@@ -10165,6 +10165,69 @@
         ],
         "type": "object"
       },
+      "UnitDetail": {
+        "description": "Одиниця для форми редагування — з усім, що форма показує, і версією.",
+        "properties": {
+          "code": {
+            "description": "Код; не редагується.",
+            "type": "string"
+          },
+          "dimensionId": {
+            "description": "Розмірність; не редагується.",
+            "format": "uint8",
+            "type": "integer"
+          },
+          "factorToBase": {
+            "description": "Множник переходу до базової одиниці.",
+            "format": "decimal",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isBase": {
+            "description": "Базова одиниця розмірності; її коефіцієнти не редагуються.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу.",
+            "type": "object"
+          },
+          "offsetToBase": {
+            "description": "Зсув переходу до базової одиниці.",
+            "format": "decimal",
+            "type": "string"
+          },
+          "rowVersion": {
+            "description": "Версія вмісту; повертається заголовком `If-Match`.",
+            "type": "string"
+          },
+          "symbolL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Позначення мовами каталогу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "symbolL10n",
+          "nameL10n",
+          "dimensionId",
+          "isBase",
+          "factorToBase",
+          "offsetToBase",
+          "rowVersion"
+        ],
+        "type": "object"
+      },
       "UnitRef": {
         "description": "Одиниця довідника.",
         "properties": {
@@ -10360,6 +10423,42 @@
           "graceOffsetDays",
           "hardCloseOffsetDays",
           "yearGraceOffsetDays"
+        ],
+        "type": "object"
+      },
+      "UpdateUnitRequest": {
+        "description": "Запит на зміну одиниці.",
+        "properties": {
+          "factorToBase": {
+            "description": "Множник; змінюється лише в одиниці без посилань.",
+            "format": "decimal",
+            "type": "string"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу.",
+            "type": "object"
+          },
+          "offsetToBase": {
+            "description": "Зсув; змінюється лише в одиниці без посилань.",
+            "format": "decimal",
+            "type": "string"
+          },
+          "symbolL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Позначення мовами каталогу.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "symbolL10n",
+          "nameL10n",
+          "factorToBase",
+          "offsetToBase"
         ],
         "type": "object"
       },
@@ -25462,6 +25561,190 @@
           }
         },
         "summary": "Видаляє одиницю, на яку ніхто не посилається.",
+        "tags": [
+          "Units"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitDetail"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitDetail"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Одиниця для форми редагування разом із `rowVersion`.",
+        "tags": [
+          "Units"
+        ]
+      },
+      "put": {
+        "description": "Потребує `If-Match` із `rowVersion`: немає — `422 ECR-REQ-0422`,\nчужа версія — `409 ECR-UOM-0409`. Код, розмірність і ознака базової не змінюються.",
+        "parameters": [
+          {
+            "description": "Ідентифікатор одиниці.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUnitRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUnitRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUnitRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitDetail"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitDetail"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює позначення, назву і — поки на одиницю ніщо не посилається — коефіцієнти.",
         "tags": [
           "Units"
         ]

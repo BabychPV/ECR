@@ -11149,8 +11149,113 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
+        /** Одиниця для форми редагування разом із `rowVersion`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UnitDetail"];
+                        "text/json": components["schemas"]["UnitDetail"];
+                        "text/plain": components["schemas"]["UnitDetail"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Змінює позначення, назву і — поки на одиницю ніщо не посилається — коефіцієнти.
+         * @description Потребує `If-Match` із `rowVersion`: немає — `422 ECR-REQ-0422`,
+         *     чужа версія — `409 ECR-UOM-0409`. Код, розмірність і ознака базової не змінюються.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateUnitRequest"];
+                    "application/json": components["schemas"]["UpdateUnitRequest"];
+                    "text/json": components["schemas"]["UpdateUnitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UnitDetail"];
+                        "text/json": components["schemas"]["UnitDetail"];
+                        "text/plain": components["schemas"]["UnitDetail"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         /**
          * Видаляє одиницю, на яку ніхто не посилається.
@@ -16479,6 +16584,43 @@ export interface components {
              */
             tableDefId: number;
         };
+        /** @description Одиниця для форми редагування — з усім, що форма показує, і версією. */
+        UnitDetail: {
+            /** @description Код; не редагується. */
+            code: string;
+            /**
+             * Format: uint8
+             * @description Розмірність; не редагується.
+             */
+            dimensionId: number;
+            /**
+             * Format: decimal
+             * @description Множник переходу до базової одиниці.
+             */
+            factorToBase: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Базова одиниця розмірності; її коефіцієнти не редагуються. */
+            isBase: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: decimal
+             * @description Зсув переходу до базової одиниці.
+             */
+            offsetToBase: string;
+            /** @description Версія вмісту; повертається заголовком `If-Match`. */
+            rowVersion: string;
+            /** @description Позначення мовами каталогу. */
+            symbolL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Одиниця довідника. */
         UnitRef: {
             /** @description Код: `kg`, `t`, `m3`. */
@@ -16584,6 +16726,27 @@ export interface components {
              * @description Пільговий строк після кінця року.
              */
             yearGraceOffsetDays: number;
+        };
+        /** @description Запит на зміну одиниці. */
+        UpdateUnitRequest: {
+            /**
+             * Format: decimal
+             * @description Множник; змінюється лише в одиниці без посилань.
+             */
+            factorToBase: string;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: decimal
+             * @description Зсув; змінюється лише в одиниці без посилань.
+             */
+            offsetToBase: string;
+            /** @description Позначення мовами каталогу. */
+            symbolL10n: {
+                [key: string]: string;
+            };
         };
         /** @description Одне місце, що посилається на ресурс. */
         UsageItemDto: {
