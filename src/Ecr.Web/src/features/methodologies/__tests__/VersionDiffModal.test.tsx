@@ -155,7 +155,9 @@ describe('VersionDiffModal', () => {
     const changed = within(formulas).getByText('E_NOX').closest('tr');
     expect(changed?.getAttribute('data-change')).toBe('Changed');
     expect(within(changed as HTMLElement).getByText('⟦methodologies.changeChanged⟧')).toBeDefined();
-    expect(within(changed as HTMLElement).getByText('expression')).toBeDefined();
+    // Поле — назвою з каталогу, а не сирим ключем дроту.
+    expect(within(changed as HTMLElement).getByText('⟦methodologyDiffField.expression⟧')).toBeDefined();
+    expect(within(changed as HTMLElement).queryByText('expression')).toBeNull();
     const values = within(changed as HTMLElement).getAllByTestId('diff-formula');
     expect(values.map((v) => v.textContent)).toEqual(['M * K1', 'M * K2']);
     expect(values[0]?.getAttribute('style') ?? '').toContain('monospace');
@@ -171,8 +173,14 @@ describe('VersionDiffModal', () => {
     expect(added.textContent).toContain('Boiler');
     expect(added.textContent).toContain('0.35');
 
-    expect(screen.getByRole('region', { name: '⟦methodologies.tests⟧' }).textContent).toContain('GOLD-1');
+    const tests = screen.getByRole('region', { name: '⟦methodologies.tests⟧' });
+    expect(tests.textContent).toContain('GOLD-1');
     expect(screen.queryByTestId('version-diff-same')).toBeNull();
+
+    // ⛔ Невідоме клієнтові поле — сирим значенням у `Code`, а не порожньо.
+    const unknown = within(tests).getByText('expected');
+    expect(unknown.tagName).toBe('CODE');
+    expect(tests.textContent).not.toContain('⟦methodologyDiffField.');
   });
 
   it('змін немає — окреме речення і ЖОДНОГО бейджа', async () => {

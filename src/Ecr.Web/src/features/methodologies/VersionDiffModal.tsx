@@ -1,8 +1,9 @@
 import { useState, type JSX } from 'react';
-import { Badge, Code, Group, Modal, Select, Stack, Table, Text } from '@mantine/core';
+import { Badge, Group, Modal, Select, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import type { MethodologyDraftVersionDto } from '@/api/types';
 import { methodologyVersionDiff } from '@/features/methodologies/api';
+import { DiffFieldLabel } from '@/features/methodologies/DiffFieldLabel';
 import {
   defaultBaseVersion,
   DiffKinds,
@@ -154,9 +155,11 @@ export function DiffResult({ items }: { items: readonly MethodologyDiffItem[] })
                     {item.changedFields.length === 0 ? (
                       '—'
                     ) : (
-                      <Group gap="xs">
+                      <Group gap="xs" data-testid="diff-changed-fields">
                         {item.changedFields.map((field) => (
-                          <Code key={field}>{field}</Code>
+                          <Text key={field} span size="sm" data-diff-field={field}>
+                            <DiffFieldLabel field={field} />
+                          </Text>
                         ))}
                       </Group>
                     )}
