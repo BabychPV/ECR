@@ -1374,6 +1374,28 @@ USING (VALUES
     -- тест «технічні ключі на екрані» в `npm run test:a11y`.
     (N'sources.testEntities.one',        N'en', N'The source catalog lists {count} entity.', 1),
     (N'sources.testEntities.other',      N'en', N'The source catalog lists {count} entities.', 1),
+    -- Створення, правка й видалення з'єднань (UI-09 крок 2). ⚠ `created` і
+    -- `saved` ідуть через `t(умова ? … : …)` — сторож `EndpointCoverageTests`
+    -- їх не бачить, тож єдина гарантія — цей рядок.
+    (N'sources.newConnection',           N'en', N'New connection', 1),
+    (N'sources.editConnection',          N'en', N'Edit', 1),
+    (N'sources.editTitle',               N'en', N'Edit connection: {name}', 1),
+    (N'sources.code',                    N'en', N'Code', 1),
+    (N'sources.codeFixed',               N'en', N'The code cannot be changed: collection entities refer to it', 1),
+    (N'sources.name',                    N'en', N'Name', 1),
+    (N'sources.isActive',                N'en', N'Collect from this connection', 1),
+    (N'sources.create',                  N'en', N'Create connection', 1),
+    (N'sources.created',                 N'en', N'Connection created', 1),
+    (N'sources.saved',                   N'en', N'Connection saved', 1),
+    (N'sources.deleteConnection',        N'en', N'Delete connection', 1),
+    (N'sources.deleteTitle',             N'en', N'Delete connection "{name}"?', 1),
+    (N'sources.deleted',                 N'en', N'Connection deleted', 1),
+    -- Вкладка Schedule у шухляді з'єднання: розклади за `?dataSource=`.
+    (N'sources.tabSchedule',             N'en', N'Schedule', 1),
+    (N'sources.schedulesNone',           N'en', N'No collection schedules for this connection', 1),
+    (N'sources.scheduleEntity',          N'en', N'Entity', 1),
+    (N'sources.scheduleNoEntities',      N'en', N'This connection has no collection entities yet', 1),
+    (N'sources.scheduleOff',             N'en', N'Off', 1),
     (N'jobs.pick',                       N'en', N'Enter a job id', 1),
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
     (N'jobs.restart',                    N'en', N'Restart', 1),
