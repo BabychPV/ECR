@@ -1,4 +1,5 @@
 import type { CSSVariablesResolver, MantineTheme } from '@mantine/core';
+import { flatten, parseColor } from './contrast';
 import { surfaces } from './theme';
 
 /**
@@ -74,6 +75,73 @@ function statusLightColor(theme: MantineTheme, scheme: Scheme): Record<string, s
   return out;
 }
 
+/** `rgba(...)` із hex і непрозорості — те саме, що `alpha()` у `@mantine/core`. */
+function withAlpha(hex: string, a: number): string {
+  const { r, g, b } = parseColor(hex);
+
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+/**
+ * Текст і межа `variant="outline"` статусних кольорів — темна схема.
+ *
+ * ⛔ Mantine бере `--mantine-color-<c>-outline` за індексом
+ * `max(primaryShade.dark − 4, 0)` = `[1]` — `#ffe3e3`/`#ffe8cc`/`#d3f9d8`, тобто
+ * той самий майже білий, що й `light-color` до `statusLightColor`. Коментар у
+ * `contrast.test.ts` називав `[1]` «блідим навмисно, щоб не зникнути й не
+ * різати очі», але це опис дефолту Mantine, а не рішення: `theme.ts` прямо
+ * каже, що індекси 0–4 «не задіяні жодним поточним використанням». `[3]` —
+ * так само блідий кінець шкали (не заливковий `[5]`), тож обидві причини з
+ * того коментаря він задовольняє: 8.16–12.46 на всіх поверхнях темної схеми.
+ *
+ * ⚠ `-outline-hover` (тло наведення) перевизначається разом: Mantine рахує
+ * його з того самого індексу, і лишити `[1]` означало б наведення іншого
+ * відтінку, ніж межа.
+ */
+function statusOutline(theme: MantineTheme, scheme: Scheme): Record<string, string> {
+  if (scheme !== 'dark') return {};
+
+  const out: Record<string, string> = {};
+  for (const name of StatusColors) {
+    const shade = theme.colors[name]?.[StatusShade.dark];
+    if (shade === undefined) continue;
+    out[`--mantine-color-${name}-outline`] = shade;
+    out[`--mantine-color-${name}-outline-hover`] = withAlpha(shade, 0.05);
+  }
+
+  return out;
+}
+
+/**
+ * Тло `variant="light"` і наведення `subtle` статусних кольорів — світла схема.
+ *
+ * ⛔ Mantine кладе `alpha([6], 0.1)` / `alpha([6], 0.12)` поверх поверхні. На
+ * `sunken` (`#eef0f5`) текст `[6]` на цьому композиті давав помилці 4.11/3.99,
+ * успіху 4.50/4.36. Альфою цього не виправити: сам `[6]` помилки на `sunken`
+ * дає лише 4.79, тож прохідна альфа (< 0.03) робить тло сірим, а не статусним.
+ *
+ * ⚠ Тому тло НЕПРОЗОРЕ: `[0]` — фон, половина між `[0]` і `[1]` — наведення.
+ * Воно не залежить від поверхні, отже й контраст один на всіх чотирьох:
+ * помилка 5.10/4.80, попередження 5.83/5.57, успіх 5.46/5.28. `[1]` цілком
+ * для наведення помилки дав би 4.51 — рівно на межі, від чого й тікаємо.
+ */
+function statusLightBackground(theme: MantineTheme, scheme: Scheme): Record<string, string> {
+  if (scheme !== 'light') return {};
+
+  const out: Record<string, string> = {};
+  for (const name of StatusColors) {
+    const tuple = theme.colors[name];
+    if (tuple === undefined) continue;
+    out[`--mantine-color-${name}-light`] = tuple[0];
+    out[`--mantine-color-${name}-light-hover`] = flatten(withAlpha(tuple[1], 0.5), tuple[0]);
+    // Той самий дефект на наведенні `outline`: `alpha([6], 0.05)` на `sunken`
+    // дає помилці 4.44. Непрозоре `[0]` — 5.10 на кожній поверхні.
+    out[`--mantine-color-${name}-outline-hover`] = tuple[0];
+  }
+
+  return out;
+}
+
 /** Змінні однієї схеми. */
 function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, string> {
   const s = surfaces[scheme];
@@ -107,6 +175,9 @@ function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, st
 
     // Текст `light`/`subtle` статусних кольорів — причина в `statusLightColor`.
     ...statusLightColor(theme, scheme),
+    // Текст/межа `outline` (темна) і тло `light` (світла) — причини там само.
+    ...statusOutline(theme, scheme),
+    ...statusLightBackground(theme, scheme),
 
     // Поверхні: чотири рівні глибини.
     '--ecr-ground': s.ground,
