@@ -483,6 +483,7 @@ public sealed partial class EndpointCoverageTests
         new("shared/ui/problemText.ts", "problem.title", 1, null, [], "title problem+json, коли він — ключ каталогу."),
         new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
+        new("features/jobs/JobFacts.tsx", "errorKey(errorCode)", 1, null, [], "errorCode провалу фонової задачі — код каталогу помилок сервера."),
     ];
 
     // ⚠ Властивості, а не поля: `DynamicKeySites` вище ініціалізується раніше
