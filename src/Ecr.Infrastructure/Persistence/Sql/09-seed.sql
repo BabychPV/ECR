@@ -2144,6 +2144,16 @@ USING (VALUES
     -- переліку розробника замість речення про те, що саме виправити.
     (N'columns.errStyleCode',            N'en', N'Give the style a code: Latin letters, digits and underscores, starting with a letter.', 1),
     (N'columns.errStyleFontSize',        N'en', N'Font size must be a number.', 1),
+
+    -- Набір (`KIT.md`): підписи дій, яких компоненти НЕ вигадують самі.
+    -- ⛔ `FilterBar` і `DataTable` навмисно не кличуть `t()` на ці ключі, а
+    -- беруть їх пропом (`clearLabel`, `showMoreLabel`): виклик ключа, якого
+    -- немає в каталозі, показав би `⟦filters.clear⟧` на кожному екрані, що
+    -- взяв набір. Тому рядки заводяться ПЕРШИМИ, а екрани переходять на набір
+    -- уже потім.
+    (N'filters.clear',                   N'en', N'Clear', 1),
+    (N'list.showMore',                   N'en', N'Show more', 1),
+
     -- ⛔ Директива registry-lookup / cell-style, PR B1: раніше жоден екран не
     -- давав автору шаблону задати StyleDef колонки — стиль долітав лише до
     -- Excel-експорту (`StyleMapper.cs`), заведеного в базу лише seed-ом.
