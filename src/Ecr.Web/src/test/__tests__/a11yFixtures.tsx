@@ -505,6 +505,45 @@ export function emptyBodyFor(url: string): unknown {
   // журнал доставок — сторінка з курсором (`NotificationRuleMatrix`,
   // `PagedResultOfNotificationDeliveryView`).
   if (url.includes('/notifications/rules')) return { eventKinds: [], rules: [] };
+  // ⚠ Два поштові канали з РІЗНОЮ ознакою транспорту й один Teams: гейт має
+  // сканувати і рядок «з налаштувань застосунку», і попередження «не
+  // налаштовано» (`TransportSource`, контраст `statusWarning`), а не порожню
+  // таблицю. Форма — як у видачі сервера
+  // (`NotificationChannelView`, `c3652cee`): без host/port/useTls/from.
+  if (/\/notifications\/channels(\?|$)/.test(url)) {
+    return [
+      {
+        id: 1,
+        kind: 'Smtp',
+        name: 'Ops mailbox',
+        isEnabled: true,
+        hasSecret: false,
+        modifiedAt: '2026-09-01T10:00:00Z',
+        settings: { recipients: ['ops@example.org'], title: 'ECR' },
+        transportFromConfiguration: true,
+      },
+      {
+        id: 2,
+        kind: 'Smtp',
+        name: 'Legacy mailbox',
+        isEnabled: true,
+        hasSecret: false,
+        modifiedAt: '2026-09-01T10:00:00Z',
+        settings: { recipients: ['legacy@example.org'] },
+        transportFromConfiguration: false,
+      },
+      {
+        id: 3,
+        kind: 'TeamsWebhook',
+        name: 'Duty channel',
+        isEnabled: true,
+        hasSecret: false,
+        modifiedAt: '2026-09-02T10:00:00Z',
+        settings: { title: 'ECR' },
+        transportFromConfiguration: false,
+      },
+    ];
+  }
   if (url.includes('/notifications/deliveries')) return { items: [], nextCursor: null, totalCount: null };
 
   // ⛔ НЕ порожня сторінка — та сама причина, що у `DocumentSliceFixture`:

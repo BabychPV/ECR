@@ -28,6 +28,7 @@ import {
   type NotificationChannel,
   type NotificationChannelSettings,
 } from './api';
+import { TransportSource } from './TransportSource';
 
 /**
  * Канали сповіщень (`BE-33`, екран `/admin/notifications`).
@@ -170,7 +171,12 @@ export function ChannelsPanel(): JSX.Element {
             {channels.data.map((channel) => (
               <Table.Tr key={channel.id}>
                 <Table.Td>{channel.name}</Table.Td>
-                <Table.Td>{t(`notifications.kind.${channel.kind}`)}</Table.Td>
+                <Table.Td>
+                  <Stack gap="xs" align="flex-start">
+                    <Text size="sm">{t(`notifications.kind.${channel.kind}`)}</Text>
+                    <TransportSource channel={channel} />
+                  </Stack>
+                </Table.Td>
                 <Table.Td>
                   {channel.isEnabled ? t('notifications.enabledYes') : t('notifications.enabledNo')}
                 </Table.Td>
@@ -295,16 +301,25 @@ export function ChannelsPanel(): JSX.Element {
               `SmtpChannelSender` бере з каналу `settings.Recipients` і
               `settings.Title` (префікс теми), а транспорт — сервер, відправника
               й пароль — із конфігурації ПРОЦЕСУ (`Smtp:Host`, `Smtp:From`).
-              Поля `host`/`port`/`from`/`useTls` у контракті є, але їх не читає
-              ніхто: показані, вони обіцяли б налаштування, якого не станеться —
-              лист однаково пішов би через процесний транспорт. Форма, яка дає
-              натиснути там, де сервер не подивиться, гірша за відсутнє поле.
+              Полів `host`/`port`/`from`/`useTls` немає ні тут, ні в контракті
+              видачі, а у вхідному вони дають `422` (`c3652cee`).
+
+              ⚠ Звідки транспорт — каже сервер (`transportFromConfiguration`),
+              коли канал уже є. Для нового каналу відповіді ще немає, тож там
+              лишається статична підказка: вигадати ознаку наперед означало б
+              сказати за сервер.
             */}
             {draft.kind === 'Smtp' && (
               <>
-                <Text size="sm" c="dimmed">
-                  {t('notifications.smtpTransportHint')}
-                </Text>
+                {draft.transportFromConfiguration === null ? (
+                  <Text size="sm" c="dimmed">
+                    {t('notifications.smtpTransportHint')}
+                  </Text>
+                ) : (
+                  <TransportSource
+                    channel={{ kind: draft.kind, transportFromConfiguration: draft.transportFromConfiguration }}
+                  />
+                )}
 
                 <TextInput
                   label={t('notifications.smtpRecipients')}
@@ -404,10 +419,11 @@ export function ChannelsPanel(): JSX.Element {
 /**
  * Чернетка каналу у формі: рядки, бо форма працює з текстом, а не з `null`.
  *
- * ⚠ Полів `host`/`port`/`from`/`useTls` тут НЕМАЄ навмисно, хоча контракт їх
- * носить: жоден відправник їх не читає (див. коментар у формі). Тримати їх у
- * чернетці означало б возити на сервер значення, яких ніхто не спитає, і
- * першому ж читачеві коду здалося б, що вони на щось впливають.
+ * ⚠ Полів `host`/`port`/`from`/`useTls` тут НЕМАЄ навмисно: сервер відхиляє
+ * їх `422 ECR-REQ-0422` (`notificationChannelTransportFromConfiguration`).
+ *
+ * ⚠ `transportFromConfiguration` — ознака з ВІДПОВІДІ сервера, на сервер вона
+ * не їде; `null` — канал ще не створено, і сервер про нього нічого не казав.
  */
 interface ChannelDraft {
   readonly id: number | null;
@@ -416,10 +432,19 @@ interface ChannelDraft {
   readonly isEnabled: boolean;
   readonly recipients: string;
   readonly title: string;
+  readonly transportFromConfiguration: boolean | null;
 }
 
 function emptyDraft(): ChannelDraft {
-  return { id: null, name: '', kind: 'Smtp', isEnabled: true, recipients: '', title: '' };
+  return {
+    id: null,
+    name: '',
+    kind: 'Smtp',
+    isEnabled: true,
+    recipients: '',
+    title: '',
+    transportFromConfiguration: null,
+  };
 }
 
 function draftOf(channel: NotificationChannel): ChannelDraft {
@@ -430,6 +455,7 @@ function draftOf(channel: NotificationChannel): ChannelDraft {
     isEnabled: channel.isEnabled,
     recipients: (channel.settings.recipients ?? []).join(', '),
     title: channel.settings.title ?? '',
+    transportFromConfiguration: channel.transportFromConfiguration,
   };
 }
 
@@ -438,6 +464,10 @@ function draftOf(channel: NotificationChannel): ChannelDraft {
  *
  * ⚠ Порожній рядок їде як `null`, а не як `''`: `''` у налаштуваннях означав
  * би «задано порожнім», і сервер зберіг би саме це.
+ *
+ * ⛔ Тип повернення — `NotificationChannelSettings` (видача: лише `recipients`
+ * і `title`), а не ширший `NotificationChannelSettingsInput`: так `host`,
+ * доданий сюди, не скомпілюється, а не поїде на сервер по `422`.
  */
 function settingsOf(draft: ChannelDraft): NotificationChannelSettings {
   if (draft.kind === 'Smtp') {
