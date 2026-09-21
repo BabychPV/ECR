@@ -733,6 +733,10 @@ USING (VALUES
     (N'err.ECR-PRD-0409.transitionNotAllowed',  N'en', N'Period {periodKey} cannot go from {from} to {to}.', 1),
     (N'err.ECR-PRD-0409.reopenOnlyClosed',      N'en', N'Only a closed period can be reopened; the period is {state}.', 1),
     (N'err.ECR-PRD-0422.reopenReasonRequired',  N'en', N'A reason is required to reopen the period.', 1),
+    -- BE-25: only a never-published, never-used methodology version can be deleted.
+    (N'err.ECR-CALC-0404.version',              N'en', N'Methodology version {methodologyVersionId} does not exist in this methodology.', 1),
+    (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
+    (N'err.ECR-CALC-0409.versionUsedInCalculations', N'en', N'Methodology version {version} has already been used in calculations and cannot be deleted.', 1),
     (N'err.ECR-SYS-0500.contactAdmin',          N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
 
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────

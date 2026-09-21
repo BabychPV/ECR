@@ -2215,6 +2215,24 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IMethodologyVersionDeletionStore`
+
+Видалення версії-чернетки методології (`DELETE /api/v1/methodologies/{id}/versions/{vid}`,
+право `Calculation.EditFormula`, `BE-25`). Обидва методи — в одній транзакції: версія
+читається під `UPDLOCK, HOLDLOCK` разом із фактом, що нею вже рахували
+(`calc.CalculationResult` або `arc.CalculationResult`); домен
+(`MethodologyVersion.EnsureDeletable`) вирішує, і лише тоді вміст видаляється явно
+(усі FK на `calc.MethodologyVersion` — `Restrict`). Слід — `aud.SecurityEvent`
+(`MethodologyVersionDeleted`).
+
+```csharp
+public interface IMethodologyVersionDeletionStore
+{
+    public Task<(MethodologyVersion Version, bool UsedInCalculations)?> LockAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<int> DeleteAsync(int methodologyVersionId, CancellationToken ct);
+}
+```
+
 #### `IColumnDefSearchStore`
 
 Пошук колонок за назвою чи кодом, поза межами однієї таблиці (директива

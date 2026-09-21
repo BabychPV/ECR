@@ -1,6 +1,7 @@
 // src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Domain.Entities.Calculations;
@@ -205,6 +206,45 @@ public sealed class MethodologyVersion : Entity<int>
         }
 
         Status = TemplateVersionStatus.Deprecated;
+    }
+
+    /// <summary>
+    /// Дозволяє видалити версію: лише чернетку, якою ще не рахували (<c>BE-25</c>).
+    /// </summary>
+    /// <param name="usedInCalculations">Чи посилається на версію бодай один результат розрахунку (живий чи архівний).</param>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> із причиною в <c>reason</c>.</exception>
+    /// <remarks>
+    /// «Ніколи не публікувалась» = <see cref="TemplateVersionStatus.Draft"/>: стану,
+    /// що повертав би опубліковану версію в чернетку, немає. Результати перевіряються
+    /// окремо — без них видалена версія лишила б числа, які нічим пояснити.
+    /// </remarks>
+    public void EnsureDeletable(bool usedInCalculations)
+    {
+        if (Status != TemplateVersionStatus.Draft)
+        {
+            throw new DomainException(
+                ErrorCodes.MethodologyFourEyes,
+                $"Версія {Version} у стані {Status}: видалити можна лише чернетку.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.versionNotDraft",
+                    ["reason"] = Status.ToString(),
+                    ["version"] = Version,
+                });
+        }
+
+        if (usedInCalculations)
+        {
+            throw new DomainException(
+                ErrorCodes.MethodologyFourEyes,
+                $"Версією {Version} уже рахували: видалити її не можна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.versionUsedInCalculations",
+                    ["reason"] = "UsedInCalculations",
+                    ["version"] = Version,
+                });
+        }
     }
 
     /// <summary>
