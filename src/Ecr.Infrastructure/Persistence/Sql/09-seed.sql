@@ -327,6 +327,74 @@ WHEN NOT MATCHED THEN INSERT (Id, Revision, ModifiedAt)
      VALUES (s.Id, s.Rev, SYSUTCDATETIME());
 GO
 
+-- ── Змінені тексти наявних ключів ────────────────────────────────────────
+-- ⛔ MERGE нижче лише ВСТАВЛЯЄ відсутні ключі, тож зміна тексту наявного ключа
+-- доходила тільки до свіжих баз. Звідси оновлення «старе → нове», але лише
+-- поки в базі стоїть САМЕ старе значення (порівняння побайтне): текст, який
+-- адміністратор уже переписав на `/admin/ui-strings`, лишається його.
+-- ⚠ Змінюєш текст наявного ключа в MERGE — додай сюди рядок (ключ, мова,
+-- старе, нове). Ланцюг A → B → C: два рядки, обидва з новим C.
+-- Сторож `SeedTextUpdateTests` тримає «нове» рівним значенню в MERGE.
+DECLARE @textUpdates int, @removed int, @inserted int;
+UPDATE t
+   SET Value = s.NewVal, ModifiedAt = SYSUTCDATETIME()
+  FROM sys_ecr.UiString AS t
+  JOIN (VALUES
+    (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    (N'periods.timeZone',                N'en', N'Site time zone', N'Site time zone (IANA)'),
+    (N'periods.timeZoneHint',            N'en', N'Period boundaries and late-edit marks are calculated in this zone. It cannot be changed once the first period is open.',
+                                                N'IANA identifier of the site, for example Asia/Aqtau. Period boundaries and late-edit marks are calculated in this zone, and it cannot be changed once the first period is open.'),
+    (N'state.errorUnknown',              N'en', N'An unexpected error occurred. Retry; if it repeats, quote the code below to support.',
+                                                N'An unexpected error occurred. Retry; if it repeats, contact support and describe what you were doing.'),
+    (N'version.diffOtherHint',           N'en', N'The other version to compare against; take the id from the template list.',
+                                                N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).'),
+    (N'columns.lookupRegistryDefIdHint', N'en', N'Identifier of the registry this column looks values up from.',
+                                                N'The registry this column looks values up from.'),
+    (N'workflow.recalculateHint',        N'en', N'Recalculates every sheet of this document for the shown period, not only this one.',
+                                                N'Recalculates this sheet. Formulas may still read data from other sheets of the same document.'),
+    (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.',
+                                                N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.'),
+    (N'err.ECR-PRJ-0409',                N'en', N'A project with code "{code}" already exists.', N'Project code already in use'),
+    (N'err.ECR-CFG-0422',                N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.',
+                                                N'Invalid code'),
+    (N'err.ECR-UOM-4091',                N'en', N'A unit with code "{code}" already exists (Id {id}).', N'Unit code already in use'),
+    (N'err.ECR-REG-0409',                N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', N'Registry entry code already in use'),
+    (N'err.ECR-USR-0409',                N'en', N'A user named "{userName}" already exists.', N'User name already in use'),
+    (N'err.ECR-REG-4091',                N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.',
+                                                N'Registry code already in use'),
+    (N'err.ECR-SEC-0409',                N'en', N'A role with code "{code}" already exists.', N'Role code already in use'),
+    (N'tables.readOnlyHint',             N'en', N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it (ФВ-7.1).',
+                                                N'A relation decides where a table takes its numbers from, so changing it would silently change forms already submitted. Clone the version to change it.'),
+    (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
+    (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
+    (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state')
+  ) AS s ([Key], Lang, OldVal, NewVal)
+    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
+ WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
+SET @textUpdates = @@ROWCOUNT;
+
+-- ── Прибрані ключі ───────────────────────────────────────────────────────
+-- ⛔ MERGE і не видаляє: ключ, який прибрали з сіду, лишається в розгорнутій
+-- базі й видний у редакторі рядків. Видаляється на тій самій умові — поки
+-- значення досі дефолтне; переписаний адміністратором рядок лишається.
+-- ⚠ Прибираєш ключ із MERGE — додай сюди (ключ, мова, останнє значення).
+-- Сторож `SeedTextUpdateTests`: ключа звідси не може бути в MERGE.
+DELETE t
+  FROM sys_ecr.UiString AS t
+  JOIN (VALUES
+    (N'campaign.truncatedHint',                    N'en', N'The server returned only part of the list. A project holding up the campaign may be among those not shown, and the totals cover only the projects shown.'),
+    (N'campaign.laggingCount',                     N'en', N'{lagging} of {shown} projects are not finished: no documents, not everything approved, or no snapshot yet.'),
+    (N'campaign.nobodyLaggingHint',                N'en', N'Every project shown has all documents approved and a report snapshot.'),
+    (N'registries.usageKind.templateColumn',       N'en', N'Template column'),
+    (N'registries.usageKind.registryField',        N'en', N'Registry field'),
+    (N'registries.usageKind.methodologySubstance', N'en', N'Methodology substance'),
+    (N'registries.usageKind.sourceEntity',         N'en', N'Source entity'),
+    (N'registries.usageKind.data',                 N'en', N'Values in documents')
+  ) AS s ([Key], Lang, OldVal)
+    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
+ WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
+SET @removed = @@ROWCOUNT;
+
 -- Каталог рядків інтерфейсу мовою за замовчуванням.
 --
 -- ⛔ Тут ВЕСЬ набір ключів, які просить клієнт, а не «мінімальний». До `A7-12`
@@ -2915,7 +2983,10 @@ WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
 -- зайве validation-round-trip для кожного клієнта на кожному рестарті, навіть
 -- коли жодного нового рядка не додалося. `@@ROWCOUNT` після `MERGE` — це
 -- кількість щойно вставлених рядків (клаузи `WHEN MATCHED` тут немає).
-IF @@ROWCOUNT > 0
+-- `@textUpdates` і `@removed` — те саме для секцій над MERGE: без інкременту
+-- кеш `ui:{lang}:{scope}:{revision}` і ETag клієнта тримали б старий каталог.
+SET @inserted = @@ROWCOUNT;
+IF @inserted > 0 OR @textUpdates > 0 OR @removed > 0
 BEGIN
     UPDATE sys_ecr.UiStringRevision
     SET Revision = Revision + 1, ModifiedAt = SYSUTCDATETIME()
