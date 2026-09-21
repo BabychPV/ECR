@@ -2100,6 +2100,17 @@ USING (VALUES
     (N'units.deleted',                   N'en', N'Unit removed.', 1),
     (N'units.deleteUnused',              N'en', N'Nothing refers to this unit.', 1),
     (N'units.deleteUsedIn',              N'en', N'Referenced in {total} place(s) - the unit cannot be removed until they are gone:', 1),
+    -- Правка одиниці (BE-15 ч.2): код, розмірність і ознака базової не
+    -- змінюються; множник і зсув — лише в одиниці, на яку ніщо не посилається.
+    (N'units.edit',                      N'en', N'Edit', 1),
+    (N'units.editTitle',                 N'en', N'Edit unit {code}', 1),
+    (N'units.codeFixed',                 N'en', N'Code, dimension and the base flag cannot be changed.', 1),
+    (N'units.factorLockedBase',          N'en', N'This is the base unit of its dimension: its factor and offset are fixed.', 1),
+    (N'units.factorLockedChecking',      N'en', N'Checking whether anything refers to this unit…', 1),
+    (N'units.factorLockedUnknown',       N'en', N'Could not check where this unit is used, so its factor and offset stay locked.', 1),
+    (N'units.factorLockedUsed',          N'en', N'Referenced in {total} place(s): factor and offset cannot change.', 1),
+    (N'units.reloadCurrent',             N'en', N'Take the current version', 1),
+    (N'units.saved',                     N'en', N'Unit saved.', 1),
     (N'nav.audit',                       N'en', N'Audit trail', 1),
     (N'audit.title',                     N'en', N'Audit trail', 1),
     (N'audit.from',                      N'en', N'From', 1),
