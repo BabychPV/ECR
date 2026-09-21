@@ -12,9 +12,10 @@
     починає перевіряти: чиста база, розгортання, застосунок, bootstrap →
     роль → іменований користувач → грант. Далі керування бере Playwright.
 
-    ⛔ Порт застосунку — 5080, бо саме туди проксіює dev-сервер Vite
-    (`vite.config.ts`). Інший порт означав би, що браузер стукає в порожнечу,
-    а падіння виглядало б як помилка тесту.
+    ⛔ Кожен стенд має СВІЙ dev-сервер Vite (`-WebPort`, типово `-Port`+1000),
+    який проксіює `/api` саме на свій `-Port` (`ECR_API_URL`). Спільний
+    фіксований 4173 з `reuseExistingServer` означав, що другий паралельний
+    стенд підхоплював Vite першого, а з ним — його API, базу й документ.
 
     ⚠ Паролі тут ТЕСТОВІ й живуть лише в цьому скрипті та в тимчасовій базі,
     яку він же видаляє. Це не послаблення `ФВ-6.11`: у продуктивній системі
@@ -28,7 +29,11 @@
     Тимчасова база; створюється і видаляється цим скриптом.
 
 .PARAMETER Port
-    Порт застосунку; має збігатися з ціллю проксі Vite.
+    Порт застосунку; стає ціллю проксі Vite цього стенда.
+
+.PARAMETER WebPort
+    Порт dev-сервера Vite для Playwright; 0 (типово) — `-Port` + 1000.
+    Зайнятий чужим процесом — стенд падає одразу, а не підхоплює чужий сервер.
 
 .PARAMETER Grep
     Фільтр назв прогонів Playwright; порожній — усі.
@@ -51,6 +56,7 @@ param(
     [string] $Server = 'localhost\SQLEXPRESS',
     [string] $Database = 'EcrE2E',
     [int] $Port = 5080,
+    [int] $WebPort = 0,
     [string] $Grep = '',
 
     # ⚠ Без умовчання навмисно: передається далі ЛИШЕ якщо задано явно, тож
@@ -144,8 +150,29 @@ function Call {
     return $null
 }
 
+if ($WebPort -eq 0) { $WebPort = $Port + 1000 }
+
+# ⛔ Playwright у стенді запускає власний Vite з `reuseExistingServer: false`
+# (`playwright.config.ts`, коли задано `E2E_WEB_PORT`), тож чужий сервер на
+# цьому порту він і так не підхопить — але впаде аж на кроці прогонів, після
+# хвилин розгортання, і з повідомленням Playwright. Тут — одразу й з PID.
+function Assert-WebPortFree {
+    $owners = @(Get-NetTCPConnection -State Listen -LocalPort $WebPort -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique)
+    if ($owners.Count -gt 0) {
+        $who = ($owners | ForEach-Object {
+            $p = Get-Process -Id $_ -ErrorAction SilentlyContinue
+            if ($p) { "$($p.ProcessName) ($_)" } else { "PID $_" }
+        }) -join ', '
+        Fail "порт Vite $WebPort уже зайнятий: $who. Це чужий сервер — не підхоплюю його; задай інший -WebPort."
+    }
+}
+
+Assert-WebPortFree
+$env:E2E_WEB_PORT = [string] $WebPort
+
 Write-Host ''
-Write-Host "Стенд Playwright на базі $Database" -ForegroundColor Cyan
+Write-Host "Стенд Playwright на базі $Database (API $Port, Vite $WebPort)" -ForegroundColor Cyan
 
 Step 'чиста база і розгортання через sqlcmd'
 $previousEap = $ErrorActionPreference
@@ -330,6 +357,7 @@ try {
     Write-Host ''
 
     Step 'прогони Playwright'
+    Assert-WebPortFree
     Push-Location $client
     try {
         # ⛔ Q-222 (аудит): той самий Q-217 клас — без тимчасового послаблення
