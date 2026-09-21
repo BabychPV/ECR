@@ -4,7 +4,13 @@ import type { JSX } from 'react';
 import { describe as report, findViolations } from '@/test/a11y';
 import { describeHits, findKeyLikeText } from '@/test/keyLikeText';
 import { loadCatalog } from '@/shared/i18n';
-import { Shell, Themes, registerA11yFetchMock } from '@/test/__tests__/a11yFixtures';
+import {
+  Shell,
+  Themes,
+  createScanClient,
+  registerA11yFetchMock,
+  settleQueries,
+} from '@/test/__tests__/a11yFixtures';
 import { LoginPage } from '@/pages/LoginPage';
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
 import { DocumentsPage } from '@/pages/DocumentsPage';
@@ -97,11 +103,17 @@ suite('Технічні ключі на екрані', () => {
     await loadCatalog('en', 'public');
     await loadCatalog('en', 'private');
 
+    const client = createScanClient();
     const { container } = render(
-      <Shell colorScheme="light">
+      <Shell colorScheme="light" client={client}>
         <Page />
       </Shell>,
     );
+
+    // ⚠ Див. `settleQueries`: без очікування сторож бачив лише те, що
+    // малюється до першої відповіді. Неактивні вкладки з `keepMounted={false}`
+    // не рендеряться й так — їхній вміст сторож не бачить за визначенням.
+    await settleQueries(client);
 
     const hits = findKeyLikeText(container);
 

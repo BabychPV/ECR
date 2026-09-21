@@ -4,7 +4,14 @@ import type { JSX } from 'react';
 import { describe as report, findViolations } from '@/test/a11y';
 import { describeHits, findKeyLikeText } from '@/test/keyLikeText';
 import { loadCatalog } from '@/shared/i18n';
-import { RouteShell, Shell, Themes, registerA11yFetchMock } from '@/test/__tests__/a11yFixtures';
+import {
+  RouteShell,
+  Shell,
+  Themes,
+  createScanClient,
+  registerA11yFetchMock,
+  settleQueries,
+} from '@/test/__tests__/a11yFixtures';
 import { TemplateCardPage } from '@/pages/admin/TemplateCardPage';
 import { AuditPage } from '@/pages/admin/AuditPage';
 import { ConsistencyIssuesPage } from '@/pages/admin/ConsistencyIssuesPage';
@@ -53,11 +60,17 @@ suite('Технічні ключі на екрані', () => {
     await loadCatalog('en', 'public');
     await loadCatalog('en', 'private');
 
+    const client = createScanClient();
     const { container } = render(
-      <Shell colorScheme="light">
+      <Shell colorScheme="light" client={client}>
         <Page />
       </Shell>,
     );
+
+    // ⚠ Див. `settleQueries`: без очікування сторож бачив лише те, що
+    // малюється до першої відповіді. Неактивні вкладки з `keepMounted={false}`
+    // не рендеряться й так — їхній вміст сторож не бачить за визначенням.
+    await settleQueries(client);
 
     const hits = findKeyLikeText(container);
 
@@ -98,8 +111,14 @@ suite('Технічні ключі на картці шаблону', () => {
     await loadCatalog('en', 'public');
     await loadCatalog('en', 'private');
 
+    const client = createScanClient();
     const { container } = render(
-      <RouteShell colorScheme="light" path={TemplateCardPath} entry={TemplateCardEntry}>
+      <RouteShell
+        colorScheme="light"
+        path={TemplateCardPath}
+        entry={TemplateCardEntry}
+        client={client}
+      >
         <TemplateCardPage />
       </RouteShell>,
     );
@@ -108,6 +127,10 @@ suite('Технічні ключі на картці шаблону', () => {
     // з'являються лише після відповіді, і перевірка до неї дивилася б на
     // скелет — тобто мовчки нічого не перевіряла б.
     await screen.findByRole('heading', { name: 'Stationary sources' });
+
+    // ⚠ Заголовок доводить лише прихід картки, не сесії: елементи під правом
+    // (`/api/v1/me`) могли ще не намалюватися. Див. `settleQueries`.
+    await settleQueries(client);
 
     const hits = findKeyLikeText(container);
 

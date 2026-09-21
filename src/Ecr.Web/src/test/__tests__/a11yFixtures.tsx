@@ -5,6 +5,7 @@ import type { JSX, ReactNode } from 'react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { act } from '@testing-library/react';
 import { mantineProviderProps } from '@/shared/theme/provider';
 
 /**
@@ -36,12 +37,14 @@ import { mantineProviderProps } from '@/shared/theme/provider';
 export function Shell({
   children,
   colorScheme,
+  client = createScanClient(),
 }: {
   children: ReactNode;
   colorScheme: 'light' | 'dark';
-}): JSX.Element {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
+  /** Переданий ззовні — щоб тест міг дочекатися запитів ({@link settleQueries}). */
+  client?: QueryClient;
+}): JSX.Element {
   return (
     <MantineProvider {...mantineProviderProps} forceColorScheme={colorScheme}>
       <QueryClientProvider client={client}>
@@ -71,6 +74,7 @@ export function RouteShell({
   colorScheme,
   path,
   entry,
+  client = createScanClient(),
 }: {
   children: ReactNode;
   colorScheme: 'light' | 'dark';
@@ -80,9 +84,10 @@ export function RouteShell({
 
   /** Конкретна адреса, на якій сторінка рендериться. */
   entry: string;
-}): JSX.Element {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
+  /** Див. той самий проп у {@link Shell}. */
+  client?: QueryClient;
+}): JSX.Element {
   return (
     <MantineProvider {...mantineProviderProps} forceColorScheme={colorScheme}>
       <QueryClientProvider client={client}>
@@ -94,6 +99,55 @@ export function RouteShell({
       </QueryClientProvider>
     </MantineProvider>
   );
+}
+
+/** `QueryClient` для сканування — той самий, що раніше створювався в оболонці. */
+export function createScanClient(): QueryClient {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+/** Скільки поспіль «тихих» макрозадач вважати сталим станом. */
+const QuietTicks = 3;
+
+/**
+ * Чекає, доки сторінка перестане вантажити дані: нуль запитів і мутацій у
+ * польоті {@link QuietTicks} макрозадачі поспіль (`ФВ-14.9`).
+ *
+ * ⛔ Без цього сторож ключів сканував DOM СИНХРОННО одразу після `render`, коли
+ * жоден запит ще не повернувся. Сліпою плямою було все, що малюється після
+ * відповіді: елементи під правом (`can(session.data, …)` — `/api/v1/me` ще
+ * летить, тож `false`) і весь вміст під `AsyncBoundary` (скелет замість даних).
+ * Виміряно на конструкторі довідника: з чотирьох неіснуючих ключів сторож
+ * бачив лише той, що стояв у шапці БЕЗ умови; ключ під `mayEdit` у шапці і
+ * обидва у переліку вкладок (з умовою і без) проходили.
+ *
+ * ⚠ «Поспіль», а не «один раз нуль»: запит, увімкнений відповіддю іншого
+ * (`enabled: a.data !== undefined`), стартує в ефекті ПІСЛЯ рендера — між
+ * ними є мить, коли в польоті нічого немає.
+ *
+ * ⚠ За межею часу — падіння з переліком завислих ключів, а не тихе
+ * сканування: перевірка напівзавантаженої сторінки виглядала б повною і не
+ * була б нею.
+ */
+export async function settleQueries(client: QueryClient, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let quiet = 0;
+
+  while (quiet < QuietTicks) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    quiet = client.isFetching() === 0 && client.isMutating() === 0 ? quiet + 1 : 0;
+
+    if (quiet < QuietTicks && Date.now() > deadline) {
+      const pending = client
+        .getQueryCache()
+        .findAll({ fetchStatus: 'fetching' })
+        .map((query) => JSON.stringify(query.queryKey));
+      throw new Error(`Запити не вщухли за ${timeoutMs} мс: ${pending.join(', ')}`);
+    }
+  }
 }
 
 /**
@@ -361,7 +415,11 @@ export function emptyBodyFor(url: string): unknown {
     };
   }
 
-  if (url.includes('/me')) {
+  // ⛔ Точний збіг, а не `includes('/me')`: під підрядок підпадав і
+  // `/methodologies`, тож сторінка методик отримувала профіль замість переліку
+  // і падала на `.map`. Поки сторож сканував DOM до відповідей, цього не було
+  // видно (`settleQueries`).
+  if (/\/api\/v1\/me(\?|$)/.test(url)) {
     return {
       userId: 0,
       userName: 'test',
@@ -372,6 +430,12 @@ export function emptyBodyFor(url: string): unknown {
   }
 
   if (url.includes('/audit/cells')) return { items: [], nextCursor: null };
+
+  // ⚠ Форми відповідей, а не `[]` за замовчуванням: матриця правил — об'єкт,
+  // журнал доставок — сторінка з курсором (`NotificationRuleMatrix`,
+  // `PagedResultOfNotificationDeliveryView`).
+  if (url.includes('/notifications/rules')) return { eventKinds: [], rules: [] };
+  if (url.includes('/notifications/deliveries')) return { items: [], nextCursor: null, totalCount: null };
 
   // ⛔ НЕ порожня сторінка — та сама причина, що у `DocumentSliceFixture`:
   // порожній журнал показує `EmptyState`, і таблиця знахідок не рендериться
