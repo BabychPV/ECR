@@ -3381,8 +3381,31 @@
               "string"
             ]
           },
+          "createdAt": {
+            "description": "Перша постановка в чергу, UTC; `null` — розклад (BE-08).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentId": {
+            "description": "Документ задачі; `null` — не документна (BE-08).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "error": {
             "description": "Текст провалу.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "errorCode": {
+            "description": "Код каталогу помилок провалу (BE-08).",
             "type": [
               "null",
               "string"
@@ -3444,8 +3467,31 @@
               "string"
             ]
           },
+          "createdAt": {
+            "description": "Перша постановка в чергу, UTC; `null` — розклад (BE-08).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "createdByDisplayName": {
             "description": "Ім'я автора; `null` — системна задача (BE-08).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "documentId": {
+            "description": "Документ задачі; `null` — не документна (BE-08).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "errorCode": {
+            "description": "Код каталогу помилок провалу (BE-08).",
             "type": [
               "null",
               "string"
@@ -3472,7 +3518,7 @@
             "type": "integer"
           },
           "startedAt": {
-            "description": "            Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.\n            ⚠ Поле називається StartedAt, а не CreatedAt, бо саме це\nзберігає стовпець: JobProgress.Begin перезаписує його в момент\nзапуску (IntegrationLogs.cs). Назва «створено» була б неправдою\nдля кожної задачі, що вже почала працювати, а окремого стовпця з\nмоментом постановки в itg.JobProgress немає.",
+            "description": "Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC\n(`JobProgress.Begin` перезаписує його). Момент постановки — CreatedAt.",
             "format": "date-time",
             "type": "string"
           },

@@ -13678,8 +13678,20 @@ export interface components {
             attempt?: null | number;
             /** @description Кореляція з логом і запитом-постановником (BE-08). */
             correlationId?: null | string;
+            /**
+             * Format: date-time
+             * @description Перша постановка в чергу, UTC; `null` — розклад (BE-08).
+             */
+            createdAt?: null | string;
+            /**
+             * Format: int64
+             * @description Документ задачі; `null` — не документна (BE-08).
+             */
+            documentId?: null | number;
             /** @description Текст провалу. */
             error: null | string;
+            /** @description Код каталогу помилок провалу (BE-08). */
+            errorCode?: null | string;
             /** @description Ідентифікатор. */
             jobId: string;
             /**
@@ -13707,8 +13719,20 @@ export interface components {
             attempt?: null | number;
             /** @description Кореляція з логом і запитом-постановником (BE-08). */
             correlationId?: null | string;
+            /**
+             * Format: date-time
+             * @description Перша постановка в чергу, UTC; `null` — розклад (BE-08).
+             */
+            createdAt?: null | string;
             /** @description Ім'я автора; `null` — системна задача (BE-08). */
             createdByDisplayName?: null | string;
+            /**
+             * Format: int64
+             * @description Документ задачі; `null` — не документна (BE-08).
+             */
+            documentId?: null | number;
+            /** @description Код каталогу помилок провалу (BE-08). */
+            errorCode?: null | string;
             /** @description Код задачі (тип). */
             jobCode: string;
             /** @description Ідентифікатор. */
@@ -13724,12 +13748,8 @@ export interface components {
             percent: number;
             /**
              * Format: date-time
-             * @description             Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.
-             *                 ⚠ Поле називається StartedAt, а не CreatedAt, бо саме це
-             *     зберігає стовпець: JobProgress.Begin перезаписує його в момент
-             *     запуску (IntegrationLogs.cs). Назва «створено» була б неправдою
-             *     для кожної задачі, що вже почала працювати, а окремого стовпця з
-             *     моментом постановки в itg.JobProgress немає.
+             * @description Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC
+             *     (`JobProgress.Begin` перезаписує його). Момент постановки — CreatedAt.
              */
             startedAt: string;
             /** @description Стан. */
