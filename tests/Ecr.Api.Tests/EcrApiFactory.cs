@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Text;
+using Ecr.Adapters.PiAf;
 using Ecr.Infrastructure.Notifications;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
@@ -61,6 +63,19 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
     /// Підміна тут робить це неможливим за побудовою, а не за домовленістю.
     /// </remarks>
     public ConcurrentQueue<Uri> WebhookCalls { get; } = new();
+
+    /// <summary>
+    /// Адреси, за якими застосунок читав каталог джерела PI Web API.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Та сама причина, що й у вебхука, і той самий захід: перевірка
+    /// з'єднання (<c>BE-21</c>) опитує джерело ТИМ САМИМ адаптером, яким потім
+    /// збиратимуть, тобто ходить справжнім <c>HttpClient</c> за адресою з
+    /// <c>ext.DataSource.Endpoint</c>. Будь-який тест, що заведе джерело й
+    /// натисне «перевірити», без цієї підміни пішов би в СПРАВЖНЮ мережу — і
+    /// чекав би три спроби по 30 с на адресу, якої не існує.
+    /// </remarks>
+    public ConcurrentQueue<Uri> SourceCalls { get; } = new();
 
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -132,9 +147,44 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             logging.AddProvider(new CapturingLoggerProvider(ServerErrors, ServerLog));
         });
 
-        builder.ConfigureTestServices(services => services
-            .AddHttpClient(TeamsWebhookSender.HttpClientName)
-            .ConfigurePrimaryHttpMessageHandler(() => new OfflineWebhookHandler(WebhookCalls)));
+        builder.ConfigureTestServices(services =>
+        {
+            services
+                .AddHttpClient(TeamsWebhookSender.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => new OfflineWebhookHandler(WebhookCalls));
+
+            // ⚠ Типізований клієнт реєструється під іменем свого типу, тож
+            // повторний `AddHttpClient<T>` тут ДОНАЛАШТОВУЄ той самий клієнт, а
+            // не заводить другий.
+            services
+                .AddHttpClient<PiWebApiDataSource>()
+                .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls));
+        });
+    }
+
+    /// <summary>Каталог джерела з однієї позиції; у мережу не ходить.</summary>
+    /// <param name="calls">Куди записати адресу спроби.</param>
+    private sealed class OfflineSourceHandler(ConcurrentQueue<Uri> calls) : HttpMessageHandler
+    {
+        /// <summary>Відповідь у формі PI Web API: <c>Items</c> з одним елементом.</summary>
+        private const string Catalog =
+            """{"Items":[{"Name":"Unit-01","Description":"Probe element","Path":"\\Srv\\Db\\Unit-01"}]}""";
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            if (request.RequestUri is { } uri)
+            {
+                calls.Enqueue(uri);
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(Catalog, Encoding.UTF8, "application/json"),
+            });
+        }
     }
 
     /// <summary>Транспорт вебхука, який нікуди не ходить і завжди приймає.</summary>

@@ -764,6 +764,356 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Перелік джерел. Право `Integration.View`.
+         * @description ⚠ Віддаються і вимкнені джерела: екран, з якого джерело вмикають назад,
+         *     без них показував би порожнє місце замість причини.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceView"][];
+                        "text/json": components["schemas"]["DataSourceView"][];
+                        "text/plain": components["schemas"]["DataSourceView"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Заводить джерело. Право `Integration.Manage`.
+         * @description Код зайнятий, назви немає, адреса задовга або несе облікові дані —
+         *     `422 ECR-REQ-0422` ДО запису.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveDataSourceRequest"];
+                    "application/json": components["schemas"]["SaveDataSourceRequest"];
+                    "text/json": components["schemas"]["SaveDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceView"];
+                        "text/json": components["schemas"]["DataSourceView"];
+                        "text/plain": components["schemas"]["DataSourceView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Змінює джерело. Право `Integration.Manage`.
+         * @description ⚠ Код не змінюється: на нього спираються сутності збору, і
+         *     перейменування ключа виглядало б як правка підпису, а було б переїздом
+         *     усієї конфігурації збору.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveDataSourceRequest"];
+                    "application/json": components["schemas"]["SaveDataSourceRequest"];
+                    "text/json": components["schemas"]["SaveDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceView"];
+                        "text/json": components["schemas"]["DataSourceView"];
+                        "text/plain": components["schemas"]["DataSourceView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Прибирає джерело, на яке ніщо не спирається. Право `Integration.Manage`.
+         * @description ⛔ Каскаду немає: джерело із сутностями збору або розкладами — це
+         *     `409 ECR-JOB-0409` із лічильниками в деталях. Видалення потягнуло б
+         *     за собою зібрані точки й журнал покриття, за якими вже пораховані
+         *     документи. Джерело, з якого більше не збирають, вимикається
+         *     (`isActive = false`).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перевіряє з'єднання з джерелом. Право `Integration.Manage`.
+         * @description ⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела
+         *     і вкладається у відповідь — на відміну від збору, який іде по діапазону
+         *     і тому віддає `jobId`.
+         *
+         *     ⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це
+         *     `{ ok: false, error }`, а не помилка запиту. Проба цього ж джерела,
+         *     яка вже виконується, — `409 ECR-JOB-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["TestDataSourceRequest"];
+                    "application/json": components["schemas"]["TestDataSourceRequest"];
+                    "text/json": components["schemas"]["TestDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceTestResult"];
+                        "text/json": components["schemas"]["DataSourceTestResult"];
+                        "text/plain": components["schemas"]["DataSourceTestResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -11723,6 +12073,35 @@ export interface components {
             /** @description Ім'я для показу в шапці. */
             userName: null | string;
         };
+        /** @description Наслідок перевірки з'єднання; `Entities` — розмір каталогу джерела. */
+        DataSourceTestResult: {
+            /** Format: int32 */
+            entities: number;
+            error: null | string;
+            messageKey?: null | string;
+            ok: boolean;
+        };
+        /** @description Джерело даних — рядок екрана конфігуратора (`BE-21`, ФВ-14.3). */
+        DataSourceView: {
+            catalog: null | string;
+            code: string;
+            /** Format: int32 */
+            collectionSchedules: number;
+            endpoint: string;
+            hasSecret: boolean;
+            /** Format: int32 */
+            id: number;
+            isActive: boolean;
+            /** Format: int32 */
+            maxParallel: number;
+            nameL10n: {
+                [key: string]: string;
+            };
+            secondaryEndpoint: null | string;
+            /** Format: int32 */
+            sourceEntities: number;
+            transport: components["schemas"]["ExternalTransport"];
+        };
         /** @description Запит на виведення версії з обігу. */
         DeprecateVersionRequest: {
             /** @description Причина; потрапляє в журнал публікацій. Обов'язкова: «чому цю версію
@@ -12019,6 +12398,11 @@ export interface components {
              *     публікацію, якої не буде. */
             skippedChecks: string[];
         };
+        /**
+         * @description Транспорт до зовнішнього джерела (ФВ-11.2).
+         * @enum {unknown}
+         */
+        ExternalTransport: "PiWebApi" | "PiSqlClient" | "Sql";
         /**
          * @description Куди лягає поле джерела.
          * @enum {unknown}
@@ -14107,6 +14491,33 @@ export interface components {
              */
             unitId: null | number;
         };
+        /** @description Тіло створення і зміни джерела. */
+        SaveDataSourceRequest: {
+            /** @description Каталог або база джерела. */
+            catalog?: null | string;
+            /** @description Код джерела; при зміні ігнорується. */
+            code: null | string;
+            /** @description Адреса або рядок з'єднання — без облікових даних. */
+            endpoint: null | string;
+            /**
+             * @description Чи збирати з джерела; при створенні ігнорується.
+             * @default true
+             */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Стеля паралельних звернень; `null` — типова.
+             */
+            maxParallel?: null | number;
+            /** @description Назва мовами каталогу; хоча б одна мова. */
+            nameL10n: null | {
+                [key: string]: string;
+            };
+            /** @description Запасна адреса; `null` — немає. */
+            secondaryEndpoint?: null | string;
+            /** @description Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`. */
+            transport: components["schemas"]["ExternalTransport"];
+        };
         /** @description Налаштування формули чернетки (`W5.3`). */
         SaveFormulaDefRequest: {
             /** @description Діалект, за яким читається вираз. */
@@ -15173,6 +15584,11 @@ export interface components {
             isGreen: boolean;
             /** @description Розбіжності; порожньо, якщо тест зелений. */
             mismatches: components["schemas"]["TestCaseMismatch"][];
+        };
+        /** @description Тіло перевірки з'єднання. */
+        TestDataSourceRequest: {
+            /** @description Причина; обов'язкова, потрапляє в журнал безпеки. */
+            reason: string;
         };
         /**
          * @description Рівень деталізації трейсу розрахунку (ЗБР-3).

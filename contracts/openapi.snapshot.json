@@ -2087,6 +2087,105 @@
         ],
         "type": "object"
       },
+      "DataSourceTestResult": {
+        "description": "Наслідок перевірки з'єднання; `Entities` — розмір каталогу джерела.",
+        "properties": {
+          "entities": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messageKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "error",
+          "entities"
+        ],
+        "type": "object"
+      },
+      "DataSourceView": {
+        "description": "Джерело даних — рядок екрана конфігуратора (`BE-21`, ФВ-14.3).",
+        "properties": {
+          "catalog": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "collectionSchedules": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "hasSecret": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "maxParallel": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "secondaryEndpoint": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceEntities": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalTransport"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "transport",
+          "endpoint",
+          "secondaryEndpoint",
+          "catalog",
+          "maxParallel",
+          "isActive",
+          "hasSecret",
+          "sourceEntities",
+          "collectionSchedules"
+        ],
+        "type": "object"
+      },
       "DeprecateVersionRequest": {
         "description": "Запит на виведення версії з обігу.",
         "properties": {
@@ -2685,6 +2784,14 @@
           "skippedChecks"
         ],
         "type": "object"
+      },
+      "ExternalTransport": {
+        "description": "Транспорт до зовнішнього джерела (ФВ-11.2).",
+        "enum": [
+          "PiWebApi",
+          "PiSqlClient",
+          "Sql"
+        ]
       },
       "FieldTargetKind": {
         "description": "Куди лягає поле джерела.",
@@ -7168,6 +7275,73 @@
         ],
         "type": "object"
       },
+      "SaveDataSourceRequest": {
+        "description": "Тіло створення і зміни джерела.",
+        "properties": {
+          "catalog": {
+            "description": "Каталог або база джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "description": "Код джерела; при зміні ігнорується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "endpoint": {
+            "description": "Адреса або рядок з'єднання — без облікових даних.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "default": true,
+            "description": "Чи збирати з джерела; при створенні ігнорується.",
+            "type": "boolean"
+          },
+          "maxParallel": {
+            "description": "Стеля паралельних звернень; `null` — типова.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу; хоча б одна мова.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "secondaryEndpoint": {
+            "description": "Запасна адреса; `null` — немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ExternalTransport",
+            "description": "Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`."
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "transport",
+          "endpoint"
+        ],
+        "type": "object"
+      },
       "SaveFormulaDefRequest": {
         "description": "Налаштування формули чернетки (`W5.3`).",
         "properties": {
@@ -9400,6 +9574,19 @@
         ],
         "type": "object"
       },
+      "TestDataSourceRequest": {
+        "description": "Тіло перевірки з'єднання.",
+        "properties": {
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал безпеки.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "TraceLevel": {
         "description": "Рівень деталізації трейсу розрахунку (ЗБР-3).",
         "enum": [
@@ -11288,6 +11475,505 @@
         "summary": "Прогін перевірки узгодженості на вимогу. Право `System.RunJob`.",
         "tags": [
           "Consistency"
+        ]
+      }
+    },
+    "/api/v1/data-sources": {
+      "get": {
+        "description": "⚠ Віддаються і вимкнені джерела: екран, з якого джерело вмикають назад,\nбез них показував би порожнє місце замість причини.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DataSourceView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DataSourceView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DataSourceView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Перелік джерел. Право `Integration.View`.",
+        "tags": [
+          "DataSources"
+        ]
+      },
+      "post": {
+        "description": "Код зайнятий, назви немає, адреса задовга або несе облікові дані —\n`422 ECR-REQ-0422` ДО запису.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDataSourceRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDataSourceRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDataSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить джерело. Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
+        ]
+      }
+    },
+    "/api/v1/data-sources/{id}": {
+      "delete": {
+        "description": "⛔ Каскаду немає: джерело із сутностями збору або розкладами — це\n`409 ECR-JOB-0409` із лічильниками в деталях. Видалення потягнуло б\nза собою зібрані точки й журнал покриття, за якими вже пораховані\nдокументи. Джерело, з якого більше не збирають, вимикається\n(`isActive = false`).",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Прибирає джерело, на яке ніщо не спирається. Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
+        ]
+      },
+      "put": {
+        "description": "⚠ Код не змінюється: на нього спираються сутності збору, і\nперейменування ключа виглядало б як правка підпису, а було б переїздом\nусієї конфігурації збору.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDataSourceRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDataSourceRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDataSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює джерело. Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
+        ]
+      }
+    },
+    "/api/v1/data-sources/{id}/test": {
+      "post": {
+        "description": "⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела\nі вкладається у відповідь — на відміну від збору, який іде по діапазону\nі тому віддає `jobId`.\n\n⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це\n`{ ok: false, error }`, а не помилка запиту. Проба цього ж джерела,\nяка вже виконується, — `409 ECR-JOB-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestDataSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataSourceTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Перевіряє з'єднання з джерелом. Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
         ]
       }
     },
@@ -24125,6 +24811,9 @@
     },
     {
       "name": "Consistency"
+    },
+    {
+      "name": "DataSources"
     },
     {
       "name": "Documents"

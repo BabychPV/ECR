@@ -2604,6 +2604,55 @@ public interface ICampaignSummaryStore
 }
 ```
 
+#### `IDataSourceStore`
+
+Конфігурація підключень (`ext.DataSource`) для екрана джерел (`BE-21`,
+ФВ-14.3): перелік разом із лічильниками того, що на джерело спирається, пошук
+для правки (**вимкнені джерела теж**), зайнятість коду, додавання і вилучення.
+
+Окремий порт, а не метод у `ICollectionStore`: той обслуговує ЗБІР і бачить
+лише чинні джерела (`FindDataSourceAsync` відсіює `IsActive = 0`) — для
+збирача правильно, для конфігуратора згубно.
+
+```csharp
+public interface IDataSourceStore
+{
+    public Task<IReadOnlyList<DataSourceRow>> ListAsync(CancellationToken ct);
+    public Task<DataSource?> FindAsync(int dataSourceId, CancellationToken ct);
+    public Task<bool> IsCodeTakenAsync(string code, int? exceptId, CancellationToken ct);
+    public Task<DataSourceUsage> CountUsageAsync(int dataSourceId, CancellationToken ct);
+    public void Add(DataSource source);
+    public void Remove(DataSource source);
+}
+```
+
+> ⛔ **Джерела даних — без сховища секретів** (`BE-21`, пряме рішення людини на
+> `Q15-06`): «Windows-автентифікація службового облікового запису; секретів у
+> застосунку немає». Тому в `SaveDataSourceRequest` поля секрету НЕМАЄ і
+> маршруту `PUT …/{id}/secret` не існує — на відміну від каналів сповіщень, де
+> секрет (пароль SMTP, URL вебхука) неминучий. У відповіді лишається
+> `hasSecret`: ознака того, що середовище все-таки дає секрет під це джерело
+> (`ISecretProvider`, ім'я `DataSource.<CODE>`), без самого значення.
+>
+> ⛔ Наслідок, на який і поставлено перевірку: коли сховища секретів немає,
+> єдиний спосіб покласти пароль у базу — вписати його в НЕСЕКРЕТНЕ поле. Для
+> транспорту `Sql` адреса і є рядком з'єднання, тож `POST`/`PUT` відмовляють
+> (`422 ECR-REQ-0422`, `err.ECR-REQ-0422.dataSourceEndpointCarriesSecret`)
+> адресі з `Password=`, `Pwd=`, `sig=`, ключем API або частиною
+> `scheme://user:pass@host`.
+>
+> ⛔ `DELETE /api/v1/data-sources/{id}` — **заборона, не каскад**. Джерело із
+> сутностями збору або розкладами дає `409 ECR-JOB-0409` із лічильниками в
+> деталях: каскад стер би `ext.RawDataPoint` і журнал покриття, за якими вже
+> пораховані й підписані документи. Джерело, з якого більше не збирають,
+> вимикається (`isActive = false`) — це оборотно.
+>
+> ⚠ `POST /api/v1/data-sources/{id}/test` опитує джерело ТИМ САМИМ адаптером,
+> яким потім збиратимуть (`IExternalDataSource.DiscoverAsync`). Причина
+> обов'язкова і йде в `aud.SecurityEvent`; друга проба того самого джерела під
+> час чинної — `409 ECR-JOB-0409`. Відмова джерела — це `{ ok: false, error }`
+> зі статусом `200`, а не помилка запиту.
+
 #### `ITemplateStructure`
 
 Синхронний доступ до вже завантаженого знімка структури версії.
@@ -3063,6 +3112,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
 | `DELETE` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
+| `GET` | `/api/v1/data-sources` | `Integration.View` | 7 |
+| `POST` | `/api/v1/data-sources` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
+| `DELETE` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
+| `POST` | `/api/v1/data-sources/{id}/test` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |

@@ -289,6 +289,15 @@ public static class DependencyInjection
         services.AddScoped<Integration.SaveCollectionScheduleHandler>();
         services.AddScoped<Integration.DeleteCollectionScheduleHandler>();
 
+        // BE-21: конфігурація самих джерел і перевірка з'єднання (ФВ-14.3).
+        // ⚠ Ворота проби — СИНГЛТОН: вони стережуть паралельні запити до одного
+        // джерела, а scoped-екземпляр жив би рівно один запит і не стеріг би нічого.
+        services.AddSingleton<Integration.SourceProbeGate>();
+        services.AddScoped<Integration.ListDataSourcesHandler>();
+        services.AddScoped<Integration.SaveDataSourceHandler>();
+        services.AddScoped<Integration.DeleteDataSourceHandler>();
+        services.AddScoped<Integration.TestDataSourceConnectionHandler>();
+
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
 

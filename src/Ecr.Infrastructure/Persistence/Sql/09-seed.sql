@@ -606,6 +606,22 @@ USING (VALUES
     (N'err.ECR-INT-0404.sourceEntity',                    N'en', N'Source entity {id} does not exist.', 1),
     (N'err.ECR-JOB-0409.collectionScheduleExists',        N'en', N'This source entity already has schedule {scheduleId}: edit it instead of adding a second one.', 1),
 
+    -- BE-21: самі джерела даних.
+    -- ⛔ Поля секрету в цій формі немає — рішення людини на Q15-06: джерела
+    -- ходять під службовим обліковим записом. Саме тому потрібен
+    -- `dataSourceEndpointCarriesSecret`: коли сховища секретів немає, єдиний
+    -- спосіб покласти пароль у базу — вписати його в адресу, а для транспорту
+    -- Sql адреса і є рядком з'єднання. Відмова НЕ повторює введеного.
+    -- ⚠ Видалення — заборона, не каскад: відмова називає числа, бо єдина
+    -- корисна дія у відповідь — прибрати саме їх або вимкнути джерело.
+    (N'err.ECR-INT-0404.dataSource',                      N'en', N'Data source {id} does not exist.', 1),
+    (N'err.ECR-REQ-0422.dataSourceInvalid',               N'en', N'A data source needs a name in at least one language, a known transport, an address of up to 400 characters and a parallelism ceiling between 1 and 32.', 1),
+    (N'err.ECR-REQ-0422.dataSourceCodeTaken',             N'en', N'A data source with code "{code}" already exists.', 1),
+    (N'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret', N'en', N'The address of a data source must not carry credentials: sources connect under the service account.', 1),
+    (N'err.ECR-REQ-0422.dataSourceTestReason',            N'en', N'A reason of up to 400 characters is required to test the connection: the attempt is recorded in the security journal.', 1),
+    (N'err.ECR-JOB-0409.dataSourceInUse',                 N'en', N'This data source still carries {sourceEntities} collection entities and {collectionSchedules} schedules: disable it instead of deleting it.', 1),
+    (N'err.ECR-JOB-0409.dataSourceTestRunning',           N'en', N'A connection test for data source "{code}" is already running: wait for it to finish.', 1),
+
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
     -- не знайдено». Для оператора це не назва нічого — у продукті немає
@@ -1326,6 +1342,10 @@ USING (VALUES
     -- взагалі: те саме, що рядок `Failed` у журналі доставок.
     (N'notifications.test.senderNotRegistered', N'en', N'No sender is registered for this channel transport: messages to it never arrive.', 1),
     (N'notifications.test.smtpNotConfigured',   N'en', N'The SMTP transport is not configured on the server.', 1),
+    -- BE-21: те саме для джерел даних — транспорт джерела не має адаптера.
+    -- Проба віддає `ok: false` із цим ключем, а не 500: конфігурація, у якій
+    -- обрано транспорт без адаптера, — стан системи, а не аварія запиту.
+    (N'integration.test.adapterNotRegistered', N'en', N'No adapter is registered for this source transport: collection from it never runs.', 1),
     (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
     (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),
     (N'profile.theme',                   N'en', N'Theme', 1),
