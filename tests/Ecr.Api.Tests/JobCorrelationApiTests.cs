@@ -65,6 +65,11 @@ public sealed class JobCorrelationApiTests(SqlServerFixture sql)
                 attempt.ValueKind == JsonValueKind.Null || attempt.GetInt32() >= 1,
                 $"attempt = {attempt}");
 
+            // Постановка є завжди, коли задачу поставили; документа в перевірки немає.
+            Assert.Equal(JsonValueKind.String, status.GetProperty("createdAt").ValueKind);
+            Assert.Equal(JsonValueKind.Null, status.GetProperty("documentId").ValueKind);
+            Assert.True(status.TryGetProperty("errorCode", out _));
+
             var listed = await client
                 .GetFromJsonAsync<JsonElement>(new Uri(
                     $"/api/v1/jobs?code={typeof(Ecr.Application.Ports.IConsistencyCheckJob).FullName}",
@@ -74,6 +79,10 @@ public sealed class JobCorrelationApiTests(SqlServerFixture sql)
             var row = listed.EnumerateArray().Single(j => j.GetProperty("jobId").GetString() == jobId);
             Assert.Equal(correlation, row.GetProperty("correlationId").GetString());
             Assert.True(row.TryGetProperty("attempt", out _));
+            Assert.Equal(
+                status.GetProperty("createdAt").GetDateTime(), row.GetProperty("createdAt").GetDateTime());
+            Assert.True(row.TryGetProperty("errorCode", out _));
+            Assert.True(row.TryGetProperty("documentId", out _));
         }
         finally
         {

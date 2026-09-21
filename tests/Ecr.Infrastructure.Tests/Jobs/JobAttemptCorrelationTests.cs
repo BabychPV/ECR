@@ -166,4 +166,31 @@ public sealed class JobAttemptCorrelationTests
         await progress.Received(1).StartAsync(
             jobId, Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), 1, RequestCorrelation);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "BE-08")]
+    public async Task Документ_задачі_береться_з_payload_при_постановці()
+    {
+        var factory = new Quartz.Impl.StdSchedulerFactory(
+            new System.Collections.Specialized.NameValueCollection
+            {
+                ["quartz.scheduler.instanceName"] = $"ecr-be08d-{Guid.NewGuid():N}",
+                ["quartz.threadPool.threadCount"] = "1",
+            });
+        var queued = Substitute.For<IJobProgressStore>();
+        var jobs = new QuartzJobScheduler(factory, queued, new TestClock(Now));
+
+        var withDoc = await jobs.EnqueueAsync<IFormulaRecalculationJob>(
+            new { DocumentId = 9_000_000_001L, PeriodKey = "2026-09" }, CancellationToken.None);
+        var noDoc = await jobs.EnqueueAsync<IFormulaRecalculationJob>(
+            new { TableInstanceId = 5L }, CancellationToken.None);
+
+        await queued.Received(1).QueueAsync(
+            withDoc, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), Arg.Any<int?>(), Arg.Any<string?>(),
+            9_000_000_001L);
+        await queued.Received(1).QueueAsync(
+            noDoc, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), Arg.Any<int?>(), Arg.Any<string?>(),
+            Arg.Is<long?>(d => d == null));
+    }
 }

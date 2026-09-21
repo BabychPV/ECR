@@ -59,6 +59,14 @@ public sealed class QuartzJobAdapterRetryTests
                 Ecr.Domain.Errors.ErrorCodes.ReportImmutable, Reason);
     }
 
+    /// <summary>Прикладна відмова з кодом (ретраїться, як будь-який <c>BusinessRuleException</c>).</summary>
+    private sealed class SourceDownJob : IBackgroundJob
+    {
+        public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+            => throw new Ecr.Application.Errors.BusinessRuleException(
+                Ecr.Domain.Errors.ErrorCodes.SourceUnavailable, "Джерело недоступне.");
+    }
+
     private static (QuartzJobAdapter Adapter, IJobProgressStore Progress) Adapter()
         => Adapter<AlwaysFailingJob>();
 
@@ -143,7 +151,8 @@ public sealed class QuartzJobAdapterRetryTests
         }
 
         await progress.DidNotReceive().FinishAsync(
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(),
+            Arg.Any<string?>());
     }
 
     /// <summary>
@@ -195,7 +204,7 @@ public sealed class QuartzJobAdapterRetryTests
 
         await progress.Received(1).FinishAsync(
             JobId, "Failed", Arg.Is<string?>(m => m != null && m.Contains("транзієнтної")),
-            Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+            Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), "ECR-SYS-0500"); // BE-08: непередбачена — системний код
 
         // ⛔ Жодного нового триґера — саме це і є «зупинка на межі», а не
         // «спроба нескінченно».
@@ -283,10 +292,25 @@ public sealed class QuartzJobAdapterRetryTests
             "Failed",
             Arg.Is<string?>(m => m != null && m.Contains(DomainFailingJob.Reason, StringComparison.Ordinal)),
             Arg.Any<DateTime>(),
-            Arg.Any<CancellationToken>());
+            Arg.Any<CancellationToken>(),
+            "ECR-RPT-0409"); // BE-08: код доменного винятку, не системний
 
         // ⚠ Деталь задачі лишається: ручний перезапуск має що перезапускати.
         await scheduler.DidNotReceive().DeleteJob(Arg.Any<JobKey>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "BE-08")]
+    public async Task Остаточний_провал_прикладною_відмовою_пише_її_код_а_не_системний()
+    {
+        var (adapter, progress) = Adapter<SourceDownJob>();
+        var (context, _) = ContextAt(QuartzJobAdapter.MaxRetryAttempts, typeof(SourceDownJob));
+
+        await Assert.ThrowsAsync<JobExecutionException>(() => adapter.Execute(context));
+
+        await progress.Received(1).FinishAsync(
+            JobId, "Failed", Arg.Any<string?>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), "ECR-INT-0503");
     }
 
     /// <summary>

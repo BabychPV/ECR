@@ -13,8 +13,9 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// <inheritdoc />
     public Task QueueAsync(
         string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
-        string? correlationId = null)
-        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Queue(utcNow, correlationId), createdByUserId, ct);
+        string? correlationId = null, long? documentId = null)
+        => UpsertAsync(
+            jobId, jobCode, utcNow, entry => entry.Queue(utcNow, correlationId, documentId), createdByUserId, ct);
 
     /// <inheritdoc />
     public Task StartAsync(
@@ -73,7 +74,8 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 
     /// <inheritdoc />
     public async Task FinishAsync(
-        string jobId, string state, string? errorMessage, DateTime utcNow, CancellationToken ct)
+        string jobId, string state, string? errorMessage, DateTime utcNow, CancellationToken ct,
+        string? errorCode = null)
     {
         var entry = await db.JobProgresses
             .FirstOrDefaultAsync(p => p.JobId == jobId, ct)
@@ -84,7 +86,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             return;
         }
 
-        entry.Finish(state, errorMessage, utcNow);
+        entry.Finish(state, errorMessage, utcNow, errorCode);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -112,7 +114,8 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .AsNoTracking()
             .Where(p => p.JobId == jobId)
             .Select(p => new JobStatus(
-                p.JobId, p.State, p.Percent, p.Message, p.Error, p.Attempt, p.CorrelationId, MaxAttempts))
+                p.JobId, p.State, p.Percent, p.Message, p.Error, p.Attempt, p.CorrelationId, MaxAttempts,
+                p.CreatedAt, p.ErrorCode, p.DocumentId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -163,7 +166,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .Select(p => new JobSummary(
                 p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt, p.Attempt, p.CorrelationId,
                 db.Users.Where(u => u.Id == p.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
-                p.Message))
+                p.Message, p.CreatedAt, p.ErrorCode, p.DocumentId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }

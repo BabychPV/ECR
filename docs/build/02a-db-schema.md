@@ -2360,6 +2360,9 @@ CREATE TABLE itg.JobProgress
     [Error]    nvarchar(2000) NULL,
     Attempt       int           NULL,  -- BE-08: спроба від 1; NULL — ще не стартувала
     CorrelationId nvarchar(64)  NULL,  -- BE-08: той самий, що в лозі запиту й задачі
+    CreatedAt     datetime2(3)  NULL,  -- BE-08: перша постановка; старт і перезапуск не чіпають; NULL — розклад
+    ErrorCode     varchar(32)   NULL,  -- BE-08: код каталогу помилок провалу (ErrorCodes)
+    DocumentId    bigint        NULL,  -- BE-08: документ задачі, з payload при постановці
     CONSTRAINT PK_JobProgress PRIMARY KEY (JobId)
 );
 GO

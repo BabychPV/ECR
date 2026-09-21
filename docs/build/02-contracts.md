@@ -1457,10 +1457,11 @@ public interface IJobProgress
     public Task ReportAsync(int percent, string? message, CancellationToken ct);
 }
 
-/// <summary>Стан фонової задачі. Attempt/CorrelationId — BE-08.</summary>
+/// <summary>Стан фонової задачі. Поля після Error — BE-08.</summary>
 public sealed record JobStatus(
     string JobId, string State, int Percent, string? Message, string? Error,
-    int? Attempt = null, string? CorrelationId = null);
+    int? Attempt = null, string? CorrelationId = null, int? MaxAttempts = null,
+    DateTime? CreatedAt = null, string? ErrorCode = null, long? DocumentId = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.

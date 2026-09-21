@@ -403,6 +403,8 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
 
         // BE-08: обидві nullable — наявні рядки лишаються валідними без backfill.
         builder.Property(x => x.CorrelationId).HasMaxLength(JobProgress.MaxCorrelationIdLength);
+        builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.ErrorCode).HasMaxLength(JobProgress.MaxErrorCodeLength).IsUnicode(false);
 
         // ⛔ Та сама причина, що й в `IX_Outbox_Claim` (Q-241): прибирання на
         // старті фільтрує саме за парою (State, HeartbeatAt), і без індексу

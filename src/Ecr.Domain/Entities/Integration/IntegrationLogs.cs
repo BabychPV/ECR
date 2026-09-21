@@ -547,6 +547,22 @@ public sealed class JobProgress
     public string? CorrelationId { get; private set; }
 
     /// <summary>
+    /// Момент ПЕРШОЇ постановки в чергу, UTC (BE-08). Не перезаписується ні
+    /// стартом (<see cref="StartedAt"/> перезаписується), ні ручним перезапуском.
+    /// </summary>
+    /// <remarks>⚠ <c>null</c> — задача за розкладом (її ніхто не ставив) або рядок старший за колонку.</remarks>
+    public DateTime? CreatedAt { get; private set; }
+
+    /// <summary>Код каталогу помилок останнього провалу (BE-08); <c>null</c> — не провалювалась.</summary>
+    public string? ErrorCode { get; private set; }
+
+    /// <summary>Документ, якого стосується задача (BE-08); <c>null</c> — задача не документна.</summary>
+    public long? DocumentId { get; private set; }
+
+    /// <summary>Межа стовпця <see cref="ErrorCode"/>.</summary>
+    public const int MaxErrorCodeLength = 32;
+
+    /// <summary>
     /// Підтверджує, що задача досі виконується.
     /// </summary>
     /// <param name="utcNow">Момент биття в UTC.</param>
@@ -569,14 +585,18 @@ public sealed class JobProgress
     /// задачу, яку щойно прийняли.
     /// </remarks>
     /// <param name="correlationId">Кореляція запиту-постановника; <c>null</c> — лишити наявну.</param>
-    public void Queue(DateTime utcNow, string? correlationId = null)
+    /// <param name="documentId">Документ задачі; <c>null</c> — лишити наявний.</param>
+    public void Queue(DateTime utcNow, string? correlationId = null, long? documentId = null)
     {
         SetCorrelation(correlationId);
+        CreatedAt ??= utcNow;
+        DocumentId = documentId ?? DocumentId;
         Attempt = null;
         State = "Queued";
         Percent = 0;
         Message = null;
         Error = null;
+        ErrorCode = null;
         UpdatedAt = utcNow;
 
         // ⚠ Биття оновлюється і тут. Задача в черзі ще не має власника, який
@@ -600,6 +620,7 @@ public sealed class JobProgress
         Percent = 0;
         Message = null;
         Error = null;
+        ErrorCode = null;
         StartedAt = utcNow;
         UpdatedAt = utcNow;
         HeartbeatAt = utcNow;
@@ -624,12 +645,19 @@ public sealed class JobProgress
     /// <param name="state">"Succeeded" або "Failed".</param>
     /// <param name="error">Текст помилки при провалі.</param>
     /// <param name="utcNow">Момент завершення в UTC.</param>
-    public void Finish(string state, string? error, DateTime utcNow)
+    /// <param name="errorCode">Код каталогу помилок при провалі (BE-08).</param>
+    public void Finish(string state, string? error, DateTime utcNow, string? errorCode = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(state);
 
+        if (errorCode is not null)
+        {
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode.Length, MaxErrorCodeLength);
+        }
+
         State = state;
         Error = error;
+        ErrorCode = errorCode;
         UpdatedAt = utcNow;
         Percent = error is null ? 100 : Percent;
     }

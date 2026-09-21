@@ -173,14 +173,8 @@ public sealed record JobListFilter(
 /// <param name="Percent">Прогрес у відсотках.</param>
 /// <param name="UpdatedAt">Момент останнього оновлення в UTC.</param>
 /// <param name="StartedAt">
-/// Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.
-/// <para>
-/// ⚠ Поле називається <c>StartedAt</c>, а не <c>CreatedAt</c>, бо саме це
-/// зберігає стовпець: <c>JobProgress.Begin</c> перезаписує його в момент
-/// запуску (<c>IntegrationLogs.cs</c>). Назва «створено» була б неправдою
-/// для кожної задачі, що вже почала працювати, а окремого стовпця з
-/// моментом постановки в <c>itg.JobProgress</c> немає.
-/// </para>
+/// Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC
+/// (<c>JobProgress.Begin</c> перезаписує його). Момент постановки — <paramref name="CreatedAt"/>.
 /// </param>
 /// <param name="Attempt">Номер спроби від 1; <c>null</c> — ще не стартувала (BE-08).</param>
 /// <param name="CorrelationId">Кореляція з логом і запитом-постановником (BE-08).</param>
@@ -190,6 +184,9 @@ public sealed record JobListFilter(
 /// ОДИН раз на весь перелік (<c>JobProgressMessageResolver.ResolveManyAsync</c>),
 /// а не на кожен рядок.
 /// </param>
+/// <param name="CreatedAt">Перша постановка в чергу, UTC; <c>null</c> — розклад (BE-08).</param>
+/// <param name="ErrorCode">Код каталогу помилок провалу (BE-08).</param>
+/// <param name="DocumentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -200,7 +197,10 @@ public sealed record JobSummary(
     int? Attempt = null,
     string? CorrelationId = null,
     string? CreatedByDisplayName = null,
-    string? Message = null);
+    string? Message = null,
+    DateTime? CreatedAt = null,
+    string? ErrorCode = null,
+    long? DocumentId = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
@@ -227,6 +227,9 @@ public interface IJobProgress
 /// Скільки спроб задача має загалом: перша + автоматичні ретраї (BE-08);
 /// <c>null</c> — стан не з журналу (<c>Unknown</c>/<c>Unavailable</c>).
 /// </param>
+/// <param name="CreatedAt">Перша постановка в чергу, UTC; <c>null</c> — розклад (BE-08).</param>
+/// <param name="ErrorCode">Код каталогу помилок провалу (BE-08).</param>
+/// <param name="DocumentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -235,7 +238,10 @@ public sealed record JobStatus(
     string? Error,
     int? Attempt = null,
     string? CorrelationId = null,
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    DateTime? CreatedAt = null,
+    string? ErrorCode = null,
+    long? DocumentId = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.

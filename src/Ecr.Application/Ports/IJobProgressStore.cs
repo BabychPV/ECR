@@ -59,9 +59,10 @@ public interface IJobProgressStore
     /// </remarks>
     /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
     /// <param name="correlationId">Кореляція запиту-постановника (BE-08).</param>
+    /// <param name="documentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
     public Task QueueAsync(
         string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
-        string? correlationId = null);
+        string? correlationId = null, long? documentId = null);
 
     /// <summary>Реєструє старт прогону.</summary>
     /// <param name="jobId">Ідентифікатор задачі.</param>
@@ -77,9 +78,10 @@ public interface IJobProgressStore
     /// <summary>Оновлює прогрес.</summary>
     public Task ReportAsync(string jobId, int percent, string? message, DateTime utcNow, CancellationToken ct);
 
-    /// <summary>Фіксує завершення.</summary>
+    /// <summary>Фіксує завершення; <paramref name="errorCode"/> — код каталогу при провалі (BE-08).</summary>
     public Task FinishAsync(
-        string jobId, string state, string? errorMessage, DateTime utcNow, CancellationToken ct);
+        string jobId, string state, string? errorMessage, DateTime utcNow, CancellationToken ct,
+        string? errorCode = null);
 
     /// <summary>
     /// Повертає раніше провалену задачу в стан «у черзі» (D-134, №11 T10 #40).

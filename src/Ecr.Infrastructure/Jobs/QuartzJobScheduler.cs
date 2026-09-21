@@ -127,10 +127,11 @@ public sealed class QuartzJobScheduler(
         where TJob : IBackgroundJob
     {
         var correlationId = NewCorrelationId();
+        var json = JsonSerializer.Serialize(payload, PayloadOptions);
 
         var builder = JobBuilder.Create<QuartzJobAdapter>()
             .WithIdentity(jobId)
-            .UsingJobData(PayloadKey, JsonSerializer.Serialize(payload, PayloadOptions))
+            .UsingJobData(PayloadKey, json)
             .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name)
             .UsingJobData(CorrelationKey, correlationId);
 
@@ -177,13 +178,31 @@ public sealed class QuartzJobScheduler(
             await progress
                 .QueueAsync(
                     jobId, typeof(TJob).FullName ?? typeof(TJob).Name, clock.UtcNow, ct, createdByUserId,
-                    correlationId)
+                    correlationId, DocumentIdOf(json))
                 .ConfigureAwait(false);
         }
 
         await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
 
         return jobId;
+    }
+
+    /// <summary>Документ задачі — числова властивість <c>documentId</c> кореня payload (BE-08).</summary>
+    /// <remarks>
+    /// ⚠ Судження: з payload, а не новим параметром порту. Документні задачі
+    /// (експорт, імпорт, перерахунок документа) вже несуть <c>DocumentId</c>
+    /// у тілі, а параметр змусив би кожного викликача дублювати те саме число.
+    /// </remarks>
+    private static long? DocumentIdOf(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+
+        return doc.RootElement.ValueKind == JsonValueKind.Object
+               && doc.RootElement.TryGetProperty("documentId", out var id)
+               && id.ValueKind == JsonValueKind.Number
+               && id.TryGetInt64(out var value)
+            ? value
+            : null;
     }
 
     /// <inheritdoc />

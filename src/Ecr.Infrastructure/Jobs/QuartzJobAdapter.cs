@@ -2,6 +2,7 @@ using System.Globalization;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Errors;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -182,7 +183,8 @@ public sealed partial class QuartzJobAdapter(
                         "Failed",
                         JobProgressMessageCodec.Shorten(ex.Message, IJobProgressStore.MaxErrorLength),
                         clock,
-                        CancellationToken.None))
+                        CancellationToken.None,
+                        ErrorCodeOf(ex)))
                 .ConfigureAwait(false);
 
             LogJobFailed(logger, jobId, typeName ?? "—");
@@ -481,8 +483,20 @@ public sealed partial class QuartzJobAdapter(
             : store.StartAsync(jobId, code, clock.UtcNow, ct, attempt, correlationId);
 
     private static Task FinishAsync(
-        IJobProgressStore? store, string jobId, string state, string? error, IClock clock, CancellationToken ct)
-        => store is null ? Task.CompletedTask : store.FinishAsync(jobId, state, error, clock.UtcNow, ct);
+        IJobProgressStore? store, string jobId, string state, string? error, IClock clock, CancellationToken ct,
+        string? errorCode = null)
+        => store is null ? Task.CompletedTask : store.FinishAsync(jobId, state, error, clock.UtcNow, ct, errorCode);
+
+    /// <summary>
+    /// Код каталогу для провалу (BE-08): власний код доменної чи прикладної
+    /// помилки, інакше — <see cref="ErrorCodes.Internal"/> (непередбачена).
+    /// </summary>
+    private static string ErrorCodeOf(Exception ex) => ex switch
+    {
+        EcrException e => e.ErrorCode,
+        DomainException d => d.ErrorCode,
+        _ => ErrorCodes.Internal,
+    };
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {TypeName} ({JobId}) не зареєстрована.")]
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);
