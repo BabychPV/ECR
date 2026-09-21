@@ -15,7 +15,6 @@ import {
   Table,
   Text,
   TextInput,
-  Tooltip,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -56,6 +55,16 @@ import { t } from '@/shared/i18n';
  * би читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
  */
 const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+
+/** Без адреси алерти нікуди надсилати — перемикач вимкнено з названою причиною (`D-125`). */
+function noEmail(user: UserView): boolean {
+  return user.email === null || user.email === '';
+}
+
+/** Id видимої причини поруч із вимкненим перемикачем — ціль `aria-describedby`. */
+function alertsReasonId(userId: number): string {
+  return `security-alerts-reason-${userId}`;
+}
 
 /**
  * Вкладка грантів — за `import()`.
@@ -497,11 +506,13 @@ export function SecurityPage(): JSX.Element {
                   <Table.Td>
                     {/* ⛔ Без пошти перемикач ВИМКНЕНИЙ, а не «вмикається і
                         мовчки не працює»: увімкнений адресат, якому нічого не
-                        надсилається, виглядає як налаштований (`D-125`). */}
-                    <Tooltip
-                      label={t('security.alertsNeedEmail')}
-                      disabled={user.email !== null && user.email !== ''}
-                    >
+                        надсилається, виглядає як налаштований (`D-125`).
+                        ⚠ Причину видно ТЕКСТОМ поруч і прив'язано
+                        `aria-describedby`, а не `Tooltip`: вимкнений перемикач
+                        не фокусується і не отримує наведення в частині
+                        браузерів, тож причина під мишею була недосяжна з
+                        клавіатури взагалі. */}
+                    <Group gap="xs" wrap="nowrap">
                       <Switch
                         size="xs"
                         aria-label={`${t('security.alerts')} · ${user.userName}`}
@@ -515,15 +526,19 @@ export function SecurityPage(): JSX.Element {
                         // погасли, — рівно та поведінка, від якої список
                         // перестає бути списком.
                         disabled={
-                          user.email === null ||
-                          user.email === '' ||
-                          (alerts.isPending && alerts.variables?.id === user.id)
+                          noEmail(user) || (alerts.isPending && alerts.variables?.id === user.id)
                         }
+                        aria-describedby={noEmail(user) ? alertsReasonId(user.id) : undefined}
                         onChange={(event) =>
                           alerts.mutate({ id: user.id, value: event.currentTarget.checked })
                         }
                       />
-                    </Tooltip>
+                      {noEmail(user) && (
+                        <Text id={alertsReasonId(user.id)} size="xs" c="dimmed" maw={220}>
+                          {t('security.alertsNeedEmail')}
+                        </Text>
+                      )}
+                    </Group>
                   </Table.Td>
                   <Table.Td>
                     <Group gap="xs">

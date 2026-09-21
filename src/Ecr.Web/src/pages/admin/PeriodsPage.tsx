@@ -12,7 +12,6 @@ import {
   Text,
   TextInput,
   Textarea,
-  Tooltip,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -37,6 +36,7 @@ import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
@@ -683,11 +683,13 @@ export function PeriodsPage(): JSX.Element {
                   чисел політики (мітка `+15/45` у формі створення проєкту
                   показує лише два з чотирьох, і НЕ тут). Тултипи нижче
                   підставляють РЕАЛЬНІ числа активної політики проєкту
-                  (`calendar.policy`), а не переказують ярлик. */}
+                  (`calendar.policy`), а не переказують ярлик.
+                  ⚠ `Hint` із `focusable`, а не `Tooltip`: заголовок — текст,
+                  він не в порядку табуляції, і `Tooltip` показував формулу
+                  лише під мишею. Тепер — фокус, наведення і `aria-describedby`. */}
               <Table.Th>
-                <Tooltip
-                  multiline
-                  w={320}
+                <Hint
+                  focusable
                   label={t('periods.rangeHint', {
                     open: calendar.policy.openOffsetDays,
                     hardClose: calendar.policy.hardCloseOffsetDays,
@@ -697,13 +699,12 @@ export function PeriodsPage(): JSX.Element {
                   <Text span td="underline dotted" fw={600} size="sm">
                     {t('periods.range')}
                   </Text>
-                </Tooltip>
+                </Hint>
               </Table.Th>
               <Table.Th>{t('periods.state')}</Table.Th>
               <Table.Th>
-                <Tooltip
-                  multiline
-                  w={320}
+                <Hint
+                  focusable
                   label={t('periods.graceHint', {
                     grace: calendar.policy.graceOffsetDays,
                     hardClose: calendar.policy.hardCloseOffsetDays,
@@ -713,7 +714,7 @@ export function PeriodsPage(): JSX.Element {
                   <Text span td="underline dotted" fw={600} size="sm">
                     {t('periods.grace')}
                   </Text>
-                </Tooltip>
+                </Hint>
               </Table.Th>
               <Table.Th />
             </Table.Tr>

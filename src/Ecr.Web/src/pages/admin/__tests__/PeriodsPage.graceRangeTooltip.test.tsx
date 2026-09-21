@@ -1,6 +1,5 @@
-import type { JSX, ReactNode } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -19,42 +18,17 @@ import { testTheme } from '@/test/render';
  * `GraceOffsetDays` політики НЕ читався взагалі. Виправлено окремо
  * (`PeriodStateCalculatorTests.GraceOffsetDays_із_політики_реально_зсуває_
  * перехід_Open_у_Grace`); цей тест перевіряє КОМУНІКАЦІЙНУ частину — що
- * тултипи на заголовках пояснюють похідну формулу в термінах РЕАЛЬНИХ
+ * підказки на заголовках пояснюють похідну формулу в термінах РЕАЛЬНИХ
  * чотирьох чисел активної політики проєкту (`calendar.policy`), а не
  * ярлика.
  *
- * ⚠ Mantine `Tooltip` під jsdom не показує вміст на `hover` без
- * floating-ui/portal-позиціонування (реального layout тут немає) —
- * той самий клас відтворюваних обмежень jsdom, що вже задокументований
- * для `MultiSelect`/`Select` в інших тестах цього репозиторію. Підмінено
- * легким заглушником, що рендерить `label` ЗАВЖДИ, поруч із дітьми, без
- * hover і без порталу — і саме тому може стверджувати РЕАЛЬНИЙ текст,
- * підставлений `t()`, а не факт «якийсь тултип десь існує».
- *
- * ✎ Заглушки `Select`/`MultiSelect` по всьому репозиторію знято: їхня
- * причина («Mantine зависає під jsdom») виявилася хибною — насправді це
- * взаємна рекурсія jsdom ↔ nwsapi на станових псевдокласах, і вона вже
- * обірвана (коментар у `src/test/setup.ts`). Ця заглушка ЛИШАЄТЬСЯ, бо
- * причина в неї інша. Спробувано справжній `Tooltip` із наведенням
- * (`fireEvent.mouseOver` на заголовку → `findByRole('tooltip')`): тултип не
- * відкрився взагалі, запит чекав до власного ліміту. Питання не в
- * швидкодії, а в тому, ЯК під jsdom відкрити тултип; поки відповіді немає,
- * заглушка чесніша за послаблене твердження.
+ * ✎ Заголовки переведено з `Tooltip` на `Hint`: `Tooltip` відкривався лише
+ * наведенням, а сам заголовок — текст поза порядком табуляції, тож з
+ * клавіатури формулу не було видно НІКОЛИ. Заглушку `Tooltip` знято — `Hint`
+ * відкривається під jsdom справжнім фокусом, і тест тепер доводить саме
+ * доступність: опис є без наведення, заголовок у порядку табуляції, фокус
+ * відкриває `role="tooltip"`.
  */
-vi.mock('@mantine/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@mantine/core')>();
-
-  function StubTooltip(props: { label?: ReactNode; children?: ReactNode }): JSX.Element {
-    return (
-      <span>
-        {props.children}
-        <span data-testid="tooltip-label">{props.label}</span>
-      </span>
-    );
-  }
-
-  return { ...actual, Tooltip: StubTooltip };
-});
 
 const project = {
   id: 7,
@@ -149,26 +123,57 @@ afterEach(() => {
 
 const SlowEnvTimeout = 400_000;
 
-describe('PeriodsPage: тултипи Range/Grace until пояснюють похідну формулу (Q-337, lane2)', () => {
+/** Текст заголовка колонки (`periods.range`/`periods.grace`) — сам тригер. */
+async function header(key: string): Promise<HTMLElement> {
+  // ⚠ `(?!Hint)`: прихований вузол опису лежить у тій самій клітинці й
+  // містить `periods.rangeHint`, а `getByText` прихованих не пропускає.
+  const pattern = new RegExp(`${key.replace('.', '\\.')}(?!Hint)`);
+  const th = await screen.findByRole('columnheader', { name: pattern }, { timeout: SlowEnvTimeout });
+
+  return within(th).getByText(pattern);
+}
+
+/**
+ * Опис тригера з `aria-describedby` — те, що озвучить читач при фокусі.
+ * ⚠ Каталог перекладів тут НЕ завантажується: `t()` повертає позначений
+ * ключ із підставленими параметрами (`⟦ключ (param=val)⟧`). Доказ — саме в
+ * ЧИСЛАХ із `calendar.policy`, а не в статичному тексті рядка (`09-seed.sql`).
+ */
+function description(el: HTMLElement): string {
+  const ids = (el.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean);
+
+  return ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+}
+
+/**
+ * ⛔ Мутаційний доказ: на `Tooltip` (до переводу) заголовок не мав ні
+ * `tabindex`, ні `aria-describedby`, і фокус не відкривав нічого — усі три
+ * твердження нижче червоні.
+ */
+async function expectKeyboardHint(trigger: HTMLElement, key: string): Promise<string> {
+  // У порядку табуляції: заголовок — `<span>`, сам по собі не фокусується.
+  expect(trigger.tabIndex).toBe(0);
+
+  // Опис прив'язаний ще ДО будь-якої взаємодії.
+  const text = description(trigger);
+  expect(text).toContain(key);
+
+  // Фокус (не наведення) відкриває видиму підказку.
+  trigger.focus();
+  expect((await screen.findByRole('tooltip')).textContent).toContain(key);
+
+  return text;
+}
+
+describe('PeriodsPage: підказки Range/Grace until пояснюють похідну формулу й доступні з клавіатури (Q-337, lane2)', () => {
   it(
-    'тултип "Range" називає Open offset і Hard-close offset із РЕАЛЬНИМИ числами політики',
+    'підказка "Range" називає Open offset і Hard-close offset із РЕАЛЬНИМИ числами політики',
     async () => {
       mockFetch();
       show();
 
-      const labels = await screen.findAllByTestId('tooltip-label', {}, { timeout: SlowEnvTimeout });
-      const text = labels.map((el) => el.textContent ?? '').join(' | ');
+      const text = await expectKeyboardHint(await header('periods.range'), 'periods.rangeHint');
 
-      // ⚠ Каталог перекладів тут НЕ завантажується (той самий підхід, що й
-      // інші `PeriodsPage.*.test.tsx` цього репозиторію) — `t()` повертає
-      // позначений ключ із підставленими параметрами (`⟦ключ (param=val)⟧`).
-      // Це й потрібно: доказ саме в ЧИСЛАХ, підставлених із `calendar.policy`
-      // (`open=0`, `hardClose=45`, `code=ECR-Standard`) — а не в статичному
-      // англійському тексті самого рядка (`09-seed.sql`).
-      //
-      // ⛔ Мутаційний доказ: до фіксу заголовок — голий текст без `Tooltip`
-      // узагалі, і жоден тултип не міг би містити параметр `hardClose=45`.
-      expect(text).toContain('periods.rangeHint');
       expect(text).toContain('open=0');
       expect(text).toContain('hardClose=45');
       expect(text).toContain('code=ECR-Standard');
@@ -177,15 +182,13 @@ describe('PeriodsPage: тултипи Range/Grace until пояснюють по�
   );
 
   it(
-    'тултип "Grace until" називає Grace offset — а не ярлик +15/45 — із РЕАЛЬНИМ числом 15',
+    'підказка "Grace until" називає Grace offset — а не ярлик +15/45 — із РЕАЛЬНИМ числом 15',
     async () => {
       mockFetch();
       show();
 
-      const labels = await screen.findAllByTestId('tooltip-label', {}, { timeout: SlowEnvTimeout });
-      const text = labels.map((el) => el.textContent ?? '').join(' | ');
+      const text = await expectKeyboardHint(await header('periods.grace'), 'periods.graceHint');
 
-      expect(text).toContain('periods.graceHint');
       expect(text).toContain('grace=15');
       expect(text).toContain('hardClose=45');
       expect(text).toContain('code=ECR-Standard');

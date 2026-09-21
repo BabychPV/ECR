@@ -1,5 +1,5 @@
 ﻿import { useEffect, useRef, useState, type JSX } from 'react';
-import { Button, Divider, Tooltip } from '@mantine/core';
+import { Button, Divider } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -13,6 +13,7 @@ import type {
 } from '@/api/types';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
+import { Hint } from '@/shared/ui/Hint';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useRecallAvailability, type RecallSheetRequest } from './api';
@@ -516,7 +517,9 @@ export function SheetActions({
        * (той самий, що й на екрані проєкту, `PeriodsPage.tsx`).
        */}
       {can(me, 'Calculation.Recalculate') && (
-        <Tooltip label={t('workflow.recalculateHint')} multiline w={260}>
+        // ⚠ `Hint`, а не `Tooltip`: кнопка фокусується, але `Tooltip` не
+        // давав `aria-describedby`, тож читач не чув нюансу про сусідні аркуші.
+        <Hint label={t('workflow.recalculateHint')}>
           <Button
             size="xs"
             variant="default"
@@ -533,7 +536,7 @@ export function SheetActions({
           >
             {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
           </Button>
-        </Tooltip>
+        </Hint>
       )}
 
       {canSubmit && (
