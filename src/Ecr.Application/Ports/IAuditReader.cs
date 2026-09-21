@@ -199,6 +199,11 @@ public interface IAuditReader
     public Task<PagedResult<StructureChangeView>> ReadStructureJournalAsync(
         StructureChangeFilter filter, CursorRequest page, CancellationToken ct);
 
+    /// <summary>Кількість записів журналу за тим самим фільтром — для стелі експорту.</summary>
+    /// <param name="filter">Вікно й звуження журналу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<int> CountStructureJournalAsync(StructureChangeFilter filter, CancellationToken ct);
+
     /// <summary>
     /// Остання зміна кожної названої комірки — ОДНИМ запитом на весь перелік
     /// (<c>BE-06</c>).

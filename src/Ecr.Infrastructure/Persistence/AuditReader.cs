@@ -218,23 +218,7 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
 
         await using var command = connection.CreateCommand();
 
-        // ⚠ Дзеркало `ReadCellChangesAsync`: вікно ПЕРШИМ (воно відсікає
-        // партиції і є префіксом кластерного ключа `(ChangedAt, Id)`), курсор
-        // за Id — додатково до вікна, кожне звуження — лише за наявності
-        // значення і лише іменованим ТИПІЗОВАНИМ параметром.
-        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to\n                   AND Id > @after");
-
-        if (filter.EntityType is { } entityType)
-        {
-            where.Append("\n                   AND EntityType = @entityType");
-            command.Parameters.Add("@entityType", SqlDbType.NVarChar, EntityTypeSize).Value = entityType;
-        }
-
-        if (filter.ChangedByUserId is { } changedBy)
-        {
-            where.Append("\n                   AND ChangedByUserId = @changedBy");
-            command.Parameters.Add("@changedBy", SqlDbType.Int).Value = changedBy;
-        }
+        var where = StructureJournalWhere(command, filter);
 
         command.CommandText = $"""
             SELECT TOP (@take)
@@ -242,20 +226,12 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
                    OldJson, NewJson, ChangeReason, ChangedByUserId
               FROM aud.StructureChange
              WHERE {where}
+               AND Id > @after
              ORDER BY Id;
             """;
 
         command.Parameters.Add("@take", SqlDbType.Int).Value = page.Limit + 1;
         command.Parameters.Add("@after", SqlDbType.BigInt).Value = Cursor.Decode(page.Cursor);
-
-        // ⚠ `datetime2(3)` — ширина колонки зі схеми: інша точність змусила б
-        // перетворювати КОЛОНКУ, і вікно перестало б відсікати партиції.
-        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
-        {
-            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
-            moment.Scale = 3;
-            moment.Value = value;
-        }
 
         var rows = new List<(long Id, StructureChangeView View)>();
         await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
@@ -282,6 +258,54 @@ public sealed class AuditReader(EcrDbContext db) : IAuditReader
             rows.Take(page.Limit).Select(r => r.View).ToList(),
             hasMore ? Cursor.Encode(rows[page.Limit - 1].Id) : null,
             TotalCount: null);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CountStructureJournalAsync(StructureChangeFilter filter, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM aud.StructureChange WHERE {StructureJournalWhere(command, filter)};";
+
+        return (int)(await command.ExecuteScalarAsync(ct).ConfigureAwait(false))!;
+    }
+
+    /// <summary>Спільна умова переліку й підрахунку: стеля експорту рахує рівно те, що віддасть перелік.</summary>
+    /// <remarks>
+    /// ⚠ Вікно ПЕРШИМ (воно відсікає партиції і є префіксом кластерного ключа
+    /// <c>(ChangedAt, Id)</c>), кожне звуження — лише за наявності значення і лише
+    /// іменованим ТИПІЗОВАНИМ параметром.
+    /// </remarks>
+    private static StringBuilder StructureJournalWhere(SqlCommand command, StructureChangeFilter filter)
+    {
+        var where = new StringBuilder("ChangedAt >= @from AND ChangedAt < @to");
+
+        if (filter.EntityType is { } entityType)
+        {
+            where.Append("\n                   AND EntityType = @entityType");
+            command.Parameters.Add("@entityType", SqlDbType.NVarChar, EntityTypeSize).Value = entityType;
+        }
+
+        if (filter.ChangedByUserId is { } changedBy)
+        {
+            where.Append("\n                   AND ChangedByUserId = @changedBy");
+            command.Parameters.Add("@changedBy", SqlDbType.Int).Value = changedBy;
+        }
+
+        // ⚠ `datetime2(3)` — ширина колонки зі схеми: інша точність змусила б
+        // перетворювати КОЛОНКУ, і вікно перестало б відсікати партиції.
+        foreach (var (name, value) in new[] { ("@from", filter.From), ("@to", filter.To) })
+        {
+            var moment = command.Parameters.Add(name, SqlDbType.DateTime2);
+            moment.Scale = 3;
+            moment.Value = value;
+        }
+
+        return where;
     }
 
     /// <inheritdoc />
