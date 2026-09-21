@@ -2173,6 +2173,7 @@ USING (VALUES
     (N'audit.operation',                 N'en', N'Operation', 1),
     (N'audit.reason',                    N'en', N'Reason', 1),
     (N'audit.structureEmpty',            N'en', N'No structure changes in this window', 1),
+    (N'audit.exportCsv',                 N'en', N'Export CSV', 1),
 
     -- ⛔ Знахідки перевірки узгодженості (`aud.ConsistencyIssue`). До цього
     -- екрана з продукту було видно лише КІЛЬКІСТЬ за типом (лічильник
