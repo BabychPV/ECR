@@ -38,13 +38,13 @@ public sealed class ClientLayerRulesTests
     /// списку → теж червоне. Формат: «файл → шлях імпорту без розширення»,
     /// обидва відносно <c>src/Ecr.Web/src</c>.
     /// </summary>
-    private static readonly string[] KnownViolations =
-    [
-        // Сторож незбережених змін у shared знає про автозбереження гріду.
-        // Правильно — інверсія (реєстрація провайдера pending з features).
-        "shared/ui/UnsavedGuard.tsx -> features/grid/autosave",
-        "shared/ui/UnsavedGuard.tsx -> features/grid/pendingStore",
-    ];
+    /// <remarks>
+    /// ⚠ Порожній — і так має лишатися. Останні два винятки
+    /// (<c>UnsavedGuard</c> → <c>features/grid</c>) зникли з інверсією через
+    /// реєстр джерел (<c>shared/ui/unsavedSources.ts</c>). Новий рядок тут —
+    /// це борг, який треба назвати в описі PR, а не спосіб позеленіти.
+    /// </remarks>
+    private static readonly string[] KnownViolations = [];
 
     private static readonly Regex ImportBefore = new(
         @"(?:\bfrom|\bimport|\bimport\s*\()\s*$",
