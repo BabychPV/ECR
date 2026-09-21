@@ -48,7 +48,7 @@ public sealed class SmtpChannelSender(INotificationSender transport) : INotifica
         if (!transport.IsConfigured)
         {
             throw new InvalidOperationException(
-                $"Канал «{channel.Name}»: транспорт SMTP процесу не налаштовано (Smtp:Host).");
+                $"Канал «{channel.Name}»: транспорт SMTP процесу не налаштовано (Smtp:Host, Smtp:From).");
         }
 
         var settings = SettingsOf(channel);

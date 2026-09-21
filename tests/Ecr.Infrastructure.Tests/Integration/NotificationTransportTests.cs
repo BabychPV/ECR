@@ -39,11 +39,39 @@ public sealed class NotificationTransportTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-6.11")]
-    public void Із_Host_відправник_налаштований()
+    public void Із_Host_і_From_відправник_налаштований()
     {
-        var sender = Sender(("Smtp:Host", "smtp.example.local"));
+        var sender = Sender(("Smtp:Host", "smtp.example.local"), ("Smtp:From", "ecr@example.local"));
 
         Assert.True(sender.IsConfigured);
+    }
+
+    /// <summary>
+    /// «Налаштовано» = «можна надіслати»: без адресанта кожна відправка падала б,
+    /// а <c>/health/facts</c>, канал і диспетчер казали б «налаштовано».
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.11")]
+    [InlineData("smtp.example.local", null)]
+    [InlineData("smtp.example.local", "")]
+    [InlineData("smtp.example.local", "   ")]
+    [InlineData(null, "ecr@example.local")]
+    [InlineData("  ", "ecr@example.local")]
+    public void Без_Host_або_From_відправник_НЕ_налаштований(string? host, string? from)
+    {
+        var settings = new List<(string, string)>();
+        if (host is not null)
+        {
+            settings.Add(("Smtp:Host", host));
+        }
+
+        if (from is not null)
+        {
+            settings.Add(("Smtp:From", from));
+        }
+
+        Assert.False(Sender([.. settings]).IsConfigured);
     }
 
     [Fact]
@@ -106,7 +134,8 @@ public sealed class NotificationTransportTests
             () => sender.SendAsync(["a@example.local"], "тема", "текст", CancellationToken.None));
     }
 
-    private static SmtpNotificationSender Sender(params (string Key, string Value)[] settings)
+    /// <summary>Справжній SMTP-відправник на словнику; спільний з тестами диспетчера.</summary>
+    internal static SmtpNotificationSender Sender(params (string Key, string Value)[] settings)
     {
         var secrets = Substitute.For<ISecretProvider>();
         secrets.Find(Arg.Any<string>()).Returns((string?)null);

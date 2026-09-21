@@ -3257,6 +3257,12 @@ public sealed class NotFoundException(string errorCode, string message)
 > `notificationTransport.isConfigured` у `GET /health/facts`; порожній
 > `Smtp:Host` → `false`), Teams — `hasSecret` (секрет і є адресою вебхука).
 > ⛔ Лише булеве: хост, адресант, порт у відповідь не йдуть.
+>
+> ✎ **2026-09-21 — «налаштовано» = «можна надіслати».** Для Smtp і
+> `isConfigured`, і `transportConfigured` — `true` лише коли непорожні (після
+> trim) **обидва** `Smtp:Host` і `Smtp:From`; хост без адресанта → `false`, і
+> `OutboxDispatcher` лишає події в черзі без спроби. Умова одна —
+> `SmtpNotificationSender.IsConfigured`.
 
 > ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
 > ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —

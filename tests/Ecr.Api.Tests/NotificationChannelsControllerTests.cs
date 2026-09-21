@@ -281,6 +281,39 @@ public sealed class NotificationChannelsControllerTests(SqlServerFixture sql)
         Assert.DoesNotContain("probe-7f3a", text + mail.GetRawText(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Одна ознака — два споживачі крізь HTTP: <c>/health/facts</c> і
+    /// <c>transportConfigured</c> каналу. Хост без адресанта (і навпаки) — «не
+    /// налаштовано», бо відправити так не можна.
+    /// </summary>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-33")]
+    [InlineData("smtp.corp.example", "ecr@corp.example", true)]
+    [InlineData("smtp.corp.example", null, false)]
+    [InlineData(null, "ecr@corp.example", false)]
+    public async Task Налаштовано_лише_з_Host_і_From_і_це_кажуть_факти_стану_й_канал(
+        string? host, string? from, bool expected)
+    {
+        var smtp = new ConfigurationBuilder()
+            .AddInMemoryCollection([new("Smtp:Host", host), new("Smtp:From", from)]).Build();
+
+        using var app = new EcrApiFactory(sql);
+        using var configured = app.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<INotificationSender>(
+            sp => new SmtpNotificationSender(smtp, sp.GetRequiredService<ISecretProvider>()))));
+        using var client = await SystemHealthControllerTests
+            .SignedInAsync(sql, configured, "System.ManageNotifications", "System.ViewHealth").ConfigureAwait(true);
+
+        var facts = await BodyAsync(
+            await client.GetAsync(new Uri("/api/v1/health/facts", UriKind.Relative)).ConfigureAwait(true), null)
+            .ConfigureAwait(true);
+        Assert.Equal(expected, facts.GetProperty("notificationTransport").GetProperty("isConfigured").GetBoolean());
+
+        var mail = await CreateAsync(client, app, "Smtp", new { recipients = Recipients }).ConfigureAwait(true);
+        Assert.Equal(expected, mail.GetProperty("transportConfigured").GetBoolean());
+    }
+
     private async Task<JsonElement> CreateAsync(HttpClient client, EcrApiFactory app, string kind, object? settings)
     {
         var created = await client.PostAsJsonAsync(
