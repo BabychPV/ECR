@@ -1,7 +1,6 @@
 import { lazy, Suspense, type JSX } from 'react';
 import { Anchor, Group, Stack, Text } from '@mantine/core';
-import { generatePath, Link } from 'react-router-dom';
-import { routes } from '@/app/routes';
+import { Link } from 'react-router-dom';
 import { t } from '@/shared/i18n';
 
 /*
@@ -98,20 +97,23 @@ export function JobFailure({
   );
 }
 
-/** Посилання на документ задачі; шлях — з реєстру маршрутів. */
+/**
+ * Посилання на документ задачі.
+ *
+ * ⛔ Адресу будує викликач (шар `pages`): `features` не імпортують `app`, тож
+ * реєстр маршрутів сюди не доходить — лише функція id → адреса.
+ */
 export function JobDocumentLink({
   documentId,
+  documentHrefOf,
 }: {
   readonly documentId?: number | null | undefined;
+  readonly documentHrefOf: (id: number) => string;
 }): JSX.Element | null {
   if (documentId === null || documentId === undefined) return null;
 
   return (
-    <Anchor
-      component={Link}
-      to={generatePath(routes.documentDetail.path, { id: String(documentId) })}
-      size="xs"
-    >
+    <Anchor component={Link} to={documentHrefOf(documentId)} size="xs">
       {t('jobs.openDocument', { id: documentId })}
     </Anchor>
   );

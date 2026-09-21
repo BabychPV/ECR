@@ -25,6 +25,13 @@ import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
 import { JobAttempt, JobDocumentLink, JobFailure, jobAuthor } from '@/features/jobs/JobFacts';
 import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
+import { generatePath } from 'react-router-dom';
+import { routes } from '@/app/routes';
+
+/** Адреса документа задачі — з реєстру маршрутів (`JobFacts` про маршрути не знає). */
+function documentHrefOf(id: number): string {
+  return generatePath(routes.documentDetail.path, { id: String(id) });
+}
 
 /**
  * Стани, у яких задачу ще є що скасовувати.
@@ -151,7 +158,7 @@ export function JobsPage(): JSX.Element {
                   {t('jobs.createdAt')}: <Timestamp value={status.createdAt} />
                 </Text>
               )}
-              <JobDocumentLink documentId={status.documentId} />
+              <JobDocumentLink documentId={status.documentId} documentHrefOf={documentHrefOf} />
             </Group>
 
             <Progress value={status.percent} animated={status.state === 'Running'} />
@@ -319,7 +326,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             render: (job) => (
               <Stack gap="xs">
                 <Text size="sm">{jobKindLabel(job.jobCode)}</Text>
-                <JobDocumentLink documentId={job.documentId} />
+                <JobDocumentLink documentId={job.documentId} documentHrefOf={documentHrefOf} />
               </Stack>
             ),
             sortValue: (job) => jobKindLabel(job.jobCode),
