@@ -322,12 +322,12 @@ try {
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
     } | Out-Null
 
-    # ⛔ Перелогін обов'язковий: PUT грантів крутить SecurityStamp УСІХ членів
-    # ролі (`RotateStampsForRoleAsync`), тобто й самого e2e-admin. Далі стару
-    # cookie рятував лише 5-секундний кеш штампа; під навантаженням пауза між
-    # PUT перевищувала 5 с — і другий PUT отримував 401 ECR-AUTH-0401.
-    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Admin-Work-2026!' } | Out-Null
+    # ⚠ Без перелогіну між двома PUT — навмисно. PUT грантів крутить
+    # SecurityStamp усіх членів ролі (`RotateStampsForRoleAsync`), зокрема й
+    # самого e2e-admin, але сервер тепер перевидає виконавцю cookie в тій самій
+    # відповіді (`3ec89e19`), а `-WebSession $session` у `Call` її підхоплює.
+    # Колишній обхід (повторний вхід тут) маскував би саме цю ваду: без
+    # перевидачі другий PUT отримав би 401 ECR-AUTH-0401, щойно мине кеш штампа.
 
     Call PUT "/api/v1/roles/$operatorRole/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Write'; isDeny = $false })
