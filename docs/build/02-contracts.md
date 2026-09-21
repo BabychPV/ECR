@@ -2912,6 +2912,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/me` | — | 1 |
 | `GET` | `/api/v1/templates` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates` | `Template.Edit` | 1 |
+| `GET` | `/api/v1/templates/{id}` | `Template.View` | 1 |
+| `PUT` | `/api/v1/templates/{id}` | `Template.Edit` | 1 |
+| `POST` | `/api/v1/templates/{id}/archive` | `Template.Edit` | 1 |
+| `POST` | `/api/v1/templates/{id}/restore` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/{id}/versions` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates/{id}/versions` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/clone` | `Template.Edit` | 1 |

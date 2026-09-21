@@ -9349,6 +9349,299 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Картка шаблону разом із лічильником залежних. Право `Template.View`.
+         * @description ⛔ Лічильник їде ТУТ, а не окремим ендпоінтом. Архівування без нього —
+         *     рішення наосліп: «більше не пропонувати» виглядає безпечно, доки не
+         *     видно, що на шаблоні вже сім проєктів і чотири сотні документів.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Змінює назву шаблону. Право `Template.Edit`.
+         * @description ⚠ Коду в запиті НЕМАЄ навмисно: він бізнес-ключ і незмінний. Поле, яке
+         *     приймають і мовчки ігнорують, гірше за відсутнє — воно обіцяє дію.
+         *     Опису мовами в моделі шаблону теж немає (колонки під нього в
+         *     `cfg.Template` не існує), тож картка редагує саме назву.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RenameTemplateRequest"];
+                    "application/json": components["schemas"]["RenameTemplateRequest"];
+                    "text/json": components["schemas"]["RenameTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Архівує шаблон: для нових документів він більше не пропонується.
+         *     Право `Template.Edit`.
+         * @description ⛔ Наявні документи працюють далі — документ назавжди лишається на своїй
+         *     версії шаблону (рішення людини на `Q15-05`). Повторне архівування —
+         *     `409 ECR-TMPL-0409` від домену, не від цього контролера.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Повертає архівований шаблон в обіг. Право `Template.Edit`.
+         * @description ⚠ Дія існує, щоб архівування не було дверима в один бік: без неї
+         *     помилкове натискання виправлялося б запитом до бази повз продукт.
+         *     Шаблон, який і так в обігу, — `409 ECR-TMPL-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates/{id}/versions": {
         parameters: {
             query?: never;
@@ -13193,6 +13486,13 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Запит на зміну назви шаблону. */
+        RenameTemplateRequest: {
+            /** @description Назва мовами каталогу; хоча б одна непорожня. */
+            nameL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Запит на відкриття поданого документа. */
         ReopenDocumentRequest: {
             /**
@@ -14454,6 +14754,28 @@ export interface components {
              */
             warningCount: null | number;
         };
+        /** @description Картка шаблону. */
+        TemplateCard: {
+            /** @description Код — бізнес-ключ; <b>незмінний</b>. */
+            code: string;
+            /**
+             * Format: date-time
+             * @description Момент створення, UTC.
+             */
+            createdAt: string;
+            /** @description Скільки всього посилається на шаблон. */
+            dependents: components["schemas"]["TemplateDependents"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description `false` — шаблон архівований: для нових документів не пропонується,
+             *             наявні працюють далі. */
+            isActive: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
         TemplateChangeDto: {
             /** @description Клас ризику; `Breaking` у версії з документами — відмова. */
             changeClass: components["schemas"]["ChangeClass"];
@@ -14494,6 +14816,29 @@ export interface components {
             ordinal: number;
             /** @description Позначення одиниці, якщо задана. */
             unitSymbol: null | string;
+        };
+        /** @description Скільки всього посилається на шаблон — ціна архівування. */
+        TemplateDependents: {
+            /**
+             * Format: int32
+             * @description Документів у цих проєктах.
+             */
+            documents: number;
+            /**
+             * Format: int32
+             * @description Проєктів, прив'язаних до будь-якої з версій.
+             */
+            projects: number;
+            /**
+             * Format: int32
+             * @description Із них опублікованих.
+             */
+            publishedVersions: number;
+            /**
+             * Format: int32
+             * @description Версій шаблону всього.
+             */
+            versions: number;
         };
         /** @description Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,
          *     `RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б

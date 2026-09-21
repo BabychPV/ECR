@@ -100,6 +100,13 @@ public static class DependencyInjection
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();
         services.AddScoped<Templates.ListTemplateVersionsHandler>();
+
+        // Картка шаблону: читання з лічильником залежних, перейменування,
+        // архівування (директива №15, BE-26).
+        services.AddScoped<Templates.GetTemplateCardHandler>();
+        services.AddScoped<Templates.RenameTemplateHandler>();
+        services.AddScoped<Templates.SetTemplateArchivedHandler>();
+
         services.AddScoped<Projects.ListProjectsHandler>();
         services.AddScoped<Projects.CreateProjectHandler>();
         services.AddScoped<Projects.ActivateProjectHandler>();

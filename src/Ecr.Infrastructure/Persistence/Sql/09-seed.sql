@@ -606,6 +606,16 @@ USING (VALUES
     -- знайдено шаблон» там, де немає ВЕРСІЇ, і людина шукала б не те.
     (N'err.ECR-TMPL-0404.template',          N'en', N'Template {templateId} was not found.', 1),
     (N'err.ECR-TMPL-0404.templateVersion',   N'en', N'Template version {versionId} was not found.', 1),
+
+    -- ⛔ `BE-26`: картка шаблону — перейменування й архівування. Архів каже
+    -- «нового на цьому шаблоні не заводимо», а не «старе зникло»: документ
+    -- назавжди лишається на своїй версії (рішення людини на `Q15-05`), тож
+    -- речення мусить це сказати — інакше адміністратор боятиметься кнопки.
+    (N'err.ECR-TMPL-0422.templateNameRequired',  N'en', N'A template needs a name in at least one language.', 1),
+    (N'err.ECR-TMPL-0409.templateArchived',      N'en', N'Template "{code}" is archived: new documents are no longer created from it, while existing ones keep working.', 1),
+    (N'err.ECR-TMPL-0409.templateAlreadyArchived', N'en', N'Template "{code}" is already archived.', 1),
+    (N'err.ECR-TMPL-0409.templateNotArchived',     N'en', N'Template "{code}" is not archived: there is nothing to bring back.', 1),
+
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
 

@@ -6117,6 +6117,22 @@
         ],
         "type": "object"
       },
+      "RenameTemplateRequest": {
+        "description": "Запит на зміну назви шаблону.",
+        "properties": {
+          "nameL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Назва мовами каталогу; хоча б одна непорожня.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "nameL10n"
+        ],
+        "type": "object"
+      },
       "ReopenDocumentRequest": {
         "description": "Запит на відкриття поданого документа.",
         "properties": {
@@ -8848,6 +8864,46 @@
         ],
         "type": "object"
       },
+      "TemplateCard": {
+        "description": "Картка шаблону.",
+        "properties": {
+          "code": {
+            "description": "Код — бізнес-ключ; <b>незмінний</b>.",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Момент створення, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "dependents": {
+            "$ref": "#/components/schemas/TemplateDependents",
+            "description": "Скільки всього посилається на шаблон."
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "`false` — шаблон архівований: для нових документів не пропонується,\n        наявні працюють далі.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "isActive",
+          "createdAt",
+          "dependents"
+        ],
+        "type": "object"
+      },
       "TemplateChangeDto": {
         "properties": {
           "changeClass": {
@@ -8949,6 +9005,38 @@
           "isHidden",
           "displayFormat",
           "unitSymbol"
+        ],
+        "type": "object"
+      },
+      "TemplateDependents": {
+        "description": "Скільки всього посилається на шаблон — ціна архівування.",
+        "properties": {
+          "documents": {
+            "description": "Документів у цих проєктах.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projects": {
+            "description": "Проєктів, прив'язаних до будь-якої з версій.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "publishedVersions": {
+            "description": "Із них опублікованих.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Версій шаблону всього.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versions",
+          "publishedVersions",
+          "projects",
+          "documents"
         ],
         "type": "object"
       },
@@ -22307,6 +22395,416 @@
           }
         },
         "summary": "Створює шаблон. Право `Template.Edit`.",
+        "tags": [
+          "Templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{id}": {
+      "get": {
+        "description": "⛔ Лічильник їде ТУТ, а не окремим ендпоінтом. Архівування без нього —\nрішення наосліп: «більше не пропонувати» виглядає безпечно, доки не\nвидно, що на шаблоні вже сім проєктів і чотири сотні документів.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Картка шаблону разом із лічильником залежних. Право `Template.View`.",
+        "tags": [
+          "Templates"
+        ]
+      },
+      "put": {
+        "description": "⚠ Коду в запиті НЕМАЄ навмисно: він бізнес-ключ і незмінний. Поле, яке\nприймають і мовчки ігнорують, гірше за відсутнє — воно обіцяє дію.\nОпису мовами в моделі шаблону теж немає (колонки під нього в\n`cfg.Template` не існує), тож картка редагує саме назву.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameTemplateRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameTemplateRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює назву шаблону. Право `Template.Edit`.",
+        "tags": [
+          "Templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{id}/archive": {
+      "post": {
+        "description": "⛔ Наявні документи працюють далі — документ назавжди лишається на своїй\nверсії шаблону (рішення людини на `Q15-05`). Повторне архівування —\n`409 ECR-TMPL-0409` від домену, не від цього контролера.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Архівує шаблон: для нових документів він більше не пропонується.\nПраво `Template.Edit`.",
+        "tags": [
+          "Templates"
+        ]
+      }
+    },
+    "/api/v1/templates/{id}/restore": {
+      "post": {
+        "description": "⚠ Дія існує, щоб архівування не було дверима в один бік: без неї\nпомилкове натискання виправлялося б запитом до бази повз продукт.\nШаблон, який і так в обігу, — `409 ECR-TMPL-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateCard"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Повертає архівований шаблон в обіг. Право `Template.Edit`.",
         "tags": [
           "Templates"
         ]

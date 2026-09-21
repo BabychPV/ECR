@@ -111,6 +111,51 @@ public interface ITemplateVersionStore
         Common.CursorRequest page, CancellationToken ct);
 
     /// <summary>
+    /// Картка шаблону разом із лічильниками залежних; <c>null</c> — шаблону немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лічильники віддаються ТІЄЮ САМОЮ відповіддю, що й картка, і саме
+    /// заради архівування: «не пропонувати для нових документів» без числа
+    /// «на цьому шаблоні вже 412 документів» — це кнопка, яку натискають
+    /// наосліп.
+    ///
+    /// ⚠ Залежність рахується через ПРОЄКТ: версію шаблону тримає
+    /// <c>doc.Project.TemplateVersionId</c> — тим самим шляхом, що вже ходить
+    /// <see cref="HasDocumentsAsync"/>.
+    /// </remarks>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<TemplateCard?> FindCardAsync(int templateId, CancellationToken ct);
+
+    /// <summary>
+    /// ВІДСТЕЖУВАНИЙ шаблон для правки; <c>null</c> — такого немає.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Саме відстежуваний, на відміну від <see cref="FindCardAsync"/>: копія
+    /// без відстеження прийняла б <c>Rename</c>/<c>Archive</c> і не записала б
+    /// нічого — правка «пройшла б» і зникла (той самий вибір, що в
+    /// <see cref="FindTableRelationAsync"/>).
+    /// </remarks>
+    /// <param name="templateId">Шаблон.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Domain.Entities.Configuration.Template?> FindTemplateAsync(
+        int templateId, CancellationToken ct);
+
+    /// <summary>
+    /// Шаблон, якому належить версія; <c>null</c> — версії немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Потрібен там, де з мережі приходить <c>templateVersionId</c>
+    /// (створення документа), а правило про архів сформульоване на ШАБЛОНІ.
+    /// Знімок метаданих відповісти не може: <c>TemplateVersionSnapshot</c> не
+    /// несе <c>TemplateId</c>.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Domain.Entities.Configuration.Template?> FindTemplateOfVersionAsync(
+        int templateVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Замінює розкриті залежності формул версії.
     /// </summary>
     /// <remarks>
@@ -254,3 +299,29 @@ public sealed record TemplateVersionSummary(
 /// <param name="Code">Код.</param>
 /// <param name="VersionCount">Скільки версій має шаблон.</param>
 public sealed record TemplateSummary(int Id, string Code, int VersionCount);
+
+/// <summary>Картка шаблону.</summary>
+/// <param name="Id">Ідентифікатор.</param>
+/// <param name="Code">Код — бізнес-ключ; <b>незмінний</b>.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <param name="IsActive">
+/// <c>false</c> — шаблон архівований: для нових документів не пропонується,
+/// наявні працюють далі.
+/// </param>
+/// <param name="CreatedAt">Момент створення, UTC.</param>
+/// <param name="Dependents">Скільки всього посилається на шаблон.</param>
+public sealed record TemplateCard(
+    int Id,
+    string Code,
+    Domain.ValueObjects.LocalizedText NameL10n,
+    bool IsActive,
+    DateTime CreatedAt,
+    TemplateDependents Dependents);
+
+/// <summary>Скільки всього посилається на шаблон — ціна архівування.</summary>
+/// <param name="Versions">Версій шаблону всього.</param>
+/// <param name="PublishedVersions">Із них опублікованих.</param>
+/// <param name="Projects">Проєктів, прив'язаних до будь-якої з версій.</param>
+/// <param name="Documents">Документів у цих проєктах.</param>
+public sealed record TemplateDependents(
+    int Versions, int PublishedVersions, int Projects, int Documents);

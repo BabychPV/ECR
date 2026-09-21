@@ -137,6 +137,20 @@ export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 /** Сторінка версій шаблону. */
 export type TemplateVersionPage = Schemas['PagedResultOfTemplateVersionSummary'];
 
+/**
+ * Картка шаблону разом із лічильником залежних (директива №15, `BE-26`).
+ *
+ * ⚠ `isActive: false` — шаблон архівований: для НОВИХ документів він більше не
+ * пропонується, наявні працюють далі.
+ */
+export type TemplateCard = Schemas['TemplateCard'];
+
+/** Скільки всього посилається на шаблон — ціна архівування. */
+export type TemplateDependents = Schemas['TemplateDependents'];
+
+/** Запит на зміну назви шаблону; коду в ньому немає — він незмінний. */
+export type RenameTemplateRequest = Schemas['RenameTemplateRequest'];
+
 /** Структура версії шаблону: аркуші, таблиці, колонки. */
 export type TemplateStructureDto = Schemas['TemplateStructureDto'];
 export type PeriodPolicyDto = Schemas['PeriodPolicyDto'];

@@ -244,6 +244,79 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
+    public async Task<TemplateCard?> FindCardAsync(int templateId, CancellationToken ct)
+    {
+        var template = await db.Templates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Id == templateId, ct)
+            .ConfigureAwait(false);
+
+        if (template is null)
+        {
+            return null;
+        }
+
+        // Версії шаблону — одиниці-десятки, і з них рахуються ОБИДВА числа
+        // (усього й опублікованих). Два `CountAsync` замість одного читання
+        // дали б два звернення заради тієї самої вибірки.
+        var versions = await db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => v.TemplateId == templateId)
+            .Select(v => new { v.Id, v.Status })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var versionIds = versions.Select(v => v.Id).ToList();
+
+        // ⛔ Фільтр за версіями ЦЬОГО шаблону — те, заради чого лічильник
+        // існує. Без нього числа були б загальними по базі: адміністратор
+        // побачив би «документів 4 812» на шаблоні, де їх нуль, і не
+        // заархівував би нічого й ніколи.
+        var projects = await db.Projects
+            .AsNoTracking()
+            .CountAsync(p => versionIds.Contains(p.TemplateVersionId), ct)
+            .ConfigureAwait(false);
+
+        // Документ прив'язаний до ПРОЄКТУ, а версію шаблону тримає проєкт —
+        // той самий шлях, що вже ходить `HasDocumentsAsync` вище.
+        var documents = await db.Documents
+            .AsNoTracking()
+            .Join(db.Projects.AsNoTracking(),
+                  d => d.ProjectId,
+                  p => p.Id,
+                  (d, p) => p.TemplateVersionId)
+            .CountAsync(versionId => versionIds.Contains(versionId), ct)
+            .ConfigureAwait(false);
+
+        return new TemplateCard(
+            template.Id,
+            template.Code,
+            template.NameL10n,
+            template.IsActive,
+            template.CreatedAt,
+            new TemplateDependents(
+                versions.Count,
+                versions.Count(v => v.Status == Domain.Enums.TemplateVersionStatus.Published),
+                projects,
+                documents));
+    }
+
+    /// <inheritdoc />
+    public async Task<Template?> FindTemplateAsync(int templateId, CancellationToken ct)
+        => await db.Templates
+            .FirstOrDefaultAsync(t => t.Id == templateId, ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<Template?> FindTemplateOfVersionAsync(int templateVersionId, CancellationToken ct)
+        => await db.TemplateVersions
+            .AsNoTracking()
+            .Where(v => v.Id == templateVersionId)
+            .Join(db.Templates.AsNoTracking(), v => v.TemplateId, t => t.Id, (_, t) => t)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<int> ReplaceFormulaDependenciesAsync(
         int templateVersionId,
         IReadOnlyList<FormulaDependency> dependencies,
