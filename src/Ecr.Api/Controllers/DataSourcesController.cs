@@ -29,7 +29,7 @@ public sealed class DataSourcesController(
     DeleteDataSourceHandler delete,
     TestDataSourceConnectionHandler test) : ControllerBase
 {
-    /// <summary>Перелік джерел. Право <c>Integration.View</c>.</summary>
+    /// <summary>Перелік джерел. Право <c>Integration.View</c> або <c>Integration.Manage</c>.</summary>
     /// <remarks>
     /// ⚠ Віддаються і вимкнені джерела: екран, з якого джерело вмикають назад,
     /// без них показував би порожнє місце замість причини.

@@ -26,10 +26,27 @@ public static class PermissionCheck
     /// <param name="permission">Код права з таблиці ендпоінтів (<c>02-contracts.md</c> §9).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="AccessDeniedException">Анонім або немає права.</exception>
-    public static async Task<AccessProfile> RequireAsync(
+    public static Task<AccessProfile> RequireAsync(
         IAccessDecisionService access, ICurrentUser currentUser, string permission, CancellationToken ct)
+        => RequireAnyAsync(access, currentUser, [permission], ct);
+
+    /// <summary>Вимагає бодай одне з прав; у відмові названо перше — основне.</summary>
+    /// <remarks>
+    /// ⚠ Для читання, яке відкриває і право перегляду, і ширше право керування
+    /// (<c>Integration.Manage</c> включає <c>Integration.View</c>): інакше
+    /// користувач, що створює з'єднання, не бачить їхнього переліку.
+    /// </remarks>
+    /// <param name="access">Служба рішень про доступ.</param>
+    /// <param name="currentUser">Поточний користувач запиту.</param>
+    /// <param name="permissions">Коди прав; перше потрапляє в текст відмови.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="AccessDeniedException">Анонім або немає жодного з прав.</exception>
+    public static async Task<AccessProfile> RequireAnyAsync(
+        IAccessDecisionService access, ICurrentUser currentUser, IReadOnlyList<string> permissions, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(permissions);
+        var permission = permissions[0];
         ArgumentNullException.ThrowIfNull(currentUser);
 
         var userId = currentUser.UserId
@@ -39,7 +56,7 @@ public static class PermissionCheck
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
-        if (!profile.Has(permission))
+        if (!permissions.Any(profile.Has))
         {
             // ⚠ У повідомленні — КОД ПРАВА, а не «недостатньо прав»: інакше
             // адміністратор не знає, що саме видати, і питання приходить до

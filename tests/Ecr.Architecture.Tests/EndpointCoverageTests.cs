@@ -686,7 +686,13 @@ public sealed partial class EndpointCoverageTests
         var seed = File.ReadAllText(Path.Combine(
             SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
 
-        var keys = SeedKeyRegex.Matches(seed).Select(m => m.Groups[1].Value).ToList();
+        // ⚠ Лише блок MERGE: секція змінених текстів над ним законно називає
+        // ті самі ключі вдруге (старе → нове), і MERGE вона не валить.
+        var start = seed.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
+        var end = start < 0 ? -1 : seed.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
+        Assert.True(end > start, "У 09-seed.sql немає блоку MERGE sys_ecr.UiString AS t — сторож дивиться не туди.");
+
+        var keys = SeedKeyRegex.Matches(seed[start..end]).Select(m => m.Groups[1].Value).ToList();
         Assert.NotEmpty(keys);
 
         var duplicates = keys

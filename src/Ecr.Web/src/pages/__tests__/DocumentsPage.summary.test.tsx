@@ -71,7 +71,7 @@ const SlowEnvTimeout = 400_000;
 
 describe('DocumentsPage: зведення переліку (BE-09)', () => {
   it(
-    'смуга показує числа сервера за період з адреси, і лічильники — не кнопки',
+    'смуга показує числа сервера за період з адреси; кнопки — лише лічильники стану',
     async () => {
       mockFetch();
       show('/?periodKey=202601');
@@ -84,7 +84,10 @@ describe('DocumentsPage: зведення переліку (BE-09)', () => {
       expect(counter('submitted')).toContain('3');
       expect(counter('approved')).toContain('12');
       expect(counter('withIssues')).toContain('4');
-      expect(within(strip).queryAllByRole('button')).toHaveLength(0);
+      // `BE-09b`: лічильники стану фільтрують (див. `DocumentListSummaryStrip.filter.test.tsx`);
+      // «з проблемами» — не стан, фільтра за ним немає.
+      expect(within(strip).queryAllByRole('button')).toHaveLength(3);
+      expect(strip.querySelector('[data-summary-counter="withIssues"]')?.tagName).toBe('DIV');
       expect(requested.some((url) => url.includes('/documents/summary?periodKey=202601'))).toBe(true);
     },
     SlowEnvTimeout,
