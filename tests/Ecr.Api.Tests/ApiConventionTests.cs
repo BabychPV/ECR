@@ -69,7 +69,7 @@ public sealed class ApiConventionTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Числа_передаються_рядком_щоб_не_втратити_точність()
     {
-        // decimal(28,16) не поміщається в double: JSON-число на клієнті стає
+        // decimal(34,16) не поміщається в double: JSON-число на клієнті стає
         // IEEE-754, і зрізана цифра з'являється у звіті. Тому всі грошові й
         // вимірювані величини їдуть рядком (D-30).
         //
