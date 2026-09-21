@@ -97,15 +97,51 @@ export function newCorrelationId(): string {
   return `cid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * Причина, з якої людину повели на вхід.
+ *
+ * `session-invalidated` — сервер обірвав ЧИННУ сесію штампом безпеки
+ * (`SecurityStampMiddleware`: змінилися гранти, пароль, блокування) і
+ * відповів `401` з тілом `ECR-AUTH-0401`. Без причини — звичайний `401`
+ * cookie-схеми без тіла: людина просто не входила.
+ */
+export type LoginReason = 'session-invalidated';
+
+/** Параметр адреси входу, що несе причину. */
+export const LOGIN_REASON_PARAM = 'reason';
+
+/** Адреса сторінки входу з поверненням і (необов'язковою) причиною. */
+export function loginUrl(from: string, reason?: LoginReason): string {
+  const base = `${LOGIN_PATH}?from=${encodeURIComponent(from)}`;
+  return reason === undefined ? base : `${base}&${LOGIN_REASON_PARAM}=${reason}`;
+}
+
 /** Куди перенаправляти при 401; підміняється в тестах. */
-let redirectToLogin: (from: string) => void = (from) => {
+let redirectToLogin: (from: string, reason?: LoginReason) => void = (from, reason) => {
   if (typeof window !== 'undefined') {
-    window.location.assign(`${LOGIN_PATH}?from=${encodeURIComponent(from)}`);
+    window.location.assign(loginUrl(from, reason));
   }
 };
 
+/**
+ * Чи це обрив чинної сесії, а не «не входив».
+ *
+ * ⚠ Розрізняє ТІЛО: cookie-схема на анонімний запит віддає `401` без тіла
+ * (`OnRedirectToLogin`), а штамп безпеки кидає `AccessDeniedException` з
+ * `ECR-AUTH-0401`, і `ExceptionHandlingMiddleware` пише `problem+json`.
+ * Читається `clone()` — оригінальне тіло лишається недоторканим.
+ */
+async function loginReasonOf(response: Response): Promise<LoginReason | undefined> {
+  try {
+    const body = (await response.clone().json()) as { errorCode?: unknown };
+    return body.errorCode === 'ECR-AUTH-0401' ? 'session-invalidated' : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Підміняє поведінку при 401 — для тестів і для роутера. */
-export function setLoginRedirect(handler: (from: string) => void): void {
+export function setLoginRedirect(handler: (from: string, reason?: LoginReason) => void): void {
   redirectToLogin = handler;
 }
 
@@ -227,7 +263,10 @@ async function apiFetchRaw(
   // отримував шансу спрацювати до навігації). Ендпоінти входу відповідають
   // за власний `401` самі — тут перенаправляти нема куди й нема чого.
   if (response.status === 401 && path !== '/api/v1/login/local' && path !== '/api/v1/login/windows') {
-    redirectToLogin(typeof window === 'undefined' ? path : window.location.pathname);
+    redirectToLogin(
+      typeof window === 'undefined' ? path : window.location.pathname,
+      await loginReasonOf(response),
+    );
     /*
      * ⛔ Заголовок — із КАТАЛОГУ, не літералом. Тут стояло «Потрібна
      * автентифікація» українською — мовою, якої в продукті немає (`D-95`:

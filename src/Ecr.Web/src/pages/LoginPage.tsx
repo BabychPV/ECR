@@ -1,5 +1,6 @@
-﻿import { useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -15,8 +16,8 @@ import {
   Title,
 } from '@mantine/core';
 import { BrandMark } from '@/shared/ui/BrandMark';
-import { useNavigate } from 'react-router-dom';
-import { apiFetch, EcrApiError } from '@/api/client';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { apiFetch, EcrApiError, LOGIN_REASON_PARAM } from '@/api/client';
 import type { LocalLoginRequest } from '@/api/types';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
@@ -84,6 +85,19 @@ const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabInd
 const LANGUAGE_LABEL = 'Interface language';
 
 /**
+ * Пояснення, чому людину повернули на вхід після обриву сесії.
+ *
+ * ⚠ Ключ `err.ECR-AUTH-0401.signInRequired` — уже в ПУБЛІЧНОМУ зрізі сіду
+ * («сеанс завершився — увійдіть знову»). Точніший рядок про зміну прав чи
+ * пароля потребує нового ключа в `09-seed.sql`, а сторож
+ * `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі`
+ * не пускає ключ без рядка сіду — тож перехід на нього йде разом із сідом.
+ */
+function sessionInvalidatedText(): string {
+  return t('err.ECR-AUTH-0401.signInRequired');
+}
+
+/**
  * Вхід: доменний і локальний.
  *
  * ⚠ Обидва способи видають **ту саму cookie** і той самий профіль. Різні
@@ -92,6 +106,8 @@ const LANGUAGE_LABEL = 'Interface language';
  */
 export function LoginPage(): JSX.Element {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const sessionInvalidated = searchParams.get(LOGIN_REASON_PARAM) === 'session-invalidated';
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
@@ -227,6 +243,17 @@ export function LoginPage(): JSX.Element {
           }}
         >
           <Stack gap="sm">
+            {/*
+              * Сервер обірвав чинну сесію штампом безпеки (`401 ECR-AUTH-0401`
+              * з тілом) — пояснюємо, чому людину повернули. Звичайний «не
+              * входив» причини не несе й банера не має.
+              */}
+            {sessionInvalidated && (
+              <Alert color="blue" variant="light" data-login-reason="session-invalidated">
+                {sessionInvalidatedText()}
+              </Alert>
+            )}
+
             {/*
               * ⛔ Кнопка доменного входу малюється лише тоді, коли схема
               * Negotiate СПРАВДІ зареєстрована на сервері
