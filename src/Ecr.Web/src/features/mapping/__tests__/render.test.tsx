@@ -43,6 +43,7 @@ const Preview: MappingPreview = {
       // (`e470777a`), тому й фікстура має бути такою — інакше вона перевіряла
       // б форму, якої сервер уже не надсилає.
       foldedValue: '42.5',
+      isActive: true,
     },
     {
       fieldMapId: 2,
@@ -56,6 +57,7 @@ const Preview: MappingPreview = {
       targetUnitCode: 't',
       pointCount: 0,
       foldedValue: null,
+      isActive: true,
     },
   ],
   rows: [
