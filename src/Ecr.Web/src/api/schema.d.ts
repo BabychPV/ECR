@@ -16632,6 +16632,11 @@ export interface components {
             isBootstrapAdmin: boolean;
             /** @description Заблокований після невдалих спроб. */
             isLockedOut: boolean;
+            /**
+             * Format: date-time
+             * @description Останній успішний вхід (UTC); `null` — не входив ніколи (BE-12).
+             */
+            lastSignInAt: null | string;
             /** @description Пароль виданий разово. */
             mustChangePassword: boolean;
             /** @description Провайдер входу. */
