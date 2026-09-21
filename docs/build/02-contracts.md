@@ -3084,6 +3084,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |
 | `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |

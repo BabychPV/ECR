@@ -6106,6 +6106,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Де використано довідник. Право `Registry.EditDefinition` (`BE-24`).
+         * @description     ⛔ Посилання на сам ДОВІДНИК, а не на окремий його запис: колонки
+         *         шаблонів типу `Lookup`, поля сусідніх довідників, речовини
+         *         методологій, сутності зовнішніх джерел. Відповідь потрібна ДО зміни
+         *         опису — сьогодні перевипустити довідник можна наосліп.
+         *         ⚠ total і довжина items — різні числа: перелік обрізаний
+         *     сторінкою, лічильник чесний.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UsageResponse"];
+                        "text/json": components["schemas"]["UsageResponse"];
+                        "text/plain": components["schemas"]["UsageResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports": {
         parameters: {
             query?: never;

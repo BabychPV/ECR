@@ -1,4 +1,6 @@
-﻿using Ecr.Application.Ports;
+﻿using System.Globalization;
+using Ecr.Application.Common;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
@@ -161,6 +163,107 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         => db.CellValues.CountAsync(c => c.ValueRegistryEntryId == registryEntryId, ct);
 
     /// <inheritdoc />
+    public async Task<UsageResponse> FindDefinitionUsageAsync(
+        int registryDefId, int take, CancellationToken ct)
+    {
+        var total = 0;
+        var items = new List<UsageItemDto>();
+
+        // Рахує джерело повністю, а в перелік бере лише те, що ще вміщається.
+        // ⚠ Джерело приходить уже ВПОРЯДКОВАНИМ: `OrderBy` після проєкції в
+        // конструктор запису EF не перекладає.
+        async Task AddAsync(string kind, IQueryable<UsageHit> source)
+        {
+            total += await source.CountAsync(ct).ConfigureAwait(false);
+            if (items.Count >= take)
+            {
+                return;
+            }
+
+            var page = await source.Take(take - items.Count).ToListAsync(ct).ConfigureAwait(false);
+            items.AddRange(page.Select(h => new UsageItemDto(
+                kind, h.Id.ToString(CultureInfo.InvariantCulture), h.Label, h.Route)));
+        }
+
+        await AddAsync(
+            "templateColumn",
+            from column in db.ColumnDefs.AsNoTracking()
+            where column.LookupRegistryDefId == registryDefId
+            join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
+            join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
+            join version in db.TemplateVersions.AsNoTracking()
+                on sheet.TemplateVersionId equals version.Id
+            orderby column.Id
+            select new UsageHit(
+                column.Id,
+                table.Code + "." + column.Code,
+                "/admin/templates/" + version.TemplateId + "/versions/" + version.Id))
+            .ConfigureAwait(false);
+
+        // ⚠ Поле ВЛАСНОГО довідника, що вказує на нього ж (ієрархія), теж
+        // рахується: воно так само перестане резолвитися, якщо довідник
+        // перевипустити. Підпис показує довідник-власника, тож рядок читається.
+        await AddAsync(
+            "registryField",
+            from field in db.RegistryFieldDefs.AsNoTracking()
+            where field.RefRegistryDefId == registryDefId
+            join owner in db.RegistryDefs.AsNoTracking() on field.RegistryDefId equals owner.Id
+            orderby field.Id
+            select new UsageHit(
+                field.Id,
+                owner.Code + "." + field.Code,
+                "/admin/registries/" + owner.Code + "/definition"))
+            .ConfigureAwait(false);
+
+        // Методологія посилається не на довідник, а на його ЗАПИС
+        // (`MethodologySubstance.SubstanceEntryId`, ФВ-8.8) — тому join через
+        // `dic.RegistryEntry`, а не колонка з `RegistryDefId`.
+        await AddAsync(
+            "methodologySubstance",
+            from substance in db.MethodologySubstances.AsNoTracking()
+            join entry in db.RegistryEntries.AsNoTracking()
+                on substance.SubstanceEntryId equals entry.Id
+            where entry.RegistryDefId == registryDefId
+            join version in db.MethodologyVersions.AsNoTracking()
+                on substance.MethodologyVersionId equals version.Id
+            orderby substance.Id
+            select new UsageHit(
+                substance.Id,
+                entry.Code,
+                "/admin/methodologies/" + version.MethodologyId + "/versions"))
+            .ConfigureAwait(false);
+
+        await AddAsync(
+            "sourceEntity",
+            db.SourceEntities
+                .AsNoTracking()
+                .Where(entity => entity.RegistryDefId == registryDefId)
+                .OrderBy(entity => entity.Id)
+                .Select(entity => new UsageHit(entity.Id, entity.Code, "/admin/sources")))
+            .ConfigureAwait(false);
+
+        // Дані: один рядок на таблицю, без підрахунку (див. порт).
+        var inCells = await db.CellValues
+            .AnyAsync(
+                cell => db.RegistryEntries.Any(
+                    entry => entry.RegistryDefId == registryDefId
+                             && entry.Id == cell.ValueRegistryEntryId),
+                ct)
+            .ConfigureAwait(false);
+
+        if (inCells)
+        {
+            total++;
+            if (items.Count < take)
+            {
+                items.Add(new UsageItemDto("data", "doc.CellValue", "doc.CellValue", null));
+            }
+        }
+
+        return new UsageResponse(total, items);
+    }
+
+    /// <inheritdoc />
     public Task<bool> HasOpenPeriodAsync(CancellationToken ct)
         => db.Periods.AnyAsync(
             p => p.State == PeriodState.Open || p.State == PeriodState.Grace, ct);
@@ -253,6 +356,9 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
 
         return await query.ToListAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>Проміжний рядок пошуку посилань на визначення довідника.</summary>
+    private sealed record UsageHit(int Id, string Label, string? Route);
 }
 
 

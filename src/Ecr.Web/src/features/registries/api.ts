@@ -1,7 +1,11 @@
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import type { components } from '@/api/schema';
 import type { CreateRegistryDto, RegistryDefDto } from '@/api/types';
+
+/** «Де використовується» — єдина форма `GET /…/usage` (директива №15). */
+export type UsageResponse = components['schemas']['UsageResponse'];
 
 /*
  * ⛔ Адреса в КОЖНІЙ функції записана повністю, а не збирається з помічника.
@@ -23,6 +27,20 @@ export function createRegistry(body: CreateRegistryDto): Promise<RegistryDefDto>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * Де використано ВИЗНАЧЕННЯ довідника (`BE-24`): колонки шаблонів, поля
+ * сусідніх довідників, речовини методологій, сутності джерел.
+ *
+ * ⛔ Це інше питання, ніж `entryReferences` нижче: той каже, чому не вдалося
+ * прибрати ОДИН запис, а це — що зламається, якщо чіпати довідник цілком.
+ *
+ * ⚠ `total` і довжина `items` — різні числа: перелік обрізаний двадцятьма
+ * першими, лічильник чесний.
+ */
+export function registryUsage(code: string): Promise<UsageResponse> {
+  return apiFetch<UsageResponse>(`/api/v1/registries/${encodeURIComponent(code)}/usage`);
 }
 
 /** Код відмови «на запис посилаються дані» (`ФВ-8.6`, `ФВ-8.7`). */

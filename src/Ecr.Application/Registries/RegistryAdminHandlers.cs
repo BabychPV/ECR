@@ -286,6 +286,7 @@ public sealed class SwitchRegistrySourceHandler(
 public sealed class DeleteRegistryEntryHandler(
     IRegistryStore registries,
     IUnitOfWork uow,
+    IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
@@ -369,6 +370,35 @@ public sealed class DeleteRegistryEntryHandler(
         // що гірше, другою правдою про те, який саме довідник змінюється.
         definition.BumpDataRevision();
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ Слід у журналі структурних змін — як у сусідньої дії над тим самим
+        // записом (`SetEntryValidityHandler`, `Operation = "SetValidity"`). Без
+        // нього видалення лишало по собі лише прапорці `IsDeleted`/`DeletedAt`
+        // на самому рядку: побачити «хто прибрав запис, на який учора ще
+        // посилалися» можна було тільки в самому довіднику, і тільки доти, доки
+        // його не видалять удруге. Журнал довідника (`GET …/{code}/history`)
+        // при цьому мовчав, хоч відповідає саме на таке питання.
+        //
+        // ⚠ Аудит і збереження — ОДНІЄЮ транзакцією (`Q-244`): інакше збій між
+        // ними лишає журнал і довідник у різних станах.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
+                    TemplateVersionId: 0,
+                    EntityType: "dic.RegistryEntry",
+                    EntityId: checked((int)registryEntryId),
+                    ChangeClass: ChangeClass.Breaking,
+                    Operation: "Delete",
+                    OldJson: JsonSerializer.Serialize(
+                        new { registry = definition.Code, code = entry.Code }),
+                    NewJson: null,
+                    ChangeReason: $"Записів довідника «{definition.Code}» прибрано: 1.",
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 }

@@ -206,6 +206,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.GetRegistryDefinitionHandler>();
         services.AddScoped<Registries.SaveRegistryDefinitionHandler>();
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
+        services.AddScoped<Registries.GetRegistryUsageHandler>();
 
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.
         services.AddScoped<Expressions.ValidateExpressionHandler>();

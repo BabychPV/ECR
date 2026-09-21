@@ -172,7 +172,7 @@ public sealed class RegistryResolverTests
          */
         _registries.FindDefinitionByIdAsync(Permits, Arg.Any<CancellationToken>()).Returns(Definition());
 
-        var handler = new DeleteRegistryEntryHandler(_registries, _uow, _access, _user, _clock);
+        var handler = new DeleteRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync("PERMITS", 101, CancellationToken.None));
@@ -186,10 +186,23 @@ public sealed class RegistryResolverTests
         Assert.True(entry.IsActive);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
 
+        // ⚠ Заглушка ВИКОНУЄ замикання. Без неї «успішне видалення» нижче не
+        // зберігало б нічого й не писало в журнал, а тест лишався б зеленим на
+        // прапорці, який ставиться ще до транзакції.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         // Без посилань — видалення логічне і проходить.
         _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(0);
         await handler.HandleAsync("PERMITS", 101, CancellationToken.None);
         Assert.True(entry.IsDeleted);
+
+        // ⛔ І лишає слід: видалення без запису в журналі не відрізнити від
+        // запису, якого ніколи не заводили.
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(
+                r => r.EntityType == "dic.RegistryEntry" && r.Operation == "Delete"),
+            Arg.Any<CancellationToken>());
     }
 
     /// <summary>

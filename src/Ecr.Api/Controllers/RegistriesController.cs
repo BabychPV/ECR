@@ -1,3 +1,4 @@
+using Ecr.Application.Common;
 using Ecr.Application.Registries;
 using Ecr.Application.Registries.Dto;
 using Microsoft.AspNetCore.Authorization;
@@ -19,7 +20,8 @@ public sealed class RegistriesController(
     GetRegistryDefinitionHandler getDefinition,
     SaveRegistryDefinitionHandler saveDefinition,
     DeleteRegistryEntryHandler deleteEntry,
-    GetRegistryHistoryHandler getHistory) : ControllerBase
+    GetRegistryHistoryHandler getHistory,
+    GetRegistryUsageHandler getUsage) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -134,6 +136,27 @@ public sealed class RegistriesController(
     public async Task<ActionResult<IReadOnlyList<RegistryHistoryEntryDto>>> History(
         string code, CancellationToken ct)
         => Ok(await getHistory.HandleAsync(code, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Де використано довідник. Право <c>Registry.EditDefinition</c> (`BE-24`).
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Посилання на сам ДОВІДНИК, а не на окремий його запис: колонки
+    /// шаблонів типу <c>Lookup</c>, поля сусідніх довідників, речовини
+    /// методологій, сутності зовнішніх джерел. Відповідь потрібна ДО зміни
+    /// опису — сьогодні перевипустити довідник можна наосліп.
+    /// <para>
+    /// ⚠ <c>total</c> і довжина <c>items</c> — різні числа: перелік обрізаний
+    /// сторінкою, лічильник чесний.
+    /// </para>
+    /// </remarks>
+    [HttpGet("{code}/usage")]
+    [ProducesResponseType<UsageResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UsageResponse>> Usage(string code, CancellationToken ct)
+        => Ok(await getUsage.HandleAsync(code, ct).ConfigureAwait(false));
 
     /// <summary>Створює або оновлює запис. Право <c>Registry.EditData</c>.</summary>
     /// <param name="code">Код довідника.</param>
