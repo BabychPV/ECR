@@ -2282,6 +2282,10 @@ USING (VALUES
     (N'mapping.createAggregation',       N'en', N'Fold period points as', 1),
     (N'mapping.createSubmit',            N'en', N'Save mapping', 1),
     (N'mapping.created',                 N'en', N'The mapping has been created.', 1),
+    -- Призупинений мапінг (isActive = false): видно, але не пише і не
+    -- лічиться діючим.
+    (N'mapping.paused',                  N'en', N'paused', 1),
+    (N'mapping.mapsSummary',             N'en', N'{active} active, {paused} paused. A paused mapping keeps its settings and writes nothing.', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),
