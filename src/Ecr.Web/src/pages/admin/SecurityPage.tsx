@@ -37,6 +37,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -465,6 +466,7 @@ export function SecurityPage(): JSX.Element {
                 <Table.Th>{t('security.access')}</Table.Th>
                 <Table.Th>{t('security.alerts')}</Table.Th>
                 <Table.Th>{t('security.userState')}</Table.Th>
+                <Table.Th>{t('security.lastSignIn')}</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -573,6 +575,13 @@ export function SecurityPage(): JSX.Element {
                           <StartSimulationButton userId={user.id} />
                         )}
                     </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    {/* ⛔ `null` — «жодного разу не входив», а не «дані ще не
+                        приїхали» (`BE-12`): дефолтне тире `Timestamp`
+                        перекрито тим самим ключем каталогу, що вже несе це
+                        значення для `CollectionScheduleTab.lastRunAt`. */}
+                    <Timestamp value={user.lastSignInAt} fallback={t('sources.never')} />
                   </Table.Td>
                 </Table.Tr>
               ))}
