@@ -54,12 +54,18 @@ public sealed class ReportSnapshotConfiguration : IEntityTypeConfiguration<Repor
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("ReportSnapshot", "rpt");
+        builder.ToTable("ReportSnapshot", "rpt", t => t.HasCheckConstraint(
+            "CK_ReportSnapshot_HashFormat", "[HashFormat] IN ('current', 'legacy')"));
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Status).HasDefaultValue(Domain.Enums.SnapshotStatus.Draft);
         builder.Property(x => x.IsCurrent).HasDefaultValue(false);
         builder.Property(x => x.RowCount).HasColumnName("RowCount").HasDefaultValue(0);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");
+
+        // D-53: колонка АДИТИВНА й nullable — `rpt.v_*` її не бачать, старі зрізи
+        // лишаються NULL, доки їх не класифікує фонова задача.
+        builder.Property(x => x.HashFormat).HasColumnType("varchar(8)");
+
         builder.Property(x => x.BuiltAt).HasColumnType("datetime2(3)").IsRequired();
 
         // ⚠ Унікальний ФІЛЬТРОВАНИЙ індекс: поточний зріз для трійки

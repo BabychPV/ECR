@@ -152,6 +152,17 @@ public sealed class ReportSnapshot : Entity<long>
     public int RowCount { get; private set; }
 
     public byte[]? ContentHash { get; private set; }
+
+    /// <summary>
+    /// Яким форматом пораховано <see cref="ContentHash"/>: <c>current</c> або
+    /// <c>legacy</c> (до BE-17); <c>null</c> — ще не визначено.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Зберігається, а не виводиться в запиті: визначення читає ВСІ рядки
+    /// зрізу. Старі зрізи класифікує фонова задача, нові пишуться <c>current</c>.
+    /// </remarks>
+    public string? HashFormat { get; private set; }
+
     public DateTime BuiltAt { get; private set; }
     public int? BuiltByUserId { get; private set; }
 
