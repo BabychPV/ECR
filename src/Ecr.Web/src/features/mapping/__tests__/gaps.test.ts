@@ -22,6 +22,7 @@ function field(overrides: Partial<MappedFieldPreview>): MappedFieldPreview {
     targetUnitCode: 't',
     pointCount: 3,
     foldedValue: '42',
+    isActive: true,
     ...overrides,
   };
 }
