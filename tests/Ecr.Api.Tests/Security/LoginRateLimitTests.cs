@@ -88,16 +88,8 @@ public sealed class LoginRateLimitTests(SqlServerFixture sql)
         using var host = WithRemoteIp(app);
         using var client = Client(host, "203.0.113.10");
 
-        for (var attempt = 1; attempt <= Permit; attempt++)
-        {
-            var allowed = await LoginAsync(client, "немає-такого-користувача").ConfigureAwait(true);
-
-            // ⚠ Спершу — що межа не спрацювала РАНІШЕ. Обмежувач, який ріже з
-            // першого запиту, теж дав би 429 на одинадцятому.
-            Assert.Equal(HttpStatusCode.Unauthorized, allowed.StatusCode);
-        }
-
-        var rejected = await LoginAsync(client, "немає-такого-користувача").ConfigureAwait(true);
+        var rejected = await SingleRejectionInBurstAsync(
+            () => LoginAsync(client, "немає-такого-користувача")).ConfigureAwait(true);
 
         // ⛔ Мутаційний доказ: прибрати `app.UseRateLimiter()` із `Program.cs`
         // (або підняти `PermitLimit`) — падає цей рядок.
@@ -168,13 +160,8 @@ public sealed class LoginRateLimitTests(SqlServerFixture sql)
 
         // ⚠ Вичерпує межу під ІМЕНЕМ, ЯКОГО НЕМАЄ: інакше тест заблокував би
         // обліковку (`ФВ-6.4a`) і перевіряв би вже не обмежувач частоти.
-        for (var attempt = 0; attempt <= Permit; attempt++)
-        {
-            await LoginAsync(attacker, "немає-такого-користувача").ConfigureAwait(true);
-        }
-
-        var blocked = await LoginAsync(attacker, "немає-такого-користувача").ConfigureAwait(true);
-        Assert.Equal(HttpStatusCode.TooManyRequests, blocked.StatusCode);
+        await SingleRejectionInBurstAsync(
+            () => LoginAsync(attacker, "немає-такого-користувача")).ConfigureAwait(true);
 
         var login = await honest.PostAsJsonAsync(
             new Uri("/api/v1/login/local", UriKind.Relative),
@@ -275,26 +262,51 @@ public sealed class LoginRateLimitTests(SqlServerFixture sql)
 
         // Нападник міняє заголовок щозапиту — найдешевший спосіб обійти межу,
         // якщо ключ розділу брати з нього.
-        for (var attempt = 1; attempt <= Permit; attempt++)
-        {
-            using var request = Request("немає-такого-користувача");
-            request.Headers.Add(
-                ForwardedFor,
-                string.Create(CultureInfo.InvariantCulture, $"10.0.0.{attempt}"));
-
-            using var allowed = await client.SendAsync(request).ConfigureAwait(true);
-            Assert.Equal(HttpStatusCode.Unauthorized, allowed.StatusCode);
-        }
-
-        using var last = Request("немає-такого-користувача");
-        last.Headers.Add(ForwardedFor, "10.0.0.250");
-
-        using var rejected = await client.SendAsync(last).ConfigureAwait(true);
+        var attempt = 0;
 
         // ⛔ Мутаційний доказ: змінити дефолт `Security:RateLimit:TrustForwardedFor`
-        // на `true` — падає цей рядок, бо кожен запит потрапляє у власний
-        // розділ і межа не спрацьовує ЖОДНОГО разу.
-        Assert.Equal(HttpStatusCode.TooManyRequests, rejected.StatusCode);
+        // на `true` — у пачці не буде жодного 429, бо кожен запит потрапляє у
+        // власний розділ і межа не спрацьовує ЖОДНОГО разу.
+        using var rejected = await SingleRejectionInBurstAsync(() =>
+        {
+            var request = Request("немає-такого-користувача");
+            request.Headers.Add(
+                ForwardedFor,
+                string.Create(CultureInfo.InvariantCulture, $"10.0.0.{Interlocked.Increment(ref attempt)}"));
+            return client.SendAsync(request);
+        }).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Шле <c>Permit + 1</c> входів ОДНОЧАСНО й вимагає рівно одного 429.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не послідовно. Вікно фіксоване, 1 хв, а кожен вхід — 210 000 ітерацій
+    /// PBKDF2: 61 послідовний вхід займав 19–25 с без навантаження і понад
+    /// 60 с під паралельним прогоном — вікно оновлювалося посеред циклу, і
+    /// 61-й запит отримував 401. Дозвіл береться на вході в конвеєр, ДО
+    /// PBKDF2, тож одночасна пачка вичерпує межу за мілісекунди незалежно від
+    /// швидкості машини. Кількість, а не порядок: і «межа не спрацювала
+    /// раніше» (рівно <c>Permit</c> пропущено), і «спрацювала» (рівно один 429).
+    /// </remarks>
+    private static async Task<HttpResponseMessage> SingleRejectionInBurstAsync(
+        Func<Task<HttpResponseMessage>> send)
+    {
+        var responses = await Task.WhenAll(Enumerable.Range(0, Permit + 1).Select(_ => send()))
+            .ConfigureAwait(true);
+
+        var rejected = responses.Where(r => r.StatusCode == HttpStatusCode.TooManyRequests).ToList();
+        var allowed = responses.Except(rejected).ToList();
+
+        Assert.All(allowed, r => Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode));
+        Assert.Single(rejected);
+
+        foreach (var response in allowed)
+        {
+            response.Dispose();
+        }
+
+        return rejected[0];
     }
 
     /// <summary>Застосунок, у якому адресу сокета задає заголовок тесту.</summary>
