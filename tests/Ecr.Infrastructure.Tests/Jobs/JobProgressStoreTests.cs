@@ -271,4 +271,39 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
         Assert.Equal(2, listed.Attempt);
         Assert.Equal("req-be08", listed.CorrelationId);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-08")]
+    public async Task Стан_несе_стелю_спроб_а_перелік_автора_і_повідомлення()
+    {
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+        var code = $"be08m-{Guid.NewGuid():N}"[..20];
+
+        var name = $"be08_{Guid.NewGuid():N}"[..20];
+        var user = new Ecr.Domain.Entities.Security.User(name, $"Author {name}", Ecr.Domain.Enums.AuthProvider.Local);
+        user.SetPassword("hash"); // CK_User_Provider: локальному користувачу потрібен хеш.
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var authored = $"be08a-{Guid.NewGuid():N}";
+        var system = $"be08s-{Guid.NewGuid():N}";
+        await store.QueueAsync(authored, code, Now, CancellationToken.None, createdByUserId: user.Id);
+        await store.QueueAsync(system, code, Now.AddSeconds(1), CancellationToken.None);
+        await store.ReportAsync(authored, 10, "phase-1", Now.AddSeconds(2), CancellationToken.None);
+
+        // Перша спроба + три ретраї QuartzJobAdapter — число літералом, не з константи.
+        Assert.Equal(4, (await store.FindAsync(authored, CancellationToken.None))!.MaxAttempts);
+
+        var listed = (await store.ListRecentAsync(
+                new Ecr.Application.Ports.JobListFilter(JobCode: code), 5, CancellationToken.None))
+            .ToDictionary(j => j.JobId, StringComparer.Ordinal);
+
+        Assert.Equal($"Author {name}", listed[authored].CreatedByDisplayName);
+        Assert.Equal("phase-1", listed[authored].Message);
+        Assert.Null(listed[system].CreatedByDisplayName);
+        Assert.Null(listed[system].Message);
+    }
 }

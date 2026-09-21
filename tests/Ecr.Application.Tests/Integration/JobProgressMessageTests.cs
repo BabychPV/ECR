@@ -344,6 +344,47 @@ public sealed class JobProgressMessageTests
         Assert.Equal(raw, resolved);
     }
 
+    /// <summary>BE-08: перелік резолвиться з ОДНИМ завантаженням каталогу; не-конверти й null — без змін.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Directive", "BE-08")]
+    public async Task Резолв_переліку_вантажить_каталог_один_раз()
+    {
+        var strings = await new FakeUiStringCatalog()
+            .Add("en", "jobs.orphanScanDone", "Rows changed: {changed}")
+            .GetScopedAsync("en", UiStringScope.Private, CancellationToken.None);
+        var catalog = Substitute.For<IUiStringCatalog>();
+        catalog.GetScopedAsync("en", UiStringScope.Private, Arg.Any<CancellationToken>()).Returns(strings);
+
+        string Raw(string n) => JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+            "jobs.orphanScanDone", new Dictionary<string, string> { ["changed"] = n }));
+
+        var resolved = await JobProgressMessageResolver.ResolveManyAsync(
+            catalog, "en", [Raw("1"), null, "export-abc", Raw("2")], CancellationToken.None);
+
+        Assert.Equal(["Rows changed: 1", null, "export-abc", "Rows changed: 2"], resolved);
+        await catalog.Received(1).GetScopedAsync("en", UiStringScope.Private, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Directive", "BE-08")]
+    public async Task Резолв_переліку_без_конвертів_не_чіпає_каталог_а_збій_віддає_сирі_рядки()
+    {
+        var idle = Substitute.For<IUiStringCatalog>();
+        Assert.Equal(["plain", null], await JobProgressMessageResolver.ResolveManyAsync(
+            idle, "en", ["plain", null], CancellationToken.None));
+        await idle.DidNotReceiveWithAnyArgs().GetScopedAsync(default!, default, CancellationToken.None);
+
+        var broken = Substitute.For<IUiStringCatalog>();
+        broken.GetScopedAsync(Arg.Any<string>(), Arg.Any<UiStringScope>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<UiStringCatalog>(new InvalidOperationException("каталог недоступний")));
+        var raw = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope("jobs.orphanScanChecking"));
+
+        Assert.Equal([raw], await JobProgressMessageResolver.ResolveManyAsync(
+            broken, "en", [raw], CancellationToken.None));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Резолв_без_повідомлення_повертає_null()

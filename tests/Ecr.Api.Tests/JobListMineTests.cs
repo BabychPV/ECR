@@ -282,6 +282,34 @@ public sealed class JobListMineTests(SqlServerFixture sql)
         Assert.True(accepted.IsSuccessStatusCode, $"{accepted.StatusCode}: {app.ErrorsText}");
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-08")]
+    public async Task Перелік_віддає_автора_і_повідомлення_а_стан_стелю_спроб()
+    {
+        using var app = new EcrApiFactory(sql);
+
+        var author = await SignedInAsync(app).ConfigureAwait(true);
+        using var client = author.Client;
+
+        var jobId = Assert.Single(await QueueAsync(author.UserId, count: 1, message: "step-2").ConfigureAwait(true));
+
+        var items = await client
+            .GetFromJsonAsync<JsonElement>(new Uri("/api/v1/jobs?mine=true", UriKind.Relative))
+            .ConfigureAwait(true);
+        var item = items.EnumerateArray().Single(i => i.GetProperty("jobId").GetString() == jobId);
+
+        Assert.Equal(author.Name, item.GetProperty("createdByDisplayName").GetString());
+        Assert.Equal("step-2", item.GetProperty("message").GetString());
+
+        var status = await client
+            .GetFromJsonAsync<JsonElement>(new Uri($"/api/v1/jobs/{Uri.EscapeDataString(jobId)}", UriKind.Relative))
+            .ConfigureAwait(true);
+
+        Assert.Equal(4, status.GetProperty("maxAttempts").GetInt32());
+    }
+
     /// <summary>Ідентифікатори задач із відповіді; падає з текстом сервера на не-200.</summary>
     private static async Task<List<string>> IdsAsync(HttpClient client, EcrApiFactory app, string query)
     {
@@ -305,7 +333,9 @@ public sealed class JobListMineTests(SqlServerFixture sql)
     /// <param name="createdByUserId">Автор; <c>null</c> — системна задача за розкладом.</param>
     /// <param name="count">Скільки рядків.</param>
     /// <param name="state">Кінцевий стан; <c>null</c> — лишити <c>Running</c>.</param>
-    private async Task<List<string>> QueueAsync(int? createdByUserId, int count, string? state = null)
+    /// <param name="message">Повідомлення прогресу; <c>null</c> — без нього.</param>
+    private async Task<List<string>> QueueAsync(
+        int? createdByUserId, int count, string? state = null, string? message = null)
     {
         await using var db = Context();
 
@@ -316,6 +346,11 @@ public sealed class JobListMineTests(SqlServerFixture sql)
         {
             var jobId = $"{_tag}#{Guid.NewGuid():N}"[..40];
             var entry = new JobProgress(jobId, _tag, now, createdByUserId);
+
+            if (message is not null)
+            {
+                entry.Report(10, message, now);
+            }
 
             if (state is not null)
             {
@@ -332,7 +367,7 @@ public sealed class JobListMineTests(SqlServerFixture sql)
     }
 
     /// <summary>Користувач із чинним сеансом і його ідентифікатор.</summary>
-    private sealed record Session(HttpClient Client, int UserId);
+    private sealed record Session(HttpClient Client, int UserId, string Name);
 
     /// <summary>Заводить користувача, видає права й входить локально.</summary>
     /// <param name="app">Фабрика застосунку.</param>
@@ -379,7 +414,7 @@ public sealed class JobListMineTests(SqlServerFixture sql)
 
         Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
 
-        return new Session(client, userId);
+        return new Session(client, userId, name);
     }
 
     private EcrDbContext Context()

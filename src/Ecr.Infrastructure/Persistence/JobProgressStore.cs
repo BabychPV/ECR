@@ -7,6 +7,9 @@ namespace Ecr.Infrastructure.Persistence;
 /// <summary>Реалізація <see cref="IJobProgressStore"/> над <see cref="EcrDbContext"/>.</summary>
 public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 {
+    /// <summary>Спроб загалом: перша + <see cref="Jobs.QuartzJobAdapter.MaxRetryAttempts"/> ретраїв (BE-08).</summary>
+    private const int MaxAttempts = Jobs.QuartzJobAdapter.MaxRetryAttempts + 1;
+
     /// <inheritdoc />
     public Task QueueAsync(
         string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
@@ -109,7 +112,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .AsNoTracking()
             .Where(p => p.JobId == jobId)
             .Select(p => new JobStatus(
-                p.JobId, p.State, p.Percent, p.Message, p.Error, p.Attempt, p.CorrelationId))
+                p.JobId, p.State, p.Percent, p.Message, p.Error, p.Attempt, p.CorrelationId, MaxAttempts))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -152,11 +155,15 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             query = query.Where(p => p.JobCode == code);
         }
 
+        // ⚠ Лівий join: системна задача (автор null) чи видалений автор
+        // лишаються в переліку з CreatedByDisplayName = null.
         return await query
             .OrderByDescending(p => p.UpdatedAt)
             .Take(limit)
             .Select(p => new JobSummary(
-                p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt, p.Attempt, p.CorrelationId))
+                p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt, p.Attempt, p.CorrelationId,
+                db.Users.Where(u => u.Id == p.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
+                p.Message))
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }

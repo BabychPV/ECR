@@ -186,7 +186,8 @@ public sealed class GetJobStatusHandler(
 public sealed class ListJobsHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IUiStringCatalog catalog)
 {
     /// <summary>Стеля переліку: більше — сторінка, якої тут немає навмисно.</summary>
     /// <remarks>
@@ -303,7 +304,13 @@ public sealed class ListJobsHandler(
         // числа в сигнатурі немає.
         var filter = new JobListFilter(state, code, mine ? userId : null);
 
-        return await jobs.ListRecentAsync(filter, limit ?? MaxLimit, ct).ConfigureAwait(false);
+        var items = await jobs.ListRecentAsync(filter, limit ?? MaxLimit, ct).ConfigureAwait(false);
+
+        var messages = await JobProgressMessageResolver
+            .ResolveManyAsync(catalog, currentUser.Language, [.. items.Select(i => i.Message)], ct)
+            .ConfigureAwait(false);
+
+        return [.. items.Select((item, i) => item with { Message = messages[i] })];
     }
 }
 

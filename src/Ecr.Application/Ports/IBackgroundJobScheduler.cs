@@ -184,17 +184,12 @@ public sealed record JobListFilter(
 /// </param>
 /// <param name="Attempt">Номер спроби від 1; <c>null</c> — ще не стартувала (BE-08).</param>
 /// <param name="CorrelationId">Кореляція з логом і запитом-постановником (BE-08).</param>
-/// <remarks>
-/// ⚠ Поля <c>Message</c> тут НЕМАЄ, хоч воно й лежить у тому самому рядку
-/// <c>itg.JobProgress</c>. Причина не в даних, а в резолві: повідомлення —
-/// структурований конверт, який локалізується мовою ЧИТАЧА (<c>Q-326</c>), а
-/// <c>JobProgressMessageResolver</c> приймає рядок по одному й на кожен
-/// виклик відкриває з'єднання по ревізію каталогу
-/// (<c>UiStringCatalogStore.LoadAsync</c>). Півсотні рядків переліку, який
-/// клієнт опитує кожні три секунди, коштували б півсотні з'єднань на запит.
-/// Щоб віддати повідомлення в переліку, резолверу потрібна форма, яка приймає
-/// ВЖЕ завантажений каталог, — окремий PR.
-/// </remarks>
+/// <param name="CreatedByDisplayName">Ім'я автора; <c>null</c> — системна задача (BE-08).</param>
+/// <param name="Message">
+/// Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться
+/// ОДИН раз на весь перелік (<c>JobProgressMessageResolver.ResolveManyAsync</c>),
+/// а не на кожен рядок.
+/// </param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -203,7 +198,9 @@ public sealed record JobSummary(
     DateTime UpdatedAt,
     DateTime StartedAt,
     int? Attempt = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    string? CreatedByDisplayName = null,
+    string? Message = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
@@ -226,6 +223,10 @@ public interface IJobProgress
 /// <param name="Error">Текст провалу.</param>
 /// <param name="Attempt">Номер спроби від 1; <c>null</c> — ще не стартувала (BE-08).</param>
 /// <param name="CorrelationId">Кореляція з логом і запитом-постановником (BE-08).</param>
+/// <param name="MaxAttempts">
+/// Скільки спроб задача має загалом: перша + автоматичні ретраї (BE-08);
+/// <c>null</c> — стан не з журналу (<c>Unknown</c>/<c>Unavailable</c>).
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -233,7 +234,8 @@ public sealed record JobStatus(
     string? Message,
     string? Error,
     int? Attempt = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    int? MaxAttempts = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.
