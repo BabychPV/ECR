@@ -172,7 +172,7 @@ react-router 7 · RevoGrid 4.11. ⛔ Прототип написаний на в
 | Задачі | `pages/admin/JobsPage.tsx` (196) | `/admin/jobs` | — | BE-02 | BE-08 |
 | Джерела | `pages/admin/SourcesPage.tsx` (163) | `/admin/sources` | — | — (лише перегляд) | BE-21 |
 | Журнал | `pages/admin/AuditPage.tsx` (169) | `/admin/audit` | — | BE-03 | BE-16 |
-| Узгодженість | `pages/admin/ConsistencyIssuesPage.tsx` (181) | `/admin/consistency` | — | — | BE-30 (Q15-03) |
+| Узгодженість | `pages/admin/ConsistencyIssuesPage.tsx` (181) | `/admin/consistency` | — | — | ~~BE-30 (Q15-03)~~ ✎ **2026-09-21:** відповідь на Q15-03 є (рішення 2: Acknowledge знято); «Run check now» зроблено — `ConsistencyController.cs:86` `POST /consistency/run`, споживач `features/jobs/api.ts:92`, кнопка на `ConsistencyIssuesPage.tsx` (`RunConsistencyPermission`) |
 | Стан системи | `pages/admin/HealthPage.tsx` (183) | `/admin/health` | — | — | BE-18 |
 | Документи | `pages/DocumentsPage.tsx` (190) | `/` | — | BE-09 (смуга) | швидкий перегляд (`docs-quicklook`) — BE-10 |
 | Мапінг | `pages/admin/MappingPreviewPage.tsx` (130) | `/admin/mapping` | — | — | BE-27 |
@@ -189,7 +189,7 @@ react-router 7 · RevoGrid 4.11. ⛔ Прототип написаний на в
 | Безпека | `pages/admin/SecurityPage.tsx` (644) | `/admin/security` | — | — | BE-12, BE-14 |
 | Періоди | `pages/admin/PeriodsPage.tsx` (730) | `/admin/periods` | — | — (⚠ Q15-02) | BE-22, BE-29 |
 | Версії методики | `pages/admin/MethodologyVersionsPage.tsx` (778) + `MethodologyContentPanels.tsx` (1385) | `/admin/methodologies/:id/versions` | — | — | BE-25 |
-| Конструктор версії | `pages/admin/TemplateVersionPage.tsx` (1127) | `/admin/templates/:id/versions/:v` | **`…/compare`**, **`…/access-matrix`**, **`…/period-rules`** (зараз — частини сторінки ◐) | — | BE-23, BE-26 |
+| Конструктор версії | `pages/admin/TemplateVersionPage.tsx` (1127) | `/admin/templates/:id/versions/:v` | **`…/compare`**, **`…/access-matrix`**, **`…/period-rules`** (зараз — частини сторінки ◐) | — | ~~BE-23,~~ BE-26 ✎ **2026-09-21:** `BE-23` знято рішенням 4 (`DIRECTIVE-15-DECISIONS.md`), право `Template.Migrate` видалено із сіду (`09-seed.sql:41-42`) |
 | 403 / 404 / збій | `app/NotFoundPage.tsx`, `RouteErrorPage.tsx`, `RenderErrorScreen.tsx` | `/403`, `/404`, `/error` | `/403` (зараз немає ◐) | — | — |
 
 **Порядок UI-09** — від дешевих до дорогих, щоб набір обкатався на простому:
@@ -203,8 +203,14 @@ react-router 7 · RevoGrid 4.11. ⛔ Прототип написаний на в
 ⚠ Розбіжності макета з бекендом, які інтерфейс **не малює як у макеті** —
 таблиця в `DIRECTIVE-15.md` §4. Коротко: гранти редагуються **набором на роль**;
 «Create partitions» → «Copy command for DBA»; «Purge jobs», лічильник спроб
-входу — не переносяться; ручні кнопки періоду, Acknowledge, Recall, Migrate —
-лише після відповіді людини.
+входу — не переносяться; ~~ручні кнопки періоду, Acknowledge, Recall, Migrate —
+лише після відповіді людини.~~ ✎ **2026-09-21:** відповіді є
+(`DIRECTIVE-15-DECISIONS.md` §1): ручні кнопки періоду — лише перевідкриття
+(рішення 1; `PeriodsPage.tsx:366` → `POST /periods/{id}/reopen`); Acknowledge
+— не переноситься (рішення 2); Recall — зроблено (рішення 3;
+`DocumentWorkflowHistoryController.cs:37`, кнопка в
+`features/workflow/SheetActions.tsx:232`); Migrate — не переноситься
+(рішення 4).
 
 ---
 

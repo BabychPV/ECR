@@ -59,10 +59,14 @@
    стара DLL (пам'ятка `msbuild-stale-after-copy`).
 6. **Міграції — по одній, окремим PR, послідовно** (CLAUDE.md §2). Пункти з
    позначкою 🗄 мають міграцію; вони НЕ паралеляться між собою.
-7. **Конфлікт за файли з №14-ARCH.** `PatchCellsHandler.cs`, `AuditReader.cs`,
+7. ~~**Конфлікт за файли з №14-ARCH.** `PatchCellsHandler.cs`, `AuditReader.cs`,
    `QuartzJobScheduler.cs` зараз активно змінюються (відкритий #347, worktree'ї
    `wr05-period`, `w16-timeouts`). Пункти `BE-05`, `BE-06` стартують лише після
-   мержу відкритих PR, що чіпають `PatchCellsHandler.cs`.
+   мержу відкритих PR, що чіпають `PatchCellsHandler.cs`.~~
+   ✎ **2026-09-21:** умова знята — `BE-05` і `BE-06` уже змерджено:
+   `Dto/PatchCellsResponse.cs:30` (`RecalculationJobId`),
+   `PatchCellsHandler.cs:533` (`ReadLastChangesAsync`), `CellConflictDto.cs:51`
+   (`TheirOrigin`). Чекати нема на що.
 
 ---
 
@@ -72,7 +76,11 @@
 `openapi.snapshot.json`/`schema.d.ts` — тому **мержити по одному**, а
 перегенерацію контракту робити останнім комітом гілки після `git merge origin/main`.
 
-### BE-01 · Видалення запису довідника — маршрут до наявного обробника ✔
+### ~~BE-01 · Видалення запису довідника — маршрут до наявного обробника ✔~~
+
+✎ **2026-09-21: зроблено.** `RegistriesController.cs:240`
+`[HttpDelete("{code}/entries/{id:long}")]`. «Факт» нижче описує стан до
+реалізації — маршруту тепер НЕ бракує.
 
 **Факт.** `DeleteRegistryEntryHandler` існує й зареєстрований
 (`RegistryAdminHandlers.cs:286-334` ✔, DI — `DependencyInjection.cs:172` ✔), але
@@ -149,7 +157,10 @@ public async Task HandleAsync(string registryCode, long registryEntryId, Cancell
 
 ---
 
-### BE-02 · Скасування фонової задачі ✔
+### ~~BE-02 · Скасування фонової задачі ✔~~
+
+✎ **2026-09-21: зроблено.** `JobsController.cs:118`
+`[HttpPost("{jobId}/cancel")]`; «три дії» нижче — стан до реалізації.
 
 **Факт.** `IBackgroundJobScheduler.CancelAsync(string jobId, CancellationToken ct)`
 існує (`Ports/IBackgroundJobScheduler.cs:63` ✔), `QuartzJobAdapter` уміє
@@ -235,7 +246,11 @@ public sealed class CancelJobHandler(
 
 ---
 
-### BE-03 · Історія однієї комірки й фільтри журналу ✔
+### ~~BE-03 · Історія однієї комірки й фільтри журналу ✔~~
+
+✎ **2026-09-21: зроблено.** `AuditController.cs:67-68` приймає `rowKey`,
+`columnDefId`, `author`, `origin`, `lateOnly`; «лише
+`from,to,documentId,limit,cursor`» нижче — стан до реалізації.
 
 **Факт.** `GET /api/v1/audit/cells` приймає лише `from,to,documentId,limit,cursor`
 (`AuditController.cs:31-34` ✔); SQL у `AuditReader.cs:32-41` ✔ читає
@@ -319,7 +334,11 @@ if (filter.LateOnly)                 where.Append(" AND IsLateEdit = 1");
 
 ---
 
-### BE-04 · `TableDefId` у знахідках валідації ✔
+### ~~BE-04 · `TableDefId` у знахідках валідації ✔~~
+
+✎ **2026-09-21: зроблено.** Обидва відображення несуть `m.TableDefId`
+(`DocumentsController.cs:186`, `:245`), поле в DTO — `:568`. «Відображення
+його викидає» нижче — стан до реалізації.
 
 **Факт.** `ValidationMessage` має `int TableDefId`
 (`Validation/ValidationMessage.cs:19` ✔), а відображення в DTO його **викидає**:
@@ -339,7 +358,10 @@ if (filter.LateOnly)                 where.Append(" AND IsLateEdit = 1");
 
 ---
 
-### BE-05 · `jobId` перерахунку у відповіді на запис комірок ✔
+### ~~BE-05 · `jobId` перерахунку у відповіді на запис комірок ✔~~
+
+✎ **2026-09-21: зроблено.** `Dto/PatchCellsResponse.cs:30`
+`string? RecalculationJobId`; «три поля» нижче — стан до реалізації.
 
 **Факт.** `EnqueueRecalculationAsync` повертає `Task`, а не ідентифікатор:
 результат `jobs.EnqueueAsync<IFormulaRecalculationJob>(…)` (це `Task<string>` ✔,
@@ -375,7 +397,12 @@ public sealed record PatchCellsResponse(
 
 ---
 
-### BE-06 · Конфлікт версій: чиє значення, хто, коли ✔
+### ~~BE-06 · Конфлікт версій: чиє значення, хто, коли ✔~~
+
+✎ **2026-09-21: зроблено (основна гілка).** `PatchCellsHandler.cs:533`
+`ReadLastChangesAsync`, `CellConflictDto.cs:51` `TheirOrigin`; «заглушки
+`null, "", clock.UtcNow`» нижче — стан до реалізації. ⚠ Гілка «розійшовся
+весь рядок» (`ColumnCode="*"`) свідомо віддає `null` — дочитка окремим кроком.
 
 **Факт.** `CellConflictDto` має `TheirValue, TheirUser, TheirChangedAt`
 (`Dto/CellConflictDto.cs:9-16` ✔), але обробник заповнює їх заглушками:
@@ -409,7 +436,10 @@ theirs») сьогодні показав би порожнечу й **пото�
 
 ---
 
-### BE-07 · Публічні дані для екрана входу ◐
+### ~~BE-07 · Публічні дані для екрана входу ◐~~
+
+✎ **2026-09-21: зроблено.** `PublicController.cs:39` — `GET /api/v1/public/bootstrap`
+(`[AllowAnonymous]`); «анонімних дій дві» нижче — стан до реалізації.
 
 **Факт.** Анонімних дій дві: `LoginLocal` (`AuthController.cs:64` ✔) і каталог
 рядків (`UiStringsController.cs:40` ✔). Макет екрана входу показує: перелік мов,
@@ -468,9 +498,16 @@ public sealed record PublicBootstrapResponse(
 
 ### BE-08 · Фонові задачі: «мої», фільтри, деталі ◐
 
-- `GET /api/v1/jobs?state=&code=&mine=true&limit=` — `mine=true` не вимагає
+✎ **2026-09-21: зроблено частково.** Фільтри є (`JobsController.cs:53-58`:
+`state`, `code`, `mine`). Лишились поля: `JobSummary`
+(`Ports/IBackgroundJobScheduler.cs:196-202`) — лише
+`JobId, JobCode, State, Percent, UpdatedAt, StartedAt`, без
+`CreatedByDisplayName`/`Message`/`ErrorCode` (`Message` відкладено свідомо,
+коментар `:186-194`); `JobStatus` (`:218`) — без `Attempt/MaxAttempts/CorrelationId/DocumentId`.
+
+- ~~`GET /api/v1/jobs?state=&code=&mine=true&limit=` — `mine=true` не вимагає
   `System.ViewHealth` і фільтрує за `itg.JobProgress.CreatedByUserId` (поле є ✔
-  `IntegrationLogs.cs:480`). Без `mine` — як зараз.
+  `IntegrationLogs.cs:480`). Без `mine` — як зараз.~~ ✎ зроблено, див. вище.
 - `JobSummary` розширити: `CreatedAt, CreatedByDisplayName?, Message (конверт
   `JobProgressMessageEnvelope` → локалізується на клієнті), ErrorCode?`.
 - `GET /jobs/{id}` → додати `Attempt, MaxAttempts, CorrelationId, DocumentId?`.
@@ -487,8 +524,16 @@ public sealed record PublicBootstrapResponse(
 issues) і в рядку — к-сть зауважень, «змінено ким/коли», позначку пізньої правки,
 фільтри `state` і `mine`.
 
-- `DocumentSummary` (`IDocumentStore.cs:26-33` ✔) розширити:
-  `DateTime? ModifiedAt, string? ModifiedByDisplayName, int ErrorCount, int WarningCount, bool HasLateEdits`.
+✎ **2026-09-21: зроблено частково.** Смуга — `DocumentsController.cs:84`
+`GET /documents/summary`; `DocumentSummary` уже має
+`ModifiedAt/ModifiedByDisplayName/ErrorCount/WarningCount`
+(`Ports/IDocumentStore.cs:43-46`). **Лишилось («BE-09b»):** `HasLateEdits`
+(0 збігів у `src`) і фільтри `state`/`mine` у `GET /documents`
+(`DocumentsController.cs:48-51` — лише `limit, cursor, projectId, periodKey`).
+
+- ~~`DocumentSummary` (`IDocumentStore.cs:26-33` ✔) розширити:
+  `DateTime? ModifiedAt, string? ModifiedByDisplayName, int ErrorCount, int WarningCount, bool HasLateEdits`.~~
+  ✎ зроблено, крім `HasLateEdits`.
   `ErrorCount/WarningCount` — з ОСТАННЬОГО збереженого підсумку валідації
   (`IValidationResultStore.GetLatestAsync` ✔ існує), **не** повторний прогін.
   Немає підсумку → `null`, і UI показує «—», не «0». ⛔ «0 зауважень» для
@@ -497,12 +542,15 @@ issues) і в рядку — к-сть зауважень, «змінено ки
   фільтрує за агрегованим станом аркушів; `mine` — документи, де користувач має
   право редагувати хоч один аркуш (◐ дорогий шлях: зроби через наявний
   `IAccessDecisionService` пакетно, заміряй ⏱ на 500 документах).
-- `GET /documents/summary?periodKey&projectId` → `DocumentListSummaryResponse(int Draft, int Submitted, int Approved, int Rejected, int WithIssues)` —
+- ~~`GET /documents/summary?periodKey&projectId` → `DocumentListSummaryResponse(int Draft, int Submitted, int Approved, int Rejected, int WithIssues)` —
   ОДИН `GROUP BY`, не завантаження переліку. ⚠ Лічить лише документи, які
   користувач бачить (той самий предикат доступу, що й перелік) — інакше смуга
-  і таблиця розійдуться.
+  і таблиця розійдуться.~~ ✎ **2026-09-21:** зроблено, `DocumentsController.cs:84`.
 
-### BE-10 · Заповненість таблиць документа ◐
+### ~~BE-10 · Заповненість таблиць документа ◐~~
+
+✎ **2026-09-21: зроблено.** `DocumentsController.cs:362`
+`GET {id}/tables/status`, DTO — `Documents/Dto/TableStatusDto.cs:34`.
 
 Дерево аркушів у макеті: «68 of 91 tables filled», крапка помилки біля таблиці.
 
@@ -515,7 +563,10 @@ issues) і в рядку — к-сть зауважень, «змінено ки
 ⏱ Заміряти на документі з 91 таблицею: ціль ≤ 150 мс; якщо більше — кешувати за
 ревізією документа (механізм ревізій — `#346`).
 
-### BE-11 · Хто й коли подав/погодив; історія станів аркуша ◐
+### ~~BE-11 · Хто й коли подав/погодив; історія станів аркуша ◐~~
+
+✎ **2026-09-21: зроблено.** `DocumentWorkflowHistoryController.cs:26`
+`GET {id}/workflow/history`, DTO — `Workflow/GetWorkflowHistoryHandler.cs:19`.
 
 `GET /documents/{id}/workflow/history?periodKey` →
 `IReadOnlyList<WorkflowEventDto(string SheetCode, string FromState, string ToState, string Action, string ByDisplayName, DateTime At, string? Reason)>`.
@@ -537,13 +588,22 @@ issues) і в рядку — к-сть зауважень, «змінено ки
 
 ### BE-13 · Рядки інтерфейсу: покриття перекладу ◐
 
-`GET /ui-strings/coverage` → по мовах `Total, Translated, Missing`;
+~~`GET /ui-strings/coverage` → по мовах `Total, Translated, Missing`;
 `GET /ui-strings?lang=&missingOnly=true` — «сирі» значення **без fallback на `en`**
 (зараз каталог віддає вже зі спадком, і «відсутній переклад» невидимий);
 перевірка плейсхолдерів при збереженні (`{0}`/`{name}` у перекладі ті самі, що
-в `en`) → `422 ECR-L10N-0422`. Імпорт/експорт (CSV) — окремим PR після цього.
+в `en`) → `422 ECR-L10N-0422`.~~ ✎ **2026-09-21: частина 1 зроблена.**
+`UiStringsController.cs:38` `GET coverage`, `:60` `missingOnly`, перевірка
+плейсхолдерів — `SetUiStringHandler.cs:58`/`:99`.
 
-### BE-14 · Ролі: клонувати, перейменувати, видалити ◐
+Імпорт/експорт (CSV) — окремим PR після цього. ✎ **2026-09-21: ще НЕ
+зроблено** (0 збігів `csv` у `Application/Localization` і
+`UiStringsController.cs`); обсяг — `DIRECTIVE-15-DECISIONS.md` рішення 16 і §4.
+
+### ~~BE-14 · Ролі: клонувати, перейменувати, видалити ◐~~
+
+✎ **2026-09-21: зроблено.** `SecurityController.cs:118` clone, `:135` code,
+`:154` delete.
 
 Видалення ролі з призначеннями → `409` з кількістю; системні ролі з сіду — не
 видаляються й не перейменовуються. ⚠ Модель грантів лишається як є: суб'єкт —
@@ -558,15 +618,30 @@ issues) і в рядку — к-сть зауважень, «змінено ки
 залежних (`un-delete-blocked`, `ex-delete-blocked`). `PUT/DELETE /units/{id}` —
 видалення з посиланнями `409`.
 
+✎ **2026-09-21: одиниці — зроблено частково, вирази — предмета немає.**
+Зроблено: `UnitsController.cs:20` `GET {id}/usage`, `:33` `DELETE {id}`.
+~~`PUT /units/{id}`~~ — **ще немає** (у контролері лише GET, POST, usage,
+delete, convert). ~~«вирази» (`ex-delete-blocked`)~~ — доменної сутності
+виразу з id немає, `ExpressionsController.cs` має лише `validate` (`:53`) і
+`metadata` (`:85`); «usage/delete виразу» не має предмета, доки не визначено,
+що вважається виразом на `/admin/expressions`.
+
 ### BE-16 · Журнал структурних змін і експорт журналу ◐
 
-`IAuditReader.ReadStructureChangesAsync` існує ✔ (`AuditReader.cs:89`), але лише
+~~`IAuditReader.ReadStructureChangesAsync` існує ✔ (`AuditReader.cs:89`), але лише
 «для однієї сутності». Потрібен загальний перелік із вікном часу й курсором:
-`GET /audit/structure?from&to&entityType&cursor`. Експорт — фоновою задачею
+`GET /audit/structure?from&to&entityType&cursor`.~~ ✎ **2026-09-21: перелік
+зроблено** — `AuditController.cs:107` `GET /audit/structure`. **Лишився
+експорт** (0 збігів `export` в `AuditController.cs`). Експорт — фоновою задачею
 (`202 + jobId`, файл — через наявний механізм завантаження звітів ◐), не
 синхронним CSV: журнал за рік — мільйони рядків.
 
-### BE-17 · Знімки звітності: картка, перевірка, завантаження ◐
+### ~~BE-17 · Знімки звітності: картка, перевірка, завантаження ◐~~
+
+✎ **2026-09-21: зроблено.** `ReportsController.cs:142`
+`POST snapshots/{id}/verify`, `:181` `GET snapshots/{id}/export.xlsx`;
+`Report.Export` перевіряє `Reporting/ExportSnapshotHandler.cs:38` (фраза «не
+перевіряється ніде» нижче — стан до реалізації).
 
 `IsCurrent` і `ContentHash` уже є в DTO ◐ і не показуються. Додати
 `POST /snapshots/{id}/verify` → перерахувати хеш і порівняти
@@ -574,7 +649,11 @@ issues) і в рядку — к-сть зауважень, «змінено ки
 `GET /snapshots/{id}/content` — право `Report.Export` (зараз не перевіряється
 ніде — див. BE-28).
 
-### BE-18 · Стан системи: версія, транспорт, шлях логів ◐
+### ~~BE-18 · Стан системи: версія, транспорт, шлях логів ◐~~
+
+✎ **2026-09-21: зроблено.** `SystemHealthController.cs:28` `GET /health/facts`,
+`:53` `GET /health/partitions/script`; `LogDirectory` —
+`Health/SystemHealthHandlers.cs:59`.
 
 Розширити відповідь health наявними фактами: `ProductVersion`, `StartedAt`,
 `Environment`, стан транспорту сповіщень, каталог логів. ⛔ «Create partitions»
@@ -607,44 +686,60 @@ PR-міграція ПЕРШИМ. До його мержу клієнт трим
 |---|---|---|---|
 | BE-21 | ~~Джерела даних: CRUD, заміна секрету, розклад, «перевірити з'єднання», «зібрати зараз»~~ ✎ **2026-09-21: рядок застарів у трьох місцях із п'яти.** «Розклад» зроблено раніше (`GET/POST/PUT/DELETE /api/v1/collection-schedules`, `BE-21b`), «зібрати зараз» існує від Етапу 5 (`POST /api/v1/sources/{id}/collect` → `202 + jobId`), а **«заміну секрету» знято рішенням людини** (див. колонку питання). Лишалося і зроблено саме це: `GET/POST/PUT/DELETE /api/v1/data-sources` і `POST /api/v1/data-sources/{id}/test`. Права наявні: перелік — `Integration.View` (його ПЕРШИЙ викликач, `BE-28`), правка й проба — `Integration.Manage`. Проба опитує джерело ТИМ САМИМ адаптером, яким збирають (`IExternalDataSource.DiscoverAsync`), причина обов'язкова й іде в журнал безпеки, друга проба того самого джерела — `409 ECR-JOB-0409`. Видалення джерела із сутностями збору або розкладами — **заборона, не каскад** (`409` із лічильниками): каскад стер би `ext.RawDataPoint` і журнал покриття. Міграції не знадобилося. | ~~`DataSource`, `CollectionSchedule`, `ISecretProvider` ◐; право `Integration.EditSchedule` у сіді є, ніде не перевіряється~~ ⚠ `Integration.EditSchedule` перевіряється з `BE-21b`; невикритим лишався `Integration.View` — його й закрито тут. `ISecretProvider` **не розширювався**: у базі як було, так і лишається лише ІМ'Я секрету. | ~~Q15-06: автентифікація PI Web API — факт замовника~~ ✎ **відповідь є, і вона ЗВУЖУЄ задачу.** `DIRECTIVE-15-DECISIONS.md` (рішення 5): **Windows-автентифікація службового облікового запису; секретів у застосунку немає.** Отже ані сховища секретів, ані `PUT …/{id}/secret`, ані поля «секрет» у формі — на відміну від каналів сповіщень (`BE-33`), де секрет неминучий. У відповіді лишилося `hasSecret` (ознака того, що середовище все-таки дає секрет під це джерело), а «write-only» перетворилося на перевірку, якої без цього рішення не знадобилося б: адреса джерела не має нести облікових даних (`422 err.ECR-REQ-0422.dataSourceEndpointCarriesSecret`) — коли сховища секретів немає, єдиний спосіб покласти пароль у базу — вписати його в несекретне поле, а для транспорту `Sql` адреса і є рядком з'єднання. |
 | BE-22 | ~~Огляд кампанії: усі проєкти × період, зведення~~ ✎ **2026-09-21: зроблено.** `GET /api/v1/campaign/summary?periodKey=` → `CampaignSummaryResponse(periodKey, totalProjects, projects[])`, у рядку — код і назва проєкту плюс лічильники `documents / draft / submitted / approved / rejected / snapshots`. Агрегат етапів — той самий, що в смузі переліку документів (`BE-09`), але **згрупований по проєктах і без предиката грантів**; перелік іде ВІД `doc.Period`, тому проєкт, у якому кампанія ще не починалася, видно з нулями, а не втрачено. Стеля `GetCampaignSummaryHandler.MaxProjects = 200`, повне число — в `totalProjects`. Ані таблиць, ані колонок, ані міграції не знадобилося. | ~~—~~ ⚠ колонка не брехала, але й не допомогла: у домені справді не було нічого, а от **питання вже мало відповідь** | ~~Q15-07: хто бачить чужі проєкти~~ ✎ **відповідь є, і вона перевертає очікуване.** `DIRECTIVE-15-DECISIONS.md` (рішення 6): **окреме право `Report.ViewCampaign`, видається явно; лише лічильники станів, без значень.** Тобто межа — НЕ грант на проєкт: огляд свідомо віддає чужі проєкти, бо питання «хто затримує кампанію» без них не має відповіді. Право заведено небезпечним (`IsDangerous = 1`) — саме це й тримає його поза шаблоном `Report.%` вбудованого `Approver`, тобто робить видачу явною. |
-| BE-23 | Міграція документів на нову версію шаблону | право `Template.Migrate` у сіді, не використовується ◐ | Q15-05 |
-| BE-24 | Довідники: чернетка визначення → публікація; історія/«де використано»/імпорт записів | версіонування визначень ◐ | — (судження; різати на 3–4 PR) |
-| BE-25 | Методики: матриця покриття, запит рев'ю, видалення чернетки, diff версій | — | Q15-08: чи є процес рев'ю методик у замовника |
+| BE-23 | ~~Міграція документів на нову версію шаблону~~ ✎ **2026-09-21: знято** рішенням людини (`DIRECTIVE-15-DECISIONS.md`, рішення 4: документ назавжди на своїй версії). | ~~право `Template.Migrate` у сіді, не використовується ◐~~ ✎ право видалено із сіду: `09-seed.sql:41-42` (`DELETE … WHERE Code = N'Template.Migrate'`), доказ — `SeedTests.cs:124`. | ~~Q15-05~~ ✎ відповідь є (рішення 4) |
+| BE-24 | Довідники: чернетка визначення → публікація; ~~історія/«де використано»/~~імпорт записів ✎ **2026-09-21:** історія й «де використано» зроблено — `RegistriesController.cs:133` `GET {code}/history`, `:155` `GET {code}/usage`. Лишилось: чернетка → публікація (`PUT {code}/definition`, `:107`, пише одразу) та імпорт записів (маршруту немає). | ~~версіонування визначень ◐~~ ✎ **у домені його НЕМАЄ:** `Entities/Configuration/RegistryDef.cs` — 0 збігів `IsDraft`/`Publish(`/`Status`; стан чернетки потребує 🗄. `Registry.Publish` досі без викликача (`UncheckedPermissionTests.cs:42`). | — (судження; різати на 3–4 PR) ✎ право `Registry.Publish` **лишити**, викликач — крок 2 (`tz/10-decisions.md:456`) |
+| BE-25 | Методики: матриця покриття, ~~запит рев'ю,~~ видалення чернетки, diff версій ✎ **2026-09-21:** запит рев'ю знято рішенням 7; решта **ще не зроблена** — у `MethodologiesController.cs` немає ні coverage, ні `DELETE versions/{vid}`, ні diff версій (є лише diff РЕЗУЛЬТАТІВ публікації, `:525-539`). | — | ~~Q15-08: чи є процес рев'ю методик у замовника~~ ✎ відповідь є (`DIRECTIVE-15-DECISIONS.md`, рішення 7): окремого кроку рев'ю немає, публікує той, хто має право, з причиною |
 | BE-26 | ~~Шаблон: редагування картки, архівування, лічильник залежних~~ ✎ **2026-09-21: зроблено.** `GET/PUT /api/v1/templates/{id}`, `POST …/archive`, `POST …/restore` — права наявні (`Template.View`/`Template.Edit`), нового не заводилось; заборонений перехід віддає `409 ECR-TMPL-0409` із домену (суфікс `-0409` мапить `ExceptionHandlingMiddleware`, арм не потрібен); журнал безпеки — `TemplateArchived`/`TemplateRestored` разом із лічильниками. Картка редагує **лише назву мовами**: колонки під опис у `cfg.Template` немає, а `Code` — бізнес-ключ і незмінний. Лічильник (версії / опубліковані / проєкти / документи) їде ТІЄЮ САМОЮ відповіддю, що й картка. | ~~—~~ ⚠ **колонка брехала, і саме так, як найдорожче.** `Template.IsActive` + `Template.Deactivate()` існували від Етапу 1 і не викликалися ніде — це і є ознака «архівовано», тож **міграції не потрібно**. Пошук за `IsArchived\|Archived` у `src/Ecr.Domain` (саме його й радить процедура перед BE-26) дає **нуль** і веде до хибного «поля немає → СТОП». Шукати треба ЗМІСТ, а не слово. | — |
 | BE-27 | ~~Мапінг: пауза, прийняти зміну одиниці, видалення~~ ✎ **2026-09-21: зроблено.** `POST /api/v1/entity-field-maps/{id}/pause` і `…/resume`, `POST …/accept-unit-change`, `DELETE …/{id}` — право наявне (`Integration.Manage`), нового не заводилось. Конфлікти стану — `409 ECR-INT-0409` (родина `INT` наявна; новий код у ній, не нова родина). **Міграції не знадобилося.** Пауза = `EntityFieldMap.IsActive`, і обидва шляхи збору вже фільтрували за ним: `CollectionStore.GetFieldMapsAsync` (що читати з джерела) і `MaterializeCollectedDataJob` (що класти в комірки). Приймання зміни одиниці пише в журнал безпеки `MappingSourceUnitChangeAccepted` з обома одиницями — id і **кодами**: довідник живий, і самого числа через рік буде замало. **Видалення мапінгу зі зібраними даними заборонене** (`409` з `collectedPoints` / `firstPointAt` / `lastPointAt`): точки `ext.RawDataPoint` пояснює саме мапінг — одиниця, рядок-адресат, згортка, — і вихід тут пауза, а не повтор запиту (той самий шаблон, що `ECR-REG-0409` у `BE-01`). | ~~—~~ ⚠ **колонка брехала тим самим способом, що й у `BE-26`.** `EntityFieldMap.IsActive` + `Deactivate()` існували від Етапу 5 і не викликалися ніде — це і є «пауза», тож міграції не потрібно; `Deactivate()` замінено парою `Pause()`/`Resume()` з відмовою на повторний перехід. Виявлення зміни одиниці теж уже було: `SourceUnitConverter.EnsureDeclaredUnit` зупиняє збір кодом `ECR-INT-0422` (`ФВ-16.9`) — бракувало лише способу цю зупинку зняти. Шукати треба було ЗМІСТ («чим спиняється збір за одним полем»), а не слово `Paused`, якого в домені немає й не було. | — |
 | BE-29 | ~~Ручне відкриття/закриття/архівування періоду~~ ✎ **2026-09-21: рядок застарів і коштував пів години розвідки.** Відповідь на Q15-02 звузила обсяг до ОДНОГО перевідкриття закритого періоду з причиною (`close`/`archive` лишаються за `PeriodStateJob`), а саме перевідкриття **вже було реалізоване**: `POST /periods/{id}/reopen`, право `Period.Reopen`, перехід через домен, журнал із причиною, колонки `ReopenedUntil`/`ReopenReason`, узгодження з задачею. Бракувало лише доказу на рівні HTTP — додано (`PeriodReopenTests`). | ~~стан міняє ЛИШЕ `PeriodStateJob` ◐~~ зроблено | Q15-02 (відповідь є) |
 | BE-30 | ~~«Підтвердити» знахідку узгодженості~~ ✎ **2026-09-21: рядок застарів і встиг задати хибну рамку задачі.** Відповідь людини на Q15-03 — «Ні. Знахідка зникає сама, коли наступна перевірка проходить»; підтвердження знято з обсягу, натомість лишається «Run check now». Зроблено саме це: `POST /api/v1/consistency/run` під `System.RunJob` (його ПЕРШИЙ викликач узагалі), обов'язкова причина в журнал безпеки, повторний запуск під час чинної перевірки → 409. Колонки «підтверджено» не заводилось — саме її й прибрало рішення. | ~~контролер свідомо лише читає ◐~~ зроблено інакше, ніж тут написано | Q15-03 (відповідь є) |
-| BE-31 | Відкликання поданого аркуша автором | — | Q15-04 |
+| BE-31 | ~~Відкликання поданого аркуша автором~~ ✎ **2026-09-21: зроблено** (#429). `DocumentWorkflowHistoryController.cs:37` `POST /api/v1/documents/{id}/recall` (аркуш і період — у тілі, `RecallSheetRequest`), `:53` `GET …/recall` — чи доступна кнопка; обробник `Workflow/RecallSheetHandler.cs:31`. ⚠ Маршрут на рівні документа, а не `…/sheets/{code}/recall`, як записано в рішенні 3. | ~~—~~ ✎ домен: `ApprovalState.cs:260` `Recall(...)`, `ApprovalEvent.cs:26` `ApprovalAction.Recall = 6` (byte, міграції не знадобилося) | ~~Q15-04~~ ✎ відповідь є (рішення 3) |
 
 ---
 
-## 4. BE-28 · Борг: вісім прав у сіді, яких ніхто не перевіряє ◐
+## 4. BE-28 · Борг: ~~вісім прав~~ у сіді, яких ніхто не перевіряє ◐
 
-`Template.Migrate`, `Registry.Publish`, `Document.Delete`, `Report.MarkSubmitted`,
-`Report.Export`, `Integration.View`, `Integration.EditSchedule`, `System.RunJob`.
+✎ **2026-09-21: з восьми лишилось ОДНЕ — `Registry.Publish`** (виняток у
+`tests/Ecr.Architecture.Tests/UncheckedPermissionTests.cs:42`, закривається
+кроком 2 `BE-24`; рішення людини — право лишити, `tz/10-decisions.md:456`).
+Решта: `Template.Migrate` — видалено із сіду (`09-seed.sql:41-42`);
+`Report.MarkSubmitted` — прибрано з каталогу рішенням людини
+(`tz/10-decisions.md:456`); `Document.Delete` — `Documents/DeleteDocumentHandler.cs:30`;
+`Report.Export` — `Reporting/ExportSnapshotHandler.cs:38`; `Integration.View` —
+`Integration/DataSourceHandlers.cs:57`; `Integration.EditSchedule` —
+`Integration/CollectionScheduleHandlers.cs:58`; `System.RunJob` —
+`Consistency/RunConsistencyCheckHandler.cs:45`.
+
+~~`Template.Migrate`, `Registry.Publish`, `Document.Delete`, `Report.MarkSubmitted`,
+`Report.Export`, `Integration.View`, `Integration.EditSchedule`, `System.RunJob`.~~
 Право, яке можна видати й яке нічого не відкриває, — це брехня в матриці доступу:
 адміністратор бачить галочку й вірить їй.
 
 **Сторож** (`tests/Ecr.Architecture.Tests`): кожен код із сіду `sec.Permission`
 зустрічається як рядковий літерал принаймні в одному файлі `src/Ecr.Application/**`.
-Ratchet-перелік винятків — ці вісім, із правилом «перелік лише зменшується».
+Ratchet-перелік винятків — ~~ці вісім~~ ✎ зараз один (`Registry.Publish`), із правилом «перелік лише зменшується».
+✎ **2026-09-21: сторож є** — `UncheckedPermissionTests.Кожне_право_з_сіду_перевіряє_обробник_або_воно_в_переліку`,
+ratchet у два боки (`UncheckedPermissionTests.cs:34-47`).
 ⚠ Пам'ятка `source-text-guards-are-brittle`: шукати літерал у лапках, не слово;
 ratchet із `NotEmpty` вимагає тримати борг живим — тут краще `Assert.Equal(очікуваний перелік, фактичний)`.
 
 Кожне право закривається своїм `BE-xx` вище (`Report.Export` → BE-17,
-`Integration.EditSchedule` → BE-21, `Template.Migrate` → BE-23,
+`Integration.EditSchedule` → BE-21, ~~`Template.Migrate` → BE-23,~~
 `System.RunJob` → «run now» у BE-30/узгодженості) або видаляється з сіду
-рішенням людини.
+рішенням людини. ✎ **2026-09-21:** `BE-23` знято, `Template.Migrate`
+видалено із сіду (`09-seed.sql:41-42`) — саме «видаляється з сіду», а не BE-23.
 
 ✎ **2026-09-21: із восьми лишилося менше, і перелік вище про це мовчить.**
 `Integration.EditSchedule` закрито розкладом збору (`BE-21b`), `System.RunJob`
 — прогоном перевірки узгодженості (`RunConsistencyCheckHandler`),
 `Integration.View` — переліком джерел (`ListDataSourcesHandler`, цей `BE-21`).
 `Template.Migrate` рішенням людини на `Q15-05` **видаляється із сіду**, а не
-закривається обробником. Сторожа з ratchet-переліком у
+закривається обробником. ~~Сторожа з ratchet-переліком у
 `tests/Ecr.Architecture.Tests` на 2026-09-21 ще немає — тобто борг тримається
 цим абзацом, а не машиною; перш ніж на нього посилатися, перевір
-`git grep -n "\"Integration.View\"" -- src/Ecr.Application`.
+`git grep -n "\"Integration.View\"" -- src/Ecr.Application`.~~
+✎ **2026-09-21, пізніше:** сторож є — `tests/Ecr.Architecture.Tests/UncheckedPermissionTests.cs`;
+борг тримає машина, а не цей абзац (див. примітку на початку розділу).
 
 ---
 
@@ -663,6 +758,13 @@ B2:  BE-08, BE-09, BE-10, BE-11   паралельно (різні контро�
      BE-13…BE-19                  паралельно, по 3–4
 B3:  після відповідей
 ```
+
+✎ **2026-09-21:** рядок «B3: після відповідей» застарів — відповіді є
+(`DIRECTIVE-15-DECISIONS.md` §1, рішення 1–18), і більшість B3 уже зроблено:
+`BE-21` (a, b), `BE-22`, `BE-26`, `BE-27`, `BE-29`, `BE-30` (як «run check
+now»), `BE-31`; `BE-23` знято. Лишаються `BE-21c` (обсяг не визначено),
+`BE-24` кроки 2–4, `BE-25` — див. таблицю §3. Блоку в коді вище не
+перекреслено, бо `~~` усередині коду не рендериться.
 
 **Перетин за файлами, який треба пам'ятати:** `contracts/openapi.snapshot.json`
 і `schema.d.ts` змінює КОЖЕН пункт. Це не привід серіалізувати роботу — це
