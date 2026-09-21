@@ -3,9 +3,13 @@ import { Button, Code, Group, NumberInput, Skeleton, Stack, Table, Text } from '
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { DocumentPage, PagedProjects } from '@/api/types';
+import type { PagedProjects } from '@/api/types';
+import { listDocuments, type DocumentListPage } from '@/features/documents/api';
 import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
+import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
+import { useDocumentListFilters } from '@/features/documents/documentListFilters';
+import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
@@ -35,14 +39,13 @@ export function DocumentsPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const session = useSession();
 
+  // `BE-09b`: стан і «мої» — теж в адресі; без періоду стан у запит не йде.
+  const filters = useDocumentListFilters(periodKey);
+
   const query = useQuery({
-    queryKey: ['documents', periodKey, cursor],
+    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine],
     queryFn: () =>
-      apiFetch<DocumentPage>(
-        `/api/v1/documents?limit=50` +
-          (periodKey === null ? '' : `&periodKey=${periodKey}`) +
-          (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
-      ),
+      listDocuments({ periodKey, cursor, state: filters.state, mine: filters.mine }),
   });
 
   // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`
@@ -108,7 +111,14 @@ export function DocumentsPage(): JSX.Element {
               label={t('documents.period')}
               value={periodKey ?? ''}
               onChange={(value) => {
-                setUrlParams({ periodKey: typeof value === 'number' ? value : null, cursor: null });
+                // ⚠ Період прибрано — прибирається й фільтр стану: без періоду
+                // він однаково не діє, а повернення періоду не має мовчки
+                // відновлювати звуження, якого на екрані вже не видно.
+                setUrlParams(
+                  typeof value === 'number'
+                    ? { periodKey: value, cursor: null }
+                    : { periodKey: null, cursor: null, state: null },
+                );
               }}
             />
 
@@ -130,13 +140,31 @@ export function DocumentsPage(): JSX.Element {
        * зверху червона смуга, під нею таблиця з заголовками і жодним рядком —
        * тобто «даних немає» там, де сервер відмовив (`ФВ-14.22`).
        */}
-      <AsyncBoundary<DocumentPage>
+      {/* ⚠ Фільтри — ПОЗА межею станів: коли фільтр нічого не знайшов, саме
+          ними людина й виходить із порожнього стану. */}
+      <DocumentListFilterBar periodKey={periodKey} filters={filters} />
+
+      {/*
+       * ⛔ Три порожні стани не виглядають однаково (L10): «фільтр нічого не
+       * знайшов» — власний заголовок і кнопка скидання; «документів немає» —
+       * колишній текст про відкриття періоду; відмова — стан помилки межі
+       * (перевіряється першою, до порожнечі). Сказати «документів немає» там,
+       * де їх сховав фільтр, — неправда, з якою йдуть створювати дублікат.
+       */}
+      <AsyncBoundary<DocumentListPage>
         isPending={query.isPending}
         error={query.error}
         data={query.data}
         isEmpty={(page) => page.items.length === 0}
-        emptyTitle={t('documents.empty')}
-        emptyHint={t('documents.emptyHint')}
+        emptyTitle={filters.active ? t('documents.noMatch') : t('documents.empty')}
+        emptyHint={filters.active ? t('documents.noMatchHint') : t('documents.emptyHint')}
+        emptyAction={
+          filters.active ? (
+            <Button size="xs" variant="default" onClick={filters.reset}>
+              {t('documents.resetFilters')}
+            </Button>
+          ) : undefined
+        }
         skeleton="table"
         onRetry={() => void query.refetch()}
       >
@@ -265,6 +293,8 @@ export function DocumentsPage(): JSX.Element {
                             {document.modifiedByDisplayName}
                           </Text>
                         )}
+                        {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
+                        {document.hasLateEdits && <LateEditsMark />}
                       </Stack>
                     </Table.Td>
                   </Table.Tr>

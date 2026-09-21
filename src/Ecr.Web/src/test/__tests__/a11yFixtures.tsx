@@ -873,6 +873,28 @@ export function emptyBodyFor(url: string): unknown {
 
   if (url.includes('/reports/snapshots')) return SnapshotListFixture;
 
+  /*
+   * ⚠ Перелік документів — НЕ порожній і з `hasLateEdits` (`BE-09b`): інакше
+   * гейт сканував би порожній стан, а позначка пізніх правок і сама таблиця
+   * не потрапляли б під перевірку контрасту взагалі.
+   */
+  if (url.includes('/api/v1/documents?')) {
+    return {
+      items: [
+        {
+          businessKey: 'DOC-0001',
+          createdAt: '2026-01-01T00:00:00Z',
+          hasLateEdits: true,
+          id: 1,
+          projectId: 1,
+          sheetCount: 1,
+          sheetStates: { GEN: 'Draft' },
+        },
+      ],
+      nextCursor: null,
+    };
+  }
+
   const paged = ['/documents', '/templates', '/users', '/projects'];
 
   return paged.some((entry) => url.includes(entry)) ? { items: [], nextCursor: null } : [];
