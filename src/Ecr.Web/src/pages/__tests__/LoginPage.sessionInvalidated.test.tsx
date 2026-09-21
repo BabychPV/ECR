@@ -18,7 +18,7 @@ import { apiFetch, loginUrl, setLoginRedirect, type LoginReason } from '@/api/cl
  * ⚠ Ланцюг ходить справжнім шляхом: `apiFetch` → обробник редиректу → адреса,
  * яку будує `loginUrl` (та сама, що в продакшн-редиректі) → `LoginPage`.
  */
-const SIGN_IN_REQUIRED = 'You are not signed in or your session has ended: sign in again.';
+const SESSION_TEXT = 'Your session has ended because your permissions or password changed. Sign in again.';
 
 const baseStrings: Record<string, string> = {
   'login.title': 'Environmental Compliance Reporting',
@@ -28,7 +28,7 @@ const baseStrings: Record<string, string> = {
   'login.password': 'Password',
   'login.submit': 'Sign in',
   'login.hint': 'Use your Windows account or a local one',
-  'err.ECR-AUTH-0401.signInRequired': SIGN_IN_REQUIRED,
+  'login.sessionInvalidated': SESSION_TEXT,
 };
 
 /** Каталог — для `/ui-strings/`, для `/api/v1/me` — задана відповідь `401`. */
@@ -105,7 +105,7 @@ describe('LoginPage: сесія втратила чинність (401 ECR-AUTH-
     renderLogin(target);
 
     const banner = await waitForBanner();
-    expect(banner.textContent).toContain(SIGN_IN_REQUIRED);
+    expect(banner.textContent).toContain(SESSION_TEXT);
     expect(document.body.textContent).not.toMatch(/⟦[^⟧]*⟧/);
   });
 
@@ -118,6 +118,6 @@ describe('LoginPage: сесія втратила чинність (401 ECR-AUTH-
 
     expect(await screen.findByText('Environmental Compliance Reporting')).toBeDefined();
     expect(document.querySelector('[data-login-reason]')).toBeNull();
-    expect(document.body.textContent).not.toContain(SIGN_IN_REQUIRED);
+    expect(document.body.textContent).not.toContain(SESSION_TEXT);
   });
 });
