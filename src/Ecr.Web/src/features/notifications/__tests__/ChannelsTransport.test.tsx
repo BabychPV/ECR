@@ -6,14 +6,20 @@ import { ChannelsPanel } from '@/features/notifications/ChannelsPanel';
 import { testTheme } from '@/test/render';
 
 /**
- * Транспорт поштового каналу — із налаштувань застосунку (`c3652cee`).
+ * Транспорт поштового каналу — із налаштувань застосунку (`c3652cee`), і чи є
+ * каналу чим доставляти (`208fb92e`, `transportConfigured`).
  *
- * ⛔ Три твердження, заради яких цей файл існує:
+ * ⛔ Чотири твердження, заради яких цей файл існує:
  *   1. екран каже, ЗВІДКИ береться транспорт, і каже це за ознакою сервера
  *      `transportFromConfiguration`, а не за видом каналу;
- *   2. `false` для пошти — попередження «не надсилатиме», а не порожнє місце
- *      і не «налаштовано»;
- *   3. збереження не везе `host`/`port`/`useTls`/`from` — сервер відповів би
+ *   2. попередження «не надсилатиме» — за `transportConfigured === false`, А
+ *      НЕ за `transportFromConfiguration`: сервер ніколи не віддає для пошти
+ *      `transportFromConfiguration: false`, тож попередження на цій ознаці
+ *      мертве (не показується НІКОЛИ) — саме це і виправлено;
+ *   3. дві ознаки незалежні: канал може одночасно брати транспорт із
+ *      налаштувань застосунку І не мати його налаштованим (порожній
+ *      `Smtp:Host`) — обидва рядки на екрані тоді на місці разом;
+ *   4. збереження не везе `host`/`port`/`useTls`/`from` — сервер відповів би
  *      на них `422 ECR-REQ-0422`.
  */
 
@@ -33,6 +39,7 @@ interface Channel {
   readonly modifiedAt: string;
   readonly settings: { readonly recipients?: string[]; readonly title?: string };
   readonly transportFromConfiguration: boolean;
+  readonly transportConfigured: boolean;
 }
 
 const Mail: Channel = {
@@ -44,6 +51,7 @@ const Mail: Channel = {
   modifiedAt: '2026-09-01T10:00:00Z',
   settings: { recipients: ['ops@example.org'], title: 'ECR' },
   transportFromConfiguration: true,
+  transportConfigured: true,
 };
 
 const Teams: Channel = {
@@ -55,6 +63,7 @@ const Teams: Channel = {
   modifiedAt: '2026-09-02T10:00:00Z',
   settings: { title: 'ECR' },
   transportFromConfiguration: false,
+  transportConfigured: true,
 };
 
 function json(body: unknown, status = 200): Response {
@@ -117,20 +126,36 @@ describe('ChannelsPanel: транспорт пошти — з налаштува
     expect(text).not.toContain(NotConfigured);
   }, 30_000);
 
-  it('сервер каже «ні» — попередження «не надсилатиме», а не «налаштовано»', async () => {
-    mockServer([{ ...Mail, transportFromConfiguration: false }, Teams]);
+  it('SMTP-транспорт процесу не налаштовано — попередження «не надсилатиме» поруч із підказкою', async () => {
+    mockServer([{ ...Mail, transportConfigured: false }, Teams]);
     show();
 
     const row = await screen.findByRole('row', { name: /Ops mailbox/ });
     const text = row.textContent ?? '';
 
     /*
-     * ⛔ Ознака читається з відповіді, а не виводиться з `kind === 'Smtp'`:
-     * саме ця заміна зробила б рядок зеленим «налаштовано» там, де сервер
-     * сказав протилежне.
+     * ⛔ Ознака читається САМЕ з `transportConfigured`, а не з
+     * `transportFromConfiguration` (та лишається `true`) і не з
+     * `kind === 'Smtp'`: заміна на будь-яке з двох дала б тут «немає
+     * попередження» там, де сервер сказав «доставляти нічим».
      */
     expect(text).toContain(NotConfigured);
-    expect(text).not.toContain(FromConfiguration);
+    // ⚠ Незалежний факт: канал усе одно бере транспорт із налаштувань
+    // застосунку — просто там порожньо. Обидва рядки на місці разом.
+    expect(text).toContain(FromConfiguration);
+  }, 30_000);
+
+  it('дзеркало: транспорт налаштовано — попередження немає навіть поруч із підказкою', async () => {
+    mockServer([{ ...Mail, transportConfigured: true }, Teams]);
+    show();
+
+    const row = await screen.findByRole('row', { name: /Ops mailbox/ });
+    const text = row.textContent ?? '';
+
+    // ⛔ Тут і попередній тест відрізняються ЛИШЕ `transportConfigured`:
+    // мутація «показувати попередження завжди» червонить саме цей тест.
+    expect(text).toContain(FromConfiguration);
+    expect(text).not.toContain(NotConfigured);
   }, 30_000);
 
   it('Teams — ні «з налаштувань застосунку», ні попередження про SMTP', async () => {
@@ -147,7 +172,7 @@ describe('ChannelsPanel: транспорт пошти — з налаштува
   }, 30_000);
 
   it('форма наявного каналу каже те, що сказав сервер, а не статичну підказку', async () => {
-    mockServer([{ ...Mail, transportFromConfiguration: false }, Teams]);
+    mockServer([{ ...Mail, transportConfigured: false }, Teams]);
     show();
 
     const row = await screen.findByRole('row', { name: /Ops mailbox/ });
@@ -156,10 +181,11 @@ describe('ChannelsPanel: транспорт пошти — з налаштува
     const dialog = await screen.findByRole('dialog');
     await within(dialog).findByLabelText(/notifications\.smtpRecipients/);
 
-    // ⚠ Саме `false`: на `true` статична підказка й відповідь сервера
-    // збігаються текстом, і твердження не відрізнило б одне від одного.
+    // ⚠ Попередження — за `transportConfigured` з відповіді сервера;
+    // підказка «з налаштувань застосунку» лишається (`transportFromConfiguration`
+    // не чіпали), і обидва рядки на формі не суперечать одне одному.
     expect(dialog.textContent ?? '').toContain(NotConfigured);
-    expect(dialog.textContent ?? '').not.toContain(FromConfiguration);
+    expect(dialog.textContent ?? '').toContain(FromConfiguration);
   }, 30_000);
 
   it('форма нового каналу — відповіді сервера ще немає, тож лишається підказка', async () => {

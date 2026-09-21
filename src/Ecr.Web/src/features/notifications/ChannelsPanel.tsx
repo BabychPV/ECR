@@ -311,13 +311,17 @@ export function ChannelsPanel(): JSX.Element {
             */}
             {draft.kind === 'Smtp' && (
               <>
-                {draft.transportFromConfiguration === null ? (
+                {draft.transportFromConfiguration === null || draft.transportConfigured === null ? (
                   <Text size="sm" c="dimmed">
                     {t('notifications.smtpTransportHint')}
                   </Text>
                 ) : (
                   <TransportSource
-                    channel={{ kind: draft.kind, transportFromConfiguration: draft.transportFromConfiguration }}
+                    channel={{
+                      kind: draft.kind,
+                      transportFromConfiguration: draft.transportFromConfiguration,
+                      transportConfigured: draft.transportConfigured,
+                    }}
                   />
                 )}
 
@@ -422,8 +426,9 @@ export function ChannelsPanel(): JSX.Element {
  * ⚠ Полів `host`/`port`/`from`/`useTls` тут НЕМАЄ навмисно: сервер відхиляє
  * їх `422 ECR-REQ-0422` (`notificationChannelTransportFromConfiguration`).
  *
- * ⚠ `transportFromConfiguration` — ознака з ВІДПОВІДІ сервера, на сервер вона
- * не їде; `null` — канал ще не створено, і сервер про нього нічого не казав.
+ * ⚠ `transportFromConfiguration` і `transportConfigured` — ознаки з ВІДПОВІДІ
+ * сервера, на сервер вони не їдуть; `null` — канал ще не створено, і сервер
+ * про нього нічого не казав.
  */
 interface ChannelDraft {
   readonly id: number | null;
@@ -433,6 +438,7 @@ interface ChannelDraft {
   readonly recipients: string;
   readonly title: string;
   readonly transportFromConfiguration: boolean | null;
+  readonly transportConfigured: boolean | null;
 }
 
 function emptyDraft(): ChannelDraft {
@@ -444,6 +450,7 @@ function emptyDraft(): ChannelDraft {
     recipients: '',
     title: '',
     transportFromConfiguration: null,
+    transportConfigured: null,
   };
 }
 
@@ -456,6 +463,7 @@ function draftOf(channel: NotificationChannel): ChannelDraft {
     recipients: (channel.settings.recipients ?? []).join(', '),
     title: channel.settings.title ?? '',
     transportFromConfiguration: channel.transportFromConfiguration,
+    transportConfigured: channel.transportConfigured,
   };
 }
 
