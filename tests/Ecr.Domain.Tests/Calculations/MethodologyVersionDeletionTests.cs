@@ -42,4 +42,23 @@ public sealed class MethodologyVersionDeletionTests
         Assert.Equal("ECR-CALC-0409", error.ErrorCode);
         Assert.Equal("UsedInCalculations", error.Details!["reason"]);
     }
+
+    /// <summary>
+    /// Заголовок <c>ECR-CALC-0409</c> нейтральний, тож відмову чотирьох очей від
+    /// відмови видалення відрізняє лише <c>messageKey</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public void Чотири_очі_і_видалення_мають_той_самий_код_але_різні_messageKey()
+    {
+        var fourEyes = Assert.Throws<DomainException>(
+            () => Draft().Publish(publishedByUserId: 7, "first", new DateOnly(2026, 1, 1), testsPassed: true, Now));
+        var deletion = Assert.Throws<DomainException>(() => Draft().EnsureDeletable(usedInCalculations: true));
+
+        Assert.Equal(deletion.ErrorCode, fourEyes.ErrorCode);
+        Assert.NotNull(fourEyes.Details);
+        Assert.Equal("err.ECR-CALC-0409.authorCannotPublish", fourEyes.Details["messageKey"]);
+        Assert.Equal("2.0", fourEyes.Details["version"]);
+        Assert.Equal("err.ECR-CALC-0409.versionUsedInCalculations", deletion.Details!["messageKey"]);
+    }
 }

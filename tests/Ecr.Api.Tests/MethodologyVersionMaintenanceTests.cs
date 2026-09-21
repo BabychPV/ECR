@@ -69,6 +69,13 @@ public sealed class MethodologyVersionMaintenanceTests(SqlServerFixture sql)
         Assert.Equal("ECR-CALC-0409", problem.GetProperty("errorCode").GetString());
         Assert.Equal("Published", problem.GetProperty("reason").GetString());
 
+        // Заголовок коду спільний для всіх його відмов: правило чотирьох очей
+        // над відмовою видалення було б неправдою.
+        var title = problem.GetProperty("title").GetString();
+        Assert.Equal("Conflicting methodology state", title);
+        Assert.DoesNotContain("eyes", title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("draft", problem.GetProperty("detail").GetString(), StringComparison.OrdinalIgnoreCase);
+
         await using var db = Db();
         Assert.True(await db.MethodologyVersions.AnyAsync(v => v.Id == stand.PublishedId).ConfigureAwait(true));
     }

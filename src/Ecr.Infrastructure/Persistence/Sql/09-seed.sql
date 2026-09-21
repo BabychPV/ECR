@@ -737,6 +737,9 @@ USING (VALUES
     (N'err.ECR-CALC-0404.version',              N'en', N'Methodology version {methodologyVersionId} does not exist in this methodology.', 1),
     (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'en', N'Methodology version {version} has already been used in calculations and cannot be deleted.', 1),
+    -- D-40: with a neutral code title, the four-eyes refusals carry their own detail.
+    (N'err.ECR-CALC-0409.authorCannotPublish',  N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.', 1),
+    (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.', 1),
     (N'err.ECR-SYS-0500.contactAdmin',          N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
 
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
@@ -819,7 +822,9 @@ USING (VALUES
 
     -- Розрахунки і методології.
     (N'err.ECR-CALC-0404',  N'en', N'Methodology version not found', 1),
-    (N'err.ECR-CALC-0409',  N'en', N'A second pair of eyes is required', 1),
+    -- Фраза `ECR-CALC-0409` покриває всі його стани: чотири очі, видалення
+    -- версії, зміна не-чернетки, зайнята дата. Який саме — каже подробиця.
+    (N'err.ECR-CALC-0409',  N'en', N'Conflicting methodology state', 1),
     (N'err.ECR-CALC-0422',  N'en', N'The methodology version cannot be published', 1),
     (N'err.ECR-CALC-0431',  N'en', N'Unsupported operator in a formula', 1),
     (N'err.ECR-CALC-0432',  N'en', N'Undeclared formula argument', 1),

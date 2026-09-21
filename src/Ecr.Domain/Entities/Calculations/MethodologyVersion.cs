@@ -159,10 +159,17 @@ public sealed class MethodologyVersion : Entity<int>
         // у ній того, що побачить інший.
         if (publishedByUserId == CreatedByUserId)
         {
+            // Власний messageKey обов'язковий: заголовок коду нейтральний, і без
+            // подробиці людина не дізналась би, що відмовило саме правило D-40.
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"Користувач {publishedByUserId} є автором версії {Version} і не може її опублікувати "
-                + "(правило чотирьох очей, D-40).");
+                + "(правило чотирьох очей, D-40).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.authorCannotPublish",
+                    ["version"] = Version,
+                });
         }
 
         // Причина обов'язкова (ФВ-14.7). Порожній рядок і пробіли — те саме,

@@ -352,6 +352,11 @@ public static class ErrorCodes
     public const string UnitContextualCoefficient = "ECR-UOM-4221";
 
     // Розрахунки
+
+    /// <summary>
+    /// Стан методології чи версії не дозволяє дію. ⚠ Не лише чотири очі (D-40):
+    /// тим самим кодом відмовляє й видалення версії (BE-25); випадок — у <c>messageKey</c>.
+    /// </summary>
     public const string MethodologyFourEyes = "ECR-CALC-0409";
     public const string MethodologyNoGreenTest = "ECR-CALC-0422";
     public const string RecalculateClosedPeriod = "ECR-CALC-4221";

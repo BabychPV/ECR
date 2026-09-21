@@ -206,7 +206,8 @@ public sealed class RunCalculationHandler(
         {
             throw new BusinessRuleException(
                 "ECR-CALC-0409",
-                "Погодити власний перерахунок закритого періоду не можна (правило чотирьох очей, D-40).");
+                "Погодити власний перерахунок закритого періоду не можна (правило чотирьох очей, D-40).",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0409.ownRecalculationApproval" });
         }
     }
 }

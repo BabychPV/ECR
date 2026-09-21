@@ -282,6 +282,7 @@ public sealed class MethodologyPublishTests
             () => handler.HandleAsync(
                 1, 202601, new ClosedPeriodApproval(Reviewer, "треба"), CancellationToken.None));
         Assert.Equal("ECR-CALC-0409", own.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.ownRecalculationApproval", own.Details?["messageKey"]);
 
         var blank = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(

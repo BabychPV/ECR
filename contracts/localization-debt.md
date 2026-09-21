@@ -126,7 +126,7 @@
 | `src/Ecr.Application/Calculations/MethodologyPublishChecks.cs` | 2 |
 | `src/Ecr.Application/Calculations/MethodologyQueryHandlers.cs` | 1 |
 | `src/Ecr.Application/Calculations/PublishMethodologyHandler.cs` | 9 |
-| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 6 |
+| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 5 |
 | `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
@@ -179,7 +179,7 @@
 | `src/Ecr.Domain/Entities/Calculations/MethodologyFormula.cs` | 3 |
 | `src/Ecr.Domain/Entities/Calculations/MethodologyImport.cs` | 1 |
 | `src/Ecr.Domain/Entities/Calculations/MethodologyRule.cs` | 1 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs` | 7 |
+| `src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs` | 6 |
 | `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/ColumnDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
