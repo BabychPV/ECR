@@ -295,6 +295,13 @@ try {
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
     } | Out-Null
 
+    # ⛔ Перелогін обов'язковий: PUT грантів крутить SecurityStamp УСІХ членів
+    # ролі (`RotateStampsForRoleAsync`), тобто й самого e2e-admin. Далі стару
+    # cookie рятував лише 5-секундний кеш штампа; під навантаженням пауза між
+    # PUT перевищувала 5 с — і другий PUT отримував 401 ECR-AUTH-0401.
+    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Admin-Work-2026!' } | Out-Null
+
     Call PUT "/api/v1/roles/$operatorRole/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Write'; isDeny = $false })
     } | Out-Null
