@@ -145,11 +145,15 @@ describe('незбережені правки при обриві сесії', (
     await signIn();
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('3 unsaved change(s)');
-    expect(alert.textContent).toContain(`#${String(DocumentId)}`);
+    // ⚠ Рядків `login.lostEdits.*` у тестовому каталозі навмисно немає (сід
+    // заводить інтегратор): `t()` показує ключ `⟦…⟧` разом із параметрами, і
+    // саме вони доводять, що втрачено ТРИ зміни в ЦЬОМУ документі.
+    expect(alert.textContent).toContain(
+      `⟦login.lostEdits.text (count=3, documentId=${String(DocumentId)})⟧`,
+    );
 
     // Повертає до документа, звідки перенаправили.
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: '⟦login.lostEdits.continue⟧' }));
     expect(await screen.findByText('document page')).toBeDefined();
   });
 
@@ -174,7 +178,7 @@ describe('незбережені правки при обриві сесії', (
 
     expect(await screen.findByText('home')).toBeDefined();
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(document.body.textContent).not.toContain('unsaved change');
+    expect(document.body.textContent).not.toContain('login.lostEdits');
   });
 
   it('без незбережених правок 401 нічого не лишає', async () => {

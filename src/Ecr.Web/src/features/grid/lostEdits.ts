@@ -92,6 +92,7 @@ export function takeLostEdits(userId: number): LostEdits | null {
     return {
       documentId: value.documentId,
       count: value.count,
+      // Цю перевірку замінить `safeReturnPath` (гілка 37) після зведення `LoginPage`.
       from: typeof value.from === 'string' && value.from.startsWith('/') && !value.from.startsWith('//')
           ? value.from
           : '/',

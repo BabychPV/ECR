@@ -89,17 +89,10 @@ const LANGUAGE_LABEL = 'Interface language';
 /*
  * Повідомлення про втрачені правки (`features/grid/lostEdits.ts`).
  *
- * ⚠ ЛІТЕРАЛИ з тієї ж причини, що `passwordToggleProps`: `09-seed.sql` цій
- * гілці недоступний, а голий `t()` без рядка показав би `⟦...⟧`. Ключі для
- * сіду: `login.lostEdits.title`, `login.lostEdits.text` ({count}, {documentId}),
- * `login.lostEdits.continue` — область public.
+ * ⚠ Ключі `login.lostEdits.title`, `login.lostEdits.text` ({count},
+ * {documentId}), `login.lostEdits.continue` — область public; рядки сіду
+ * заводить інтегратор.
  */
-const LOST_EDITS_TITLE = 'Unsaved changes were lost';
-const LOST_EDITS_CONTINUE = 'Continue';
-
-function lostEditsText(lost: LostEdits): string {
-  return `${String(lost.count)} unsaved change(s) in document #${String(lost.documentId)} were lost — your session ended. Please re-enter them.`;
-}
 
 /** Слід саме цього користувача — `userId` з профілю щойно відкритої сесії. */
 async function ownLostEdits(): Promise<LostEdits | null> {
@@ -218,11 +211,11 @@ export function LoginPage(): JSX.Element {
       <Center h="100vh">
         <Card withBorder w={380} p="lg">
           <Stack gap="sm">
-            <Alert color="statusError" role="alert" title={LOST_EDITS_TITLE}>
-              {lostEditsText(lost)}
+            <Alert color="statusError" role="alert" title={t('login.lostEdits.title')}>
+              {t('login.lostEdits.text', { count: lost.count, documentId: lost.documentId })}
             </Alert>
             <Button onClick={() => navigate(safeReturnPath(lost.from), { replace: true })}>
-              {LOST_EDITS_CONTINUE}
+              {t('login.lostEdits.continue')}
             </Button>
           </Stack>
         </Card>
