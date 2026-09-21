@@ -417,6 +417,12 @@ public sealed partial class EndpointCoverageTests
         new("pages/admin/SnapshotsPage.tsx", "blockedReason", 1, "pages/admin/SnapshotsPage.tsx",
             ["snapshots.parametersUnknown", "snapshots.parametersBlocked"],
             "Причина, чому зріз не можна замовити."),
+        new("features/reports/SnapshotFormatBadge.tsx", "look.label", 1, "features/reports/SnapshotFormatBadge.tsx",
+            ["snapshots.formatLegacy", "snapshots.formatUnknown"],
+            "Позначка формату чисел зрізу (legacy/unknown; current не позначається)."),
+        new("features/reports/SnapshotFormatBadge.tsx", "look.hint", 1, "features/reports/SnapshotFormatBadge.tsx",
+            ["snapshots.formatLegacyHint", "snapshots.formatUnknownHint"],
+            "Підказка до позначки формату чисел зрізу."),
 
         new("features/integration/CollectionScheduleTab.tsx", "problem.key", 1, "features/integration/cronFormat.ts",
             ["schedule.cronEmpty", "schedule.cronTooLong", "schedule.cronFieldCount", "schedule.cronDayQuestion", "schedule.cronField"],
