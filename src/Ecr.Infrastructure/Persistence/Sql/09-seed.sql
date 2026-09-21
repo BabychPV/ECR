@@ -1801,6 +1801,14 @@ USING (VALUES
     (N'registries.usageNone',            N'en', N'Not used anywhere', 1),
     (N'registries.usageTotal',           N'en', N'{total} references', 1),
     (N'registries.usageShown',           N'en', N'Showing {shown} of {total}', 1),
+    -- Рід залежного (`UsageItemDto.Kind`, `RegistryStore.GetUsageAsync`).
+    -- ⚠ `data` — не звіт: це значення комірок документів (`doc.CellValue`), що
+    -- посилаються на запис довідника; один рядок на всі документи, без числа.
+    (N'registries.usageKind.templateColumn',       N'en', N'Template column', 1),
+    (N'registries.usageKind.registryField',        N'en', N'Registry field', 1),
+    (N'registries.usageKind.methodologySubstance', N'en', N'Methodology substance', 1),
+    (N'registries.usageKind.sourceEntity',         N'en', N'Source entity', 1),
+    (N'registries.usageKind.data',                 N'en', N'Values in documents', 1),
     (N'registries.newRegistry',          N'en', N'New registry', 1),
     (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
     (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),
