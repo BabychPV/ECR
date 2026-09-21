@@ -60,6 +60,18 @@ export function roundToScale(text: string, column: ColumnDto): string | null {
 
   const scale = column.scale;
   if (scale === null || scale === undefined) return null;
+
+  return roundDecimalText(text, scale);
+}
+
+/**
+ * Ядро `roundToScale` без прив'язки до колонки: текст → округлений до `scale`
+ * знаків (AwayFromZero), суто рядково. `null` — вже в масштабі або не число.
+ *
+ * ⚠ Спільне для вводу (`roundToScale`, лише `Decimal`) і для ПОКАЗУ
+ * (`cellDisplay`, усі числові типи зі `scale`) — одне правило, не дві копії.
+ */
+export function roundDecimalText(text: string, scale: number): string | null {
   if (!Number.isInteger(scale) || scale < 0) return null;
 
   const parts = parseDecimal(text);

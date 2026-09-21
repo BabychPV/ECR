@@ -200,8 +200,23 @@ describe('Д: формат комірки — доповнення нулями 
     expect(shownValue(slice({ C1: '1e3' }, [column({ scale: 2 })]), '1e3')).toBe('1e3');
   });
 
-  it('довший дріб за scale не зрізається показом', () => {
-    expect(shownValue(slice({ C1: '1.23456' }, [column({ scale: 2 })]), '1.23456')).toBe('1.23456');
+  it('довший дріб округлюється ПОКАЗОМ до scale — AwayFromZero, як roundToScale', () => {
+    // ✎ Рішення координатора 2026-09-22: «рівно N» — це й округлення показу.
+    const formula = [column({ dataType: 'Formula', scale: 2 })];
+
+    expect(shownValue(slice({ C1: '1.005' }, formula), '1.005')).toBe('1.01');
+    expect(shownValue(slice({ C1: '-1.005' }, formula), '-1.005')).toBe('-1.01');
+    expect(shownValue(slice({ C1: '1.23456' }, [column({ scale: 2 })]), '1.23456')).toBe('1.23');
+    // Буфер обміну лишає повне значення.
+    expect(cellText('1.005')).toBe('1.005');
+  });
+
+  it('20 значущих цифр округлюються рядково, не через double', () => {
+    // ⛔ Через `Number` дріб став би ...0124 (13 знаків ≤ 15) і показ дав би
+    // `...012400`; рядкове AwayFromZero над ...0123456 дає ...012346.
+    const data = slice({ C1: Twenty }, [column({ dataType: 'Calculated', scale: 15 })]);
+
+    expect(norm(shownValue(data, Twenty))).toBe('1,234.123456789012346');
   });
 
   it('буфер обміну нулів показу не отримує', () => {

@@ -86,10 +86,15 @@ function sliceFixture(): TableSliceDto {
     periodKey: 202609,
     tableInstanceId: 1,
     // C1 — масштаб 4; C2 — без масштабу (дзеркало: доповнення немає).
-    columns: [column('C1', 0, 4), column('C2', 1, null)],
+    // C3 — `Formula` зі scale 2: показ округлюється, модель — ні.
+    columns: [
+      column('C1', 0, 4),
+      column('C2', 1, null),
+      { ...column('C3', 2, 2), dataType: 'Formula', isReadOnly: true },
+    ],
     rows: [
       {
-        cells: { C1: '2.0000000000', C2: '1.5000000000' },
+        cells: { C1: '2.0000000000', C2: '1.5000000000', C3: '1.0050000000' },
         isOrphaned: false,
         label: null,
         ordinal: 0,
@@ -203,6 +208,17 @@ describe('формат комірки: scale = 4', () => {
     show();
 
     expect((await screen.findByTestId('cell-r2-C1')).textContent).toBe('');
+  });
+
+  it('Formula, scale 2: «1.005» показано як «1.01», модель лишається повною', async () => {
+    mockServer();
+    show();
+
+    const cell = await screen.findByTestId('cell-r1-C3');
+
+    expect(cell.textContent).toBe('1.01');
+    // ⛔ Округлення показу не потрапляє в модель (редактор, буфер, PATCH).
+    expect(cell.getAttribute('data-model')).toBe('1.0050000000');
   });
 
   it('дзеркало: колонка без scale нулями не доповнюється', async () => {
