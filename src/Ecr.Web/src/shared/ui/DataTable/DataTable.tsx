@@ -8,7 +8,13 @@ import {
   formatNumber,
   normalizeDecimal,
 } from '@/shared/format';
-import { MaxColumns, type DataTableColumn, type SortKey, type SortState } from './types';
+import {
+  MaxColumns,
+  type DataTableColumn,
+  type SortKey,
+  type SortScalar,
+  type SortState,
+} from './types';
 
 /**
  * Таблиця переліку набору (`KIT.md` §6.5, директива №15 §2, Шар 3, крок
@@ -126,6 +132,20 @@ export interface DataTableProps<Row> {
 
   /** Висота області прокручування; без неї — висота за вмістом (`auto`). */
   readonly height?: number | string | undefined;
+
+  /**
+   * Сортування, з яким таблиця ВІДКРИВАЄТЬСЯ; без нього — порядок сервера.
+   *
+   * ⛔ Це стан шапки, а не пресортований масив: `aria-sort` і стрілка на старті
+   * кажуть правду про порядок рядків, а клацання продовжує цикл від нього
+   * (зростання → спадання → порядок сервера). Пресортування в екрані давало
+   * порядок, про який шапка мовчала (`aria-sort="none"` на впорядкованій
+   * колонці).
+   *
+   * ⚠ Читається ОДИН раз, при монтуванні — як початкове значення стану. Зміна
+   * пропу пізніше не скидає вибір людини.
+   */
+  readonly defaultSort?: SortState | undefined;
 }
 
 /**
@@ -169,8 +189,18 @@ function sortKeyOf<Row>(column: DataTableColumn<Row>, row: Row): SortKey {
 }
 
 /** Чи вважається значення відсутнім для сортування. */
-function isMissing(value: SortKey): boolean {
+function isMissing(value: SortScalar): boolean {
   return value === null || value === undefined || value === '';
+}
+
+/**
+ * Чи є ключ сортування кортежем.
+ *
+ * ⚠ Власний предикат, а не голий `Array.isArray`: на `readonly`-масиві той не
+ * звужує гілку «не масив», і компілятор лишив би в ній кортеж.
+ */
+function isTuple(value: SortKey): value is readonly SortScalar[] {
+  return Array.isArray(value);
 }
 
 /**
@@ -245,6 +275,10 @@ function compareDecimals(left: string, right: string): number | null {
  * ⚠ Це НЕ та сама стеля, що в зрізі звітності (`SnapshotRowsModal`, `D15-09`,
  * десять знаків). Різниця існувала й до зведення копій в одне місце; тепер вона
  * хоч і лишається, але видима — окремим аргументом, а не окремою функцією.
+ *
+ * ⛔ Дефолт свідомо НЕ змінено разом із появою `exact`: скільки знаків показує
+ * перелік — відкрите рішення людини. Колонка, якій округлення шкодить,
+ * відмовляється від нього поіменно (`DataTableColumn.exact`).
  */
 const CellFractionCeiling = 3;
 
@@ -273,6 +307,21 @@ function compareKeys(
   collator: Intl.Collator,
   numeric: boolean,
 ): number {
+  // Кортеж — поелементно; кожен елемент за тими ж правилами, включно з
+  // пропусками в кінці. Скаляр проти кортежу — як кортеж з одного елемента.
+  if (isTuple(a) || isTuple(b)) {
+    const left: readonly SortScalar[] = isTuple(a) ? a : [a];
+    const right: readonly SortScalar[] = isTuple(b) ? b : [b];
+
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+      const order = compareKeys(left[index], right[index], sign, collator, numeric);
+
+      if (order !== 0) return order;
+    }
+
+    return 0;
+  }
+
   const aMissing = isMissing(a);
   const bMissing = isMissing(b);
 
@@ -294,7 +343,14 @@ function compareKeys(
   return collator.compare(String(a), String(b)) * sign;
 }
 
-/** Наступний стан сортування за клацанням: зростання → спадання → як було. */
+/**
+ * Наступний стан сортування за клацанням: зростання → спадання → порядок
+ * сервера.
+ *
+ * ⚠ Третій клац веде до `null`, а не назад до `defaultSort`: інакше колонку
+ * початкового порядку неможливо було б «відпустити» — вона ходила б по колу
+ * зростання ↔ спадання, і порядок сервера став би недосяжним.
+ */
 function nextSort(current: SortState | null, key: string): SortState | null {
   if (current === null || current.key !== key) return { key, direction: 'asc' };
   if (current.direction === 'asc') return { key, direction: 'desc' };
@@ -338,6 +394,7 @@ export function DataTable<Row>({
   selectedKey,
   caption,
   height,
+  defaultSort,
 }: DataTableProps<Row>): JSX.Element {
   /*
    * ⛔ `L5` кидає ВИНЯТОК у режимі розробки, а не пише в консоль (`KIT.md`
@@ -361,7 +418,7 @@ export function DataTable<Row>({
     );
   }
 
-  const [sort, setSort] = useState<SortState | null>(null);
+  const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
 
   const collator = useMemo(() => new Intl.Collator(formatLocale()), []);
 
@@ -609,12 +666,29 @@ function Cell<Row>({
 
   if (raw === null || raw === undefined) return null;
 
-  if (typeof raw === 'number') return <>{formatNumber(raw)}</>;
+  const magnitude = column.num === true;
+
+  /*
+   * ⛔ `exact` — перед будь-яким форматуванням: значення їде на екран дослівно.
+   * Рядок — як прийшов (включно з масштабом колонки), `number` — `String`, без
+   * `Intl`. Лише так множник `0.4535923700` не стає `0.454`.
+   */
+  if (magnitude && column.exact === true) {
+    if (typeof raw === 'string' || typeof raw === 'number') return <>{String(raw)}</>;
+  }
+
+  /*
+   * ⛔ `formatNumber` — лише для ВЕЛИЧИНИ (`num`). Доти тут стояло безумовне
+   * `formatNumber(raw)`, і ідентифікатор `1234` у колонці без `num` їхав на
+   * екран як `1,234` — числом, якого в базі немає. Екрани обходили це власним
+   * `render: String(…)`; тепер колонка, що не сказала `num`, показує число як є.
+   */
+  if (typeof raw === 'number') return <>{magnitude ? formatNumber(raw) : String(raw)}</>;
 
   if (typeof raw === 'string') {
     // ⛔ Лише числова колонка: `'007'` у колонці кодів теж нормалізується — і
     // поїхав би на екран сімкою.
-    if (column.num === true) {
+    if (magnitude) {
       const shown = formatDecimal(raw, undefined, CellFractionCeiling);
 
       if (shown !== null) return <>{shown}</>;
