@@ -231,6 +231,34 @@ public sealed class MappingPreviewTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "BE-27")]
+    public void Призупинений_мапінг_видно_в_переліку_з_isActive_false_а_адреси_він_не_дає()
+    {
+        // ⛔ Пауза — рівно те, що людина щойно змінила. Перегляд, де
+        // призупинений мапінг невідрізнимий від діючого, збрехав би саме тут.
+        var data = Data(
+            maps:
+            [
+                Map(1, "Flare_01_CO", rowKey: "Flare_01", aggregation: "Sum"),
+                Map(2, "Flare_01_NOx", rowKey: "Flare_01", aggregation: "Sum", isActive: false),
+            ],
+            points:
+            [
+                Point("Flare_01_CO", From.AddHours(1), 10m),
+                Point("Flare_01_NOx", From.AddHours(1), 3m),
+            ]);
+
+        var preview = PreviewMappingHandler.Compose(data, From, To);
+
+        Assert.True(Assert.Single(preview.Fields, f => f.FieldMapId == 1).IsActive);
+        Assert.False(Assert.Single(preview.Fields, f => f.FieldMapId == 2).IsActive);
+
+        // Точки призупиненого поля нікуди не лягають — так і сказано.
+        Assert.Equal("Flare_01_NOx", Assert.Single(preview.UnmappedSourceFields).SourcePath);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Урізана_вибірка_позначається_прапорцем()
     {
         // ⛔ Урізана серія дає правильне НА ВИГЛЯД число: `Sum` просто менша,
@@ -313,8 +341,9 @@ public sealed class MappingPreviewTests
 
     /// <summary>Мапінг поля.</summary>
     private static FieldMapRef Map(
-        int id, string field, string? rowKey, string? aggregation, string? columnCode = "CO_MASS")
-        => new(id, field, rowKey, 100, columnCode, columnCode is not null, aggregation, "kg", "t");
+        int id, string field, string? rowKey, string? aggregation, string? columnCode = "CO_MASS",
+        bool isActive = true)
+        => new(id, field, rowKey, 100, columnCode, columnCode is not null, aggregation, "kg", "t", isActive);
 
     /// <summary>Реальна точка джерела.</summary>
     private static RawPointRef Point(string path, DateTime at, decimal value)

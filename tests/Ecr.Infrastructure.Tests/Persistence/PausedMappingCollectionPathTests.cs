@@ -96,6 +96,39 @@ public sealed class PausedMappingCollectionPathTests(SqlServerFixture sql)
         Assert.Equal(30m, value.Value);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "BE-27")]
+    public async Task Перегляд_мапінгу_приносить_і_призупинений_із_ознакою_isActive()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+
+        await using var db = builder.CreateContext();
+
+        // ⚠ Перегляд відкривається лише на АКТИВНІЙ сутності — тож вона активна
+        // рівно на час читання й вимикається у `finally` (див. `ArrangeAsync`).
+        var stand = await ArrangeAsync(db, chain, keepEntityActive: true);
+        try
+        {
+            var data = await new MappingPreviewStore(db).LoadAsync(
+                stand.SourceEntityId, FromUtc, ToUtc, maxPoints: 100, CancellationToken.None);
+
+            // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути `&& m.IsActive` у вибірку мапінгів
+            // `MappingPreviewStore` — і призупинений мапінг зникає з перегляду.
+            Assert.NotNull(data);
+            Assert.True(Assert.Single(data.Maps, m => m.SourceField == stand.ActiveField).IsActive);
+            Assert.False(Assert.Single(data.Maps, m => m.SourceField == stand.PausedField).IsActive);
+        }
+        finally
+        {
+            var entity = await db.SourceEntities.SingleAsync(e => e.Id == stand.SourceEntityId);
+            entity.Deactivate();
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+    }
+
     /// <summary>Що саме заведено для тесту.</summary>
     private sealed record Stand(
         int SourceEntityId, string ActiveField, string PausedField, string ActiveRowKey);
@@ -104,7 +137,8 @@ public sealed class PausedMappingCollectionPathTests(SqlServerFixture sql)
     /// Джерело, сутність, два мапінги (діючий і призупинений) і зібрані точки
     /// за ОБОМА полями.
     /// </summary>
-    private async Task<Stand> ArrangeAsync(EcrDbContext db, TestDocument chain)
+    /// <remarks><c>keepEntityActive</c> — тоді тест сам вимикає сутність у <c>finally</c>.</remarks>
+    private async Task<Stand> ArrangeAsync(EcrDbContext db, TestDocument chain, bool keepEntityActive = false)
     {
         var tag = Guid.NewGuid().ToString("N")[..8];
 
@@ -121,7 +155,11 @@ public sealed class PausedMappingCollectionPathTests(SqlServerFixture sql)
         // робить `SourcesHealthCheck` жовтим для КОЖНОГО наступного прогону.
         // Ані `GetFieldMapsAsync`, ані `MaterializeCollectedDataJob` активності
         // джерела не питають — вони йдуть від мапінгів.
-        entity.Deactivate();
+        if (!keepEntityActive)
+        {
+            entity.Deactivate();
+        }
+
         db.SourceEntities.Add(entity);
         await db.SaveChangesAsync(CancellationToken.None);
 

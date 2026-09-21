@@ -35,7 +35,7 @@ public interface IMappingPreviewStore
 
 /// <summary>Сирий матеріал перегляду.</summary>
 /// <param name="Entity">Сутність джерела.</param>
-/// <param name="Maps">Активні мапінги полів цієї сутності.</param>
+/// <param name="Maps">Мапінги полів цієї сутності — діючі й призупинені.</param>
 /// <param name="Points">Реальні точки вікна, за зростанням мітки часу.</param>
 /// <param name="IsTruncated">Точок у вікні більше за стелю: згортання неповне.</param>
 /// <param name="Columns">Колонки таблиць, у які цілить хоча б один мапінг.</param>
@@ -69,6 +69,7 @@ public sealed record SourceEntityRef(int Id, string Code, string? DisplayName);
 /// <param name="Aggregation">Спосіб згортання точок періоду.</param>
 /// <param name="SourceUnitCode">Одиниця джерела, оголошена в мапінгу.</param>
 /// <param name="TargetUnitCode">Одиниця, в якій значення лягає в ECR.</param>
+/// <param name="IsActive">Мапінг діє; <c>false</c> — призупинений (<c>BE-27</c>).</param>
 public sealed record FieldMapRef(
     int Id,
     string SourceField,
@@ -78,7 +79,8 @@ public sealed record FieldMapRef(
     bool TargetColumnExists,
     string? Aggregation,
     string? SourceUnitCode,
-    string? TargetUnitCode);
+    string? TargetUnitCode,
+    bool IsActive);
 
 /// <summary>Реальний рядок джерела — точка <c>ext.RawDataPoint</c> як є.</summary>
 /// <param name="SourcePath">Шлях атрибута в джерелі.</param>
