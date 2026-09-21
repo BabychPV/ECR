@@ -40,9 +40,6 @@ public sealed class ClientLayerRulesTests
     /// </summary>
     private static readonly string[] KnownViolations =
     [
-        // Утиліта безпечного return-шляху живе в pages, а потрібна гріду.
-        // Місце їй — shared/routing; перенесення — окремий PR.
-        "features/grid/lostEdits.ts -> pages/safeReturnPath",
         // Сторож незбережених змін у shared знає про автозбереження гріду.
         // Правильно — інверсія (реєстрація провайдера pending з features).
         "shared/ui/UnsavedGuard.tsx -> features/grid/autosave",
