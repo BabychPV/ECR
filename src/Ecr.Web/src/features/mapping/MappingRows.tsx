@@ -3,6 +3,8 @@ import { Badge, Stack, Table, Text, Title } from '@mantine/core';
 import type { MappingPreview } from '@/api/types';
 import { target } from './MappingGaps';
 import { outcomeColor, outcomeLabel } from './outcome';
+import { PausedBadge, mappingCounts } from './paused';
+import { toneFills } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 
@@ -18,12 +20,22 @@ import { t } from '@/shared/i18n';
  * найчастіше джерело мовчазних розходжень у числах (`ФВ-16.9`).
  */
 export function MappingRows({ preview }: { readonly preview: MappingPreview }): JSX.Element {
+  const counts = mappingCounts(preview.fields);
+
   return (
     <Stack gap="lg">
       <Stack gap="xs">
         <Title order={2} size="h4">
           {t('mapping.maps')}
         </Title>
+
+        {/* ⚠ Лише коли є пауза: «0 призупинених» під кожним справним
+            мапінгом — шум, а діючі за сервером рахуються тими ж, що й тут. */}
+        {counts.paused > 0 && (
+          <Text size="sm" c="dimmed" data-testid="mapping-counts">
+            {t('mapping.mapsSummary', { active: counts.active, paused: counts.paused })}
+          </Text>
+        )}
 
         <Table striped highlightOnHover className="ecr-sticky-head">
           <Table.Thead>
@@ -38,23 +50,48 @@ export function MappingRows({ preview }: { readonly preview: MappingPreview }): 
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {preview.fields.map((field) => (
-              <Table.Tr key={field.fieldMapId}>
-                <Table.Td>{field.sourceField}</Table.Td>
-                <Table.Td>{target(field.targetRowKey, field.targetColumnCode)}</Table.Td>
-                <Table.Td>{field.aggregation ?? '—'}</Table.Td>
-                <Table.Td>
-                  {field.sourceUnitCode ?? '—'} → {field.targetUnitCode ?? '—'}
-                </Table.Td>
-                <Table.Td>{field.pointCount}</Table.Td>
-                <Table.Td>{field.foldedValue ?? '—'}</Table.Td>
-                <Table.Td>
-                  <Badge color={outcomeColor(field.outcome)} variant="light">
-                    {outcomeLabel(field.outcome)}
-                  </Badge>
-                </Table.Td>
-              </Table.Tr>
-            ))}
+            {preview.fields.map((field) =>
+              field.isActive ? (
+                <Table.Tr key={field.fieldMapId}>
+                  <Table.Td>{field.sourceField}</Table.Td>
+                  <Table.Td>{target(field.targetRowKey, field.targetColumnCode)}</Table.Td>
+                  <Table.Td>{field.aggregation ?? '—'}</Table.Td>
+                  <Table.Td>
+                    {field.sourceUnitCode ?? '—'} → {field.targetUnitCode ?? '—'}
+                  </Table.Td>
+                  <Table.Td>{field.pointCount}</Table.Td>
+                  <Table.Td>{field.foldedValue ?? '—'}</Table.Td>
+                  <Table.Td>
+                    <Badge color={outcomeColor(field.outcome)} variant="light">
+                      {outcomeLabel(field.outcome)}
+                    </Badge>
+                  </Table.Td>
+                </Table.Tr>
+              ) : (
+                /* ⛔ Призупинений (`BE-27`) нікуди не пише: ні адреси, ні
+                   «значення в комірці», ні стану «лягає в комірку» — усе це
+                   читалося б як діючий мапінг. Лишаються поле, згортка,
+                   одиниці й точки: вони пояснюють уже зібране. Приглушення —
+                   лише токеном. */
+                <Table.Tr
+                  key={field.fieldMapId}
+                  data-mapping-state="paused"
+                  c={toneFills.muted.text}
+                >
+                  <Table.Td>{field.sourceField}</Table.Td>
+                  <Table.Td>—</Table.Td>
+                  <Table.Td>{field.aggregation ?? '—'}</Table.Td>
+                  <Table.Td>
+                    {field.sourceUnitCode ?? '—'} → {field.targetUnitCode ?? '—'}
+                  </Table.Td>
+                  <Table.Td>{field.pointCount}</Table.Td>
+                  <Table.Td>—</Table.Td>
+                  <Table.Td>
+                    <PausedBadge />
+                  </Table.Td>
+                </Table.Tr>
+              ),
+            )}
           </Table.Tbody>
         </Table>
       </Stack>

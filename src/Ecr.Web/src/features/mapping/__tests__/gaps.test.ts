@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { MappedFieldPreview, MappingPreview } from '@/api/types';
 import { brokenMaps, hasNoGaps, windowFrom } from '@/features/mapping/api';
+import { gapsView, mappingCounts } from '@/features/mapping/paused';
 
 /**
  * Визначення розриву з боку мапінгу (`ФВ-13.14`).
@@ -97,6 +98,70 @@ describe('Розриви мапінгу', () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe('Призупинений мапінг (`BE-27`)', () => {
+  it('лічильник діючих не бере призупинені', () => {
+    const counts = mappingCounts([
+      field({ fieldMapId: 1 }),
+      field({ fieldMapId: 2, isActive: false }),
+      field({ fieldMapId: 3, isActive: false }),
+    ]);
+
+    expect(counts).toEqual({ active: 1, paused: 2 });
+  });
+
+  it('усі діючі — призупинених нуль', () => {
+    expect(mappingCounts([field({ fieldMapId: 1 }), field({ fieldMapId: 2 })])).toEqual({
+      active: 2,
+      paused: 0,
+    });
+  });
+
+  it('призупинений `NoData` розривом не є: пауза — рішення людини', () => {
+    // ⚠ Той самий принцип, що й `RawOnly`: свідомий вибір не лічиться дефектом.
+    const view = gapsView(
+      preview({
+        fields: [
+          field({ fieldMapId: 1 }),
+          field({ fieldMapId: 2, outcome: 'NoData', pointCount: 0, isActive: false }),
+        ],
+      }),
+    );
+
+    expect(brokenMaps(view.fields)).toHaveLength(0);
+    expect(hasNoGaps(view)).toBe(true);
+  });
+
+  it('діючий `NoData` поруч із призупиненим лишається розривом', () => {
+    const view = gapsView(
+      preview({
+        fields: [
+          field({ fieldMapId: 1, outcome: 'NoData', isActive: true }),
+          field({ fieldMapId: 2, outcome: 'NoData', isActive: false }),
+        ],
+      }),
+    );
+
+    expect(brokenMaps(view.fields).map((f) => f.fieldMapId)).toEqual([1]);
+  });
+
+  it('поле лише з призупиненим мапінгом лишається «йде нікуди»', () => {
+    // ⛔ Сервер рахує `unmappedSourceFields` за діючими; наявність запису в
+    // `fields` не робить поле покритим.
+    const unmapped = [
+      { sourcePath: 'Flare_01_NOx', pointCount: 7, lastSeenUtc: '2026-09-02T00:00:00Z' },
+    ];
+    const view = gapsView(
+      preview({
+        fields: [field({ fieldMapId: 5, sourceField: 'Flare_01_NOx', isActive: false })],
+        unmappedSourceFields: unmapped,
+      }),
+    );
+
+    expect(view.unmappedSourceFields).toEqual(unmapped);
+    expect(hasNoGaps(view)).toBe(false);
   });
 });
 

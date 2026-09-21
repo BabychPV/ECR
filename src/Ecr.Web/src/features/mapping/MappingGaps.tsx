@@ -3,6 +3,7 @@ import { Badge, Stack, Table, Text, Title } from '@mantine/core';
 import type { MappingPreview } from '@/api/types';
 import { brokenMaps, hasNoGaps } from './api';
 import { outcomeLabel } from './outcome';
+import { gapsView } from './paused';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 
@@ -19,9 +20,12 @@ import { t } from '@/shared/i18n';
  * порожнеча читалася б як «перевірка не відпрацювала» (`ФВ-14.22`).
  */
 export function MappingGaps({ preview }: { readonly preview: MappingPreview }): JSX.Element {
-  const broken = brokenMaps(preview.fields);
+  // ⚠ Розриви — лише за діючими мапінгами: призупинений нічого не пише, і
+  // це рішення людини, а не дефект (`BE-27`). Див. `paused.tsx`.
+  const gaps = gapsView(preview);
+  const broken = brokenMaps(gaps.fields);
 
-  if (hasNoGaps(preview)) {
+  if (hasNoGaps(gaps)) {
     return (
       <Stack gap="xs" mb="lg">
         <Title order={2} size="h4">
@@ -76,7 +80,7 @@ export function MappingGaps({ preview }: { readonly preview: MappingPreview }): 
         </Stack>
       )}
 
-      {preview.unmappedSourceFields.length > 0 && (
+      {gaps.unmappedSourceFields.length > 0 && (
         <Stack gap="xs">
           <Title order={3} size="h5">
             {t('mapping.unmapped')}
@@ -94,7 +98,7 @@ export function MappingGaps({ preview }: { readonly preview: MappingPreview }): 
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {preview.unmappedSourceFields.map((field) => (
+              {gaps.unmappedSourceFields.map((field) => (
                 <Table.Tr key={field.sourcePath}>
                   <Table.Td>{field.sourcePath}</Table.Td>
                   <Table.Td>{field.pointCount}</Table.Td>
@@ -113,7 +117,7 @@ export function MappingGaps({ preview }: { readonly preview: MappingPreview }): 
         </Stack>
       )}
 
-      {preview.uncoveredColumns.length > 0 && (
+      {gaps.uncoveredColumns.length > 0 && (
         <Stack gap="xs">
           <Title order={3} size="h5">
             {t('mapping.uncovered')}
@@ -135,7 +139,7 @@ export function MappingGaps({ preview }: { readonly preview: MappingPreview }): 
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {preview.uncoveredColumns.map((column) => (
+              {gaps.uncoveredColumns.map((column) => (
                 <Table.Tr key={column.columnDefId}>
                   <Table.Td>
                     {column.code}
