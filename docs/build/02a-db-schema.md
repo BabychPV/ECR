@@ -2358,6 +2358,8 @@ CREATE TABLE itg.JobProgress
     StartedAt  datetime2(3)  NOT NULL,
     UpdatedAt  datetime2(3)  NOT NULL,
     [Error]    nvarchar(2000) NULL,
+    Attempt       int           NULL,  -- BE-08: спроба від 1; NULL — ще не стартувала
+    CorrelationId nvarchar(64)  NULL,  -- BE-08: той самий, що в лозі запиту й задачі
     CONSTRAINT PK_JobProgress PRIMARY KEY (JobId)
 );
 GO

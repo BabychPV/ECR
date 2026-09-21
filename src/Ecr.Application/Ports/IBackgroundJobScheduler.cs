@@ -182,6 +182,8 @@ public sealed record JobListFilter(
 /// моментом постановки в <c>itg.JobProgress</c> немає.
 /// </para>
 /// </param>
+/// <param name="Attempt">Номер спроби від 1; <c>null</c> — ще не стартувала (BE-08).</param>
+/// <param name="CorrelationId">Кореляція з логом і запитом-постановником (BE-08).</param>
 /// <remarks>
 /// ⚠ Поля <c>Message</c> тут НЕМАЄ, хоч воно й лежить у тому самому рядку
 /// <c>itg.JobProgress</c>. Причина не в даних, а в резолві: повідомлення —
@@ -199,7 +201,9 @@ public sealed record JobSummary(
     string State,
     int Percent,
     DateTime UpdatedAt,
-    DateTime StartedAt);
+    DateTime StartedAt,
+    int? Attempt = null,
+    string? CorrelationId = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
@@ -215,7 +219,21 @@ public interface IJobProgress
 }
 
 /// <summary>Стан фонової задачі.</summary>
-public sealed record JobStatus(string JobId, string State, int Percent, string? Message, string? Error);
+/// <param name="JobId">Ідентифікатор.</param>
+/// <param name="State">Стан.</param>
+/// <param name="Percent">Прогрес у відсотках.</param>
+/// <param name="Message">Повідомлення прогресу.</param>
+/// <param name="Error">Текст провалу.</param>
+/// <param name="Attempt">Номер спроби від 1; <c>null</c> — ще не стартувала (BE-08).</param>
+/// <param name="CorrelationId">Кореляція з логом і запитом-постановником (BE-08).</param>
+public sealed record JobStatus(
+    string JobId,
+    string State,
+    int Percent,
+    string? Message,
+    string? Error,
+    int? Attempt = null,
+    string? CorrelationId = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.

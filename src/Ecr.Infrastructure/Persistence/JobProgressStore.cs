@@ -9,12 +9,16 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 {
     /// <inheritdoc />
     public Task QueueAsync(
-        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null)
-        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Queue(utcNow), createdByUserId, ct);
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
+        string? correlationId = null)
+        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Queue(utcNow, correlationId), createdByUserId, ct);
 
     /// <inheritdoc />
-    public Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct)
-        => UpsertAsync(jobId, jobCode, utcNow, entry => entry.Begin(utcNow), createdByUserId: null, ct);
+    public Task StartAsync(
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int attempt = 1,
+        string? correlationId = null)
+        => UpsertAsync(
+            jobId, jobCode, utcNow, entry => entry.Begin(utcNow, attempt, correlationId), createdByUserId: null, ct);
 
     /// <summary>Створює або оновлює запис прогресу.</summary>
     /// <remarks>
@@ -104,7 +108,8 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         => await db.JobProgresses
             .AsNoTracking()
             .Where(p => p.JobId == jobId)
-            .Select(p => new JobStatus(p.JobId, p.State, p.Percent, p.Message, p.Error))
+            .Select(p => new JobStatus(
+                p.JobId, p.State, p.Percent, p.Message, p.Error, p.Attempt, p.CorrelationId))
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -151,7 +156,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .OrderByDescending(p => p.UpdatedAt)
             .Take(limit)
             .Select(p => new JobSummary(
-                p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt))
+                p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt, p.Attempt, p.CorrelationId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }

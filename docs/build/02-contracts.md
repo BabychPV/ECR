@@ -1457,8 +1457,10 @@ public interface IJobProgress
     public Task ReportAsync(int percent, string? message, CancellationToken ct);
 }
 
-/// <summary>Стан фонової задачі.</summary>
-public sealed record JobStatus(string JobId, string State, int Percent, string? Message, string? Error);
+/// <summary>Стан фонової задачі. Attempt/CorrelationId — BE-08.</summary>
+public sealed record JobStatus(
+    string JobId, string State, int Percent, string? Message, string? Error,
+    int? Attempt = null, string? CorrelationId = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.
@@ -2317,6 +2319,20 @@ public interface IJobProgressStore
     public Task ReportAsync(string jobId, int percent, string? message, DateTime utcNow, CancellationToken ct);
     public Task FinishAsync(
     public Task<JobStatus?> FindAsync(string jobId, CancellationToken ct);
+}
+```
+
+#### `ICorrelationIdAccessor`
+
+Кореляція поточного HTTP-запиту (`X-Correlation-Id`, та сама, що в лозі) для
+планувальника: задача, поставлена запитом, несе її в `itg.JobProgress` і в
+рядки власного логу (BE-08). Поза запитом — `null`, і планувальник генерує
+нову. Реалізація — `Ecr.Api` (`HttpCorrelationIdAccessor`).
+
+```csharp
+public interface ICorrelationIdAccessor
+{
+    public string? CorrelationId { get; }
 }
 ```
 

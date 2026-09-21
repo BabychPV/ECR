@@ -108,7 +108,16 @@ public sealed partial class QuartzJobAdapter(
             return;
         }
 
-        await StartAsync(progress, jobId, typeName!, clock, context.CancellationToken).ConfigureAwait(false);
+        // BE-08: спроба від 1 (ретраї Quartz рахуються від 0), кореляція — та,
+        // що вже в логах запиту-постановника; scope несе її в УСІ рядки логу
+        // задачі (MEL-scope спільний для всіх логерів цього async-потоку).
+        var attemptNumber = CurrentAttempt(context) + 1;
+        var correlationId = CorrelationOf(context);
+        using var logScope = logger.BeginScope(
+            new Dictionary<string, object> { ["CorrelationId"] = correlationId });
+
+        await StartAsync(progress, jobId, typeName!, attemptNumber, correlationId, clock, context.CancellationToken)
+            .ConfigureAwait(false);
 
         // ⛔ Биття серця на весь час виконання. Прибирання на старті
         // (`IJobProgressStore.FailStaleAsync`) відрізняє покинуту задачу від
@@ -156,7 +165,7 @@ public sealed partial class QuartzJobAdapter(
                 // ⚠ Ретрай — НЕ Failed. Клієнт, що опитує стан, має й далі
                 // бачити задачу «у виконанні», а не короткий спалах «провалу»,
                 // який за кілька секунд сам собою стає «виконується» знову.
-                await ScheduleRetryAsync(context, attempt, progress, clock, ex).ConfigureAwait(false);
+                await ScheduleRetryAsync(context, attempt, correlationId, progress, clock, ex).ConfigureAwait(false);
                 return;
             }
 
@@ -252,13 +261,33 @@ public sealed partial class QuartzJobAdapter(
     /// <summary>Скільки РЕТРАЇВ уже було — з даних триґера, що щойно відпрацював.</summary>
     private static int CurrentAttempt(IJobExecutionContext context)
     {
-        var map = context.Trigger.JobDataMap;
+        var map = context.Trigger?.JobDataMap;
 
-        return map.ContainsKey(QuartzJobScheduler.RetryAttemptKey)
+        return map is not null
+               && map.ContainsKey(QuartzJobScheduler.RetryAttemptKey)
                && int.TryParse(
                    map.GetString(QuartzJobScheduler.RetryAttemptKey), out var attempt)
             ? attempt
             : 0;
+    }
+
+    /// <summary>
+    /// Кореляція прогону: триґер (ретрай, ручний перезапуск) → задача
+    /// (постановка) → нова (розклад: нічний прогін не має запиту-причини).
+    /// </summary>
+    private static string CorrelationOf(IJobExecutionContext context)
+    {
+        foreach (var map in new[] { context.Trigger?.JobDataMap, context.JobDetail.JobDataMap })
+        {
+            if (map is not null
+                && map.ContainsKey(QuartzJobScheduler.CorrelationKey)
+                && map.GetString(QuartzJobScheduler.CorrelationKey) is { Length: > 0 } id)
+            {
+                return id;
+            }
+        }
+
+        return Guid.NewGuid().ToString("N");
     }
 
     /// <summary>
@@ -298,7 +327,8 @@ public sealed partial class QuartzJobAdapter(
     /// експоненційним відступом і пише в прогрес, ЩО задача повторює спробу.
     /// </summary>
     private async Task ScheduleRetryAsync(
-        IJobExecutionContext context, int attempt, IJobProgressStore? progress, IClock clock, Exception ex)
+        IJobExecutionContext context, int attempt, string correlationId, IJobProgressStore? progress,
+        IClock clock, Exception ex)
     {
         var jobId = context.JobDetail.Key.Name;
         var nextAttempt = attempt + 1;
@@ -319,6 +349,8 @@ public sealed partial class QuartzJobAdapter(
             .ForJob(context.JobDetail.Key)
             .WithIdentity($"{jobId}-retry{nextAttempt}-{Guid.NewGuid():N}-trigger")
             .UsingJobData(QuartzJobScheduler.RetryAttemptKey, nextAttempt.ToString(CultureInfo.InvariantCulture))
+            // Повтор — та сама задача, отже та сама кореляція (і для розкладу теж).
+            .UsingJobData(QuartzJobScheduler.CorrelationKey, correlationId)
             .StartAt(startAt)
             .Build();
 
@@ -442,8 +474,11 @@ public sealed partial class QuartzJobAdapter(
     }
 
     private static Task StartAsync(
-        IJobProgressStore? store, string jobId, string code, IClock clock, CancellationToken ct)
-        => store is null ? Task.CompletedTask : store.StartAsync(jobId, code, clock.UtcNow, ct);
+        IJobProgressStore? store, string jobId, string code, int attempt, string correlationId, IClock clock,
+        CancellationToken ct)
+        => store is null
+            ? Task.CompletedTask
+            : store.StartAsync(jobId, code, clock.UtcNow, ct, attempt, correlationId);
 
     private static Task FinishAsync(
         IJobProgressStore? store, string jobId, string state, string? error, IClock clock, CancellationToken ct)

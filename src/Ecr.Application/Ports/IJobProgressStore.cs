@@ -58,10 +58,21 @@ public interface IJobProgressStore
     /// задачу, яку щойно прийняли, — і вважає, що вона загубилася.
     /// </remarks>
     /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
+    /// <param name="correlationId">Кореляція запиту-постановника (BE-08).</param>
     public Task QueueAsync(
-        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null);
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
+        string? correlationId = null);
 
-    public Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct);
+    /// <summary>Реєструє старт прогону.</summary>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="jobCode">Код задачі.</param>
+    /// <param name="utcNow">Момент старту в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <param name="attempt">Номер спроби від 1 (BE-08).</param>
+    /// <param name="correlationId">Кореляція прогону (BE-08); <c>null</c> — лишити наявну.</param>
+    public Task StartAsync(
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int attempt = 1,
+        string? correlationId = null);
 
     /// <summary>Оновлює прогрес.</summary>
     public Task ReportAsync(string jobId, int percent, string? message, DateTime utcNow, CancellationToken ct);

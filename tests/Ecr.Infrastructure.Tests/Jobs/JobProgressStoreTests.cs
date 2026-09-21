@@ -240,4 +240,35 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
 
         Assert.Equal(Now.AddHours(-1), heartbeat);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-08")]
+    public async Task Спроба_і_кореляція_зберігаються_і_читаються_обома_шляхами()
+    {
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+        var jobId = $"be08-{Guid.NewGuid():N}";
+        var code = $"be08-{Guid.NewGuid():N}"[..20];
+
+        await store.QueueAsync(jobId, code, Now, CancellationToken.None, correlationId: "req-be08");
+
+        // До старту спроби немає — «0» чи «1» тут були б вигадкою.
+        var queued = await store.FindAsync(jobId, CancellationToken.None);
+        Assert.Null(queued!.Attempt);
+        Assert.Equal("req-be08", queued.CorrelationId);
+
+        await store.StartAsync(jobId, code, Now.AddSeconds(1), CancellationToken.None, attempt: 2);
+
+        // Старт без кореляції не стирає ту, що прийшла з постановки.
+        var status = await store.FindAsync(jobId, CancellationToken.None);
+        Assert.Equal(2, status!.Attempt);
+        Assert.Equal("req-be08", status.CorrelationId);
+
+        var listed = Assert.Single(await store.ListRecentAsync(
+            new Ecr.Application.Ports.JobListFilter(JobCode: code), 5, CancellationToken.None));
+        Assert.Equal(2, listed.Attempt);
+        Assert.Equal("req-be08", listed.CorrelationId);
+    }
 }

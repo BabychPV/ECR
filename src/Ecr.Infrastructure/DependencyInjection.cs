@@ -220,7 +220,8 @@ public static class DependencyInjection
         services.AddScoped<IBackgroundJobScheduler>(sp => new Jobs.QuartzJobScheduler(
             sp.GetService<ISchedulerFactory>(),
             sp.GetService<IJobProgressStore>(),
-            sp.GetService<IClock>()));
+            sp.GetService<IClock>(),
+            sp.GetService<ICorrelationIdAccessor>()));
 
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`

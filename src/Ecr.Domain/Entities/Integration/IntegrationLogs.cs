@@ -526,6 +526,26 @@ public sealed class JobProgress
     /// </remarks>
     public DateTime? HeartbeatAt { get; private set; }
 
+    /// <summary>Межа стовпця <see cref="CorrelationId"/> — як у <c>aud.*</c> і в <c>X-Correlation-Id</c>.</summary>
+    public const int MaxCorrelationIdLength = 64;
+
+    /// <summary>
+    /// Номер спроби поточного/останнього прогону: 1 — перший запуск, далі +1 на
+    /// кожен автоматичний повтор після збою (BE-08).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>null</c> — задача ще не стартувала або рядок старший за колонку.
+    /// Ручний перезапуск починає нову серію з 1 — так само, як лічильник
+    /// ретраїв Quartz (<c>QuartzJobScheduler.RestartAsync</c>).
+    /// </remarks>
+    public int? Attempt { get; private set; }
+
+    /// <summary>
+    /// Ідентифікатор кореляції: той самий, під яким у лог пишуться запит, що
+    /// поставив задачу, і рядки самої задачі (BE-08).
+    /// </summary>
+    public string? CorrelationId { get; private set; }
+
     /// <summary>
     /// Підтверджує, що задача досі виконується.
     /// </summary>
@@ -548,8 +568,11 @@ public sealed class JobProgress
     /// не існує — і клієнт, який опитує його одразу, отримує <c>404</c> на
     /// задачу, яку щойно прийняли.
     /// </remarks>
-    public void Queue(DateTime utcNow)
+    /// <param name="correlationId">Кореляція запиту-постановника; <c>null</c> — лишити наявну.</param>
+    public void Queue(DateTime utcNow, string? correlationId = null)
     {
+        SetCorrelation(correlationId);
+        Attempt = null;
         State = "Queued";
         Percent = 0;
         Message = null;
@@ -565,8 +588,14 @@ public sealed class JobProgress
 
     /// <summary>Ставить стан «виконується».</summary>
     /// <param name="utcNow">Момент старту в UTC.</param>
-    public void Begin(DateTime utcNow)
+    /// <param name="attempt">Номер спроби, від 1.</param>
+    /// <param name="correlationId">Кореляція прогону; <c>null</c> — лишити наявну.</param>
+    public void Begin(DateTime utcNow, int attempt = 1, string? correlationId = null)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(attempt, 1);
+
+        SetCorrelation(correlationId);
+        Attempt = attempt;
         State = "Running";
         Percent = 0;
         Message = null;
@@ -603,5 +632,17 @@ public sealed class JobProgress
         Error = error;
         UpdatedAt = utcNow;
         Percent = error is null ? 100 : Percent;
+    }
+
+    /// <summary>Ставить кореляцію, якщо її передали; довша за стовпець — відмова, не обрізання.</summary>
+    private void SetCorrelation(string? correlationId)
+    {
+        if (string.IsNullOrWhiteSpace(correlationId))
+        {
+            return;
+        }
+
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(correlationId.Length, MaxCorrelationIdLength);
+        CorrelationId = correlationId;
     }
 }

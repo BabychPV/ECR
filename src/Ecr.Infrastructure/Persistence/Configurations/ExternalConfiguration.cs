@@ -401,6 +401,9 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         builder.Property(x => x.Error).HasColumnName("Error").HasMaxLength(2000);
         builder.Property(x => x.HeartbeatAt).HasColumnType("datetime2(3)");
 
+        // BE-08: обидві nullable — наявні рядки лишаються валідними без backfill.
+        builder.Property(x => x.CorrelationId).HasMaxLength(JobProgress.MaxCorrelationIdLength);
+
         // ⛔ Та сама причина, що й в `IX_Outbox_Claim` (Q-241): прибирання на
         // старті фільтрує саме за парою (State, HeartbeatAt), і без індексу
         // воно сканувало б усю історію задач, яка не видаляється.

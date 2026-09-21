@@ -67,6 +67,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser>(
     sp => sp.GetRequiredService<CurrentUser>());
+// BE-08: кореляція запиту доїжджає до itg.JobProgress через планувальник.
+builder.Services.AddSingleton<Ecr.Application.Ports.ICorrelationIdAccessor,
+    Ecr.Api.Middleware.HttpCorrelationIdAccessor>();
 // ⚠ Метрики бюджету — фільтром, а не викликом у кожній дії: метрика, яку
 // треба не забути дописати, рано чи пізно не дописується. До цього
 // `EcrMetrics` існував і не викликався жодного разу (аудит Етапу 5).
