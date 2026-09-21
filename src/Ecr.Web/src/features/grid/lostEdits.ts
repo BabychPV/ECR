@@ -1,3 +1,4 @@
+import { safeReturnPath } from '@/pages/safeReturnPath';
 import { currentDocumentId, pendingCount } from './pendingStore';
 
 /**
@@ -92,10 +93,10 @@ export function takeLostEdits(userId: number): LostEdits | null {
     return {
       documentId: value.documentId,
       count: value.count,
-      // Цю перевірку замінить `safeReturnPath` (гілка 37) після зведення `LoginPage`.
-      from: typeof value.from === 'string' && value.from.startsWith('/') && !value.from.startsWith('//')
-          ? value.from
-          : '/',
+      // ⛔ Одна перевірка адреси повернення на весь застосунок — та сама, що
+      // й для `?from=` на сторінці входу: власна копія тут пропускала `/\evil`
+      // і керівні символи, які `safeReturnPath` відсікає.
+      from: safeReturnPath(typeof value.from === 'string' ? value.from : null),
     };
   } catch {
     return null;
