@@ -65,7 +65,7 @@ public sealed class DataSourceHandlersTests
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Save().CreateAsync("NEW", Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, default));
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Delete().HandleAsync(source.Id, default));
+            () => Delete().HandleAsync(source.Id, Version(source), default));
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Test().HandleAsync(source.Id, Reason, default));
 
@@ -102,6 +102,7 @@ public sealed class DataSourceHandlersTests
 
             Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
             Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", refused.Details!["messageKey"]);
+            Assert.Equal("endpoint", refused.Details!["field"]);
 
             // ⛔ Відмова не повторює введеного: інакше пароль, який ми щойно
             // відмовилися зберігати, поїхав би в журнал разом із її текстом.
@@ -111,10 +112,20 @@ public sealed class DataSourceHandlersTests
         // Та сама перевірка на ЗАПАСНІЙ адресі — і на правці, не лише створенні.
         var existing = Add("PI_MAIN");
 
-        await Assert.ThrowsAsync<BusinessRuleException>(
+        var spare = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().UpdateAsync(
                 existing.Id, Named(), ExternalTransport.PiWebApi, Endpoint,
-                "https://svc:hunter2@pi2.corp.example", null, null, true, default));
+                "https://svc:hunter2@pi2.corp.example", null, null, true, Version(existing), default));
+
+        // Відмова називає поле, у якому облікові дані, — не вміст.
+        Assert.Equal("secondaryEndpoint", spare.Details!["field"]);
+
+        // Несуть обидві — називається перша за порядком перевірки.
+        var both = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                "BOTH", Named(), ExternalTransport.Sql, "Server=a;Password=x", "Server=b;Password=y",
+                null, null, default));
+        Assert.Equal("endpoint", both.Details!["field"]);
 
         Assert.Empty(_store.Added);
         Assert.Equal(Endpoint, existing.Endpoint);
@@ -224,7 +235,7 @@ public sealed class DataSourceHandlersTests
         _store.Usage[source.Id] = new DataSourceUsage(SourceEntities: 12, CollectionSchedules: 3);
 
         var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Delete().HandleAsync(source.Id, default));
+            () => Delete().HandleAsync(source.Id, Version(source), default));
 
         // ⛔ Заборона, а не каскад: каскад стер би `ext.RawDataPoint` і журнал
         // покриття, за якими вже пораховані й підписані документи.
@@ -236,14 +247,14 @@ public sealed class DataSourceHandlersTests
 
         // Оборотна дія на її місці: збір спиняє `isActive = false`.
         var disabled = await Save().UpdateAsync(
-            source.Id, Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, false, default);
+            source.Id, Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, false, Version(source), default);
 
         Assert.False(disabled.IsActive);
         Assert.Equal(12, disabled.SourceEntities);
 
         // А джерело, на яке ніщо не спирається, прибирається.
         _store.Usage[source.Id] = new DataSourceUsage(0, 0);
-        await Delete().HandleAsync(source.Id, default);
+        await Delete().HandleAsync(source.Id, Version(source), default);
 
         Assert.Same(source, Assert.Single(_store.Removed));
     }
@@ -281,10 +292,15 @@ public sealed class DataSourceHandlersTests
             ExternalTransport.PiWebApi, Endpoint, SaveDataSourceHandler.SecretNamePrefix + code);
 
         typeof(Entity<int>).GetProperty("Id")!.SetValue(source, _store.Sources.Count + 1);
+        typeof(DataSource).GetProperty(nameof(DataSource.RowVersion))!
+            .SetValue(source, new byte[] { 0, 0, 0, 0, 0, 0, 7, (byte)_store.Sources.Count });
         _store.Sources.Add(source);
 
         return source;
     }
+
+    /// <summary>Значення <c>If-Match</c>, яке клієнт узяв би з переліку.</summary>
+    private static string Version(DataSource source) => $"\"{Convert.ToBase64String(source.RowVersion)}\"";
 
     private sealed class FakeStore : IDataSourceStore
     {

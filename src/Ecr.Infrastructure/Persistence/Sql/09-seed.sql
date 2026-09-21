@@ -631,6 +631,9 @@ USING (VALUES
     (N'err.ECR-REQ-0422.dataSourceTestReason',            N'en', N'A reason of up to 400 characters is required to test the connection: the attempt is recorded in the security journal.', 1),
     (N'err.ECR-JOB-0409.dataSourceInUse',                 N'en', N'This data source still carries {sourceEntities} collection entities and {collectionSchedules} schedules: disable it instead of deleting it.', 1),
     (N'err.ECR-JOB-0409.dataSourceTestRunning',           N'en', N'A connection test for data source "{code}" is already running: wait for it to finish.', 1),
+    -- ⚠ Версія рядка з'єднання: той самий контракт If-Match, що в розкладах.
+    (N'err.ECR-REQ-0422.dataSourceIfMatch',               N'en', N'This request needs an If-Match header carrying the rowVersion of the data source you read.', 1),
+    (N'err.ECR-JOB-0409.dataSourceChanged',               N'en', N'Someone else changed this data source after you read it: reload it and repeat the change.', 1),
     -- ⛔ `BE-27`: дії над мапінгом. Пауза існує, щоб мапінг можна було спинити,
     -- НЕ стираючи пояснення вже зібраних точок, — тому речення про видалення
     -- мусить назвати її прямо, інакше відмова виглядає глухим кутом.

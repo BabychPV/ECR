@@ -247,7 +247,7 @@ public sealed class ListCollectionSchedulesHandler(
     /// значення. Приймаються обидві форми: відмовити через лапки означало б
     /// віддати 422 за правильно виконану вимогу.
     /// </remarks>
-    private static string? NormalizeETag(string? header)
+    internal static string? NormalizeETag(string? header)
     {
         if (string.IsNullOrWhiteSpace(header))
         {

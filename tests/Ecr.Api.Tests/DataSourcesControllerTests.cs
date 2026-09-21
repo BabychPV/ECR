@@ -168,7 +168,9 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
         var created = await client.PostAsJsonAsync(Sources, Body(code)).ConfigureAwait(true);
         Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
 
-        var id = (await BodyAsync(created, null).ConfigureAwait(true)).GetProperty("id").GetInt32();
+        var createdBody = await BodyAsync(created, null).ConfigureAwait(true);
+        var id = createdBody.GetProperty("id").GetInt32();
+        var version = createdBody.GetProperty("rowVersion").GetString();
 
         int entityId;
         await using (var arrange = NewDb())
@@ -179,7 +181,7 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
             entityId = entity.Id;
         }
 
-        var refused = await client.DeleteAsync(At(id.ToString(CultureInfo.InvariantCulture))).ConfigureAwait(true);
+        var refused = await SendAsync(client, HttpMethod.Delete, id, version, body: null).ConfigureAwait(true);
 
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
         var problem = await BodyAsync(refused, null).ConfigureAwait(true);
@@ -196,22 +198,197 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
             await cleanup.SourceEntities.Where(e => e.Id == entityId).ExecuteDeleteAsync().ConfigureAwait(true);
         }
 
-        var removed = await client.DeleteAsync(At(id.ToString(CultureInfo.InvariantCulture))).ConfigureAwait(true);
+        var removed = await SendAsync(client, HttpMethod.Delete, id, version, body: null).ConfigureAwait(true);
         Assert.True(removed.StatusCode == HttpStatusCode.NoContent, $"{removed.StatusCode}: {app.ErrorsText}");
 
         await using var db = NewDb();
         Assert.False(await db.DataSources.AnyAsync(s => s.Id == id).ConfigureAwait(true));
     }
 
-    private static object Body(string code) => new
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21")]
+    public async Task Актуальна_версія_дає_200_з_новою_версією_а_видалення_з_нею_204()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.Manage", "Integration.View").ConfigureAwait(true);
+
+        var (id, code) = await AddInactiveAsync().ConfigureAwait(true);
+        var version = await VersionAsync(client, id).ConfigureAwait(true);
+
+        var saved = await SendAsync(client, HttpMethod.Put, id, version, Body(code, isActive: false, catalog: "Moved"))
+            .ConfigureAwait(true);
+        Assert.True(saved.StatusCode == HttpStatusCode.OK, $"{saved.StatusCode}: {app.ErrorsText}");
+
+        var fresh = (await BodyAsync(saved, null).ConfigureAwait(true)).GetProperty("rowVersion").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(fresh));
+        Assert.NotEqual(version, fresh);
+        Assert.Equal(fresh, await VersionAsync(client, id).ConfigureAwait(true));
+
+        var removed = await SendAsync(client, HttpMethod.Delete, id, fresh, body: null).ConfigureAwait(true);
+        Assert.True(removed.StatusCode == HttpStatusCode.NoContent, $"{removed.StatusCode}: {app.ErrorsText}");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21")]
+    public async Task Застаріла_версія_дає_409_на_зміні_й_видаленні_і_рядок_не_змінюється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.Manage", "Integration.View").ConfigureAwait(true);
+
+        var (id, code) = await AddInactiveAsync().ConfigureAwait(true);
+        var stale = await VersionAsync(client, id).ConfigureAwait(true);
+
+        // Хтось інший зберіг правку раніше — версія рядка вже не та.
+        var first = await SendAsync(client, HttpMethod.Put, id, stale, Body(code, isActive: false, catalog: "Moved"))
+            .ConfigureAwait(true);
+        Assert.True(first.StatusCode == HttpStatusCode.OK, $"{first.StatusCode}: {app.ErrorsText}");
+
+        HttpResponseMessage[] conflicts =
+        [
+            await SendAsync(client, HttpMethod.Put, id, stale, Body(code, isActive: false, catalog: "Lost"))
+                .ConfigureAwait(true),
+            await SendAsync(client, HttpMethod.Delete, id, stale, body: null).ConfigureAwait(true),
+        ];
+
+        foreach (var conflict in conflicts)
+        {
+            Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+            var problem = await BodyAsync(conflict, null).ConfigureAwait(true);
+            Assert.Equal("ECR-JOB-0409", problem.GetProperty("errorCode").GetString());
+            Assert.Equal("err.ECR-JOB-0409.dataSourceChanged", problem.GetProperty("messageKey").GetString());
+        }
+
+        // Рядок той, що зберіг перший; видалення теж не відбулося.
+        await using var db = NewDb();
+        var stored = await db.DataSources.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true);
+        Assert.Equal("Moved", stored.Catalog);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21")]
+    public async Task Без_If_Match_зміна_й_видалення_дають_422_і_рядок_лишається()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.Manage", "Integration.View").ConfigureAwait(true);
+
+        var (id, code) = await AddInactiveAsync().ConfigureAwait(true);
+
+        HttpResponseMessage[] refusals =
+        [
+            await SendAsync(client, HttpMethod.Put, id, rowVersion: null, Body(code, isActive: false, catalog: "Lost"))
+                .ConfigureAwait(true),
+            await SendAsync(client, HttpMethod.Delete, id, rowVersion: null, body: null).ConfigureAwait(true),
+        ];
+
+        foreach (var refusal in refusals)
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, refusal.StatusCode);
+            var problem = await BodyAsync(refusal, null).ConfigureAwait(true);
+            Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+            Assert.Equal("err.ECR-REQ-0422.dataSourceIfMatch", problem.GetProperty("messageKey").GetString());
+        }
+
+        await using var db = NewDb();
+        var stored = await db.DataSources.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true);
+        Assert.Equal("EcrDb", stored.Catalog);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21")]
+    public async Task Облікові_дані_в_резервній_адресі_відмова_називає_поле_secondaryEndpoint()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.Manage", "Integration.View").ConfigureAwait(true);
+
+        var code = $"SP{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+        var refused = await client.PostAsJsonAsync(
+            Sources,
+            new
+            {
+                code,
+                nameL10n = new Dictionary<string, string> { ["en"] = "PI AF" },
+                transport = "PiWebApi",
+                endpoint = Endpoint,
+                secondaryEndpoint = "https://svc:hunter2@pi2.corp.example/piwebapi",
+                isActive = false,
+            }).ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var problem = await BodyAsync(refused, null).ConfigureAwait(true);
+        Assert.Equal(
+            "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("secondaryEndpoint", problem.GetProperty("field").GetString());
+
+        await using var db = NewDb();
+        Assert.False(await db.DataSources.AnyAsync(s => s.Code == code).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// Вимкнене джерело прямо в базі: активне без відповіді зробило б
+    /// <c>/health/ready</c> «Degraded» для решти прогону.
+    /// </summary>
+    private async Task<(int Id, string Code)> AddInactiveAsync()
+    {
+        var code = $"RV{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+
+        await using var db = NewDb();
+        var source = new DataSource(
+            Ecr.Domain.ValueObjects.EcrCode.Create(code),
+            new Ecr.Domain.ValueObjects.LocalizedText(new Dictionary<string, string> { ["en"] = "PI AF" }),
+            ExternalTransport.PiWebApi, Endpoint, $"DataSource.{code}");
+        source.Configure(null, "EcrDb", 4);
+        source.Deactivate();
+        db.DataSources.Add(source);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return (source.Id, code);
+    }
+
+    private static async Task<string?> VersionAsync(HttpClient client, int id)
+    {
+        var listed = await BodyAsync(await client.GetAsync(Sources).ConfigureAwait(false), null).ConfigureAwait(false);
+
+        return listed.EnumerateArray()
+            .Single(s => s.GetProperty("id").GetInt32() == id)
+            .GetProperty("rowVersion").GetString();
+    }
+
+    /// <summary>Запит із <c>If-Match</c> у лапках — так, як його шле клієнт; <c>null</c> — без заголовка.</summary>
+    private static async Task<HttpResponseMessage> SendAsync(
+        HttpClient client, HttpMethod method, int id, string? rowVersion, object? body)
+    {
+        using var request = new HttpRequestMessage(method, At(id.ToString(CultureInfo.InvariantCulture)));
+
+        if (rowVersion is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-Match", $"\"{rowVersion}\"");
+        }
+
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        return await client.SendAsync(request).ConfigureAwait(false);
+    }
+
+    private static object Body(string code, bool isActive = true, string catalog = "EcrDb") => new
     {
         code,
         nameL10n = new Dictionary<string, string> { ["en"] = "PI AF primary" },
         transport = "PiWebApi",
         endpoint = Endpoint,
-        catalog = "EcrDb",
+        catalog,
         maxParallel = 4,
-        isActive = true,
+        isActive,
     };
 
     private static Uri At(string tail) => new($"{Sources}/{tail}", UriKind.Relative);
