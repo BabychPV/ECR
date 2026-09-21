@@ -1669,6 +1669,7 @@ CREATE TABLE ext.DataSource
     Catalog           nvarchar(200) NULL,
     MaxParallel       int           NOT NULL CONSTRAINT DF_DS_Par DEFAULT(4),
     IsActive          bit           NOT NULL CONSTRAINT DF_DS_Act DEFAULT(1),
+    RowVersion        rowversion    NOT NULL,   -- If-Match для PUT/DELETE з'єднання
     CONSTRAINT PK_DataSource PRIMARY KEY (Id),
     CONSTRAINT UQ_DataSource UNIQUE (Code)
 );
