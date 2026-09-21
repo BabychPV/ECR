@@ -954,6 +954,7 @@ USING (VALUES
     (N'search.placeholder',              N'en', N'Documents, templates, registries…', 1),
     (N'search.minLength',                N'en', N'Type at least {min} characters', 1),
     (N'search.empty',                    N'en', N'Nothing found', 1),
+    (N'search.rateLimited',              N'en', N'Too many searches — retrying in {seconds}s', 1),
     (N'documents.title',                 N'en', N'Documents', 1),
     (N'documents.key',                   N'en', N'Key', 1),
     (N'documents.project',               N'en', N'Project', 1),
