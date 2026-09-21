@@ -136,6 +136,77 @@ test.describe('Знімки маршрутів (D-142)', () => {
     }
   }
 
+  /*
+   * Шухляда з'єднання (`/admin/sources?panel=<code>`, вкладка Connection).
+   *
+   * ⚠ На стенді з'єднань немає, і сідом його не заводимо: це дані, а не
+   * конфігурація. Тож з'єднання створюється через API тим самим входом, що й
+   * у людини (`page.request` ділить куки з вкладкою), і прибирається за собою
+   * у `finally`. Лічильники нового рядка — нулі, тож `DELETE` не впирається в
+   * `409 dataSourceInUse`.
+   *
+   * ⚠ Лише `admin`: без `Integration.Manage` створити з'єднання нікому, а
+   * порожній перелік під оператором уже знімає цикл вище.
+   */
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`admin · ${scheme} · шухляда з'єднання`, async ({ page }) => {
+      test.slow();
+
+      await mkdir(OutputDirectory, { recursive: true });
+
+      await page.goto('/login');
+      await page.evaluate(
+        (colour: string) => {
+          localStorage.setItem('mantine-color-scheme-value', colour);
+          localStorage.setItem('ecr.density', 'compact');
+        },
+        scheme,
+      );
+
+      await signIn(page, 'e2e-admin', 'E2E-Admin-Work-2026!');
+
+      // ⚠ Унікальний код: прогін, що впав до `finally`, не має ламати наступний
+      // через `dataSourceCodeTaken`.
+      const code = `E2E_DS_${scheme.toUpperCase()}_${Date.now()}`;
+      const created = await page.request.post('/api/v1/data-sources', {
+        data: {
+          code,
+          nameL10n: { en: 'E2E PI server' },
+          transport: 'PiWebApi',
+          endpoint: 'https://pi.e2e.invalid/piwebapi',
+          catalog: 'E2E_AF',
+          maxParallel: 4,
+        },
+      });
+
+      expect(created.status(), `створення з'єднання: ${await created.text()}`).toBe(201);
+
+      const source = (await created.json()) as { id: number; rowVersion: string };
+
+      try {
+        await page.goto(`/admin/sources?panel=${code}`);
+
+        const drawer = page.getByRole('dialog');
+
+        await expect(drawer, 'шухляда не відкрилася адресою').toBeVisible({ timeout: 30_000 });
+        await expect(drawer.getByRole('tab', { selected: true })).toBeVisible();
+        await expect(drawer.getByText('https://pi.e2e.invalid/piwebapi')).toBeVisible();
+
+        const crashed = await page.getByText(/Unhandled|TypeError|is not a function/i).count();
+        expect(crashed, 'шухляда з\'єднання: на сторінці слід аварії').toBe(0);
+
+        const shot = await page.screenshot();
+
+        await writeFile(path.join(OutputDirectory, `admin-${scheme}-compact-sources-drawer.png`), shot);
+      } finally {
+        const removed = await page.request.delete(`/api/v1/data-sources/${source.id}`, {
+          headers: { 'If-Match': `"${source.rowVersion}"` },
+        });
+
+        expect(removed.ok(), `прибирання з'єднання: ${removed.status()}`).toBe(true);
+      }
+    });
+  }
 });
 
 /*
