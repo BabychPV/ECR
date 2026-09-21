@@ -2023,6 +2023,13 @@ USING (VALUES
     (N'snapshots.status',                N'en', N'Status', 1),
     (N'snapshots.hash',                  N'en', N'Content hash', 1),
     (N'snapshots.current',               N'en', N'current', 1),
+    -- Формат чисел зрізу: `current` не позначається. ⚠ Ключі беруться з мапи в
+    -- `SnapshotFormatBadge.tsx` через `t(look.label)` — `EndpointCoverageTests`
+    -- їх не бачить; сторож — ФВ-14.9 у `test:a11y` на `/admin/snapshots`.
+    (N'snapshots.formatLegacy',          N'en', N'Earlier format', 1),
+    (N'snapshots.formatLegacyHint',      N'en', N'Built before numbers were extended to 16 decimal places. Kept exactly as it was submitted to the regulator.', 1),
+    (N'snapshots.formatUnknown',         N'en', N'Format unknown', 1),
+    (N'snapshots.formatUnknownHint',     N'en', N'The number format of this snapshot has not been determined yet.', 1),
     (N'snapshots.empty',                 N'en', N'No snapshots built yet', 1),
     (N'snapshots.emptyHint',             N'en', N'SSRS reads snapshots, not live data: until one is built, the regulator sees nothing.', 1),
     (N'snapshots.pickReport',            N'en', N'Pick a report', 1),
