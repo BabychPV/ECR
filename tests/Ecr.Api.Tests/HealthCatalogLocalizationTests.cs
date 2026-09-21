@@ -106,7 +106,8 @@ public sealed class HealthCatalogLocalizationTests
         [
             new SourceEntityStatus(
                 Id: 1, Code: "pi-water", DisplayName: "pi-water", EntityPath: "pi-water",
-                Transport: "PiSql", IsActive: true, LastRun: null, OldestGap: null),
+                Transport: "PiSql", IsActive: true, LastRun: null, OldestGap: null,
+                DataSourceId: 1, DataSourceCode: "PI"),
         ]);
 
         var check = new SourcesHealthCheck(store, catalog, user);

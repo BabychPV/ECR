@@ -21,8 +21,13 @@ namespace Ecr.Application.Ports;
 /// </remarks>
 public interface ICollectionScheduleStore
 {
-    /// <summary>Усі розклади за ідентифікатором; лише для читання.</summary>
-    public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(CancellationToken ct);
+    /// <summary>Розклади; лише для читання.</summary>
+    /// <param name="dataSourceCode">
+    /// Лише розклади сутностей цього з'єднання; <c>null</c> — усі. ⚠ Фільтр у
+    /// самому запиті: після стелі переліку він дав би неповну вибірку.
+    /// </param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(string? dataSourceCode, CancellationToken ct);
 
     /// <summary>
     /// Розклад для зміни — <b>відстежуваний</b>; <c>null</c> — такого немає.
@@ -56,11 +61,20 @@ public interface ICollectionScheduleStore
 /// <param name="Code">Код сутності в джерелі.</param>
 /// <param name="Name">Підпис сутності; <c>null</c> — каталог джерела його не дав.</param>
 /// <param name="ScheduleId">Розклад, який у неї вже є; <c>null</c> — розкладу немає.</param>
-public sealed record SourceEntityScheduling(string Code, string? Name, int? ScheduleId);
+/// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
+/// <param name="DataSourceCode">Код цього з'єднання.</param>
+public sealed record SourceEntityScheduling(
+    string Code, string? Name, int? ScheduleId, int DataSourceId, string DataSourceCode);
 
 /// <summary>Розклад збору разом із сутністю джерела, якій він належить.</summary>
 /// <param name="Schedule">Сам розклад.</param>
 /// <param name="SourceEntityCode">Код сутності в джерелі.</param>
 /// <param name="SourceEntityName">Підпис сутності; <c>null</c> — каталог джерела його не дав.</param>
+/// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
+/// <param name="DataSourceCode">Код цього з'єднання.</param>
 public sealed record ScheduledSourceEntity(
-    CollectionSchedule Schedule, string SourceEntityCode, string? SourceEntityName);
+    CollectionSchedule Schedule,
+    string SourceEntityCode,
+    string? SourceEntityName,
+    int DataSourceId,
+    string DataSourceCode);

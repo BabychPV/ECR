@@ -28,8 +28,17 @@ function ifMatch(rowVersion: string): HeadersInit {
   return { 'If-Match': `"${rowVersion}"` };
 }
 
-export function listCollectionSchedules(): Promise<CollectionSchedule[]> {
-  return apiFetch<CollectionSchedule[]>('/api/v1/collection-schedules');
+/**
+ * Розклади збору; `dataSourceCode` — лише розклади сутностей цього з'єднання
+ * (поле `dataSourceCode` рядка). Фільтрує сервер, до стелі переліку;
+ * невідомий код — порожній перелік, а не помилка.
+ */
+export function listCollectionSchedules(dataSourceCode?: string): Promise<CollectionSchedule[]> {
+  return apiFetch<CollectionSchedule[]>(
+    dataSourceCode
+      ? `/api/v1/collection-schedules?dataSource=${encodeURIComponent(dataSourceCode)}`
+      : '/api/v1/collection-schedules',
+  );
 }
 
 /**

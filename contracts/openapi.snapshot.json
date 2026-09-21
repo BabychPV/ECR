@@ -936,6 +936,15 @@
             "description": "Вираз cron (формат Quartz, 6–7 полів).",
             "type": "string"
           },
+          "dataSourceCode": {
+            "description": "Код цього з'єднання — значення фільтра `?dataSource=`.",
+            "type": "string"
+          },
+          "dataSourceId": {
+            "description": "З'єднання, якому належить сутність джерела.",
+            "format": "int32",
+            "type": "integer"
+          },
           "id": {
             "description": "Ідентифікатор розкладу.",
             "format": "int32",
@@ -999,7 +1008,9 @@
           "lastRunAt",
           "lastError",
           "lastErrorAt",
-          "rowVersion"
+          "rowVersion",
+          "dataSourceId",
+          "dataSourceCode"
         ],
         "type": "object"
       },
@@ -8537,6 +8548,15 @@
             "description": "Код у джерелі.",
             "type": "string"
           },
+          "dataSourceCode": {
+            "description": "Код цього з'єднання.",
+            "type": "string"
+          },
+          "dataSourceId": {
+            "description": "З'єднання, якому належить сутність.",
+            "format": "int32",
+            "type": "integer"
+          },
           "displayName": {
             "description": "Підпис для конфігуратора.",
             "type": [
@@ -8592,7 +8612,9 @@
           "transport",
           "isActive",
           "lastRun",
-          "oldestGap"
+          "oldestGap",
+          "dataSourceId",
+          "dataSourceCode"
         ],
         "type": "object"
       },
@@ -10889,6 +10911,16 @@
     },
     "/api/v1/collection-schedules": {
       "get": {
+        "description": "`dataSource` — код з'єднання: лише розклади його сутностей\n(вкладка розкладу в шухляді з'єднання). Невідомий код — порожній перелік.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dataSource",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10920,7 +10952,7 @@
             "description": "OK"
           }
         },
-        "summary": "Усі розклади разом із кодом сутності джерела і станом постановки.",
+        "summary": "Розклади разом із кодом сутності джерела, з'єднання і станом постановки.",
         "tags": [
           "CollectionSchedules"
         ]

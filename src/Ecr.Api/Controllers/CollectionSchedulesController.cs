@@ -24,11 +24,15 @@ public sealed class CollectionSchedulesController(
     SaveCollectionScheduleHandler save,
     DeleteCollectionScheduleHandler delete) : ControllerBase
 {
-    /// <summary>Усі розклади разом із кодом сутності джерела і станом постановки.</summary>
+    /// <summary>Розклади разом із кодом сутності джерела, з'єднання і станом постановки.</summary>
+    /// <remarks>
+    /// <c>dataSource</c> — код з'єднання: лише розклади його сутностей
+    /// (вкладка розкладу в шухляді з'єднання). Невідомий код — порожній перелік.
+    /// </remarks>
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<CollectionScheduleView>>(StatusCodes.Status200OK)]
-    public async Task<IActionResult> List(CancellationToken ct)
-        => Ok(await list.HandleAsync(ct).ConfigureAwait(false));
+    public async Task<IActionResult> List([FromQuery] string? dataSource, CancellationToken ct)
+        => Ok(await list.HandleAsync(dataSource, ct).ConfigureAwait(false));
 
     /// <summary>Заводить розклад для сутності джерела, у якої його ще немає.</summary>
     /// <remarks>

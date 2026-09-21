@@ -332,10 +332,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Усі розклади разом із кодом сутності джерела і станом постановки. */
+        /**
+         * Розклади разом із кодом сутності джерела, з'єднання і станом постановки.
+         * @description `dataSource` — код з'єднання: лише розклади його сутностей
+         *     (вкладка розкладу в шухляді з'єднання). Невідомий код — порожній перелік.
+         */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    dataSource?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -11850,6 +11856,13 @@ export interface components {
         CollectionScheduleView: {
             /** @description Вираз cron (формат Quartz, 6–7 полів). */
             cron: string;
+            /** @description Код цього з'єднання — значення фільтра `?dataSource=`. */
+            dataSourceCode: string;
+            /**
+             * Format: int32
+             * @description З'єднання, якому належить сутність джерела.
+             */
+            dataSourceId: number;
             /**
              * Format: int32
              * @description Ідентифікатор розкладу.
@@ -15360,6 +15373,13 @@ export interface components {
         SourceEntityStatus: {
             /** @description Код у джерелі. */
             code: string;
+            /** @description Код цього з'єднання. */
+            dataSourceCode: string;
+            /**
+             * Format: int32
+             * @description З'єднання, якому належить сутність.
+             */
+            dataSourceId: number;
             /** @description Підпис для конфігуратора. */
             displayName: null | string;
             /** @description Шлях в ієрархії джерела. */

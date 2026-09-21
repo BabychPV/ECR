@@ -291,10 +291,14 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
 
         var ids = entities.ConvertAll(e => e.Id);
 
+        // ⚠ Лише з'єднання цих сутностей: зовнішній ключ гарантує, що кожне
+        // знайдеться, тож код з'єднання ніколи не підміняється заглушкою.
+        var dataSourceIds = entities.Select(e => e.DataSourceId).Distinct().ToList();
+
         var transports = await db.DataSources
             .AsNoTracking()
-            .Take(MaxSourceEntities)
-            .Select(s => new { s.Id, s.Transport })
+            .Where(s => dataSourceIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Transport, s.Code })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -319,6 +323,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             .ConfigureAwait(false);
 
         var transportById = transports.ToDictionary(s => s.Id, s => s.Transport.ToString());
+        var codeById = transports.ToDictionary(s => s.Id, s => s.Code);
 
         var lastRun = runs
             .GroupBy(r => r.SourceEntityId)
@@ -350,7 +355,9 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 transportById.GetValueOrDefault(entity.DataSourceId, "—"),
                 entity.IsActive,
                 run is null ? null : new CollectionRunStatus(run.FinishedAt, run.Status, run.PointsRetrieved),
-                gaps.Count == 0 ? null : gaps[0].From);
+                gaps.Count == 0 ? null : gaps[0].From,
+                entity.DataSourceId,
+                codeById[entity.DataSourceId]);
         });
     }
 

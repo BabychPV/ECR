@@ -256,7 +256,9 @@ public sealed class HealthRedStateTests
             LastRun: lastRunStatus is null
                 ? null
                 : new CollectionRunStatus(DateTime.UtcNow, lastRunStatus, 10),
-            OldestGap: gap);
+            OldestGap: gap,
+            DataSourceId: 1,
+            DataSourceCode: "PI");
 
     private static ICollectionStore StoreWith(params SourceEntityStatus[] sources)
     {

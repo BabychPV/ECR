@@ -163,6 +163,8 @@ public interface ICollectionStore
 /// <param name="IsActive">Чи ввімкнено збір.</param>
 /// <param name="LastRun">Останній прогін; <c>null</c> — не збирали жодного разу.</param>
 /// <param name="OldestGap">Початок найстарішої непокритої прогалини; <c>null</c> — покриття суцільне.</param>
+/// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
+/// <param name="DataSourceCode">Код цього з'єднання.</param>
 public sealed record SourceEntityStatus(
     int Id,
     string Code,
@@ -171,7 +173,9 @@ public sealed record SourceEntityStatus(
     string Transport,
     bool IsActive,
     CollectionRunStatus? LastRun,
-    DateTime? OldestGap);
+    DateTime? OldestGap,
+    int DataSourceId,
+    string DataSourceCode);
 
 /// <summary>Що джерело вже віддало за одним полем мапінгу (<c>BE-27</c>).</summary>
 /// <param name="Points">Скільки точок у <c>ext.RawDataPoint</c>.</param>

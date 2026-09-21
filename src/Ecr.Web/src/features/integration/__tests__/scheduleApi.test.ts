@@ -42,6 +42,18 @@ describe('features/integration/scheduleApi', () => {
     });
   });
 
+  it('перелік із кодом зʼєднання передає його параметром dataSource, закодованим', async () => {
+    await listCollectionSchedules('PI WEST&1');
+    await listCollectionSchedules('');
+
+    // ⛔ Фільтрує сервер: відбір на клієнті після стелі переліку дав би неповну
+    // вкладку. Порожній код — без параметра, тобто всі розклади.
+    expect(apiFetch.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/collection-schedules?dataSource=PI%20WEST%261',
+      '/api/v1/collection-schedules',
+    ]);
+  });
+
   it('зміна і видалення несуть If-Match із версією рядка, а перелік і створення — ні', async () => {
     await listCollectionSchedules();
     await createCollectionSchedule({ sourceEntityId: 42, cron: '0 15 2 * * ?', isEnabled: true });

@@ -232,7 +232,7 @@ public sealed class CollectionScheduleHandlersTests
         Allow("Integration.Manage");
 
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => new ListCollectionSchedulesHandler(_store, _access, _user).HandleAsync(CancellationToken.None));
+            () => new ListCollectionSchedulesHandler(_store, _access, _user).HandleAsync(null, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Create().HandleAsync(77, Nightly, isEnabled: true, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(
@@ -270,7 +270,7 @@ public sealed class CollectionScheduleHandlersTests
         typeof(CollectionSchedule).GetProperty(nameof(CollectionSchedule.RowVersion))!
             .SetValue(schedule, new byte[] { 0, 0, 0, 0, 0, 0, 7, (byte)id });
 
-        _store.Rows.Add(new ScheduledSourceEntity(schedule, $"ENT-{id}", $"Entity {id}"));
+        _store.Rows.Add(new ScheduledSourceEntity(schedule, $"ENT-{id}", $"Entity {id}", 3, "SRC-3"));
 
         return schedule;
     }
@@ -284,7 +284,7 @@ public sealed class CollectionScheduleHandlersTests
         /// <summary>Сутності джерела, які «є в базі»: ключ → код і підпис.</summary>
         public Dictionary<int, (string Code, string? Name)> Entities { get; } = [];
 
-        public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(CancellationToken ct)
+        public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(string? dataSourceCode, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<ScheduledSourceEntity>>(Rows);
 
         public Task<ScheduledSourceEntity?> FindAsync(int collectionScheduleId, CancellationToken ct)
@@ -296,7 +296,9 @@ public sealed class CollectionScheduleHandlersTests
                     ? new SourceEntityScheduling(
                         entity.Code,
                         entity.Name,
-                        Rows.Find(r => r.Schedule.SourceEntityId == sourceEntityId)?.Schedule.Id)
+                        Rows.Find(r => r.Schedule.SourceEntityId == sourceEntityId)?.Schedule.Id,
+                        3,
+                        "SRC-3")
                     : null);
 
         /// <summary>Ключ присвоюється одразу — базу тут заміняє цей список.</summary>
@@ -306,7 +308,7 @@ public sealed class CollectionScheduleHandlersTests
                 .SetValue(schedule, Rows.Count + 1);
 
             var entity = Entities[schedule.SourceEntityId];
-            Rows.Add(new ScheduledSourceEntity(schedule, entity.Code, entity.Name));
+            Rows.Add(new ScheduledSourceEntity(schedule, entity.Code, entity.Name, 3, "SRC-3"));
         }
 
         public void Remove(CollectionSchedule schedule)

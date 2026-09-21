@@ -3202,6 +3202,13 @@ public sealed class NotFoundException(string errorCode, string message)
 > ⚠ `channelId` — фільтр, а не адресація: неіснуючий канал дає порожню
 > сторінку, а не `404`. Журнал переживає видалення каналу навмисно.
 
+> **`GET /api/v1/collection-schedules` — параметр** (`UI-09`): `dataSource` —
+> код з'єднання (`DataSource.Code`), необов'язковий. Звужує САМ ЗАПИТ (до стелі
+> переліку в 1000): вкладку розкладу відкривають із шухляди з'єднання.
+> Невідомий код — порожній перелік, а не `404`, як `channelId` вище. Кожен рядок
+> несе `dataSourceId` і `dataSourceCode`; ті самі два поля має й
+> `GET /api/v1/sources`.
+
 > ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
 > ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —
 > `ExportSnapshotHandler.MaxRows` = 50 000 рядків, понад неї `422 ECR-RPT-0422`,

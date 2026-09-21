@@ -242,6 +242,82 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "UI-09")]
+    public async Task Фільтр_dataSource_віддає_розклади_лише_цього_зʼєднання_а_невідомий_код_порожній_перелік()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var mine = await AddDataSourceAsync().ConfigureAwait(true);
+        var other = await AddDataSourceAsync().ConfigureAwait(true);
+        var (first, _) = await AddScheduleAsync(FarFuture, mine.Id).ConfigureAwait(true);
+        var (second, _) = await AddScheduleAsync(FarFuture, mine.Id).ConfigureAwait(true);
+        await AddScheduleAsync(FarFuture, other.Id).ConfigureAwait(true);
+
+        var filtered = await client.GetAsync(Filtered(mine.Code)).ConfigureAwait(true);
+        Assert.True(filtered.StatusCode == HttpStatusCode.OK, $"{filtered.StatusCode}: {app.ErrorsText}");
+
+        var ids = (await BodyAsync(filtered).ConfigureAwait(true))
+            .EnumerateArray().Select(s => s.GetProperty("id").GetInt32()).Order().ToArray();
+        Assert.Equal(new[] { first, second }.Order().ToArray(), ids);
+
+        // ⚠ Фільтр, а не адресація: невідоме з'єднання — порожній перелік, не 404.
+        var unknown = await client.GetAsync(Filtered($"Nope{Guid.NewGuid():N}")).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.OK, unknown.StatusCode);
+        Assert.Equal(0, (await BodyAsync(unknown).ConfigureAwait(true)).GetArrayLength());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "UI-09")]
+    public async Task Розклад_і_сутність_джерела_несуть_зʼєднання_якому_належать()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.EditSchedule").ConfigureAwait(true);
+
+        var source = await AddDataSourceAsync().ConfigureAwait(true);
+        var (id, _) = await AddScheduleAsync(FarFuture, source.Id).ConfigureAwait(true);
+        var (entityId, _) = await AddSourceEntityAsync(source.Id).ConfigureAwait(true);
+
+        var listed = await RowAsync(client, id).ConfigureAwait(true);
+        var created = await BodyAsync(await PostAsync(client, entityId, FarFuture).ConfigureAwait(true)).ConfigureAwait(true);
+
+        Assert.All(
+            new[] { listed, created },
+            row => Assert.Equal(
+                (source.Id, source.Code),
+                (row.GetProperty("dataSourceId").GetInt32(), row.GetProperty("dataSourceCode").GetString())));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "UI-09")]
+    public async Task Перелік_сутностей_збору_несе_код_зʼєднання()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.Manage").ConfigureAwait(true);
+
+        var source = await AddDataSourceAsync().ConfigureAwait(true);
+        var (entityId, _) = await AddSourceEntityAsync(source.Id).ConfigureAwait(true);
+
+        var listed = await client.GetAsync(new Uri("/api/v1/sources", UriKind.Relative)).ConfigureAwait(true);
+        Assert.True(listed.StatusCode == HttpStatusCode.OK, $"{listed.StatusCode}: {app.ErrorsText}");
+
+        var row = (await BodyAsync(listed).ConfigureAwait(true))
+            .EnumerateArray().Single(s => s.GetProperty("id").GetInt32() == entityId);
+        Assert.Equal(
+            (source.Id, source.Code),
+            (row.GetProperty("dataSourceId").GetInt32(), row.GetProperty("dataSourceCode").GetString()));
+    }
+
+    private static Uri Filtered(string dataSource)
+        => new($"{Schedules}?dataSource={Uri.EscapeDataString(dataSource)}", UriKind.Relative);
+
     private static Uri At(int id) => new($"{Schedules}/{id}", UriKind.Relative);
 
     private static Task<HttpResponseMessage> PostAsync(HttpClient client, int sourceEntityId, string cron)
@@ -291,9 +367,9 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
     /// кожного наступного тесту прогону. Розкладу активність не потрібна —
     /// перевіряється його редагування, а не збір.
     /// </remarks>
-    private async Task<(int Id, string Code)> AddScheduleAsync(string cron)
+    private async Task<(int Id, string Code)> AddScheduleAsync(string cron, int? dataSourceId = null)
     {
-        var (entityId, code) = await AddSourceEntityAsync().ConfigureAwait(false);
+        var (entityId, code) = await AddSourceEntityAsync(dataSourceId).ConfigureAwait(false);
 
         await using var db = NewDb();
         var schedule = new CollectionSchedule(entityId, cron);
@@ -303,14 +379,13 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         return (schedule.Id, code);
     }
 
-    /// <summary>Джерело і сутність БЕЗ розкладу; повертає ключ і код сутності.</summary>
-    private async Task<(int Id, string Code)> AddSourceEntityAsync()
+    /// <summary>З'єднання без сутностей; повертає його ключ і код.</summary>
+    private async Task<(int Id, string Code)> AddDataSourceAsync()
     {
-        var tag = Guid.NewGuid().ToString("N")[..10];
         await using var db = NewDb();
 
         var dataSource = new DataSource(
-            EcrCode.Create($"Sch{tag}"),
+            EcrCode.Create($"Sch{Guid.NewGuid().ToString("N")[..10]}"),
             new LocalizedText(new Dictionary<string, string>(StringComparer.Ordinal) { ["en"] = "Source" }),
             ExternalTransport.PiWebApi,
             "https://example.test",
@@ -318,7 +393,20 @@ public sealed class CollectionSchedulesControllerTests(SqlServerFixture sql)
         db.DataSources.Add(dataSource);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        var entity = new SourceEntity(dataSource.Id, $"Ent{tag}", RegistrySourceKind.External);
+        return (dataSource.Id, dataSource.Code);
+    }
+
+    /// <summary>
+    /// Сутність БЕЗ розкладу (у новому з'єднанні або в названому); повертає ключ
+    /// і код сутності.
+    /// </summary>
+    private async Task<(int Id, string Code)> AddSourceEntityAsync(int? dataSourceId = null)
+    {
+        var tag = Guid.NewGuid().ToString("N")[..10];
+        var sourceId = dataSourceId ?? (await AddDataSourceAsync().ConfigureAwait(false)).Id;
+        await using var db = NewDb();
+
+        var entity = new SourceEntity(sourceId, $"Ent{tag}", RegistrySourceKind.External);
         entity.Describe($"Entity {tag}", null);
         entity.Deactivate();
         db.SourceEntities.Add(entity);

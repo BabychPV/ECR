@@ -26,6 +26,8 @@ namespace Ecr.Application.Integration;
 /// <param name="RowVersion">
 /// Версія рядка в Base64 — її ж клієнт повертає заголовком <c>If-Match</c>.
 /// </param>
+/// <param name="DataSourceId">З'єднання, якому належить сутність джерела.</param>
+/// <param name="DataSourceCode">Код цього з'єднання — значення фільтра <c>?dataSource=</c>.</param>
 public sealed record CollectionScheduleView(
     int Id,
     int SourceEntityId,
@@ -36,7 +38,9 @@ public sealed record CollectionScheduleView(
     DateTime? LastRunAt,
     string? LastError,
     DateTime? LastErrorAt,
-    string RowVersion);
+    string RowVersion,
+    int DataSourceId,
+    string DataSourceCode);
 
 /// <summary>
 /// Перелік розкладів збору. Право <c>Integration.EditSchedule</c>.
@@ -54,12 +58,17 @@ public sealed class ListCollectionSchedulesHandler(
     public const string Permission = "Integration.EditSchedule";
 
     /// <summary>Віддає розклади разом із кодом і назвою сутності джерела.</summary>
+    /// <param name="dataSource">
+    /// Код з'єднання: лише його розклади; порожній — усі. Невідомий код — порожній
+    /// перелік, а не <c>404</c>: це фільтр, а не адресація.
+    /// </param>
     /// <param name="ct">Скасування.</param>
-    public async Task<IReadOnlyList<CollectionScheduleView>> HandleAsync(CancellationToken ct)
+    public async Task<IReadOnlyList<CollectionScheduleView>> HandleAsync(string? dataSource, CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
-        var rows = await store.ListAsync(ct).ConfigureAwait(false);
+        var code = string.IsNullOrWhiteSpace(dataSource) ? null : dataSource.Trim();
+        var rows = await store.ListAsync(code, ct).ConfigureAwait(false);
 
         return [.. rows.Select(ToView)];
     }
@@ -79,7 +88,9 @@ public sealed class ListCollectionSchedulesHandler(
             row.Schedule.LastRunAt,
             row.Schedule.LastError,
             row.Schedule.LastErrorAt,
-            VersionOf(row.Schedule));
+            VersionOf(row.Schedule),
+            row.DataSourceId,
+            row.DataSourceCode);
 
     internal static async Task<ScheduledSourceEntity> FindAsync(
         ICollectionScheduleStore store, int id, CancellationToken ct)
@@ -402,7 +413,8 @@ public sealed class CreateCollectionScheduleHandler(
             .ApplyOrFailAsync(applier, uow, clock, schedule, ct).ConfigureAwait(false);
 
         return ListCollectionSchedulesHandler.ToView(
-            new ScheduledSourceEntity(schedule, entity.Code, entity.Name));
+            new ScheduledSourceEntity(
+                schedule, entity.Code, entity.Name, entity.DataSourceId, entity.DataSourceCode));
     }
 }
 
