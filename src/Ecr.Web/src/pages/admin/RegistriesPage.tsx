@@ -1,5 +1,5 @@
-﻿import { useState, type JSX } from 'react';
-import { Badge, Button, Checkbox, Group, Modal, Select, Stack, Table, Text, TextInput } from '@mantine/core';
+﻿import { useMemo, useState, type JSX } from 'react';
+import { Badge, Button, Checkbox, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -14,6 +14,8 @@ import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
+import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -54,14 +56,23 @@ export function RegistriesPage(): JSX.Element {
   const session = useSession();
   const queryClient = useQueryClient();
 
-  // ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
-  // списком без жодного пошуку чи фільтра — акцесибіліті-дерево теж
-  // підтверджувало відсутність контролю. Клієнтський фільтр достатній: цей
-  // запит (`entries` нижче) повертає ПОВНИЙ масив без курсора/пагінації —
-  // сервер тут не розбиває відповідь на сторінки (`RegistryEntryDto[]`, не
-  // `Paged*`), тож фільтрувати вже завантажене дешевше й миттєвіше, ніж
-  // додавати параметр пошуку в API заради списку, що й так цілий.
-  const [search, setSearch] = useState('');
+  /*
+   * ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
+   * списком без жодного пошуку чи фільтра — акцесибіліті-дерево теж
+   * підтверджувало відсутність контролю. Клієнтський фільтр достатній: цей
+   * запит (`entries` нижче) повертає ПОВНИЙ масив без курсора/пагінації —
+   * сервер тут не розбиває відповідь на сторінки (`RegistryEntryDto[]`, не
+   * `Paged*`), тож фільтрувати вже завантажене дешевше й миттєвіше, ніж
+   * додавати параметр пошуку в API заради списку, що й так цілий.
+   *
+   * ⚠ Значення переїхало з `useState` в АДРЕСУ (`?q=`) разом із переходом на
+   * `FilterBar` — це вимога самого набору (`ФВ-14.29`), а не вподобання:
+   * рядок фільтрів інакше не вміє, бо кожне його поле читає `useUrlState`
+   * САМЕ. Той самий параметр читається тут, а не через `onChange` рядка
+   * фільтрів: сторінці потрібне значення в ТОМУ Ж рендері, що й таблиці, а
+   * `onChange` кличеться з ефекту — тобто на такт пізніше.
+   */
+  const [query, setQuery] = useUrlState('q');
 
   // `undefined` — діалог закритий; `null` — новий запис; об'єкт — правка.
   const [editing, setEditing] = useState<RegistryEntryDto | null | undefined>(undefined);
@@ -119,6 +130,151 @@ export function RegistriesPage(): JSX.Element {
   // ⛔ Не `null` означає «відмовлено, бо на запис посилаються N комірок». Саме
   // це число, а не текст відмови, вирішує, ЩО показати замість «повторити».
   const blocked = entryReferences(remove.error);
+
+  const needle = (query ?? '').trim().toLowerCase();
+
+  /*
+   * ⛔ `undefined` мусить лишатися `undefined`: `?? []` перетворило б «запиту
+   * ще не робили» (довідник не обрано) на «записів немає» — рівно ту підміну,
+   * яку `AsyncBoundary` всередині таблиці й ловить.
+   *
+   * ⚠ Фільтрування переїхало СЮДИ з тіла `AsyncBoundary`: таблиця набору має
+   * отримати вже звужений перелік РАЗОМ із прапорцем `filtered`, інакше вона
+   * не відрізнить «нічого не знайдено» від «нічого немає».
+   */
+  const rows = useMemo<readonly RegistryEntryDto[] | undefined>(() => {
+    const all = code === null ? undefined : entries.data;
+
+    if (all === undefined) return undefined;
+    if (needle.length === 0) return all;
+
+    return all.filter(
+      (entry) =>
+        entry.code.toLowerCase().includes(needle) ||
+        entry.display.toLowerCase().includes(needle),
+    );
+  }, [code, entries.data, needle]);
+
+  const canEditData = can(session.data, 'Registry.EditData');
+
+  /*
+   * Колонки переліку записів. Чотири плюс дії — межа `L5` (сім) із запасом.
+   *
+   * ⛔ Жодного `num`: він склеює вирівнювання праворуч, моноширинність і
+   * ОКРУГЛЕННЯ до трьох знаків (`CellFractionCeiling`), а тут немає
+   * числової величини взагалі. `parentEntryId` — ідентифікатор, і навіть без
+   * `num` голе числове поле пішло б через `formatNumber`, тобто запис 1234
+   * поїхав би на екран як «1,234». Тому в нього власний `render`, що віддає
+   * рядок без роздільників розрядів.
+   */
+  const columns: readonly DataTableColumn<RegistryEntryDto>[] = [
+    { key: 'code', label: t('registries.code') },
+    {
+      key: 'display',
+      label: t('registries.name'),
+
+      /* ⛔ UI-аудит-пас 8, lane4, п.5: довгий рядок БЕЗ пробілів (~570
+         символів в «Name · English») розтягував клітинку, таблицю й ВСЮ
+         сторінку — навігація теж їхала вбік. `.ecr-wrap-anywhere`
+         (`motion.css`) дає браузеру переносити такий рядок замість
+         розтягувати розкладку; повне значення лишається читаним, на відміну
+         від еліпсиса.
+
+         ⚠ Клас переїхав із `<td>` на вузол ВСЕРЕДИНІ клітинки: розмітку
+         рядка тепер малює набір, і власного `className` колонка йому не
+         передає. Властивість та сама — `overflow-wrap: anywhere` змінює
+         мінімальний вклад рядка в розкладку незалежно від того, на якому з
+         двох вузлів вона оголошена. */
+      render: (entry) => <span className="ecr-wrap-anywhere">{entry.display}</span>,
+    },
+    {
+      key: 'parentEntryId',
+      label: t('registries.parent'),
+
+      // ⛔ `D15-06`: елемента без даних не малюємо — ні прочерку, ні
+      // заглушки. Тут стояло `?? '—'`, і саме це набір знімає: прочерк —
+      // твердження «батька немає», яке не відрізнити від «поле не приїхало».
+      render: (entry) => (entry.parentEntryId === null ? null : String(entry.parentEntryId)),
+    },
+    {
+      key: 'validity',
+      label: t('registries.validity'),
+
+      // ⛔ Без `sortValue` сортування цієї колонки мовчки не робило б нічого:
+      // `validity` не є полем рядка, і `row['validity']` — `undefined` для
+      // кожного запису. Порядок вікна задає його ПОЧАТОК; порожні межі
+      // `compareKeys` відправляє в кінець і при зростанні, і при спаданні.
+      sortValue: (entry) => entry.validFrom,
+
+      /* ⛔ Склейку рядком РОЗІБРАНО на вузли, а не замінено на `formatDate()`
+         всередині неї. Обидва варіанти дали б читабельний текст, але рядок не
+         має атрибутів — точне значення не лишилося б ДЕ. Тут воно лишається в
+         `dateTime` кожної межі окремо.
+
+         ⚠ `dateOnly` в обох: контракт віддає `validFrom`/`validTo` як
+         `Format: date` (`RegistryEntryDto`) — це КАЛЕНДАРНІ межі вікна
+         чинності, які звіряються з днем документа, а не з годинником.
+         «12:00 AM» приписало б їм точність, якої в даних немає. */
+      render: (entry) => (
+        <>
+          <Timestamp value={entry.validFrom} dateOnly fallback={Unbounded} />
+          {' — '}
+          <Timestamp value={entry.validTo} dateOnly fallback={Unbounded} />
+        </>
+      ),
+    },
+
+    /*
+     * ⚠ Колонка дій з'являється лише з правом — рівно як і до переїзду
+     * (раніше порожня клітинка малювалася завжди; тепер порожньої колонки
+     * просто немає, `D15-06`). `sortable: false` обов'язковий: у кнопок
+     * немає скалярного значення, а шапка з порожнім підписом стала б
+     * кнопкою БЕЗ імені й завалила б `button-name` у гейті `a11y`.
+     */
+    ...(canEditData
+      ? [
+          {
+            key: 'actions',
+            label: '',
+            sortable: false,
+            render: (entry: RegistryEntryDto) => (
+              <Group gap="xs" justify="flex-end">
+                <Button size="compact-xs" variant="subtle" onClick={() => setEditing(entry)}>
+                  {t('registries.editEntry')}
+                </Button>
+
+                {/* ⚠ Вікно чинності — окрема дія, і саме воно замінює
+                    видалення: запис, на який посилаються комірки, закривають
+                    датою (`ФВ-8.5`). */}
+                <Button size="compact-xs" variant="subtle" onClick={() => setValidity(entry)}>
+                  {t('registries.validity')}
+                </Button>
+
+                {/* ⛔ Видалення не мало в інтерфейсі жодної кнопки: обробник
+                    на сервері існував, перевіряв право й рахував посилання —
+                    і не викликався ніколи (директива №15, BE-01).
+
+                    ⚠ Дія тут ДРУГА за помітністю після вікна чинності
+                    навмисно: у більшості випадків правильна дія саме закрити
+                    датою, а видалення доступне лише запису, на який ще ніхто
+                    не послався. */}
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="statusError"
+                  onClick={() => {
+                    remove.reset();
+                    setDeleting(entry);
+                  }}
+                >
+                  {t('common.delete')}
+                </Button>
+              </Group>
+            ),
+          } satisfies DataTableColumn<RegistryEntryDto>,
+        ]
+      : []),
+  ];
 
   return (
     <>
@@ -219,150 +375,63 @@ export function RegistriesPage(): JSX.Element {
       )}
 
       {/*
-       * ⚠ Доки довідник не обрано, `data` — `undefined`, і обгортка показує
-       * порожній стан із підказкою «оберіть довідник». Це не «даних немає»:
-       * запиту ще не було, і сказати про це чесніше, ніж малювати порожню
-       * таблицю з заголовками.
+       * ⚠ Рядок фільтрів стоїть НАД таблицею й поза її станами — на відміну
+       * від поля пошуку, яке жило всередині гілки «дані» й зникало разом із
+       * нею. Це не косметика: зі стану «фільтр нічого не знайшов» вийти можна
+       * лише правкою фільтра, а поле, що зникло разом із рядками, лишало
+       * людину в тупику.
+       *
+       * ⚠ Малюється лише з обраним довідником: без нього фільтрувати нема
+       * чого, а контрол без даних — це `D15-06`.
        */}
-      <AsyncBoundary<RegistryEntryDto[]>
+      {code !== null && (
+        <FilterBar
+          search={{
+            label: t('registries.search'),
+            param: 'q',
+            placeholder: t('registries.searchPlaceholder'),
+          }}
+          clearLabel={t('filters.clear')}
+        />
+      )}
+
+      {/*
+       * ⛔ `DataTable` замінює `AsyncBoundary` + `<Table>` РАЗОМ із власним
+       * перемикачем «фільтр нічого не знайшов»: обгортку станів набір тримає
+       * всередині себе (той самий `AsyncBoundary`, `skeleton="table"`).
+       * Лишити зовнішню поруч означало б два перемикачі станів на одну
+       * таблицю — саме ту розбіжність, заради усунення якої таблиця й стала
+       * компонентом.
+       *
+       * ⛔ `L10`: різниця «порожньо» / «фільтр нічого не знайшов» ПЕРЕЇХАЛА, а
+       * не зникла. Раніше її тримали два різні місця — `emptyTitle` обгортки і
+       * власний `<Text>` під таблицею; тепер її тримає `filtered`, і перелік
+       * станів став трьома, а не двома: «оберіть довідник» (запиту не було),
+       * «у довіднику немає записів» (запит був, порожньо), «нічого не
+       * знайдено» (записи є, фільтр їх не пропустив).
+       *
+       * ⚠ Сортування шапкою прийшло з набором, і його тут не було: чотири
+       * перші колонки стали клікабельними з `aria-sort`. Порядок при
+       * відкритті — той самий, у якому віддав сервер.
+       *
+       * ⚠ `total`/`onShowMore` цьому екрану передавати нема куди:
+       * `GET …/entries` віддає повний масив без курсора, тож підсумок «N / M»
+       * не малюється зовсім (`D15-06`).
+       */}
+      <DataTable<RegistryEntryDto>
+        columns={columns}
+        rows={rows}
+        rowKey={(entry) => String(entry.id)}
         isPending={code !== null && entries.isPending}
         error={entries.error}
-        data={code === null ? undefined : entries.data}
-        isEmpty={(all) => all.length === 0}
+        filtered={code !== null && needle.length > 0}
         emptyTitle={code === null ? t('registries.pick') : t('registries.noEntries')}
         emptyHint={code === null ? t('registries.pickHint') : t('registries.noEntriesHint')}
-        skeleton="table"
+        noMatchTitle={t('registries.searchNoMatches')}
+        onClearFilters={() => setQuery(null)}
+        clearFiltersLabel={t('filters.clear')}
         onRetry={() => void entries.refetch()}
-      >
-        {(all) => {
-          // ⛔ UI-аудит-пас 8, lane4, п.6: фільтр за кодом чи назвою —
-          // клієнтський, бо `all` тут уже ПОВНИЙ масив (сервер не пагінує
-          // цей маршрут).
-          const needle = search.trim().toLowerCase();
-          const filtered =
-            needle.length === 0
-              ? all
-              : all.filter(
-                  (entry) =>
-                    entry.code.toLowerCase().includes(needle) ||
-                    entry.display.toLowerCase().includes(needle),
-                );
-
-          return (
-            <>
-              <TextInput
-                size="xs"
-                mb="xs"
-                miw={220}
-                label={t('registries.search')}
-                placeholder={t('registries.searchPlaceholder')}
-                value={search}
-                onChange={(event) => setSearch(event.currentTarget.value)}
-              />
-
-              <Table striped highlightOnHover className="ecr-sticky-head">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>{t('registries.code')}</Table.Th>
-                    <Table.Th>{t('registries.name')}</Table.Th>
-                    <Table.Th>{t('registries.parent')}</Table.Th>
-                    <Table.Th>{t('registries.validity')}</Table.Th>
-                    <Table.Th />
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {filtered.map((entry) => (
-                    <Table.Tr key={entry.id}>
-                      <Table.Td>{entry.code}</Table.Td>
-                      {/* ⛔ UI-аудит-пас 8, lane4, п.5: довгий рядок БЕЗ
-                          пробілів (~570 символів в «Name · English»)
-                          розтягував клітинку, таблицю й ВСЮ сторінку —
-                          навігація теж їхала вбік. `.ecr-wrap-anywhere`
-                          (`motion.css`) дає браузеру переносити такий рядок
-                          замість розтягувати розкладку; повне значення
-                          лишається читаним, на відміну від еліпсиса. */}
-                      <Table.Td className="ecr-wrap-anywhere">{entry.display}</Table.Td>
-                      <Table.Td>{entry.parentEntryId ?? '—'}</Table.Td>
-                      {/* ⛔ Склейку рядком РОЗІБРАНО на вузли, а не замінено
-                          на `formatDate()` всередині неї. Обидва варіанти
-                          дали б читабельний текст, але рядок не має
-                          атрибутів — точне значення не лишилося б ДЕ. Тут
-                          воно лишається в `dateTime` кожної межі окремо.
-
-                          ⚠ `dateOnly` в обох: контракт віддає
-                          `validFrom`/`validTo` як `Format: date`
-                          (`RegistryEntryDto`) — це КАЛЕНДАРНІ межі вікна
-                          чинності, які звіряються з днем документа, а не з
-                          годинником. «12:00 AM» приписало б їм точність,
-                          якої в даних немає. */}
-                      <Table.Td>
-                        <Timestamp value={entry.validFrom} dateOnly fallback={Unbounded} />
-                        {' — '}
-                        <Timestamp value={entry.validTo} dateOnly fallback={Unbounded} />
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap="xs" justify="flex-end">
-                          {can(session.data, 'Registry.EditData') && (
-                            <>
-                              <Button
-                                size="compact-xs"
-                                variant="subtle"
-                                onClick={() => setEditing(entry)}
-                              >
-                                {t('registries.editEntry')}
-                              </Button>
-
-                              {/* ⚠ Вікно чинності — окрема дія, і саме воно
-                                  замінює видалення: запис, на який
-                                  посилаються комірки, закривають датою
-                                  (`ФВ-8.5`). */}
-                              <Button
-                                size="compact-xs"
-                                variant="subtle"
-                                onClick={() => setValidity(entry)}
-                              >
-                                {t('registries.validity')}
-                              </Button>
-
-                              {/* ⛔ Видалення не мало в інтерфейсі жодної
-                                  кнопки: обробник на сервері існував,
-                                  перевіряв право й рахував посилання — і не
-                                  викликався ніколи (директива №15, BE-01).
-
-                                  ⚠ Дія тут ДРУГА за помітністю після вікна
-                                  чинності навмисно: у більшості випадків
-                                  правильна дія саме закрити датою, а видалення
-                                  доступне лише запису, на який ще ніхто не
-                                  послався. */}
-                              <Button
-                                size="compact-xs"
-                                variant="subtle"
-                                color="statusError"
-                                onClick={() => {
-                                  remove.reset();
-                                  setDeleting(entry);
-                                }}
-                              >
-                                {t('common.delete')}
-                              </Button>
-                            </>
-                          )}
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-
-              {filtered.length === 0 && (
-                <Text size="sm" c="dimmed" mt="xs">
-                  {t('registries.searchNoMatches')}
-                </Text>
-              )}
-            </>
-          );
-        }}
-      </AsyncBoundary>
+      />
 
       {selected !== undefined && (
         <RegistryEntryEditor
