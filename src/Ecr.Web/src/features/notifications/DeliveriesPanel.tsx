@@ -3,6 +3,7 @@ import { Button, Code, Group, Skeleton, Stack, Table, Text, VisuallyHidden } fro
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { listNotificationDeliveries } from '@/features/notifications/api';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
@@ -191,10 +192,17 @@ export function DeliveriesPanel(): JSX.Element {
  * ⛔ Ідентифікатор показується `<code>`, а не текстом, і це не про шрифт.
  * Гола `17` у стовпці «Канал» читається як назва — поруч із «Пошта
  * бухгалтерії» вона виглядає таким самим значенням того самого роду.
- * Моноширинна рамка каже, що це машинний ключ, а `title` — чому назви немає.
+ * Моноширинна рамка каже, що це машинний ключ, а підказка — чому назви немає.
+ *
+ * ⚠ Підказка — `Hint focusable`, а не `title`: `title` не видно з клавіатури,
+ * а пояснення «канал видалено» — єдине, що відрізняє цей рядок від зламаного.
  */
 function channelCell(channelName: string | null, channelId: number): ReactNode {
   if (channelName !== null) return channelName;
 
-  return <Code title={t('notifications.channelGone')}>{channelId}</Code>;
+  return (
+    <Hint label={t('notifications.channelGone')} focusable>
+      <Code>{channelId}</Code>
+    </Hint>
+  );
 }

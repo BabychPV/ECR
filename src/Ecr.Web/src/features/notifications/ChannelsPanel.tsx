@@ -16,6 +16,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
@@ -194,9 +195,11 @@ export function ChannelsPanel(): JSX.Element {
                     тоді, коли сповіщення були потрібні.
                   */}
                   {channel.kind !== 'TeamsWebhook' ? (
-                    <Text size="sm" c="dimmed" title={t('notifications.secretNotUsedSmtp')}>
-                      {t('notifications.notApplicable')}
-                    </Text>
+                    <Hint label={t('notifications.secretNotUsedSmtp')} focusable>
+                      <Text size="sm" c="dimmed">
+                        {t('notifications.notApplicable')}
+                      </Text>
+                    </Hint>
                   ) : channel.hasSecret ? (
                     <Text size="sm">{t('notifications.webhookSet')}</Text>
                   ) : (

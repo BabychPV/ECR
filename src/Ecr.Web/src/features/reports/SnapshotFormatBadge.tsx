@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import { Badge } from '@mantine/core';
+import { Hint } from '@/shared/ui/Hint';
 import { toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 import { t } from '@/shared/i18n';
 
@@ -56,8 +57,10 @@ const Looks: Readonly<
  * (`toneFills`), варіант `default` з тієї ж причини, що й у `StatusBadge`
  * (`light` без `color` бере фірмовий відтінок).
  *
- * ⚠ Підказка — `title`, той самий прийом, що й `snapshots.exportHint` на цій
- * сторінці. Підпис сам несе зміст («ранній формат»), підказка лише пояснює.
+ * ⚠ Підказка — `Hint`, а не `title`: `title` не видно з клавіатури, а
+ * позначка сама по собі не фокусована, тож `Hint focusable` дає їй
+ * `tabIndex=0` і прив'язує пояснення через `aria-describedby`. Підпис сам
+ * несе зміст («ранній формат»), підказка лише пояснює.
  */
 export function SnapshotFormatBadge(props: { format: string | undefined }): JSX.Element | null {
   const format = snapshotHashFormat(props.format);
@@ -68,17 +71,18 @@ export function SnapshotFormatBadge(props: { format: string | undefined }): JSX.
   const fill = toneFills[look.tone];
 
   return (
-    <Badge
-      size="sm"
-      miw="fit-content"
-      variant="default"
-      bg={fill.bg}
-      c={fill.text}
-      title={t(look.hint)}
-      data-hash-format={format}
-      data-format-tone={look.tone}
-    >
-      {t(look.label)}
-    </Badge>
+    <Hint label={t(look.hint)} focusable>
+      <Badge
+        size="sm"
+        miw="fit-content"
+        variant="default"
+        bg={fill.bg}
+        c={fill.text}
+        data-hash-format={format}
+        data-format-tone={look.tone}
+      >
+        {t(look.label)}
+      </Badge>
+    </Hint>
   );
 }

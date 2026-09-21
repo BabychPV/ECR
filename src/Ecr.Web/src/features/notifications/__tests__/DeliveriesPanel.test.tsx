@@ -212,7 +212,12 @@ describe('DeliveriesPanel: відмова журналу не читається
       // надруковане голим текстом у комірці, — тобто твердження «на екрані є
       // 4217» лишалося б зеленим після зламу.
       expect(shown.tagName).toBe('CODE');
-      expect(shown.getAttribute('title')).toBe(key('notifications.channelGone'));
+
+      // Чому назви немає — опис самого `<code>`, і він у порядку табуляції:
+      // `title` не видно ні з клавіатури, ні екранному читачу надійно.
+      expect(shown.hasAttribute('title')).toBe(false);
+      expect(shown.tabIndex).toBe(0);
+      expect(screen.queryAllByRole('code', { description: key('notifications.channelGone') })).toContain(shown);
     },
     SlowEnvTimeout,
   );

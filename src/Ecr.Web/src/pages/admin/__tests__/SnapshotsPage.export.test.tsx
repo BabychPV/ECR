@@ -117,8 +117,11 @@ describe('SnapshotsPage: вивантаження зрізу в книгу (R7)'
       // навігацію, і сторінка зі зрізами зникла б з-під користувача.
       expect(link.hasAttribute('download')).toBe(true);
 
-      // ⚠ Межа Excel має бути названа біля дії, а не в довідці.
-      expect(link.getAttribute('title') ?? '').toContain('snapshots.exportHint');
+      // ⚠ Межа Excel має бути названа біля дії, а не в довідці — як опис
+      // самого посилання (`aria-describedby`), а не `title`, якого не видно з
+      // клавіатури (`SnapshotsPage.keyboardHints`).
+      expect(link.hasAttribute('title')).toBe(false);
+      expect(screen.queryAllByRole('link', { description: '⟦snapshots.exportHint⟧' })).toContain(link);
     },
     SlowEnvTimeout,
   );

@@ -125,7 +125,10 @@ describe('SnapshotsPage: позначка формату зрізу', () => {
       // Каталог не завантажено: `t()` віддає позначений ключ (`D-138`) — саме
       // він доводить, що підпис і підказка пройшли через каталог.
       expect(badge?.textContent).toBe('⟦snapshots.formatLegacy⟧');
-      expect(badge?.getAttribute('title')).toBe('⟦snapshots.formatLegacyHint⟧');
+      // Підказка — опис позначки (`aria-describedby`), а не `title`: так її
+      // чує екранний читач і бачить клавіатура (`SnapshotsPage.keyboardHints`).
+      expect(badge?.hasAttribute('title')).toBe(false);
+      expect(screen.queryAllByRole('generic', { description: '⟦snapshots.formatLegacyHint⟧' })).toContain(badge);
 
       // ⛔ Не тривога: зріз не має дефекту й не вимагає дії.
       expect(badge?.getAttribute('data-format-tone')).toBe('info');
@@ -157,7 +160,7 @@ describe('SnapshotsPage: позначка формату зрізу', () => {
 
       expect(badge?.getAttribute('data-hash-format')).toBe('unknown');
       expect(badge?.textContent).toBe('⟦snapshots.formatUnknown⟧');
-      expect(badge?.getAttribute('title')).toBe('⟦snapshots.formatUnknownHint⟧');
+      expect(screen.queryAllByRole('generic', { description: '⟦snapshots.formatUnknownHint⟧' })).toContain(badge);
       expect(badge?.getAttribute('data-format-tone')).toBe('neutral');
     },
     SlowEnvTimeout,

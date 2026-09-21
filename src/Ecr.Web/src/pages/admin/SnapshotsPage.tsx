@@ -43,6 +43,7 @@ import {
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -410,16 +411,18 @@ export function SnapshotsPage(): JSX.Element {
                         до останнього знаку, мусить дізнатися про це ДО
                         вивантаження, а не після. Для звірки без утрат лишається
                         перегляд рядків поруч.
+
+                        ⚠ Межа — `Hint`, а не `title`: посилання вже в порядку
+                        табуляції, тож опис прив'язано до нього самого
+                        (`aria-describedby`) і показано на фокусі — кнопка «i»
+                        поруч додала б другу зупинку заради того самого тексту.
                       */}
                       {can(session.data, 'Report.Export') && (
-                        <Anchor
-                          size="xs"
-                          href={snapshotExportUrl(snapshot.id)}
-                          download
-                          title={t('snapshots.exportHint')}
-                        >
-                          {t('snapshots.export')}
-                        </Anchor>
+                        <Hint label={t('snapshots.exportHint')}>
+                          <Anchor size="xs" href={snapshotExportUrl(snapshot.id)} download>
+                            {t('snapshots.export')}
+                          </Anchor>
+                        </Hint>
                       )}
                     </Group>
                   </Table.Td>

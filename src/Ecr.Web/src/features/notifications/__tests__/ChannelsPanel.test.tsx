@@ -152,6 +152,15 @@ describe('ChannelsPanel: відмова переліку ≠ «каналів н
     expect(row.textContent ?? '').toContain('notifications.notApplicable');
     expect(row.textContent ?? '').not.toContain('notifications.webhookMissing');
 
+    // ⚠ Чому «не застосовується» — опис самої позначки, і вона в порядку
+    // табуляції: `title`, яким це пояснювалось раніше, не видно з клавіатури.
+    const notApplicable = within(row).getByText(/notifications\.notApplicable/);
+    expect(notApplicable.hasAttribute('title')).toBe(false);
+    expect(notApplicable.tabIndex).toBe(0);
+    expect(
+      within(row).queryAllByRole('paragraph', { description: /notifications\.secretNotUsedSmtp/ }),
+    ).toContain(notApplicable);
+
     // ⚠ І дії теж немає: збережена адреса для пошти нікуди не піде.
     expect(within(row).queryByText(/notifications\.setWebhook/)).toBeNull();
   }, 30_000);
