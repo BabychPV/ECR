@@ -262,9 +262,25 @@ internal static class Program
             }
         }
 
+        await BuildStatisticsAsync(db).ConfigureAwait(false);
         await PrintSizeAsync(db, rows, cells).ConfigureAwait(false);
         await db.DisposeAsync().ConfigureAwait(false);
         return 0;
+    }
+
+    /// <summary>Створює й оновлює статистику після масового завантаження.</summary>
+    /// <remarks>
+    /// ⛔ Без цього першу статистику на 2 млн рядків <c>doc.CellValue</c> будує
+    /// СИНХРОННО перша ж компіляція запиту користувача. Замір на стенді
+    /// (2026-09-21): компіляція <c>MERGE doc.CellValue</c> 3634 мс → 210 мс,
+    /// перший <c>PATCH …/cells</c> на 4 комірки ніс ці секунди на собі.
+    /// </remarks>
+    private static async Task BuildStatisticsAsync(EcrDbContext db)
+    {
+        var started = DateTime.UtcNow;
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC sys.sp_createstats; EXEC sys.sp_updatestats;").ConfigureAwait(false);
+        Console.WriteLine(Fmt($"Статистика: {(DateTime.UtcNow - started).TotalSeconds:F0} с."));
     }
 
     /// <summary>Шаблон, версія, структура таблиць і проєкт із періодами.</summary>
