@@ -122,6 +122,11 @@ interface StringAwareNumberFormat {
  * все, що є у значенні»; екран, у якого своя стеля, називає її явно і
  * пояснює, звідки вона взялася, поруч із викликом.
  *
+ * ⚠ `minFractionDigits` — доповнення нулями до формату комірки (сітка
+ * документа, `scale` колонки: `1.5` при масштабі 4 → `1.5000`, як у Excel).
+ * Лише ПОДАННЯ: на дріт, у редактор і в буфер нулі не йдуть. Дефолт 0 —
+ * поведінка решти викликачів не змінюється.
+ *
  * ⚠ `number` на вході теж приймається — колонки `Int`/`Lookup` їдуть числами й
  * далі. `String(number)` в експоненційному записі (`1e-7`) `normalizeDecimal`
  * свідомо відхиляє, тож такі значення повертаються як `null` і показуються
@@ -131,6 +136,7 @@ export function formatDecimal(
   value: unknown,
   lang?: Language,
   maxFractionDigits: number = MaxIntlFractionDigits,
+  minFractionDigits = 0,
 ): string | null {
   const text =
     typeof value === 'string'
@@ -147,8 +153,15 @@ export function formatDecimal(
   const dot = canonical.indexOf('.');
   const fractionDigits = dot === -1 ? 0 : canonical.length - dot - 1;
 
+  // ⚠ Доповнення нулями (`minFractionDigits`) робить сам `Intl` над РЯДКОМ —
+  // жодного `Number(...).toFixed()`, який з'їв би знаки за 17-ю значущою.
+  // Мінімум не перевищує стелю: `Intl` кидає `RangeError`, коли min > max.
+  const ceiling = Math.min(maxFractionDigits, MaxIntlFractionDigits);
+  const minimum = Math.max(0, Math.min(Math.trunc(minFractionDigits), ceiling));
+
   const format = formatter(formatLocale(lang), {
-    maximumFractionDigits: Math.min(fractionDigits, maxFractionDigits, MaxIntlFractionDigits),
+    minimumFractionDigits: minimum,
+    maximumFractionDigits: Math.max(minimum, Math.min(fractionDigits, ceiling)),
   }) as unknown as StringAwareNumberFormat;
 
   return format.format(canonical);

@@ -132,5 +132,22 @@ export function cellDisplay(value: unknown, column: ColumnDto): string {
   if (value === null || value === undefined) return '';
   if (!isNumericColumn(column)) return String(value);
 
-  return formatDecimal(value) ?? String(value);
+  return formatDecimal(value, undefined, undefined, displayScaleOf(column)) ?? String(value);
+}
+
+/**
+ * Скільки знаків після коми ПОКАЗУВАТИ щонайменше — формат комірки, як у Excel:
+ * `1.5` при `scale = 4` → `1.5000`.
+ *
+ * ⛔ Лише показ. Значення в рядку, редактор, `pendingStore`, тіло PATCH і буфер
+ * (`cellText`) нулів не отримують — вони йдуть від сирого значення, не від
+ * цього шаблону.
+ *
+ * ⚠ Колонка без масштабу — 0, тобто без доповнення, як до цієї зміни.
+ * Довший дріб не зрізається: округлення — справа `roundToScale` на вводі.
+ */
+function displayScaleOf(column: ColumnDto): number {
+  const scale = column.scale;
+
+  return typeof scale === 'number' && Number.isInteger(scale) && scale > 0 ? scale : 0;
 }
