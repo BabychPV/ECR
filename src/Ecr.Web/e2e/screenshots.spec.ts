@@ -104,6 +104,35 @@ async function expectNoAccessDenied(page: Page, where: string): Promise<void> {
   ).toBe(0);
 }
 
+/**
+ * Скелети завантаження, що ще на екрані.
+ *
+ * ⚠ Mantine `Skeleton` — єдиний спосіб, яким застосунок малює скелет
+ * (`AsyncBoundary.LoadingState`, `AppLayout` для лінивих маршрутів,
+ * окремі панелі). Видимий скелет має `data-visible="true"`; з `visible={false}`
+ * атрибута немає, і там уже показано вміст.
+ */
+const LoadingSkeleton = '.mantine-Skeleton-root[data-visible="true"]';
+
+/**
+ * Чекає, доки сторінка довантажиться.
+ *
+ * ⛔ Заголовок малюється ДО даних, тож очікування лише заголовка давало
+ * знімок скелета: `admin-light-compact-campaign.png` двічі поспіль був сірими
+ * смугами — перший маршрут першого прогону адміна, запит ще в дорозі.
+ *
+ * ⚠ `soft`: скелет, що не зник, — іменована помилка маршруту, але прогін іде
+ * далі й знімає решту, а не мовчки кладе знімок скелета в артефакти.
+ */
+async function waitForSkeletons(page: Page, where: string): Promise<void> {
+  await expect
+    .soft(
+      page.locator(LoadingSkeleton),
+      `${where}: скелет завантаження не зник — знімок показав би заглушку, а не дані`,
+    )
+    .toHaveCount(0, { timeout: 20_000 });
+}
+
 test.describe('Знімки маршрутів (D-142)', () => {
   // ⚠ Цей гейт більше не вирішує долю набору: без стенда ВЕСЬ набір падає в
   // `globalSetup.ts`. Він лишається робочим лише під `ECR_E2E_OPTIONAL`, коли
@@ -149,6 +178,8 @@ test.describe('Знімки маршрутів (D-142)', () => {
               page.getByRole('heading').first(),
               `${route.name}: заголовка немає — сторінка не відрендерилася`,
             ).toBeVisible({ timeout: 30_000 });
+
+            await waitForSkeletons(page, route.name);
 
             // ⛔ Аварійного стану бути не має. Порожній екран під роллю без
             // прав — законно (пункт меню туди й не веде); аварія — ні.
@@ -225,6 +256,7 @@ test.describe('Знімки маршрутів (D-142)', () => {
         await expect(drawer, 'шухляда не відкрилася адресою').toBeVisible({ timeout: 30_000 });
         await expect(drawer.getByRole('tab', { selected: true })).toBeVisible();
         await expect(drawer.getByText('https://pi.e2e.invalid/piwebapi')).toBeVisible();
+        await waitForSkeletons(page, 'шухляда з\'єднання');
 
         const crashed = await page.getByText(/Unhandled|TypeError|is not a function/i).count();
         expect(crashed, 'шухляда з\'єднання: на сторінці слід аварії').toBe(0);
