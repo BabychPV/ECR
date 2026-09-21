@@ -90,6 +90,18 @@ export interface RouteHandle {
   /** Право (`sec.Permission.Code`), потрібне для показу пункту; без нього — доступно всім. */
   permission?: string;
 
+  /**
+   * Права, КОЖНЕ з яких саме по собі теж відкриває маршрут — «`permission`
+   * АБО будь-яке з цих». Без `permission` поле не діє. Читати лише через
+   * `canAccessRoute()` (`routeAccess.ts`), не порівнювати `permission` руками.
+   *
+   * ⚠ Окреме поле, а не `permission: string | string[]`: відмова
+   * (`AccessDeniedPage`) і далі називає ОДНЕ право — те, що називає сервер у
+   * своєму `403`, — а сторож `S-02` (`AuthScenarios.cs`) і далі бачить
+   * `permission: '…'` рядковим літералом.
+   */
+  alsoPermittedBy?: readonly string[];
+
   /** Ключ іконки навбару (`navIcons`, `src/app/navIcons.tsx`) — резолвиться в
    *  компонент inline SVG на споживачі (`AppLayout.tsx`, `NavLink leftSection`).
    *  Рядковий ключ, не сама іконка чи компонент: реєстр маршрутів і далі не
@@ -285,7 +297,16 @@ export const routes = {
   adminSources: {
     id: 'admin-sources',
     path: '/admin/sources',
-    handle: { labelKey: 'nav.sources', permission: 'Integration.Manage', icon: 'sources' },
+    // ⚠ `Integration.View` АБО `Integration.Manage` — так само, як сервер
+    // пускає до `GET /api/v1/data-sources`, і відмова називає `View`, як і
+    // серверний `403`. Лише з `View` сторінка показує з'єднання без дій, а
+    // таблиця сутностей збору (`/api/v1/sources`, лише `Manage`) — відмову.
+    handle: {
+      labelKey: 'nav.sources',
+      permission: 'Integration.View',
+      alsoPermittedBy: ['Integration.Manage'],
+      icon: 'sources',
+    },
     showInNav: true,
   },
   adminMapping: {
