@@ -144,6 +144,11 @@ export function DocumentsPage(): JSX.Element {
           ними людина й виходить із порожнього стану. */}
       <DocumentListFilterBar periodKey={periodKey} filters={filters} />
 
+      {/* ⚠ Смуга — теж ПОЗА межею: її лічильники фільтрують перелік, і під
+          межею кожен клік знімав би її разом із фокусом на час запиту, а
+          порожній результат — ховав би кнопку, якою фільтр і знімають. */}
+      <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
+
       {/*
        * ⛔ Три порожні стани не виглядають однаково (L10): «фільтр нічого не
        * знайшов» — власний заголовок і кнопка скидання; «документів немає» —
@@ -177,8 +182,6 @@ export function DocumentsPage(): JSX.Element {
             {projects.error !== null && (
               <ErrorAlert error={projects.error} onRetry={() => void projects.refetch()} />
             )}
-
-            <DocumentListSummaryStrip periodKey={periodKey} />
 
             <Table striped highlightOnHover className="ecr-sticky-head">
               <Table.Thead>
