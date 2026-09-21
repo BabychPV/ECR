@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe as describeViolations, findViolations } from '@/test/a11y';
@@ -12,7 +12,15 @@ import { SearchLauncher } from '@/features/search/SearchLauncher';
  * ⚠ Сценарій — відкритий перелік зі збігами: саме там ролі
  * `combobox`/`listbox`/`group`/`option` і `aria-activedescendant` мають
  * зійтися між собою.
+ *
+ * ⛔ Модуль палітри прогрівається в `beforeAll`: холодний `import()` під
+ * навантаженням (1.6 с, заміряно) не вміщався в 1 с `findByRole('combobox')`
+ * першого тесту. Розбір — у `DataSearchPalette.test.tsx`.
  */
+
+beforeAll(async () => {
+  await import('@/features/search/DataSearchPalette');
+});
 
 const original = globalThis.fetch;
 

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { JSX } from 'react';
-import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Badge, Button, DEFAULT_THEME, MantineProvider, mergeMantineTheme } from '@mantine/core';
 import { Hint } from '@/shared/ui/Hint';
@@ -32,6 +32,28 @@ function show(ui: JSX.Element): void {
 function tooltip(): HTMLElement | null {
   return screen.queryByRole('tooltip');
 }
+
+/** Просуває фейковий час усередині `act`: переходи `Transition` доходять до кінця. */
+async function elapse(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+/**
+ * Переводить мишу з `from` на `to` так, як це робить браузер: `mouseout` на
+ * старому елементі з `relatedTarget` = новий, далі `mouseover` на новому.
+ * React будує `onMouseLeave`/`onMouseEnter` саме з цієї пари, тож обидва
+ * обробники спрацьовують в одній події — як і за справжнього руху миші.
+ */
+function moveMouse(from: Element | null, to: Element): void {
+  if (from !== null) fireEvent.mouseOut(from, { relatedTarget: to });
+  fireEvent.mouseOver(to, { relatedTarget: from });
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /** Елементи ролі `role`, чий обчислений опис — рівно `text`. */
 function describedAs(role: string, text: string): HTMLElement[] {
@@ -160,23 +182,44 @@ describe('Hint', () => {
     await screen.findByRole('tooltip');
   });
 
+  /**
+   * ⚠ Час — фейковий. Раніше тут стояв справжній `setTimeout(300)`, і за ці
+   * 300 мс `Transition` Mantine (два `requestAnimationFrame` і `setTimeout` на
+   * тривалість переходу) міняв стан ПОЗА `act` — звідси попередження
+   * `An update to @mantine/core/Transition … not wrapped in act(...)`, а
+   * результат залежав від того, скільки справжнього часу встигло минути.
+   * Тепер кожен крок часу — `advanceTimersByTimeAsync` усередині `act`, і
+   * «тримає відкритою» перевіряється на 1 с — із запасом довше за перехід
+   * закриття (150 мс + два кадри), тобто закриття, якби воно почалося, уже
+   * встигло б завершитися.
+   *
+   * ⚠ Миша — `moveMouse` (`fireEvent`), а не `user-event`: кожен виклик
+   * `user-event` загорнутий в `asyncWrapper` Testing Library, що завершується
+   * `setTimeout(0)` і просуває час лише для фейкових таймерів ЯКОГОСЬ `jest`;
+   * фейкові таймери vitest він не впізнає й чекає вічно (тест висів до
+   * 5 с таймауту). З тієї ж причини — жодних `findBy*`/`waitFor`.
+   */
   it('наведення на саму підказку тримає її відкритою (WCAG 1.4.13)', async () => {
-    const user = userEvent.setup();
+    vi.useFakeTimers();
     show(
       <Hint label={Text} focusable>
         <Badge data-testid="badge">legacy</Badge>
       </Hint>,
     );
+    const badge = screen.getByTestId('badge');
 
-    await user.hover(screen.getByTestId('badge'));
-    const tip = await screen.findByRole('tooltip');
+    moveMouse(null, badge);
+    await elapse(1_000);
+    const tip = screen.getByRole('tooltip');
 
-    await user.hover(tip);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // З тригера — на саму підказку: тригер мишу відпустив.
+    moveMouse(badge, tip);
+    await elapse(1_000);
     expect(tooltip()?.textContent).toContain(Text);
 
-    await user.unhover(tip);
-    await waitFor(() => expect(tooltip()).toBeNull());
+    moveMouse(tip, document.body);
+    await elapse(1_000);
+    expect(tooltip()).toBeNull();
   });
 
   it('підказка — не діалог: немає aria-haspopup/aria-expanded, фокус лишається на тригері', async () => {

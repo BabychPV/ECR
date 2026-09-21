@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { JSX } from 'react';
@@ -18,7 +18,22 @@ import { SearchLauncher } from '@/features/search/SearchLauncher';
  * ⚠ Очікувані написи беруться тим самим `t()`, що й у компоненті: каталогу
  * в тесті немає, тож обидві сторони бачать `⟦ключ⟧`, і тест не залежить від
  * перекладу.
+ *
+ * ⛔ Модуль палітри прогрівається в `beforeAll`. Без цього ПЕРШИЙ тест файлу
+ * платив за холодний `import()` усього графа палітри (`Modal`, `Combobox`,
+ * `useRateLimitedSearch`…) усередині типової 1 с `findByRole('combobox')`.
+ * Заміряно (2026-09-21): холодний імпорт — 180–260 мс у спокої й 1608 мс під
+ * навантаженням, тобто довше за весь бюджет `findBy*`; повний `npm test` під
+ * навантаженням падав тут 3 рази з 8, завжди на першому тесті й завжди
+ * «Unable to find role="combobox"». Прогрів не обходить лінивість: палітра
+ * й далі монтується через `lazy()` + `Suspense` справжнього `SearchLauncher`,
+ * просто модуль уже обчислено. Те, що до першого відкриття він НЕ
+ * обчислюється, стереже окремий `SearchLauncher.lazy.test.tsx`.
  */
+
+beforeAll(async () => {
+  await import('@/features/search/DataSearchPalette');
+});
 
 const original = globalThis.fetch;
 

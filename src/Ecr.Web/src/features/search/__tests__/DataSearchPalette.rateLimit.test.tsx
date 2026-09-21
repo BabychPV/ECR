@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
@@ -19,6 +19,10 @@ import { SearchLauncher } from '@/features/search/SearchLauncher';
  * вмикаються фейкові, і кожен запит записує момент (`Date.now()`), тож «чекає
  * `Retry-After`» перевіряється числом, а не відчуттям.
  */
+
+beforeAll(async () => {
+  await import('@/features/search/DataSearchPalette');
+});
 
 const original = globalThis.fetch;
 
@@ -96,10 +100,10 @@ function mount(): void {
 async function openPalette(): Promise<HTMLElement> {
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: t('search.open') }));
-  // ⚠ Запас на холодний `import()` палітри під навантаженням повного прогону:
-  // типової 1 с `findByRole` там не вистачає.
-  const input = await screen.findByRole('combobox', { name: t('search.open') }, { timeout: 5_000 });
-  await waitFor(() => expect(document.activeElement).toBe(input), { timeout: 5_000 });
+  // ⚠ Типової 1 с досить: холодний `import()` палітри знято прогрівом у
+  // `beforeAll` (розбір — у `DataSearchPalette.test.tsx`), а не таймаутом.
+  const input = await screen.findByRole('combobox', { name: t('search.open') });
+  await waitFor(() => expect(document.activeElement).toBe(input));
 
   // ⚠ Без власного `toFake`: список у `vite.config.ts` (`toNotFake`) — розширення
   // дефолту vitest, і з `toFake` разом він не працює.
