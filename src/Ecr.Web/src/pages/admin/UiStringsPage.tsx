@@ -345,7 +345,9 @@ export function UiStringsPage(): JSX.Element {
 
                 return (
                   <Table.Tr key={key}>
-                    <Table.Td>
+                    {/* ⚠ `data-allow-dotted`: ключ каталогу тут — ДАНІ редактора,
+                        а не неперекладений напис (сторож `ФВ-14.9`, `D-138`). */}
+                    <Table.Td data-allow-dotted>
                       <Text size="xs">{key}</Text>
                     </Table.Td>
                     <Table.Td>{source}</Table.Td>
