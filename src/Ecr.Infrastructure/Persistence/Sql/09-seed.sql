@@ -1390,6 +1390,9 @@ USING (VALUES
     (N'sources.create',                  N'en', N'Create connection', 1),
     (N'sources.created',                 N'en', N'Connection created', 1),
     (N'sources.saved',                   N'en', N'Connection saved', 1),
+    -- ⚠ Кнопка на 409 від If-Match: з'єднання змінив хтось інший, і форма бере
+    -- свіжу версію, а не перезаписує чужу правку.
+    (N'sources.reloadCurrent',           N'en', N'Reload the current version', 1),
     (N'sources.deleteConnection',        N'en', N'Delete connection', 1),
     (N'sources.deleteTitle',             N'en', N'Delete connection "{name}"?', 1),
     (N'sources.deleted',                 N'en', N'Connection deleted', 1),
