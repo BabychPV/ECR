@@ -8189,6 +8189,35 @@
         ],
         "type": "object"
       },
+      "SearchHitDto": {
+        "description": "Один збіг пошуку палітри. Маршрут будує клієнт за Kind.",
+        "properties": {
+          "code": {
+            "description": "Код; для документа — `BusinessKey`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор сутності.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "`document`, `template` або `registry`.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Назва мовою запиту; немає назви — код.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "code",
+          "title"
+        ],
+        "type": "object"
+      },
       "SetAlertsRequest": {
         "description": "Запит на зміну отримання алертів.",
         "properties": {
@@ -20763,6 +20792,64 @@
         ]
       }
     },
+    "/api/v1/search": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Підрядок; коротший за 2 символи — порожня відповідь.",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Стеля; `0` — 10, більше за 20 — обрізається до 20.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchHitDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchHitDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchHitDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Документи, шаблони й довідники за підрядком коду чи назви — лише видимі користувачу.",
+        "tags": [
+          "Search"
+        ]
+      }
+    },
     "/api/v1/security/group-assignments": {
       "get": {
         "responses": {
@@ -25511,6 +25598,9 @@
     },
     {
       "name": "Reports"
+    },
+    {
+      "name": "Search"
     },
     {
       "name": "Security"

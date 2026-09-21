@@ -2607,6 +2607,20 @@ public interface IDocumentListSummaryStore
 }
 ```
 
+#### `ISearchStore`
+
+Пошук даних для командної палітри (`BE-19`): документи (межа — ті самі
+гранти проєкту, що й `IDocumentStore.ListAsync`), шаблони, активні довідники;
+підрядок коду чи будь-якого перекладу назви, стеля на тип.
+
+```csharp
+public interface ISearchStore
+{
+    public Task<IReadOnlyList<SearchRow>> SearchAsync(
+        string term, SearchScope scope, int perKind, CancellationToken ct);
+}
+```
+
 #### `ICampaignSummaryStore`
 
 Огляд кампанії звітності за період (`BE-22`): проєкти з лічильниками етапів,
@@ -3192,6 +3206,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
+| `GET` | `/api/v1/search` | — (кожен тип під правом свого переліку й грантами проєкту) | 8 |
 
 > **`GET /jobs?mine=true` — межа доступу, а не фільтр зручності** (`BE-08`,
 > `Q-156`). Параметри переліку: `state` (`Queued`, `Running`, `Succeeded`,

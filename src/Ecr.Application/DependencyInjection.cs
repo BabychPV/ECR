@@ -320,6 +320,9 @@ public static class DependencyInjection
         services.AddScoped<Health.GetSystemFactsHandler>();
         services.AddScoped<Health.GetPartitionScriptHandler>();
 
+        // BE-19: пошук даних для командної палітри.
+        services.AddScoped<Search.SearchHandler>();
+
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();
 

@@ -7830,6 +7830,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Документи, шаблони й довідники за підрядком коду чи назви — лише видимі користувачу. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Підрядок; коротший за 2 символи — порожня відповідь. */
+                    q?: string;
+                    /** @description Стеля; `0` — 10, більше за 20 — обрізається до 20. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchHitDto"][];
+                        "text/json": components["schemas"]["SearchHitDto"][];
+                        "text/plain": components["schemas"]["SearchHitDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/group-assignments": {
         parameters: {
             query?: never;
@@ -15319,6 +15362,20 @@ export interface components {
             scope: number;
             /** @description Рівень: `Info`, `Warning`, `Error`. */
             severity: components["schemas"]["ValidationSeverity"];
+        };
+        /** @description Один збіг пошуку палітри. Маршрут будує клієнт за Kind. */
+        SearchHitDto: {
+            /** @description Код; для документа — `BusinessKey`. */
+            code: string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор сутності.
+             */
+            id: number;
+            /** @description `document`, `template` або `registry`. */
+            kind: string;
+            /** @description Назва мовою запиту; немає назви — код. */
+            title: string;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {
