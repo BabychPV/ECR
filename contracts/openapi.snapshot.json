@@ -3505,6 +3505,14 @@
             "description": "Ідентифікатор.",
             "type": "string"
           },
+          "maxAttempts": {
+            "description": "Спроб загалом, як у int? JobStatus.MaxAttempts; рядок переліку завжди\nз журналу, тож від сховища — завжди число, `null` лише від інших реалізацій.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "message": {
             "description": "Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться\nОДИН раз на весь перелік (`JobProgressMessageResolver.ResolveManyAsync`),\nа не на кожен рядок.",
             "type": [

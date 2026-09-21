@@ -13737,6 +13737,12 @@ export interface components {
             jobCode: string;
             /** @description Ідентифікатор. */
             jobId: string;
+            /**
+             * Format: int32
+             * @description Спроб загалом, як у int? JobStatus.MaxAttempts; рядок переліку завжди
+             *     з журналу, тож від сховища — завжди число, `null` лише від інших реалізацій.
+             */
+            maxAttempts?: null | number;
             /** @description Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться
              *     ОДИН раз на весь перелік (`JobProgressMessageResolver.ResolveManyAsync`),
              *     а не на кожен рядок. */
