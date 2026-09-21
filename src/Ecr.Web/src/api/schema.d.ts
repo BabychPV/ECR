@@ -4879,6 +4879,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/rule-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Матриця покриття «рядки реальних даних × правила» (ФВ-13.9). Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише одна з таблиць прив'язок. */
+                    tableDefId?: number;
+                    /** @description Нижня межа вікна періодів; типово — початок минулого року. */
+                    periodFrom?: number;
+                    /** @description Верхня межа; типово — кінець поточного року. */
+                    periodTo?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RuleCoverageDto"];
+                        "text/json": components["schemas"]["RuleCoverageDto"];
+                        "text/plain": components["schemas"]["RuleCoverageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/rules": {
         parameters: {
             query?: never;
@@ -15662,6 +15734,70 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Одна комбінація значень (коди, не числа звітності) і що з нею роблять правила. */
+        RuleCoverageCombinationDto: {
+            /**
+             * Format: int32
+             * @description Кількість документів.
+             */
+            documents: number;
+            /** @description Усі збіжні правила; після переможця — нічия або затінені. */
+            matchedRuleCodes: string[];
+            /**
+             * Format: int64
+             * @description Кількість рядків.
+             */
+            rows: number;
+            /** @description Стан. */
+            state: components["schemas"]["RuleCoverageState"];
+            /** @description Значення в порядку `ColumnDefIds`; `null` — порожньо. */
+            values: string[];
+            /** @description Правило-переможець; `null` для розриву. */
+            winnerRuleCode: null | string;
+        };
+        /** @description Матриця покриття «рядки реальних даних × правила» версії методології. */
+        RuleCoverageDto: {
+            /** @description Колонки осі — ті, що згадують правила; порядок значень у комбінації. */
+            columnDefIds: number[];
+            /** @description Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків. */
+            combinations: components["schemas"]["RuleCoverageCombinationDto"][];
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            methodologyVersionId: number;
+            /**
+             * Format: int32
+             * @description Нижня межа вікна періодів (включно), фактично застосована.
+             */
+            periodFrom: number;
+            /**
+             * Format: int32
+             * @description Верхня межа (включно).
+             */
+            periodTo: number;
+            /** @description Активні правила в порядку пріоритету. */
+            rules: components["schemas"]["RuleCoverageRuleDto"][];
+            /** @description Таблиці, рядки яких бралися. */
+            tableDefIds: number[];
+            /** @description Комбінацій більше за стелю; показано найчисленніші. */
+            truncated: boolean;
+        };
+        /** @description Правило осі матриці. */
+        RuleCoverageRuleDto: {
+            /** @description Код правила. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Пріоритет; менше — вищий.
+             */
+            priority: number;
+        };
+        /**
+         * @description Стан комбінації значень у матриці покриття (ФВ-13.9).
+         * @enum {unknown}
+         */
+        RuleCoverageState: "Gap" | "Conflict" | "Covered";
         /** @description Запит на прогін перевірки узгодженості. */
         RunConsistencyCheckRequest: {
             /** @description Причина; обов'язкова, потрапляє в журнал безпеки (`aud.SecurityEvent`). */
