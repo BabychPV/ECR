@@ -26,6 +26,7 @@ import { NavRouteLink } from './NavRouteLink';
 import { navRoutes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
+import { SearchLauncher } from '@/features/search/SearchLauncher';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { can, useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
@@ -320,6 +321,8 @@ export function AppLayout(): JSX.Element {
                   <EndSimulationButton />
                 </>
               )}
+              {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}
+              <SearchLauncher />
               <UserMenu userName={me.userName ?? '—'} />
             </Group>
           </Group>
