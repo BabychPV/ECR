@@ -306,6 +306,24 @@ export const routes = {
     handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory', icon: 'snapshots' },
     showInNav: true,
   },
+  /**
+   * Огляд звітної кампанії періоду (`BE-22`): хто її затримує.
+   *
+   * ⛔ Право — `Report.ViewCampaign`, те саме, що вимагає
+   * `GetCampaignSummaryHandler`. Воно окреме й небезпечне (`Q15-07`): екран
+   * показує ВСІ проєкти періоду, не звужуючи їх грантами.
+   */
+  adminCampaign: {
+    id: 'admin-campaign',
+    path: '/admin/campaign',
+    handle: {
+      labelKey: 'nav.campaign',
+      permission: 'Report.ViewCampaign',
+      icon: 'campaign',
+      skeletonShape: 'table',
+    },
+    showInNav: true,
+  },
   adminAudit: {
     id: 'admin-audit',
     path: '/admin/audit',

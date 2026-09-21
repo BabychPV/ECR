@@ -352,10 +352,60 @@ export const DocumentTableStatusFixture = [
 ];
 
 /**
+ * Огляд кампанії (`BE-22`) — ОБРІЗАНИЙ стелею і НЕоднорідний.
+ *
+ * ⛔ `totalProjects` більший за довжину переліку навмисно: інакше банер
+ * усічення не малюється, і гейт сканував би екран без його головного
+ * попередження. Рядки різні: один проєкт завершений (у перелік відстаючих не
+ * потрапляє), один із відхиленими (тон проблеми у смузі), один не починав.
+ */
+export const CampaignSummaryFixture = {
+  periodKey: 202601,
+  totalProjects: 5,
+  projects: [
+    {
+      projectId: 1,
+      projectCode: '10000',
+      nameL10n: { values: { en: 'North plant' } },
+      documents: 4,
+      draft: 0,
+      submitted: 0,
+      approved: 4,
+      rejected: 0,
+      snapshots: 1,
+    },
+    {
+      projectId: 2,
+      projectCode: 'P-02',
+      nameL10n: { values: { en: 'South plant' } },
+      documents: 5,
+      draft: 1,
+      submitted: 2,
+      approved: 1,
+      rejected: 1,
+      snapshots: 0,
+    },
+    {
+      projectId: 3,
+      projectCode: 'P-03',
+      nameL10n: { values: { en: 'East plant' } },
+      documents: 0,
+      draft: 0,
+      submitted: 0,
+      approved: 0,
+      rejected: 0,
+      snapshots: 0,
+    },
+  ],
+};
+
+/**
  * Порожня відповідь ПОТРІБНОЇ форми для кожного маршруту (незмінно з
  * попереднього єдиного файлу).
  */
 export function emptyBodyFor(url: string): unknown {
+  if (url.includes('/campaign/summary')) return CampaignSummaryFixture;
+
   if (url.includes('/ui-strings/')) {
     return { languageCode: 'en', revision: 1, strings: Catalog };
   }

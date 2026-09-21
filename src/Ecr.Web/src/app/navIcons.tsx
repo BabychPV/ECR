@@ -240,6 +240,16 @@ function NotificationsIcon(): JSX.Element {
   );
 }
 
+/** Campaign — прапорець на древку: у кампанії є фініш, і хтось до нього ще не дійшов. */
+function CampaignIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M5 21V4" />
+      <path d="M5 4h11l-2 4 2 4H5" />
+    </Icon>
+  );
+}
+
 /**
  * Ключ → компонент. Ключі відповідають рядковим значенням `handle.icon` у
  * `routes.ts` — один нав-пункт, один ключ, одна іконка.
@@ -262,6 +272,7 @@ export const navIcons: Record<string, () => JSX.Element> = {
   uiStrings: UiStringsIcon,
   health: HealthIcon,
   notifications: NotificationsIcon,
+  campaign: CampaignIcon,
   myGroups: MyGroupsIcon,
 };
 

@@ -131,6 +131,11 @@ const NotificationsPageLoader = async () => ({
 });
 export const NotificationsPage = lazy(NotificationsPageLoader);
 
+const CampaignOverviewPageLoader = async () => ({
+  default: (await import('@/pages/admin/CampaignOverviewPage')).CampaignOverviewPage,
+});
+export const CampaignOverviewPage = lazy(CampaignOverviewPageLoader);
+
 /**
  * Прогрів ЧАНКА маршруту за наміром — виклик того самого завантажувача, що
  * й аргумент `lazy()` вище. Виклик поза рендером НЕ рендерить компонент —
@@ -168,6 +173,7 @@ const routeChunkLoaders: Partial<Record<string, () => Promise<unknown>>> = {
   [routes.adminUiStrings.id]: UiStringsPageLoader,
   [routes.adminHealth.id]: HealthPageLoader,
   [routes.adminNotifications.id]: NotificationsPageLoader,
+  [routes.adminCampaign.id]: CampaignOverviewPageLoader,
 };
 
 /**

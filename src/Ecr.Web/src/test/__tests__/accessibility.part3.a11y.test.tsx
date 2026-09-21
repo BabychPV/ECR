@@ -18,6 +18,7 @@ import { MappingPreviewPage } from '@/pages/admin/MappingPreviewPage';
 import { JobsPage } from '@/pages/admin/JobsPage';
 import { SnapshotsPage } from '@/pages/admin/SnapshotsPage';
 import { NotificationsPage } from '@/pages/admin/NotificationsPage';
+import { CampaignOverviewPage } from '@/pages/admin/CampaignOverviewPage';
 
 /**
  * WCAG 2.1 AA на кожному маршруті (`ФВ-14.16`, `D-127`) — частина 3 із 4
@@ -39,6 +40,11 @@ const Pages: [string, () => JSX.Element][] = [
   // ⚠ Новий маршрут (`BE-33`) додано саме сюди: ця частина найлегша, і жодного
   // з трьох найповільніших маршрутів у ній немає.
   ['/admin/notifications', NotificationsPage],
+
+  // ⚠ Огляд кампанії (`BE-22`) — теж сюди, з тієї самої причини. Фікстура
+  // обрізана стелею (`a11yFixtures.tsx`, `CampaignSummaryFixture`), тож axe
+  // сканує і банер усічення, і смугу, і перелік відстаючих.
+  ['/admin/campaign', CampaignOverviewPage],
 ];
 
 registerA11yFetchMock();

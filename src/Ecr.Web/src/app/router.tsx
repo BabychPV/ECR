@@ -8,6 +8,7 @@ import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
   AuditPage,
+  CampaignOverviewPage,
   ChangePasswordPage,
   ConsistencyIssuesPage,
   DocumentPage,
@@ -332,6 +333,11 @@ export const router = createBrowserRouter([
             path: relativePath(routes.adminSnapshots, 'admin'),
             element: guarded(routes.adminSnapshots.handle, <SnapshotsPage />),
             handle: routes.adminSnapshots.handle,
+          },
+          {
+            path: relativePath(routes.adminCampaign, 'admin'),
+            element: guarded(routes.adminCampaign.handle, <CampaignOverviewPage />),
+            handle: routes.adminCampaign.handle,
           },
           {
             path: relativePath(routes.adminAudit, 'admin'),
