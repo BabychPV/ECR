@@ -11311,6 +11311,94 @@
         ]
       }
     },
+    "/api/v1/audit/structure/export.csv": {
+      "get": {
+        "description": "Синхронний потік, а не фонова задача: стеля рядків (`Audit:ExportMaxRows`,\nтипово 100 000) тримає файл у межах одного запиту. Понад стелю — `422`.\nКодування — UTF-8 із BOM, щоб Excel не читав кирилицю як cp1251.",
+        "parameters": [
+          {
+            "description": "Початок вікна в UTC, включно.",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Кінець вікна в UTC, виключно.",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Тип сутності.",
+            "in": "query",
+            "name": "entityType",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Автор зміни — `UserId`.",
+            "in": "query",
+            "name": "changedByUserId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Експорт журналу структурних змін у CSV (`BE-16`). Право й фільтри — як у `structure`.",
+        "tags": [
+          "Audit"
+        ]
+      }
+    },
     "/api/v1/auth/change-password": {
       "post": {
         "description": "Доступна навіть під `MustChangePassword`, коли решта запитів\nвідхиляється `ECR-PWD-0428` — інакше користувач не мав би способу\nвийти з цього стану.",
