@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Ecr.Application.Documents;
 using Ecr.Application.Errors;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Errors;
 using Ecr.Expressions.Ast;
 
@@ -255,8 +256,11 @@ public static partial class ReportParameters
     /// ⛔ Тип диктує ОГОЛОШЕННЯ, а не вигляд значення — рівно з тієї ж причини,
     /// що й у <see cref="CellValueReader"/>: через HTTP усе приходить
     /// <c>JsonElement</c>-ом, і розбір «за типом CLR» промахувався б завжди.
-    /// Тихого приведення тут немає: рядок «5» у числовий параметр — відмова, бо
-    /// текст у числі означає, що опис і запит розуміють параметр по-різному.
+    /// Рядок у числовому параметрі — канонічний дротовий формат десяткового (як
+    /// у <c>DecimalAsStringJsonConverter</c>): JS-число губить знаки після ~15.
+    /// Граматика та сама інваріантна (<see cref="MethodologyConstant.TryParseNumeric"/>);
+    /// «1,5», «5 т», порожній — відмова. Рядок понад 16 знаків дробу — теж відмова,
+    /// не обріз (JSON-число поводиться як і раніше).
     /// </remarks>
     private static object? Value(string code, ExpressionValueType type, object? raw, string part)
     {
@@ -266,6 +270,8 @@ public static partial class ReportParameters
         {
             (_, null) => null,
             (ExpressionValueType.Number, decimal number) => number,
+            (ExpressionValueType.Number, string text)
+                when MethodologyConstant.TryParseNumeric(text, out var parsed) && WithinScale(parsed) => parsed,
             (ExpressionValueType.Text, string text) => text,
             (ExpressionValueType.Boolean, bool flag) => flag,
             (ExpressionValueType.Date, DateTime date) => date,
@@ -273,6 +279,9 @@ public static partial class ReportParameters
             _ => throw Mismatch(code, type, part),
         };
     }
+
+    /// <summary>Не більше 16 знаків дробу — межа <c>NumericPolicy.DefaultOutputScale</c> і <c>decimal(34,16)</c>.</summary>
+    private static bool WithinScale(decimal number) => decimal.Round(number, 16) == number;
 
     /// <summary>Ім'я параметра так, як його читає лексер (<c>02b</c> §3.4).</summary>
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*$")]
