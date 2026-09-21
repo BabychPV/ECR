@@ -33,6 +33,7 @@ const DraftDocument: DocumentSummary = {
   projectId: 7,
   sheetCount: 2,
   sheetStates: { GEN: 'Draft', AIR: 'Draft' },
+  hasLateEdits: false,
 };
 
 const sent: { url: string; method: string }[] = [];

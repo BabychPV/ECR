@@ -1163,6 +1163,8 @@ export interface paths {
                     cursor?: string;
                     projectId?: number;
                     periodKey?: number;
+                    state?: string;
+                    mine?: boolean;
                 };
                 header?: never;
                 path?: never;
@@ -12647,6 +12649,12 @@ export interface components {
              *     неправда, що `A7-28`.
              */
             errorCount?: null | number;
+            /**
+             * @description Чи є в журналі правки з позначкою `IsLateEdit` (`D-70`) — за період,
+             *     якщо його задано, інакше за будь-який (`BE-09b`).
+             * @default false
+             */
+            hasLateEdits: boolean;
             /**
              * Format: int64
              * @description Ідентифікатор.

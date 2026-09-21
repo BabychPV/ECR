@@ -17,14 +17,17 @@ public sealed class ListDocumentsHandler(
     /// <summary>Повертає сторінку документів, видимих користувачу.</summary>
     /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
     /// <param name="periodKey">Період для зведеного стану; <c>null</c> — без стану.</param>
+    /// <param name="state">Зведений стан (<c>Draft|Submitted|Approved|Rejected</c>); порожньо — будь-який.</param>
+    /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<PagedResult<DocumentSummary>> HandleAsync(
-        int? projectId, int? periodKey, CursorRequest page, CancellationToken ct)
+        int? projectId, int? periodKey, string? state, bool mine, CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var filter = new DocumentListFilter(ParseState(state, periodKey), mine ? profile.UserId : null);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок
@@ -49,7 +52,7 @@ public sealed class ListDocumentsHandler(
         var visibleProjects = ReadableProjects(profile);
 
         var all = await documents
-            .ListAsync(projectId, new PeriodKeyFilter(periodKey), page, visibleProjects, ct)
+            .ListAsync(projectId, new PeriodKeyFilter(periodKey), filter, page, visibleProjects, ct)
             .ConfigureAwait(false);
 
         // ⚠ Постфільтр лишається другим рубежем: перелік документів чужого
@@ -69,6 +72,40 @@ public sealed class ListDocumentsHandler(
         var total = page.Cursor is null && all.NextCursor is null ? visible.Count : (int?)null;
 
         return new PagedResult<DocumentSummary>(visible, all.NextCursor, total);
+    }
+
+    /// <summary>Фільтр стану: порожньо — без фільтра; невідоме ім'я або стан без періоду — 422.</summary>
+    /// <remarks>
+    /// ⛔ Звірка з ІМЕНАМИ, не <c>Enum.TryParse</c>: той прийняв би «2» і «99».
+    /// Невідомий стан — відмова, а не мовчазне «усі»: порожній перелік на
+    /// друкарську помилку читався б як «таких документів немає».
+    /// </remarks>
+    private static DocumentStatus? ParseState(string? state, int? periodKey)
+    {
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return null;
+        }
+
+        var known = Enum.GetValues<DocumentStatus>()
+            .Cast<DocumentStatus?>()
+            .FirstOrDefault(v => string.Equals(v.ToString(), state.Trim(), StringComparison.OrdinalIgnoreCase))
+            ?? throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Стану документа «{state}» не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.documentState",
+                    ["state"] = state,
+                });
+
+        // Стан документа поза періодом не визначений (`D-93`).
+        return periodKey is null
+            ? throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "Фільтр стану потребує періоду.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.documentStateNeedsPeriod" })
+            : known;
     }
 
     /// <summary>Проєкти, на які є грант читання (ключі <c>Project:{id}</c>).</summary>

@@ -43,7 +43,7 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
         var store = new DocumentStore(counting);
 
         var page = await store.ListAsync(
-            doc1.ProjectId, new PeriodKeyFilter(doc1.PeriodKey.Value), new CursorRequest(Limit: 50),
+            doc1.ProjectId, new PeriodKeyFilter(doc1.PeriodKey.Value), default, new CursorRequest(Limit: 50),
             visibleProjectIds: null,
             CancellationToken.None);
 
@@ -62,10 +62,11 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
         Assert.All(page.Items, d => Assert.False(d.SheetStates.ContainsKey(numericKey)));
 
         // ⛔ Q-167: сторінка з ДВОМА документами — а запитів у базу рівно
-        // ТРИ (перелік документів + стан погодження ВСІЄЇ сторінки + лічильники
-        // останньої перевірки ВСІЄЇ сторінки, `BE-09`), а не по запиту на
-        // кожен документ окремо: число не залежить від розміру сторінки.
-        Assert.Equal(3, executed.Count);
+        // ЧОТИРИ (перелік документів + стан погодження ВСІЄЇ сторінки + лічильники
+        // останньої перевірки ВСІЄЇ сторінки, `BE-09` + пізні правки ВСІЄЇ
+        // сторінки, `BE-09b`), а не по запиту на кожен документ окремо: число не
+        // залежить від розміру сторінки.
+        Assert.Equal(4, executed.Count);
     }
 
     /// <summary>Контекст, який складає кожну виконану команду в список.</summary>

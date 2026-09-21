@@ -2463,6 +2463,11 @@
               "integer"
             ]
           },
+          "hasLateEdits": {
+            "default": false,
+            "description": "Чи є в журналі правки з позначкою `IsLateEdit` (`D-70`) — за період,\nякщо його задано, інакше за будь-який (`BE-09b`).",
+            "type": "boolean"
+          },
           "id": {
             "description": "Ідентифікатор.",
             "format": "int64",
@@ -12239,6 +12244,20 @@
             "schema": {
               "format": "int32",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mine",
+            "schema": {
+              "type": "boolean"
             }
           }
         ],

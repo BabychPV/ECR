@@ -90,6 +90,41 @@ export function deleteDocument(documentId: number): Promise<void> {
   return apiFetch<void>(`/api/v1/documents/${String(documentId)}`, { method: 'DELETE' });
 }
 
+/** Рядок переліку документів (`hasLateEdits` — `BE-09b`); тип — зі згенерованої схеми. */
+export type DocumentSummary = components['schemas']['DocumentSummary'];
+
+/** Сторінка переліку документів. */
+export type DocumentListPage = components['schemas']['PagedResultOfDocumentSummary'];
+
+/** Значення фільтра `state` — імена `DocumentStatus` на сервері; інше сервер відхиляє `422`. */
+export type DocumentStateFilter = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
+
+/** Параметри переліку документів (`BE-09b`). */
+export interface DocumentListParams {
+  periodKey: number | null;
+  cursor?: string | null;
+  /** ⚠ Лише разом із `periodKey`: без періоду стан не визначений (`D-93`), сервер відповість `422`. */
+  state?: DocumentStateFilter | null;
+  /** Лише документи, де я автор або подавав аркуш. */
+  mine?: boolean;
+}
+
+/**
+ * Сторінка переліку документів із фільтрами.
+ *
+ * ⚠ Порожні параметри НЕ йдуть у запит: `state=` без значення сервер читає як
+ * «без фільтра», але `mine=false` у адресі — лише шум у посиланні.
+ */
+export function listDocuments(params: DocumentListParams): Promise<DocumentListPage> {
+  const query = new URLSearchParams({ limit: '50' });
+  if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
+  if (params.cursor) query.set('cursor', params.cursor);
+  if (params.state) query.set('state', params.state);
+  if (params.mine) query.set('mine', 'true');
+
+  return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
+}
+
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */
 export type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
 

@@ -1,5 +1,6 @@
 using Ecr.Application.Common;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Ports;
@@ -32,6 +33,10 @@ namespace Ecr.Application.Ports;
 /// неправда, що <c>A7-28</c>.
 /// </param>
 /// <param name="WarningCount">Попередження звідти ж; <c>null</c> — за тим самим правилом.</param>
+/// <param name="HasLateEdits">
+/// Чи є в журналі правки з позначкою <c>IsLateEdit</c> (<c>D-70</c>) — за період,
+/// якщо його задано, інакше за будь-який (<c>BE-09b</c>).
+/// </param>
 public sealed record DocumentSummary(
     long Id,
     int ProjectId,
@@ -43,7 +48,16 @@ public sealed record DocumentSummary(
     DateTime? ModifiedAt = null,
     string? ModifiedByDisplayName = null,
     int? ErrorCount = null,
-    int? WarningCount = null);
+    int? WarningCount = null,
+    bool HasLateEdits = false);
+
+/// <summary>Фільтри переліку документів (<c>BE-09b</c>); <c>default</c> — без фільтрів.</summary>
+/// <param name="State">Зведений стан документа за період; <c>null</c> — будь-який.</param>
+/// <param name="MineUserId">
+/// Лише документи, де цей користувач — автор (<c>CreatedByUserId</c>) або подавав
+/// хоч один аркуш (<c>ApprovalState.SubmittedByUserId</c>); <c>null</c> — усі.
+/// </param>
+public readonly record struct DocumentListFilter(DocumentStatus? State, int? MineUserId);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>
@@ -82,6 +96,11 @@ public interface IDocumentStore
     /// <summary>Сторінка документів проєкту.</summary>
     /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
     /// <param name="period">Період для зведеного стану аркушів.</param>
+    /// <param name="filter">
+    /// Фільтри стану й «мої». ⛔ Застосовуються ЗАПИТОМ до стелі сторінки: постфільтр
+    /// віддав би неповну сторінку при живому <c>NextCursor</c>. Фільтр <c>State</c>
+    /// без періоду ігнорується — стан поза періодом не визначений (<c>D-93</c>).
+    /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="visibleProjectIds">
     /// Проєкти, на які в користувача є грант читання. <c>null</c> — без
@@ -100,6 +119,7 @@ public interface IDocumentStore
     public Task<PagedResult<DocumentSummary>> ListAsync(
         int? projectId,
         PeriodKeyFilter period,
+        DocumentListFilter filter,
         CursorRequest page,
         IReadOnlyCollection<int>? visibleProjectIds,
         CancellationToken ct);

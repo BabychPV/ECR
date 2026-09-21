@@ -1,7 +1,10 @@
 using System.Globalization;
+using System.Linq.Expressions;
+using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -74,16 +77,19 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .CountAsync(s => s.DocumentId == documentId && s.IsIncluded, ct)
             .ConfigureAwait(false);
 
+        var states = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
+        var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
+
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
-            await StatesAsync(documentId, period, ct).ConfigureAwait(false),
-            document.NameL10n);
+            states, document.NameL10n, HasLateEdits: late.Contains(documentId));
     }
 
     /// <inheritdoc />
     public async Task<PagedResult<DocumentSummary>> ListAsync(
         int? projectId,
         PeriodKeyFilter period,
+        DocumentListFilter filter,
         CursorRequest page,
         IReadOnlyCollection<int>? visibleProjectIds,
         CancellationToken ct)
@@ -96,11 +102,25 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // перекладає в `IN (...)`, над інтерфейсом — не гарантовано.
         var allowedProjects = visibleProjectIds?.ToArray();
 
-        var rows = await db.Documents
+        var documents = db.Documents
             .AsNoTracking()
             .Where(d => d.Id > after
                         && (projectId == null || d.ProjectId == projectId)
-                        && (allowedProjects == null || allowedProjects.Contains(d.ProjectId)))
+                        && (allowedProjects == null || allowedProjects.Contains(d.ProjectId)));
+
+        // BE-09b: фільтри — у ЗАПИТІ, до `Take`; межа грантів вище лишається.
+        if (filter.MineUserId is { } me)
+        {
+            documents = documents.Where(d => d.CreatedByUserId == me
+                                             || db.ApprovalStates.Any(a => a.DocumentId == d.Id && a.SubmittedByUserId == me));
+        }
+
+        if (filter.State is { } state && period.Value is { } periodKey)
+        {
+            documents = WhereState(documents, state, periodKey);
+        }
+
+        var rows = await documents
             .OrderBy(d => d.Id)
             .Take(page.Limit + 1)
             .Select(d => new DocumentRow(
@@ -129,6 +149,9 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var findingsByDocument = await LatestFindingsBatchAsync(
             [.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
 
+        // BE-09b: і позначка пізніх правок — теж ОДИН запит на сторінку.
+        var late = await LateEditsBatchAsync([.. page1.Select(d => d.Id)], period, ct).ConfigureAwait(false);
+
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
@@ -141,7 +164,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
             items.Add(new DocumentSummary(
                 d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states, d.NameL10n,
-                d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount));
+                d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
+                late.Contains(d.Id)));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -467,6 +491,77 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         return latest
             .GroupBy(f => f.DocumentId)
             .ToDictionary(g => g.Key, g => g.First());
+    }
+
+    /// <summary>Фільтр зведеного стану документа за період (<c>BE-09b</c>).</summary>
+    /// <remarks>
+    /// ⛔ Правило — ТЕ САМЕ, що в смузі (<see cref="DocumentListSummaryStore"/>):
+    /// аркуш складу без рядка стану — чернетка; хоч один відхилений — Rejected;
+    /// Approved — усі аркуші. Інше правило дало б фільтр, що розходиться з цифрою
+    /// над таблицею.
+    /// </remarks>
+    private IQueryable<Document> WhereState(IQueryable<Document> documents, DocumentStatus state, int periodKey)
+    {
+        var sheets = db.DocumentSheets.Where(s => s.IsIncluded);
+        var states = db.ApprovalStates.Where(a => a.PeriodKey == periodKey);
+
+        Expression<Func<Document, bool>> rejected = d => sheets.Any(s => s.DocumentId == d.Id
+            && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status == DocumentStatus.Rejected));
+        Expression<Func<Document, bool>> draftSheet = d => sheets.Any(s => s.DocumentId == d.Id
+            && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status != DocumentStatus.Draft));
+
+        return state switch
+        {
+            DocumentStatus.Rejected => documents.Where(rejected),
+            DocumentStatus.Draft => documents.Where(Not(rejected))
+                .Where(d => !sheets.Any(s => s.DocumentId == d.Id)
+                            || sheets.Any(s => s.DocumentId == d.Id
+                                && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status != DocumentStatus.Draft))),
+            DocumentStatus.Submitted => documents.Where(Not(rejected)).Where(Not(draftSheet))
+                .Where(d => sheets.Any(s => s.DocumentId == d.Id
+                    && states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status == DocumentStatus.Submitted))),
+            DocumentStatus.Approved => documents
+                .Where(d => sheets.Any(s => s.DocumentId == d.Id))
+                .Where(d => !sheets.Any(s => s.DocumentId == d.Id
+                    && !states.Any(a => a.DocumentId == d.Id && a.SheetDefId == s.SheetDefId && a.Status == DocumentStatus.Approved))),
+            _ => throw new ArgumentOutOfRangeException(nameof(state), state, "Невідомий стан документа."),
+        };
+    }
+
+    private static Expression<Func<T, bool>> Not<T>(Expression<Func<T, bool>> predicate)
+        => Expression.Lambda<Func<T, bool>>(Expression.Not(predicate.Body), predicate.Parameters);
+
+    /// <summary>Документи сторінки з хоч однією пізньою правкою (<c>D-70</c>) — одним запитом.</summary>
+    /// <remarks>
+    /// ⚠ Сирий SQL: <c>aud.CellChange</c> навмисно поза моделлю EF (незмінний журнал).
+    /// Пошук іде індексом <c>IX_CellChange_Cell</c> (провідна колонка — <c>DocumentId</c>).
+    /// Без періоду — пізня правка за будь-який період.
+    /// </remarks>
+    private async Task<HashSet<long>> LateEditsBatchAsync(
+        IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
+    {
+        if (documentIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = JsonSerializer.Serialize(documentIds);
+        var anyPeriod = period.Value is null ? 1 : 0;
+        var periodKey = period.Value ?? 0;
+
+        var late = await db.Database
+            .SqlQuery<long>($"""
+                SELECT DISTINCT c.DocumentId AS Value
+                  FROM aud.CellChange AS c
+                 WHERE c.IsLateEdit = 1
+                   AND c.DocumentId IN (SELECT CAST(j.value AS bigint) FROM OPENJSON({ids}) AS j)
+                   AND ({anyPeriod} = 1 OR c.PeriodKey = {periodKey})
+                """)
+            .Take(documentIds.Count)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. late];
     }
 
     /// <summary>Лічильники останньої перевірки одного документа.</summary>
