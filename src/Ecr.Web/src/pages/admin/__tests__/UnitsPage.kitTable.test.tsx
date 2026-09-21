@@ -201,9 +201,10 @@ describe('UnitsPage на DataTable: порядок при відкритті н�
     await within(table).findByText('a_nine');
 
     /*
-     * ⛔ Мутаційний доказ: приберіть `.sort(...)` у `rows` — і перелік вийде в
-     * порядку відповіді сервера (`c_half, b_ten, a_nine, a_first`). Замініть
-     * ключ на самий лише `code` — нагору поїде `a_first` із чужої розмірності.
+     * ⛔ Мутаційний доказ: приберіть `defaultSort` у `<DataTable>` — і перелік
+     * вийде в порядку відповіді сервера (`c_half, b_ten, a_nine, a_first`).
+     * Замініть кортеж `sortValue` колонки `dimensionCode` на самий лише
+     * `unit.code` — нагору поїде `a_first` із чужої розмірності.
      */
     expect(codes(table)).toEqual(['a_nine', 'b_ten', 'c_half', 'a_first']);
 
@@ -218,7 +219,7 @@ describe('UnitsPage на DataTable: порядок при відкритті н�
     await within(table).findByText('a_nine');
 
     /*
-     * ⛔ Мутаційний доказ: приберіть `render` у колонки `factorToBase` — і
+     * ⛔ Мутаційний доказ: приберіть `exact: true` у колонки `factorToBase` — і
      * клітинка піде через `formatDecimal(raw, undefined, 3)` самої таблиці,
      * тобто `'0.5000000000'` стане `'0.5'`, а масштаб колонки зникне з екрана.
      * Саме заради цих знаків контракт і віддає `decimal` рядком (`e470777a`).
