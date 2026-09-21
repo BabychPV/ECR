@@ -22,6 +22,7 @@ function connection(overrides: Record<string, unknown> = {}): Record<string, unk
     isActive: true,
     maxParallel: 4,
     nameL10n: { en: 'Main PI server' },
+    rowVersion: 'AAAAAAAAB9E=',
     secondaryEndpoint: null,
     sourceEntities: 12,
     transport: 'PiWebApi',

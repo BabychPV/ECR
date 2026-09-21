@@ -24,10 +24,29 @@ const Connection = {
   isActive: true,
   maxParallel: 4,
   nameL10n: { en: 'Main PI server', ru: 'Основной сервер PI' },
+  rowVersion: 'AAAAAAAAB9E=',
   secondaryEndpoint: null,
   sourceEntities: 0,
   transport: 'PiWebApi',
 };
+
+/** Версія, яку сервер називає чинною у відмові `409 dataSourceChanged`. */
+const FreshVersion = 'AAAAAAAAB+8=';
+
+function changed(rowVersion = FreshVersion): Response {
+  return json(
+    {
+      title: 'Conflicting state',
+      status: 409,
+      errorCode: 'ECR-JOB-0409',
+      correlationId: 'c-409',
+      detail: 'Someone else changed this data source after you read it.',
+      messageKey: 'err.ECR-JOB-0409.dataSourceChanged',
+      rowVersion,
+    },
+    409,
+  );
+}
 
 interface Call {
   readonly method: string;
@@ -51,9 +70,11 @@ function json(body: unknown, status = 200): Response {
 function respond({
   permissions = ['Integration.View', 'Integration.Manage'],
   change = () => json(Connection),
+  list = () => [Connection],
 }: {
   permissions?: string[];
   change?: (call: Call) => Response;
+  list?: () => unknown[];
 } = {}): void {
   calls = [];
 
@@ -87,7 +108,7 @@ function respond({
 
       if (method !== 'GET') return change(call);
 
-      if (path.endsWith('/api/v1/data-sources')) return json([Connection]);
+      if (path.endsWith('/api/v1/data-sources')) return json(list());
       if (path.endsWith('/api/v1/sources')) return json([]);
 
       return json(null);
@@ -254,6 +275,49 @@ describe("З'єднання: створення", () => {
     expect(endpoint.value).toBe('https://user:pass@lab.example.invalid/api');
     expect(field(scope, /sources\.name/).value).toBe('Lab feed');
   });
+
+  it('422 dataSourceEndpointCarriesSecret з field=secondaryEndpoint — причина під РЕЗЕРВНОЮ адресою, не під основною', async () => {
+    respond({
+      change: () =>
+        json(
+          {
+            title: 'Invalid request',
+            status: 422,
+            errorCode: 'ECR-REQ-0422',
+            correlationId: 'c-422',
+            messageKey: 'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret',
+            field: 'secondaryEndpoint',
+          },
+          422,
+        ),
+    });
+    show();
+
+    await screen.findByText('Main PI server');
+    const scope = await openCreate();
+
+    type(scope, /sources\.code/, 'LAB');
+    type(scope, /sources\.name/, 'Lab feed');
+    type(scope, /^.*sources\.endpoint/, 'https://lab.example.invalid/api');
+    type(scope, /sources\.secondaryEndpoint/, 'https://user:pass@lab2.example.invalid/api');
+
+    fireEvent.click(within(scope).getByRole('button', { name: /sources\.create/ }));
+
+    const secondary = field(scope, /sources\.secondaryEndpoint/);
+    const endpoint = field(scope, /^.*sources\.endpoint/);
+
+    await waitFor(() =>
+      expect(errorOf(secondary)).toContain('err.ECR-REQ-0422.dataSourceEndpointCarriesSecret'),
+    );
+    expect(secondary.getAttribute('aria-invalid')).toBe('true');
+
+    // ⛔ Основна адреса чиста: показ біля неї казав би людині правити не те поле.
+    expect(errorOf(endpoint)).not.toContain('dataSourceEndpointCarriesSecret');
+    expect(endpoint.getAttribute('aria-invalid')).not.toBe('true');
+    expect(within(scope).queryByRole('alert')).toBeNull();
+
+    expect(secondary.value).toBe('https://user:pass@lab2.example.invalid/api');
+  });
 });
 
 describe("З'єднання: правка", () => {
@@ -300,11 +364,64 @@ describe("З'єднання: правка", () => {
       isActive: false,
     });
 
-    // ⚠ Версії рядка в контракті з'єднання немає (`DataSourceView`), тож і
-    // `If-Match` не шлеться — тест фіксує це, щоб поява версії не пройшла тихо.
-    expect(put?.headers.has('If-Match')).toBe(false);
+    // ⛔ `If-Match` — версія ПОКАЗАНОГО рядка: без неї сервер дає `422`, а
+    // чужа правка між читанням і збереженням дає `409`, а не тихе затирання.
+    expect(put?.headers.get('If-Match')).toBe(`"${Connection.rowVersion}"`);
 
     await waitFor(() => expect(listReads()).toBeGreaterThan(before));
+  });
+
+  it('409 dataSourceChanged: чернетка ціла, причина видима; «взяти свіжу версію» → перечитано, наступний PUT іде з версією з відмови', async () => {
+    const puts: Call[] = [];
+
+    respond({
+      change: (call) => {
+        puts.push(call);
+
+        return puts.length === 1 ? changed() : json({ ...Connection, rowVersion: 'AAAAAAAACAA=' });
+      },
+    });
+    show('/admin/sources?panel=PI-MAIN');
+
+    const scope = await openEdit();
+
+    type(scope, /sources\.name/, 'Main PI (draft)');
+    type(scope, /sources\.catalog/, 'OtherAF');
+    fireEvent.click(within(scope).getByRole('button', { name: /common\.save/ }));
+
+    const alert = await within(scope).findByRole('alert');
+    expect(alert.textContent).toContain('Someone else changed this data source');
+
+    // Чернетка не загублена.
+    expect(field(scope, /sources\.name/).value).toBe('Main PI (draft)');
+    expect(field(scope, /sources\.catalog/).value).toBe('OtherAF');
+
+    // ⛔ Зберегти поверх нерозв'язаного конфлікту не можна: той самий PUT зі
+    // старою версією дав би той самий 409.
+    const save = within(scope).getByRole('button', { name: /common\.save/ }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    const before = listReads();
+    fireEvent.click(within(scope).getByRole('button', { name: /sources\.reloadCurrent/ }));
+
+    // Рядок перечитано, причина прибрана, а поля людини — ті самі.
+    await waitFor(() => expect(listReads()).toBeGreaterThan(before));
+    await waitFor(() => expect(within(scope).queryByRole('alert')).toBeNull());
+    expect(field(scope, /sources\.name/).value).toBe('Main PI (draft)');
+    expect(field(scope, /sources\.catalog/).value).toBe('OtherAF');
+
+    fireEvent.click(within(scope).getByRole('button', { name: /common\.save/ }));
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+
+    expect(puts[0]?.headers.get('If-Match')).toBe(`"${Connection.rowVersion}"`);
+    expect(puts[1]?.headers.get('If-Match')).toBe(`"${FreshVersion}"`);
+    expect(puts[1]?.body).toMatchObject({
+      nameL10n: { [language()]: 'Main PI (draft)' },
+      catalog: 'OtherAF',
+    });
+
+    await waitFor(() => expect(document.querySelector('[data-data-source-form]')).toBeNull());
   });
 
   it('відмова правки не губить чернетку й показує причину', async () => {
@@ -356,9 +473,58 @@ describe("З'єднання: видалення", () => {
     await waitFor(() => expect(changes()).toHaveLength(1));
     expect(changes()[0]?.method).toBe('DELETE');
     expect(changes()[0]?.path).toBe('/api/v1/data-sources/7');
+    expect(changes()[0]?.headers.get('If-Match')).toBe(`"${Connection.rowVersion}"`);
 
     await waitFor(() => expect(listReads()).toBeGreaterThan(before));
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(''));
+  });
+
+  it('409 dataSourceChanged: причина видима, рядок перечитано; повтор — лише через нове підтвердження й зі свіжою версією', async () => {
+    let fresh = false;
+
+    respond({
+      change: () => {
+        if (changes().length === 1) {
+          fresh = true;
+
+          return changed();
+        }
+
+        return new Response(null, { status: 204 });
+      },
+      list: () => [fresh ? { ...Connection, rowVersion: FreshVersion, catalog: 'MovedAF' } : Connection],
+    });
+    show('/admin/sources?panel=PI-MAIN');
+
+    const drawer = await screen.findByRole('dialog');
+    fireEvent.click(await within(drawer).findByRole('button', { name: /sources\.deleteConnection/ }));
+
+    const before = listReads();
+    fireEvent.click(await screen.findByTestId('confirm-verb'));
+
+    const failure = await waitFor(() => {
+      const node = drawer.querySelector<HTMLElement>('[data-delete-failure]');
+      expect(node).not.toBeNull();
+
+      return node as HTMLElement;
+    });
+    expect(failure.textContent).toContain('Someone else changed this data source');
+
+    // Перечитано: шухляда показує чинний рядок, а не той, що бачили до відмови.
+    await waitFor(() => expect(listReads()).toBeGreaterThan(before));
+    await within(drawer).findByText('MovedAF');
+
+    // ⛔ Сам повтор не пішов: підтвердження закрите, DELETE був один.
+    await waitFor(() => expect(screen.queryByTestId('confirm-verb')).toBeNull());
+    expect(changes()).toHaveLength(1);
+    expect(screen.getByTestId('location').textContent).toBe('?panel=PI-MAIN');
+
+    fireEvent.click(within(drawer).getByRole('button', { name: /sources\.deleteConnection/ }));
+    fireEvent.click(await screen.findByTestId('confirm-verb'));
+
+    await waitFor(() => expect(changes()).toHaveLength(2));
+    expect(changes()[0]?.headers.get('If-Match')).toBe(`"${Connection.rowVersion}"`);
+    expect(changes()[1]?.headers.get('If-Match')).toBe(`"${FreshVersion}"`);
   });
 
   it('409 dataSourceInUse — причина в шухляді, а не «не вдалося»', async () => {

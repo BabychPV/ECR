@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import { language, t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { dataSourceName } from './DataSourceDrawer';
+import { dataSourceName, freshVersionOf } from './DataSourceDrawer';
 import {
   createDataSource,
   updateDataSource,
@@ -17,24 +17,26 @@ import { DataSourcesQueryKey } from './dataSourcesKey';
 /** Транспорти, які знає сервер (`ExternalTransport`). */
 const Transports: readonly SaveDataSourceBody['transport'][] = ['PiWebApi', 'PiSqlClient', 'Sql'];
 
+type FailedField = 'code' | 'endpoint' | 'secondaryEndpoint';
+
 /**
  * Відмови сервера, які належать КОНКРЕТНОМУ полю, — за `messageKey`.
  *
- * ⚠ Поля в problem details сервер не називає (`ListDataSourcesHandler.Invalid`
- * кладе лише `messageKey` і `code`), тож поле виводиться з ключа. Решта
- * відмов (`dataSourceInvalid`, 403, 5xx) — загальний `ErrorAlert` над кнопками.
+ * Решта відмов (`dataSourceInvalid`, 403, 5xx) — загальний `ErrorAlert` над
+ * кнопками.
  *
- * ⚠ `dataSourceEndpointCarriesSecret` сервер кидає і за основну, і за резервну
- * адресу, не кажучи, за яку. Показ — біля ОСНОВНОЇ: власного правила
- * «де саме облікові дані» клієнт не вигадує.
+ * ⚠ `dataSourceEndpointCarriesSecret` сервер кидає за будь-яку з двох адрес і
+ * називає її полем `field` верхнього рівня (`endpoint` | `secondaryEndpoint`).
+ * Без `field` (старий сервер) — біля ОСНОВНОЇ: власного правила «де саме
+ * облікові дані» клієнт не вигадує.
  */
-const FieldOfKey: Readonly<Record<string, 'code' | 'endpoint'>> = {
+const FieldOfKey: Readonly<Record<string, FailedField>> = {
   'err.ECR-REQ-0422.dataSourceEndpointCarriesSecret': 'endpoint',
   'err.ECR-REQ-0422.dataSourceCodeTaken': 'code',
 };
 
 interface FieldFailure {
-  readonly field: 'code' | 'endpoint';
+  readonly field: FailedField;
   readonly text: string;
 }
 
@@ -45,8 +47,11 @@ export function fieldFailureOf(error: unknown): FieldFailure | null {
   const key = error.problem.extensions2?.['messageKey'];
   if (typeof key !== 'string') return null;
 
-  const field = FieldOfKey[key];
-  if (field === undefined) return null;
+  const byKey = FieldOfKey[key];
+  if (byKey === undefined) return null;
+
+  const named = error.problem.extensions2?.['field'];
+  const field = byKey === 'endpoint' && named === 'secondaryEndpoint' ? named : byKey;
 
   const code = error.problem.extensions2?.['code'];
 
@@ -109,10 +114,11 @@ export function bodyOf(draft: Draft, base: DataSource | null): SaveDataSourceBod
  * записом. Облікові дані в адресі сервер відхиляє `422
  * dataSourceEndpointCarriesSecret` — відмова стоїть біля поля адреси.
  *
- * ⚠ Версії рядка (`rowVersion`/`If-Match`) у з'єднання немає: ні в
- * `DataSourceView`, ні в `PUT /api/v1/data-sources/{id}` — сервер конфлікту
- * версій не перевіряє й `409` на правці не віддає. Тому кнопки «взяти свіжу
- * версію» тут немає: вона обіцяла б захист, якого немає.
+ * ⛔ Правка шле `If-Match` із `rowVersion` рядка, який ПОКАЗАЛИ людині.
+ * Хтось змінив з'єднання між читанням і збереженням — `409 dataSourceChanged`:
+ * причина над кнопками, «Зберегти» заблоковано, а кнопка «взяти свіжу версію»
+ * бере чинну версію з тіла відмови й перечитує перелік. Поля людини при цьому
+ * лишаються — вона бачить, що змінилося, і зберігає ще раз свідомо.
  *
  * ⛔ Чернетка живе, доки діалог відкритий: будь-яка відмова лишає введене як
  * є, а перелік, перечитаний під час правки, чернетки не перезаписує
@@ -154,15 +160,18 @@ function DataSourceForm({
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Draft>(() => draftOf(source));
 
+  // ⚠ Версія, яку шле `If-Match`: спершу — показаного рядка; після `409` —
+  // та, яку сервер назвав чинною, і лише коли людина сама її взяла.
+  const [rowVersion, setRowVersion] = useState<string>(() => source?.rowVersion ?? '');
+
   const save = useMutation({
     mutationFn: (body: SaveDataSourceBody) =>
-      source === null ? createDataSource(body) : updateDataSource(source.id, body),
+      source === null ? createDataSource(body) : updateDataSource(source.id, body, rowVersion),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: DataSourcesQueryKey });
       notifications.show({ message: t(source === null ? 'sources.created' : 'sources.saved') });
       onDone();
-    },
-  });
+    },  });
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -170,6 +179,13 @@ function DataSourceForm({
 
   const onField = fieldFailureOf(save.error);
   const general = save.error !== null && onField === null ? save.error : null;
+  const fresh = freshVersionOf(save.error);
+
+  const takeFresh = (version: string): void => {
+    setRowVersion(version);
+    save.reset();
+    void queryClient.invalidateQueries({ queryKey: DataSourcesQueryKey });
+  };
 
   // ⚠ Лише обов'язковість — те, що сервер вимагає однаково й без чого запит
   // гарантовано дав би `422`. Власних правил формату тут немає.
@@ -227,6 +243,7 @@ function DataSourceForm({
         label={t('sources.secondaryEndpoint')}
         value={draft.secondaryEndpoint}
         onChange={(event) => set('secondaryEndpoint', event.currentTarget.value)}
+        error={onField?.field === 'secondaryEndpoint' ? onField.text : undefined}
         ff="monospace"
         autoComplete="off"
         spellCheck={false}
@@ -261,6 +278,14 @@ function DataSourceForm({
 
       {general !== null && <ErrorAlert error={general} />}
 
+      {fresh !== null && (
+        <Group gap="xs">
+          <Button size="xs" variant="default" onClick={() => takeFresh(fresh)} data-take-fresh="">
+            {t('sources.reloadCurrent')}
+          </Button>
+        </Group>
+      )}
+
       <Group justify="flex-end" gap="xs">
         <Button variant="default" onClick={onDone}>
           {t('common.cancel')}
@@ -268,7 +293,9 @@ function DataSourceForm({
 
         <Button
           loading={save.isPending}
-          disabled={incomplete}
+          // ⛔ Поверх нерозв'язаного конфлікту не зберігаємо: та сама версія
+          // дала б той самий `409`.
+          disabled={incomplete || fresh !== null}
           onClick={() => save.mutate(bodyOf(draft, source))}
         >
           {source === null ? t('sources.create') : t('common.save')}

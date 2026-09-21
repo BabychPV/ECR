@@ -25,6 +25,7 @@ function connection(code: string, id: number, name: string): Record<string, unkn
     isActive: true,
     maxParallel: 4,
     nameL10n: { en: name },
+    rowVersion: 'AAAAAAAAB9E=',
     secondaryEndpoint: null,
     sourceEntities: 1,
     transport: 'PiWebApi',

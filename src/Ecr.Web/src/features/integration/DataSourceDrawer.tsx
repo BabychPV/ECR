@@ -2,6 +2,7 @@ import { Suspense, useState, type JSX } from 'react';
 import { Badge, Button, Group, Loader, Stack, Tabs } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { EcrApiError } from '@/api/client';
 import { formatNumber } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
@@ -24,6 +25,21 @@ export function dataSourceName(source: DataSource): string {
   const name = localized({ values: source.nameL10n });
 
   return name.length > 0 ? name : source.code;
+}
+
+/**
+ * `409 dataSourceChanged` → чинна версія рядка з тіла відмови; `null` — відмова
+ * не про версію (або сервер версії не назвав).
+ *
+ * ⚠ Тут, а не у формі: форма — окремий лінивий чанк і сама імпортує звідси.
+ */
+export function freshVersionOf(error: unknown): string | null {
+  if (!(error instanceof EcrApiError) || error.problem.status !== 409) return null;
+  if (error.problem.extensions2?.['messageKey'] !== 'err.ECR-JOB-0409.dataSourceChanged') return null;
+
+  const rowVersion = error.problem.extensions2['rowVersion'];
+
+  return typeof rowVersion === 'string' && rowVersion.length > 0 ? rowVersion : null;
 }
 
 /**
@@ -87,16 +103,26 @@ export function DataSourceDrawer({
    * (`err.ECR-JOB-0409.dataSourceInUse`) з лічильниками. Причина показується
    * в шухляді (`ErrorAlert` несе локалізований сервером текст із числами), а
    * не «не вдалося»; перелік при цьому НЕ перечитується — нічого не змінилося.
+   *
+   * ⛔ `If-Match` — версія рядка, який людина БАЧИТЬ у шухляді й підтвердила.
+   * Хтось змінив з'єднання тим часом — `409 dataSourceChanged`: причина
+   * лишається в шухляді, перелік перечитується (шухляда показує чинний рядок),
+   * а повторне видалення — лише новим підтвердженням уже над ним.
    */
   const remove = useMutation({
-    mutationFn: () => deleteDataSource(source.id),
+    mutationFn: (rowVersion: string) => deleteDataSource(source.id, rowVersion),
     onSuccess: () => {
       setConfirming(false);
       void queryClient.invalidateQueries({ queryKey: DataSourcesQueryKey });
       notifications.show({ message: t('sources.deleted') });
       onDeleted();
     },
-    onError: () => setConfirming(false),
+    onError: (error) => {
+      setConfirming(false);
+      if (freshVersionOf(error) !== null) {
+        void queryClient.invalidateQueries({ queryKey: DataSourcesQueryKey });
+      }
+    },
   });
 
   return (
@@ -184,7 +210,7 @@ export function DataSourceDrawer({
             title={t('sources.deleteTitle', { name: dataSourceName(source) })}
             verb={t('sources.deleteConnection')}
             isPending={remove.isPending}
-            onConfirm={() => remove.mutate()}
+            onConfirm={() => remove.mutate(source.rowVersion)}
             onClose={() => setConfirming(false)}
           />
         </>
