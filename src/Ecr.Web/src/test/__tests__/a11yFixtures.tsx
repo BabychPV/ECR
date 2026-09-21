@@ -398,6 +398,28 @@ export const CampaignSummaryFixture = {
 };
 
 /**
+ * Перелік зрізів (`/admin/snapshots`) — НЕ порожній і з усіма трьома форматами.
+ *
+ * ⛔ Порожній перелік показав би `EmptyState`, і axe не бачив би ні таблиці, ні
+ * позначки формату (2026-09-21). `legacy` і `unknown` — дві різні позначки,
+ * `current` — рядок без позначки.
+ */
+export const SnapshotListFixture = (['legacy', 'current', 'unknown'] as const).map(
+  (hashFormat, index) => ({
+    builtAt: '2026-01-15T10:00:00Z',
+    contentHash: `a11y${String(index + 1)}`,
+    hashFormat,
+    id: index + 1,
+    isCurrent: index === 1,
+    periodKey: 202601,
+    projectId: 1,
+    reportVersionId: 1,
+    rowCount: 10,
+    status: 'Submitted',
+  }),
+);
+
+/**
  * Порожня відповідь ПОТРІБНОЇ форми для кожного маршруту (незмінно з
  * попереднього єдиного файлу).
  */
@@ -610,6 +632,8 @@ export function emptyBodyFor(url: string): unknown {
       },
     ];
   }
+
+  if (url.includes('/reports/snapshots')) return SnapshotListFixture;
 
   const paged = ['/documents', '/templates', '/users', '/projects'];
 

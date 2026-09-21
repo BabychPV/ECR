@@ -29,6 +29,7 @@ import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
 import { snapshotExportUrl } from '@/features/reports/api';
+import { SnapshotFormatBadge } from '@/features/reports/SnapshotFormatBadge';
 import {
   NoParameters,
   defaultDraft,
@@ -431,7 +432,13 @@ export function SnapshotsPage(): JSX.Element {
                         каталогу (`status.snapshot.*`), а `miw="fit-content"`
                         (UI-аудит-пас 8, lane6, п.9) тепер живе в самому
                         `StatusBadge`, а не на сторінці. */}
-                    <StatusBadge kind="snapshot" state={snapshot.status} />
+                    {/* ⚠ Формат чисел (2026-09-21): поданий зріз не
+                        перебудовується, тож старий показує менше знаків —
+                        позначка каже, що це формат, а не дефект. */}
+                    <Group gap="xs" wrap="nowrap">
+                      <StatusBadge kind="snapshot" state={snapshot.status} />
+                      <SnapshotFormatBadge format={snapshot.hashFormat} />
+                    </Group>
                   </Table.Td>
                   <Table.Td>
                     {/* ⛔ Контрольна сума показується цілком, а не обрізаною:
