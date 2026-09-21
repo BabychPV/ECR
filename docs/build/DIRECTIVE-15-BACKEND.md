@@ -576,10 +576,14 @@ issues) і в рядку — к-сть зауважень, «змінено ки
 
 ### BE-12 · Користувачі: скидання пароля, блокування, останній вхід ◐ (🗄 можливо)
 
-- `POST /security/users/{id}/reset-password` → `ResetPasswordResponse(string TemporaryPassword)`;
+- ~~`POST /security/users/{id}/reset-password` → `ResetPasswordResponse(string TemporaryPassword)`;
   доменні методи є: `User.SetPassword`, `RequirePasswordChange` ◐. Тимчасовий
   пароль показується ОДИН раз (макет `sec-dlg-result-password`), у журнал і лог
-  не потрапляє (тест: лог-рядок запиту не містить значення).
+  не потрапляє (тест: лог-рядок запиту не містить значення).~~
+  ✎ **2026-09-21, рішення людини** (`docs/tz/10-decisions.md`, журнал за
+  2026-09-21): сервер тимчасовий пароль НЕ генерує — новий пароль задає
+  адміністратор у запиті, далі примусова зміна при вході (`RequirePasswordChange`).
+  Вимога «значення не потрапляє в журнал і лог» лишається чинною.
 - `POST /security/users/{id}/lock` / `…/unlock` з обов'язковою причиною
   (`ReasonModal` уже є на клієнті).
 - `LastSignInAt` у переліку користувачів — якщо колонки немає, 🗄.
