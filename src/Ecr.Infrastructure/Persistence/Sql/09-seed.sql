@@ -1952,6 +1952,7 @@ USING (VALUES
     (N'consistency.runSucceeded',        N'en', N'Check finished — list refreshed', 1),
     (N'consistency.runFailed',           N'en', N'Check failed', 1),
     (N'consistency.runUnknown',          N'en', N'Check status is unavailable', 1),
+    (N'consistency.runJoined',           N'en', N'A check was already running (started earlier or by someone else) — following it', 1),
     -- Огляд звітної кампанії (BE-22): хто затримує кампанію періоду. Лічильники
     -- — по ВСІХ проєктах періоду (Q15-07), і підказка каже це прямо.
     (N'nav.campaign',                    N'en', N'Reporting campaign', 1),
