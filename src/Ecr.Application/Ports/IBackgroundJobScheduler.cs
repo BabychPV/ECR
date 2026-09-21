@@ -187,6 +187,10 @@ public sealed record JobListFilter(
 /// <param name="CreatedAt">Перша постановка в чергу, UTC; <c>null</c> — розклад (BE-08).</param>
 /// <param name="ErrorCode">Код каталогу помилок провалу (BE-08).</param>
 /// <param name="DocumentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
+/// <param name="MaxAttempts">
+/// Спроб загалом, як у <see cref="JobStatus.MaxAttempts"/>; рядок переліку завжди
+/// з журналу, тож від сховища — завжди число, <c>null</c> лише від інших реалізацій.
+/// </param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -200,7 +204,8 @@ public sealed record JobSummary(
     string? Message = null,
     DateTime? CreatedAt = null,
     string? ErrorCode = null,
-    long? DocumentId = null);
+    long? DocumentId = null,
+    int? MaxAttempts = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
