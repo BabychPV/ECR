@@ -1,4 +1,4 @@
-import { safeReturnPath } from '@/pages/safeReturnPath';
+import { safeReturnPath } from '@/shared/safeReturnPath';
 import { currentDocumentId, pendingCount } from './pendingStore';
 
 /**

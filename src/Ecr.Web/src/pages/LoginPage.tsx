@@ -20,7 +20,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, EcrApiError, LOGIN_REASON_PARAM } from '@/api/client';
 import type { CurrentUserDto, LocalLoginRequest } from '@/api/types';
 import { anyLostEdits, takeLostEdits, type LostEdits } from '@/features/grid/lostEdits';
-import { safeReturnPath } from './safeReturnPath';
+import { safeReturnPath } from '@/shared/safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
   isCatalogFailed,
