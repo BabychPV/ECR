@@ -164,6 +164,17 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 /**
+ * Сирий `Response` для тіл, що не є JSON (файли: CSV-вивантаження аудиту).
+ *
+ * ⚠ Той самий шлях, що й `apiFetch`: кореляція, `Accept-Language`, cookie,
+ * перенаправлення на 401 і розбір `problem+json` у `EcrApiError`. Тіло
+ * успішної відповіді НЕ читається — його читає викликач (`blob()`/`text()`).
+ */
+export async function apiFetchResponse(path: string, init?: RequestInit): Promise<Response> {
+  return apiFetchRaw(path, init, false);
+}
+
+/**
  * Спільна частина: кореляція, cookie, розбір відмови.
  *
  * ⚠ Виділена не заради стислості, а тому, що інакше умовний запит довелося б
