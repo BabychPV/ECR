@@ -2,6 +2,7 @@ using Ecr.Application.Integration;
 using Ecr.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Ecr.Api.Controllers;
 
@@ -71,16 +72,22 @@ public sealed class DataSourcesController(
     [ProducesResponseType<DataSourceView>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Update(
         int id, [FromBody] SaveDataSourceRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ⚠ `If-Match` із `rowVersion` обов'язковий: немає — 422, чужа версія —
+        // 409 ECR-JOB-0409. Читається з запиту, а не `[FromHeader]` — та сама
+        // причина, що в `CollectionSchedulesController`.
+        var ifMatch = Request.Headers[HeaderNames.IfMatch].ToString();
+
         return Ok(await save
             .UpdateAsync(
                 id, request.NameL10n, request.Transport, request.Endpoint, request.SecondaryEndpoint,
-                request.Catalog, request.MaxParallel, request.IsActive, ct)
+                request.Catalog, request.MaxParallel, request.IsActive, ifMatch, ct)
             .ConfigureAwait(false));
     }
 
@@ -92,16 +99,19 @@ public sealed class DataSourcesController(
     /// <c>409 ECR-JOB-0409</c> із лічильниками в деталях. Видалення потягнуло б
     /// за собою зібрані точки й журнал покриття, за якими вже пораховані
     /// документи. Джерело, з якого більше не збирають, вимикається
-    /// (<c>isActive = false</c>).
+    /// (<c>isActive = false</c>). Потребує <c>If-Match</c>, як і зміна.
     /// </remarks>
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        await delete.HandleAsync(id, ct).ConfigureAwait(false);
+        var ifMatch = Request.Headers[HeaderNames.IfMatch].ToString();
+
+        await delete.HandleAsync(id, ifMatch, ct).ConfigureAwait(false);
 
         return NoContent();
     }

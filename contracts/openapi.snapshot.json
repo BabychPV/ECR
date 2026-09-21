@@ -2283,6 +2283,9 @@
             },
             "type": "object"
           },
+          "rowVersion": {
+            "type": "string"
+          },
           "secondaryEndpoint": {
             "type": [
               "null",
@@ -2309,7 +2312,8 @@
           "isActive",
           "hasSecret",
           "sourceEntities",
-          "collectionSchedules"
+          "collectionSchedules",
+          "rowVersion"
         ],
         "type": "object"
       },
@@ -11809,7 +11813,7 @@
     },
     "/api/v1/data-sources/{id}": {
       "delete": {
-        "description": "⛔ Каскаду немає: джерело із сутностями збору або розкладами — це\n`409 ECR-JOB-0409` із лічильниками в деталях. Видалення потягнуло б\nза собою зібрані точки й журнал покриття, за якими вже пораховані\nдокументи. Джерело, з якого більше не збирають, вимикається\n(`isActive = false`).",
+        "description": "⛔ Каскаду немає: джерело із сутностями збору або розкладами — це\n`409 ECR-JOB-0409` із лічильниками в деталях. Видалення потягнуло б\nза собою зібрані точки й журнал покриття, за якими вже пораховані\nдокументи. Джерело, з якого більше не збирають, вимикається\n(`isActive = false`). Потребує `If-Match`, як і зміна.",
         "parameters": [
           {
             "in": "path",
@@ -11885,6 +11889,26 @@
               }
             },
             "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Прибирає джерело, на яке ніщо не спирається. Право `Integration.Manage`.",
@@ -11986,6 +12010,26 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

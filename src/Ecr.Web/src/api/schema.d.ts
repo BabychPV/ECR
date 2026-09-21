@@ -941,6 +941,17 @@ export interface paths {
                         "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
                 /** @description Unprocessable Entity */
                 422: {
                     headers: {
@@ -961,7 +972,7 @@ export interface paths {
          *     `409 ECR-JOB-0409` із лічильниками в деталях. Видалення потягнуло б
          *     за собою зібрані точки й журнал покриття, за якими вже пораховані
          *     документи. Джерело, з якого більше не збирають, вимикається
-         *     (`isActive = false`).
+         *     (`isActive = false`). Потребує `If-Match`, як і зміна.
          */
         delete: {
             parameters: {
@@ -1005,6 +1016,17 @@ export interface paths {
                 };
                 /** @description Conflict */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12524,6 +12546,7 @@ export interface components {
             nameL10n: {
                 [key: string]: string;
             };
+            rowVersion: string;
             secondaryEndpoint: null | string;
             /** Format: int32 */
             sourceEntities: number;

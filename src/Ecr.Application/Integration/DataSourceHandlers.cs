@@ -37,7 +37,8 @@ public sealed record DataSourceView(
     bool IsActive,
     bool HasSecret,
     int SourceEntities,
-    int CollectionSchedules);
+    int CollectionSchedules,
+    string RowVersion);
 
 /// <summary>Наслідок перевірки з'єднання; <c>Entities</c> — розмір каталогу джерела.</summary>
 public sealed record DataSourceTestResult(bool Ok, string? Error, int Entities, string? MessageKey = null);
@@ -77,7 +78,39 @@ public sealed class ListDataSourcesHandler(
             // `GET` (ФВ-6.11).
             secrets.Find(source.SecretName) is not null,
             usage.SourceEntities,
-            usage.CollectionSchedules);
+            usage.CollectionSchedules,
+            Convert.ToBase64String(source.RowVersion));
+
+    /// <summary>
+    /// Звіряє <c>If-Match</c> із версією рядка — той самий контракт, що в розкладах
+    /// (<see cref="ListCollectionSchedulesHandler.RequireCurrentVersion"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Власна перевірка, а не токен EF: той ловить лише збіг у мілісекунди між
+    /// читанням і записом ЦЬОГО запиту, а правку втрачають між двома відкритими
+    /// шухлядами. Заголовка немає — <c>422</c>; версія чужа — <c>409</c>.
+    /// </remarks>
+    internal static void RequireCurrentVersion(DataSource source, string? ifMatch)
+    {
+        var expected = ListCollectionSchedulesHandler.NormalizeETag(ifMatch)
+                       ?? throw Invalid(
+                           "err.ECR-REQ-0422.dataSourceIfMatch",
+                           "Запит на зміну з'єднання має нести заголовок If-Match зі значенням rowVersion.");
+
+        var actual = Convert.ToBase64String(source.RowVersion);
+
+        if (!string.Equals(expected, actual, StringComparison.Ordinal))
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.JobStateConflict,
+                $"З'єднання «{source.Code}» змінили після того, як його прочитали.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0409.dataSourceChanged",
+                    ["rowVersion"] = actual,
+                });
+        }
+    }
 
     internal static async Task<DataSource> FindAsync(IDataSourceStore store, int id, CancellationToken ct)
         => await store.FindAsync(id, ct).ConfigureAwait(false)
@@ -173,12 +206,15 @@ public sealed class SaveDataSourceHandler(
         string? catalog,
         int? maxParallel,
         bool isActive,
+        string? ifMatch,
         CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var source = await ListDataSourcesHandler.FindAsync(store, id, ct).ConfigureAwait(false);
+        ListDataSourcesHandler.RequireCurrentVersion(source, ifMatch);
+
         var parsed = await ValidateAsync(
             source.Code, name, transport, endpoint, secondaryEndpoint, maxParallel, id, ct).ConfigureAwait(false);
 
@@ -228,8 +264,8 @@ public sealed class SaveDataSourceHandler(
         // ⛔ Облікові дані в адресі ловляться ДО перевірки унікальності коду:
         // інакше перший же дублікат ховав би причину, через яку відмовляти
         // треба в будь-якому разі.
-        RequireNoCredentials(address);
-        RequireNoCredentials(spare);
+        RequireNoCredentials(address, "endpoint");
+        RequireNoCredentials(spare, "secondaryEndpoint");
 
         if (await store.IsCodeTakenAsync(code, exceptId, ct).ConfigureAwait(false))
         {
@@ -265,9 +301,12 @@ public sealed class SaveDataSourceHandler(
     /// КОЖНУ відповідь <c>GET</c>.
     ///
     /// ⚠ Відмова не повторює введеного: інакше пароль, який ми щойно
-    /// відмовилися зберігати, поїхав би в журнал разом із її текстом.
+    /// відмовилися зберігати, поїхав би в журнал разом із її текстом. Тому
+    /// відмова називає ПОЛЕ (<c>field</c>: <c>endpoint</c> або
+    /// <c>secondaryEndpoint</c>), а не вміст. Несуть обидві — називається
+    /// <c>endpoint</c>: перевірка йде в порядку полів форми і зупиняється на першому.
     /// </remarks>
-    internal static void RequireNoCredentials(string? address)
+    internal static void RequireNoCredentials(string? address, string field)
     {
         if (string.IsNullOrWhiteSpace(address))
         {
@@ -283,9 +322,14 @@ public sealed class SaveDataSourceHandler(
 
         if (carries)
         {
-            throw ListDataSourcesHandler.Invalid(
-                "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret",
-                "Адреса джерела не має нести облікових даних: джерела ходять під службовим обліковим записом.");
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "Адреса джерела не має нести облікових даних: джерела ходять під службовим обліковим записом.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret",
+                    ["field"] = field,
+                });
         }
     }
 
@@ -350,12 +394,14 @@ public sealed class DeleteDataSourceHandler(
     public const string EventType = "DataSourceDeleted";
 
     /// <summary>Прибирає джерело, на яке ніщо не спирається.</summary>
-    public async Task HandleAsync(int id, CancellationToken ct)
+    public async Task HandleAsync(int id, string? ifMatch, CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, SaveDataSourceHandler.Permission, ct).ConfigureAwait(false);
 
         var source = await ListDataSourcesHandler.FindAsync(store, id, ct).ConfigureAwait(false);
+        ListDataSourcesHandler.RequireCurrentVersion(source, ifMatch);
+
         var usage = await store.CountUsageAsync(id, ct).ConfigureAwait(false);
 
         if (usage.SourceEntities > 0 || usage.CollectionSchedules > 0)

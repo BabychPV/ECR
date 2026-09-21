@@ -15,9 +15,18 @@ export type DataSourceTestResult = components['schemas']['DataSourceTestResult']
  * ⛔ Адреси записані повністю, а не збираються з помічника — той самий прийом,
  * що й у `scheduleApi.ts`: сторож `Кожна_дія_сервера_має_споживача_в_інтерфейсі`
  * шукає літерал `/api/v1/…` разом із методом поруч.
- *
- * ⚠ Екрана джерел ще НЕМАЄ — модуль поки має єдиного споживача, власний тест.
  */
+
+/**
+ * `If-Match` із версією рядка — той самий контракт, що в `scheduleApi.ts`.
+ *
+ * ⛔ Обов'язковий для зміни й видалення: без нього сервер відповідає `422`, а
+ * якщо з'єднання встигли змінити — `409 ECR-JOB-0409`. Передавати треба
+ * `rowVersion` того рядка, який ПОКАЗАЛИ людині, а не перечитаний перед збереженням.
+ */
+function ifMatch(rowVersion: string): HeadersInit {
+  return { 'If-Match': `"${rowVersion}"` };
+}
 
 export function listDataSources(): Promise<DataSource[]> {
   return apiFetch<DataSource[]>('/api/v1/data-sources');
@@ -31,9 +40,14 @@ export function createDataSource(body: SaveDataSourceBody): Promise<DataSource> 
 }
 
 /** Змінює джерело. Код не змінюється: на нього спираються сутності збору. */
-export function updateDataSource(id: number, body: SaveDataSourceBody): Promise<DataSource> {
+export function updateDataSource(
+  id: number,
+  body: SaveDataSourceBody,
+  rowVersion: string,
+): Promise<DataSource> {
   return apiFetch<DataSource>(`/api/v1/data-sources/${id}`, {
     method: 'PUT',
+    headers: ifMatch(rowVersion),
     body: JSON.stringify(body),
   });
 }
@@ -43,10 +57,13 @@ export function updateDataSource(id: number, body: SaveDataSourceBody): Promise<
  *
  * ⛔ Джерело із сутностями збору або розкладами сервер НЕ видаляє — `409`
  * (`ECR-JOB-0409`) із лічильниками. Таке джерело вимикають:
- * `updateDataSource(id, { ...body, isActive: false })`.
+ * `updateDataSource(id, { ...body, isActive: false }, rowVersion)`.
  */
-export function deleteDataSource(id: number): Promise<void> {
-  return apiFetch<void>(`/api/v1/data-sources/${id}`, { method: 'DELETE' });
+export function deleteDataSource(id: number, rowVersion: string): Promise<void> {
+  return apiFetch<void>(`/api/v1/data-sources/${id}`, {
+    method: 'DELETE',
+    headers: ifMatch(rowVersion),
+  });
 }
 
 /**
