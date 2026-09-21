@@ -1891,6 +1891,15 @@ USING (VALUES
     (N'consistency.messageLanguage',     N'en', N'The finding text is written by the nightly job and is not translated.', 1),
     (N'consistency.empty',               N'en', N'No consistency issues recorded', 1),
     (N'consistency.emptyHint',           N'en', N'The nightly check writes what it finds here; an empty journal means the last run found nothing.', 1),
+    -- Позачерговий запуск перевірки: підтвердження з причиною (вона йде в
+    -- журнал безпеки) і стан фонової задачі. `unknown` — стан задачі не
+    -- вдалося прочитати, а не «перевірка впала».
+    (N'consistency.runNow',              N'en', N'Run check now', 1),
+    (N'consistency.runHint',             N'en', N'The reason is written to the security log.', 1),
+    (N'consistency.runRunning',          N'en', N'Check is running', 1),
+    (N'consistency.runSucceeded',        N'en', N'Check finished — list refreshed', 1),
+    (N'consistency.runFailed',           N'en', N'Check failed', 1),
+    (N'consistency.runUnknown',          N'en', N'Check status is unavailable', 1),
     (N'nav.snapshots',                   N'en', N'Report snapshots', 1),
     (N'snapshots.title',                 N'en', N'Report snapshots', 1),
     (N'snapshots.build',                 N'en', N'Build snapshot', 1),
