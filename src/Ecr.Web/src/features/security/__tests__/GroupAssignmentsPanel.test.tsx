@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { theme } from '@/shared/theme/theme';
@@ -66,6 +66,42 @@ async function renderPanel(): Promise<void> {
   );
 }
 
+/*
+ * ⛔ Чому тут не `userEvent.*` напряму і чому поля беруться за підписом, а не
+ * за роллю. Файл падав таймаутом (5000 мс) у повному наборі під навантаженням,
+ * проходячи поодинці. Профіль випадку з датами (`node:inspector`): ~40 % CPU —
+ * `window.getComputedStyle` jsdom (377 з 907 мс), і приходить він із ДВОХ
+ * місць: `getByRole`/`findByRole` (`queryAllByRole` — 359 мс: роль кожного
+ * вузла, перевірка «чи прихований» і доступне ім'я йдуть по предках до
+ * `<html>`) та перевірки `pointer-events` у `user-event` перед кожною дією
+ * вказівника; ще `userEvent.tab()` будує список фокусованих із тією ж
+ * перевіркою видимості. У jsdom `getComputedStyle` не дешевий: кожен виклик
+ * проганяє вбудовану таблицю стилів браузера через `nwsapi` для елемента й
+ * предків, а кеш скидається БУДЬ-ЯКОЮ мутацією DOM, тобто після кожного
+ * рендера. ⚠ Змінні теми Mantine тут ні до чого: `withCssVariables={false}`
+ * виміряно — частка не змінилася.
+ *
+ * Після правки той самий профіль: `getComputedStyle` 56–77 мс, `queryAllByRole`
+ * 12–15 мс; лишився рендер самого React (~320 мс), тобто ціна компонента, а
+ * не запитів тесту. Випадок поодинці: 2.4–3.0 с → 0.65–1.2 с.
+ *
+ *  • `pointerEventsCheck: Never` — перевірка тут порожня: CSS Mantine у
+ *    тестах не завантажується (`css` у vitest вимкнено), тож `pointer-events:
+ *    none` взятися нізвідки, а ціна — прохід по предках на кожну дію.
+ *  • `delay: null` — без `setTimeout` між діями: під навантаженням кожен
+ *    таймер запізнюється, а предмет цих випадків — не темп введення.
+ *  • Поля — `getByLabelText`: зв'язок «підпис → поле» перевіряється так само,
+ *    але без обходу всього дерева з обчисленням стилів.
+ *  • Без `userEvent.tab()` між датами: `DateInput` кладе розібрану дату в стан
+ *    уже на `change`, а не на втраті фокуса, — «End before start» з'являється
+ *    й без нього (випадок це й доводить: повідомлення чекається `findByText`).
+ *  • Кнопку «Assign role to group» знайдено ОДИН раз: вузол той самий на всіх
+ *    рендерах, а повторний `getByRole` після розкритих випадних блоків —
+ *    найдорожчий запит випадку.
+ */
+const user = (): ReturnType<typeof userEvent.setup> =>
+  userEvent.setup({ delay: null, pointerEventsCheck: PointerEventsCheckLevel.Never });
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -78,7 +114,7 @@ describe('GroupAssignmentsPanel', () => {
     expect(await screen.findByText('CORP\\EcrOps')).not.toBeNull();
     expect(screen.getByText('S-1-5-21-1-2-3-1105')).not.toBeNull();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    await user().click(screen.getByRole('button', { name: 'Revoke' }));
 
     await waitFor(() => {
       const call = fetchSpy.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
@@ -106,16 +142,19 @@ describe('GroupAssignmentsPanel', () => {
           );
     });
     await renderPanel();
+    const u = user();
+    const assign = screen.getByRole('button', { name: 'Assign role to group' });
 
-    await userEvent.click(screen.getByRole('textbox', { name: 'Role' }));
-    await userEvent.click(await screen.findByRole('option', { name: 'Publishers' }));
-    await userEvent.type(screen.getByLabelText(/Group name or SID/), 'S-1-5-32-544');
-    await userEvent.click(screen.getByRole('button', { name: 'Assign role to group' }));
+    await u.click(screen.getByLabelText('Role'));
+    await u.click(await screen.findByRole('option', { name: 'Publishers' }));
+    // Предмет випадку — підтвердження небезпечної ролі, а не посимвольний ввід.
+    fireEvent.change(screen.getByLabelText(/Group name or SID/), { target: { value: 'S-1-5-32-544' } });
+    await u.click(assign);
 
     expect(await screen.findByText('Calculation.Publish')).not.toBeNull();
     expect(posted).toEqual([{ roleId: 2, principal: 'S-1-5-32-544', confirmDangerous: false }]);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Assign anyway' }));
+    await u.click(screen.getByRole('button', { name: 'Assign anyway' }));
 
     await waitFor(() => expect(posted.at(-1)).toEqual({ roleId: 2, principal: 'S-1-5-32-544', confirmDangerous: true }));
   });
@@ -168,24 +207,25 @@ describe('GroupAssignmentsPanel', () => {
         return json({ id: 13, principalSid: 'S-1-5-32-544', principalName: null, effectiveAfterNextSignIn: false }, 201);
       });
       await renderPanel();
+      const u = user();
+      const assign = screen.getByRole('button', { name: 'Assign role to group' });
+      const validTo = screen.getByLabelText('Valid to');
 
-      await userEvent.click(screen.getByRole('textbox', { name: 'Role' }));
-      await userEvent.click(await screen.findByRole('option', { name: 'Publishers' }));
+      await u.click(screen.getByLabelText('Role'));
+      await u.click(await screen.findByRole('option', { name: 'Publishers' }));
       // ⚠ Дати вводяться `fireEvent.change`, а не посимвольним `userEvent.type`:
       // предмет випадку — ФОРМАТ відправленого тіла, а не ввід. П'ять полів по
       // десять символів з'їдали майже всю стелю vitest (5000 мс), і випадок падав
       // таймаутом у повному наборі під навантаженням, проходячи поодинці.
       fireEvent.change(screen.getByLabelText(/Group name or SID/), { target: { value: 'S-1-5-32-544' } });
-      fireEvent.change(screen.getByRole('textbox', { name: 'Valid from' }), { target: { value: '2026-03-10' } });
-      fireEvent.change(screen.getByRole('textbox', { name: 'Valid to' }), { target: { value: '2026-03-01' } });
-      await userEvent.tab();
+      fireEvent.change(screen.getByLabelText('Valid from'), { target: { value: '2026-03-10' } });
+      fireEvent.change(validTo, { target: { value: '2026-03-01' } });
 
       expect(await screen.findByText('End before start')).not.toBeNull();
-      expect(screen.getByRole('button', { name: 'Assign role to group' })).toHaveProperty('disabled', true);
+      expect(assign).toHaveProperty('disabled', true);
 
-      fireEvent.change(screen.getByRole('textbox', { name: 'Valid to' }), { target: { value: '2026-03-31' } });
-      await userEvent.tab();
-      await userEvent.click(screen.getByRole('button', { name: 'Assign role to group' }));
+      fireEvent.change(validTo, { target: { value: '2026-03-31' } });
+      await u.click(assign);
 
       await waitFor(() =>
         expect(posted).toEqual([

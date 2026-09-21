@@ -1,6 +1,6 @@
 import { useState, type JSX } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
@@ -193,6 +193,38 @@ async function show(initial: ColumnDraft): Promise<() => ColumnDraft> {
 function saveButton(): HTMLButtonElement {
   return screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement;
 }
+
+/*
+ * ⛔ Прогрів `lazy()` — не оптимізація, а причина падінь під навантаженням.
+ * `ColumnEditor` тягне `StyleEditor` через `lazy()`, і об'єкт `lazy` живе на
+ * рівні модуля. Тому ЛИШЕ перший монтаж у файлі проходить шлях «Suspense →
+ * запасний скелет → доїзд модуля → повторний рендер у задачі планувальника»,
+ * і все це — всередині `findByLabelText('Font size')`, чия стеля 1000 мс.
+ * Далі `lazy` уже розв'язаний, і форма малюється одним синхронним рендером.
+ *
+ * Виміряно на першому випадку поодинці (3 прогони кожен):
+ *   • без прогріву: очікування поля 339–397 мс, випадок 778–837 мс;
+ *   • з прогрівом:  очікування поля  28–64 мс, випадок 204–326 мс.
+ * Під 24 процесами-навантажувачами на 12 ядрах перший випадок падав 5 із 5
+ * («Unable to find a label with the text of: Font size» на 3.2–4.3 с), а три
+ * наступні — ні: саме тому, що платив лише перший.
+ *
+ * ⚠ Попередній імпорт самих модулів НЕ допомагав (виміряно: 330–490 мс
+ * очікування): розв'язується не модуль, а конкретний об'єкт `lazy`, і
+ * зробити це можна лише рендером. Разова ціна переїжджає в хук зі стелею
+ * `hookTimeout`; `timeout` тут — для цієї разової ціни, а не для випадків.
+ */
+beforeAll(async () => {
+  mockApi();
+  try {
+    await show(styledDraft);
+    // 8 с, а не 10: нижче `hookTimeout` (10 с), щоб відмова назвала поле, а не хук.
+    await screen.findByLabelText('Font size', undefined, { timeout: 8_000 });
+  } finally {
+    cleanup();
+    vi.unstubAllGlobals();
+  }
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
