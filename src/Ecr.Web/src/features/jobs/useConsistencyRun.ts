@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type { JobStatus } from '@/api/types';
 import { outcomeOf, pollInterval, type JobOutcome } from '@/features/workflow/jobFollow';
+import { problemText } from '@/shared/ui/problemText';
 import { runConsistencyCheck } from './api';
 
 /**
@@ -16,6 +17,32 @@ export const RunConsistencyPermission = 'System.RunJob';
 
 /** Ключ переліку знахідок — те, що перечитується після успішного прогону. */
 export const ConsistencyIssuesKey = ['consistency-issues'] as const;
+
+/**
+ * Код відмови «перевірка вже в черзі або виконується»
+ * (`RunConsistencyCheckHandler.AlreadyRunningErrorCode` = `ErrorCodes.JobStateConflict`).
+ */
+const AlreadyRunningCode = 'ECR-JOB-0409';
+
+/**
+ * Задача, яку сервер назвав у відмові «перевірка вже йде»; `null` — це інша
+ * відмова або задачу не названо.
+ *
+ * ⛔ Гілкування — за КОДОМ, а не за статусом `409`: той самий статус дають і
+ * інші конфлікти, і вони лишаються відмовами з `ErrorAlert`.
+ *
+ * ⚠ `jobId` лежить плоско у верхньому рівні тіла: `ExceptionHandlingMiddleware`
+ * копіює `Details` обробника в `problem.Extensions`, а `problemOf` кладе все
+ * нестандартне в `extensions2`. `409` без `jobId` — лишається відмовою: стежити
+ * нема за чим, а «виконується» без задачі було б неправдою про стан сервера.
+ */
+function runningJobOf(error: unknown): string | null {
+  if (!(error instanceof EcrApiError) || problemText(error).code !== AlreadyRunningCode) return null;
+
+  const jobId = error.problem.extensions2?.['jobId'];
+
+  return typeof jobId === 'string' && jobId.length > 0 ? jobId : null;
+}
 
 /** Стан ручного прогону перевірки узгодженості для екрана. */
 export interface ConsistencyRun {
@@ -33,6 +60,12 @@ export interface ConsistencyRun {
 
   /** Текст сервера про збій задачі, якщо він є. */
   failure: string | null;
+
+  /**
+   * Стежимо за задачею, яку поставив хтось інший або раніше: сервер відповів
+   * `409 ECR-JOB-0409` і назвав її `jobId`.
+   */
+  joined: boolean;
 }
 
 /**
@@ -54,10 +87,24 @@ export interface ConsistencyRun {
 export function useConsistencyRun(): ConsistencyRun {
   const queryClient = useQueryClient();
   const [jobId, setJobId] = useState<string | null>(null);
+  const [joined, setJoined] = useState(false);
 
   const enqueue = useMutation({
     mutationFn: runConsistencyCheck,
-    onSuccess: (job) => setJobId(job.jobId),
+    onSuccess: (job) => {
+      setJoined(false);
+      setJobId(job.jobId);
+    },
+    // ⚠ Перевірка вже йде — це не відмова, а та сама задача, яку людина й
+    // хотіла: стежимо за нею так само, як за власною (і так само перечитуємо
+    // перелік на її `Succeeded`).
+    onError: (error) => {
+      const running = runningJobOf(error);
+      if (running === null) return;
+
+      setJoined(true);
+      setJobId(running);
+    },
   });
 
   const job = useQuery({
@@ -83,8 +130,9 @@ export function useConsistencyRun(): ConsistencyRun {
   return {
     start: (reason) => enqueue.mutate(reason),
     isStarting: enqueue.isPending,
-    startError: enqueue.error,
+    startError: runningJobOf(enqueue.error) === null ? enqueue.error : null,
     outcome,
     failure: outcome === 'failed' ? (job.data?.error ?? null) : null,
+    joined,
   };
 }

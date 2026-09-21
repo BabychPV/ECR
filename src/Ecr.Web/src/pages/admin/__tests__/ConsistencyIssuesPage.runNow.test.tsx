@@ -64,6 +64,34 @@ function problem(status: number, errorCode: string): unknown {
   };
 }
 
+/** Задача, яку поставив хтось інший (або нічний розклад) раніше за нас. */
+const RunningJobId = 'IConsistencyCheckJob#41';
+
+/**
+ * `409` «перевірка вже йде» — у тій формі, яку пише сервер.
+ *
+ * ⚠ Розширення лежать ПЛОСКО на верхньому рівні тіла (RFC 9457 §3.2):
+ * `ExceptionHandlingMiddleware` копіює `Details` обробника
+ * (`RunConsistencyCheckHandler`: `jobId`, `state`, `messageKey`) у
+ * `problem.Extensions`. `jobId === undefined` — сервер задачу не назвав.
+ */
+function alreadyRunning(jobId: string | undefined): JobReply {
+  return {
+    status: 409,
+    body: {
+      type: 'https://ecr.ncoc.kz/errors/ECR-JOB-0409',
+      title: 'Conflict',
+      status: 409,
+      detail: 'A consistency check is already in progress.',
+      errorCode: 'ECR-JOB-0409',
+      correlationId: 'corr-2',
+      messageKey: 'err.ECR-JOB-0409.consistencyCheckRunning',
+      state: 'Running',
+      ...(jobId === undefined ? {} : { jobId }),
+    },
+  };
+}
+
 function jobState(state: string, error: string | null = null): JobReply {
   return { status: 200, body: { jobId: JobId, state, percent: 0, message: null, error } };
 }
@@ -240,6 +268,60 @@ describe('ConsistencyIssuesPage: «перевірити зараз»', () => {
     expect(api.jobUrls).toHaveLength(0);
 
     // Перелік не підмінено ні порожнечею, ні відмовою.
+    expect(screen.getByText(Finding.message)).toBeTruthy();
+  });
+
+  it('409 «вже йде» з jobId — не відмова: стежить за ТІЄЮ задачею і перечитує перелік на успіху', async () => {
+    const api = mockApi({
+      permissions: ['System.ViewHealth', 'System.RunJob'],
+      enqueue: alreadyRunning(RunningJobId),
+      job: [jobState('Running'), jobState('Succeeded')],
+    });
+    show();
+
+    expect(await screen.findByText(Finding.message)).toBeTruthy();
+    const before = api.issuesCalls();
+
+    await runWithReason('Полагодили довідник');
+
+    // Стан — «виконується», і рядок пояснює, чому ми стежимо за чужою задачею.
+    const status = await screen.findByRole('status');
+    await waitFor(() => expect(status.getAttribute('data-outcome')).toBe('running'));
+    expect(within(status).getByText('⟦consistency.runJoined⟧')).toBeTruthy();
+
+    // ⛔ Стежимо саме за задачею з відповіді `409`, а не за нічим.
+    expect(api.jobUrls[0]).toBe('/api/v1/jobs/IConsistencyCheckJob%2341');
+
+    // І це не відмова: червоної панелі немає.
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    await waitFor(
+      () => expect(screen.getByRole('status').getAttribute('data-outcome')).toBe('succeeded'),
+      { timeout: 5000 },
+    );
+
+    // Перелік перечитано — так само, як після власної задачі.
+    await waitFor(() => expect(api.issuesCalls()).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.queryByText(Finding.message)).toBeNull());
+    expect(screen.queryByRole('alert')).toBeNull();
+  }, 10000);
+
+  it('409 без jobId — відмова з кодом, стежити нема за чим', async () => {
+    const api = mockApi({
+      permissions: ['System.ViewHealth', 'System.RunJob'],
+      enqueue: alreadyRunning(undefined),
+    });
+    show();
+
+    await screen.findByText(Finding.message);
+    await runWithReason('Полагодили довідник');
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('ECR-JOB-0409')).toBeTruthy();
+
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByText('⟦consistency.runJoined⟧')).toBeNull();
+    expect(api.jobUrls).toHaveLength(0);
     expect(screen.getByText(Finding.message)).toBeTruthy();
   });
 

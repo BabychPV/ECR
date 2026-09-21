@@ -238,6 +238,13 @@ function RunStatus({ run }: { run: ConsistencyRun }): JSX.Element | null {
       <Badge size="sm" variant="light" color={tone.color}>
         {tone.label}
       </Badge>
+      {/* ⚠ Сервер відповів «перевірка вже йде» і назвав задачу: стежимо за нею,
+          і людина має знати, що це не її натискання поставило прогін. */}
+      {run.joined && (
+        <Text size="sm" c="dimmed">
+          {t('consistency.runJoined')}
+        </Text>
+      )}
       {run.failure !== null && <Text size="sm">{run.failure}</Text>}
     </Group>
   );
