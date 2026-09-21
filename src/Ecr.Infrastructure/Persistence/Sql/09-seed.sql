@@ -1328,6 +1328,38 @@ USING (VALUES
     (N'periods.noPeriodsHint',           N'en', N'Periods are generated from the project calendar; a draft project has none until it is activated.', 1),
     (N'sources.empty',                   N'en', N'No collection sources configured', 1),
     (N'sources.emptyHint',               N'en', N'Without sources the system works fine: data is entered by hand.', 1),
+    -- З'єднання з джерелами на `/admin/sources` (UI-09): перелік, шухляда
+    -- Connection і проба «Test connection».
+    (N'sources.connections',             N'en', N'Connections', 1),
+    (N'sources.connection',              N'en', N'Connection', 1),
+    (N'sources.state',                   N'en', N'State', 1),
+    (N'sources.active',                  N'en', N'Active', 1),
+    (N'sources.entities',                N'en', N'Entities', 1),
+    (N'sources.schedules',               N'en', N'Schedules', 1),
+    (N'sources.connectionsEmpty',        N'en', N'No connections configured', 1),
+    (N'sources.connectionsEmptyHint',    N'en', N'A connection says where data is collected from; entities and schedules are attached to it.', 1),
+    (N'sources.closeDetails',            N'en', N'Close connection details', 1),
+    (N'sources.endpoint',                N'en', N'Endpoint', 1),
+    (N'sources.secondaryEndpoint',       N'en', N'Secondary endpoint', 1),
+    (N'sources.catalog',                 N'en', N'Catalog', 1),
+    (N'sources.maxParallel',             N'en', N'Max parallel requests', 1),
+    (N'sources.hasSecret',               N'en', N'Secret', 1),
+    (N'sources.hasSecretYes',            N'en', N'Stored', 1),
+    -- ⚠ Проба йде в журнал безпеки: сервер звертається до чужої системи від
+    -- імені службового запису, тому причина обов'язкова.
+    (N'sources.testConnection',          N'en', N'Test connection', 1),
+    (N'sources.testTitle',               N'en', N'Test connection: {name}', 1),
+    (N'sources.testReason',              N'en', N'Reason', 1),
+    (N'sources.testReasonHint',          N'en', N'Required: the test is written to the security log.', 1),
+    (N'sources.testOk',                  N'en', N'The source answered', 1),
+    (N'sources.testFailed',              N'en', N'The source refused the connection', 1),
+    (N'sources.testRunning',             N'en', N'A test of this connection is already running', 1),
+    -- ⚠ Перші ключі-множини в сіді: `formatCount` бере `<основа>.<категорія>`
+    -- за `Intl.PluralRules` (для en — `one` і `other`) і підставляє `{count}`.
+    -- `EndpointCoverageTests` дворівневих ключів не бачить; сторож тут —
+    -- тест «технічні ключі на екрані» в `npm run test:a11y`.
+    (N'sources.testEntities.one',        N'en', N'The source catalog lists {count} entity.', 1),
+    (N'sources.testEntities.other',      N'en', N'The source catalog lists {count} entities.', 1),
     (N'jobs.pick',                       N'en', N'Enter a job id', 1),
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
     (N'jobs.restart',                    N'en', N'Restart', 1),
