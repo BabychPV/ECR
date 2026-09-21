@@ -745,6 +745,11 @@ USING (VALUES
     (N'err.ECR-INT-0409.mappingUnitNotDeclared',          N'en', N'The mapping of field "{sourceField}" declares no source unit, so there is no change to accept. Set the unit by editing the mapping instead.', 1),
     (N'err.ECR-INT-0409.mappingUnitUnchanged',            N'en', N'The mapping of field "{sourceField}" already declares that unit.', 1),
     (N'err.ECR-INT-0409.mappingHasCollectedData',         N'en', N'{collectedPoints} points have already been collected through the mapping of field "{sourceField}". Deleting it would leave those points without the unit and the target that explain them: pause the mapping instead.', 1),
+    -- BE-20: власні налаштування інтерфейсу (`/me/preferences`).
+    (N'err.ECR-REQ-0422.preferenceKeyInvalid',            N'en', N'"{key}" is not a known preference key, or it is longer than {max} characters.', 1),
+    (N'err.ECR-REQ-0422.preferenceValueInvalid',          N'en', N'The value of preference "{key}" is not valid JSON.', 1),
+    (N'err.ECR-REQ-0422.preferenceValueTooLarge',         N'en', N'The value of preference "{key}" takes {size} bytes; the limit is {max}.', 1),
+    (N'err.ECR-REQ-0422.preferenceLimitReached',          N'en', N'You already keep {max} preferences: delete one before adding "{key}".', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5

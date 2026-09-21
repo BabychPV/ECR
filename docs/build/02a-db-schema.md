@@ -2144,6 +2144,19 @@ GO
 CREATE INDEX IX_LoginAttempt_User ON sec.LoginAttempt (UserName, AttemptedAt DESC) ON [INDEXES];
 GO
 
+-- Налаштування інтерфейсу користувача (BE-20, міграція BE20UserPreference):
+-- ключ → JSON. Ключ — з білого списку обробника, значення до 8 КБ, до 200 ключів.
+CREATE TABLE sec.UserPreference
+(
+    UserId    int           NOT NULL,
+    [Key]     varchar(100)  NOT NULL,
+    ValueJson nvarchar(max) NOT NULL,
+    UpdatedAt datetime2(3)  NOT NULL,
+    CONSTRAINT PK_UserPreference PRIMARY KEY (UserId, [Key]),
+    CONSTRAINT FK_UserPreference_User FOREIGN KEY (UserId) REFERENCES sec.[User] (Id)
+);
+GO
+
 CREATE TABLE sec.DataProtectionKey
 (
     Id           int            IDENTITY(1,1) NOT NULL,
