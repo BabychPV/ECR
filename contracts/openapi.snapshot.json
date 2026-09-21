@@ -3366,26 +3366,46 @@
       "JobStatus": {
         "description": "Стан фонової задачі.",
         "properties": {
+          "attempt": {
+            "description": "Номер спроби від 1; `null` — ще не стартувала (BE-08).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "correlationId": {
+            "description": "Кореляція з логом і запитом-постановником (BE-08).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "error": {
+            "description": "Текст провалу.",
             "type": [
               "null",
               "string"
             ]
           },
           "jobId": {
+            "description": "Ідентифікатор.",
             "type": "string"
           },
           "message": {
+            "description": "Повідомлення прогресу.",
             "type": [
               "null",
               "string"
             ]
           },
           "percent": {
+            "description": "Прогрес у відсотках.",
             "format": "int32",
             "type": "integer"
           },
           "state": {
+            "description": "Стан.",
             "type": "string"
           }
         },
@@ -3401,6 +3421,21 @@
       "JobSummary": {
         "description": "Задача в переліку черги — легша за JobStatus.",
         "properties": {
+          "attempt": {
+            "description": "Номер спроби від 1; `null` — ще не стартувала (BE-08).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "correlationId": {
+            "description": "Кореляція з логом і запитом-постановником (BE-08).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "jobCode": {
             "description": "Код задачі (тип).",
             "type": "string"

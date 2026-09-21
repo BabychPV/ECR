@@ -13372,15 +13372,36 @@ export interface components {
         };
         /** @description Стан фонової задачі. */
         JobStatus: {
+            /**
+             * Format: int32
+             * @description Номер спроби від 1; `null` — ще не стартувала (BE-08).
+             */
+            attempt?: null | number;
+            /** @description Кореляція з логом і запитом-постановником (BE-08). */
+            correlationId?: null | string;
+            /** @description Текст провалу. */
             error: null | string;
+            /** @description Ідентифікатор. */
             jobId: string;
+            /** @description Повідомлення прогресу. */
             message: null | string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Прогрес у відсотках.
+             */
             percent: number;
+            /** @description Стан. */
             state: string;
         };
         /** @description Задача в переліку черги — легша за JobStatus. */
         JobSummary: {
+            /**
+             * Format: int32
+             * @description Номер спроби від 1; `null` — ще не стартувала (BE-08).
+             */
+            attempt?: null | number;
+            /** @description Кореляція з логом і запитом-постановником (BE-08). */
+            correlationId?: null | string;
             /** @description Код задачі (тип). */
             jobCode: string;
             /** @description Ідентифікатор. */
