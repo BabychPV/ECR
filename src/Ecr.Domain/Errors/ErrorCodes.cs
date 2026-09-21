@@ -327,6 +327,10 @@ public static class ErrorCodes
     /// </remarks>
     public const string RegistryDefDuplicate = "ECR-REG-4091";
 
+    /// <summary>
+    /// Конверсія одиниць неможлива. ⚠ Не лише різні розмірності: тим самим кодом
+    /// відмовляє й множник ≤ 0 на заведенні та зміні одиниці; випадок — у <c>messageKey</c>.
+    /// </summary>
     public const string UnitDimensionMismatch = "ECR-UOM-0422";
 
     /// <summary>Одиниці з таким кодом немає в довіднику (<c>ECR-UOM-0404</c>).</summary>

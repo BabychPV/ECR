@@ -67,6 +67,11 @@ public sealed class UnitConverterTests
         // випадку, а не для зручності.
         Assert.Equal(2540m, _converter.Convert(2.5m, tonne, kg, pinned));
         Assert.Equal(2500m, _converter.Convert(2.5m, tonne, kg, null));
+
+        // Явна конверсія не для цієї пари — відмова зі своєю подробицею.
+        var mismatch = Assert.Throws<DomainException>(() => _converter.Convert(2.5m, kg, tonne, pinned));
+        Assert.Equal("ECR-UOM-0422", mismatch.ErrorCode);
+        Assert.Equal("err.ECR-UOM-0422.explicitConversionMismatch", mismatch.Details!["messageKey"]);
     }
 
     [Fact]
@@ -95,6 +100,11 @@ public sealed class UnitConverterTests
 
         Assert.Equal("ECR-UOM-0422", error.ErrorCode);
         Assert.False(_converter.CanConvert(kg, cubicMetre));
+
+        // Заголовок коду нейтральний: причину каже лише messageKey.
+        Assert.Equal("err.ECR-UOM-0422.incompatibleDimensions", error.Details!["messageKey"]);
+        Assert.Equal("kg", error.Details["from"]);
+        Assert.Equal("m3", error.Details["to"]);
     }
 
     [Fact]
@@ -155,6 +165,8 @@ public sealed class UnitConverterTests
         var error = Assert.Throws<DomainException>(() => _converter.Convert(2m, broken, kg, null));
         Assert.Equal("ECR-UOM-0422", error.ErrorCode);
         Assert.Contains("broken", error.Message, StringComparison.Ordinal);
+        Assert.Equal("err.ECR-UOM-0422.zeroFactor", error.Details!["messageKey"]);
+        Assert.Equal("broken", error.Details["code"]);
 
         Assert.Throws<DomainException>(() => _converter.Convert(1_000_000m, broken, kg, null));
 

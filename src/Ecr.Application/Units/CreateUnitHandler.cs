@@ -93,7 +93,7 @@ public sealed class CreateUnitHandler(
                 + "нуль згортає конверсію до константи, від'ємний — перевертає знак величини.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-UOM-0422",
+                    ["messageKey"] = "err.ECR-UOM-0422.factorMustBePositive",
                     ["code"] = unitCode.Value,
                     ["factorToBase"] = factorToBase.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
