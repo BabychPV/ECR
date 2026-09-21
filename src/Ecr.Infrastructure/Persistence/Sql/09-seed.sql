@@ -559,6 +559,7 @@ USING (VALUES
     -- уже заведений нижче. Ключ із підстановкою `{max}` — рівно та форма, що й
     -- `auditWindowTooWide` вище (`Q-341`).
     (N'err.ECR-REQ-0422.pageSizeOutOfRange', N'en', N'The page size must be between 1 and {max}.', 1),
+    (N'err.ECR-REQ-0422.auditExportTooLarge', N'en', N'The export would contain {total} rows, the limit is {max}: narrow the window or the filters.', 1),
     -- BE-09b: фільтр стану переліку документів. Невідомий стан — відмова, а не «усі».
     (N'err.ECR-REQ-0422.documentState',      N'en', N'There is no document state "{state}".', 1),
     (N'err.ECR-REQ-0422.documentStateNeedsPeriod', N'en', N'Filtering by document state needs a period: outside a period the state is not defined.', 1),

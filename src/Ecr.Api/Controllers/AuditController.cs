@@ -14,7 +14,10 @@ namespace Ecr.Api.Controllers;
 [Route("api/v1/audit")]
 [Authorize]
 public sealed class AuditController(
-    GetCellChangesHandler cellChanges, GetStructureChangesHandler structureChanges) : ControllerBase
+    GetCellChangesHandler cellChanges,
+    GetStructureChangesHandler structureChanges,
+    ExportStructureChangesHandler exportStructure,
+    IConfiguration configuration) : ControllerBase
 {
     /// <summary>
     /// Історія змін комірок. Право <c>Security.ViewAudit</c> — або
@@ -124,5 +127,57 @@ public sealed class AuditController(
         return Ok(await structureChanges
             .HandleAsync(filter, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
             .ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Експорт журналу структурних змін у CSV (<c>BE-16</c>). Право й фільтри — як у <c>structure</c>.
+    /// </summary>
+    /// <remarks>
+    /// Синхронний потік, а не фонова задача: стеля рядків (<c>Audit:ExportMaxRows</c>,
+    /// типово 100 000) тримає файл у межах одного запиту. Понад стелю — <c>422</c>.
+    /// Кодування — UTF-8 із BOM, щоб Excel не читав кирилицю як cp1251.
+    /// </remarks>
+    /// <param name="from">Початок вікна в UTC, включно.</param>
+    /// <param name="to">Кінець вікна в UTC, виключно.</param>
+    /// <param name="entityType">Тип сутності.</param>
+    /// <param name="changedByUserId">Автор зміни — <c>UserId</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("structure/export.csv")]
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(FileResult))]
+    [Produces("text/csv")]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ExportStructure(
+        [FromQuery] DateTime from, [FromQuery] DateTime to,
+        [FromQuery] string? entityType, [FromQuery] int? changedByUserId,
+        CancellationToken ct)
+    {
+        var filter = new Ecr.Application.Ports.StructureChangeFilter(
+            from, to,
+            string.IsNullOrWhiteSpace(entityType) ? null : entityType,
+            changedByUserId);
+
+        var maxRows = configuration.GetValue("Audit:ExportMaxRows", ExportStructureChangesHandler.DefaultMaxRows);
+
+        // Усі відмови (403/422) — тут, до першого байта відповіді.
+        var export = await exportStructure.PrepareAsync(filter, maxRows, ct).ConfigureAwait(false);
+
+        Response.ContentType = "text/csv; charset=utf-8";
+        Response.Headers.ContentDisposition = new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment")
+        {
+            FileName = export.FileName,
+        }.ToString();
+
+        await using var writer = new StreamWriter(Response.Body, new System.Text.UTF8Encoding(true), 64 * 1024);
+        await writer.WriteAsync(Ecr.Application.Common.CsvFormat.Row(ExportStructureChangesHandler.Columns)).ConfigureAwait(false);
+
+        await foreach (var row in export.Rows.WithCancellation(ct).ConfigureAwait(false))
+        {
+            await writer.WriteAsync(ExportStructureChangesHandler.ToCsv(row)).ConfigureAwait(false);
+        }
+
+        await writer.FlushAsync(ct).ConfigureAwait(false);
+        return new EmptyResult();
     }
 }
