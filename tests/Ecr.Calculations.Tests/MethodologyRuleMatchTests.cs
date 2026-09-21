@@ -124,6 +124,23 @@ public sealed class MethodologyRuleMatchTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "ФВ-13.4")]
+    public async Task Нічия_за_пріоритетом_не_змінює_прогону_виграє_перше_від_сховища()
+    {
+        // Регресія виносу класифікації в домен: прогін бере переможця і не
+        // зважає на нічию — її показує лише матриця покриття (ФВ-13.9).
+        Arrange(
+            Rule("FIRST", $$"""{"{{SubstanceColumn}}":"CO2"}""", priority: 10),
+            Rule("SECOND", $$"""{"{{SourceColumn}}":"Flare"}""", priority: 10));
+
+        var matches = await Resolver().MatchRowsWithRulesAsync(1, TableInstance, CancellationToken.None);
+
+        Assert.Equal("FIRST", matches.Single(m => m.RowKey == "R1").RuleCode);
+        Assert.Equal("SECOND", matches.Single(m => m.RowKey == "R2").RuleCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-13.8")]
     public async Task Кон_юнкція_кількох_полів_звужує_вибір()
     {
