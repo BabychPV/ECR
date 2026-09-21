@@ -105,6 +105,12 @@ public sealed class CampaignSummaryTests(SqlServerFixture sql)
         Assert.Equal(1, row.GetProperty("submitted").GetInt32());
         Assert.Equal(0, row.GetProperty("draft").GetInt32());
 
+        // Форма проводу для клієнта: класифікація — рядком, строк у будівника
+        // ланцюга не пораховано (`null`), підсумки — окремим об'єктом.
+        Assert.Equal("InProgress", row.GetProperty("progress").GetString());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("submissionDeadline").ValueKind);
+        Assert.True(body.GetProperty("totals").GetProperty("projects").GetInt32() >= 1);
+
         // ⛔ Лічильники — і нічого крім них (рішення `Q15-07`: «без значень»).
         // Поля зі значеннями комірок чи сумами зрізу тут бути не може: воно
         // перетворило б право на огляд на обхід грантів.

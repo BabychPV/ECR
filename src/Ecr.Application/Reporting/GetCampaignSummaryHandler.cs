@@ -2,6 +2,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Reporting.Dto;
 using Ecr.Application.Security;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Reporting;
@@ -29,7 +30,11 @@ namespace Ecr.Application.Reporting;
 /// правом на огляд.
 /// </remarks>
 public sealed class GetCampaignSummaryHandler(
-    ICampaignSummaryStore store, IAccessDecisionService access, ICurrentUser currentUser)
+    ICampaignSummaryStore store,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IClock clock,
+    CampaignProgressPolicy policy)
 {
     /// <summary>Право огляду кампанії по всіх проєктах.</summary>
     public const string Permission = "Report.ViewCampaign";
@@ -58,6 +63,53 @@ public sealed class GetCampaignSummaryHandler(
         var key = PeriodKey.Parse(periodKey);
         var page = await store.ListAsync(key.Value, MaxProjects, ct).ConfigureAwait(false);
 
-        return new CampaignSummaryResponse(key.Value, page.Total, page.Projects);
+        var now = clock.UtcNow;
+        var zones = new Dictionary<string, TimeZoneInfo>(StringComparer.Ordinal);
+        TimeZoneInfo Zone(string id)
+            => zones.TryGetValue(id, out var zone) ? zone : zones[id] = TimeZoneInfo.FindSystemTimeZoneById(id);
+
+        var rows = page.Projects.Select(p =>
+        {
+            var zone = Zone(p.TimeZoneId);
+            var progress = CampaignProgressRule.Classify(
+                CampaignProgressRule.AllApproved(p.Documents, p.Approved), p.Snapshots > 0,
+                p.SubmissionDeadlineUtc, zone, now, policy.AtRiskDays);
+
+            return new CampaignProjectSummary(
+                p.ProjectId, p.ProjectCode, p.NameL10n,
+                p.Documents, p.Draft, p.Submitted, p.Approved, p.Rejected, p.Snapshots,
+                progress,
+                p.SubmissionDeadlineUtc is { } deadline ? ToSite(deadline, zone) : null);
+        }).ToList();
+
+        // ⛔ Підсумки — з агрегату по ВСІХ проєктах періоду, а не з `rows`:
+        // сума по обрізаному переліку читалася б як стан кампанії.
+        var progressCounts = new Dictionary<CampaignProgress, int>();
+        foreach (var bucket in page.Buckets)
+        {
+            var progress = CampaignProgressRule.Classify(
+                bucket.AllApproved, bucket.HasSnapshot, bucket.SubmissionDeadlineUtc,
+                Zone(bucket.TimeZoneId), now, policy.AtRiskDays);
+            progressCounts[progress] = progressCounts.GetValueOrDefault(progress) + bucket.Projects;
+        }
+
+        var totals = new CampaignTotals(
+            page.Buckets.Sum(b => b.Projects),
+            page.Buckets.Sum(b => b.Documents),
+            page.Buckets.Sum(b => b.Draft),
+            page.Buckets.Sum(b => b.Submitted),
+            page.Buckets.Sum(b => b.Approved),
+            page.Buckets.Sum(b => b.Rejected),
+            page.Buckets.Sum(b => b.Snapshots),
+            progressCounts.GetValueOrDefault(CampaignProgress.Done),
+            progressCounts.GetValueOrDefault(CampaignProgress.Overdue),
+            progressCounts.GetValueOrDefault(CampaignProgress.AtRisk),
+            progressCounts.GetValueOrDefault(CampaignProgress.InProgress));
+
+        return new CampaignSummaryResponse(key.Value, page.Total, rows, totals);
     }
+
+    /// <summary>UTC → момент у поясі проєкту зі збереженим зсувом (як у календарі періодів).</summary>
+    private static DateTimeOffset ToSite(DateTime utc, TimeZoneInfo zone)
+        => TimeZoneInfo.ConvertTime(new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)), zone);
 }

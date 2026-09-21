@@ -3364,6 +3364,17 @@ public sealed class NotFoundException(string errorCode, string message)
 > грантів. Перелік має стелю `GetCampaignSummaryHandler.MaxProjects`, і
 > `totalProjects` каже, скільки проєктів насправді: обрізана відповідь не
 > прикидається повною.
+>
+> ✎ 2026-09-21 (адитивно): `totals { projects, documents, draft, submitted,
+> approved, rejected, snapshots, done, overdue, atRisk, inProgress }` — по ВСІХ
+> проєктах періоду одним агрегатом, без стелі переліку; у кожному рядку —
+> `progress` (`Done`/`Overdue`/`AtRisk`/`InProgress`) і `submissionDeadline`
+> (строк подання = `Period.ComputedGraceAt`, момент `Open → Grace`, у поясі
+> проєкту, виключно; `null` — межі не пораховано). «Готово» — усі документи
+> затверджено **і** є поточний зріз; «прострочено» — строк минув; «під
+> ризиком» — до останнього дня подання ≤ `Campaign:AtRiskDays` (типово 3) діб
+> поясу проєкту. Рішення людини, підтверджене в чаті клієнтської сесії
+> 2026-09-21; правило — `CampaignProgressRule`.
 
 > **Опис довідника і його записи — різні маршрути** (`ФВ-8.12`).
 > `GET /registries` віддає перелік для вибору: десятки довідників, самі

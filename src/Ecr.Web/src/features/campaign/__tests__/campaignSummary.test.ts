@@ -55,7 +55,22 @@ function summaryOf(listed: number, total: number): CampaignSummary {
       approved: 0,
       rejected: 0,
       snapshots: 0,
+      progress: 'InProgress',
+      submissionDeadline: null,
     })),
+    totals: {
+      projects: total,
+      documents: 0,
+      draft: 0,
+      submitted: 0,
+      approved: 0,
+      rejected: 0,
+      snapshots: 0,
+      done: 0,
+      overdue: 0,
+      atRisk: 0,
+      inProgress: total,
+    },
   };
 }
 

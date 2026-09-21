@@ -536,6 +536,15 @@
           "Fixed360"
         ]
       },
+      "CampaignProgress": {
+        "description": "Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».\nПравило — CampaignProgressRule.",
+        "enum": [
+          "InProgress",
+          "AtRisk",
+          "Overdue",
+          "Done"
+        ]
+      },
       "CampaignProjectSummary": {
         "description": "Один проєкт у огляді кампанії.",
         "properties": {
@@ -558,6 +567,10 @@
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Назва мовами каталогу."
           },
+          "progress": {
+            "$ref": "#/components/schemas/CampaignProgress",
+            "description": "Класифікація проєкту в кампанії (CampaignProgressRule)."
+          },
           "projectCode": {
             "description": "Код проєкту; ним перелік і впорядковано.",
             "type": "string"
@@ -577,6 +590,14 @@
             "format": "int32",
             "type": "integer"
           },
+          "submissionDeadline": {
+            "description": "Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду\n`Open → Grace` (`Period.ComputedGraceAt`, опівніч\n`PeriodEnd + GraceOffsetDays`), після якого правки позначаються\nпізніми (`D-70`). Останній день подання — доба ПЕРЕД цим моментом.\n`null` — межі періоду ще не пораховано.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "submitted": {
             "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
             "format": "int32",
@@ -592,7 +613,9 @@
           "submitted",
           "approved",
           "rejected",
-          "snapshots"
+          "snapshots",
+          "progress",
+          "submissionDeadline"
         ],
         "type": "object"
       },
@@ -615,12 +638,91 @@
             "description": "Скільки проєктів мають цей період УСЬОГО. Більше за довжину\nProjects — перелік обрізано стелею\nint GetCampaignSummaryHandler.MaxProjects, і кампанія бачиться не\nцілком.",
             "format": "int32",
             "type": "integer"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/CampaignTotals",
+            "description": "Підсумки по ВСІХ проєктах періоду, без стелі переліку. ⛔ Не сума\nProjects: сума по обрізаній підмножині читалася б як\nстан кампанії й брехала б саме тоді, коли проєктів більше за стелю."
           }
         },
         "required": [
           "periodKey",
           "totalProjects",
-          "projects"
+          "projects",
+          "totals"
+        ],
+        "type": "object"
+      },
+      "CampaignTotals": {
+        "description": "Підсумки кампанії по всіх проєктах періоду.",
+        "properties": {
+          "approved": {
+            "description": "Сума `Approved`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "atRisk": {
+            "description": "Проєктів у стані CampaignProgress.AtRisk.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "documents": {
+            "description": "Документів у цих проєктах.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "done": {
+            "description": "Проєктів у стані CampaignProgress.Done.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "draft": {
+            "description": "Сума `Draft` по всіх проєктах.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "inProgress": {
+            "description": "Проєктів у стані CampaignProgress.InProgress.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "overdue": {
+            "description": "Проєктів у стані CampaignProgress.Overdue.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projects": {
+            "description": "Проєктів періоду; дорівнює `TotalProjects`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rejected": {
+            "description": "Сума `Rejected`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "snapshots": {
+            "description": "Сума поточних зрізів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "submitted": {
+            "description": "Сума `Submitted`.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projects",
+          "documents",
+          "draft",
+          "submitted",
+          "approved",
+          "rejected",
+          "snapshots",
+          "done",
+          "overdue",
+          "atRisk",
+          "inProgress"
         ],
         "type": "object"
       },

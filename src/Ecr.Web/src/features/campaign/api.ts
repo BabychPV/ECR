@@ -18,6 +18,22 @@ export type CampaignSummary = components['schemas']['CampaignSummaryResponse'];
 export type CampaignProject = components['schemas']['CampaignProjectSummary'];
 
 /**
+ * Підсумки кампанії по ВСІХ проєктах періоду, без стелі переліку.
+ *
+ * ⛔ Не сума `projects`: перелік обрізано стелею, і сума по ньому читалася б як
+ * стан кампанії.
+ */
+export type CampaignTotals = components['schemas']['CampaignTotals'];
+
+/**
+ * «Хто затримує кампанію» — класифікація проєкту, яку рахує СЕРВЕР (одне
+ * джерело правди для рядків і підсумків): `Done` — усе затверджено і є зріз;
+ * `Overdue` — строк подання минув; `AtRisk` — до останнього дня ≤ N діб;
+ * `InProgress` — решта.
+ */
+export type CampaignProgress = components['schemas']['CampaignProgress'];
+
+/**
  * Зведення кампанії за період.
  *
  * ⛔ Адреса записана ПОВНІСТЮ і поруч із `apiFetch`: сторож

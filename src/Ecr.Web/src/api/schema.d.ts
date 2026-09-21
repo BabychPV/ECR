@@ -11692,6 +11692,12 @@ export interface components {
          * @enum {unknown}
          */
         CalendarMode: "Actual" | "Fixed365" | "Fixed360";
+        /**
+         * @description Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».
+         *     Правило — CampaignProgressRule.
+         * @enum {unknown}
+         */
+        CampaignProgress: "InProgress" | "AtRisk" | "Overdue" | "Done";
         /** @description Один проєкт у огляді кампанії. */
         CampaignProjectSummary: {
             /**
@@ -11712,6 +11718,8 @@ export interface components {
             draft: number;
             /** @description Назва мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Класифікація проєкту в кампанії (CampaignProgressRule). */
+            progress: components["schemas"]["CampaignProgress"];
             /** @description Код проєкту; ним перелік і впорядковано. */
             projectCode: string;
             /**
@@ -11731,6 +11739,15 @@ export interface components {
              *     затверджено, але доки зрізу немає — регулятор не отримав нічого.
              */
             snapshots: number;
+            /**
+             * Format: date-time
+             * @description Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду
+             *     `Open → Grace` (`Period.ComputedGraceAt`, опівніч
+             *     `PeriodEnd + GraceOffsetDays`), після якого правки позначаються
+             *     пізніми (`D-70`). Останній день подання — доба ПЕРЕД цим моментом.
+             *     `null` — межі періоду ще не пораховано.
+             */
+            submissionDeadline: null | string;
             /**
              * Format: int32
              * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
@@ -11754,6 +11771,68 @@ export interface components {
              *     цілком.
              */
             totalProjects: number;
+            /** @description Підсумки по ВСІХ проєктах періоду, без стелі переліку. ⛔ Не сума
+             *     Projects: сума по обрізаній підмножині читалася б як
+             *     стан кампанії й брехала б саме тоді, коли проєктів більше за стелю. */
+            totals: components["schemas"]["CampaignTotals"];
+        };
+        /** @description Підсумки кампанії по всіх проєктах періоду. */
+        CampaignTotals: {
+            /**
+             * Format: int32
+             * @description Сума `Approved`.
+             */
+            approved: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.AtRisk.
+             */
+            atRisk: number;
+            /**
+             * Format: int32
+             * @description Документів у цих проєктах.
+             */
+            documents: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.Done.
+             */
+            done: number;
+            /**
+             * Format: int32
+             * @description Сума `Draft` по всіх проєктах.
+             */
+            draft: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.InProgress.
+             */
+            inProgress: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.Overdue.
+             */
+            overdue: number;
+            /**
+             * Format: int32
+             * @description Проєктів періоду; дорівнює `TotalProjects`.
+             */
+            projects: number;
+            /**
+             * Format: int32
+             * @description Сума `Rejected`.
+             */
+            rejected: number;
+            /**
+             * Format: int32
+             * @description Сума поточних зрізів.
+             */
+            snapshots: number;
+            /**
+             * Format: int32
+             * @description Сума `Submitted`.
+             */
+            submitted: number;
         };
         /** @description Зміна комірки в журналі, як її бачить читач аудиту. */
         CellChangeView: {

@@ -1,4 +1,4 @@
-using Ecr.Application.Reporting.Dto;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Ports;
 
@@ -27,4 +27,42 @@ public interface ICampaignSummaryStore
 /// <summary>Сторінка огляду кампанії.</summary>
 /// <param name="Total">Скільки проєктів мають цей період усього.</param>
 /// <param name="Projects">Не більше ніж <c>limit</c> рядків, за кодом проєкту.</param>
-public sealed record CampaignProjectPage(int Total, IReadOnlyList<CampaignProjectSummary> Projects);
+/// <param name="Buckets">
+/// Агрегат по ВСІХ проєктах періоду (без стелі), згрупований за тим, від чого
+/// залежить класифікація, — щоб підсумки рахувалися тим самим
+/// <c>CampaignProgressRule</c>, а не другою його копією в SQL.
+/// </param>
+public sealed record CampaignProjectPage(
+    int Total, IReadOnlyList<CampaignProjectFacts> Projects, IReadOnlyList<CampaignBucket> Buckets);
+
+/// <summary>
+/// Рядок проєкту зі сховища: лічильники (як у <c>CampaignProjectSummary</c>),
+/// строк подання <c>Period.ComputedGraceAt</c> (<c>null</c> — не пораховано) і
+/// пояс проєкту — усе, що потрібно для класифікації.
+/// </summary>
+public sealed record CampaignProjectFacts(
+    int ProjectId,
+    string ProjectCode,
+    LocalizedText NameL10n,
+    int Documents,
+    int Draft,
+    int Submitted,
+    int Approved,
+    int Rejected,
+    int Snapshots,
+    DateTime? SubmissionDeadlineUtc,
+    string TimeZoneId);
+
+/// <summary>Група проєктів з однаковими строком, поясом і готовністю; лічильники — суми по групі.</summary>
+public sealed record CampaignBucket(
+    DateTime? SubmissionDeadlineUtc,
+    string TimeZoneId,
+    bool AllApproved,
+    bool HasSnapshot,
+    int Projects,
+    int Documents,
+    int Draft,
+    int Submitted,
+    int Approved,
+    int Rejected,
+    int Snapshots);

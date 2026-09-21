@@ -28,7 +28,7 @@ public sealed class CampaignSummaryHandlerTests
         _user.UserId.Returns(7);
         _store.ListAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(call => new CampaignProjectPage(
-                Total: 2, Projects: [Row(Mine), Row(Foreign)]));
+                Total: 2, Projects: [Row(Mine), Row(Foreign)], Buckets: []));
     }
 
     [Fact]
@@ -106,14 +106,17 @@ public sealed class CampaignSummaryHandlerTests
         await _store.DidNotReceiveWithAnyArgs().ListAsync(default, default, default);
     }
 
-    private static CampaignProjectSummary Row(int projectId)
+    private static CampaignProjectFacts Row(int projectId)
         => new(
             projectId,
             $"P{projectId}",
             new LocalizedText(new Dictionary<string, string> { ["en"] = $"Project {projectId}" }),
-            Documents: 1, Draft: 1, Submitted: 0, Approved: 0, Rejected: 0, Snapshots: 0);
+            Documents: 1, Draft: 1, Submitted: 0, Approved: 0, Rejected: 0, Snapshots: 0,
+            SubmissionDeadlineUtc: null, TimeZoneId: "Asia/Almaty");
 
-    private GetCampaignSummaryHandler Handler() => new(_store, _access, _user);
+    private GetCampaignSummaryHandler Handler()
+        => new(_store, _access, _user, new TestClock(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc)),
+            new CampaignProgressPolicy(3));
 
     private void Profile(AccessBuilder builder)
         => _access.BuildProfileAsync(7, Arg.Any<CancellationToken>()).Returns(builder.Build());
