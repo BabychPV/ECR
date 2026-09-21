@@ -66,10 +66,10 @@ public sealed class CompareMethodologyVersionsHandler(
         Diff(items, MethodologyDiffItemKind.Formula, before.Formulas, after.Formulas,
             f => f.Code.ToUpperInvariant(), f => (f.Code, null, null, null), f => f.Expression,
             (a, b) => Changed(
-                ("expression", a.Expression != b.Expression),
-                ("resultType", a.ResultType != b.ResultType),
-                ("outputUnitId", a.OutputUnitId != b.OutputUnitId),
-                ("argumentsCsv", a.ArgumentsCsv != b.ArgumentsCsv)));
+                (MethodologyDiffFields.Expression, a.Expression != b.Expression),
+                (MethodologyDiffFields.ResultType, a.ResultType != b.ResultType),
+                (MethodologyDiffFields.OutputUnitId, a.OutputUnitId != b.OutputUnitId),
+                (MethodologyDiffFields.ArgumentsCsv, a.ArgumentsCsv != b.ArgumentsCsv)));
 
         Diff(items, MethodologyDiffItemKind.Constant, before.Constants, after.Constants,
             c => string.Create(
@@ -78,19 +78,19 @@ public sealed class CompareMethodologyVersionsHandler(
             c => (c.Code, c.Category, c.SubstanceEntryId, c.ValidFrom),
             c => c.Value?.ToString(CultureInfo.InvariantCulture) ?? c.TextValue,
             (a, b) => Changed(
-                ("kind", a.Kind != b.Kind),
-                ("value", a.Value != b.Value),
-                ("textValue", a.TextValue != b.TextValue),
-                ("unitId", a.UnitId != b.UnitId),
-                ("validTo", a.ValidTo != b.ValidTo),
-                ("source", a.Source != b.Source)));
+                (MethodologyDiffFields.Kind, a.Kind != b.Kind),
+                (MethodologyDiffFields.Value, a.Value != b.Value),
+                (MethodologyDiffFields.TextValue, a.TextValue != b.TextValue),
+                (MethodologyDiffFields.UnitId, a.UnitId != b.UnitId),
+                (MethodologyDiffFields.ValidTo, a.ValidTo != b.ValidTo),
+                (MethodologyDiffFields.Source, a.Source != b.Source)));
 
         Diff(items, MethodologyDiffItemKind.TestCase, before.TestCases, after.TestCases,
             t => t.Code.ToUpperInvariant(), t => (t.Code, null, null, null), t => t.ExpectedJson,
             (a, b) => Changed(
-                ("inputJson", a.InputJson != b.InputJson),
-                ("expectedJson", a.ExpectedJson != b.ExpectedJson),
-                ("tolerance", a.Tolerance != b.Tolerance)));
+                (MethodologyDiffFields.InputJson, a.InputJson != b.InputJson),
+                (MethodologyDiffFields.ExpectedJson, a.ExpectedJson != b.ExpectedJson),
+                (MethodologyDiffFields.Tolerance, a.Tolerance != b.Tolerance)));
 
         return items;
     }
