@@ -2004,11 +2004,25 @@ USING (VALUES
     (N'campaign.emptyTitle',             N'en', N'No projects in this period', 1),
     (N'campaign.emptyHint',              N'en', N'No project has reporting for this period, so there is no campaign to review.', 1),
     (N'campaign.truncatedTitle',         N'en', N'Showing {shown} of {total} projects', 1),
-    (N'campaign.truncatedHint',          N'en', N'The server returned only part of the list. A project holding up the campaign may be among those not shown, and the totals cover only the projects shown.', 1),
+    -- ⚠ Обрізано лише ПЕРЕЛІК: підсумки й лічильники класів сервер рахує по
+    -- всіх проєктах періоду (`totals`). Колишня підказка `truncatedHint`
+    -- казала протилежне і прибрана разом із `laggingCount` і
+    -- `nobodyLaggingHint` — клієнт їх більше не просить. MERGE тут лише
+    -- додає, тож у вже розгорнутих базах ці рядки лишаються мертвими.
+    (N'campaign.truncatedListHint',      N'en', N'Only the list is cut short. The totals above count all {total} projects of the period.', 1),
     (N'campaign.laggingTitle',           N'en', N'Holding up the campaign', 1),
-    (N'campaign.laggingCount',           N'en', N'{lagging} of {shown} projects are not finished: no documents, not everything approved, or no snapshot yet.', 1),
     (N'campaign.nobodyLagging',          N'en', N'Nobody is holding up the campaign', 1),
-    (N'campaign.nobodyLaggingHint',      N'en', N'Every project shown has all documents approved and a report snapshot.', 1),
+    (N'campaign.nobodyLaggingServerHint', N'en', N'No project is past its submission deadline or close to it. Projects still in progress are counted in the totals.', 1),
+    -- Клас проєкту рахує сервер (`CampaignProgressRule`): Done — усе
+    -- затверджено і є зріз; Overdue — строк минув; AtRisk — до останнього дня
+    -- подання лишилося мало; решта — InProgress.
+    (N'campaign.progress.Overdue',       N'en', N'Overdue', 1),
+    (N'campaign.progress.AtRisk',        N'en', N'At risk', 1),
+    (N'campaign.progress.InProgress',    N'en', N'In progress', 1),
+    (N'campaign.progress.Done',          N'en', N'Done', 1),
+    (N'campaign.progressColumn',         N'en', N'Status', 1),
+    (N'campaign.lastSubmissionDay',      N'en', N'Last day to submit', 1),
+    (N'campaign.deadlineUnknown',        N'en', N'No deadline yet', 1),
     (N'campaign.projectCode',            N'en', N'Project code', 1),
     (N'campaign.projectName',            N'en', N'Project', 1),
     (N'campaign.documents',              N'en', N'Documents', 1),
