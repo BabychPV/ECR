@@ -55,6 +55,8 @@ const schedule = (overrides: Partial<CollectionSchedule> = {}): CollectionSchedu
   sourceEntityId: SourceEntityId,
   sourceEntityCode: 'STACK-1',
   sourceEntityName: 'Stack analyzer',
+  dataSourceId: 3,
+  dataSourceCode: 'PI-WEST',
   cron: '0 15 2 * * ?',
   isEnabled: true,
   lastRunAt: null,

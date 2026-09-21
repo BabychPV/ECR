@@ -43,15 +43,33 @@ describe('features/integration/scheduleApi', () => {
   });
 
   it('перелік із кодом зʼєднання передає його параметром dataSource, закодованим', async () => {
-    await listCollectionSchedules('PI WEST&1');
-    await listCollectionSchedules('');
+    await listCollectionSchedules({ dataSource: 'PI WEST&1' });
+    await listCollectionSchedules({ dataSource: '' });
+    await listCollectionSchedules({ dataSource: '   ' });
+    await listCollectionSchedules({});
 
     // ⛔ Фільтрує сервер: відбір на клієнті після стелі переліку дав би неповну
-    // вкладку. Порожній код — без параметра, тобто всі розклади.
+    // вкладку. Порожній код чи самі пробіли — без параметра, тобто всі розклади.
     expect(apiFetch.mock.calls.map(([path]) => path)).toEqual([
       '/api/v1/collection-schedules?dataSource=PI%20WEST%261',
       '/api/v1/collection-schedules',
+      '/api/v1/collection-schedules',
+      '/api/v1/collection-schedules',
     ]);
+  });
+
+  it('контекст react-query першим аргументом (queryFn напряму) не стає фільтром', async () => {
+    // ⛔ Саме так `useCollectionSchedules` і кличе функцію: `queryFn:
+    // listCollectionSchedules`. Позиційний рядковий параметр узяв би цей
+    // об'єкт за код і послав `?dataSource=[object Object]`.
+    const context = {
+      queryKey: ['collection-schedules'] as const,
+      signal: new AbortController().signal,
+      meta: undefined,
+    };
+    await listCollectionSchedules(context);
+
+    expect(apiFetch.mock.calls.map(([path]) => path)).toEqual(['/api/v1/collection-schedules']);
   });
 
   it('зміна і видалення несуть If-Match із версією рядка, а перелік і створення — ні', async () => {

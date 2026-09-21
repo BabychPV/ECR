@@ -29,14 +29,34 @@ function ifMatch(rowVersion: string): HeadersInit {
 }
 
 /**
- * Розклади збору; `dataSourceCode` — лише розклади сутностей цього з'єднання
- * (поле `dataSourceCode` рядка). Фільтрує сервер, до стелі переліку;
- * невідомий код — порожній перелік, а не помилка.
+ * Опції переліку розкладів збору.
+ *
+ * ⚠ Індексна сигнатура — не недбалість: без неї тип «слабкий» (усі поля
+ * необов'язкові), і TypeScript не дає передати функцію як `queryFn` —
+ * контекст react-query «не має спільних полів». Сторонні поля (той самий
+ * контекст) ігноруються; `dataSource` береться лише рядком.
  */
-export function listCollectionSchedules(dataSourceCode?: string): Promise<CollectionSchedule[]> {
+export interface ListCollectionSchedulesOptions {
+  /** Код з'єднання: лише розклади сутностей цього з'єднання (поле `dataSourceCode` рядка). */
+  dataSource?: string;
+  [ignored: string]: unknown;
+}
+
+/**
+ * Розклади збору. Фільтрує сервер, до стелі переліку; невідомий код —
+ * порожній перелік, а не помилка; порожній чи з самих пробілів — без фільтра.
+ *
+ * ⛔ Опції — об'єктом, а не позиційним рядком: функцію передають у `useQuery`
+ * як `queryFn` напряму, і react-query кладе першим аргументом СВІЙ контекст
+ * (`{ queryKey, signal, meta }`). Позиційний параметр прийняв би його за код
+ * і послав `?dataSource=[object Object]`; у контексту поля `dataSource` немає,
+ * тож тут він просто не дає фільтра.
+ */
+export function listCollectionSchedules(options?: ListCollectionSchedulesOptions): Promise<CollectionSchedule[]> {
+  const dataSource = typeof options?.dataSource === 'string' ? options.dataSource : '';
   return apiFetch<CollectionSchedule[]>(
-    dataSourceCode
-      ? `/api/v1/collection-schedules?dataSource=${encodeURIComponent(dataSourceCode)}`
+    dataSource.trim()
+      ? `/api/v1/collection-schedules?dataSource=${encodeURIComponent(dataSource)}`
       : '/api/v1/collection-schedules',
   );
 }
