@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { showApiError } from '@/shared/ui/notify';
+import { onBeforeLoginRedirect } from '@/api/client';
+import { recordLostEdits } from './lostEdits';
 import {
   cellKey,
   discardPendingRows,
@@ -337,8 +339,16 @@ async function saveOrphanSlice(
  * діалог «є незбережені зміни») — крок 3 `D14-12`; цей хук навмисно не
  * вигадує для нього половинчастого рішення.
  */
-export function useDocumentPending(documentId: number): void {
+export function useDocumentPending(documentId: number, ownerUserId?: number): void {
   const queryClient = useQueryClient();
+
+  // ⚠ `401` перезавантажує сторінку, і правки зникають разом із пам'яттю:
+  // зберегти їх уже нема чим, тож лишаємо слід для сторінки входу
+  // (`lostEdits.ts`), прив'язаний до власника.
+  useEffect(
+    () => onBeforeLoginRedirect((from) => recordLostEdits(ownerUserId, from)),
+    [ownerUserId],
+  );
 
   useEffect(() => {
     openDocument(documentId);

@@ -146,6 +146,36 @@ export function setLoginRedirect(handler: (from: string, reason?: LoginReason) =
 }
 
 /**
+ * Хто має щось зробити ПЕРЕД перенаправленням на вхід.
+ *
+ * ⚠ Перенаправлення — повне перезавантаження сторінки, і все, що жило лише в
+ * пам'яті (незбережені правки сітки), зникає разом із ним. Хук — останній
+ * момент, коли про це ще можна залишити слід (`features/grid/lostEdits.ts`).
+ * Транспорт не знає, ЩО саме записується: напрямок залежності той самий, що й
+ * у `setRequestLanguageTag`.
+ */
+const beforeLoginRedirect = new Set<(from: string) => void>();
+
+/** Реєструє дію перед перенаправленням на вхід; повертає зняття. */
+export function onBeforeLoginRedirect(hook: (from: string) => void): () => void {
+  beforeLoginRedirect.add(hook);
+
+  return () => {
+    beforeLoginRedirect.delete(hook);
+  };
+}
+
+function runBeforeLoginRedirect(from: string): void {
+  for (const hook of beforeLoginRedirect) {
+    try {
+      hook(from);
+    } catch {
+      // Збій хука не має зірвати перенаправлення.
+    }
+  }
+}
+
+/**
  * Тег мови інтерфейсу, який іде на сервер заголовком `Accept-Language`.
  *
  * ⛔ Дефект, який це закриває: вибір мови в застосунку до сервера НЕ ДОХОДИВ
@@ -263,10 +293,9 @@ async function apiFetchRaw(
   // отримував шансу спрацювати до навігації). Ендпоінти входу відповідають
   // за власний `401` самі — тут перенаправляти нема куди й нема чого.
   if (response.status === 401 && path !== '/api/v1/login/local' && path !== '/api/v1/login/windows') {
-    redirectToLogin(
-      typeof window === 'undefined' ? path : window.location.pathname,
-      await loginReasonOf(response),
-    );
+    const from = typeof window === 'undefined' ? path : window.location.pathname;
+    runBeforeLoginRedirect(from);
+    redirectToLogin(from, await loginReasonOf(response));
     /*
      * ⛔ Заголовок — із КАТАЛОГУ, не літералом. Тут стояло «Потрібна
      * автентифікація» українською — мовою, якої в продукті немає (`D-95`:

@@ -303,7 +303,7 @@ export function DocumentPage(): JSX.Element {
    * ⚠ Імпорт статичний і бюджет чанка (`D-132`) не чіпає: `autosave.ts` не
    * тягне ядро `RevoGrid` — воно лишається за виразом `import()` вище.
    */
-  useDocumentPending(documentId);
+  useDocumentPending(documentId, session.data?.userId);
 
   // Видалення чернетки: кнопка — у шапці, відмова сервера — банером під нею.
   const deletion = useDeleteDocumentAction({

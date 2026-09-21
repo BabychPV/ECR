@@ -18,7 +18,8 @@ import {
 import { BrandMark } from '@/shared/ui/BrandMark';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, EcrApiError, LOGIN_REASON_PARAM } from '@/api/client';
-import type { LocalLoginRequest } from '@/api/types';
+import type { CurrentUserDto, LocalLoginRequest } from '@/api/types';
+import { anyLostEdits, takeLostEdits, type LostEdits } from '@/features/grid/lostEdits';
 import { safeReturnPath } from './safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
@@ -85,6 +86,31 @@ const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabInd
  */
 const LANGUAGE_LABEL = 'Interface language';
 
+/*
+ * Повідомлення про втрачені правки (`features/grid/lostEdits.ts`).
+ *
+ * ⚠ ЛІТЕРАЛИ з тієї ж причини, що `passwordToggleProps`: `09-seed.sql` цій
+ * гілці недоступний, а голий `t()` без рядка показав би `⟦...⟧`. Ключі для
+ * сіду: `login.lostEdits.title`, `login.lostEdits.text` ({count}, {documentId}),
+ * `login.lostEdits.continue` — область public.
+ */
+const LOST_EDITS_TITLE = 'Unsaved changes were lost';
+const LOST_EDITS_CONTINUE = 'Continue';
+
+function lostEditsText(lost: LostEdits): string {
+  return `${String(lost.count)} unsaved change(s) in document #${String(lost.documentId)} were lost — your session ended. Please re-enter them.`;
+}
+
+/** Слід саме цього користувача — `userId` з профілю щойно відкритої сесії. */
+async function ownLostEdits(): Promise<LostEdits | null> {
+  try {
+    const me = await apiFetch<CurrentUserDto>('/api/v1/me');
+    return takeLostEdits(me.userId);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Пояснення, чому людину повернули на вхід після обриву сесії.
  *
@@ -110,6 +136,7 @@ export function LoginPage(): JSX.Element {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [lost, setLost] = useState<LostEdits | null>(null);
 
   // Перемальовує сторінку, коли каталог доїхав (інакше видно самі ключі).
   useCatalog();
@@ -139,6 +166,15 @@ export function LoginPage(): JSX.Element {
         method: 'POST',
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
+
+      // ⚠ Слід втрачених правок читається лише ПІСЛЯ входу і лише свого
+      // користувача: до входу невідомо, чий він, а показати його будь-кому
+      // означало б розкрити чужу роботу на спільному комп'ютері.
+      const found = anyLostEdits() ? await ownLostEdits() : null;
+      if (found !== null) {
+        setLost(found);
+        return;
+      }
 
       // Повернення туди, де людина була, — лише на внутрішній шлях.
       navigate(safeReturnPath(searchParams.get('from')), { replace: true });
@@ -172,6 +208,23 @@ export function LoginPage(): JSX.Element {
       <Center h="100vh">
         <Card withBorder w={380} p="lg">
           <ErrorAlert error={CATALOG_LOAD_FAILED} />
+        </Card>
+      </Center>
+    );
+  }
+
+  if (lost !== null) {
+    return (
+      <Center h="100vh">
+        <Card withBorder w={380} p="lg">
+          <Stack gap="sm">
+            <Alert color="statusError" role="alert" title={LOST_EDITS_TITLE}>
+              {lostEditsText(lost)}
+            </Alert>
+            <Button onClick={() => navigate(safeReturnPath(lost.from), { replace: true })}>
+              {LOST_EDITS_CONTINUE}
+            </Button>
+          </Stack>
         </Card>
       </Center>
     );
