@@ -524,6 +524,45 @@ export function emptyBodyFor(url: string): unknown {
     };
   }
 
+  /*
+   * ⛔ З'єднання (`UI-09`) — НЕ порожній перелік: порожній показав би
+   * `EmptyState`, і гейт сканував би `/admin/sources` без таблиці з'єднань,
+   * заради якої секція існує. Одне активне й одне вимкнене — два різні бейджі
+   * й `aria-label` рядка лише на другому.
+   */
+  if (url.includes('/data-sources')) {
+    return [
+      {
+        catalog: 'ProdAF',
+        code: 'PI-MAIN',
+        collectionSchedules: 3,
+        endpoint: 'https://pi.example.invalid/piwebapi',
+        hasSecret: false,
+        id: 1,
+        isActive: true,
+        maxParallel: 4,
+        nameL10n: { en: 'Main PI server' },
+        secondaryEndpoint: null,
+        sourceEntities: 12,
+        transport: 'PiWebApi',
+      },
+      {
+        catalog: null,
+        code: 'LAB-OLD',
+        collectionSchedules: 0,
+        endpoint: 'https://lab.example.invalid/api',
+        hasSecret: false,
+        id: 2,
+        isActive: false,
+        maxParallel: 1,
+        nameL10n: { en: 'Old lab feed' },
+        secondaryEndpoint: null,
+        sourceEntities: 2,
+        transport: 'Rest',
+      },
+    ];
+  }
+
   const paged = ['/documents', '/templates', '/users', '/projects'];
 
   return paged.some((entry) => url.includes(entry)) ? { items: [], nextCursor: null } : [];

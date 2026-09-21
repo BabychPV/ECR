@@ -2,7 +2,9 @@
 import { Badge, Button, Group, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { useInRouterContext } from 'react-router-dom';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import { DataSourcesTable } from '@/features/integration/DataSourcesTable';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
@@ -25,6 +27,18 @@ import { t } from '@/shared/i18n';
  */
 export function SourcesPage(): JSX.Element {
   const session = useSession();
+
+  /*
+   * ⚠ З'єднання (`UI-09`) — СЕКЦІЄЮ під сутностями, а не вкладкою `?tab=`:
+   * обидва переліки потрібні разом (лічильник сутностей у з'єднанні читається
+   * поруч із самими сутностями), а вкладка ховала б один із них.
+   *
+   * ⚠ Секція читає `?panel=`, тобто потребує маршрутизатора. У застосунку він
+   * є завжди; його немає лише в чотирьох старших тестах сутностей, які
+   * рендерять сторінку без `MemoryRouter`. Без цієї перевірки вони падали б
+   * не на своєму твердженні, а на «useSearchParams() outside a <Router>».
+   */
+  const routed = useInRouterContext();
 
   const sources = useQuery({
     queryKey: ['sources'],
@@ -177,6 +191,8 @@ export function SourcesPage(): JSX.Element {
           }
         />
       }
-    />
+    >
+      {routed && <DataSourcesTable />}
+    </ListPage>
   );
 }
