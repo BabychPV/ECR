@@ -50,6 +50,7 @@ public sealed record RoleValidityWindow(DateOnly? ValidFrom, DateOnly? ValidTo);
 /// <param name="IsLockedOut">Заблокований після невдалих спроб.</param>
 /// <param name="Email">Пошта; без неї отримання алертів увімкнути не можна.</param>
 /// <param name="ReceivesAlerts">Чи отримує алерти про збої (`D-125`).</param>
+/// <param name="LastSignInAt">Останній успішний вхід (UTC); <c>null</c> — не входив ніколи (BE-12).</param>
 public sealed record UserView(
     int Id,
     string UserName,
@@ -60,7 +61,8 @@ public sealed record UserView(
     bool MustChangePassword,
     bool IsLockedOut,
     string? Email,
-    bool ReceivesAlerts);
+    bool ReceivesAlerts,
+    DateTime? LastSignInAt);
 
 /// <summary>Перелік ролей із правами. Право <c>Security.ManageRoles</c>.</summary>
 public sealed class ListRolesHandler(IUserStore users, IAccessDecisionService access, ICurrentUser currentUser)

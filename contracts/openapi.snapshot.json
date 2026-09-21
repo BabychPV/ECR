@@ -10560,6 +10560,14 @@
             "description": "Заблокований після невдалих спроб.",
             "type": "boolean"
           },
+          "lastSignInAt": {
+            "description": "Останній успішний вхід (UTC); `null` — не входив ніколи (BE-12).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "mustChangePassword": {
             "description": "Пароль виданий разово.",
             "type": "boolean"
@@ -10587,7 +10595,8 @@
           "mustChangePassword",
           "isLockedOut",
           "email",
-          "receivesAlerts"
+          "receivesAlerts",
+          "lastSignInAt"
         ],
         "type": "object"
       },

@@ -23,12 +23,13 @@ import { useDisclosure } from '@mantine/hooks';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
+import { canAccessRoute } from './routeAccess';
 import { navRoutes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { SearchLauncher } from '@/features/search/SearchLauncher';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
-import { can, useSession } from '@/shared/session/useSession';
+import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { BrandMark } from '@/shared/ui/BrandMark';
@@ -331,7 +332,7 @@ export function AppLayout(): JSX.Element {
         <AppShell.Navbar p="xs">
           <ScrollArea>
             {navRoutes
-              .filter((route) => route.handle.permission === undefined || can(me, route.handle.permission))
+              .filter((route) => canAccessRoute(me, route.handle))
               .map((route) => (
                 // тиснути те, що все одно дасть 403. Той самий фільтр
                 // одночасно захищає прогрів за наміром (`PR nav-arch #5`):

@@ -224,7 +224,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             {
                 u.Id, u.UserName, u.DisplayName, u.Provider,
                 u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword, u.LockedUntil,
-                u.Email, u.ReceivesAlerts,
+                u.Email, u.ReceivesAlerts, u.LastSignInAt,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -235,7 +235,11 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 u.Id, u.UserName, u.DisplayName, u.Provider,
                 u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword,
                 u.LockedUntil is { } until && until > utcNow,
-                u.Email, u.ReceivesAlerts))
+                u.Email, u.ReceivesAlerts,
+
+                // datetime2 читається з Kind=Unspecified і йшов би в JSON без «Z» —
+                // клієнт прочитав би його як місцевий час.
+                u.LastSignInAt is { } at ? DateTime.SpecifyKind(at, DateTimeKind.Utc) : null))
             .ToList();
 
         // ⛔ У проєкції немає ні PasswordHash, ні SecurityStamp — і не тому, що

@@ -1,10 +1,11 @@
 import { useEffect, useRef, type JSX, type ReactNode } from 'react';
 import { Anchor, Center, Code, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
-import { can, useSession } from '@/shared/session/useSession';
+import { useSession } from '@/shared/session/useSession';
 import { t } from '@/shared/i18n';
 import { announceRoute } from '@/shared/ui/RouteAnnouncer';
 import { RouteHeadingClass } from '@/shared/theme/routeHeading';
+import { canAccessRoute } from './routeAccess';
 import type { RouteHandle } from './routes';
 
 /**
@@ -119,7 +120,7 @@ export function RouteGuard({
 }): JSX.Element {
   const session = useSession();
 
-  if (handle.permission !== undefined && !can(session.data, handle.permission)) {
+  if (handle.permission !== undefined && !canAccessRoute(session.data, handle)) {
     return <AccessDeniedPage permission={handle.permission} />;
   }
 

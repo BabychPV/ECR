@@ -91,6 +91,10 @@ public sealed class User : Entity<int>
     public int FailedAttempts { get; private set; }
     public DateTime? LockedUntil { get; private set; }
 
+    /// <summary>Момент останнього УСПІШНОГО входу (UTC); <c>null</c> — не входив ніколи (BE-12).</summary>
+    /// <remarks>Ставиться лише входом, не кожним запитом: інакше це був би «останній запит».</remarks>
+    public DateTime? LastSignInAt { get; private set; }
+
     /// <summary>Пароль виданий разово; доки прапорець стоїть — лише зміна пароля і вихід (ФВ-6.18).</summary>
     public bool MustChangePassword { get; private set; }
 
@@ -220,11 +224,13 @@ public sealed class User : Entity<int>
         return true;
     }
 
-    /// <summary>Скидає лічильник після вдалого входу.</summary>
-    public void RegisterSuccessfulLogin()
+    /// <summary>Скидає лічильник після вдалого входу і запам'ятовує його момент.</summary>
+    /// <param name="utcNow">Момент входу.</param>
+    public void RegisterSuccessfulLogin(DateTime utcNow)
     {
         FailedAttempts = 0;
         LockedUntil = null;
+        LastSignInAt = utcNow;
     }
 
     /// <summary>Вимикає bootstrap-запис. **Не видаляє**: він потрібен в аудиті.</summary>

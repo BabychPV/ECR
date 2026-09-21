@@ -31,6 +31,7 @@ const user: UserView = {
   isLockedOut: false,
   mustChangePassword: false,
   receivesAlerts: false,
+  lastSignInAt: null,
 };
 
 const roles: RoleView[] = [

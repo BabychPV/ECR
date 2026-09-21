@@ -97,7 +97,7 @@ public sealed partial class LoginHandler(
             throw InvalidCredentials();
         }
 
-        user.RegisterSuccessfulLogin();
+        user.RegisterSuccessfulLogin(now);
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Local, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -147,7 +147,7 @@ public sealed partial class LoginHandler(
             throw InvalidCredentials();
         }
 
-        user.RegisterSuccessfulLogin();
+        user.RegisterSuccessfulLogin(now);
         users.RecordAttempt(new LoginAttempt(userName, AuthProvider.Windows, true, now, ipAddress));
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 

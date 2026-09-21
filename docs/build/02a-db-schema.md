@@ -1988,6 +1988,8 @@ CREATE TABLE sec.[User]
     SecurityStamp  nvarchar(64)  NOT NULL,
     FailedAttempts int           NOT NULL CONSTRAINT DF_User_Failed DEFAULT(0),
     LockedUntil    datetime2(3)  NULL,
+    -- Останній УСПІШНИЙ вхід, UTC (BE-12); ставиться лише входом, не запитом.
+    LastSignInAt   datetime2(3)  NULL,
     -- Пароль виданий разово і має бути змінений при першому вході (D-97).
     -- Доки прапорець стоїть, дозволені лише зміна пароля і вихід.
     MustChangePassword bit       NOT NULL CONSTRAINT DF_User_MustChg DEFAULT(0),
