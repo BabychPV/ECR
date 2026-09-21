@@ -3517,6 +3517,10 @@
               "string"
             ]
           },
+          "isActive": {
+            "description": "Мапінг діє; `false` — призупинений (`BE-27`), значень не пише.",
+            "type": "boolean"
+          },
           "outcome": {
             "$ref": "#/components/schemas/MappingOutcome",
             "description": "Стан мапінгу."
@@ -3578,7 +3582,8 @@
           "sourceUnitCode",
           "targetUnitCode",
           "pointCount",
-          "foldedValue"
+          "foldedValue",
+          "isActive"
         ],
         "type": "object"
       },

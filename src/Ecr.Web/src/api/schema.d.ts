@@ -13340,6 +13340,8 @@ export interface components {
              * @description Число, яке лягло б у комірку; `null` — нічого згортати.
              */
             foldedValue: null | string;
+            /** @description Мапінг діє; `false` — призупинений (`BE-27`), значень не пише. */
+            isActive: boolean;
             /** @description Стан мапінгу. */
             outcome: components["schemas"]["MappingOutcome"];
             /**

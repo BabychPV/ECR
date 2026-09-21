@@ -3229,6 +3229,12 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
 | `GET` | `/api/v1/search` | — (кожен тип під правом свого переліку й грантами проєкту) | 8 |
 
+> ✎ 2026-09-21: `GET /sources/{id}/mapping/preview` — `fields[].isActive`
+> (обов'язкове; `false` — мапінг призупинений, `BE-27`, і його точки адрес не
+> дають). `GET /units/{id}/usage` і `GET /registries/{code}/usage` — `kind`
+> лише з `UsageKinds` (`Ecr.Application/Common/UsageKinds.cs`), значення на
+> дроті незмінні.
+
 > **`GET /jobs?mine=true` — межа доступу, а не фільтр зручності** (`BE-08`,
 > `Q-156`). Параметри переліку: `state` (`Queued`, `Running`, `Succeeded`,
 > `Failed`, `Cancelled`), `code` (тип задачі), `mine`, `limit` (1…50).
