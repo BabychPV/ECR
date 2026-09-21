@@ -1,5 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Reporting/ReportSnapshotBuildTests.cs
 using Ecr.Domain.Entities.Reporting;
+using Ecr.Domain.Entities.Workflow;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
@@ -88,6 +90,80 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
             string.IsNullOrWhiteSpace(made.ContentHash),
             "зріз побудовано без контрольної суми: звіряти його було б нічим.");
         Assert.Equal(version.Id, made.ReportVersionId);
+    }
+
+    /// <remarks>
+    /// ⛔ Дефект знайшла наскрізна перевірка <c>tools/smoke.ps1</c> (крок 23):
+    /// «побудова зрізу завершилася станом Failed за 211 с». Жоден із тестів не
+    /// будував зріз за ПОДАНИЙ період — а саме там статус, успадкований від
+    /// даних (<c>D-65</c>), робить новий зріз <c>Submitted</c> ще до того, як у
+    /// ньому з'явився хоч один рядок, і правило «поданий не перебудовується»
+    /// відмовляло ПЕРШОМУ ж завершенню (<c>ECR-RPT-0409</c>). Тобто зріз за
+    /// поданий період не будувався взагалі — рівно тоді, коли він потрібен
+    /// регуляторові.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    [Trait("Requirement", "ФВ-10.2")]
+    public async Task Зріз_за_ПОДАНИМ_періодом_усе_одно_будується()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await chain.BuildAsync();
+
+        await using var db = chain.CreateContext();
+
+        // Єдиний аркуш періоду ПОДАНО: `StatusOfDataAsync` виведе `Submitted`,
+        // і саме цей статус дістанеться щойно створеному зрізу.
+        var state = new ApprovalState(document.DocumentId, document.SheetDefId, document.PeriodKey.Value);
+        state.Submit(userId: 5, Now);
+        db.ApprovalStates.Add(state);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var tag = Guid.NewGuid().ToString("N")[..8];
+        var def = new ReportDef(
+            EcrCode.Create($"RPS{tag}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Submitted period test" }),
+            isRegulatory: true);
+
+        db.ReportDefs.Add(def);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var version = new ReportVersion(
+            def.Id,
+            "1.0",
+            """[{"code":"DocumentId","kind":"number"},{"code":"Value","kind":"number"}]""",
+            """{"rowSource":"CalculationResults"}""",
+            Now);
+
+        version.Publish();
+        db.ReportVersions.Add(version);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        // ⛔ Головна перевірка — що виклик узагалі ЗАВЕРШУЄТЬСЯ. До виправлення
+        // він кидав `DomainException(ECR-RPT-0409)` з наступного ж рядка після
+        // створення зрізу, а черга ретраїла це тричі по 30/60/120 с.
+        var snapshotId = await builder.BuildAsync(
+            version.Id, document.ProjectId, document.PeriodKey, parametersJson: null,
+            CancellationToken.None);
+
+        var list = await builder.ListAsync(
+            document.ProjectId, document.PeriodKey.Value, visibleProjectIds: null, CancellationToken.None);
+
+        var made = Assert.Single(list, s => s.Id == snapshotId);
+
+        // Статус — успадкований від аркушів, не вигаданий побудовою (D-65).
+        Assert.Equal(nameof(SnapshotStatus.Submitted), made.Status);
+
+        // ⚠ І зріз саме ЗАВЕРШЕНИЙ: без цього твердження тест пройшов би й на
+        // зрізі-порожняку, який `BuildAsync` устиг зберегти до відмови.
+        Assert.False(
+            string.IsNullOrWhiteSpace(made.ContentHash),
+            "зріз за поданий період побудовано без контрольної суми: завершення не відбулося.");
+        Assert.True(made.IsCurrent, "зріз за поданий період не позначено поточним.");
     }
 
     [Fact]
