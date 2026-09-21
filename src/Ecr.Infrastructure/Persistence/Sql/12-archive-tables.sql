@@ -73,7 +73,7 @@ CREATE TABLE arc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,16) NULL,
+    ValueNumeric         decimal(34,16) NULL,
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,

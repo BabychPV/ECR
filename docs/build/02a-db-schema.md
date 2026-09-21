@@ -1192,7 +1192,7 @@ CREATE TABLE doc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,   -- денормалізовано під складений FK
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,16) NULL,        -- D-148; precision 28 → ті самі 13 Б на рядок
+    ValueNumeric         decimal(34,16) NULL,        -- D-148; precision 34 → 18 цілих розрядів, 17 Б на рядок
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,
@@ -2531,7 +2531,7 @@ CREATE TABLE arc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,16) NULL,        -- дзеркало doc.CellValue (D-148)
+    ValueNumeric         decimal(34,16) NULL,        -- дзеркало doc.CellValue (D-148)
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,

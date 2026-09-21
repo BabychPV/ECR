@@ -48,6 +48,26 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
     /// </summary>
     private const string SixteenDigits = "0.1234567890123456";
 
+    /// <summary>
+    /// 278 МВт·год у базовій одиниці (джоуль) із шістнадцятьма знаками:
+    /// тринадцять цілих розрядів, яких <c>decimal(28,16)</c> не вміщав.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це наскрізний доказ РОЗШИРЕННЯ (precision 28 → 34, 2026-09-21).
+    /// Каталог одиниць має множник <c>MWh → 3 600 000 000</c>, тож звичайні
+    /// 278 МВт·год — це 1.0008·10¹² в базовій одиниці, а precision 28 при
+    /// масштабі 16 лишає рівно 12 цілих розрядів. До переходу цей самий запит
+    /// не округлявся, а відмовляв.
+    ///
+    /// ⚠ Чому НЕ 18 цілих розрядів, хоча стовпець їх тримає: 18 + 16 = 34
+    /// значущі цифри, а <c>System.Decimal</c> несе лише 29. Таке значення не
+    /// існує в CLR — <c>decimal.Parse</c> мовчки округлив би його ще до
+    /// відправки, і тест порівнював би огризок сам із собою. Стелю стовпця й
+    /// стелю CLR розводить окремий тест у
+    /// <c>Ecr.Infrastructure.Tests</c> (<c>CellValueScale16Tests</c>).
+    /// </remarks>
+    private const string ThirteenIntegerDigits = "1000800000000.1234567890123456";
+
     /// <summary>Пояс майданчика; той самий, який ставить <see cref="TestDocumentBuilder"/>.</summary>
     private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
 
@@ -138,7 +158,7 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
 
         // ⛔ Числова комірка їде РЯДКОМ (`D-30`, `DecimalAsStringJsonConverter`):
         // JSON-число на клієнті проходить через `JSON.parse`, тобто через
-        // IEEE-754, і 16-й знак `decimal(28,16)` зникає ще до того, як до
+        // IEEE-754, і 16-й знак `decimal(34,16)` зникає ще до того, як до
         // нього можна дотягнутися. Хвостові нулі — масштаб самої колонки.
         var createdNumber = afterCreate.GetProperty("cells").GetProperty(numberColumn);
 
@@ -198,11 +218,13 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         Assert.Equal("мазут", afterUpdate.GetProperty("cells").GetProperty(textColumn).GetString());
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(SixteenDigits)]
+    [InlineData(ThirteenIntegerDigits)]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-148")]
-    public async Task Шістнадцятий_знак_доживає_від_HTTP_до_бази_і_назад()
+    public async Task Повна_ширина_числа_доживає_від_HTTP_до_бази_і_назад(string text)
     {
         // ⛔ Наскрізний доказ `D-148` («усюди 16 знаків»). Ланок, кожна з яких
         // ріже МОВЧКИ, чотири: `JSON.parse`-подібна втрата на числі в тілі
@@ -211,6 +233,12 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         // `doc.CellValue.ValueNumeric`. Жодна з них не відмовляє — усі
         // округлюють і повертають `200`. Тому твердження одне й просте:
         // введений текст і прочитаний текст збігаються ПОСИМВОЛЬНО.
+        //
+        // ⚠ Два випадки перевіряють РІЗНІ половини типу, і другий з'явився з
+        // переходом на `decimal(34,16)`: перший — масштаб (16 знаків після
+        // коми), другий — ширину цілої частини (13 розрядів). Другий на
+        // `(28,16)` не проходив узагалі: СУБД відмовляла «Arithmetic
+        // overflow», бо precision 28 при масштабі 16 лишає 12 цілих розрядів.
         var scenario = await ArrangeAsync().ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
@@ -246,14 +274,14 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
                 {
                     rowKey,
                     baseVersion = (string?)null,
-                    cells = new object[] { new { columnCode = numberColumn, value = (object)SixteenDigits } },
+                    cells = new object[] { new { columnCode = numberColumn, value = (object)text } },
                 },
             },
         }).ConfigureAwait(true);
 
         Assert.True(
             applied.StatusCode == HttpStatusCode.OK,
-            $"PATCH із 16 знаками: {applied.StatusCode}\n"
+            $"PATCH «{text}»: {applied.StatusCode}\n"
             + $"{await applied.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
 
         // ⚠ Читання йде тим самим шляхом, що й у клієнта, — зрізом, а не
@@ -264,7 +292,7 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         var cell = row.GetProperty("cells").GetProperty(numberColumn);
 
         Assert.Equal(JsonValueKind.String, cell.ValueKind);
-        Assert.Equal(SixteenDigits, cell.GetString());
+        Assert.Equal(text, cell.GetString());
 
         // І в самій базі теж шістнадцять знаків, а не «щось, що зріз гарно
         // надрукував»: зріз бере число зі сховища, і обидва твердження разом
@@ -279,7 +307,7 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
             .ConfigureAwait(true);
 
         Assert.Equal(
-            SixteenDigits,
+            text,
             stored!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 

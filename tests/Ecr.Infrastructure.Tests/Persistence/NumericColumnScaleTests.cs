@@ -7,7 +7,7 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
 /// <c>D-148</c>: усі стовпці вимірюваних величин у РОЗГОРНУТІЙ базі мають
-/// масштаб 16.
+/// масштаб 16, а precision — ту, що названа поруч із кожним.
 /// </summary>
 /// <remarks>
 /// ⛔ Це перевірка БАЗИ, а не моделі, і різниця не формальна. Модель EF
@@ -19,6 +19,13 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 ///
 /// ⚠ Перелік — таблицею, а не окремим тестом на колонку: додати колонку з
 /// вимірюваною величиною й забути її тут має бути видно з одного місця.
+///
+/// ✎ 2026-09-21: очікуваний тип переїхав із одного літерала в тілі тесту в
+/// ТРЕТЮ колонку переліку. Причина не косметична: перехід на
+/// <c>decimal(34,16)</c> іде трьома міграціями, по одній за коміт, і спільний
+/// літерал змушував би або міняти всі тринадцять рядків разом із першою з них
+/// (тобто червонити те, чого ще ніхто не чіпав), або тримати серію одним
+/// комітом. Тепер кожен рядок червоніє рівно у своєму.
 ///
 /// ⚠ `uom.Unit`/`uom.Conversion` (коефіцієнти, <c>decimal(38,18)</c>) і
 /// `cfg.StyleDef.FontSize` (<c>decimal(4,1)</c>) свідомо ПОЗА переліком:
@@ -36,21 +43,21 @@ public sealed class NumericColumnScaleTests(SqlServerFixture sql)
     /// перевела на 16 знаків трьома міграціями. Нова колонка з вимірюваною
     /// величиною має з'явитися саме тут — інакше її масштаб не стереже ніщо.
     /// </remarks>
-    public static TheoryData<string, string> Columns() => new()
+    public static TheoryData<string, string, string> Columns() => new()
     {
-        { "doc.CellValue", "ValueNumeric" },
-        { "doc.DocumentIndexValue", "ValueNumeric" },
-        { "rpt.ReportRow", "ValueNumeric" },
-        { "ext.RawDataPoint", "ValueNumeric" },
-        { "dic.RegistryValue", "ValueNumeric" },
-        { "calc.CalculationResult", "Value" },
-        { "calc.CalculationInput", "Value" },
-        { "calc.CalculationStep", "Value" },
-        { "calc.MethodologyConstant", "Value" },
-        { "calc.TestCase", "Tolerance" },
-        { "arc.CellValue", "ValueNumeric" },
-        { "arc.CalculationResult", "Value" },
-        { "arc.CalculationStep", "Value" },
+        { "doc.CellValue", "ValueNumeric", "decimal(34,16)" },
+        { "doc.DocumentIndexValue", "ValueNumeric", "decimal(28,16)" },
+        { "rpt.ReportRow", "ValueNumeric", "decimal(28,16)" },
+        { "ext.RawDataPoint", "ValueNumeric", "decimal(28,16)" },
+        { "dic.RegistryValue", "ValueNumeric", "decimal(28,16)" },
+        { "calc.CalculationResult", "Value", "decimal(28,16)" },
+        { "calc.CalculationInput", "Value", "decimal(28,16)" },
+        { "calc.CalculationStep", "Value", "decimal(28,16)" },
+        { "calc.MethodologyConstant", "Value", "decimal(28,16)" },
+        { "calc.TestCase", "Tolerance", "decimal(28,16)" },
+        { "arc.CellValue", "ValueNumeric", "decimal(34,16)" },
+        { "arc.CalculationResult", "Value", "decimal(28,16)" },
+        { "arc.CalculationStep", "Value", "decimal(28,16)" },
     };
 
     [Theory]
@@ -58,7 +65,8 @@ public sealed class NumericColumnScaleTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-148")]
-    public async Task Стовпець_вимірюваної_величини_має_тип_decimal_28_16(string table, string column)
+    public async Task Стовпець_вимірюваної_величини_має_оголошений_тип(
+        string table, string column, string expected)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync().ConfigureAwait(true);
@@ -74,7 +82,9 @@ public sealed class NumericColumnScaleTests(SqlServerFixture sql)
 
         var actual = await command.ExecuteScalarAsync().ConfigureAwait(true);
 
-        // Літералом: 16 — це вимога `D-148`, а не значення константи продукту.
-        Assert.Equal("decimal(28,16)", actual);
+        // Літералом у переліку: і 16, і precision — вимога `D-148`, а не
+        // значення константи продукту, тож твердження не може поїхати разом
+        // із кодом, який воно стереже.
+        Assert.Equal(expected, actual);
     }
 }

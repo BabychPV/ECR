@@ -38,7 +38,7 @@ public sealed class CellValueConfiguration : IEntityTypeConfiguration<CellValue>
         builder.Property(x => x.TableDefId).HasColumnName("TableDefId");
 
         builder.Property(x => x.ValueString).HasMaxLength(1000);
-        builder.Property(x => x.ValueNumeric).HasPrecision(28, 16);
+        builder.Property(x => x.ValueNumeric).HasPrecision(34, 16);
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
 
         // ⛔ Директива registry-lookup, PR A1. Той самий прийом, що вже working
