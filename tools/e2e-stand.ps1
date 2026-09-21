@@ -248,7 +248,7 @@ try {
             'Calculation.View', 'Calculation.Publish', 'Calculation.Recalculate',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
-            'Report.ViewRegulatory', 'Report.BuildSnapshot',
+            'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',
             'Integration.View', 'Integration.Manage', 'System.ViewHealth', 'System.ManageLocalization',
             'System.ManageNotifications')
     } | Out-Null
