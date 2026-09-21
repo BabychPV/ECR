@@ -43,11 +43,16 @@ registerA11yFetchMock();
 
 suite.each(Themes)('Доступність маршрутів (%s)', (colorScheme) => {
   it.each(Pages)('ФВ-14.16: %s не має порушень critical і serious', async (_path, Page) => {
+    const client = createScanClient();
     const { container } = render(
-      <Shell colorScheme={colorScheme}>
+      <Shell colorScheme={colorScheme} client={client}>
         <Page />
       </Shell>,
     );
+
+    // ⚠ Той самий сліпий кут, що й у ФВ-14.9: без очікування axe бачив лише
+    // те, що малюється до першої відповіді (див. `settleQueries`).
+    await settleQueries(client);
 
     const violations = await findViolations(container);
 
@@ -92,13 +97,20 @@ const TemplateCardEntry = '/admin/templates/1';
 
 suite.each(Themes)('Доступність картки шаблону (%s)', (colorScheme) => {
   it(`ФВ-14.16: ${TemplateCardPath} не має порушень critical і serious`, async () => {
+    const client = createScanClient();
     const { container } = render(
-      <RouteShell colorScheme={colorScheme} path={TemplateCardPath} entry={TemplateCardEntry}>
+      <RouteShell
+        colorScheme={colorScheme}
+        path={TemplateCardPath}
+        entry={TemplateCardEntry}
+        client={client}
+      >
         <TemplateCardPage />
       </RouteShell>,
     );
 
     await screen.findByRole('heading', { name: 'Stationary sources' });
+    await settleQueries(client);
 
     const violations = await findViolations(container);
 
