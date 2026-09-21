@@ -176,6 +176,16 @@ public sealed class SqlServerFixture : IAsyncLifetime
                 connection,
                 $"CREATE DATABASE [{DatabaseName}]{FilesClause()} COLLATE Latin1_General_100_CI_AS_SC;")
                 .ConfigureAwait(false);
+
+            // ⚠ Приріст журналу 16 МБ, а не типові 64: з SQL Server 2022 приріст
+            // ≤ 64 МБ — це ОДИН VLF, і журнал із VLF по 64 МБ не звільняється на
+            // CHECKPOINT, доки весь блок активний, — тож росте кроками по 64 МБ
+            // і перетинає стелю `TestDatabaseSizeTests` (128 МБ) від порядку тестів.
+            await ExecuteAsync(connection, $"""
+                DECLARE @log sysname = (SELECT name FROM sys.master_files
+                                         WHERE database_id = DB_ID(N'{DatabaseName}') AND type = 1);
+                EXEC (N'ALTER DATABASE [{DatabaseName}] MODIFY FILE (NAME = N''' + @log + N''', FILEGROWTH = 16MB);');
+                """).ConfigureAwait(false);
         }
 
         await MarkAsSmallAsync(serverConnection).ConfigureAwait(false);

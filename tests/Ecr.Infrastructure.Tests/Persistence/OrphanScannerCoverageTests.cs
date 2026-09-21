@@ -35,8 +35,58 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// курсора.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class OrphanScannerCoverageTests(SqlServerFixture sql)
+public sealed class OrphanScannerCoverageTests(SqlServerFixture sql) : IAsyncLifetime
 {
+    /// <summary>Засіяні набори цього тесту — їх прибирає <see cref="DisposeAsync"/>.</summary>
+    private readonly List<SeededSet> _seeded = [];
+
+    /// <inheritdoc />
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <summary>Прибирає засіяні рядки: база спільна на всю колекцію.</summary>
+    /// <remarks>
+    /// ⛔ Лишені 3 × 21 000 комірок ламали ЧУЖИЙ тест. `arc.usp_ArchiveYear`
+    /// фільтрує `PeriodKey = @k` за локальною змінною, тобто оцінює рядки за
+    /// щільністю всієї `doc.CellValue`: із цим сміттям ~13 000 замість 1, і
+    /// `INSERT … arc.CellValue WITH (TABLOCK)` отримував план DOP 12. Під
+    /// завантаженим CPU такий план стояв на `CXCONSUMER` понад 30 с при ~1 с CPU
+    /// — `ArchiveJobTests` падали на таймауті, а поодинці були зелені.
+    /// </remarks>
+    public async Task DisposeAsync()
+    {
+        // Спершу звільнити журнал від засіву й прогону сканера — інакше
+        // видалення лягає поверх них і журнал росте.
+        await ExecuteAsync("CHECKPOINT;", _ => { });
+
+        foreach (var set in _seeded)
+        {
+            foreach (var table in new[] { "doc.CellValue", "doc.TableRow" })
+            {
+                var idColumn = table == "doc.CellValue" ? "TableRowId" : "Id";
+                // Порціями і з CHECKPOINT: база без резервної копії звільняє
+                // журнал лише на контрольній точці, і 42 000 видалень поспіль
+                // роздували його понад стелю `TestDatabaseSizeTests` (136 МБ > 128).
+                await ExecuteAsync(
+                    $"""
+                    WHILE 1 = 1
+                    BEGIN
+                        DELETE TOP (2000) FROM {table}
+                         WHERE PeriodKey = @pk AND {idColumn} >= @first AND {idColumn} < @first + @count;
+                        IF @@ROWCOUNT = 0 BREAK;
+                        CHECKPOINT;
+                    END
+                    CHECKPOINT;
+                    """,
+                    command =>
+                    {
+                        command.Parameters.AddWithValue("@pk", set.PeriodKey);
+                        command.Parameters.AddWithValue("@first", set.FirstRowId);
+                        command.Parameters.AddWithValue("@count", SeededRows);
+                    });
+            }
+        }
+    }
+
     /// <summary>
     /// Скільки рядків-кандидатів засівається понад стелю однієї вибірки.
     /// </summary>
@@ -281,6 +331,10 @@ public sealed class OrphanScannerCoverageTests(SqlServerFixture sql)
             .ReserveIdsAsync("doc.TableRowSeq", SeededRows, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // Реєструється ДО вставки: обрив посередині теж прибирається.
+        var set = new SeededSet(periodKey, firstRowId);
+        _seeded.Add(set);
+
         const string tally =
             "SELECT TOP (@count) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS i " +
             "FROM sys.all_objects a CROSS JOIN sys.all_objects b";
@@ -317,7 +371,7 @@ public sealed class OrphanScannerCoverageTests(SqlServerFixture sql)
                 command.Parameters.AddWithValue("@entry", (int)entryId);
             });
 
-        return new SeededSet(periodKey, firstRowId);
+        return set;
     }
 
     /// <summary>Скільки із засіяних рядків мають задану ознаку.</summary>
