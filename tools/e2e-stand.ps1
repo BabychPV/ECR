@@ -249,7 +249,7 @@ try {
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
             'Report.ViewRegulatory', 'Report.BuildSnapshot',
-            'Integration.Manage', 'System.ViewHealth', 'System.ManageLocalization',
+            'Integration.View', 'Integration.Manage', 'System.ViewHealth', 'System.ManageLocalization',
             'System.ManageNotifications')
     } | Out-Null
 
