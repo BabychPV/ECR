@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Anchor, Button, Group, Modal, Table, TextInput } from '@mantine/core';
+import { Anchor, Button, Group, Modal, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -9,11 +9,13 @@ import type {
   CreateTemplateVersionRequest,
   TemplateIdResponse,
   TemplatePage,
+  TemplateSummary,
   TemplateVersionPage,
+  TemplateVersionSummary,
   VersionIdResponse,
 } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
-import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
@@ -63,6 +65,23 @@ export function TemplatesPage(): JSX.Element {
   });
 
   const versionsError = versionQueries.find((query) => query.error)?.error ?? null;
+
+  /*
+   * Версії РЯДКА — за ідентифікатором шаблону, а не за позицією рядка.
+   *
+   * ⛔ Доти тут стояло `versionQueries[index]`, де `index` — позиція в
+   * `page.items.map(...)`. Поки порядок рядків збігався з порядком відповіді
+   * сервера, формула працювала; шапка `DataTable` цей порядок ПЕРЕСТАВЛЯЄ, і та
+   * сама формула віддала б рядку ЧУЖИЙ перелік версій — посилання вело б на
+   * версію іншого шаблону, лишаючись при цьому цілком правдоподібним на вигляд.
+   *
+   * ⚠ Сам масив `versionQueries` і далі індексується `items`: `useQueries`
+   * повертає результати в порядку переданих запитів, і саме тут цей порядок
+   * востаннє має значення.
+   */
+  const versionsOf = new Map<number, readonly TemplateVersionSummary[]>(
+    items.map((template, index) => [template.id, versionQueries[index]?.data?.items ?? []]),
+  );
 
   /**
    * Створення шаблону (`ФВ-2.1`).
@@ -119,13 +138,88 @@ export function TemplatesPage(): JSX.Element {
 
   /** Остання версія шаблону — від неї клонується наступна. */
   const latestVersionOf = (templateId: number): number | null => {
-    const index = items.findIndex((template) => template.id === templateId);
-    const versions = index < 0 ? [] : (versionQueries[index]?.data?.items ?? []);
+    const versions = versionsOf.get(templateId) ?? [];
 
     return versions.length === 0 ? null : (versions[versions.length - 1]?.id ?? null);
   };
 
   const editable = can(session.data, 'Template.Edit');
+
+  /*
+   * ⚠ Дві колонки, межа `L5` — сім: запас є, і третьою напрошувався лічильник
+   * версій. Його тут НЕМАЄ навмисно — це рефакторинг, а нова колонка додала б
+   * на екран число, якого на ньому не було.
+   *
+   * ⛔ Колонка версій лишається `render`-колонкою і `sortable: false`: у переліку
+   * посилань немає скалярного значення, за яким їх упорядковувати, а сортування,
+   * що мовчки нічого не робить, гірше за його відсутність (`DataTableColumn.
+   * sortable`).
+   */
+  const columns: readonly DataTableColumn<TemplateSummary>[] = [
+    {
+      // ⚠ `key` збігається з полем `TemplateSummary`, тож і клітинка, і ключ
+      // сортування беруться самим набором — без `render` і без `sortValue`.
+      key: 'code',
+      label: t('templates.code'),
+    },
+    {
+      key: 'versions',
+      label: t('templates.versions'),
+      sortable: false,
+      render: (template) => (
+        <Group gap="xs">
+          {(versionsOf.get(template.id) ?? []).map((version) => (
+            /*
+             * ⛔ Тут стояв ОДИН `Badge`, у тілі якого друкувався
+             * `version.status` — тобто код сервера (`Published`,
+             * `Deprecated`) як видимий текст. Це той самий дефект,
+             * що вже знято з п'яти екранів: код не є текстом
+             * інтерфейсу й не перекладається, тож казахський
+             * користувач бачив англійське слово, а `Deprecated`
+             * нічим не відрізнявся від чинної версії, окрім
+             * `variant`, який ніхто не пояснює.
+             *
+             * ⚠ `Draft` і `Published` у наборі обидва `neutral`, і
+             * це навмисно: чернетка — не проблема й не
+             * попередження. Розрізняє їх ПІДПИС із каталогу
+             * (`status.version.*`), а не колір — рівно те, чого
+             * вимагає `L3`. Знятий `variant="filled"` для
+             * `Published` нічого не повідомляв: «опублікована» — це
+             * норма, а не подія.
+             *
+             * ⚠ Посилання стало `Anchor`, а не `Badge` із
+             * `component={Link}`: перехід на версію — це посилання,
+             * і читалка має оголосити його посиланням, а не
+             * позначкою з курсором-пальцем.
+             */
+            <Group key={version.id} gap="xs" wrap="nowrap">
+              <Anchor
+                component={Link}
+                size="sm"
+                to={`/admin/templates/${template.id}/versions/${version.id}`}
+              >
+                {version.version} · r{version.presentationRevision}
+              </Anchor>
+              <StatusBadge kind="version" state={version.status} quiet />
+            </Group>
+          ))}
+
+          {/* ⛔ Кнопка стоїть у рядку шаблону, а не на окремому
+              екрані: версія завжди належить шаблону, і питання
+              «якому саме» не має виникати. */}
+          {editable && (
+            <Button
+              size="compact-xs"
+              variant="default"
+              onClick={() => setVersioning(template.id)}
+            >
+              {t('templates.newVersion')}
+            </Button>
+          )}
+        </Group>
+      ),
+    },
+  ];
 
   return (
     <>
@@ -143,87 +237,34 @@ export function TemplatesPage(): JSX.Element {
        * ⛔ Помилка версій підмішана до помилки переліку навмисно. Інакше
        * шаблони показувалися б, а колонка версій була б порожньою — тобто
        * «версій немає» замість «версії не завантажилися» (ФВ-14.22).
+       *
+       * ⛔ `DataTable` замінює `AsyncBoundary` + `<Table>` РАЗОМ, а не лише
+       * розмітку: обгортку станів набір тримає всередині себе (той самий
+       * `AsyncBoundary`, `skeleton="table"`). Лишити зовнішню поруч означало б
+       * два перемикачі станів на одну таблицю — саме ту розбіжність, заради
+       * усунення якої таблиця й стала компонентом. Правило «відмова ≠ порожньо»
+       * від цього не слабшає: воно переїхало разом із обгорткою.
+       *
+       * ⚠ `rows` — це `templates.data?.items`, тобто `undefined`, доки запиту не
+       * зробили. `?? []` перетворило б «ще не питали» на «порожньо» — рівно ту
+       * підміну, яку обгортка й ловить.
+       *
+       * ⚠ `total`/`onShowMore` не передаються, хоч відповідь і курсорна: екран
+       * бере `?limit=100` одним запитом і другої сторінки не просить. Кнопка,
+       * яка нічого не довантажує, і підсумок «2 / 2», що не є правдою про
+       * сервер, — обидва гірші за їхню відсутність (`D15-06`). `clearFiltersLabel`
+       * передавати теж нема куди: фільтрів екран не має.
        */}
-      <AsyncBoundary<TemplatePage>
+      <DataTable<TemplateSummary>
+        columns={columns}
+        rows={templates.data?.items}
+        rowKey={(template) => String(template.id)}
         isPending={templates.isPending}
         error={templates.error ?? versionsError}
-        data={templates.data}
-        isEmpty={(page) => page.items.length === 0}
         emptyTitle={t('templates.empty')}
         emptyHint={t('templates.emptyHint')}
-        skeleton="table"
         onRetry={() => void templates.refetch()}
-      >
-        {(page) => (
-          <Table striped className="ecr-sticky-head">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('templates.code')}</Table.Th>
-                <Table.Th>{t('templates.versions')}</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {page.items.map((template, index) => (
-                <Table.Tr key={template.id}>
-                  <Table.Td>{template.code}</Table.Td>
-                  <Table.Td>
-                    <Group gap="xs">
-                      {(versionQueries[index]?.data?.items ?? []).map((version) => (
-                        /*
-                         * ⛔ Тут стояв ОДИН `Badge`, у тілі якого друкувався
-                         * `version.status` — тобто код сервера (`Published`,
-                         * `Deprecated`) як видимий текст. Це той самий дефект,
-                         * що вже знято з п'яти екранів: код не є текстом
-                         * інтерфейсу й не перекладається, тож казахський
-                         * користувач бачив англійське слово, а `Deprecated`
-                         * нічим не відрізнявся від чинної версії, окрім
-                         * `variant`, який ніхто не пояснює.
-                         *
-                         * ⚠ `Draft` і `Published` у наборі обидва `neutral`, і
-                         * це навмисно: чернетка — не проблема й не
-                         * попередження. Розрізняє їх ПІДПИС із каталогу
-                         * (`status.version.*`), а не колір — рівно те, чого
-                         * вимагає `L3`. Знятий `variant="filled"` для
-                         * `Published` нічого не повідомляв: «опублікована» — це
-                         * норма, а не подія.
-                         *
-                         * ⚠ Посилання стало `Anchor`, а не `Badge` із
-                         * `component={Link}`: перехід на версію — це посилання,
-                         * і читалка має оголосити його посиланням, а не
-                         * позначкою з курсором-пальцем.
-                         */
-                        <Group key={version.id} gap="xs" wrap="nowrap">
-                          <Anchor
-                            component={Link}
-                            size="sm"
-                            to={`/admin/templates/${template.id}/versions/${version.id}`}
-                          >
-                            {version.version} · r{version.presentationRevision}
-                          </Anchor>
-                          <StatusBadge kind="version" state={version.status} quiet />
-                        </Group>
-                      ))}
-
-                      {/* ⛔ Кнопка стоїть у рядку шаблону, а не на окремому
-                          екрані: версія завжди належить шаблону, і питання
-                          «якому саме» не має виникати. */}
-                      {editable && (
-                        <Button
-                          size="compact-xs"
-                          variant="default"
-                          onClick={() => setVersioning(template.id)}
-                        >
-                          {t('templates.newVersion')}
-                        </Button>
-                      )}
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        )}
-      </AsyncBoundary>
+      />
 
       <Modal opened={creating} onClose={() => setCreating(false)} title={t('templates.create')}>
         {/* ⚠ Код — це бізнес-ключ шаблону: за ним на нього посилаються
