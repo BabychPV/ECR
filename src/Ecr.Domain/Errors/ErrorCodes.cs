@@ -111,6 +111,13 @@ public static class ErrorCodes
     /// </remarks>
     public const string RequestInvalid = "ECR-REQ-0422";
 
+    /// <summary>Користувач вичерпав межу частоти запитів (<c>ECR-REQ-0429</c>, пошук BE-19).</summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="TooManyLoginAttempts"/>: той про АДРЕСУ й вхід, а тут —
+    /// автентифікований користувач і його власні запити; минає сама, строк — у <c>Retry-After</c>.
+    /// </remarks>
+    public const string TooManyRequests = "ECR-REQ-0429";
+
     // Шаблони і схема
     public const string TemplateNotFound = "ECR-TMPL-0404";
     public const string TemplateFrozen = "ECR-TMPL-0409";

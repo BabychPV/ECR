@@ -1,7 +1,9 @@
 // src/Ecr.Api/Controllers/SearchController.cs
+using Ecr.Api.Security;
 using Ecr.Application.Search;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Ecr.Api.Controllers;
 
@@ -16,6 +18,7 @@ public sealed class SearchController(SearchHandler search) : ControllerBase
     /// <param name="limit">Стеля; <c>0</c> — 10, більше за 20 — обрізається до 20.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet]
+    [EnableRateLimiting(SearchRateLimitPolicy.PolicyName)]
     [ProducesResponseType<IReadOnlyList<SearchHitDto>>(StatusCodes.Status200OK)]
     public async Task<IActionResult> Search([FromQuery] string? q, [FromQuery] int limit, CancellationToken ct)
         => Ok(await search.HandleAsync(q, limit, ct).ConfigureAwait(false));

@@ -190,11 +190,6 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 // виконується після `Response.Clear()` обробника помилок. Пояснення — у файлі.
 app.UseMiddleware<SecurityHeadersMiddleware>();
 
-// ⚠ Обмежувач — ДО стиснення й статики: сенс межі в тому, щоб зайвий запит
-// коштував якнайменше, а не в тому, щоб він пройшов півконвеєра й був
-// відхилений наприкінці.
-app.UseRateLimiter();
-
 // ⚠ ПЕРЕД `UseStaticFiles`: інакше бандл і зріз їхали б нестисненими (`RD-01`).
 app.UseResponseCompression();
 
@@ -244,6 +239,12 @@ app.UseAuthentication();
 app.UseMiddleware<SecurityStampMiddleware>();   // після автентифікації, до авторизації
 app.UseMiddleware<PasswordChangeMiddleware>();   // разовий пароль закриває все, крім його зміни
 app.UseAuthorization();
+
+// ⚠ Обмежувач — ПІСЛЯ автентифікації й авторизації: межа пошуку (BE-19)
+// ділиться за КОРИСТУВАЧЕМ, а до `UseAuthentication` його ще немає; анонімний
+// запит до пошуку отримує 401 і межі не витрачає. Вхід (`S-10`) від цього не
+// дорожчає: без cookie автентифікація — перевірки в пам'яті, PBKDF2 не почато.
+app.UseRateLimiter();
 
 app.MapControllers();
 

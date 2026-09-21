@@ -387,6 +387,9 @@ USING (VALUES
     (N'err.ECR-AUTH-0429', N'en', N'Too many sign-in attempts', 0),
     (N'err.ECR-AUTH-0429.tooManyAttempts', N'en',
      N'Too many sign-in attempts from this address. Try again later; the Retry-After header says how long.', 0),
+    (N'err.ECR-REQ-0429', N'en', N'Too many requests', 1),
+    (N'err.ECR-REQ-0429.tooManySearches', N'en',
+     N'Too many searches in a short time. Wait a moment and try again; the Retry-After header says how long.', 1),
     (N'err.ECR-PWD-0428',  N'en', N'Password change is required.', 0),
     (N'err.ECR-PWD-0422',  N'en', N'The new password does not meet the policy.', 0),
 

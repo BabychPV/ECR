@@ -375,7 +375,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         // межа й існує). Арм усе одно є, і з тієї самої причини, що
         // `SourceAuthenticationException` нижче: без нього той самий код,
         // кинутий із синхронного шляху, віддав би неправильний статус.
-        BusinessRuleException e when e.ErrorCode == ErrorCodes.TooManyLoginAttempts =>
+        BusinessRuleException e when e.ErrorCode is ErrorCodes.TooManyLoginAttempts or ErrorCodes.TooManyRequests =>
             (StatusCodes.Status429TooManyRequests, e.ErrorCode, e.Message, e.Details),
 
         BusinessRuleException e when e.ErrorCode is ErrorCodes.Archiving or ErrorCodes.SourceUnavailable =>
