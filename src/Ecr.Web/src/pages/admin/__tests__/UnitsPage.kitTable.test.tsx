@@ -127,7 +127,14 @@ function mockApi(reply: UnitsReply): void {
             {
               status: 500,
               title: 'Unit catalogue is unavailable',
-              errorCode: 'ECR-UOM-0500',
+              // ⚠ Код мусить бути з КАТАЛОГУ (`ErrorCodes.cs`), навіть у заглушці
+              // відмови: сторож `ClientErrorCodeTests.Клієнт_не_згадує_кодів_яких
+              // _немає_в_каталозі` читає ВЕСЬ `src/Ecr.Web/src` і продукт від тесту
+              // не відрізняє. Вигаданий `ECR-UOM-0500` червонив гейти `test` і
+              // `server` на спільній гілці — другий такий випадок за добу (перший
+              // був `ECR-SYS-0499`). Родини `UOM-05xx` немає взагалі: п'ятисоті
+              // коди каталогу — лише системні.
+              errorCode: 'ECR-SYS-0500',
               detail: 'Unit catalogue is unavailable',
               correlationId: 'c-42',
             },
