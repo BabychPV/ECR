@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { loadCatalog } from '@/shared/i18n';
@@ -109,5 +110,36 @@ describe('MethodologyRequiredInputsPanel: позначка "завислої" в
     await waitFor(() => {
       expect(screen.getByText('unattached')).toBeDefined();
     });
+  });
+
+  /**
+   * Пояснення бейджа було в Mantine `Tooltip` — лише під мишею. Бейдж не
+   * фокусований, тож з клавіатури пояснення не було видно НІКОЛИ, а читач не
+   * отримував опису.
+   *
+   * ⛔ Мутаційний доказ: повернути `Tooltip` у `MethodologyContentPanels.tsx`
+   * — тест червоний (Tab не доходить до бейджа, немає опису, фокус не дає
+   * `role="tooltip"`).
+   */
+  it('підказка бейджа "unattached" доступна з фокуса: Tab, опис, role="tooltip"', async () => {
+    mockApi([
+      { id: 1, columnDefId: 42, severity: 'Block', hintL10n: null, hasActiveBinding: false },
+    ]);
+    await show();
+
+    const hint = 'This column has no active binding for this methodology right now.';
+    const badge = (await screen.findByText('unattached')).closest('[aria-describedby]');
+
+    expect(badge).not.toBeNull();
+    expect(screen.getAllByRole('generic', { description: hint })).toContain(badge);
+
+    // З клавіатури: Tab доводить до бейджа, а не лише програмний `focus()`.
+    const user = userEvent.setup();
+    for (let step = 0; step < 20 && document.activeElement !== badge; step += 1) {
+      await user.tab();
+    }
+    expect(document.activeElement).toBe(badge);
+
+    expect((await screen.findByRole('tooltip')).textContent).toBe(hint);
   });
 });

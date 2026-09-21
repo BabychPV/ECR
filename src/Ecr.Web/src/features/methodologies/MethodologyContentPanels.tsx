@@ -12,7 +12,6 @@ import {
   Text,
   Textarea,
   TextInput,
-  Tooltip,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
@@ -34,6 +33,7 @@ import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
@@ -857,12 +857,15 @@ export function MethodologyRequiredInputsPanel({
                           рядок і далі показував `Column: X, Severity: Block`
                           так, наче все гаразд, і далі блокував збереження
                           даних для колонки, яку методологія вже не пише. */}
+                      {/* ⚠ `Hint` із `focusable`, а не `Tooltip`: бейдж не в
+                          порядку табуляції, і `Tooltip` показував пояснення
+                          лише миші — з клавіатури його не було видно ніколи. */}
                       {!requiredInput.hasActiveBinding && (
-                        <Tooltip label={t('methodologies.requiredInputUnattachedHint')} multiline w={280}>
+                        <Hint label={t('methodologies.requiredInputUnattachedHint')} focusable>
                           <Badge size="xs" color="statusWarning" variant="outline">
                             {t('methodologies.requiredInputUnattached')}
                           </Badge>
-                        </Tooltip>
+                        </Hint>
                       )}
                     </Group>
                   </Table.Td>
