@@ -200,6 +200,9 @@ public static class DependencyInjection
         services.AddScoped<Registries.SetEntryValidityHandler>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
+        services.AddScoped<Preferences.ListUserPreferencesHandler>();
+        services.AddScoped<Preferences.PutUserPreferenceHandler>();
+        services.AddScoped<Preferences.DeleteUserPreferenceHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
         services.AddScoped<Units.CreateUnitHandler>();
         services.AddScoped<Units.UnitUsageHandler>();
