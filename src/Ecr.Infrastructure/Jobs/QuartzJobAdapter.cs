@@ -1,4 +1,5 @@
 using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Infrastructure.Persistence;
@@ -150,7 +151,7 @@ public sealed partial class QuartzJobAdapter(
         {
             var attempt = CurrentAttempt(context);
 
-            if (attempt < MaxRetryAttempts)
+            if (attempt < MaxRetryAttempts && IsWorthRetrying(ex))
             {
                 // ⚠ Ретрай — НЕ Failed. Клієнт, що опитує стан, має й далі
                 // бачити задачу «у виконанні», а не короткий спалах «провалу»,
@@ -259,6 +260,38 @@ public sealed partial class QuartzJobAdapter(
             ? attempt
             : 0;
     }
+
+    /// <summary>
+    /// Чи має сенс повторювати задачу після цього винятку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перелічені типи — це ВЕРДИКТ про вже збережений стан, а не збій
+    /// дороги до нього: «зріз за період уже поданий» (<c>ECR-RPT-0409</c>),
+    /// «сутності немає», «права немає», «джерело не пускає» (<c>H-20</c>).
+    /// Той самий стан через 30 с дасть той самий вердикт, тож три ретраї
+    /// (30+60+120 = 210 с) лише ховають причину: користувач увесь цей час
+    /// бачить «виконується», а справжнє пояснення доїжджає аж наприкінці.
+    /// Провал із першої спроби показує його відразу.
+    /// <para>
+    /// ⛔ Розрізнення — лише за ТИПОМ винятку, ніколи за текстом
+    /// повідомлення: текст пишуть люди, і список за підрядком мовчки
+    /// перестане працювати від першої ж правки формулювання.
+    /// </para>
+    /// <para>
+    /// ⚠ Двох типів тут НЕМАЄ навмисно, і це не забудькуватість.
+    /// <see cref="BusinessRuleException"/> — ним із адаптерів збору приїжджає
+    /// <c>ECR-INT-0503</c> («джерело недоступне або відповідає надто
+    /// повільно»), тобто рівно та транзієнтна відмова, заради якої ретрай і
+    /// будували. <see cref="ConcurrencyConflictException"/> — конфлікт версій
+    /// минає сам, щойно повтор перечитає свіжий стан. Розширити перелік на
+    /// «усі помилки з кодом» означало б знову зламати те, що тут працює.
+    /// </para>
+    /// </remarks>
+    private static bool IsWorthRetrying(Exception ex)
+        => ex is not (DomainException
+            or NotFoundException
+            or AccessDeniedException
+            or SourceAuthenticationException);
 
     /// <summary>
     /// Планує новий одноразовий триґер того самого <c>JobKey</c> з

@@ -36,6 +36,9 @@ public sealed class QuartzJobAdapterRetryTests
 {
     private const string JobId = "retry-job-1";
 
+    /// <summary>Момент, із якого рахуються затримки ретраю.</summary>
+    private static readonly DateTime Now = new(2026, 9, 9, 0, 0, 0, DateTimeKind.Utc);
+
     /// <summary>Задача, що провалюється завжди — саме сценарій D-134.</summary>
     private sealed class AlwaysFailingJob : IBackgroundJob
     {
@@ -43,14 +46,31 @@ public sealed class QuartzJobAdapterRetryTests
             => throw new InvalidOperationException("Симуляція транзієнтної помилки.");
     }
 
+    /// <summary>
+    /// Задача, що порушує доменний інваріант: повтор через 30 с прочитає той
+    /// самий стан і дістане той самий вердикт.
+    /// </summary>
+    private sealed class DomainFailingJob : IBackgroundJob
+    {
+        internal const string Reason = "Зріз за період уже поданий: перебудувати його не можна.";
+
+        public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
+            => throw new Ecr.Domain.Abstractions.DomainException(
+                Ecr.Domain.Errors.ErrorCodes.ReportImmutable, Reason);
+    }
+
     private static (QuartzJobAdapter Adapter, IJobProgressStore Progress) Adapter()
+        => Adapter<AlwaysFailingJob>();
+
+    private static (QuartzJobAdapter Adapter, IJobProgressStore Progress) Adapter<TJob>()
+        where TJob : class, IBackgroundJob
     {
         var progress = Substitute.For<IJobProgressStore>();
 
         var services = new ServiceCollection();
         services.AddSingleton(progress);
-        services.AddSingleton<Ecr.Domain.Abstractions.IClock>(new TestClock(new DateTime(2026, 9, 9, 0, 0, 0, DateTimeKind.Utc)));
-        services.AddScoped<AlwaysFailingJob>();
+        services.AddSingleton<Ecr.Domain.Abstractions.IClock>(new TestClock(Now));
+        services.AddScoped<TJob>();
         var provider = services.BuildServiceProvider();
 
         return (new QuartzJobAdapter(provider, NullLogger<QuartzJobAdapter>.Instance), progress);
@@ -58,10 +78,13 @@ public sealed class QuartzJobAdapterRetryTests
 
     /// <summary>Будує контекст виконання так, наче Quartz щойно відпустив N-ту спробу.</summary>
     private static (IJobExecutionContext Context, IScheduler Scheduler) ContextAt(int attempt)
+        => ContextAt(attempt, typeof(AlwaysFailingJob));
+
+    private static (IJobExecutionContext Context, IScheduler Scheduler) ContextAt(int attempt, Type jobType)
     {
         var jobData = new JobDataMap
         {
-            { QuartzJobScheduler.JobCodeKey, typeof(AlwaysFailingJob).FullName! },
+            { QuartzJobScheduler.JobCodeKey, jobType.FullName! },
             { QuartzJobScheduler.PayloadKey, "null" },
         };
 
@@ -217,6 +240,88 @@ public sealed class QuartzJobAdapterRetryTests
 
         Assert.Contains(
             "транзієнтної", thrown.InnerException!.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Доменна відмова («зріз уже поданий», <c>ECR-RPT-0409</c>) не є
+    /// транзієнтною: повтор прочитає той самий стан і дістане той самий
+    /// вердикт.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дефект знайдено наскрізною перевіркою: <c>catch (Exception)</c>
+    /// ретраїв УСЕ однаково, тож користувач 210 с (30+60+120) бачив
+    /// «виконується», а причина доїжджала аж наприкінці — при тому, що за
+    /// 30 с вона й не могла змінитися.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "T10-40")]
+    public async Task Доменна_відмова_провалює_задачу_з_першої_спроби_без_ретраю()
+    {
+        var (adapter, progress) = Adapter<DomainFailingJob>();
+
+        // Спроба НУЛЬОВА: ретраїв іще не було, ліміт цілий — єдине, що може
+        // спинити повтор, це тип винятку.
+        var (context, scheduler) = ContextAt(0, typeof(DomainFailingJob));
+
+        var thrown = await Assert.ThrowsAsync<JobExecutionException>(() => adapter.Execute(context));
+
+        Assert.IsType<Ecr.Domain.Abstractions.DomainException>(thrown.InnerException);
+
+        // ⛔ Жодного нового триґера — саме тут видно, що повтору не буде.
+        await scheduler.DidNotReceive().ScheduleJob(Arg.Any<ITrigger>(), Arg.Any<CancellationToken>());
+
+        // …і жодного повідомлення «спроба 1 із 3»: воно збрехало б клієнтові
+        // про повтор, якого не станеться.
+        await progress.DidNotReceive().ReportAsync(
+            Arg.Any<string>(), Arg.Any<int>(), Arg.Any<string?>(),
+            Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+
+        // Причина мусить бути в стані задачі впізнаваною, а не «сталася помилка».
+        await progress.Received(1).FinishAsync(
+            JobId,
+            "Failed",
+            Arg.Is<string?>(m => m != null && m.Contains(DomainFailingJob.Reason, StringComparison.Ordinal)),
+            Arg.Any<DateTime>(),
+            Arg.Any<CancellationToken>());
+
+        // ⚠ Деталь задачі лишається: ручний перезапуск має що перезапускати.
+        await scheduler.DidNotReceive().DeleteJob(Arg.Any<JobKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Транзієнтний збій ретраїться так само, як до розрізнення типів: та сама
+    /// стеля (<c>3</c>) і ті самі затримки (<c>30/60/120</c> с).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Числа тут ЛІТЕРАЛАМИ, не через <see cref="QuartzJobAdapter.RetryBaseDelay"/>:
+    /// твердження проти константи з того самого модуля поїхало б разом із нею
+    /// і лишилося б зеленим на будь-якій зміні відступу.
+    /// </remarks>
+    [Theory]
+    [InlineData(0, 30)]
+    [InlineData(1, 60)]
+    [InlineData(2, 120)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "T10-40")]
+    public async Task Транзієнтний_збій_ретраїться_із_тією_самою_стелею_і_затримками(
+        int attempt, int expectedDelaySeconds)
+    {
+        Assert.Equal(3, QuartzJobAdapter.MaxRetryAttempts);
+
+        var (adapter, _) = Adapter();
+        var (context, scheduler) = ContextAt(attempt);
+
+        await adapter.Execute(context);
+
+        var expectedStart = Now.AddSeconds(expectedDelaySeconds);
+
+        await scheduler.Received(1).ScheduleJob(
+            Arg.Is<ITrigger>(t =>
+                t.JobDataMap.GetString(QuartzJobScheduler.RetryAttemptKey)
+                    == (attempt + 1).ToString(CultureInfo.InvariantCulture)
+                && t.StartTimeUtc.UtcDateTime == expectedStart),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
