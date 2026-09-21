@@ -101,6 +101,62 @@ export function RouteShell({
   );
 }
 
+/**
+ * Маршрут із параметром: шаблон, конкретна адреса й ознака, що сторінка
+ * показує ДАНІ, а не скелет.
+ *
+ * ⛔ `content` обов'язковий, а не «за бажанням»: саме його відсутність і
+ * дозволила сліпій плямі прожити. Під голим `Shell` сторінки з параметром
+ * сканувалися як скелет або `EmptyState`, і жоден тест цього не помічав, бо
+ * «axe не знайшов порушень» однаково правдиве і для порожнього екрана.
+ */
+export interface ParamRoute {
+  /** Шаблон, як у `app/routes.ts` (`/admin/registries/:code/definition`). */
+  readonly path: string;
+
+  /** Конкретна адреса (`/admin/registries/FUEL/definition`). */
+  readonly entry: string;
+
+  /** Чекає характерний елемент, який малюється лише з даними; кидає, якщо його немає. */
+  readonly content: () => Promise<unknown>;
+}
+
+/**
+ * Оболонка для рядка набору: {@link RouteShell} для маршруту з параметром,
+ * {@link Shell} — для решти.
+ */
+export function ScanShell({
+  children,
+  colorScheme,
+  client,
+  route,
+}: {
+  children: ReactNode;
+  colorScheme: 'light' | 'dark';
+  client: QueryClient;
+  route: ParamRoute | undefined;
+}): JSX.Element {
+  return route === undefined ? (
+    <Shell colorScheme={colorScheme} client={client}>
+      {children}
+    </Shell>
+  ) : (
+    <RouteShell colorScheme={colorScheme} client={client} path={route.path} entry={route.entry}>
+      {children}
+    </RouteShell>
+  );
+}
+
+/**
+ * Чекає, доки сторінка покаже дані: спершу характерний елемент маршруту з
+ * параметром (якщо є), потім тишу запитів ({@link settleQueries}).
+ */
+export async function settlePage(client: QueryClient, route: ParamRoute | undefined): Promise<void> {
+  if (route !== undefined) await route.content();
+
+  await settleQueries(client);
+}
+
 /** `QueryClient` для сканування — той самий, що раніше створювався в оболонці. */
 export function createScanClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -441,6 +497,98 @@ export const SnapshotListFixture = (['legacy', 'current', 'unknown'] as const).m
   }),
 );
 
+/** Назва довідника в описі (`/registries/<code>/definition`) — те, на що чекає тест. */
+export const RegistryDefinitionName = 'Fuel types';
+
+/**
+ * Структура версії шаблону: один аркуш з однією таблицею (`/admin/templates/:id/versions/:versionId`).
+ *
+ * ⛔ Не порожня — див. коментар біля відповіді в {@link emptyBodyFor}. Таблиця
+ * без колонок і рядків навмисно: аркуш уже дає перелік (акордеон), а повна
+ * таблиця потягла б редактори колонок, яких цей скан не стосується.
+ */
+export const TemplateStructureFixture = {
+  groupRules: [],
+  isEditable: true,
+  presentationRevision: 3,
+  templateVersionId: 1,
+  sheets: [
+    {
+      code: 'GEN',
+      id: 1,
+      isMandatory: true,
+      isVisible: true,
+      nameL10n: { values: { en: 'General sheet' } },
+      ordinal: 0,
+      sheetGroup: null,
+      tables: [
+        {
+          code: 'T1',
+          columns: [],
+          id: 1,
+          layoutKind: 'Static',
+          maxDynamicRows: null,
+          nameL10n: { values: { en: 'Fuel balance' } },
+          ordinal: 0,
+          rowMode: 'Fixed',
+          rows: [],
+        },
+      ],
+    },
+  ],
+};
+
+/** Перелік версій шаблону (`/templates/<id>/versions`) — одна чернетка з `id` 1. */
+export const TemplateVersionListFixture = {
+  items: [
+    {
+      clonedFromVersionId: null,
+      id: 1,
+      presentationRevision: 3,
+      publishedAt: null,
+      status: 'Draft',
+      version: '1.0',
+    },
+  ],
+  nextCursor: null,
+};
+
+/** Зв'язки таблиць версії (`/template-versions/<id>/relations`) — один активний. */
+export const TableRelationsFixture = {
+  isEditable: true,
+  relations: [
+    {
+      code: 'ROLLUP-T1',
+      id: 1,
+      isActive: true,
+      mapJson: null,
+      matchJson: '{}',
+      onSourceChange: 1,
+      relationKind: 'Rollup',
+      sourceTableCode: 'T1',
+      sourceTableDefId: 1,
+      targetTableCode: 'T2',
+      targetTableDefId: 2,
+    },
+  ],
+};
+
+/** Версії методології (`/methodologies/<id>/versions`) — одна чернетка. */
+export const MethodologyVersionsFixture = [
+  {
+    calendarMode: 'Actual',
+    createdByUserId: 1,
+    effectiveFrom: null,
+    id: 1,
+    isEditable: true,
+    level: 'Configuration',
+    numericMode: 'Strict',
+    status: 'Draft',
+    traceLevel: 'ErrorsOnly',
+    versionNumber: '2026.1',
+  },
+];
+
 /**
  * Порожня відповідь ПОТРІБНОЇ форми для кожного маршруту (незмінно з
  * попереднього єдиного файлу).
@@ -485,17 +633,35 @@ export function emptyBodyFor(url: string): unknown {
       uncoveredColumns: [],
     };
   }
+  /*
+   * ⛔ Структура КОНКРЕТНОЇ версії (`/template-versions/<число>/structure`) —
+   * НЕ порожня: версія без аркушів показує `EmptyState`, і гейт сканував би
+   * сторінку версії без переліку аркушів, заради якого вона існує. До
+   * `RouteShell` сюди приходило `NaN` (параметра не було), тож порожня
+   * відповідь нічого не ховала — тепер ховала б.
+   */
+  if (/\/template-versions\/\d+\/structure$/.test(url)) return TemplateStructureFixture;
+
   if (url.includes('/structure')) {
     return { templateVersionId: 0, presentationRevision: 0, sheets: [], isEditable: true };
   }
 
+  // ⛔ Зв'язки КОНКРЕТНОЇ версії — один зв'язок, а не порожній перелік: інакше
+  // `TableRelationsPage` показує `EmptyState`, і таблиця зв'язків не
+  // рендериться взагалі.
+  if (/\/template-versions\/\d+\/relations$/.test(url)) return TableRelationsFixture;
+
   if (url.includes('/relations')) return { isEditable: true, relations: [] };
 
   if (url.includes('/definition')) {
+    // ⚠ Код береться з адреси: сторінка шле `/registries/<code>/definition`, і
+    // відповідь про ІНШИЙ довідник була б неправдоподібною.
+    const code = /\/registries\/([^/?]+)\/definition/.exec(url)?.[1];
+
     return {
       id: 0,
-      code: 'test',
-      nameL10n: { values: {} },
+      code: code === undefined || code === '' ? 'test' : decodeURIComponent(code),
+      nameL10n: { values: code === undefined || code === '' ? {} : { en: RegistryDefinitionName } },
       isTemporal: false,
       sourceKind: 'Local',
       definitionVersion: 1,
@@ -644,6 +810,15 @@ export function emptyBodyFor(url: string): unknown {
    * складовою. `isActive: true` — щоб у шапці був саме той стан, у якому
    * малюється кнопка архівування з підтвердженням.
    */
+  // ⚠ Перелік версій шаблону — одна ЧЕРНЕТКА: саме з нього
+  // `TemplateVersionPage` знає стан версії (`canPublish`). Без параметра в
+  // адресі цей запит був вимкнений (`enabled: Number.isFinite(...)`).
+  if (/\/templates\/\d+\/versions(\?|$)/.test(url)) return TemplateVersionListFixture;
+
+  // ⚠ Версії методології — одна чернетка: без неї `MethodologyVersionsPage`
+  // показує `EmptyState` і не монтує жодної панелі обраної версії.
+  if (/\/methodologies\/\d+\/versions$/.test(url)) return MethodologyVersionsFixture;
+
   if (/\/templates\/\d+$/.test(url)) {
     return {
       code: 'TPL-A11Y',
