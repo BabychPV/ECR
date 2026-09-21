@@ -49,6 +49,8 @@ function done(id: number, code: string): CampaignProject {
     approved: 4,
     rejected: 0,
     snapshots: 1,
+    progress: 'Done',
+    submissionDeadline: null,
   };
 }
 
@@ -64,11 +66,32 @@ function behind(id: number, code: string): CampaignProject {
     approved: 1,
     rejected: 2,
     snapshots: 0,
+    progress: 'InProgress',
+    submissionDeadline: null,
   };
 }
 
 function summaryOf(projects: CampaignProject[], total: number): CampaignSummary {
-  return { periodKey: Period, totalProjects: total, projects };
+  // Екран поки рахує підсумки сам (`campaignTotals`) і `totals` не читає —
+  // нулі тут лише задовольняють обов'язкове поле контракту.
+  return {
+    periodKey: Period,
+    totalProjects: total,
+    projects,
+    totals: {
+      projects: 0,
+      documents: 0,
+      draft: 0,
+      submitted: 0,
+      approved: 0,
+      rejected: 0,
+      snapshots: 0,
+      done: 0,
+      overdue: 0,
+      atRisk: 0,
+      inProgress: 0,
+    },
+  };
 }
 
 /** Перелік потрібної довжини: кожен другий проєкт затримує кампанію. */
