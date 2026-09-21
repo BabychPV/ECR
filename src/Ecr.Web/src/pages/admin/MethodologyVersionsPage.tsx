@@ -42,6 +42,7 @@ import {
   type FormulaDraft,
 } from '@/features/methodologies/draft';
 import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAction';
+import { VersionDiffModal } from '@/features/methodologies/VersionDiffModal';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -176,8 +177,9 @@ export function MethodologyVersionsPage(): JSX.Element {
 
   const all = useMemo(() => versions.data ?? [], [versions.data]);
 
-  // BE-25: видалення чернетки — у `features/methodologies/`.
+  // BE-25: видалення чернетки й порівняння версій — у `features/methodologies/`.
   const versionDeletion = useDeleteVersionAction({ methodologyId, allowed: mayEdit });
+  const [compareTarget, setCompareTarget] = useState<MethodologyDraftVersionDto | null>(null);
 
   // ⚠ Обрана версія — стан, але за замовчуванням береться ЧЕРНЕТКА, а не
   // перша в переліку: екран існує заради редагування, і відкривати його на
@@ -401,6 +403,18 @@ export function MethodologyVersionsPage(): JSX.Element {
                           onClick={() => setPublishing({ versionId: version.id })}
                         >
                           {t('methodologies.publish')}
+                        </Button>
+                      )}
+
+                      {/* ⚠ Лише коли є з чим порівнювати: з однією версією
+                          діалог відкривався б без базової версії. */}
+                      {list.length > 1 && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() => setCompareTarget(version)}
+                        >
+                          {t('methodologies.compare')}
                         </Button>
                       )}
 
@@ -949,6 +963,13 @@ export function MethodologyVersionsPage(): JSX.Element {
       </Modal>
 
       {versionDeletion.dialog}
+
+      <VersionDiffModal
+        methodologyId={methodologyId}
+        versions={all}
+        target={compareTarget}
+        onClose={() => setCompareTarget(null)}
+      />
     </Stack>
   );
 }
