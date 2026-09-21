@@ -15,7 +15,7 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// </summary>
 /// <remarks>
 /// ⚠ Саме на базі, а не на підробці: вся складність — у колі через
-/// <c>decimal(28,16)</c> (масштаб числа після читання інший, ніж при побудові)
+/// <c>decimal(34,16)</c> (масштаб числа після читання інший, ніж при побудові)
 /// і в порядку рядків, який первинний ключ дає алфавітним за кодом колонки.
 /// Обидва дефекти на підробці невидимі.
 /// </remarks>
@@ -95,7 +95,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
 
         await using var db = chain.CreateContext();
 
-        // Засновок відтворення: з `decimal(28,16)` число повертається з
+        // Засновок відтворення: з `decimal(34,16)` число повертається з
         // масштабом 16 — так само `Value` приходить із `calc.CalculationResult`
         // у мить побудови. Зламається це — зламається й відтворення.
         //
@@ -137,7 +137,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
         // оголошує як `decimal(18,2)`, і `5.0000000001` доїхало б як `5.00` —
         // «підміна» нічого б не змінила, а тест звинуватив би продукт.
         var touched = await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE rpt.ReportRow SET ValueNumeric = CAST({tampered} AS decimal(28,16)) WHERE SnapshotId = {snapshotId} AND ColumnCode = {column}");
+            $"UPDATE rpt.ReportRow SET ValueNumeric = CAST({tampered} AS decimal(34,16)) WHERE SnapshotId = {snapshotId} AND ColumnCode = {column}");
         Assert.Equal(1, touched);
 
         var now = await db.ReportRows.AsNoTracking()
@@ -157,7 +157,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
 
     /// <summary>
     /// Рядки з масштабом чисел МИТІ ПОБУДОВИ: ідентифікатори — з <c>long</c>
-    /// (масштаб 0), значення — з <c>decimal(28,16)</c> (масштаб 16). Ціле
+    /// (масштаб 0), значення — з <c>decimal(34,16)</c> (масштаб 16). Ціле
     /// значення взято навмисно: «5» проти «5.0000000000000000» — саме та пастка.
     /// </summary>
     private static List<ReportRow> LegacyRows(long snapshotId) =>
@@ -193,7 +193,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
 
                 // ⚠ Масштаб чисел — як при побудові: ідентифікатори цілі
                 // (масштаб 0), значення — дріб. Після кола через
-                // `decimal(28,16)` усе матиме масштаб 16, і сума мусить це
+                // `decimal(34,16)` усе матиме масштаб 16, і сума мусить це
                 // пережити.
                 Cell(id, "DocumentId", null, 4217L),
                 Cell(id, "RowKey", "row-1", null),

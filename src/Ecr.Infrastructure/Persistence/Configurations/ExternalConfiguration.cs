@@ -160,7 +160,7 @@ public sealed class RawDataPointConfiguration : IEntityTypeConfiguration<RawData
         builder.HasKey(x => x.Id);
         builder.Property(x => x.SourcePath).HasMaxLength(400).IsRequired();
         builder.Property(x => x.Timestamp).HasColumnName("Timestamp").HasColumnType("datetime2(3)");
-        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,16)");
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(34,16)");
         builder.Property(x => x.ValueString).HasMaxLength(1000);
         builder.Property(x => x.Quality).HasMaxLength(32);
         builder.Property(x => x.RetrievedAt).HasColumnType("datetime2(3)").IsRequired();

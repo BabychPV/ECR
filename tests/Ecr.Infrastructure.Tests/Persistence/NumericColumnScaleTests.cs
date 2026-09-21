@@ -46,10 +46,10 @@ public sealed class NumericColumnScaleTests(SqlServerFixture sql)
     public static TheoryData<string, string, string> Columns() => new()
     {
         { "doc.CellValue", "ValueNumeric", "decimal(34,16)" },
-        { "doc.DocumentIndexValue", "ValueNumeric", "decimal(28,16)" },
-        { "rpt.ReportRow", "ValueNumeric", "decimal(28,16)" },
-        { "ext.RawDataPoint", "ValueNumeric", "decimal(28,16)" },
-        { "dic.RegistryValue", "ValueNumeric", "decimal(28,16)" },
+        { "doc.DocumentIndexValue", "ValueNumeric", "decimal(34,16)" },
+        { "rpt.ReportRow", "ValueNumeric", "decimal(34,16)" },
+        { "ext.RawDataPoint", "ValueNumeric", "decimal(34,16)" },
+        { "dic.RegistryValue", "ValueNumeric", "decimal(34,16)" },
         { "calc.CalculationResult", "Value", "decimal(34,16)" },
         { "calc.CalculationInput", "Value", "decimal(34,16)" },
         { "calc.CalculationStep", "Value", "decimal(34,16)" },

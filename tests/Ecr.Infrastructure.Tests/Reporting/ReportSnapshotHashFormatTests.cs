@@ -14,7 +14,7 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// </summary>
 /// <remarks>
 /// Без бази: формат — чиста функція від рядків зрізу, і закріпити його треба
-/// ДО того, як <c>rpt.ReportRow.ValueNumeric</c> стане <c>decimal(28,16)</c>.
+/// ДО того, як <c>rpt.ReportRow.ValueNumeric</c> стане <c>decimal(34,16)</c>.
 /// Коло через базу перевіряють <c>ReportSnapshotVerifyTests</c> і
 /// <c>ReportSnapshotLayoutTests</c> — там же лежить незмінність суми зрізу IEC.
 /// </remarks>
@@ -66,7 +66,7 @@ public sealed class ReportSnapshotHashFormatTests
     public void Хвостові_нулі_масштабу_не_змінюють_суми()
     {
         // Те саме число з різним МАСШТАБОМ: «5.0» при побудові й
-        // «5.0000000000000000» після читання з `decimal(28,16)`.
+        // «5.0000000000000000» після читання з `decimal(34,16)`.
         Assert.Equal(
             Convert.ToHexString(ReportSnapshotBuilder.ComputeHash(Rows(("Value", null, 5.0m)))),
             Convert.ToHexString(

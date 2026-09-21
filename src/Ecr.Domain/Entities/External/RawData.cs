@@ -48,7 +48,7 @@ public sealed class RawDataPoint : Entity<long>
     public string SourcePath { get; private set; } = null!;
     public DateTime Timestamp { get; private set; }
 
-    /// <summary><c>decimal(28,16)</c>; <c>float</c> заборонений (D-30).</summary>
+    /// <summary><c>decimal(34,16)</c>; <c>float</c> заборонений (D-30).</summary>
     public decimal? ValueNumeric { get; private set; }
 
     public string? ValueString { get; private set; }
