@@ -41,6 +41,7 @@ import {
   mayEditContent,
   type FormulaDraft,
 } from '@/features/methodologies/draft';
+import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAction';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -175,6 +176,9 @@ export function MethodologyVersionsPage(): JSX.Element {
 
   const all = useMemo(() => versions.data ?? [], [versions.data]);
 
+  // BE-25: видалення чернетки — у `features/methodologies/`.
+  const versionDeletion = useDeleteVersionAction({ methodologyId, allowed: mayEdit });
+
   // ⚠ Обрана версія — стан, але за замовчуванням береться ЧЕРНЕТКА, а не
   // перша в переліку: екран існує заради редагування, і відкривати його на
   // версії, яку не можна правити, означало б щоразу починати з глухого кута.
@@ -307,6 +311,8 @@ export function MethodologyVersionsPage(): JSX.Element {
         }
       />
 
+      {versionDeletion.refusal}
+
       <AsyncBoundary<MethodologyDraftVersionDto[]>
         isPending={versions.isPending && known}
         error={versions.error}
@@ -397,6 +403,8 @@ export function MethodologyVersionsPage(): JSX.Element {
                           {t('methodologies.publish')}
                         </Button>
                       )}
+
+                      {versionDeletion.triggerFor(version)}
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -939,6 +947,8 @@ export function MethodologyVersionsPage(): JSX.Element {
           </Stack>
         )}
       </Modal>
+
+      {versionDeletion.dialog}
     </Stack>
   );
 }
