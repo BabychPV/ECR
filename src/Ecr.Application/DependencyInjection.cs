@@ -246,6 +246,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SaveCalculationBindingHandler>();
         services.AddScoped<Calculations.DeleteMethodologyVersionHandler>();
         services.AddScoped<Calculations.MethodologyCoverageHandler>();
+        services.AddScoped<Calculations.RuleCoverageHandler>();
         services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
         services.AddScoped<Documents.GetCalculationResultsHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();

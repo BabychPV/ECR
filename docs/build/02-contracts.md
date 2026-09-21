@@ -2571,6 +2571,22 @@ public interface IResourceNameResolver
 }
 ```
 
+#### `IRuleCoverageReader`
+
+Матриця покриття «рядки × правила» (ФВ-13.9): живі рядки примірників таблиць
+прив'язок методології за вікно періодів, згруповані в SQL за значеннями колонок,
+які згадують правила, з лічильниками рядків і різних документів. Класифікацію
+робить застосунок (`MethodologyRuleMatcher.Classify`), не порт.
+
+```csharp
+public interface IRuleCoverageReader
+{
+    public Task<IReadOnlyList<RuleCoverageCombination>> ReadAsync(
+        IReadOnlyList<int> tableDefIds, IReadOnlyList<int> columnDefIds,
+        int periodFrom, int periodTo, int limit, CancellationToken ct);
+}
+```
+
 #### `ISecretProvider`
 
 Значення секрету за його іменем.
@@ -3161,6 +3177,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/tests/{code}` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/modes` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/coverage` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |

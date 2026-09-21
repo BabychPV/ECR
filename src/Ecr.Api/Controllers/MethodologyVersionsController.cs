@@ -17,6 +17,7 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class MethodologyVersionsController(
     MethodologyCoverageHandler coverage,
+    RuleCoverageHandler ruleCoverage,
     CompareMethodologyVersionsHandler compare,
     DeleteMethodologyVersionHandler delete) : ControllerBase
 {
@@ -31,6 +32,28 @@ public sealed class MethodologyVersionsController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<MethodologyCoverageDto>> Coverage(int id, int vid, CancellationToken ct)
         => Ok(await coverage.HandleAsync(id, vid, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Матриця покриття «рядки реальних даних × правила» (ФВ-13.9). Право <c>Calculation.View</c>.
+    /// </summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="tableDefId">Лише одна з таблиць прив'язок.</param>
+    /// <param name="periodFrom">Нижня межа вікна періодів; типово — початок минулого року.</param>
+    /// <param name="periodTo">Верхня межа; типово — кінець поточного року.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/versions/{vid:int}/rule-coverage")]
+    [ProducesResponseType<RuleCoverageDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RuleCoverageDto>> RuleCoverage(
+        int id,
+        int vid,
+        [FromQuery] int? tableDefId,
+        [FromQuery] int? periodFrom,
+        [FromQuery] int? periodTo,
+        CancellationToken ct)
+        => Ok(await ruleCoverage.HandleAsync(id, vid, tableDefId, periodFrom, periodTo, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Різниця версії з базовою: формули, константи, тести. Право <c>Calculation.View</c>.
