@@ -443,6 +443,9 @@ USING (VALUES
     (N'login.password',    N'en', N'Password', 0),
     (N'login.submit',      N'en', N'Sign in', 0),
     (N'login.hint',        N'en', N'Use your Windows account, or the local account issued to you.', 0),
+    -- ⚠ Публічна область (0): банер показано ДО входу, коли приватний зріз
+    -- каталогу ще недоступний.
+    (N'login.sessionInvalidated', N'en', N'Your session has ended because your permissions or password changed. Sign in again.', 0),
     (N'err.ECR-AUTH-0401', N'en', N'Sign in to continue.', 0),
     (N'err.ECR-AUTH-0403', N'en', N'You do not have permission for this action.', 0),
     (N'err.ECR-AUTH-0403.requiresPermission', N'en', N'Requires permission', 1),
