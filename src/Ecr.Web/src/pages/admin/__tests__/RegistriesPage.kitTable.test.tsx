@@ -176,6 +176,29 @@ describe('RegistriesPage: перелік записів на таблиці на
     expect(codeColumn()).toEqual(['C_GRAM', 'B_TONNE', 'A_KILOGRAM']);
   });
 
+  it('ідентифікатор батька показано як ідентифікатор, а не як число з розрядами', async () => {
+    /*
+     * ⛔ Пастка самого набору, ширша за проп `num`: `Cell` жене БУДЬ-ЯКЕ числове
+     * поле через `formatNumber`, тож ідентифікатор `1234` виїхав би на екран як
+     * `1,234` — число, якого в базі немає й за яким нічого не знайти. Колонка
+     * закривається власним `render`, і саме його стереже цей випадок.
+     *
+     * ⚠ Чотиризначний батько навмисно: на `7` роздільник не з'являється, і
+     * твердження було б зеленим із фіксом і без нього.
+     */
+    mockFetch([
+      { id: 9, code: 'CHILD', display: 'Child', parentEntryId: 1234, validFrom: null, validTo: null },
+    ]);
+    await loadCatalog('en', 'private');
+
+    show();
+
+    await screen.findByText('Child');
+
+    expect(screen.getByText('1234')).toBeDefined();
+    expect(screen.queryByText('1,234')).toBeNull();
+  });
+
   it('довідник без записів — «записів немає», і НЕ «фільтр нічого не знайшов»', async () => {
     mockFetch([]);
     await loadCatalog('en', 'private');
