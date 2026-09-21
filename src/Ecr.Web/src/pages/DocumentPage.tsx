@@ -438,50 +438,84 @@ export function DocumentPage(): JSX.Element {
             </Tabs.Tab>
           ))}
         </Tabs.List>
+
+        {/* ⛔ Кожна вкладка має СВОЮ панель: Mantine ставить вкладці
+            `aria-controls` на id панелі, і без панелі посилання висіло в
+            повітрі (axe `aria-valid-attr-value`, critical; спіймано, щойно
+            гейт почав чекати даних). Неактивні — порожні: `keepMounted` у
+            `Tabs` не ввімкнено, тож вміст вони не рендерять.
+
+            ⚠ Активна панель — ОКРЕМИЙ елемент на сталому місці дерева, а не
+            елемент того ж списку з ключем аркуша: інакше перемикання аркуша
+            перемонтовувало б сітку (важкий RevoGrid і стан лінивого
+            монтажу). Так, як і раніше, сітка лише отримує нові `tables`. */}
+        {sheets
+          .filter((s) => s.code !== active?.code)
+          .map((s) => (
+            <Tabs.Panel key={s.code} value={s.code}>
+              {null}
+            </Tabs.Panel>
+          ))}
+
+        {/* ⚠ `pt="md"` і `Stack` відтворюють відступи, які раніше давав
+            зовнішній `Stack` сторінки між вкладками й сіткою. */}
+        {active !== undefined && (
+          <Tabs.Panel value={active.code} pt="md">
+            <Stack>
+              {/* ⚠ Три стани чанка сітки замість `<Suspense>`: вантажиться —
+                  заглушка ПО ОДНІЙ НА ТАБЛИЦЮ (кількість таблиць відома до
+                  завантаження чанка, і одна смужка замість дев'яноста однієї
+                  збрехала б про розмір сторінки, яка зараз з'явиться); не
+                  завантажився — помилка з кнопкою «повторити», бо порожній
+                  екран із заглушками тут не відрізнити від того самого
+                  дефекту, який ця картка закриває; завантажився — таблиці. */}
+              {gridModule.error !== null && (
+                <ErrorAlert error={gridModule.error} onRetry={gridModule.reload} />
+              )}
+
+              {/* ⚠ Заглушка чанка повторює розкладку `SheetTables`: заголовок
+                  таблиці ПЛЮС смужка зарезервованої висоти. Обидва — не
+                  прикраса. Заголовок робить осмисленою прокрутку по ще не
+                  завантаженій сторінці (і з'являється він одразу, а не після
+                  чанка сітки), а висота слота мусить збігатися з тією, яку
+                  тримає `SheetTables` (`TableSlotMinHeight`), інакше поява
+                  чанка перекладає всю сторінку під курсором. Числове значення
+                  тут не імпортується з модуля сітки навмисно: це той самий
+                  модуль, який ця гілка й чекає, і статичний імпорт із нього
+                  повернув би `RevoGrid` у чанк маршруту (`D-132`). */}
+              {gridModule.error === null && gridModule.component === null && (
+                <Stack gap="xs">
+                  {active.tables.map((table) => (
+                    <Stack
+                      key={table.tableInstanceId}
+                      gap="xs"
+                      style={{ minHeight: 'calc(70vh + 96px)' }}
+                    >
+                      <Text fw={600}>{localized(table.tableNameL10n)}</Text>
+                      <Skeleton height="60vh" radius="sm" />
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+
+              {gridModule.component !== null && (
+                <gridModule.component
+                  documentId={documentId}
+                  periodKey={periodKey}
+                  readOnly={readOnly}
+                  tables={active.tables}
+                />
+              )}
+            </Stack>
+          </Tabs.Panel>
+        )}
       </Tabs>
 
-      {/* ⚠ Три стани чанка сітки замість `<Suspense>`: вантажиться —
-          заглушка ПО ОДНІЙ НА ТАБЛИЦЮ (кількість таблиць відома до
-          завантаження чанка, і одна смужка замість дев'яноста однієї
-          збрехала б про розмір сторінки, яка зараз з'явиться); не
-          завантажився — помилка з кнопкою «повторити», бо порожній екран із
-          заглушками тут не відрізнити від того самого дефекту, який ця
-          картка закриває; завантажився — таблиці. */}
-      {gridModule.error !== null && (
+      {/* ⚠ Без аркушів панелі немає, а відмова чанка має лишатися видимою —
+          як і до появи панелі. Заглушка й сітка без аркуша не малювалися й
+          раніше. */}
+      {active === undefined && gridModule.error !== null && (
         <ErrorAlert error={gridModule.error} onRetry={gridModule.reload} />
-      )}
-
-      {/* ⚠ Заглушка чанка повторює розкладку `SheetTables`: заголовок таблиці
-          ПЛЮС смужка зарезервованої висоти. Обидва — не прикраса. Заголовок
-          робить осмисленою прокрутку по ще не завантаженій сторінці (і
-          з'являється він одразу, а не після чанка сітки), а висота слота
-          мусить збігатися з тією, яку тримає `SheetTables`
-          (`TableSlotMinHeight`), інакше поява чанка перекладає всю сторінку
-          під курсором. Числове значення тут не імпортується з модуля сітки
-          навмисно: це той самий модуль, який ця гілка й чекає, і статичний
-          імпорт із нього повернув би `RevoGrid` у чанк маршруту (`D-132`). */}
-      {gridModule.error === null && gridModule.component === null && (
-        <Stack gap="xs">
-          {active?.tables.map((table) => (
-            <Stack
-              key={table.tableInstanceId}
-              gap="xs"
-              style={{ minHeight: 'calc(70vh + 96px)' }}
-            >
-              <Text fw={600}>{localized(table.tableNameL10n)}</Text>
-              <Skeleton height="60vh" radius="sm" />
-            </Stack>
-          ))}
-        </Stack>
-      )}
-
-      {gridModule.component !== null && active !== undefined && (
-        <gridModule.component
-          documentId={documentId}
-          periodKey={periodKey}
-          readOnly={readOnly}
-          tables={active.tables}
-        />
       )}
 
       {/* ⛔ Числа методологій — окремо від сітки, і це `D-69`: у комірку
