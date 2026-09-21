@@ -19,6 +19,7 @@ import { BrandMark } from '@/shared/ui/BrandMark';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, EcrApiError, LOGIN_REASON_PARAM } from '@/api/client';
 import type { LocalLoginRequest } from '@/api/types';
+import { safeReturnPath } from './safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
   isCatalogFailed,
@@ -139,7 +140,8 @@ export function LoginPage(): JSX.Element {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
 
-      navigate('/', { replace: true });
+      // Повернення туди, де людина була, — лише на внутрішній шлях.
+      navigate(safeReturnPath(searchParams.get('from')), { replace: true });
     } catch (failure) {
       // ⚠ Текст помилки — від сервера. Невірний пароль і неіснуючий
       // користувач дають ОДНАКОВУ відповідь: різниця між ними — це спосіб
