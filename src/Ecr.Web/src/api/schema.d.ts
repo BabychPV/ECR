@@ -13682,6 +13682,12 @@ export interface components {
             error: null | string;
             /** @description Ідентифікатор. */
             jobId: string;
+            /**
+             * Format: int32
+             * @description Скільки спроб задача має загалом: перша + автоматичні ретраї (BE-08);
+             *     `null` — стан не з журналу (`Unknown`/`Unavailable`).
+             */
+            maxAttempts?: null | number;
             /** @description Повідомлення прогресу. */
             message: null | string;
             /**
@@ -13701,10 +13707,16 @@ export interface components {
             attempt?: null | number;
             /** @description Кореляція з логом і запитом-постановником (BE-08). */
             correlationId?: null | string;
+            /** @description Ім'я автора; `null` — системна задача (BE-08). */
+            createdByDisplayName?: null | string;
             /** @description Код задачі (тип). */
             jobCode: string;
             /** @description Ідентифікатор. */
             jobId: string;
+            /** @description Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться
+             *     ОДИН раз на весь перелік (`JobProgressMessageResolver.ResolveManyAsync`),
+             *     а не на кожен рядок. */
+            message?: null | string;
             /**
              * Format: int32
              * @description Прогрес у відсотках.

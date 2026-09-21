@@ -3392,6 +3392,14 @@
             "description": "Ідентифікатор.",
             "type": "string"
           },
+          "maxAttempts": {
+            "description": "Скільки спроб задача має загалом: перша + автоматичні ретраї (BE-08);\n`null` — стан не з журналу (`Unknown`/`Unavailable`).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "message": {
             "description": "Повідомлення прогресу.",
             "type": [
@@ -3436,6 +3444,13 @@
               "string"
             ]
           },
+          "createdByDisplayName": {
+            "description": "Ім'я автора; `null` — системна задача (BE-08).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "jobCode": {
             "description": "Код задачі (тип).",
             "type": "string"
@@ -3443,6 +3458,13 @@
           "jobId": {
             "description": "Ідентифікатор.",
             "type": "string"
+          },
+          "message": {
+            "description": "Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться\nОДИН раз на весь перелік (`JobProgressMessageResolver.ResolveManyAsync`),\nа не на кожен рядок.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "percent": {
             "description": "Прогрес у відсотках.",
