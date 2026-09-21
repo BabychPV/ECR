@@ -2046,6 +2046,7 @@ USING (VALUES
     (N'security.emailHint',              N'en', N'Without it no notification reaches this person, and the alerts switch stays off.', 1),
     (N'security.oneTimePassword',        N'en', N'One-time password', 1),
     (N'security.oneTimePasswordHint',    N'en', N'You will have to pass it on yourself. The server neither generates nor returns passwords, and the account must change it at first sign-in.', 1),
+    (N'security.lastSignIn',             N'en', N'Last sign-in', 1),
 
     -- «Мої групи»: чому в мене немає доступу (`H-21`).
     (N'nav.myGroups',                    N'en', N'My groups', 1),
