@@ -1,4 +1,5 @@
 import { apiFetch } from '@/api/client';
+import type { components } from '@/api/schema';
 import type {
   CalculationBindingDto,
   CalculationLevel,
@@ -382,5 +383,45 @@ export function calculationResults(
 ): Promise<CalculationResultDto[]> {
   return apiFetch<CalculationResultDto[]>(
     `/api/v1/documents/${String(documentId)}/calculation-results?periodKey=${String(periodKey)}`,
+  );
+}
+
+/** Покриття версії (`BE-25`): вихід → колонки, і колонки, що чекають на вихід, якого версія не оголошує. */
+export type MethodologyCoverageDto = components['schemas']['MethodologyCoverageDto'];
+
+/** Різниця двох версій (`BE-25`): формули, константи, тести. */
+export type MethodologyVersionDiffDto = components['schemas']['MethodologyVersionDiffDto'];
+
+/** Матриця покриття версії. Вимкнені прив'язки сервер не рахує ні покриттям, ні очікуванням. */
+export function methodologyCoverage(
+  methodologyId: number,
+  versionId: number,
+): Promise<MethodologyCoverageDto> {
+  return apiFetch<MethodologyCoverageDto>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/coverage`,
+  );
+}
+
+/** Що змінилося у версії `versionId` порівняно з `baseVersionId` тієї самої методології. */
+export function methodologyVersionDiff(
+  methodologyId: number,
+  versionId: number,
+  baseVersionId: number,
+): Promise<MethodologyVersionDiffDto> {
+  return apiFetch<MethodologyVersionDiffDto>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/diff?baseVersionId=${String(baseVersionId)}`,
+  );
+}
+
+/**
+ * Видаляє версію-чернетку.
+ *
+ * ⚠ Опублікована, виведена з обігу або вже використана в розрахунку — `409`
+ * `ECR-CALC-0409`, причина в `reason` (`Published`, `Deprecated`, `UsedInCalculations`).
+ */
+export function deleteMethodologyVersion(methodologyId: number, versionId: number): Promise<void> {
+  return apiFetch<void>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}`,
+    { method: 'DELETE' },
   );
 }

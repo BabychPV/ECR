@@ -3858,6 +3858,125 @@
         ],
         "type": "object"
       },
+      "MethodologyCoverageDto": {
+        "description": "Покриття версії: які виходи куди лягають і які колонки чекають на вихід (`BE-25`).",
+        "properties": {
+          "methodologyVersionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "outputs": {
+            "description": "Кожен оголошений вихід з АКТИВНИМИ прив'язками; порожній перелік — вихід рахується,\nале не лягає нікуди.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyOutputCoverageDto"
+            },
+            "type": "array"
+          },
+          "waitingBindings": {
+            "description": "Активні прив'язки, чий `outputCode` ця версія не оголошує: колонка чекає на\nвихід, якого немає, і лишиться порожньою.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationBindingDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "methodologyVersionId",
+          "outputs",
+          "waitingBindings"
+        ],
+        "type": "object"
+      },
+      "MethodologyDiffChange": {
+        "description": "Вид зміни.",
+        "enum": [
+          "Added",
+          "Removed",
+          "Changed"
+        ]
+      },
+      "MethodologyDiffItemDto": {
+        "description": "Одна відмінність.",
+        "properties": {
+          "after": {
+            "description": "Головне значення в новій версії.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "before": {
+            "description": "Головне значення в базовій версії (вираз, значення константи, очікування тесту).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "category": {
+            "description": "Константа: категорія звуження; `null` — спільна або не константа.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "change": {
+            "$ref": "#/components/schemas/MethodologyDiffChange",
+            "description": "Додано, прибрано чи змінено."
+          },
+          "changedFields": {
+            "description": "Які поля змінено; порожньо для доданого й прибраного.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "code": {
+            "description": "Код запису.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MethodologyDiffItemKind",
+            "description": "Формула, константа чи тест."
+          },
+          "substanceEntryId": {
+            "description": "Константа: речовина звуження.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "validFrom": {
+            "description": "Константа: перший чинний день варіанта.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "category",
+          "substanceEntryId",
+          "validFrom",
+          "change",
+          "changedFields",
+          "before",
+          "after"
+        ],
+        "type": "object"
+      },
+      "MethodologyDiffItemKind": {
+        "description": "Що саме порівнюється у двох версіях.",
+        "enum": [
+          "Formula",
+          "Constant",
+          "TestCase"
+        ]
+      },
       "MethodologyDraftVersionDto": {
         "description": "Версія методології в **конфігураторі** — на відміну від\nMethodologyVersionDto, тут є і чернетки.",
         "properties": {
@@ -4041,6 +4160,27 @@
         "required": [
           "before",
           "after"
+        ],
+        "type": "object"
+      },
+      "MethodologyOutputCoverageDto": {
+        "description": "Один вихід версії і колонки, куди він лягає.",
+        "properties": {
+          "bindings": {
+            "description": "Активні прив'язки цього виходу.",
+            "items": {
+              "$ref": "#/components/schemas/CalculationBindingDto"
+            },
+            "type": "array"
+          },
+          "code": {
+            "description": "Код виходу.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "bindings"
         ],
         "type": "object"
       },
@@ -4333,6 +4473,34 @@
           "inputJson",
           "expectedJson",
           "tolerance"
+        ],
+        "type": "object"
+      },
+      "MethodologyVersionDiffDto": {
+        "description": "Різниця двох версій методології — лише читання (`BE-25`, макет `mv-compare`).",
+        "properties": {
+          "baseVersionId": {
+            "description": "Версія, з якою порівнюють («було»).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "items": {
+            "description": "Відмінності; порожній перелік — версії однакові за цими наборами.",
+            "items": {
+              "$ref": "#/components/schemas/MethodologyDiffItemDto"
+            },
+            "type": "array"
+          },
+          "methodologyVersionId": {
+            "description": "Версія, яку порівнюють («стало»).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "baseVersionId",
+          "methodologyVersionId",
+          "items"
         ],
         "type": "object"
       },
@@ -15577,6 +15745,84 @@
         ]
       }
     },
+    "/api/v1/methodologies/{id}/versions/{vid}": {
+      "delete": {
+        "description": "Опублікована, виведена з обігу або вже використана в розрахунку версія —\n`409 ECR-CALC-0409` із причиною в `reason` (рішення домену).",
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Видаляє версію-чернетку. Право `Calculation.EditFormula`.",
+        "tags": [
+          "MethodologyVersions"
+        ]
+      }
+    },
     "/api/v1/methodologies/{id}/versions/{vid}/constants": {
       "get": {
         "parameters": [
@@ -15782,6 +16028,163 @@
         "summary": "Записує константу версії-чернетки. Право `Calculation.EditConstant`.",
         "tags": [
           "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/coverage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCoverageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCoverageDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyCoverageDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Матриця покриття версії: вихід → колонки. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyVersions"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/diff": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія «стало».",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія «було» тієї самої методології.",
+            "in": "query",
+            "name": "baseVersionId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyVersionDiffDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyVersionDiffDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/MethodologyVersionDiffDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Різниця версії з базовою: формули, константи, тести. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyVersions"
         ]
       }
     },
@@ -25577,6 +25980,9 @@
     },
     {
       "name": "Methodologies"
+    },
+    {
+      "name": "MethodologyVersions"
     },
     {
       "name": "NotificationChannels"

@@ -3886,6 +3886,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє версію-чернетку. Право `Calculation.EditFormula`.
+         * @description Опублікована, виведена з обігу або вже використана в розрахунку версія —
+         *     `409 ECR-CALC-0409` із причиною в `reason` (рішення домену).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/constants": {
         parameters: {
             query?: never;
@@ -4015,6 +4080,117 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Матриця покриття версії: вихід → колонки. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCoverageDto"];
+                        "text/json": components["schemas"]["MethodologyCoverageDto"];
+                        "text/plain": components["schemas"]["MethodologyCoverageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Різниця версії з базовою: формули, константи, тести. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Версія «було» тієї самої методології. */
+                    baseVersionId?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія «стало». */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyVersionDiffDto"];
+                        "text/json": components["schemas"]["MethodologyVersionDiffDto"];
+                        "text/plain": components["schemas"]["MethodologyVersionDiffDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -13305,6 +13481,57 @@ export interface components {
              */
             value: null | string;
         };
+        /** @description Покриття версії: які виходи куди лягають і які колонки чекають на вихід (`BE-25`). */
+        MethodologyCoverageDto: {
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            methodologyVersionId: number;
+            /** @description Кожен оголошений вихід з АКТИВНИМИ прив'язками; порожній перелік — вихід рахується,
+             *     але не лягає нікуди. */
+            outputs: components["schemas"]["MethodologyOutputCoverageDto"][];
+            /** @description Активні прив'язки, чий `outputCode` ця версія не оголошує: колонка чекає на
+             *     вихід, якого немає, і лишиться порожньою. */
+            waitingBindings: components["schemas"]["CalculationBindingDto"][];
+        };
+        /**
+         * @description Вид зміни.
+         * @enum {unknown}
+         */
+        MethodologyDiffChange: "Added" | "Removed" | "Changed";
+        /** @description Одна відмінність. */
+        MethodologyDiffItemDto: {
+            /** @description Головне значення в новій версії. */
+            after: null | string;
+            /** @description Головне значення в базовій версії (вираз, значення константи, очікування тесту). */
+            before: null | string;
+            /** @description Константа: категорія звуження; `null` — спільна або не константа. */
+            category: null | string;
+            /** @description Додано, прибрано чи змінено. */
+            change: components["schemas"]["MethodologyDiffChange"];
+            /** @description Які поля змінено; порожньо для доданого й прибраного. */
+            changedFields: string[];
+            /** @description Код запису. */
+            code: string;
+            /** @description Формула, константа чи тест. */
+            kind: components["schemas"]["MethodologyDiffItemKind"];
+            /**
+             * Format: int64
+             * @description Константа: речовина звуження.
+             */
+            substanceEntryId: null | number;
+            /**
+             * Format: date
+             * @description Константа: перший чинний день варіанта.
+             */
+            validFrom: null | string;
+        };
+        /**
+         * @description Що саме порівнюється у двох версіях.
+         * @enum {unknown}
+         */
+        MethodologyDiffItemKind: "Formula" | "Constant" | "TestCase";
         /** @description Версія методології в **конфігураторі** — на відміну від
          *     MethodologyVersionDto, тут є і чернетки. */
         MethodologyDraftVersionDto: {
@@ -13398,6 +13625,13 @@ export interface components {
             before: components["schemas"]["NumericMode"];
             /** @description Чи змінився режим. */
             isChanged?: boolean;
+        };
+        /** @description Один вихід версії і колонки, куди він лягає. */
+        MethodologyOutputCoverageDto: {
+            /** @description Активні прив'язки цього виходу. */
+            bindings: components["schemas"]["CalculationBindingDto"][];
+            /** @description Код виходу. */
+            code: string;
         };
         /** @description Оголошений вихід версії — те, що методологія повертає (ФВ-16.6). */
         MethodologyOutputDto: {
@@ -13554,6 +13788,21 @@ export interface components {
              * @description Допуск порівняння; нуль — точна рівність.
              */
             tolerance: string;
+        };
+        /** @description Різниця двох версій методології — лише читання (`BE-25`, макет `mv-compare`). */
+        MethodologyVersionDiffDto: {
+            /**
+             * Format: int32
+             * @description Версія, з якою порівнюють («було»).
+             */
+            baseVersionId: number;
+            /** @description Відмінності; порожній перелік — версії однакові за цими наборами. */
+            items: components["schemas"]["MethodologyDiffItemDto"][];
+            /**
+             * Format: int32
+             * @description Версія, яку порівнюють («стало»).
+             */
+            methodologyVersionId: number;
         };
         /** @description Версія методології. */
         MethodologyVersionDto: {
