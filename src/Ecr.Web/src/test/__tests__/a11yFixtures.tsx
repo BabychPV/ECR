@@ -227,8 +227,14 @@ function seededStrings(): Record<string, string> {
     'utf8',
   );
 
+  // Лише блок MERGE: секції «змінені тексти»/«прибрані ключі» над ним мають
+  // той самий вигляд рядка і несуть старі значення та видалені ключі.
+  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
+  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
+  if (start < 0 || end < 0) throw new Error('09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString');
+
   const strings: Record<string, string> = {};
-  for (const row of seed.matchAll(/\(N'([^']+)',\s*N'[a-z]{2}',\s*N'([^']*)'/g)) {
+  for (const row of seed.slice(start, end).matchAll(/\(N'([^']+)',\s*N'[a-z]{2}',\s*N'([^']*)'/g)) {
     strings[row[1] ?? ''] = row[2] ?? '';
   }
 
