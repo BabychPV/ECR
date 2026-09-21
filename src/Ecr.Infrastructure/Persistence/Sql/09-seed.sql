@@ -462,6 +462,11 @@ USING (VALUES
     (N'err.ECR-UOM-0404.unitId', N'en', N'There is no unit with Id {id}.', 1),
     (N'err.ECR-UOM-0409',  N'en', N'Unit is in use', 1),
     (N'err.ECR-UOM-0409.unitInUse', N'en', N'Unit "{code}" cannot be removed: it is referenced in {total} place(s).', 1),
+    -- BE-15: зміна одиниці (`PUT /api/v1/units/{id}`).
+    (N'err.ECR-UOM-0409.unitChanged', N'en', N'Someone else changed unit "{code}" after you read it: reload it and repeat the change.', 1),
+    (N'err.ECR-UOM-0409.unitFactorInUse', N'en', N'The factor and offset of unit "{code}" cannot change: it is referenced in {total} place(s), and stored values would silently convert to different numbers.', 1),
+    (N'err.ECR-REQ-0422.unitIfMatch', N'en', N'This request needs an If-Match header carrying the rowVersion of the unit you read.', 1),
+    (N'err.ECR-REQ-0422.unitInvalid', N'en', N'Unit "{code}" needs a symbol and a name in at least one language, each up to 200 characters.', 1),
     (N'err.validityWindowEmpty', N'en', N'Empty validity window: the exclusive end {to} is not later than the start {from}.', 1),
     (N'err.ECR-REQ-0422.auditWindowOrder',   N'en', N'The end of the audit window must be later than the start.', 1),
     (N'err.ECR-REQ-0422.auditWindowTooWide', N'en', N'The audit window is wider than {maxDays} days: the request would scan every partition.', 1),

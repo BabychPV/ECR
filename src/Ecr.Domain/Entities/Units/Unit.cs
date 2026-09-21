@@ -45,6 +45,30 @@ public sealed class Unit
         IsActive = true;
     }
 
+    /// <summary>Змінює позначення, назву і коефіцієнти переходу.</summary>
+    /// <remarks>
+    /// Код, розмірність і ознака базової не змінюються: за кодом на одиницю
+    /// посилаються формули, а зміна розмірності — це вже інша одиниця.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Множник ≤ 0 або базова одиниця отримує множник ≠ 1 чи зсув ≠ 0.
+    /// </exception>
+    public void Update(LocalizedText symbol, LocalizedText name, decimal factorToBase, decimal offsetToBase)
+    {
+        if (factorToBase <= 0m || (IsBase && (factorToBase != 1m || offsetToBase != 0m)))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(factorToBase),
+                factorToBase,
+                "Множник мусить бути додатним, а базова одиниця — лишатися з множником 1 і зсувом 0.");
+        }
+
+        SymbolL10n = symbol;
+        NameL10n = name;
+        FactorToBase = factorToBase;
+        OffsetToBase = offsetToBase;
+    }
+
     public int Id { get; private set; }
     public string Code { get; private set; } = null!;
     public LocalizedText SymbolL10n { get; private set; } = null!;

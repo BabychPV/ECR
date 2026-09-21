@@ -201,6 +201,8 @@ public static class DependencyInjection
         services.AddScoped<Units.CreateUnitHandler>();
         services.AddScoped<Units.UnitUsageHandler>();
         services.AddScoped<Units.DeleteUnitHandler>();
+        services.AddScoped<Units.GetUnitHandler>();
+        services.AddScoped<Units.UpdateUnitHandler>();
 
         // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
         // мапінг і історія опису.

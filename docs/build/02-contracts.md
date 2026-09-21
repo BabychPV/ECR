@@ -2954,7 +2954,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
 | `ECR-UOM-4091` | 422 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
-| `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15) |
+| `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15), **або** не змінюються її множник і зсув (`unitFactorInUse`), **або** одиницю змінили між читанням і записом — `If-Match` не збігся з `rowVersion` (`unitChanged`, `UpdateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
 | `ECR-CALC-0409` | 409 | стан методології чи версії не дозволяє дію. Заголовок нейтральний, випадок каже `messageKey`-подробиця (як у `ECR-JOB-0409`): публікація автором версії (D-40, `authorCannotPublish`), погодження власного перерахунку закритого періоду (D-40, `ownRecalculationApproval`), видалення не-чернетки (`versionNotDraft`) або версії, якою вже рахували (`versionUsedInCalculations`, BE-25); також зміна не-чернетки, чужий дочірній запис, зайнятий номер версії чи дата чинності |
 | `ECR-CALC-0422` | 422 | публікація без зеленого тесту (ФВ-9.12) |
@@ -3120,6 +3120,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/units/convert` | — | 4 |
 | `GET` | `/api/v1/units/{id}/usage` | `Uom.EditCatalog` | 4 |
 | `DELETE` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
+| `GET` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
+| `PUT` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
