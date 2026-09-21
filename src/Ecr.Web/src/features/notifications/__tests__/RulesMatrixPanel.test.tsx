@@ -38,6 +38,7 @@ const Channels: NotificationChannel[] = [
     modifiedAt: '2026-09-01T10:00:00Z',
     settings: { recipients: ['ops@corp.example'] },
     transportFromConfiguration: true,
+    transportConfigured: true,
   },
   {
     id: 9,
@@ -48,6 +49,7 @@ const Channels: NotificationChannel[] = [
     modifiedAt: '2026-09-01T10:00:00Z',
     settings: { title: 'ECR' },
     transportFromConfiguration: false,
+    transportConfigured: true,
   },
 ];
 

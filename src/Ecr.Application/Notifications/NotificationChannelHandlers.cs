@@ -74,10 +74,17 @@ public sealed record NotificationChannelSettingsInput(
 /// а не лишати порожнє місце там, де колись було поле. <c>false</c> для Teams,
 /// де адреса доставки живе в секреті САМОГО каналу.
 /// </param>
+/// <param name="TransportConfigured">
+/// Чи є канал, чим доставляти. Пошта — <see cref="INotificationSender.IsConfigured"/>,
+/// те саме джерело, що <c>notificationTransport.isConfigured</c> у <c>/health/facts</c>.
+/// Teams — <see cref="HasSecret"/>: секрет вебхука і Є його адресою, іншого
+/// налаштування транспорту в Teams немає. ⛔ Лише булеве: хост, адресант чи порт
+/// сюди не йдуть з тієї ж причини, з якої секрет write-only.
+/// </param>
 public sealed record NotificationChannelView(
     int Id, NotificationChannelKind Kind, string Name, bool IsEnabled,
     NotificationChannelSettings Settings, bool HasSecret, DateTime ModifiedAt,
-    bool TransportFromConfiguration);
+    bool TransportFromConfiguration, bool TransportConfigured);
 
 /// <summary>Наслідок пробного повідомлення.</summary>
 /// <param name="Ok">Чи прийняв канал повідомлення.</param>
@@ -87,7 +94,7 @@ public sealed record NotificationTestResult(bool Ok, string? Error, string? Mess
 
 /// <summary>Перелік каналів. Право <c>System.ManageNotifications</c>.</summary>
 public sealed class ListNotificationChannelsHandler(
-    INotificationStore store, IAccessDecisionService access, ICurrentUser currentUser)
+    INotificationStore store, INotificationSender sender, IAccessDecisionService access, ICurrentUser currentUser)
 {
     /// <summary>Право на все керування сповіщеннями.</summary>
     public const string Permission = "System.ManageNotifications";
@@ -104,15 +111,19 @@ public sealed class ListNotificationChannelsHandler(
 
         var channels = await store.ListChannelsAsync(ct).ConfigureAwait(false);
 
-        return [.. channels.Select(ToView)];
+        return [.. channels.Select(c => ToView(c, sender.IsConfigured))];
     }
 
-    internal static NotificationChannelView ToView(NotificationChannel channel)
+    /// <summary>Рядок екрана з сутності.</summary>
+    /// <param name="channel">Канал.</param>
+    /// <param name="smtpConfigured"><see cref="INotificationSender.IsConfigured"/> процесу.</param>
+    internal static NotificationChannelView ToView(NotificationChannel channel, bool smtpConfigured)
         => new(
             channel.Id, channel.Kind, channel.Name, channel.IsEnabled,
             JsonSerializer.Deserialize<NotificationChannelSettings>(channel.SettingsJson, Json) ?? new(),
             channel.HasSecret, channel.ModifiedAt,
-            channel.Kind == NotificationChannelKind.Smtp);
+            channel.Kind == NotificationChannelKind.Smtp,
+            channel.Kind == NotificationChannelKind.Smtp ? smtpConfigured : channel.HasSecret);
 
     internal static async Task<NotificationChannel> FindAsync(INotificationStore store, int id, CancellationToken ct)
         => await store.FindChannelAsync(id, ct).ConfigureAwait(false)
@@ -141,8 +152,8 @@ public sealed class ListNotificationChannelsHandler(
 
 /// <summary>Створення і зміна каналу. Право <c>System.ManageNotifications</c>.</summary>
 public sealed class SaveNotificationChannelHandler(
-    INotificationStore store, IAccessDecisionService access, IUnitOfWork uow, IAuditWriter audit,
-    ICurrentUser currentUser, IClock clock)
+    INotificationStore store, INotificationSender sender, IAccessDecisionService access, IUnitOfWork uow,
+    IAuditWriter audit, ICurrentUser currentUser, IClock clock)
 {
     /// <summary>Створює ввімкнений канал без секрету.</summary>
     public async Task<NotificationChannelView> CreateAsync(
@@ -166,7 +177,7 @@ public sealed class SaveNotificationChannelHandler(
             new { name = channel.Name, kind = kind.ToString(), settings }, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return ListNotificationChannelsHandler.ToView(channel);
+        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured);
     }
 
     /// <summary>Змінює назву, стан і несекретні параметри; транспорт і секрет не чіпає.</summary>
@@ -185,7 +196,7 @@ public sealed class SaveNotificationChannelHandler(
             new { id, name = channel.Name, isEnabled, settings }, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return ListNotificationChannelsHandler.ToView(channel);
+        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured);
     }
 
     private async Task<string> ValidateAsync(
@@ -274,7 +285,8 @@ public sealed class DeleteNotificationChannelHandler(
 /// </remarks>
 public sealed class ReplaceNotificationChannelSecretHandler(
     INotificationStore store, INotificationSecretProtector protector, WebhookUrlPolicy webhooks,
-    IAccessDecisionService access, IUnitOfWork uow, IAuditWriter audit, ICurrentUser currentUser, IClock clock)
+    INotificationSender sender, IAccessDecisionService access, IUnitOfWork uow, IAuditWriter audit,
+    ICurrentUser currentUser, IClock clock)
 {
     /// <summary>Замінює секрет; порожній — прибирає.</summary>
     public async Task<NotificationChannelView> HandleAsync(int id, string? secret, CancellationToken ct)
@@ -300,7 +312,7 @@ public sealed class ReplaceNotificationChannelSecretHandler(
             new { id, name = channel.Name, hasSecret = channel.HasSecret }, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return ListNotificationChannelsHandler.ToView(channel);
+        return ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured);
     }
 }
 
@@ -361,7 +373,7 @@ public sealed class TestNotificationChannelHandler(
                     false, "The SMTP transport is not configured.", "notifications.test.smtpNotConfigured")
                 : await TryAsync(
                     () => sender.SendAsync(
-                        ListNotificationChannelsHandler.ToView(channel).Settings.Recipients ?? [],
+                        ListNotificationChannelsHandler.ToView(channel, sender.IsConfigured).Settings.Recipients ?? [],
                         Subject, BodyFor(channel), ct))
                     .ConfigureAwait(false);
         }

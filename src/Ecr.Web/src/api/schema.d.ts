@@ -13563,6 +13563,12 @@ export interface components {
             name: string;
             /** @description Несекретні параметри. */
             settings: components["schemas"]["NotificationChannelSettings"];
+            /** @description Чи є канал, чим доставляти. Пошта — bool INotificationSender.IsConfigured,
+             *     те саме джерело, що `notificationTransport.isConfigured` у `/health/facts`.
+             *     Teams — bool NotificationChannelView.HasSecret: секрет вебхука і Є його адресою, іншого
+             *     налаштування транспорту в Teams немає. ⛔ Лише булеве: хост, адресант чи порт
+             *     сюди не йдуть з тієї ж причини, з якої секрет write-only. */
+            transportConfigured: boolean;
             /** @description Чи бере канал транспорт із налаштувань застосунку. `true` для пошти:
              *     сервера в каналі немає й задати його нічим — екран має сказати це словами,
              *     а не лишати порожнє місце там, де колись було поле. `false` для Teams,

@@ -207,7 +207,8 @@ public sealed class NotificationRuleHandlersTests
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());
 
     private async Task<int> NewChannelAsync()
-        => (await new SaveNotificationChannelHandler(_store, _access, _uow, _audit, _user, _clock)
+        => (await new SaveNotificationChannelHandler(
+                _store, Substitute.For<INotificationSender>(), _access, _uow, _audit, _user, _clock)
             .CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None)).Id;
 
     private GetNotificationRulesHandler Rules() => new(_store, _access, _user);

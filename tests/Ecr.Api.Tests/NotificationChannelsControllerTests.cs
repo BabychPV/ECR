@@ -3,13 +3,18 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Notifications;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
+using Ecr.Infrastructure.Integration;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -216,6 +221,77 @@ public sealed class NotificationChannelsControllerTests(SqlServerFixture sql)
             .SingleAsync(c => c.Id == body.GetProperty("id").GetInt32()).ConfigureAwait(true);
         Assert.DoesNotContain("mail.corp.example", stored.SettingsJson, StringComparison.Ordinal);
     }
+
+    /// <summary>Фікстура не задає <c>Smtp:Host</c> — рівно свіже встановлення.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Без_Smtp_Host_поштовий_канал_не_налаштований_а_Teams_налаштований_лише_з_адресою()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "System.ManageNotifications").ConfigureAwait(true);
+
+        var mail = await CreateAsync(client, app, "Smtp", new { recipients = Recipients }).ConfigureAwait(true);
+        var teams = await CreateAsync(client, app, "TeamsWebhook", null).ConfigureAwait(true);
+        Assert.False(mail.GetProperty("transportConfigured").GetBoolean());
+        Assert.False(teams.GetProperty("transportConfigured").GetBoolean());
+
+        var id = teams.GetProperty("id").GetInt32();
+        var replaced = await client.PutAsJsonAsync(
+            At($"{id}/secret"), new { secret = "https://prod-17.westeurope.logic.azure.com/workflows/abc" })
+            .ConfigureAwait(true);
+        Assert.True((await BodyAsync(replaced, null).ConfigureAwait(true)).GetProperty("transportConfigured").GetBoolean());
+
+        var listed = await BodyAsync(await client.GetAsync(Channels).ConfigureAwait(true), null).ConfigureAwait(true);
+        Assert.False(Row(listed, mail).GetProperty("transportConfigured").GetBoolean());
+        Assert.True(Row(listed, teams).GetProperty("transportConfigured").GetBoolean());
+    }
+
+    /// <summary>
+    /// Налаштований транспорт — справжній <c>SmtpNotificationSender</c> на
+    /// власній конфігурації; у відповідь іде лише булеве, без хоста й адресанта.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-33")]
+    public async Task З_Smtp_Host_поштовий_канал_налаштований_а_подробиць_транспорту_у_відповіді_немає()
+    {
+        const string host = "smtp-probe-7f3a.corp.example";
+        const string from = "ecr-probe-7f3a@corp.example";
+        var smtp = new ConfigurationBuilder()
+            .AddInMemoryCollection([new("Smtp:Host", host), new("Smtp:From", from)]).Build();
+
+        using var app = new EcrApiFactory(sql);
+        using var configured = app.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<INotificationSender>(
+            sp => new SmtpNotificationSender(smtp, sp.GetRequiredService<ISecretProvider>()))));
+        using var client = await SystemHealthControllerTests
+            .SignedInAsync(sql, configured, "System.ManageNotifications").ConfigureAwait(true);
+
+        var created = await client.PostAsJsonAsync(
+            Channels, new { kind = "Smtp", name = $"mail-{Guid.NewGuid():N}", settings = new { recipients = Recipients } })
+            .ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+        var mail = await BodyAsync(created, null).ConfigureAwait(true);
+        Assert.True(mail.GetProperty("transportConfigured").GetBoolean());
+
+        var text = await client.GetStringAsync(Channels).ConfigureAwait(true);
+        Assert.True(Row(JsonDocument.Parse(text).RootElement, mail).GetProperty("transportConfigured").GetBoolean());
+        Assert.DoesNotContain("probe-7f3a", text + mail.GetRawText(), StringComparison.Ordinal);
+    }
+
+    private async Task<JsonElement> CreateAsync(HttpClient client, EcrApiFactory app, string kind, object? settings)
+    {
+        var created = await client.PostAsJsonAsync(
+            Channels, new { kind, name = $"{kind}-{Guid.NewGuid():N}", settings }).ConfigureAwait(false);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+
+        return await BodyAsync(created, null).ConfigureAwait(false);
+    }
+
+    private static JsonElement Row(JsonElement listed, JsonElement channel)
+        => listed.EnumerateArray().Single(c => c.GetProperty("id").GetInt32() == channel.GetProperty("id").GetInt32());
 
     private static Uri At(string tail) => new($"{Channels}/{tail}", UriKind.Relative);
 

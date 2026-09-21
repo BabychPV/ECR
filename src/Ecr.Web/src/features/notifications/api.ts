@@ -8,6 +8,9 @@ import type { components } from '@/api/schema';
  * адресу відправника задають налаштування застосунку, і полів під них у каналі
  * немає (рішення 2026-09-20). Екран має сказати це словами, а не лишити
  * порожнє місце.
+ *
+ * ⚠ `transportConfigured` — чи є каналу чим доставляти: пошта — чи налаштовано
+ * SMTP процесу (порожній `Smtp:Host` → `false`), Teams — те саме, що `hasSecret`.
  */
 export type NotificationChannel = components['schemas']['NotificationChannelView'];
 /** Те, що канал справді зберігає: адресати й підпис. */

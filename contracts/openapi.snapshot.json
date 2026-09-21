@@ -4501,6 +4501,10 @@
             "$ref": "#/components/schemas/NotificationChannelSettings",
             "description": "Несекретні параметри."
           },
+          "transportConfigured": {
+            "description": "Чи є канал, чим доставляти. Пошта — bool INotificationSender.IsConfigured,\nте саме джерело, що `notificationTransport.isConfigured` у `/health/facts`.\nTeams — bool NotificationChannelView.HasSecret: секрет вебхука і Є його адресою, іншого\nналаштування транспорту в Teams немає. ⛔ Лише булеве: хост, адресант чи порт\nсюди не йдуть з тієї ж причини, з якої секрет write-only.",
+            "type": "boolean"
+          },
           "transportFromConfiguration": {
             "description": "Чи бере канал транспорт із налаштувань застосунку. `true` для пошти:\nсервера в каналі немає й задати його нічим — екран має сказати це словами,\nа не лишати порожнє місце там, де колись було поле. `false` для Teams,\nде адреса доставки живе в секреті САМОГО каналу.",
             "type": "boolean"
@@ -4514,7 +4518,8 @@
           "settings",
           "hasSecret",
           "modifiedAt",
-          "transportFromConfiguration"
+          "transportFromConfiguration",
+          "transportConfigured"
         ],
         "type": "object"
       },

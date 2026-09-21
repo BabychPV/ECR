@@ -156,7 +156,7 @@ public sealed class NotificationChannelHandlersTests
             NotificationChannelKind.Smtp, "Legacy", legacy, _clock.UtcNow, Actor));
 
         var listed = Assert.Single(
-            await new ListNotificationChannelsHandler(_store, _access, _user).HandleAsync(CancellationToken.None));
+            await List().HandleAsync(CancellationToken.None));
 
         // Читається: адресати й підпис на місці, транспорту у видачі немає, а
         // екран має чим пояснити порожнє місце там, де колись було поле.
@@ -197,6 +197,58 @@ public sealed class NotificationChannelHandlersTests
             Assert.Equal(
                 "err.ECR-REQ-0422.notificationChannelTransportFromConfiguration", each.Details!["messageKey"]);
         }
+    }
+
+    /// <summary>
+    /// Свіже встановлення без <c>Smtp:Host</c>: поштовий канал є, а доставляти
+    /// його нічим — і кожна відповідь каналу мусить це визнати.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Поштовий_канал_без_транспорту_процесу_не_названо_налаштованим()
+    {
+        var created = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+        var updated = await Save().UpdateAsync(created.Id, "Mail", true, Smtp, CancellationToken.None);
+        var listed = Assert.Single(await List().HandleAsync(CancellationToken.None));
+
+        Assert.Equal([false, false, false], new[] { created, updated, listed }.Select(v => v.TransportConfigured));
+
+        // `transportFromConfiguration` лишився тим, чим був: «транспорт із налаштувань».
+        Assert.True(listed.TransportFromConfiguration);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-33")]
+    public async Task Поштовий_канал_налаштований_коли_налаштований_транспорт_процесу()
+    {
+        _sender.IsConfigured.Returns(true);
+
+        var created = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
+        var listed = Assert.Single(await List().HandleAsync(CancellationToken.None));
+
+        Assert.True(created.TransportConfigured);
+        Assert.True(listed.TransportConfigured);
+    }
+
+    /// <summary>Для Teams «налаштовано» — це «задано адресу вебхука», і транспорт пошти тут ні до чого.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-34")]
+    public async Task Канал_Teams_налаштований_рівно_тоді_коли_задано_адресу_вебхука()
+    {
+        _sender.IsConfigured.Returns(true);
+        var teams = await Save().CreateAsync(NotificationChannelKind.TeamsWebhook, "Teams", null, CancellationToken.None);
+        Assert.False(teams.TransportConfigured);
+
+        _sender.IsConfigured.Returns(false);
+        var withUrl = await Secret().HandleAsync(teams.Id, Webhook, CancellationToken.None);
+        Assert.True(withUrl.TransportConfigured);
+        Assert.True(Assert.Single(await List().HandleAsync(CancellationToken.None)).TransportConfigured);
+
+        var cleared = await Secret().HandleAsync(teams.Id, " ", CancellationToken.None);
+        Assert.False(cleared.TransportConfigured);
     }
 
     /// <summary>Адресати каналу — саме адреси, а не будь-який непорожній рядок.</summary>
@@ -325,7 +377,7 @@ public sealed class NotificationChannelHandlersTests
         var mail = await Save().CreateAsync(NotificationChannelKind.Smtp, "Mail", Smtp, CancellationToken.None);
         Allow("System.ViewHealth");
 
-        await Assert.ThrowsAsync<AccessDeniedException>(() => new ListNotificationChannelsHandler(_store, _access, _user).HandleAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<AccessDeniedException>(() => List().HandleAsync(CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(() => Save().CreateAsync(NotificationChannelKind.Smtp, "X", Smtp, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(() => Save().UpdateAsync(mail.Id, "X", true, Smtp, CancellationToken.None));
         await Assert.ThrowsAsync<AccessDeniedException>(() => Delete().HandleAsync(mail.Id, CancellationToken.None));
@@ -340,7 +392,9 @@ public sealed class NotificationChannelHandlersTests
         => _access.BuildProfileAsync(Actor, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Actor }.Permission(permission).Build());
 
-    private SaveNotificationChannelHandler Save() => new(_store, _access, _uow, _audit, _user, _clock);
+    private ListNotificationChannelsHandler List() => new(_store, _sender, _access, _user);
+
+    private SaveNotificationChannelHandler Save() => new(_store, _sender, _access, _uow, _audit, _user, _clock);
 
     private DeleteNotificationChannelHandler Delete() => new(_store, _access, _uow, _audit, _user, _clock);
 
@@ -366,7 +420,7 @@ public sealed class NotificationChannelHandlersTests
 
     // ⚠ Суфікси — літералом, а не з appsettings: тест тримає ПРАВИЛО, не дефолт.
     private ReplaceNotificationChannelSecretHandler Secret(string suffixes = ".logic.azure.com;webhook.office.com")
-        => new(_store, new FakeProtector(), new WebhookUrlPolicy(suffixes.Split(';')), _access, _uow, _audit, _user, _clock);
+        => new(_store, new FakeProtector(), new WebhookUrlPolicy(suffixes.Split(';')), _sender, _access, _uow, _audit, _user, _clock);
 
     private sealed class FakeProtector : INotificationSecretProtector
     {

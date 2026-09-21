@@ -3251,6 +3251,12 @@ public sealed class NotFoundException(string errorCode, string message)
 > ⚠ У відповіді кожного каналу є `transportFromConfiguration`: `true` для
 > Smtp — екрану є чим пояснити відсутність полів сервера; `false` для Teams,
 > де адреса доставки живе в секреті самого каналу.
+>
+> ✎ **2026-09-21 — `transportConfigured` (адитивне).** Чи є каналу чим
+> доставляти: Smtp — `INotificationSender.IsConfigured` процесу (те саме, що
+> `notificationTransport.isConfigured` у `GET /health/facts`; порожній
+> `Smtp:Host` → `false`), Teams — `hasSecret` (секрет і є адресою вебхука).
+> ⛔ Лише булеве: хост, адресант, порт у відповідь не йдуть.
 
 > ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
 > ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —
