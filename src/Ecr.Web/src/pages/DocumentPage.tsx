@@ -10,6 +10,10 @@ import type {
   DocumentTableDto,
   ValidationResultResponse,
 } from '@/api/types';
+import {
+  DeleteDocumentPermission,
+  useDeleteDocumentAction,
+} from '@/features/documents/DeleteDocumentAction';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
@@ -301,6 +305,14 @@ export function DocumentPage(): JSX.Element {
    */
   useDocumentPending(documentId);
 
+  // Видалення чернетки: кнопка — у шапці, відмова сервера — банером під нею.
+  const deletion = useDeleteDocumentAction({
+    documentId,
+    document: summary.data,
+    sheetCodes: sheets.map((s) => s.code),
+    allowed: can(session.data, DeleteDocumentPermission),
+  });
+
   return (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
@@ -379,9 +391,13 @@ export function DocumentPage(): JSX.Element {
                 state={state}
               />
             )}
+
+            {deletion.trigger}
           </Group>
         }
       />
+
+      {deletion.refusal}
 
       {/* ⛔ `BE-10`. Компонент сам вирішує, чи малюватися: доки сервер не
           відповів, він повертає `null`, а не «0 з 0» — заповненість, якої ще
