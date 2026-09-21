@@ -10366,7 +10366,7 @@
             "type": "string"
           },
           "kind": {
-            "description": "Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…).",
+            "description": "Рід залежного об'єкта — одне зі значень UsageKinds.",
             "type": "string"
           },
           "label": {

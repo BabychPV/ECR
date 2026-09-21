@@ -16587,7 +16587,7 @@ export interface components {
         UsageItemDto: {
             /** @description Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу. */
             id: string;
-            /** @description Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…). */
+            /** @description Рід залежного об'єкта — одне зі значень UsageKinds. */
             kind: string;
             /** @description Те, чим об'єкт упізнає людина: код. */
             label: string;
