@@ -332,7 +332,7 @@ public sealed class RestartJobHandler(
     ICurrentUser currentUser)
 {
     /// <summary>Код помилки: задачу можна перезапустити, лише коли вона провалилась.</summary>
-    public const string NotFailedErrorCode = "ECR-JOB-0409";
+    public const string NotFailedErrorCode = ErrorCodes.JobStateConflict;
 
     /// <summary>Перезапускає провалену задачу.</summary>
     /// <param name="jobId">Ідентифікатор задачі.</param>
@@ -351,7 +351,7 @@ public sealed class RestartJobHandler(
 
         if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
         {
-            throw new NotFoundException("ECR-JOB-0404", $"Задачі {jobId} не існує.");
+            throw new NotFoundException(ErrorCodes.JobNotFound, $"Задачі {jobId} не існує.");
         }
 
         if (!string.Equals(status.State, "Failed", StringComparison.Ordinal))
@@ -369,7 +369,7 @@ public sealed class RestartJobHandler(
             // сховище Quartz В ПАМ'ЯТІ (D-66) і не пережило перезапуск процесу
             // між провалом і спробою перезапуску.
             throw new NotFoundException(
-                "ECR-JOB-0404",
+                ErrorCodes.JobNotFound,
                 $"Задачу {jobId} не можна перезапустити: деталі задачі не пережили перезапуск сервера.");
         }
     }
@@ -416,7 +416,7 @@ public sealed class CancelJobHandler(
     /// підставляється різна, і шукати «звідки цей 409» треба від дії, а не від
     /// сусіднього обробника.
     /// </remarks>
-    public const string NotActiveErrorCode = "ECR-JOB-0409";
+    public const string NotActiveErrorCode = ErrorCodes.JobStateConflict;
 
     /// <summary>Стани, у яких задачу ще є що скасовувати.</summary>
     /// <remarks>
@@ -459,7 +459,7 @@ public sealed class CancelJobHandler(
         if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
         {
             throw new NotFoundException(
-                "ECR-JOB-0404", $"Задачі {jobId} не існує.",
+                ErrorCodes.JobNotFound, $"Задачі {jobId} не існує.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-JOB-0404.job",

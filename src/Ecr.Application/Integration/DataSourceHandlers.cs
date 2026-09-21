@@ -344,7 +344,7 @@ public sealed class DeleteDataSourceHandler(
     /// НАВМИСНО: одна природа відмови («стан не дозволяє дію»), один
     /// HTTP-статус, і арм у <c>ExceptionHandlingMiddleware</c> мапить саме код.
     /// </remarks>
-    public const string InUseErrorCode = "ECR-JOB-0409";
+    public const string InUseErrorCode = ErrorCodes.JobStateConflict;
 
     /// <summary>Тип події в журналі безпеки.</summary>
     public const string EventType = "DataSourceDeleted";
@@ -425,7 +425,7 @@ public sealed class TestDataSourceConnectionHandler(
     IClock clock)
 {
     /// <summary>Код відмови: перевірка цього джерела вже виконується.</summary>
-    public const string AlreadyRunningErrorCode = "ECR-JOB-0409";
+    public const string AlreadyRunningErrorCode = ErrorCodes.JobStateConflict;
 
     /// <summary>Тип події в журналі безпеки.</summary>
     public const string EventType = "DataSourceConnectionTested";

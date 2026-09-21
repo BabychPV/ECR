@@ -25,10 +25,10 @@ namespace Ecr.Architecture.Tests;
 /// звичайним <c>test</c>), а перевірка по джерелах — одразу і без СУБД.
 ///
 /// ⚠ Джерело істини про коди — <c>ErrorCodes.cs</c>, а не таблиця §7
-/// <c>02-contracts.md</c>: у таблиці є коди, яких у каталозі констант немає
-/// (<c>ECR-JOB-0404</c>, <c>ECR-UOM-4041</c> — вони живуть рядковими
-/// літералами). Звірку таблиці з тим, що кидає <c>src/</c>, робить
-/// <c>ContractIntegrityTests</c>, і дублювати її тут нічого.
+/// <c>02-contracts.md</c>. Коди, що жили рядковими літералами повз каталог
+/// (<c>ECR-JOB-0404/0409</c>, <c>ECR-UOM-4041/4091</c>), заведено константами,
+/// і <c>ServerErrorCodeLiteralTests</c> не дає з'явитися новим. Звірку таблиці
+/// з тим, що кидає <c>src/</c>, робить <c>ContractIntegrityTests</c>.
 /// </remarks>
 public sealed partial class ErrorTitleCatalogTests
 {

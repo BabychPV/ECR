@@ -52,7 +52,7 @@ public sealed class RunConsistencyCheckHandler(
     /// у <c>ExceptionHandlingMiddleware</c> мапить саме код. Нової родини кодів
     /// не заводиться.
     /// </remarks>
-    public const string AlreadyRunningErrorCode = "ECR-JOB-0409";
+    public const string AlreadyRunningErrorCode = ErrorCodes.JobStateConflict;
 
     /// <summary>Тип події в журналі безпеки (<c>aud.SecurityEvent</c>).</summary>
     public const string EventType = "ConsistencyCheckRunRequested";

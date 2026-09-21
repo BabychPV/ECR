@@ -128,7 +128,7 @@ public sealed class ListCollectionSchedulesHandler(
         if (!string.Equals(expected, VersionOf(schedule), StringComparison.Ordinal))
         {
             throw new ConcurrencyConflictException(
-                "ECR-JOB-0409",
+                ErrorCodes.JobStateConflict,
                 $"Розклад {schedule.Id} змінили після того, як його прочитали.",
                 new Dictionary<string, object?>
                 {
@@ -379,7 +379,7 @@ public sealed class CreateCollectionScheduleHandler(
         if (entity.ScheduleId is { } existing)
         {
             throw new ConcurrencyConflictException(
-                "ECR-JOB-0409",
+                ErrorCodes.JobStateConflict,
                 $"Сутність джерела {sourceEntityId} уже має розклад {existing}.",
                 new Dictionary<string, object?>
                 {

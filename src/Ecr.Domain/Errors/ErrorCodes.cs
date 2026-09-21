@@ -331,6 +331,17 @@ public static class ErrorCodes
     /// </summary>
     public const string UnitInUse = "ECR-UOM-0409";
 
+    /// <summary>Розмірності з таким ідентифікатором немає (<c>ECR-UOM-4041</c>).</summary>
+    public const string UnitDimensionNotFound = "ECR-UOM-4041";
+
+    /// <summary>Одиниця з таким кодом уже є (<c>ECR-UOM-4091</c>).</summary>
+    /// <remarks>
+    /// ⚠ §7 контракту дає цьому коду 422, хоча цифри кажуть 409 (як у
+    /// <see cref="RegistryDefDuplicate"/>). Статус не змінено — лише заведено
+    /// код у каталог; розбіжність названа окремо.
+    /// </remarks>
+    public const string UnitCodeTaken = "ECR-UOM-4091";
+
     /// <summary>
     /// Контекстний коефіцієнт у <c>uom.Conversion</c> (ФВ-16.5).
     /// </summary>
@@ -531,6 +542,23 @@ public static class ErrorCodes
     /// автентифікації від повторення не минає — у цьому весь її сенс.
     /// </remarks>
     public const string SourceAuthenticationRefused = "ECR-INT-0502";
+
+    // Фонові задачі
+    /// <summary>Фонової задачі з таким ідентифікатором немає (<c>ECR-JOB-0404</c>).</summary>
+    public const string JobNotFound = "ECR-JOB-0404";
+
+    /// <summary>
+    /// Стан черги чи розкладу не дозволяє дію (<c>ECR-JOB-0409</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Код роками кидався сирим літералом у шести обробниках і в каталозі
+    /// не був — клієнт не міг за ним розгалузитися (<c>ClientErrorCodeTests</c>
+    /// червонить код поза каталогом). Один код на кілька станів: ЯКИЙ саме —
+    /// каже <c>messageKey</c>. Кидається і <c>BusinessRuleException</c>, і
+    /// <c>ConcurrencyConflictException</c>; перший має власний арм у
+    /// <c>ExceptionHandlingMiddleware</c>, без якого доїхав би як 422.
+    /// </remarks>
+    public const string JobStateConflict = "ECR-JOB-0409";
 
     // Звіти
     /// <summary>Звіту з таким кодом немає або жодну версію не опубліковано (<c>ECR-RPT-0404</c>).</summary>

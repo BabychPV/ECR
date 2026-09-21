@@ -4,6 +4,7 @@ using System.Text.Json;
 using Ecr.Application.Consistency;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Jobs;
@@ -228,6 +229,58 @@ public sealed class ConsistencyIssuesControllerTests(SqlServerFixture sql)
             // Прогін під небезпечним правом, про який журнал не знає «навіщо»,
             // відповідає лише на «хто» — а питають тут саме про перше.
             Assert.Equal(1, await SecurityEventsWithReasonAsync(reason).ConfigureAwait(true));
+        }
+        finally
+        {
+            await ClearInFlightChecksAsync().ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// Прогін, поки попередній ще йде, — <c>409 ECR-JOB-0409</c>, а не 422.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відмову кидає <c>BusinessRuleException</c>, а загальний арм для нього
+    /// — 422. Код і статус тут прибиті ЛІТЕРАЛАМИ: твердження проти константи
+    /// обробника рухалося б разом із нею. Незавершений прогін ставиться рядком
+    /// <c>itg.JobProgress</c> напряму — справжня задача могла б устигнути
+    /// завершитися, і тест плавав би.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "BE-30")]
+    public async Task Повторний_прогін_поки_йде_попередній_дає_409_ECR_JOB_0409()
+    {
+        await ClearInFlightChecksAsync().ConfigureAwait(true);
+
+        var busyJobId = $"be30-{Guid.NewGuid():N}";
+        await using (var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options))
+        {
+            db.JobProgresses.Add(new JobProgress(
+                busyJobId, "Ecr.Tests.Probe.ConsistencyCheckJob", DateTime.UtcNow, null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        try
+        {
+            using var app = new EcrApiFactory(sql);
+            using var client = await SignedInAsync(app, RunJob).ConfigureAwait(true);
+
+            var refused = await client.PostAsJsonAsync(
+                new Uri("/api/v1/consistency/run", UriKind.Relative),
+                new { reason = "BE-30 second run" }).ConfigureAwait(true);
+
+            Assert.True(
+                refused.StatusCode == HttpStatusCode.Conflict,
+                $"{refused.StatusCode}: {await refused.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+            var problem = JsonDocument
+                .Parse(await refused.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+
+            Assert.Equal("ECR-JOB-0409", problem.GetProperty("errorCode").GetString());
+            Assert.Equal("err.ECR-JOB-0409.consistencyCheckRunning", problem.GetProperty("messageKey").GetString());
         }
         finally
         {

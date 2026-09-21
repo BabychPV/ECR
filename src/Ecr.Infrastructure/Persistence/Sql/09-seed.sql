@@ -792,6 +792,7 @@ USING (VALUES
     (N'err.ECR-UOM-0404',   N'en', N'Unit not found', 1),
     (N'err.ECR-UOM-0422',   N'en', N'Incompatible unit dimensions', 1),
     (N'err.ECR-UOM-4221',   N'en', N'Contextual conversion coefficient', 1),
+    (N'err.ECR-UOM-4041',   N'en', N'Unit dimension not found', 1),
 
     -- Розрахунки і методології.
     (N'err.ECR-CALC-0404',  N'en', N'Methodology version not found', 1),
@@ -816,10 +817,10 @@ USING (VALUES
     (N'err.ECR-INT-0422',   N'en', N'The source unit of measure changed', 1),
     (N'err.ECR-INT-0502',   N'en', N'The data source refused authentication', 1),
     (N'err.ECR-INT-0503',   N'en', N'The data source is unavailable', 1),
-    -- ⚠ `ECR-JOB-0409` живе рядковим літералом, не константою `ErrorCodes`, тому
-    -- сторож заголовків його не вимагав — і заголовком плашки їхав сам код.
-    -- Фраза покриває обидва стани цього коду: задача не в тому стані для дії
-    -- (BE-02) і розклад збору, змінений паралельно (BE-21b).
+    -- Фонові задачі. Фраза `ECR-JOB-0409` покриває всі його стани: задача не в
+    -- тому стані для дії, перевірка чи тест джерела вже йде, розклад змінено
+    -- паралельно або вже є, джерело ще в ужитку. Який саме — каже подробиця.
+    (N'err.ECR-JOB-0404',   N'en', N'Background job not found', 1),
     (N'err.ECR-JOB-0409',   N'en', N'Conflicting state', 1),
 
     -- Звіти.
