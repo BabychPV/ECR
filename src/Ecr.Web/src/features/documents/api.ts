@@ -80,6 +80,16 @@ export function summarize(tables: readonly TableStatus[]): FillSummary {
   };
 }
 
+/**
+ * Видаляє документ-чернетку (право `Document.Delete`).
+ *
+ * ⚠ Не чернетка (хоч один аркуш подано, погоджено, відхилено або вже був у
+ * погодженні) — `409` `ECR-DOC-0409`, причина в `messageKey`; чужий — `404`.
+ */
+export function deleteDocument(documentId: number): Promise<void> {
+  return apiFetch<void>(`/api/v1/documents/${String(documentId)}`, { method: 'DELETE' });
+}
+
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */
 export type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
 

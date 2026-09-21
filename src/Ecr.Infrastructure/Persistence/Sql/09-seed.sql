@@ -701,6 +701,9 @@ USING (VALUES
     (N'err.ECR-ACCS-0403.recallNotAuthor',      N'en', N'Only the person who submitted the sheet can recall it.', 1),
     (N'err.ECR-DOC-0409.recallWrongState',      N'en', N'Only a submitted sheet can be recalled; the sheet is {status}.', 1),
     (N'err.ECR-DOC-0409.recallStepSigned',      N'en', N'The sheet can no longer be recalled: approval has already started.', 1),
+    -- Document.Delete: only a draft document can be deleted (decision 2026-09-21).
+    (N'err.ECR-DOC-0409.deleteNotDraft',        N'en', N'Only a draft document can be deleted; sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
+    (N'err.ECR-DOC-0409.deleteHasHistory',      N'en', N'Only a draft document can be deleted; this document has already been through approval.', 1),
     (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),

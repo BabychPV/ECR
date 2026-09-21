@@ -2198,6 +2198,23 @@ public interface IDocumentStore
 `ValidateCompositionAsync` (лише `RequiresAll`/`RequiresOne` — `Excludes`
 сервер сьогодні не перевіряє, і клієнт навмисно цього не вигадує).
 
+#### `IDocumentDeletionStore`
+
+Видалення документа-чернетки (`DELETE /api/v1/documents/{id}`, право
+`Document.Delete`, рішення людини 2026-09-21 «лише чернетки»). Обидва методи —
+в одній транзакції: стани аркушів читаються під `UPDLOCK, HOLDLOCK`, домен
+(`DraftDocumentDeletion`) вирішує, чи це чернетка, і лише тоді дані видаляються
+явно від листя до кореня (каскадів на `doc.Document` немає). `aud.CellChange`
+не чіпається; видалення лягає в `aud.SecurityEvent` (`DocumentDeleted`).
+
+```csharp
+public interface IDocumentDeletionStore
+{
+    public Task<DocumentWorkflowFacts> LockWorkflowFactsAsync(long documentId, CancellationToken ct);
+    public Task<int> DeleteAsync(long documentId, CancellationToken ct);
+}
+```
+
 #### `IColumnDefSearchStore`
 
 Пошук колонок за назвою чи кодом, поза межами однієї таблиці (директива
@@ -3029,6 +3046,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
+| `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |

@@ -32,7 +32,8 @@ public sealed class DocumentsController(
     ExportDocumentHandler export,
     DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
-    ApplyImportHandler applyImport) : ControllerBase
+    ApplyImportHandler applyImport,
+    DeleteDocumentHandler delete) : ControllerBase
 {
     /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
     /// <remarks>
@@ -130,6 +131,22 @@ public sealed class DocumentsController(
                     ["documentId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 })
             : Ok(document);
+    }
+
+    /// <summary>Видаляє документ-чернетку. Право <c>Document.Delete</c>.</summary>
+    /// <remarks>
+    /// Лише чернетку: хоч один аркуш поданий, погоджений, відхилений або вже
+    /// проходив погодження — <c>409</c> <c>ECR-DOC-0409</c> із причиною.
+    /// Чужий документ — <c>404</c>, як і неіснуючий.
+    /// </remarks>
+    [HttpDelete("{id:long}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Delete(long id, CancellationToken ct)
+    {
+        await delete.HandleAsync(id, ct).ConfigureAwait(false);
+        return NoContent();
     }
 
     /// <summary>Валідація документа. Право <c>Document.View</c>.</summary>

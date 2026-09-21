@@ -181,6 +181,7 @@ public static class DependencyInjection
         services.AddScoped<Workflow.SubmitSheetHandler>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
+        services.AddScoped<Documents.DeleteDocumentHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
 
