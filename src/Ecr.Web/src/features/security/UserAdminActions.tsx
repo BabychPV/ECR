@@ -103,18 +103,29 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
 
   return (
     <>
+      {/* ⚠ Видимий текст короткий, а доступна назва — з іменем: у переліку
+          кнопок читалка інакше чує десяток однакових «Lock» без рядка. */}
       <Group gap="xs" wrap="nowrap">
         {user.isLockedOut ? (
-          <Button size="compact-xs" variant="subtle" onClick={() => openLock('unlock')}>
+          <Button size="compact-xs" variant="subtle"
+            aria-label={t('security.unlockUserNamed', { userName: user.userName })}
+            onClick={() => openLock('unlock')}
+          >
             {t('security.unlockUser')}
           </Button>
         ) : (
-          <Button size="compact-xs" variant="subtle" color="statusError" onClick={() => openLock('lock')}>
+          <Button size="compact-xs" variant="subtle" color="statusError"
+            aria-label={t('security.lockUserNamed', { userName: user.userName })}
+            onClick={() => openLock('lock')}
+          >
             {t('security.lockUser')}
           </Button>
         )}
         {user.provider === 'Local' && (
-          <Button size="compact-xs" variant="subtle" onClick={() => setResetting(true)}>
+          <Button size="compact-xs" variant="subtle"
+            aria-label={t('security.resetPasswordNamed', { userName: user.userName })}
+            onClick={() => setResetting(true)}
+          >
             {t('security.resetPassword')}
           </Button>
         )}

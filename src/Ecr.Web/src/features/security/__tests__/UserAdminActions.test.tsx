@@ -24,6 +24,9 @@ const Strings: Record<string, string> = {
   'security.userLocked': 'Locked',
   'security.userUnlocked': 'Unlocked',
   'security.passwordResetDone': 'Password set',
+  'security.lockUserNamed': 'Lock {userName}',
+  'security.unlockUserNamed': 'Unlock {userName}',
+  'security.resetPasswordNamed': 'Reset password {userName}',
   'workflow.reason': 'Reason',
   'common.cancel': 'Cancel',
 };
@@ -129,16 +132,16 @@ describe('UserAdminActions: хто бачить дії', () => {
   it('чужий локальний незаблокований запис: «Заблокувати» і «Скинути пароль» є, «Розблокувати» немає', async () => {
     renderActions(userView({}));
 
-    expect(await screen.findByRole('button', { name: 'Lock' })).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Reset password' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
+    expect(await screen.findByRole('button', { name: /^Lock jdoe$/ })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /^Reset password jdoe$/ })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^Unlock jdoe$/ })).toBeNull();
   });
 
   it('заблокований запис: «Розблокувати» замість «Заблокувати»', async () => {
     renderActions(userView({ isLockedOut: true }));
 
-    expect(await screen.findByRole('button', { name: 'Unlock' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Lock' })).toBeNull();
+    expect(await screen.findByRole('button', { name: /^Unlock jdoe$/ })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^Lock jdoe$/ })).toBeNull();
   });
 
   it('власний рядок — жодної дії', async () => {
@@ -147,8 +150,8 @@ describe('UserAdminActions: хто бачить дії', () => {
     await waitFor(() => expect(calls.some((c) => c.url.includes('/me'))).toBe(true));
     // Сесія приїхала — і кнопок однаково немає.
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByRole('button', { name: 'Lock' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Reset password' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Lock jdoe$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Reset password jdoe$/ })).toBeNull();
   });
 
   it('без Security.ManageUsers — жодної дії', async () => {
@@ -157,14 +160,30 @@ describe('UserAdminActions: хто бачить дії', () => {
 
     await waitFor(() => expect(calls.some((c) => c.url.includes('/me'))).toBe(true));
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByRole('button', { name: 'Lock' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Lock jdoe$/ })).toBeNull();
   });
 
   it('доменний запис: «Скинути пароль» немає, «Заблокувати» є', async () => {
     renderActions(userView({ provider: 'Windows' }));
 
-    expect(await screen.findByRole('button', { name: 'Lock' })).not.toBeNull();
-    expect(screen.queryByRole('button', { name: 'Reset password' })).toBeNull();
+    expect(await screen.findByRole('button', { name: /^Lock jdoe$/ })).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /^Reset password jdoe$/ })).toBeNull();
+  });
+});
+
+describe('UserAdminActions: доступні назви з іменем користувача', () => {
+  it('кнопки рядка називають користувача, видимий текст короткий', async () => {
+    renderActions(userView({}));
+
+    const lock = await screen.findByRole('button', { name: /Lock.*jdoe/ });
+    expect(lock.textContent).toBe('Lock');
+    expect(screen.getByRole('button', { name: /Reset password.*jdoe/ }).textContent).toBe('Reset password');
+  });
+
+  it('заблокований запис: «Unlock» з іменем', async () => {
+    renderActions(userView({ isLockedOut: true }));
+
+    expect(await screen.findByRole('button', { name: /Unlock.*jdoe/ })).not.toBeNull();
   });
 });
 
@@ -173,7 +192,7 @@ describe('UserAdminActions: блокування', () => {
     const user = userEvent.setup();
     renderActions(userView({}));
 
-    await user.click(await screen.findByRole('button', { name: 'Lock' }));
+    await user.click(await screen.findByRole('button', { name: /^Lock jdoe$/ }));
     const dialog = await screen.findByRole('dialog');
     const confirm = within(dialog).getByRole('button', { name: 'Lock' });
 
@@ -193,7 +212,7 @@ describe('UserAdminActions: блокування', () => {
     const user = userEvent.setup();
     renderActions(userView({}));
 
-    await user.click(await screen.findByRole('button', { name: 'Lock' }));
+    await user.click(await screen.findByRole('button', { name: /^Lock jdoe$/ }));
     const dialog = await screen.findByRole('dialog');
     const field = within(dialog).getByRole('textbox', { name: /Reason/ });
 
@@ -215,7 +234,7 @@ describe('UserAdminActions: блокування', () => {
     const user = userEvent.setup();
     renderActions(userView({}));
 
-    await user.click(await screen.findByRole('button', { name: 'Lock' }));
+    await user.click(await screen.findByRole('button', { name: /^Lock jdoe$/ }));
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByRole('textbox', { name: /Reason/ }), 'why');
     await user.click(within(dialog).getByRole('button', { name: 'Lock' }));
@@ -231,7 +250,7 @@ describe('UserAdminActions: скидання пароля', () => {
     const user = userEvent.setup();
     renderActions(userView({}));
 
-    await user.click(await screen.findByRole('button', { name: 'Reset password' }));
+    await user.click(await screen.findByRole('button', { name: /^Reset password jdoe$/ }));
     let field = await screen.findByLabelText('New password');
     expect(field.getAttribute('autocomplete')).toBe('new-password');
 
@@ -239,7 +258,7 @@ describe('UserAdminActions: скидання пароля', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-    await user.click(screen.getByRole('button', { name: 'Reset password' }));
+    await user.click(screen.getByRole('button', { name: /^Reset password jdoe$/ }));
     field = await screen.findByLabelText('New password');
     expect((field as HTMLInputElement).value).toBe('');
   });
@@ -248,7 +267,7 @@ describe('UserAdminActions: скидання пароля', () => {
     const user = userEvent.setup();
     const client = renderActions(userView({}));
 
-    await user.click(await screen.findByRole('button', { name: 'Reset password' }));
+    await user.click(await screen.findByRole('button', { name: /^Reset password jdoe$/ }));
     await user.type(await screen.findByLabelText('New password'), 'Secret#123');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reset password' }));
 
@@ -272,7 +291,7 @@ describe('UserAdminActions: скидання пароля', () => {
     const user = userEvent.setup();
     renderActions(userView({}));
 
-    await user.click(await screen.findByRole('button', { name: 'Reset password' }));
+    await user.click(await screen.findByRole('button', { name: /^Reset password jdoe$/ }));
     const field = await screen.findByLabelText('New password');
     await user.type(field, 'short');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reset password' }));
@@ -294,7 +313,7 @@ describe('UserAdminActions: скидання пароля', () => {
     const user = userEvent.setup();
     renderActions(userView({}));
 
-    await user.click(await screen.findByRole('button', { name: 'Reset password' }));
+    await user.click(await screen.findByRole('button', { name: /^Reset password jdoe$/ }));
     const field = await screen.findByLabelText('New password');
     await user.type(field, 'whatever');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reset password' }));
