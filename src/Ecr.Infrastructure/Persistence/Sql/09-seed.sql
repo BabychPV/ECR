@@ -1701,6 +1701,12 @@ USING (VALUES
     -- ⚠ Показано, коли `changedByUserId` не знайшовся в переліку користувачів:
     -- нема права `Security.ManageUsers`, або користувача видалено.
     (N'registries.userUnresolved',       N'en', N'unresolved', 1),
+    -- Вкладка «Де використано» (BE-24). «Показано N із M» з'являється лише
+    -- тоді, коли сервер віддав не всі посилання (D15-06).
+    (N'registries.tabUsage',             N'en', N'Where used', 1),
+    (N'registries.usageNone',            N'en', N'Not used anywhere', 1),
+    (N'registries.usageTotal',           N'en', N'{total} references', 1),
+    (N'registries.usageShown',           N'en', N'Showing {shown} of {total}', 1),
     (N'registries.newRegistry',          N'en', N'New registry', 1),
     (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
     (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),
