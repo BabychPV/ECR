@@ -1690,6 +1690,13 @@ USING (VALUES
     -- Створення документа.
     (N'documents.create',                N'en', N'New document', 1),
     (N'documents.created',               N'en', N'The document has been created.', 1),
+    -- Видалення документа-чернетки. ⚠ Примітка каже прямо, що остаточне слово
+    -- за сервером: історію погодження клієнт не бачить.
+    (N'documents.delete',                N'en', N'Delete document', 1),
+    (N'documents.deleteTitle',           N'en', N'Delete document {name}?', 1),
+    (N'documents.deleteText',            N'en', N'The draft document and all data entered in it will be deleted. This cannot be undone.', 1),
+    (N'documents.deleteNote',            N'en', N'Only a draft can be deleted: a document that has already been through approval will be refused.', 1),
+    (N'documents.deleted',               N'en', N'Document {name} has been deleted.', 1),
     (N'documents.version',               N'en', N'Template version', 1),
     (N'documents.versionHint',           N'en', N'Only published versions: a draft has no frozen structure.', 1),
     (N'documents.pickVersion',           N'en', N'Pick a version', 1),
