@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Anchor, Badge, Group, List, Skeleton, Stack, Text } from '@mantine/core';
+import { Anchor, Badge, Code, Group, List, Skeleton, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { registryUsage, type UsageResponse } from '@/features/registries/api';
@@ -48,6 +48,37 @@ export function RegistryUsagePanel({ code }: { code: string }): JSX.Element {
 }
 
 /**
+ * Людська назва роду залежного об'єкта.
+ *
+ * ⚠ Перелік — рівно ті значення, які пише сервер у
+ * `RegistryStore.FindDefinitionUsageAsync`: там це рядкові літерали, enum
+ * немає, тож прив'язати перелік до сервера типом нема до чого.
+ *
+ * ⚠ Ключі — літерали в кожній гілці, а не шаблон `usageKind.${kind}`: так їх
+ * бачить сторож каталогу (`EndpointCoverageTests`) і вимагає рядок сіду.
+ *
+ * ⛔ Невідоме значення (новий рід на сервері раніше за клієнт) — сире значення
+ * в `Code`, а не порожньо й не вигадана назва: людина має бачити, ЩО саме
+ * залежить від довідника, навіть якщо назви ще немає.
+ */
+function UsageKind({ kind }: { kind: string }): JSX.Element {
+  switch (kind) {
+    case 'templateColumn':
+      return <>{t('registries.usageKind.templateColumn')}</>;
+    case 'registryField':
+      return <>{t('registries.usageKind.registryField')}</>;
+    case 'methodologySubstance':
+      return <>{t('registries.usageKind.methodologySubstance')}</>;
+    case 'sourceEntity':
+      return <>{t('registries.usageKind.sourceEntity')}</>;
+    case 'data':
+      return <>{t('registries.usageKind.data')}</>;
+    default:
+      return <Code>{kind}</Code>;
+  }
+}
+
+/**
  * Перелік залежних із чесною кількістю.
  *
  * ⚠ `items` — не більше двадцяти перших, `total` — усі (`UsageResponse.PageSize`
@@ -83,7 +114,7 @@ export function RegistryUsageList({ usage }: { usage: UsageResponse }): JSX.Elem
           <List.Item key={`${item.kind}:${item.id}`}>
             <Group gap="xs" wrap="nowrap">
               <Badge size="xs" variant="light">
-                {item.kind}
+                <UsageKind kind={item.kind} />
               </Badge>
 
               {item.route === null ? (

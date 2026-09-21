@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RegistryDefinitionDto } from '@/api/types';
 import type { UsageResponse } from '@/features/registries/api';
+import { RegistryUsageList } from '@/features/registries/RegistryUsage';
 import { RegistryConstructorPage } from '@/pages/admin/RegistryConstructorPage';
 import { testTheme } from '@/test/render';
 
@@ -241,5 +242,60 @@ describe('Конструктор довідника: «де використан
 
     expect(screen.queryByRole('tab', { name: /registries\.tabUsage/ })).toBeNull();
     expect(usageCalls(fetch)).toBe(0);
+  });
+});
+
+/**
+ * Рід залежного об'єкта — людською назвою з каталогу, не сирим `kind`.
+ *
+ * ⚠ Перелік — рівно ті п'ять значень, які сервер пише в
+ * `RegistryStore.FindDefinitionUsageAsync` (рядкові літерали, enum немає). Новий
+ * рід на сервері без рядка тут покаже сире значення в `<code>` — не порожнечу.
+ */
+describe('«де використано»: назва роду залежного', () => {
+  const Kinds = [
+    'templateColumn',
+    'registryField',
+    'methodologySubstance',
+    'sourceEntity',
+    'data',
+  ] as const;
+
+  function badgeOf(label: string): HTMLElement {
+    const item = screen.getByText(label).closest('li');
+    if (item === null) throw new Error(`рядка ${label} немає`);
+    // ⚠ Клас Mantine, а не власний атрибут: тоді «до» падає на ЗМІСТІ бейджа,
+    // а не на тому, що селектор ще нічого не знаходить.
+    const badge = item.querySelector('.mantine-Badge-root');
+    if (badge === null) throw new Error(`бейджа роду в ${label} немає`);
+    return badge as HTMLElement;
+  }
+
+  function list(items: UsageResponse['items']): void {
+    render(
+      <MantineProvider theme={testTheme}>
+        <MemoryRouter>
+          <RegistryUsageList usage={{ total: items.length, items }} />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+  }
+
+  it('кожен відомий рід — ключ каталогу, а не сире значення', () => {
+    list(Kinds.map((kind, i) => ({ kind, id: String(i), label: `L-${kind}`, route: null })));
+
+    for (const kind of Kinds) {
+      const badge = badgeOf(`L-${kind}`);
+      expect(badge.textContent).toBe(`⟦registries.usageKind.${kind}⟧`);
+    }
+  });
+
+  it('невідомий рід — сире значення в <code>, не порожньо й не вигадана назва', () => {
+    list([{ kind: 'futureThing', id: '1', label: 'X.Y', route: null }]);
+
+    const badge = badgeOf('X.Y');
+    const code = badge.querySelector('code');
+    expect(code?.textContent).toBe('futureThing');
+    expect(badge.textContent).not.toContain('registries.usageKind');
   });
 });
