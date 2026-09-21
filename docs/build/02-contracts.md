@@ -2590,6 +2590,20 @@ public interface IDocumentListSummaryStore
 }
 ```
 
+#### `ICampaignSummaryStore`
+
+Огляд кампанії звітності за період (`BE-22`): проєкти з лічильниками етапів,
+за кодом проєкту, зі стелею переліку. **Межі грантів тут немає навмисно** —
+рішення людини `Q15-07`: огляд відкриває окреме право `Report.ViewCampaign`,
+а не грант на проєкт, і віддає лише лічильники, без значень.
+
+```csharp
+public interface ICampaignSummaryStore
+{
+    public Task<CampaignProjectPage> ListAsync(int periodKey, int limit, CancellationToken ct);
+}
+```
+
 #### `ITemplateStructure`
 
 Синхронний доступ до вже завантаженого знімка структури версії.
@@ -3050,6 +3064,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
 | `DELETE` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
 | `GET` | `/api/v1/reports/snapshots/{id}/rows` | `Report.ViewRegulatory` | 5 |
@@ -3229,6 +3244,17 @@ public sealed class NotFoundException(string errorCode, string message)
 > вивантажувати». Авторство державної форми — інша річ, і роздати його кожному
 > погоджувачу правкою одного рядка каталогу було б зміною повноважень людей
 > без жодного рішення (`ФВ-6.12`, `D-40`).
+>
+> ⛔ `GET /api/v1/campaign/summary?periodKey=` (`BE-22`) — огляд кампанії по
+> ВСІХ проєктах періоду: лічильники етапів (`documents`, `draft`, `submitted`,
+> `approved`, `rejected`) і скільки побудовано поточних зрізів. **Межі грантів
+> тут немає навмисно** — пряме рішення людини на `Q15-07`: замість неї окреме
+> право `Report.ViewCampaign`, яке видається явно. Тому воно теж небезпечне
+> (`IsDangerous = 1`) і з шаблону `Report.%` не приїжджає. Значень у відповіді
+> немає жодного — лише лічильники; інакше право на огляд стало б обходом
+> грантів. Перелік має стелю `GetCampaignSummaryHandler.MaxProjects`, і
+> `totalProjects` каже, скільки проєктів насправді: обрізана відповідь не
+> прикидається повною.
 
 > **Опис довідника і його записи — різні маршрути** (`ФВ-8.12`).
 > `GET /registries` віддає перелік для вибору: десятки довідників, самі

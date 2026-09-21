@@ -2881,6 +2881,11 @@ USING (VALUES
   (N'Calculation.Recalculate',  N'Calculation', 0), (N'Calculation.ManageRequiredInputs', N'Calculation', 0),
   (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
   (N'Report.MarkSubmitted',     N'Report',      0), (N'Report.Export',        N'Report',      0),
+  -- ⚠ Обидва НЕБЕЗПЕЧНІ (1) заради фільтра `IsDangerous = 0` у MERGE роздач:
+  -- шаблон `Report.%` вбудованого `Approver` їх не бере. `Report.EditDefinition`
+  -- — авторство державної форми (`ФВ-10.4`); `Report.ViewCampaign` (`BE-22`,
+  -- рішення `Q15-07`) — огляд кампанії по ВСІХ проєктах без межі грантів.
+  (N'Report.EditDefinition',    N'Report',      1), (N'Report.ViewCampaign',  N'Report',      1),
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),
   (N'Integration.EditSchedule', N'Integration', 0),
   (N'Uom.EditCatalog',          N'Uom',         0),

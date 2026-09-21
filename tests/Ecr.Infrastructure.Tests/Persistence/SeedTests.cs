@@ -17,9 +17,9 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 41;
+    private const int ExpectedPermissions = 42;
 
-    private const int ExpectedDangerous = 10;
+    private const int ExpectedDangerous = 11;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -80,6 +80,19 @@ public sealed class SeedTests(SqlServerFixture sql)
         // рядка каталогу.
         Assert.Equal(1, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.EditDefinition' AND IsDangerous = 1"));
+
+        // ⛔ `Report.ViewCampaign` (`BE-22`) — те саме, і тут це ЄДИНИЙ спосіб
+        // виконати рішення людини на `Q15-07`: «окреме право, видається явно».
+        // Позначка `IsDangerous = 1` — не оцінка ризику втратити дані, а
+        // механізм: фільтр `IsDangerous = 0` у MERGE роздач тримає право поза
+        // шаблоном `Report.%` вбудованого `Approver`. Позначене безпечним, воно
+        // мовчки відкрило б кожному погоджувачу коди й назви ВСІХ проєктів
+        // системи разом із лічильниками їхніх документів.
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.ViewCampaign' AND IsDangerous = 1"));
+
+        Assert.Equal(0, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Report.ViewCampaign'"));
     }
 
     [Fact]

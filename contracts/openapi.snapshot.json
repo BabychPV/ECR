@@ -522,6 +522,94 @@
           "Fixed360"
         ]
       },
+      "CampaignProjectSummary": {
+        "description": "Один проєкт у огляді кампанії.",
+        "properties": {
+          "approved": {
+            "description": "Усі аркуші затверджено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "documents": {
+            "description": "Скільки документів у проєкті. `0` означає «кампанія тут ще не\nпочиналася» — і це окрема відповідь, а не «все в чернетках».",
+            "format": "int32",
+            "type": "integer"
+          },
+          "draft": {
+            "description": "Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          },
+          "projectCode": {
+            "description": "Код проєкту; ним перелік і впорядковано.",
+            "type": "string"
+          },
+          "projectId": {
+            "description": "Проєкт.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rejected": {
+            "description": "Хоч один аркуш відхилено.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "snapshots": {
+            "description": "Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період\n(`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи\nзатверджено, але доки зрізу немає — регулятор не отримав нічого.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "submitted": {
+            "description": "Усі аркуші подано або затверджено, і хоч один ще не затверджено.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "projectId",
+          "projectCode",
+          "nameL10n",
+          "documents",
+          "draft",
+          "submitted",
+          "approved",
+          "rejected",
+          "snapshots"
+        ],
+        "type": "object"
+      },
+      "CampaignSummaryResponse": {
+        "description": "Огляд кампанії звітності за один період (`BE-22`).",
+        "properties": {
+          "periodKey": {
+            "description": "Період кампанії — той самий для всіх рядків.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "projects": {
+            "description": "Проєкти за кодом; лише лічильники, без значень.",
+            "items": {
+              "$ref": "#/components/schemas/CampaignProjectSummary"
+            },
+            "type": "array"
+          },
+          "totalProjects": {
+            "description": "Скільки проєктів мають цей період УСЬОГО. Більше за довжину\nProjects — перелік обрізано стелею\nint GetCampaignSummaryHandler.MaxProjects, і кампанія бачиться не\nцілком.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "periodKey",
+          "totalProjects",
+          "projects"
+        ],
+        "type": "object"
+      },
       "CellChangeView": {
         "description": "Зміна комірки в журналі, як її бачить читач аудиту.",
         "properties": {
@@ -10533,6 +10621,68 @@
         "summary": "Зміна власного пароля.",
         "tags": [
           "Security"
+        ]
+      }
+    },
+    "/api/v1/campaign/summary": {
+      "get": {
+        "description": "⚠ Період — обов'язковий параметр запиту, а не сегмент шляху: кампанія\nне є ресурсом, який можна відкрити чи змінити, і `/campaign/202601`\nобіцяв би саме це. Сусідні зведення адресуються так само\n(`GET /documents/summary?periodKey`).\n\n⛔ Перелік проєктів НЕ звужується грантами користувача — рішення людини\n`Q15-07`. Замість межі видимості тут окреме право, яке видають\nсвідомо; докладніше — у GetCampaignSummaryHandler.",
+        "parameters": [
+          {
+            "description": "Період кампанії (`Рік*100 + Номер`).",
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignSummaryResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignSummaryResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignSummaryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зведення кампанії за період. Право `Report.ViewCampaign`.",
+        "tags": [
+          "Campaign"
         ]
       }
     },
@@ -23960,6 +24110,9 @@
     },
     {
       "name": "Auth"
+    },
+    {
+      "name": "Campaign"
     },
     {
       "name": "Cells"

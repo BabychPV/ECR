@@ -263,6 +263,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/campaign/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Зведення кампанії за період. Право `Report.ViewCampaign`.
+         * @description ⚠ Період — обов'язковий параметр запиту, а не сегмент шляху: кампанія
+         *     не є ресурсом, який можна відкрити чи змінити, і `/campaign/202601`
+         *     обіцяв би саме це. Сусідні зведення адресуються так само
+         *     (`GET /documents/summary?periodKey`).
+         *
+         *     ⛔ Перелік проєктів НЕ звужується грантами користувача — рішення людини
+         *     `Q15-07`. Замість межі видимості тут окреме право, яке видають
+         *     свідомо; докладніше — у GetCampaignSummaryHandler.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період кампанії (`Рік*100 + Номер`). */
+                    periodKey?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CampaignSummaryResponse"];
+                        "text/json": components["schemas"]["CampaignSummaryResponse"];
+                        "text/plain": components["schemas"]["CampaignSummaryResponse"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collection-schedules": {
         parameters: {
             query?: never;
@@ -10939,6 +11001,69 @@ export interface components {
          * @enum {unknown}
          */
         CalendarMode: "Actual" | "Fixed365" | "Fixed360";
+        /** @description Один проєкт у огляді кампанії. */
+        CampaignProjectSummary: {
+            /**
+             * Format: int32
+             * @description Усі аркуші затверджено.
+             */
+            approved: number;
+            /**
+             * Format: int32
+             * @description Скільки документів у проєкті. `0` означає «кампанія тут ще не
+             *     починалася» — і це окрема відповідь, а не «все в чернетках».
+             */
+            documents: number;
+            /**
+             * Format: int32
+             * @description Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.
+             */
+            draft: number;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Код проєкту; ним перелік і впорядковано. */
+            projectCode: string;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            /**
+             * Format: int32
+             * @description Хоч один аркуш відхилено.
+             */
+            rejected: number;
+            /**
+             * Format: int32
+             * @description Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період
+             *     (`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи
+             *     затверджено, але доки зрізу немає — регулятор не отримав нічого.
+             */
+            snapshots: number;
+            /**
+             * Format: int32
+             * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
+             */
+            submitted: number;
+        };
+        /** @description Огляд кампанії звітності за один період (`BE-22`). */
+        CampaignSummaryResponse: {
+            /**
+             * Format: int32
+             * @description Період кампанії — той самий для всіх рядків.
+             */
+            periodKey: number;
+            /** @description Проєкти за кодом; лише лічильники, без значень. */
+            projects: components["schemas"]["CampaignProjectSummary"][];
+            /**
+             * Format: int32
+             * @description Скільки проєктів мають цей період УСЬОГО. Більше за довжину
+             *     Projects — перелік обрізано стелею
+             *     int GetCampaignSummaryHandler.MaxProjects, і кампанія бачиться не
+             *     цілком.
+             */
+            totalProjects: number;
+        };
         /** @description Зміна комірки в журналі, як її бачить читач аудиту. */
         CellChangeView: {
             /**
