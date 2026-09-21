@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/types';
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
+import { UnitEditModal } from '@/features/units/UnitEditModal';
 import { UsageKindLabel } from '@/features/usage/UsageKindLabel';
 import { decimalEquals, normalizeDecimal } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
@@ -135,6 +136,7 @@ export function UnitsPage(): JSX.Element {
   // повтор дав би ту саму відповідь.
   const canEdit = can(session.data, 'Uom.EditCatalog');
   const [deleting, setDeleting] = useState<UnitRef | null>(null);
+  const [editing, setEditing] = useState<UnitRef | null>(null);
 
   const usage = useQuery({
     queryKey: ['units', deleting?.id, 'usage'],
@@ -225,18 +227,28 @@ export function UnitsPage(): JSX.Element {
             label: '',
             sortable: false,
             render: (unit: UnitRef) => (
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="statusError"
-                aria-label={`${t('common.delete')} ${unit.code}`}
-                onClick={() => {
-                  remove.reset();
-                  setDeleting(unit);
-                }}
-              >
-                {t('common.delete')}
-              </Button>
+              <Group gap="xs" wrap="nowrap">
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  aria-label={`${t('units.edit')} ${unit.code}`}
+                  onClick={() => setEditing(unit)}
+                >
+                  {t('units.edit')}
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="statusError"
+                  aria-label={`${t('common.delete')} ${unit.code}`}
+                  onClick={() => {
+                    remove.reset();
+                    setDeleting(unit);
+                  }}
+                >
+                  {t('common.delete')}
+                </Button>
+              </Group>
             ),
           } satisfies DataTableColumn<UnitRef>,
         ]
@@ -408,7 +420,9 @@ export function UnitsPage(): JSX.Element {
         </Stack>
       </Modal>
 
-      <Modal opened={creating} onClose={() => setCreating(false)} title={t('units.new')}>
+      <UnitEditModal unitId={editing?.id ?? null} code={editing?.code ?? ''} onClose={() => setEditing(null)} />
+
+      <Modal opened={creating}onClose={() => setCreating(false)} title={t('units.new')}>
         <Stack gap="sm">
           <TextInput
             label={t('units.newCode')}
