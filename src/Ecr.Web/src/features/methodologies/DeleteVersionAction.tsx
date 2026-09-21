@@ -1,14 +1,10 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Code, Text } from '@mantine/core';
+import { Button } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MethodologyDraftVersionDto } from '@/api/types';
 import { queryKeys } from '@/api/queryKeys';
 import { deleteMethodologyVersion } from '@/features/methodologies/api';
-import {
-  deleteRefusalOf,
-  mayDeleteVersion,
-  type DeleteRefusal,
-} from '@/features/methodologies/versionDeletion';
+import { mayDeleteVersion } from '@/features/methodologies/versionDeletion';
 import { t } from '@/shared/i18n';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -99,41 +95,14 @@ export function useDeleteVersionAction({
     />
   );
 
-  let refusal: JSX.Element | null = null;
-
-  if (remove.error !== null) {
-    const known = deleteRefusalOf(remove.error, versionNumber);
-
-    // ⚠ Без `onRetry`: «повторити» означало б видалення без підтвердження.
-    refusal = known === null ? <ErrorAlert error={remove.error} /> : <RefusalAlert refusal={known} />;
-  }
+  // ⚠ Відмова — стандартним `ErrorAlert`, як скрізь. Причину (`versionNotDraft`
+  // / `versionUsedInCalculations`) сервер кладе в `detail`, зібраний із
+  // каталогу за `messageKey`; заголовок коду `ECR-CALC-0409` нейтральний
+  // («Conflicting methodology state», `b0f4cacd`), тож власний банер, що
+  // ховав колишнє «second pair of eyes», більше не потрібен.
+  //
+  // ⚠ Без `onRetry`: «повторити» означало б видалення без підтвердження.
+  const refusal = remove.error === null ? null : <ErrorAlert error={remove.error} />;
 
   return { triggerFor, dialog, refusal };
-}
-
-/**
- * Відмова `409` із ПРИЧИНОЮ за `messageKey`, а не «не вдалося».
- *
- * ⛔ Не `ErrorAlert`: його заголовок — назва КОДУ `ECR-CALC-0409`, спільного з
- * правилом «чотирьох очей» публікації, і людина прочитала б його як «вам
- * бракує другого погоджувача». Тут заголовок — сама причина з каталогу.
- */
-function RefusalAlert({ refusal }: { refusal: DeleteRefusal }): JSX.Element {
-  const title =
-    refusal.reason === 'UsedInCalculations'
-      ? t('err.ECR-CALC-0409.versionUsedInCalculations', { version: refusal.version })
-      : t('err.ECR-CALC-0409.versionNotDraft', {
-          version: refusal.version,
-          reason: refusal.state ?? '',
-        });
-
-  return (
-    <Alert color="statusError" role="alert" title={title} data-refusal={refusal.reason}>
-      {/* ⚠ Код і кореляція — як в `ErrorAlert`: з ними звернення в підтримку
-          займає хвилину. */}
-      <Text size="xs">
-        <Code>{refusal.errorCode}</Code> <Code>{refusal.correlationId}</Code>
-      </Text>
-    </Alert>
-  );
 }

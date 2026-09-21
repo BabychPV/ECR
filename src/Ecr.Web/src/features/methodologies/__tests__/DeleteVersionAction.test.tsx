@@ -167,6 +167,12 @@ describe('useDeleteVersionAction: успіх', () => {
   });
 });
 
+/**
+ * ⚠ Відмова 409 іде стандартним `ErrorAlert`. Причину сервер збирає з
+ * каталогу за `messageKey` і віддає в `detail` (`ExceptionHandlingMiddleware`);
+ * тексти `detail` нижче — рядки `09-seed.sql` для цих ключів із підставленими
+ * параметрами, тобто те, що сервер справді надіслав би мовою `en`.
+ */
 describe('useDeleteVersionAction: відмова 409 — причина за messageKey', () => {
   it('versionUsedInCalculations — «вже рахували», а не загальна відмова', async () => {
     mockServer(409, {
@@ -184,13 +190,14 @@ describe('useDeleteVersionAction: відмова 409 — причина за mes
     await confirmDeletion();
 
     const alert = await screen.findByRole('alert');
-    expect(alert.getAttribute('data-refusal')).toBe('UsedInCalculations');
-    expect(alert.textContent).toContain('⟦err.ECR-CALC-0409.versionUsedInCalculations (version=2026.2)⟧');
+    expect(alert.textContent).toContain(
+      'Methodology version 2026.2 has already been used in calculations and cannot be deleted.',
+    );
+    // Заголовок — нейтральна назва коду з каталогу, а не «не вдалося».
+    expect(alert.textContent).toContain('⟦err.ECR-CALC-0409⟧');
+    expect(alert.textContent).not.toContain('⟦state.errorTitle⟧');
     expect(alert.textContent).toContain('ECR-CALC-0409');
     expect(alert.textContent).toContain('cid-used');
-
-    // ⛔ Не заголовок коду («потрібна друга пара очей») — це інша відмова.
-    expect(alert.textContent).not.toContain('⟦err.ECR-CALC-0409⟧');
     expect(showDone).not.toHaveBeenCalled();
   });
 
@@ -210,10 +217,31 @@ describe('useDeleteVersionAction: відмова 409 — причина за mes
     await confirmDeletion();
 
     const alert = await screen.findByRole('alert');
-    expect(alert.getAttribute('data-refusal')).toBe('NotDraft');
     expect(alert.textContent).toContain(
-      '⟦err.ECR-CALC-0409.versionNotDraft (version=2026.2, reason=Published)⟧',
+      'Only a draft methodology version can be deleted; version 2026.2 is Published.',
     );
+    expect(alert.textContent).toContain('cid-draft');
+  });
+
+  it('банер відмови — рівно один і без кнопки «повторити»', async () => {
+    mockServer(409, {
+      title: 'err.ECR-CALC-0409',
+      status: 409,
+      errorCode: 'ECR-CALC-0409',
+      correlationId: 'cid-once',
+      detail: 'Only a draft methodology version can be deleted; version 2026.2 is Published.',
+      messageKey: 'err.ECR-CALC-0409.versionNotDraft',
+      reason: 'Published',
+      version: '2026.2',
+    });
+    show();
+
+    await confirmDeletion();
+
+    await screen.findByRole('alert');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    // «Повторити» означало б видалення без підтвердження.
+    expect(screen.queryByRole('button', { name: '⟦common.retry⟧' })).toBeNull();
   });
 
   it('не 409 — загальний банер із текстом сервера, без вигаданої причини', async () => {
@@ -231,7 +259,7 @@ describe('useDeleteVersionAction: відмова 409 — причина за mes
     await confirmDeletion();
 
     const alert = await screen.findByRole('alert');
-    expect(alert.getAttribute('data-refusal')).toBeNull();
     expect(alert.textContent).toContain('Methodology version 3 does not exist in this methodology.');
+    expect(alert.textContent).toContain('⟦err.ECR-CALC-0404⟧');
   });
 });
