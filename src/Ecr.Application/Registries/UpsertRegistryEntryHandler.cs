@@ -68,7 +68,7 @@ public sealed class UpsertRegistryEntryHandler(
         entry.Rename(dto.Display);
         entry.SetParent(dto.ParentEntryId);
 
-        await ApplyValuesAsync(definition, entry, dto.Values, ct).ConfigureAwait(false);
+        await ApplyValuesAsync(registries, definition, entry, dto.Values, ct).ConfigureAwait(false);
 
         // ⛔ Вікно дії сюди НЕ приймається, хоча воно є полем запису: його
         // зміна тягне перерахунок IsOrphaned (ФВ-8.13a), і зроблена мимохідь
@@ -89,8 +89,17 @@ public sealed class UpsertRegistryEntryHandler(
     /// ⚠ Тип береться з опису поля, а не з типу переданого об'єкта. Інакше
     /// число, що прийшло рядком із JSON, лягло б у <c>ValueString</c> — і поле
     /// «ліміт» перестало б порівнюватися й сумуватися, не давши жодної помилки.
+    /// <para>
+    /// ⚠ <c>internal static</c>, а не приватний метод екземпляра: єдине місце,
+    /// де валідується тип, обов'язковість і склад полів запису довідника, і
+    /// імпорт CSV (`BE-24`, <c>ImportRegistryEntriesHandler</c>) кличе САМЕ цей
+    /// метод — не копіює правило вдруге. <paramref name="registries"/>
+    /// передається параметром замість поля екземпляра: метод раніше читав
+    /// лише це поле, тож перетворення на static нічого не втратило.
+    /// </para>
     /// </remarks>
-    private async Task ApplyValuesAsync(
+    internal static async Task ApplyValuesAsync(
+        IRegistryStore registries,
         Domain.Entities.Configuration.RegistryDef definition,
         RegistryEntry entry,
         IReadOnlyDictionary<string, object?> values,
