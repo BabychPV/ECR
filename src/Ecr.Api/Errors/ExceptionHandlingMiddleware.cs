@@ -451,7 +451,7 @@ public sealed partial class ExceptionHandlingMiddleware(
         // fallback нижче голим `500`. Цифри коду — наш HTTP-статус, і
         // «дублікат» — конфлікт, а не помилка введення (integration-pending
         // фікс findings 1-3).
-        BusinessRuleException e when e.ErrorCode is ErrorCodes.RoleDuplicate or ErrorCodes.ProjectDuplicate =>
+        BusinessRuleException e when e.ErrorCode is ErrorCodes.SecurityConflict or ErrorCodes.ProjectDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         // ⚠ Той самий клас, що й `ECR-ROW-0409`/`ECR-RPT-0409` вище: стан черги

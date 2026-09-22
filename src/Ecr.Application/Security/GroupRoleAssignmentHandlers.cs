@@ -96,7 +96,7 @@ public sealed partial class AssignGroupRoleHandler(
         if (dangerous.Count > 0 && !confirmDangerous)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate,
+                ErrorCodes.SecurityConflict,
                 $"Роль «{role.Code}» несе небезпечні права: {string.Join(", ", dangerous)}.",
                 new Dictionary<string, object?>
                 {
@@ -114,7 +114,7 @@ public sealed partial class AssignGroupRoleHandler(
         if (existing.Exists(a => a.RoleId == roleId))
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate, $"Роль «{role.Code}» уже призначена групі {sid}.",
+                ErrorCodes.SecurityConflict, $"Роль «{role.Code}» уже призначена групі {sid}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-SEC-0409.groupAssignmentExists",

@@ -76,7 +76,7 @@ public static class ErrorCodes
     /// <c>ExceptionHandlingMiddleware</c> — модалка збереження не показувала
     /// НІЧОГО, ні тосту, ні помилки поля.
     /// </remarks>
-    public const string RoleDuplicate = "ECR-SEC-0409";
+    public const string SecurityConflict = "ECR-SEC-0409";
 
     /// <summary>Дані облікового запису не проходять перевірку.</summary>
     /// <remarks>
@@ -368,8 +368,8 @@ public static class ErrorCodes
     /// Стан методології чи версії не дозволяє дію. ⚠ Не лише чотири очі (D-40):
     /// тим самим кодом відмовляє й видалення версії (BE-25); випадок — у <c>messageKey</c>.
     /// </summary>
-    public const string MethodologyFourEyes = "ECR-CALC-0409";
-    public const string MethodologyNoGreenTest = "ECR-CALC-0422";
+    public const string MethodologyConflict = "ECR-CALC-0409";
+    public const string MethodologyInvalid = "ECR-CALC-0422";
     public const string RecalculateClosedPeriod = "ECR-CALC-4221";
 
     /// <summary>Версії методології не існує (<c>ECR-CALC-0404</c>).</summary>
@@ -397,7 +397,7 @@ public static class ErrorCodes
     /// правдоподібний результат. Замір корпусу — 38 таких токенів у двох
     /// формулах <c>Flert</c>.
     ///
-    /// ⚠ Окремий код, а не <see cref="MethodologyNoGreenTest"/>: у методолога
+    /// ⚠ Окремий код, а не <see cref="MethodologyInvalid"/>: у методолога
     /// тут рівно одна правильна дія — дописати токен у список аргументів
     /// формули, — і зводити це до загального «версія не пройшла перевірок»
     /// означало б сховати саме ту відповідь, яка потрібна.
@@ -430,7 +430,7 @@ public static class ErrorCodes
     /// зараз означало б зіткнення, щойно ці TODO стануть кодом.
     ///
     /// ⛔ Окремий код від <see cref="CellInvalid"/> (<c>ECR-CELL-0422</c>) і
-    /// від <see cref="MethodologyNoGreenTest"/>: тут рівно одна правильна дія —
+    /// від <see cref="MethodologyInvalid"/>: тут рівно одна правильна дія —
     /// заповнити названу колонку, — а суб'єкт відмови не комірка й не публікація
     /// версії, а РЯДОК документа з уже визначеною методологією.
     /// </remarks>
