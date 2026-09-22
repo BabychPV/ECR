@@ -109,7 +109,14 @@ const ThreeStates = matrix({
   ],
 });
 
-function mockApi(body: RuleCoverageDto): { calls: string[] } {
+/**
+ * Прив'язка методології, як її віддає `GET …/bindings` — єдина відповідь,
+ * що несе `tableCode`/`tableNameL10n` (`PUT` і аналіз версії віддають `null`).
+ */
+function mockApi(
+  body: RuleCoverageDto,
+  bindingOverrides: Record<string, unknown> = {},
+): { calls: string[] } {
   const calls: string[] = [];
 
   vi.stubGlobal(
@@ -144,6 +151,7 @@ function mockApi(body: RuleCoverageDto): { calls: string[] } {
             outputCode: 'CO2',
             matchJson: '{}',
             isActive: true,
+            ...bindingOverrides,
           },
         ]);
       }
@@ -339,5 +347,44 @@ describe('Матриця покриття правил: дзеркало', () =>
     expect(screen.queryByText(/shadowed by priority/)).toBeNull();
     expect(document.querySelectorAll('[data-other-rules]')).toHaveLength(0);
     expect(document.querySelectorAll('[data-coverage-state="Covered"]')).toHaveLength(2);
+  }, 60000);
+});
+
+describe('Матриця покриття правил: вибір таблиці показує назву, а не TableDefId', () => {
+  it('прив\'язка з назвою й кодом — у виборі видно назву мовою інтерфейсу, а не "Table 7"', async () => {
+    mockApi(ThreeStates, {
+      tableCode: 'FUEL',
+      tableNameL10n: { values: { en: 'Fuel types' } },
+    });
+    await show();
+    await screen.findByText('CO2');
+
+    fireEvent.click(screen.getByLabelText('Table'));
+
+    // ⛔ Мутація «показ TableDefId завжди, ігноруючи назву» валить саме це:
+    // опція називалася б "Table 7" незалежно від того, що прийшло з сервера.
+    expect(screen.getByRole('option', { name: 'Fuel types (FUEL)' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Table 7' })).toBeNull();
+  }, 60000);
+
+  it('дзеркало: без назви (tableNameL10n null) — запасний варіант, код таблиці', async () => {
+    mockApi(ThreeStates, { tableCode: 'FUEL', tableNameL10n: null });
+    await show();
+    await screen.findByText('CO2');
+
+    fireEvent.click(screen.getByLabelText('Table'));
+
+    expect(screen.getByRole('option', { name: 'FUEL' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Table 7' })).toBeNull();
+  }, 60000);
+
+  it('дзеркало: ні назви, ні коду — запасний варіант "Table {id}"', async () => {
+    mockApi(ThreeStates, { tableCode: null, tableNameL10n: null });
+    await show();
+    await screen.findByText('CO2');
+
+    fireEvent.click(screen.getByLabelText('Table'));
+
+    expect(screen.getByRole('option', { name: 'Table 7' })).toBeTruthy();
   }, 60000);
 });

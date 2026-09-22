@@ -2,6 +2,7 @@ import { useMemo, useState, type JSX } from 'react';
 import { Badge, Code, Group, NumberInput, Select, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -133,6 +134,35 @@ function RuleCell({
   );
 }
 
+/** Один запис переліку таблиць вибору — те, що вибудовується з прив'язок. */
+interface RuleCoverageTableOption {
+  readonly id: number;
+  readonly code: string | null;
+  readonly name: string;
+}
+
+/**
+ * Підпис таблиці у виборі: назва мовою інтерфейсу, а поруч — код у дужках.
+ *
+ * ⚠ Ланцюг запасних варіантів: назва → код → `Table {id}`. `PUT` і аналіз
+ * версії віддають `tableCode`/`tableNameL10n` як `null` (лише перелік
+ * прив'язок, `GET …/bindings`, несе обидва поля) — тому короткий текст
+ * `Table {id}` лишається як останній варіант, а не прибирається зовсім:
+ * без жодної прив'язки з назвою чи кодом вибір мав би лишитися підписаним,
+ * а не порожнім.
+ */
+function ruleCoverageTableLabel(table: RuleCoverageTableOption): string {
+  if (table.name.length > 0) {
+    return table.code !== null && table.code.length > 0
+      ? `${table.name} (${table.code})`
+      : table.name;
+  }
+
+  if (table.code !== null && table.code.length > 0) return table.code;
+
+  return t('methodologies.ruleCoverageTableOption', { id: table.id });
+}
+
 /**
  * Матриця покриття «рядки реальних даних × правила» версії методології
  * (`ФВ-13.4`, `ФВ-13.9`).
@@ -173,12 +203,28 @@ export function MethodologyRuleCoveragePanel({
     queryFn: () => calculationBindings(methodologyId),
   });
 
-  const tables = useMemo(() => {
-    const ids = (bindings.data ?? [])
-      .filter((binding) => binding.isActive)
-      .map((binding) => binding.tableDefId);
+  const tables = useMemo<RuleCoverageTableOption[]>(() => {
+    const byId = new Map<number, { code: string | null; name: string }>();
 
-    return [...new Set(ids)].sort((left, right) => left - right);
+    for (const binding of bindings.data ?? []) {
+      if (!binding.isActive) continue;
+
+      const code = binding.tableCode ?? null;
+      const name = localized(binding.tableNameL10n);
+      const existing = byId.get(binding.tableDefId);
+
+      // ⚠ Кілька активних прив'язок можуть указувати на ту саму таблицю;
+      // береться перший непорожній варіант назви й коду, а не останній
+      // запис перезаписує попередній порожнім значенням.
+      byId.set(binding.tableDefId, {
+        code: existing?.code ?? code,
+        name: existing !== undefined && existing.name.length > 0 ? existing.name : name,
+      });
+    }
+
+    return [...byId.entries()]
+      .map(([id, table]) => ({ id, ...table }))
+      .sort((left, right) => left.id - right.id);
   }, [bindings.data]);
 
   const coverage = useQuery({
@@ -212,9 +258,9 @@ export function MethodologyRuleCoveragePanel({
           label={t('methodologies.ruleCoverageTable')}
           data={[
             { value: '', label: t('methodologies.ruleCoverageAllTables') },
-            ...tables.map((id) => ({
-              value: String(id),
-              label: t('methodologies.ruleCoverageTableOption', { id }),
+            ...tables.map((table) => ({
+              value: String(table.id),
+              label: ruleCoverageTableLabel(table),
             })),
           ]}
           value={tableDefId === null ? '' : String(tableDefId)}
