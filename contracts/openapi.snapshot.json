@@ -745,12 +745,24 @@
         "type": "object"
       },
       "CellChangeDto": {
-        "description": "Змінена комірка; значення — рядком (decimal без втрати знаків).",
+        "description": "Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання\n(string? SubmissionPayloadCell.Type): `null` — число або текст, інакше\n`date|bool|ref|unit`.",
         "properties": {
           "columnCode": {
             "type": "string"
           },
+          "newType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "newValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldType": {
             "type": [
               "null",
               "string"
@@ -774,7 +786,9 @@
           "rowKey",
           "columnCode",
           "oldValue",
-          "newValue"
+          "newValue",
+          "oldType",
+          "newType"
         ],
         "type": "object"
       },

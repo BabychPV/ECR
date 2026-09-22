@@ -1,5 +1,5 @@
-using System.Globalization;
 using Ecr.Application.Ports;
+using Ecr.Application.Workflow;
 using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
@@ -33,7 +33,7 @@ public sealed class DocumentVersionStore(EcrDbContext db) : IDocumentVersionStor
             .ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<VersionCell>> ReadCurrentAsync(
+    public async Task<IReadOnlyList<SubmissionPayloadCell>> ReadCurrentAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
     {
         var p = periodKey.Value;
@@ -47,14 +47,25 @@ public sealed class DocumentVersionStore(EcrDbContext db) : IDocumentVersionStor
                 on new { P = row.PeriodKeyValue, R = row.Id }
                 equals new { P = cell.PeriodKeyValue, R = cell.TableRowId }
             where !row.IsDeleted
-            select new CellRow(cell.TableRowId, cell.ColumnDefId, cell.ValueNumeric, cell.ValueString))
+            select new CellRow(
+                cell.TableRowId, cell.ColumnDefId, cell.TableDefId, cell.ValueNumeric, cell.ValueString,
+                cell.ValueDate, cell.ValueBool, cell.ValueRegistryEntryId, cell.ValueUnitId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // Та сама форма значення, що пише SubmitSheetHandler у зріз.
-        return [.. cells.Select(c => new VersionCell(
-            c.RowId, c.ColumnDefId,
-            c.Numeric?.ToString(CultureInfo.InvariantCulture) ?? c.Text))];
+        // Той самий запис, що й у зрізі (SubmitSheetHandler): обидві сторони порівняння — одна форма.
+        return SubmissionPayload.Read(SubmissionPayload.Write(cells.Select(c => new CellRecord(
+            new CellAddress(periodKey, c.RowId, c.ColumnDefId),
+            c.TableDefId,
+            new CellValueData
+            {
+                ValueNumeric = c.Numeric,
+                ValueString = c.Text,
+                ValueDate = c.Date,
+                ValueBool = c.Bool,
+                ValueRegistryEntryId = c.RegistryEntryId,
+                ValueUnitId = c.UnitId,
+            }))));
     }
 
     /// <inheritdoc />
@@ -82,7 +93,9 @@ public sealed class DocumentVersionStore(EcrDbContext db) : IDocumentVersionStor
         return rows.ToDictionary(r => r.RowId, r => new RowLabel(r.TableCode, r.RowKey));
     }
 
-    private sealed record CellRow(long RowId, int ColumnDefId, decimal? Numeric, string? Text);
+    private sealed record CellRow(
+        long RowId, int ColumnDefId, int TableDefId, decimal? Numeric, string? Text,
+        DateTime? Date, bool? Bool, long? RegistryEntryId, int? UnitId);
 
     private sealed record LabelRow(long RowId, string TableCode, string RowKey);
 

@@ -13273,10 +13273,14 @@ export interface components {
              */
             submitted: number;
         };
-        /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). */
+        /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання
+         *     (string? SubmissionPayloadCell.Type): `null` — число або текст, інакше
+         *     `date|bool|ref|unit`. */
         CellChangeDto: {
             columnCode: string;
+            newType: null | string;
             newValue: null | string;
+            oldType: null | string;
             oldValue: null | string;
             rowKey: string;
             tableCode: string;

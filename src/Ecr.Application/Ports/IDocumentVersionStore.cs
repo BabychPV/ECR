@@ -1,3 +1,4 @@
+using Ecr.Application.Workflow;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Ports;
@@ -16,10 +17,10 @@ public interface IDocumentVersionStore
     public Task<DocumentVersionPayload?> FindAsync(long documentId, long versionId, CancellationToken ct);
 
     /// <summary>
-    /// Поточні комірки документа за період у тій самій формі, що й зріз подання
-    /// (<c>SubmitSheetHandler.SnapshotPayloadAsync</c>): видалені рядки не входять.
+    /// Поточні комірки документа за період, записані тим самим <see cref="SubmissionPayload"/>,
+    /// що й зріз подання (з типом дати, булевого, довідника, одиниці): видалені рядки не входять.
     /// </summary>
-    public Task<IReadOnlyList<VersionCell>> ReadCurrentAsync(
+    public Task<IReadOnlyList<SubmissionPayloadCell>> ReadCurrentAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>Таблиця й ключ рядків — зокрема вже видалених.</summary>
@@ -37,9 +38,6 @@ public sealed record DocumentVersionRecord(
 
 /// <summary>Зріз подання з вмістом.</summary>
 public sealed record DocumentVersionPayload(long Id, int PeriodKey, string PayloadJson);
-
-/// <summary>Комірка версії: значення — рядок (decimal у інваріантній культурі або текст).</summary>
-public sealed record VersionCell(long RowId, int ColumnDefId, string? Value);
 
 /// <summary>Підпис рядка для людини.</summary>
 public sealed record RowLabel(string TableCode, string RowKey);
