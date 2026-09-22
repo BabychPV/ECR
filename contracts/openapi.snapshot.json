@@ -12177,6 +12177,69 @@
         ]
       }
     },
+    "/api/v1/column-defs/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Колонка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Де використовується колонка (ФВ-8.14). Право `Template.View`.",
+        "tags": [
+          "ColumnDefs"
+        ]
+      }
+    },
     "/api/v1/consistency/issues": {
       "get": {
         "description": "⛔ До цього ендпоінта `aud.ConsistencyIssue` не читав НІХТО —\nні сервер, ні клієнт. З продукту було видно лише кількість за типом\n(лічильник `ecr.consistency.issues`), тобто «є 12 знахідок\n`BROKEN_FK`» без жодного способу дізнатися, де саме.\n\n⚠ Пагінація курсорна: таблиця росте від кожного нічного прогону, і\nстеля одного проходу — тисяча знахідок.\n\n⚠ `message` у відповіді — український текст, який записала сама\nзадача. Він НЕ локалізується: каталог рядків існує для відмов API\n(`err.*`), не для цього журналу.",
@@ -16710,6 +16773,89 @@
           }
         },
         "summary": "Записує константу версії-чернетки. Право `Calculation.EditConstant`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код константи.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Формули версії, що посилаються на константу (ФВ-8.14). Право `Calculation.View`.",
         "tags": [
           "Methodologies"
         ]
