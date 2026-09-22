@@ -102,12 +102,22 @@ describe('usePreferenceSync — BE-20', () => {
 
     const { result } = renderHook(() => useProbe(true), { wrapper });
 
+    // ⚠ `density()`/`dataset` — синхронний побічний ефект (localStorage/DOM),
+    // а `result.current.generation` — окремий React-стан, який той самий ефект
+    // оновлює ЧЕРЕЗ setState. Він не гарантовано розкомічений в один тік із
+    // побічним ефектом: у повному прогоні (`npm test`, конкуренція за CPU між
+    // файлами vmThreads) React може розкомітити generation ПІЗНІШЕ, ніж
+    // `waitFor` побачить оновлений `density()`. Окремий `expect` одразу після
+    // `waitFor` за density читав generation достроково — звідси
+    // `expected +0 to be 1`, що плавало саме тут (не таймаут, а порядок
+    // готовності двох різних джерел стану). Тому чекаємо на ОБИДВІ умови в
+    // ОДНОМУ `waitFor`: він ретраїть, доки generation теж не стане 1.
     await waitFor(() => {
       expect(density()).toBe('compact');
+      // Перемикач із власним станом має перемонтуватися.
+      expect(result.current.generation).toBe(1);
     });
     expect(document.documentElement.dataset['ecrDensity']).toBe('compact');
-    // Перемикач із власним станом має перемонтуватися.
-    expect(result.current.generation).toBe(1);
 
     await settle();
     // Відлуння застосування не йде на сервер.

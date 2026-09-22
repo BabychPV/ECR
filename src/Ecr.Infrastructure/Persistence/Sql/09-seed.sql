@@ -881,6 +881,16 @@ USING (VALUES
     (N'err.ECR-REG-0422.fieldWrongRegistry', N'en', N'Field "{fieldCode}" belongs to registry {ownerRegistryDefId}, not {registryDefId}.', 1),
     (N'err.ECR-REG-0422.fieldCodeTaken',     N'en', N'Registry "{registryCode}" already has a field with code "{fieldCode}".', 1),
 
+    -- BE-24 крок 3: імпорт записів довідника з CSV (той самий патерн, що
+    -- err.ECR-REQ-0422.uiStringCsv* для перекладів, BE-13 ч.2).
+    (N'err.ECR-REQ-0422.registryEntriesCsvTooLarge', N'en', N'The file takes {size} bytes; the limit is {max}.', 1),
+    (N'err.ECR-REG-0422.entriesCsvHeaderCode', N'en', N'The first row of the file must name a "code" column.', 1),
+    (N'err.ECR-REG-0422.entriesCsvUnknownColumn', N'en', N'Registry "{registryCode}" has no field "{column}": the column is unknown.', 1),
+    (N'err.ECR-REG-0422.entryCodeRequired',  N'en', N'The code column is empty.', 1),
+    (N'err.ECR-REG-0422.entryCodeDuplicateInFile', N'en', N'This code already appears earlier in the file.', 1),
+    (N'err.ECR-REG-0422.entryRefNotFound',   N'en', N'No entry with this code exists in the referenced registry.', 1),
+    (N'err.ECR-REG-0422.entryImportRowFailed', N'en', N'The row was rejected: see the detail of the underlying rule.', 1),
+
     -- ⛔ Головні шляхи користувача: вхід і зміна пароля, подання / погодження /
     -- відхилення / повернення аркуша, створення документа й рядка, періоди,
     -- обмін книгами. Доти подробицею цих відмов їхало українське речення —
@@ -2200,6 +2210,25 @@ USING (VALUES
     (N'registries.entryCreated',         N'en', N'The entry has been created.', 1),
     (N'registries.entrySaved',           N'en', N'The entry has been saved.', 1),
     (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.', 1),
+    -- Імпорт записів довідника з CSV (BE-24 крок 3). ⚠ Перший перегляд іде
+    -- сухим прогоном (dryRun): файл не застосовується, доки людина не
+    -- натисне «Apply». Файл із помилковими рядками не застосовується взагалі —
+    -- або всі рядки, або жоден. Причини рядків приходять messageKey сервера
+    -- (позиція в DynamicKeySites), тому власних ключів під них тут немає.
+    (N'registry.import.pick',            N'en', N'Import from CSV', 1),
+    (N'registry.import.title',           N'en', N'Review the import', 1),
+    (N'registry.import.added',           N'en', N'{count} added', 1),
+    (N'registry.import.updated',         N'en', N'{count} updated', 1),
+    (N'registry.import.unchanged',       N'en', N'{count} unchanged', 1),
+    (N'registry.import.errorsCount',     N'en', N'{count} error(s)', 1),
+    (N'registry.import.blockedTitle',    N'en', N'This file cannot be applied as it is', 1),
+    (N'registry.import.blockedHint',     N'en', N'Fix the rows listed below and import the file again.', 1),
+    (N'registry.import.row',             N'en', N'Row', 1),
+    (N'registry.import.entryKey',        N'en', N'Code', 1),
+    (N'registry.import.field',           N'en', N'Field', 1),
+    (N'registry.import.reason',          N'en', N'Reason', 1),
+    (N'registry.import.apply',           N'en', N'Apply', 1),
+    (N'registry.import.applied',         N'en', N'{added} added, {updated} updated, {unchanged} unchanged.', 1),
     (N'registries.validFrom',            N'en', N'Valid from', 1),
     (N'registries.validTo',              N'en', N'Valid to', 1),
     (N'registries.validityHint',         N'en', N'This replaces deletion. Rows referring to the entry outside the window become orphaned and block submission.', 1),

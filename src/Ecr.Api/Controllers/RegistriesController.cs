@@ -25,7 +25,9 @@ public sealed class RegistriesController(
     GetRegistryDefinitionDraftHandler getDraft,
     SaveRegistryDefinitionDraftHandler saveDraft,
     PublishRegistryDefinitionHandler publish,
-    DiscardRegistryDefinitionDraftHandler discardDraft) : ControllerBase
+    DiscardRegistryDefinitionDraftHandler discardDraft,
+    ImportRegistryEntriesHandler importEntries,
+    IConfiguration configuration) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -258,6 +260,46 @@ public sealed class RegistriesController(
         return isNew
             ? CreatedAtAction(nameof(Entries), new { code }, new RegistryEntryIdResponse(id))
             : Ok(new RegistryEntryIdResponse(id));
+    }
+
+    /// <summary>
+    /// Імпорт записів довідника з CSV. Право <c>Registry.EditData</c> (`BE-24`).
+    /// </summary>
+    /// <remarks>
+    /// Звіт — завжди 200: помилки рядків є даними для того, хто імпортує.
+    /// Хоч одна помилка або <c>dryRun</c> — не записано нічого. Стеля файлу —
+    /// <c>Registries:ImportMaxBytes</c>. Колонки — коди полів ОПУБЛІКОВАНОГО
+    /// опису плюс <c>code</c>; валідація значень — та сама, що при ручному
+    /// редагуванні запису (<see cref="UpsertRegistryEntryHandler"/>).
+    /// </remarks>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="dryRun">Лише перевірка.</param>
+    /// <param name="file">CSV у кодуванні UTF-8.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("{code}/entries/import")]
+    [ProducesResponseType<RegistryEntryImportReport>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ImportEntries(
+        string code, [FromQuery] bool dryRun, IFormFile file, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        var maxBytes = configuration.GetValue(
+            "Registries:ImportMaxBytes", ImportRegistryEntriesHandler.DefaultMaxBytes);
+
+        // Понад стелю файл не читається — обробник відмовить після перевірки права.
+        var content = string.Empty;
+        if (file.Length <= maxBytes)
+        {
+            using var reader = new StreamReader(file.OpenReadStream(), System.Text.Encoding.UTF8);
+            content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+        }
+
+        return Ok(await importEntries
+            .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct)
+            .ConfigureAwait(false));
     }
 
     /// <summary>

@@ -22,7 +22,14 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
-import { JobAttempt, JobDocumentLink, JobFailure, jobAuthor } from '@/features/jobs/JobFacts';
+import {
+  JobAttempt,
+  JobDocumentLink,
+  JobFailure,
+  JobResultLink,
+  JobRetry,
+  jobAuthor,
+} from '@/features/jobs/JobFacts';
 import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
 import { generatePath } from 'react-router-dom';
@@ -399,27 +406,58 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             label: '',
             sortable: false,
             render: (job) => (
-              /* ⚠ `wrap="nowrap"`: дві дії в одному рядку таблиці не мають
-                 переносити одна одну на другий рядок і рвати висоту рядків. */
-              <Group gap="xs" wrap="nowrap">
-                <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
-                  {t('jobs.recentWatch')}
-                </Button>
-
-                {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
-                    нічого, і сервер відповів би `409` (`ECR-JOB-0409`) —
-                    кнопка, приречена на відмову, гірша за її відсутність. */}
-                {isCancellable(job.state) && (
-                  <Button
-                    variant="subtle"
-                    size="xs"
-                    color="statusError"
-                    onClick={() => setConfirming(job)}
-                  >
-                    {t('jobs.cancel')}
+              <Stack gap="xs">
+                {/* ⚠ `wrap="nowrap"`: дії в одному рядку таблиці не мають
+                    переносити одна одну на другий рядок і рвати висоту рядків. */}
+                <Group gap="xs" wrap="nowrap">
+                  <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
+                    {t('jobs.recentWatch')}
                   </Button>
-                )}
-              </Group>
+
+                  {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
+                      нічого, і сервер відповів би `409` (`ECR-JOB-0409`) —
+                      кнопка, приречена на відмову, гірша за її відсутність. */}
+                  {isCancellable(job.state) && (
+                    <Button
+                      variant="subtle"
+                      size="xs"
+                      color="statusError"
+                      onClick={() => setConfirming(job)}
+                    >
+                      {t('jobs.cancel')}
+                    </Button>
+                  )}
+                </Group>
+
+                {/*
+                 * UX-09, директива №11, T10 #40 — той самий підхід, що вже діє
+                 * в шухляді «My tasks» (`MyTasksDrawer.tsx`): ті самі
+                 * компоненти `JobFacts`, той самий критерій показу.
+                 *
+                 * ⛔ `hasViewHealth` — буквально `true`, не заглушка. Сам
+                 * маршрут `/admin/jobs` вимагає `System.ViewHealth`
+                 * (`routes.ts` → `adminJobs.handle.permission`, застосовує
+                 * `RouteGuard`) — тобто кожен, хто взагалі бачить цей рядок,
+                 * право вже має. `isOwnJob` тому байдужий для видимості
+                 * (`canRestartJob`: `state === 'Failed' && (isOwnJob ||
+                 * hasViewHealth)`) і лишається `false` буквально, а не
+                 * підмінює встановлений факт власності — на відміну від
+                 * шухляди «My tasks», де перелік ВЖЕ звужено до власних
+                 * (`mine=true`), тут перелік може містити чужі задачі
+                 * (`mineOnly` вимкнено за замовчуванням), і `isOwnJob=true`
+                 * тут було б вигадкою.
+                 */}
+                <Group gap="xs" wrap="nowrap">
+                  <JobRetry
+                    jobId={job.jobId}
+                    state={job.state}
+                    isOwnJob={false}
+                    hasViewHealth
+                    onRestarted={() => void queryClient.invalidateQueries({ queryKey: ['jobs'] })}
+                  />
+                  <JobResultLink resultUrl={job.resultUrl} />
+                </Group>
+              </Stack>
             ),
           },
         ]}

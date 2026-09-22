@@ -8057,6 +8057,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/entries/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Імпорт записів довідника з CSV. Право `Registry.EditData` (`BE-24`).
+         * @description Звіт — завжди 200: помилки рядків є даними для того, хто імпортує.
+         *     Хоч одна помилка або `dryRun` — не записано нічого. Стеля файлу —
+         *     `Registries:ImportMaxBytes`. Колонки — коди полів ОПУБЛІКОВАНОГО
+         *     опису плюс `code`; валідація значень — та сама, що при ручному
+         *     редагуванні запису (UpsertRegistryEntryHandler).
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Лише перевірка. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryEntryImportReport"];
+                        "text/json": components["schemas"]["RegistryEntryImportReport"];
+                        "text/plain": components["schemas"]["RegistryEntryImportReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries/{id}": {
         parameters: {
             query?: never;
@@ -16558,6 +16649,43 @@ export interface components {
              * @description Запис.
              */
             id: number;
+        };
+        /** @description Помилка одного рядка імпорту записів довідника. */
+        RegistryEntryImportError: {
+            /** @description Поле, якого стосується помилка; `null` — помилка самого рядка (код,
+             *     дублікат), а не конкретного поля. */
+            field: null | string;
+            /** @description Код запису, як його записано у файлі. */
+            key: string;
+            /** @description Ключ тексту відмови в каталозі. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Номер рядка у файлі; заголовок — 1.
+             */
+            row: number;
+        };
+        /** @description Звіт імпорту записів довідника (`BE-24`, крок 3). */
+        RegistryEntryImportReport: {
+            /**
+             * Format: int32
+             * @description Нових записів.
+             */
+            added: number;
+            /** @description Чи записано зміни. */
+            applied: boolean;
+            /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
+            errors: components["schemas"]["RegistryEntryImportError"][];
+            /**
+             * Format: int32
+             * @description Наявних записів, для яких файл не передав жодного значення поля.
+             */
+            unchanged: number;
+            /**
+             * Format: int32
+             * @description Записів, у яких змінилося хоча б одне поле.
+             */
+            updated: number;
         };
         /** @description Створення або оновлення запису довідника. */
         RegistryEntryUpsertDto: {
