@@ -982,6 +982,41 @@ export function emptyBodyFor(url: string): unknown {
    * заради якої секція існує. Одне активне й одне вимкнене — два різні бейджі
    * й `aria-label` рядка лише на другому.
    */
+  /*
+   * ⛔ Каталог імен джерела (`ФВ-13.13`) — ПЕРЕД переліком з'єднань нижче:
+   * `/data-sources` входить у його адресу як префікс, тож без цього рядка
+   * вибір імені отримав би МАСИВ з'єднань замість сторінки `{items,
+   * nextCursor}` — і `page.data.items` там немає взагалі.
+   *
+   * ⚠ Не порожньо: елемент і його атрибут з одиницею — те саме правило, що
+   * для `DocumentSliceFixture`. Саме вікно закрите за замовчуванням (`L2`),
+   * тож у чинному наборі цей запит не йде; рядок існує, щоб перший тест, який
+   * його відкриє, не почав із розслідування, чому сітка порожня.
+   */
+  if (/\/data-sources\/\d+\/catalog(\?|$)/.test(url)) {
+    return {
+      items: [
+        {
+          code: 'Unit1',
+          displayName: 'Unit 1',
+          path: 'Plant/Unit1',
+          kind: 'Element',
+          dataType: 'Element',
+          unitSymbol: null,
+        },
+        {
+          code: 'CO2',
+          displayName: 'CO2 flow',
+          path: 'Plant/Unit1|CO2',
+          kind: 'Attribute',
+          dataType: 'Float64',
+          unitSymbol: 't/h',
+        },
+      ],
+      nextCursor: null,
+    };
+  }
+
   if (url.includes('/data-sources')) {
     return [
       {
