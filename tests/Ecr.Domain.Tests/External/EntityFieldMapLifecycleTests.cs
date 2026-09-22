@@ -86,4 +86,61 @@ public sealed class EntityFieldMapLifecycleTests
             "ECR-INT-0409",
             Assert.Throws<DomainException>(() => undeclared.AcceptSourceUnitChange(42)).ErrorCode);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public void Прийняття_поміченої_збором_одиниці_без_id_знімає_позначку_і_відновлює_збір()
+    {
+        var map = Map();
+        map.SetUnits(sourceUnitId: 7, targetUnitId: 9);
+        map.PauseForSourceUnitChange("t", 42, new DateTime(2026, 9, 17, 5, 30, 0, DateTimeKind.Utc));
+        Assert.False(map.IsActive);
+
+        Assert.Equal(7, map.AcceptSourceUnitChange());
+
+        Assert.Equal(42, map.SourceUnitId);
+        Assert.True(map.IsActive);
+        Assert.False(map.HasPendingSourceUnitChange);
+
+        // Повторно без позначки приймати нема чого.
+        Assert.Equal("ECR-INT-0409", Assert.Throws<DomainException>(() => map.AcceptSourceUnitChange()).ErrorCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public void Одиницю_якої_немає_в_довіднику_не_приймають_і_пауза_лишається()
+    {
+        var map = Map();
+        map.SetUnits(sourceUnitId: 7, targetUnitId: 9);
+        map.PauseForSourceUnitChange("m3", actualUnitId: null, new DateTime(2026, 9, 17, 5, 30, 0, DateTimeKind.Utc));
+
+        var error = Assert.Throws<DomainException>(() => map.AcceptSourceUnitChange());
+
+        Assert.Equal("ECR-INT-0422", error.ErrorCode);
+        Assert.False(map.IsActive);
+        Assert.Equal(7, map.SourceUnitId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Finding", "BE-27")]
+    public void Ручне_відновлення_не_знімає_паузи_через_зміну_одиниці()
+    {
+        // ⚠ Інакше позначка лишилась би, і наступний прогін знову поставив би
+        // мапінг на паузу — вихід лише через рішення про одиницю.
+        var map = Map();
+        map.SetUnits(sourceUnitId: 7, targetUnitId: 9);
+        map.PauseForSourceUnitChange("t", 42, new DateTime(2026, 9, 17, 5, 30, 0, DateTimeKind.Utc));
+
+        var error = Assert.Throws<DomainException>(map.Resume);
+
+        Assert.Equal("ECR-INT-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-INT-0409.mappingUnitChangePending", error.Details!["messageKey"]);
+        Assert.Equal("t", error.Details["actualUnitCode"]);
+        Assert.False(map.IsActive);
+        Assert.True(map.HasPendingSourceUnitChange);
+    }
 }

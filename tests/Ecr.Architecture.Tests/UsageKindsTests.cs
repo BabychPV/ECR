@@ -34,9 +34,10 @@ public sealed class UsageKindsTests
         // ⛔ Літералами: перейменування константи змінило б JSON мовчки.
         Assert.Equal(
             [
-                "data", "derivedUnit", "dimensionBase", "fieldMap", "methodologyConstant",
-                "methodologyFormula", "methodologyOutput", "methodologySubstance", "registryField",
-                "sourceEntity", "templateColumn", "unitConversion",
+                "calculationBinding", "data", "derivedUnit", "dimensionBase", "fieldMap",
+                "methodologyConstant", "methodologyFormula", "methodologyOutput",
+                "methodologyRequiredInput", "methodologyRule", "methodologySubstance", "registryField",
+                "sourceEntity", "templateColumn", "templateFormula", "unitConversion",
             ],
             UsageKinds.All.Order(StringComparer.Ordinal));
     }

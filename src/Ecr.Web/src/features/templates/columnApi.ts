@@ -1,4 +1,5 @@
 import { apiFetch } from '@/api/client';
+import type { UsageResponse } from '@/features/registries/api';
 import { columnBody, type ColumnDefDto, type ColumnDraft } from './column';
 import { styleBody, type StyleDefDto } from './style';
 
@@ -62,4 +63,15 @@ export function deleteColumn(templateVersionId: number, tableId: number, code: s
     `/api/v1/template-versions/${String(templateVersionId)}/tables/${String(tableId)}/columns/${encodeURIComponent(code)}`,
     { method: 'DELETE' },
   );
+}
+
+/**
+ * Де використовується колонка (ФВ-8.14): формули шаблону й прив'язки
+ * методологій, що на неї посилаються. Право `Template.View`.
+ *
+ * ⚠ Адресується числовим `ColumnDefDto.id`, а не парою `tableId`/`code` —
+ * саме так її адресує сервер (`GET /api/v1/column-defs/{id}/usage`).
+ */
+export function columnUsage(columnDefId: number): Promise<UsageResponse> {
+  return apiFetch<UsageResponse>(`/api/v1/column-defs/${String(columnDefId)}/usage`);
 }

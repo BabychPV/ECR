@@ -104,6 +104,13 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
         builder.Property(x => x.TargetRowKey).HasMaxLength(100);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
 
+        // ФВ-16.9: позначка «чекає рішення про одиницю». Id без FK навмисно:
+        // одиницю можуть прибрати з довідника до рішення, і тоді «прийняти»
+        // має відповісти 422, а не впасти на зовнішньому ключі.
+        builder.Property(x => x.PendingSourceUnitCode).HasMaxLength(64);
+        builder.Property(x => x.PendingSourceUnitDetectedAt).HasColumnType("datetime2(3)");
+        builder.Ignore(x => x.HasPendingSourceUnitChange);
+
         builder.HasIndex(x => new { x.SourceEntityId, x.SourceField })
                .IsUnique().HasDatabaseName("UQ_EntityFieldMap");
 

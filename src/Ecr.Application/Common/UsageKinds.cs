@@ -52,6 +52,18 @@ public static class UsageKinds
     /// <summary>Таблиця даних — один рядок на таблицю, без підрахунку.</summary>
     public const string Data = "data";
 
+    /// <summary>Формула шаблону, що читає колонку (<c>cfg.FormulaDependency</c>).</summary>
+    public const string TemplateFormula = "templateFormula";
+
+    /// <summary>Прив'язка методології: колонка-приймач або вхід прив'язки.</summary>
+    public const string CalculationBinding = "calculationBinding";
+
+    /// <summary>Правило методики, чий <c>MatchJson</c> має ключем колонку.</summary>
+    public const string MethodologyRule = "methodologyRule";
+
+    /// <summary>Обов'язковий вхід версії методики.</summary>
+    public const string MethodologyRequiredInput = "methodologyRequiredInput";
+
     /// <summary>Усі види — рефлексією, щоб новий член не треба було дописувати вдруге.</summary>
     public static IReadOnlyList<string> All { get; } =
         [.. typeof(UsageKinds)

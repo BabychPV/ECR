@@ -63,18 +63,19 @@ describe('Дії над мапінгом', () => {
     ]);
   });
 
-  it('приймання зміни одиниці несе нову одиницю в тілі', async () => {
-    // ⚠ Саме в тілі, а не в шляху: одиниця — це рішення людини про дані, і
-    // класти його в URL означало б лишити слід у логах проксі.
+  it('приймання зміни одиниці йде з ПОРОЖНІМ тілом — сервер бере одиницю з позначки', async () => {
+    // ⛔ Тіло `{}`, БЕЗ `sourceUnitId`: контракт (`ФВ-16.9`) віддає рішення
+    // «яку одиницю прийняти» серверу, а не клієнту — сервер знає, яку
+    // одиницю щойно побачив збір (`pendingSourceUnitChange.actualUnitId`).
     mockServer();
 
-    await acceptSourceUnitChange(7, 42);
+    await acceptSourceUnitChange(7);
 
     expect(sent).toEqual([
       {
         url: '/api/v1/entity-field-maps/7/accept-unit-change',
         method: 'POST',
-        body: { sourceUnitId: 42 },
+        body: {},
       },
     ]);
   });

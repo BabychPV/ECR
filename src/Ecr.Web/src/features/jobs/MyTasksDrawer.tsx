@@ -1,12 +1,13 @@
 import type { JSX } from 'react';
 import { Card, Drawer, Group, Progress, Stack, Text } from '@mantine/core';
+import { useQueryClient } from '@tanstack/react-query';
 import type { JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
 import { jobKindLabel } from '@/features/workflow/jobLabel';
-import { JobAttempt, JobDocumentLink, JobFailure } from './JobFacts';
+import { JobAttempt, JobDocumentLink, JobFailure, JobResultLink, JobRetry } from './JobFacts';
 import { isActiveJob } from './myTasks';
 
 /**
@@ -121,6 +122,7 @@ export function MyTasksDrawer({
  * при першій же правці.
  */
 function MyTaskRow({ job }: { readonly job: JobSummary }): JSX.Element {
+  const queryClient = useQueryClient();
   const active = isActiveJob(job.state);
 
   /*
@@ -163,6 +165,25 @@ function MyTaskRow({ job }: { readonly job: JobSummary }): JSX.Element {
           errorCode={job.errorCode}
           correlationId={job.correlationId}
         />
+
+        {/*
+         * ⛔ UX-09, директива №11, T10 #40. `isOwnJob` — завжди `true`: цей
+         * перелік приходить з `mine=true` (`Q-156`, `useMyTasks`), тобто
+         * кожен рядок шухляди ВЖЕ є власним за побудовою — окремо ходити за
+         * правом `System.ViewHealth` заради нього немає сенсу (`hasViewHealth`
+         * нижче не впливає на результат, доки `isOwnJob` — `true`; докладніше
+         * — `JobFacts.canRestartJob`).
+         */}
+        <Group gap="xs" wrap="nowrap">
+          <JobRetry
+            jobId={job.jobId}
+            state={job.state}
+            isOwnJob
+            hasViewHealth={false}
+            onRestarted={() => void queryClient.invalidateQueries({ queryKey: ['jobs'] })}
+          />
+          <JobResultLink resultUrl={job.resultUrl} />
+        </Group>
 
         <Group gap="md" wrap="nowrap">
           <Text size="xs" c="dimmed">

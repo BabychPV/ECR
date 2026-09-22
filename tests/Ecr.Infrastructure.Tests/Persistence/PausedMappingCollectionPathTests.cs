@@ -129,6 +129,49 @@ public sealed class PausedMappingCollectionPathTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public async Task Зміна_одиниці_ставить_мапінг_на_паузу_з_позначкою_яку_бачить_перегляд()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+
+        await using var db = builder.CreateContext();
+
+        var stand = await ArrangeAsync(db, chain, keepEntityActive: true);
+        try
+        {
+            var mapId = await db.EntityFieldMaps
+                .Where(m => m.SourceEntityId == stand.SourceEntityId && m.SourceField == stand.ActiveField)
+                .Select(m => m.Id).SingleAsync();
+
+            var store = new CollectionStore(db, new TestClock(Now));
+            await store.PauseForSourceUnitChangeAsync(mapId, "t", actualUnitId: null, CancellationToken.None);
+
+            // Збір цей мапінг більше не читає.
+            Assert.DoesNotContain(
+                stand.ActiveField,
+                (await store.GetFieldMapsAsync(stand.SourceEntityId, CancellationToken.None)).Select(m => m.SourceField));
+
+            db.ChangeTracker.Clear();
+            var data = await new MappingPreviewStore(db).LoadAsync(
+                stand.SourceEntityId, FromUtc, ToUtc, maxPoints: 100, CancellationToken.None);
+
+            var field = Assert.Single(data!.Maps, m => m.SourceField == stand.ActiveField);
+            Assert.False(field.IsActive);
+            Assert.Equal(
+                new Ecr.Application.Sources.PendingSourceUnitChange("t", null, Now), field.PendingSourceUnitChange);
+        }
+        finally
+        {
+            var entity = await db.SourceEntities.SingleAsync(e => e.Id == stand.SourceEntityId);
+            entity.Deactivate();
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+    }
+
     /// <summary>Що саме заведено для тесту.</summary>
     private sealed record Stand(
         int SourceEntityId, string ActiveField, string PausedField, string ActiveRowKey);

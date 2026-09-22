@@ -5,9 +5,12 @@
         "description": "Запит на приймання зміни одиниці джерела (`ФВ-16.9`).",
         "properties": {
           "sourceUnitId": {
-            "description": "Одиниця довідника, яку джерело віддає тепер.",
+            "description": "Одиниця довідника, яку джерело віддає тепер; `null` — та, що помітив збір\n(`pendingSourceUnitChange.actualUnitId`).",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -2836,6 +2839,17 @@
             "description": "Чи діє мапінг.",
             "type": "boolean"
           },
+          "pendingSourceUnitChange": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingSourceUnitChange",
+                "description": "Збір помітив іншу одиницю джерела і поставив мапінг на паузу; `null` — ні (ФВ-16.9)."
+              }
+            ]
+          },
           "sourceEntityId": {
             "description": "Сутність джерела.",
             "format": "int32",
@@ -2900,7 +2914,8 @@
           "targetUnitId",
           "targetRowKey",
           "aggregation",
-          "isActive"
+          "isActive",
+          "pendingSourceUnitChange"
         ],
         "type": "object"
       },
@@ -3859,6 +3874,17 @@
             "$ref": "#/components/schemas/MappingOutcome",
             "description": "Стан мапінгу."
           },
+          "pendingSourceUnitChange": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingSourceUnitChange",
+                "description": "Пауза через зміну одиниці джерела; `null` — її немає (ФВ-16.9)."
+              }
+            ]
+          },
           "pointCount": {
             "description": "Скільки реальних точок вікна під цей мапінг.",
             "format": "int32",
@@ -3917,7 +3943,8 @@
           "targetUnitCode",
           "pointCount",
           "foldedValue",
-          "isActive"
+          "isActive",
+          "pendingSourceUnitChange"
         ],
         "type": "object"
       },
@@ -5655,6 +5682,34 @@
           "rowKey",
           "baseVersion",
           "cells"
+        ],
+        "type": "object"
+      },
+      "PendingSourceUnitChange": {
+        "description": "Зміна одиниці джерела, що чекає рішення людини (ФВ-16.9).",
+        "properties": {
+          "actualUnitCode": {
+            "description": "Одиниця, яку віддає джерело.",
+            "type": "string"
+          },
+          "actualUnitId": {
+            "description": "Її id у довіднику; `null` — її спершу треба завести.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "detectedAt": {
+            "description": "Коли збір це помітив.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actualUnitCode",
+          "actualUnitId",
+          "detectedAt"
         ],
         "type": "object"
       },
@@ -12600,6 +12655,69 @@
         ]
       }
     },
+    "/api/v1/column-defs/{id}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Колонка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Де використовується колонка (ФВ-8.14). Право `Template.View`.",
+        "tags": [
+          "ColumnDefs"
+        ]
+      }
+    },
     "/api/v1/consistency/issues": {
       "get": {
         "description": "⛔ До цього ендпоінта `aud.ConsistencyIssue` не читав НІХТО —\nні сервер, ні клієнт. З продукту було видно лише кількість за типом\n(лічильник `ecr.consistency.issues`), тобто «є 12 знахідок\n`BROKEN_FK`» без жодного способу дізнатися, де саме.\n\n⚠ Пагінація курсорна: таблиця росте від кожного нічного прогону, і\nстеля одного проходу — тисяча знахідок.\n\n⚠ `message` у відповіді — український текст, який записала сама\nзадача. Він НЕ локалізується: каталог рядків існує для відмов API\n(`err.*`), не для цього журналу.",
@@ -15475,22 +15593,42 @@
           "content": {
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                  }
+                ]
               }
             },
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                  }
+                ]
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                  }
+                ]
               }
             }
           },
-          "description": "Скасування.",
-          "required": true
+          "description": "Скасування."
         },
         "responses": {
           "200": {
@@ -15552,6 +15690,26 @@
               }
             },
             "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Приймає нову одиницю джерела (`ФВ-16.9`). Право `Integration.Manage`.",
@@ -17435,6 +17593,89 @@
           }
         },
         "summary": "Записує константу версії-чернетки. Право `Calculation.EditConstant`.",
+        "tags": [
+          "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код константи.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Формули версії, що посилаються на константу (ФВ-8.14). Право `Calculation.View`.",
         "tags": [
           "Methodologies"
         ]

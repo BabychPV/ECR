@@ -36,6 +36,7 @@ const WithPaused: MappingPreview = {
       pointCount: 2,
       foldedValue: '42.5',
       isActive: true,
+      pendingSourceUnitChange: null,
     },
     {
       fieldMapId: 2,
@@ -50,6 +51,7 @@ const WithPaused: MappingPreview = {
       pointCount: 7,
       foldedValue: '9.5',
       isActive: false,
+      pendingSourceUnitChange: null,
     },
   ],
   rows: [],

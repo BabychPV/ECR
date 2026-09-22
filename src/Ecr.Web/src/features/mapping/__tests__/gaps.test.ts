@@ -24,6 +24,7 @@ function field(overrides: Partial<MappedFieldPreview>): MappedFieldPreview {
     pointCount: 3,
     foldedValue: '42',
     isActive: true,
+    pendingSourceUnitChange: null,
     ...overrides,
   };
 }

@@ -70,6 +70,7 @@ public sealed record SourceEntityRef(int Id, string Code, string? DisplayName);
 /// <param name="SourceUnitCode">Одиниця джерела, оголошена в мапінгу.</param>
 /// <param name="TargetUnitCode">Одиниця, в якій значення лягає в ECR.</param>
 /// <param name="IsActive">Мапінг діє; <c>false</c> — призупинений (<c>BE-27</c>).</param>
+/// <param name="PendingSourceUnitChange">Пауза через зміну одиниці джерела (ФВ-16.9).</param>
 public sealed record FieldMapRef(
     int Id,
     string SourceField,
@@ -80,7 +81,8 @@ public sealed record FieldMapRef(
     string? Aggregation,
     string? SourceUnitCode,
     string? TargetUnitCode,
-    bool IsActive);
+    bool IsActive,
+    PendingSourceUnitChange? PendingSourceUnitChange = null);
 
 /// <summary>Реальний рядок джерела — точка <c>ext.RawDataPoint</c> як є.</summary>
 /// <param name="SourcePath">Шлях атрибута в джерелі.</param>

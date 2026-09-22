@@ -46,6 +46,7 @@ public sealed class TimeZoneImmutabilityTests
         // Scheduled. Саме з цієї миті зміна поясу переписала б минуле: запис,
         // який був вчасним, став би пізнім заднім числом.
         Assert.Equal("ECR-PRD-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-0409.timeZoneLocked", error.Details!["messageKey"]);
         Assert.Equal("Asia/Almaty", project.TimeZoneId);
     }
 

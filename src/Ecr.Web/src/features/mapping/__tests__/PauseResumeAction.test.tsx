@@ -27,6 +27,7 @@ const activeField: MappedFieldPreview = {
   pointCount: 2,
   foldedValue: '42.5',
   isActive: true,
+  pendingSourceUnitChange: null,
 };
 
 const pausedField: MappedFieldPreview = {

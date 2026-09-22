@@ -142,6 +142,21 @@ public sealed class EntityFieldMap : Entity<int>
     /// </remarks>
     public bool IsActive { get; private set; }
 
+    /// <summary>
+    /// Код одиниці, яку джерело віддає замість оголошеної; не <c>null</c> —
+    /// мапінг чекає рішення людини (<c>ФВ-16.9</c>).
+    /// </summary>
+    public string? PendingSourceUnitCode { get; private set; }
+
+    /// <summary>Та сама одиниця в довіднику; <c>null</c> — у довіднику її немає.</summary>
+    public int? PendingSourceUnitId { get; private set; }
+
+    /// <summary>Коли збір помітив зміну одиниці.</summary>
+    public DateTime? PendingSourceUnitDetectedAt { get; private set; }
+
+    /// <summary>Чи чекає мапінг рішення про нову одиницю джерела.</summary>
+    public bool HasPendingSourceUnitChange => PendingSourceUnitCode is not null;
+
     /// <summary>Чи переносяться точки цього мапінгу в комірки.</summary>
     public bool IsMaterialized => TargetRowKey is not null;
 
@@ -233,13 +248,32 @@ public sealed class EntityFieldMap : Entity<int>
                 });
         }
 
+        // Пауза через зміну одиниці знімається лише рішенням про одиницю
+        // (AcceptSourceUnitChange): інакше позначка лишилась би, і наступний
+        // прогін знову поставив би мапінг на паузу.
+        if (HasPendingSourceUnitChange)
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Мапінг поля «{SourceField}» чекає рішення про нову одиницю «{PendingSourceUnitCode}»: спершу вирішіть зміну одиниці.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.mappingUnitChangePending",
+                    ["sourceField"] = SourceField,
+                    ["actualUnitCode"] = PendingSourceUnitCode,
+                });
+        }
+
         IsActive = true;
     }
 
     /// <summary>
     /// Приймає нову одиницю джерела замість оголошеної (<c>ФВ-16.9</c>).
     /// </summary>
-    /// <param name="newSourceUnitId">Одиниця, яку джерело віддає тепер.</param>
+    /// <param name="newSourceUnitId">
+    /// Одиниця, яку джерело віддає тепер; <c>null</c> — узяти ту, що помітив
+    /// збір (<see cref="PendingSourceUnitId"/>).
+    /// </param>
     /// <returns>Одиниця, що була оголошена до цього — її називає журнал.</returns>
     /// <exception cref="DomainException">
     /// <c>ECR-INT-0409</c> — мапінг не оголошує одиниці джерела або нова
@@ -256,8 +290,33 @@ public sealed class EntityFieldMap : Entity<int>
     /// чим, і жодної «зміни» для нього не існує. Оголосити одиницю вперше —
     /// це редагування мапінгу, а не приймання зміни.
     /// </remarks>
-    public int AcceptSourceUnitChange(int newSourceUnitId)
+    public int AcceptSourceUnitChange(int? newSourceUnitId = null)
     {
+        if (newSourceUnitId is null && !HasPendingSourceUnitChange)
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Мапінг поля «{SourceField}» не чекає рішення про одиницю.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.mappingUnitChangeNotPending",
+                    ["sourceField"] = SourceField,
+                });
+        }
+
+        if ((newSourceUnitId ?? PendingSourceUnitId) is not { } target)
+        {
+            throw new DomainException(
+                "ECR-INT-0422",
+                $"Одиниці «{PendingSourceUnitCode}» немає в довіднику: спершу заведіть її.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.pendingUnitNotInCatalog",
+                    ["sourceField"] = SourceField,
+                    ["unitCode"] = PendingSourceUnitCode,
+                });
+        }
+
         if (SourceUnitId is not { } declared)
         {
             throw new DomainException(
@@ -270,11 +329,11 @@ public sealed class EntityFieldMap : Entity<int>
                 });
         }
 
-        if (declared == newSourceUnitId)
+        if (declared == target)
         {
             throw new DomainException(
                 "ECR-INT-0409",
-                $"Мапінг поля «{SourceField}» уже оголошує одиницю {newSourceUnitId}.",
+                $"Мапінг поля «{SourceField}» уже оголошує одиницю {target}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-INT-0409.mappingUnitUnchanged",
@@ -282,8 +341,46 @@ public sealed class EntityFieldMap : Entity<int>
                 });
         }
 
-        SourceUnitId = newSourceUnitId;
+        SourceUnitId = target;
+
+        // Пауза, яку поставив збір, знімається тим самим рішенням
+        // (макет: «Result: resumed · collect again»).
+        if (HasPendingSourceUnitChange)
+        {
+            ClearPendingSourceUnitChange();
+            IsActive = true;
+        }
 
         return declared;
+    }
+
+    /// <summary>
+    /// Збір помітив іншу одиницю джерела: мапінг стає на паузу й чекає
+    /// рішення людини (<c>ФВ-16.9</c>).
+    /// </summary>
+    /// <param name="actualUnitCode">Одиниця, яку віддає джерело.</param>
+    /// <param name="actualUnitId">Її id у довіднику; <c>null</c> — немає.</param>
+    /// <param name="detectedAt">Коли помічено.</param>
+    /// <remarks>
+    /// ⚠ Зупиняється цей мапінг, а не весь прогін: інші атрибути тієї самої
+    /// сутності від зміни одиниці не стали неправильними.
+    /// </remarks>
+    public void PauseForSourceUnitChange(string actualUnitCode, int? actualUnitId, DateTime detectedAt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actualUnitCode);
+
+        // Символ приходить із чужої системи: довший за код довідника (64) не
+        // збігся б ні з чим, а базу не має валити на збереженні.
+        PendingSourceUnitCode = actualUnitCode.Length > 64 ? actualUnitCode[..64] : actualUnitCode;
+        PendingSourceUnitId = actualUnitId;
+        PendingSourceUnitDetectedAt = detectedAt;
+        IsActive = false;
+    }
+
+    private void ClearPendingSourceUnitChange()
+    {
+        PendingSourceUnitCode = null;
+        PendingSourceUnitId = null;
+        PendingSourceUnitDetectedAt = null;
     }
 }

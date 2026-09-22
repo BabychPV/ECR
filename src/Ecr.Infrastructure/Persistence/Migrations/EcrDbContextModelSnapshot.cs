@@ -2491,6 +2491,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<string>("PendingSourceUnitCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("PendingSourceUnitDetectedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("PendingSourceUnitId")
+                        .HasColumnType("int");
+
                     b.Property<int>("SourceEntityId")
                         .HasColumnType("int");
 

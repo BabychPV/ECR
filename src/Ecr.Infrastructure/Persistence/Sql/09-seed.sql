@@ -344,6 +344,8 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- ФВ-4.2: кнопка більше не завжди Excel — формат обирається поруч.
+    (N'document.export',                 N'en', N'Export to Excel', N'Export'),
     (N'periods.timeZone',                N'en', N'Site time zone', N'Site time zone (IANA)'),
     (N'periods.timeZoneHint',            N'en', N'Period boundaries and late-edit marks are calculated in this zone. It cannot be changed once the first period is open.',
                                                 N'IANA identifier of the site, for example Asia/Aqtau. Period boundaries and late-edit marks are calculated in this zone, and it cannot be changed once the first period is open.'),
@@ -377,6 +379,8 @@ UPDATE t
     (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request'),
     (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change'),
     (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found'),
+    (N'err.ECR-PRD-0409',                N'en', N'The period is closed', N'Period state conflict'),
+    (N'err.ECR-PRD-0422',                N'en', N'The period is outside the project', N'Invalid period request'),
     (N'err.ECR-AUTH-0403.jobNotYours',   N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', N'This background job was started by someone else: permission {permission} is required to act on it.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -784,6 +788,10 @@ USING (VALUES
     (N'err.ECR-REQ-0422.preferenceValueInvalid',          N'en', N'The value of preference "{key}" is not valid JSON.', 1),
     (N'err.ECR-REQ-0422.preferenceValueTooLarge',         N'en', N'The value of preference "{key}" takes {size} bytes; the limit is {max}.', 1),
     (N'err.ECR-REQ-0422.preferenceLimitReached',          N'en', N'You already keep {max} preferences: delete one before adding "{key}".', 1),
+    -- ФВ-16.9: зміна одиниці ставить на паузу лише свій мапінг і чекає рішення.
+    (N'err.ECR-INT-0409.mappingUnitChangeNotPending',     N'en', N'The mapping of field "{sourceField}" is not waiting for a decision about its unit.', 1),
+    (N'err.ECR-INT-0409.mappingUnitChangePending',        N'en', N'The mapping of field "{sourceField}" is paused because its source now reports unit "{actualUnitCode}". Resolve the unit change first: accepting it resumes collection.', 1),
+    (N'err.ECR-INT-0422.pendingUnitNotInCatalog',         N'en', N'The source of field "{sourceField}" now reports unit "{unitCode}", which is not in the unit catalog. Add the unit first, then accept the change.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -923,8 +931,15 @@ USING (VALUES
     (N'err.ECR-PRD-0409.transitionNotAllowed',  N'en', N'Period {periodKey} cannot go from {from} to {to}.', 1),
     (N'err.ECR-PRD-0409.reopenOnlyClosed',      N'en', N'Only a closed period can be reopened; the period is {state}.', 1),
     (N'err.ECR-PRD-0422.reopenReasonRequired',  N'en', N'A reason is required to reopen the period.', 1),
+    (N'err.ECR-PRD-0422.periodNotInProject',    N'en', N'Period {periodId} does not belong to project "{projectCode}".', 1),
+    (N'err.ECR-PRD-0422.pinReasonRequired',     N'en', N'A reason is required to pin the current period.', 1),
+    (N'err.ECR-PRD-0409.timeZoneLocked',        N'en', N'The site time zone cannot be changed once the first period has been opened.', 1),
+    (N'err.ECR-PRD-4225.graceAfterHardClose',   N'en', N'The grace period ({graceOffsetDays} days) cannot be longer than the hard close ({hardCloseOffsetDays} days): the period would close for good before its own grace period ends.', 1),
+    (N'err.ECR-PRD-4225.negativeYearGrace',     N'en', N'The year-end grace period ({yearGraceOffsetDays} days) cannot be negative.', 1),
     -- BE-25: only a never-published, never-used methodology version can be deleted.
     (N'err.ECR-CALC-0404.version',              N'en', N'Methodology version {methodologyVersionId} does not exist in this methodology.', 1),
+    (N'err.ECR-CALC-0404.constant',             N'en', N'Methodology version {methodologyVersionId} has no constant {code}.', 1),
+    (N'err.ECR-TMPL-0404.column',               N'en', N'Column {columnDefId} does not exist or has been deleted.', 1),
     (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'en', N'Methodology version {version} has already been used in calculations and cannot be deleted.', 1),
     -- D-40: with a neutral code title, the four-eyes refusals carry their own detail.
@@ -1016,9 +1031,11 @@ USING (VALUES
     (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),
 
     -- Періоди і проєкти.
-    (N'err.ECR-PRD-0409',   N'en', N'The period is closed', 1),
+    -- Фрази `ECR-PRD-0409` і `ECR-PRD-0422` нейтральні: у обох кодів кілька
+    -- причин (перехід стану, архів, пояс; чужий період, порожня причина).
+    (N'err.ECR-PRD-0409',   N'en', N'Period state conflict', 1),
     (N'err.ECR-PRD-0404',   N'en', N'Period not found', 1),
-    (N'err.ECR-PRD-0422',   N'en', N'The period is outside the project', 1),
+    (N'err.ECR-PRD-0422',   N'en', N'Invalid period request', 1),
     (N'err.ECR-PRD-4223',   N'en', N'Reopen is blocked by a closed period', 1),
     (N'err.ECR-PRD-4224',   N'en', N'Invalid period sequence', 1),
     (N'err.ECR-PRD-4225',   N'en', N'Invalid period policy', 1),
@@ -1146,7 +1163,13 @@ USING (VALUES
     (N'document.restoreEdits.more',      N'en', N'and {count} more', 1),
     (N'document.submit',                 N'en', N'Submit', 1),
     (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
-    (N'document.export',                 N'en', N'Export to Excel', 1),
+    -- ⚠ Текст без «to Excel»: кнопка експортує у формат, обраний поруч
+    -- (ФВ-4.2). Стара фраза оновлюється в секції «Змінені тексти» вище.
+    (N'document.export',                 N'en', N'Export', 1),
+    (N'document.exportFormat',           N'en', N'Export format', 1),
+    (N'document.exportFormatXlsx',       N'en', N'Excel', 1),
+    (N'document.exportFormatCsv',        N'en', N'CSV', 1),
+    (N'document.exportFormatJson',       N'en', N'JSON', 1),
     (N'document.exportBuilding',         N'en', N'Building...', 1),
     (N'document.exportReady',            N'en', N'Download the workbook', 1),
     (N'document.exportFailed',           N'en', N'Export failed.', 1),
@@ -2212,6 +2235,11 @@ USING (VALUES
     -- `ext.RawData`. Один рядок на таблицю, без числа (підпис — ім'я таблиці).
     -- Колишнє «Values in documents» для одиниці було б неправдою.
     (N'usageKind.data',                 N'en', N'Stored data', 1),
+    -- ФВ-8.14: «де використано» колонки шаблону.
+    (N'usageKind.templateFormula',      N'en', N'Template formula', 1),
+    (N'usageKind.calculationBinding',   N'en', N'Methodology binding', 1),
+    (N'usageKind.methodologyRule',      N'en', N'Methodology rule', 1),
+    (N'usageKind.methodologyRequiredInput', N'en', N'Methodology required input', 1),
     (N'registries.newRegistry',          N'en', N'New registry', 1),
     (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
     (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),
@@ -2662,6 +2690,25 @@ USING (VALUES
     (N'mapping.resume',                  N'en', N'Resume', 1),
     (N'mapping.pauseDone',               N'en', N'Mapping paused.', 1),
     (N'mapping.resumeDone',              N'en', N'Mapping resumed.', 1),
+    -- Видалення мапінгу з рядка перегляду (BE-27). ⚠ `deleteBlocked` — відмова
+    -- сервера, коли мапінг уже пояснює зібрані точки: видалити означало б
+    -- лишити їх без пояснення, тож пропонується пауза.
+    (N'mapping.delete',                  N'en', N'Remove mapping', 1),
+    (N'mapping.deleteTitle',             N'en', N'Remove the mapping of {field}?', 1),
+    (N'mapping.deleteText',              N'en', N'The mapping is gone for good: its target row, fold and units are not kept anywhere else.', 1),
+    (N'mapping.deleteConsequence',       N'en', N'{target} stops being filled from the source; people type it by hand again.', 1),
+    (N'mapping.deleteNote',              N'en', N'The value already in the cell stays. The source field returns to the list of fields that land nowhere.', 1),
+    (N'mapping.deleteDone',              N'en', N'Mapping removed.', 1),
+    (N'mapping.deleteBlocked',           N'en', N'{points} collected rows are explained by this mapping, so it is not removed: deleting it would leave them without an explanation. Pause it instead — a paused mapping keeps its settings and writes nothing.', 1),
+    -- Зміна одиниці джерела (ФВ-16.9): збір цього мапінгу на паузі, доки
+    -- людина не вирішить, чи нова одиниця правильна.
+    (N'mapping.unitChangeTitle',         N'en', N'Source unit changed', 1),
+    (N'mapping.unitChangeBanner',        N'en', N'The source now returns {actualUnitCode} instead of {expectedUnitCode}.', 1),
+    (N'mapping.unitChangeDetected',      N'en', N'Detected', 1),
+    (N'mapping.unitChangeAccept',        N'en', N'Yes, accept {actualUnitCode}', 1),
+    (N'mapping.unitChangeDecline',       N'en', N'No, this is a source error', 1),
+    (N'mapping.unitChangeAccepted',      N'en', N'Collection resumed', 1),
+    (N'mapping.unitChangeGoToUnits',     N'en', N'Add the unit in the catalog first', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),

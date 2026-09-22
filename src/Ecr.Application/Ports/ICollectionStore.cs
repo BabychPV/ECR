@@ -94,6 +94,17 @@ public interface ICollectionStore
     /// </remarks>
     public Task<EntityFieldMap?> FindFieldMapAsync(int fieldMapId, CancellationToken ct);
 
+    /// <summary>
+    /// Ставить мапінг на паузу з позначкою «джерело змінило одиницю»
+    /// (<c>ФВ-16.9</c>); час позначки — годинник сховища.
+    /// </summary>
+    /// <param name="fieldMapId">Мапінг.</param>
+    /// <param name="actualUnitCode">Одиниця, яку віддає джерело.</param>
+    /// <param name="actualUnitId">Її id у довіднику; <c>null</c> — немає.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task PauseForSourceUnitChangeAsync(
+        int fieldMapId, string actualUnitCode, int? actualUnitId, CancellationToken ct);
+
     /// <summary>Видаляє мапінг остаточно (<c>BE-27</c>).</summary>
     /// <remarks>
     /// ⚠ Видалення фізичне, і це безпечно рівно тому, що викликач пропускає

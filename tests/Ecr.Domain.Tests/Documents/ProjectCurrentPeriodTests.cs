@@ -59,10 +59,13 @@ public sealed class ProjectCurrentPeriodTests
         // Стан неочевидний для того, хто відкриє проєкт наступним, і має бути
         // видимим в UI разом із поясненням.
         Assert.Equal("ECR-PRD-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-0422.pinReasonRequired", error.Details!["messageKey"]);
         Assert.Equal(CurrentPeriodMode.Auto, project.CurrentPeriodMode);
 
         // Чужий період теж не приймається.
-        Assert.Throws<DomainException>(() => project.PinCurrentPeriod(999, "причина", User, Now));
+        var foreign = Assert.Throws<DomainException>(() => project.PinCurrentPeriod(999, "причина", User, Now));
+        Assert.Equal("err.ECR-PRD-0422.periodNotInProject", foreign.Details!["messageKey"]);
+        Assert.Equal("999", foreign.Details["periodId"]);
     }
 
     [Fact]

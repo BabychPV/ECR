@@ -43,6 +43,14 @@ export function UsageKindLabel({ kind }: { kind: string }): JSX.Element {
       return <>{t('usageKind.dimensionBase')}</>;
     case 'data':
       return <>{t('usageKind.data')}</>;
+    case 'templateFormula':
+      return <>{t('usageKind.templateFormula')}</>;
+    case 'calculationBinding':
+      return <>{t('usageKind.calculationBinding')}</>;
+    case 'methodologyRule':
+      return <>{t('usageKind.methodologyRule')}</>;
+    case 'methodologyRequiredInput':
+      return <>{t('usageKind.methodologyRequiredInput')}</>;
     default:
       return <Code>{kind}</Code>;
   }

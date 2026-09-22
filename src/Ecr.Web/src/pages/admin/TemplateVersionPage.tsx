@@ -125,6 +125,10 @@ const PeriodAccessRuleManager = lazy(async () => ({
   default: (await import('@/features/templates/PeriodAccessRuleEditor')).PeriodAccessRuleManager,
 }));
 
+const TemplateColumnUsage = lazy(async () => ({
+  default: (await import('@/features/templates/ColumnUsage')).TemplateColumnUsage,
+}));
+
 /**
  * ⛔ `PresentationEditor` — єдиний із цих редакторів, що НЕ стоїть за
  * `{умова && …}`: він сам носить усередині `<Modal opened={column !== null}>`.
@@ -184,6 +188,11 @@ export function TemplateVersionPage(): JSX.Element {
   // адресуються не лише кодом, а й таблицею-власником (`W5.2`).
   const [columnEdit, setColumnEdit] = useState<{ tableId: number; draft: ColumnDraft } | null>(null);
   const [rowEdit, setRowEdit] = useState<{ tableId: number; draft: RowDraft } | null>(null);
+
+  // ФВ-8.14: id колонки, для якої зараз відкрито «де використовується».
+  // ⛔ Кнопка показується для КОЖНОЇ колонки завжди, незалежно від того, чи є
+  // в неї використання (`total: 0` теж чинний, а не привід ховати афордансу).
+  const [columnUsageFor, setColumnUsageFor] = useState<number | null>(null);
 
   // ⛔ Кеш повних відповідей ЦЬОГО сеансу, ключ — `tableId:код`. Структура
   // версії (`GET …/structure`) віддає колонку й рядок бідніше, ніж їх приймає
@@ -871,6 +880,14 @@ export function TemplateVersionPage(): JSX.Element {
                                     <Table.Td>{column.unitSymbol ?? '—'}</Table.Td>
                                     <Table.Td>
                                       <Group gap="xs" wrap="nowrap" justify="flex-end">
+                                        <Button
+                                          size="compact-xs"
+                                          variant="subtle"
+                                          data-column-usage="trigger"
+                                          onClick={() => setColumnUsageFor(column.id)}
+                                        >
+                                          {t('registries.tabUsage')}
+                                        </Button>
                                         {/* ⚠ Правка тут не потребує нової версії: підпис,
                                             порядок, формат і видимість — презентаційний
                                             шар, і його дозволено міняти в опублікованій
@@ -1155,6 +1172,18 @@ export function TemplateVersionPage(): JSX.Element {
               onSubmit={() => saveColumnMutation.mutate(columnEdit)}
               onCancel={() => setColumnEdit(null)}
             />
+          </Suspense>
+        )}
+      </Modal>
+
+      <Modal
+        opened={columnUsageFor !== null}
+        onClose={() => setColumnUsageFor(null)}
+        title={t('registries.tabUsage')}
+      >
+        {columnUsageFor !== null && (
+          <Suspense fallback={null}>
+            <TemplateColumnUsage columnDefId={columnUsageFor} />
           </Suspense>
         )}
       </Modal>

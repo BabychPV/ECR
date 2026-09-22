@@ -60,6 +60,9 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
                 m.SourceUnitId,
                 m.TargetUnitId,
                 m.IsActive,
+                m.PendingSourceUnitCode,
+                m.PendingSourceUnitId,
+                m.PendingSourceUnitDetectedAt,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -127,7 +130,9 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
                 Aggregation(m.TransformCode),
                 Code(units, m.SourceUnitId),
                 Code(units, m.TargetUnitId),
-                m.IsActive);
+                m.IsActive,
+                PendingSourceUnitChange.From(
+                    m.PendingSourceUnitCode, m.PendingSourceUnitId, m.PendingSourceUnitDetectedAt));
         });
 
         return new MappingPreviewData(
