@@ -1670,6 +1670,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/business-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.
+         * @description Причина обов'язкова (`422`); ключ зайнятий, застарілий `expectedBusinessKey`
+         *     або аркуш поданий/погоджений — `409` `ECR-DOC-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "application/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "text/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/calculation-results": {
         parameters: {
             query?: never;
@@ -12709,6 +12788,15 @@ export interface components {
          * @enum {unknown}
          */
         ChangeClass: "Presentation" | "Safe" | "Guarded" | "Breaking";
+        /** @description Запит на зміну бізнес-ключа документа (ФВ-3.9). */
+        ChangeDocumentKeyRequest: {
+            /** @description Новий ключ. */
+            businessKey: null | string;
+            /** @description Чинний ключ, який бачила людина; розбіжність — 409. */
+            expectedBusinessKey: null | string;
+            /** @description Причина; обов'язкова, лягає в аудит. */
+            reason: null | string;
+        };
         /** @description Запит на зміну пароля. */
         ChangePasswordRequest: {
             /** @description Поточний пароль. */
