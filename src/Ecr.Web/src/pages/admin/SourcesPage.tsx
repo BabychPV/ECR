@@ -3,6 +3,7 @@ import { Badge, Button, Group, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
 import { DataSourcesTable } from '@/features/integration/DataSourcesTable';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
@@ -190,6 +191,15 @@ export function SourcesPage(): JSX.Element {
       }
     >
       <DataSourcesTable />
+
+      {/*
+       * ⚠ Журнал прогонів (ФВ-5.23) — секцією тут, а не власним маршрутом:
+       * право те саме, що вже відкриває цю сторінку (`Integration.View` АБО
+       * `Integration.Manage`), і власний маршрут ввів би новий `labelKey` у
+       * `routes.ts`, якого нема куди дописати в сторожа
+       * `EndpointCoverageTests.RouteLabelKeys` (деталь — `CollectionRunsPanel.tsx`).
+       */}
+      <CollectionRunsPanel />
     </ListPage>
   );
 }

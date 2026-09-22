@@ -1052,6 +1052,42 @@ export function emptyBodyFor(url: string): unknown {
     ];
   }
 
+  /*
+   * ⚠ Журнал прогонів (ФВ-5.23) — НЕ порожній: порожній перелік показав би
+   * `EmptyState`, і гейт сканував би секцію на `/admin/sources` без таблиці,
+   * бейджа стану й фільтрів, заради яких вона й існує. Запит завжди йде з
+   * рядком `?` (`listCollectionRuns`), тож перевірка вужча за голе
+   * `includes('/collection-runs')` — інакше зачепила б і
+   * `/collection-runs/{id}`, якого тут немає (шухляда відкривається лише
+   * кліком, а не статичним скануванням сторінки).
+   */
+  if (url.includes('/api/v1/collection-runs?')) {
+    return {
+      items: [
+        {
+          id: 501,
+          sourceEntityId: 12,
+          sourceEntityCode: 'FLOW-01',
+          sourceEntityName: 'Flow meter #1',
+          dataSourceId: 1,
+          dataSourceCode: 'PI-MAIN',
+          rangeFrom: '2026-09-19T00:00:00Z',
+          rangeTo: '2026-09-20T00:00:00Z',
+          startedAt: '2026-09-20T03:00:00Z',
+          finishedAt: '2026-09-20T03:00:12Z',
+          durationMs: 12345,
+          status: 'Succeeded',
+          pointsRetrieved: 2880,
+          isCatchUp: false,
+          hasError: false,
+          triggeredByUserId: null,
+        },
+      ],
+      nextCursor: null,
+      totalCount: null,
+    };
+  }
+
   if (url.includes('/reports/snapshots')) return SnapshotListFixture;
 
   /*
