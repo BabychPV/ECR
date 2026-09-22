@@ -438,7 +438,7 @@ public sealed class DocumentsController(
     public async Task<IActionResult> DownloadExport(long id, string exportId, CancellationToken ct)
     {
         var content = await downloadExport.HandleAsync(exportId, ct).ConfigureAwait(false);
-        var (contentType, extension) = Ecr.Application.Documents.DocumentExportFormat.OfExportId(exportId);
+        var (contentType, extension) = Ecr.Application.Documents.DocumentExportFormat.OfContent(content);
 
         return File(content, contentType, $"document-{id}-{exportId}.{extension}");
     }

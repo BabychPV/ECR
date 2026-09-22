@@ -71,7 +71,7 @@ public sealed class ExportDocumentHandler(
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
         // сховища не може дорівнювати jobId: той повертає черга вже після
         // постановки, а задача має знати, куди класти результат, до запуску.
-        var exportId = DocumentExportFormat.NewExportId(normalized);
+        var exportId = Guid.NewGuid().ToString("N");
 
         // ⚠ `createdByUserId` — щоб автор прочитав стан ВЛАСНОЇ задачі без
         // System.ViewHealth (Q-156). CSV/JSON ідуть ТІЄЮ САМОЮ задачею, що й

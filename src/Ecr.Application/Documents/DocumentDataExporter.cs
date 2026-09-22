@@ -13,9 +13,9 @@ namespace Ecr.Application.Documents;
 
 /// <summary>Формати вивантаження документа (ФВ-4.1, ФВ-4.2).</summary>
 /// <remarks>
-/// ⚠ Формат їде суфіксом у <c>exportId</c> (<c>…-csv</c>, <c>…-json</c>): сховище
-/// експорту пам'ятає лише байти й документ, а завантаження мусить знати тип вмісту.
-/// Для <c>xlsx</c> ключ лишається голим GUID — наявні посилання не змінюються.
+/// ⚠ Тип вмісту при завантаженні визначається за САМИМ вмістом: сховище експорту
+/// пам'ятає лише байти й документ, а <c>exportId</c> лишається 32 hex-символами
+/// для всіх форматів — на цю форму спирається <c>resultUrl</c> задачі (UX-09).
 /// </remarks>
 public static class DocumentExportFormat
 {
@@ -33,22 +33,32 @@ public static class DocumentExportFormat
             _ => null,
         };
 
-    /// <summary>Ключ експорту з форматом.</summary>
-    public static string NewExportId(string format)
-        => format == Xlsx ? Guid.NewGuid().ToString("N") : $"{Guid.NewGuid():N}-{format}";
-
-    /// <summary>Тип вмісту й розширення за ключем експорту.</summary>
-    public static (string ContentType, string Extension) OfExportId(string exportId)
+    /// <summary>
+    /// Тип вмісту й розширення за вмістом: JSON починається з <c>{</c>; zip без
+    /// <c>[Content_Types].xml</c> — архів CSV; решта — книга xlsx.
+    /// </summary>
+    public static (string ContentType, string Extension) OfContent(byte[] content)
     {
-        ArgumentNullException.ThrowIfNull(exportId);
-        if (exportId.EndsWith("-" + Csv, StringComparison.Ordinal))
+        ArgumentNullException.ThrowIfNull(content);
+        if (content.Length > 0 && content[0] == (byte)'{')
         {
-            return ("application/zip", "zip");
+            return ("application/json", "json");
         }
 
-        return exportId.EndsWith("-" + Json, StringComparison.Ordinal)
-            ? ("application/json", "json")
-            : ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx");
+        try
+        {
+            using var zip = new ZipArchive(new MemoryStream(content), ZipArchiveMode.Read);
+            if (zip.GetEntry("[Content_Types].xml") is null)
+            {
+                return ("application/zip", "zip");
+            }
+        }
+        catch (InvalidDataException)
+        {
+            // Не zip — віддаємо як книгу, як і до ФВ-4.2.
+        }
+
+        return ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx");
     }
 }
 

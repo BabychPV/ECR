@@ -151,7 +151,7 @@ public sealed class DocumentDataExportTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    public async Task Json_іде_тією_самою_задачею_а_ключ_несе_формат_для_завантаження()
+    public async Task Json_іде_тією_самою_задачею_з_тим_самим_ключем_на_32_hex()
     {
         var (handler, jobs) = Handler(allowed: true);
 
@@ -162,9 +162,27 @@ public sealed class DocumentDataExportTests
             Arg.Any<CancellationToken>(), 9);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Тип_вмісту_завантаження_визначається_за_вмістом()
+    {
+        var csv = await Exporter().ExportAsync(DocumentId, Period, DocumentExportFormat.Csv, CancellationToken.None);
+        var json = await Exporter().ExportAsync(DocumentId, Period, DocumentExportFormat.Json, CancellationToken.None);
+
+        using var book = new MemoryStream();
+        using (var zip = new ZipArchive(book, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            zip.CreateEntry("[Content_Types].xml");
+        }
+
+        Assert.Equal("application/zip", DocumentExportFormat.OfContent(csv).ContentType);
+        Assert.Equal("application/json", DocumentExportFormat.OfContent(json).ContentType);
+        Assert.Equal("xlsx", DocumentExportFormat.OfContent(book.ToArray()).Extension);
+    }
+
     private static bool IsJsonTask(object? payload)
         => payload is ExcelExportTask task && task.Format == "json"
-           && DocumentExportFormat.OfExportId(task.ExportId).ContentType == "application/json";
+           && task.ExportId.Length == 32 && task.ExportId.All(Uri.IsHexDigit);
 
     private DocumentDataExporter Exporter() => new(_cells, _rows, _metadata, _registries);
 
