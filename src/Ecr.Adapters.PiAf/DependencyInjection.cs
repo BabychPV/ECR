@@ -53,6 +53,7 @@ public static class DependencyInjection
         services.AddScoped<SourceUnitConverter>();
         services.AddScoped<CatchUpPlanner>();
         services.AddScoped<PiAfCatalogReader>();
+        services.AddScoped<ISourceCatalogReader>(sp => sp.GetRequiredService<PiAfCatalogReader>());
         services.AddScoped<ICollectionRunner, CollectionRunner>();
 
         return services;

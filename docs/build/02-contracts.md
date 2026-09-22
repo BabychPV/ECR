@@ -2692,6 +2692,24 @@ public interface IDataSourceStore
 }
 ```
 
+#### `ISourceCatalogReader`
+
+Каталог імен джерела для мапінгу (ФВ-13.13); реалізація — `PiAfCatalogReader`,
+тільки читання (D-44). Споживач — `GET /api/v1/data-sources/{id}/catalog`
+(`path`, `search`, `cursor`, `limit` 1–200, типово 50): без `path` — кореневі
+елементи, зі шляхом — дочірні елементи й атрибути з UOM. Межа очікування —
+`Integration:CatalogTimeoutSeconds` (10 с); не вклалось, джерело лежить або
+вимкнене — `503 ECR-INT-0503` (`catalogTimeout` / `catalogUnavailable`),
+відмова в автентифікації — `502 ECR-INT-0502`.
+
+```csharp
+public interface ISourceCatalogReader
+{
+    public Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(int dataSourceId, string? parentPath, CancellationToken ct);
+    public Task<IReadOnlyList<SourceEntityDescriptor>> AttributesAsync(int dataSourceId, string elementPath, CancellationToken ct);
+}
+```
+
 > ⛔ **Джерела даних — без сховища секретів** (`BE-21`, пряме рішення людини на
 > `Q15-06`): «Windows-автентифікація службового облікового запису; секретів у
 > застосунку немає». Тому в `SaveDataSourceRequest` поля секрету НЕМАЄ і
@@ -3224,6 +3242,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `DELETE` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/data-sources/{id}/test` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/data-sources/{id}/catalog` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/entity-field-maps/{id}/pause` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/entity-field-maps/{id}/resume` | `Integration.Manage` | 5 |

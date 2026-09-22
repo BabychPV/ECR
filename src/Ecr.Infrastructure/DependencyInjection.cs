@@ -73,6 +73,11 @@ public static class DependencyInjection
         services.AddScoped<ICampaignSummaryStore, CampaignSummaryStore>();
         services.AddSingleton(new Application.Reporting.CampaignProgressPolicy(Math.Max(0,
             ReadInt(configuration, "Campaign:AtRiskDays", Application.Reporting.CampaignProgressPolicy.DefaultAtRiskDays))));
+
+        // Каталог джерела читають перед екраном: межа коротка, 1–60 с (ФВ-13.13).
+        services.AddSingleton(new Application.Integration.SourceCatalogPolicy(TimeSpan.FromSeconds(Math.Clamp(
+            ReadInt(configuration, "Integration:CatalogTimeoutSeconds", Application.Integration.SourceCatalogPolicy.DefaultTimeoutSeconds),
+            1, 60))));
         services.AddScoped<ITemplateVersionStore, TemplateVersionStore>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAuditWriter, AuditWriter>();

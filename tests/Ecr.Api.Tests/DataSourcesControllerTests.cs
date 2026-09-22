@@ -361,6 +361,57 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
         Assert.False(await db.DataSources.AnyAsync(s => s.Code == code).ConfigureAwait(true));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.13")]
+    public async Task Каталог_джерела_відкриває_Manage_читає_адаптером_а_вимкнене_джерело_503()
+    {
+        using var app = new EcrApiFactory(sql);
+        var (id, _) = await AddInactiveAsync().ConfigureAwait(true);
+
+        using var client = await SignedInAsync(app, "Integration.Manage").ConfigureAwait(true);
+
+        // Вимкнене джерело каталогу не віддає: відмова джерела, а не 500.
+        var down = await client.GetAsync(At($"{id}/catalog")).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, down.StatusCode);
+
+        var problem = await BodyAsync(down, null).ConfigureAwait(true);
+        Assert.Equal("ECR-INT-0503", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-INT-0503.catalogUnavailable", problem.GetProperty("messageKey").GetString());
+
+        // Увімкнене — читається підміненим транспортом PI Web API; потім знову
+        // вимикається, щоб не робити `/health/ready` «Degraded» решті прогону.
+        await SetActiveAsync(id, true).ConfigureAwait(true);
+
+        try
+        {
+            var listed = await client.GetAsync(At($"{id}/catalog?limit=10")).ConfigureAwait(true);
+            Assert.True(listed.StatusCode == HttpStatusCode.OK, $"{listed.StatusCode}: {app.ErrorsText}");
+
+            var page = await BodyAsync(listed, null).ConfigureAwait(true);
+            var item = Assert.Single(page.GetProperty("items").EnumerateArray());
+            Assert.Equal("Unit-01", item.GetProperty("code").GetString());
+            Assert.Equal("Element", item.GetProperty("kind").GetString());
+            Assert.Equal(JsonValueKind.Null, page.GetProperty("nextCursor").ValueKind);
+        }
+        finally
+        {
+            await SetActiveAsync(id, false).ConfigureAwait(true);
+        }
+
+        using var viewer = await SignedInAsync(app, "Integration.View").ConfigureAwait(true);
+        Assert.Equal(
+            HttpStatusCode.Forbidden, (await viewer.GetAsync(At($"{id}/catalog")).ConfigureAwait(true)).StatusCode);
+    }
+
+    private async Task SetActiveAsync(int id, bool active)
+    {
+        await using var db = NewDb();
+        await db.DataSources.Where(s => s.Id == id)
+            .ExecuteUpdateAsync(u => u.SetProperty(s => s.IsActive, active)).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Вимкнене джерело прямо в базі: активне без відповіді зробило б
     /// <c>/health/ready</c> «Degraded» для решти прогону.
