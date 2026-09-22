@@ -16,7 +16,7 @@ namespace Ecr.Adapters.PiAf;
 /// навмисно** (`D-44`): Web API їх підтримує, але система в AF не пише нічого.
 /// </remarks>
 public sealed class PiWebApiDataSource(
-    HttpClient http, ICollectionStore store, ISecretProvider secrets) : IExternalDataSource
+    HttpClient http, ICollectionStore store, ISecretProvider secrets) : IExternalDataSource, IHierarchicalCatalogSource
 {
     /// <summary>Скільки разів повторювати запит, який відмовив через 5xx або таймаут.</summary>
     /// <remarks>
@@ -39,42 +39,132 @@ public sealed class PiWebApiDataSource(
 
     /// <inheritdoc />
     /// <remarks>
-    /// Обхід дає **один рівень** ієрархії. Повний обхід бази AF у
-    /// конфігураторі означав би хвилини очікування на дереві, у якому
-    /// користувач відкриє два вузли.
+    /// Лише кореневий рівень. Глибше — ліниво, на запитаний вузол
+    /// (<see cref="BrowseAsync"/>, <see cref="AttributesAsync"/>): повний обхід
+    /// бази AF означав би хвилини очікування на дереві, у якому користувач
+    /// відкриє два вузли.
     /// </remarks>
     public async Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(
         int dataSourceId, CancellationToken ct)
+        => await BrowseAsync(dataSourceId, null, ct).ConfigureAwait(false);
+
+    /// <summary>Скільки позицій одного рівня читати з джерела, йдучи за <c>Links.Next</c>.</summary>
+    public const int MaxItemsPerLevel = 1_000;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Корінь — <c>assetdatabases/{webId}/elements</c>; вузол — спершу WebId
+    /// елемента за шляхом (<c>elements?path=</c>), потім
+    /// <c>elements/{webId}/elements</c>. Лише прямі діти: <c>searchFullHierarchy=false</c>.
+    /// </remarks>
+    public async Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(
+        int dataSourceId, string? parentPath, CancellationToken ct)
     {
         var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
 
-        // ⛔ Q-222 (аудит): `using`, а не голий `.Dispose()` наприкінці —
-        // виняток із `EnumerateArray()`/`Text(...)` лишав би `JsonDocument`
-        // (некерована пам'ять) недиспозженим, на відміну від `ReadAsync` у
-        // цьому самому класі, де той самий патерн уже під `using`.
-        using var elements = await GetAsync(
-            source.Endpoint,
-            $"assetdatabases/{Uri.EscapeDataString(source.Catalog ?? string.Empty)}/elements"
-            + "?searchFullHierarchy=false",
-            source.SecretName,
+        var collection = string.IsNullOrWhiteSpace(parentPath)
+            ? $"assetdatabases/{Uri.EscapeDataString(source.Catalog ?? string.Empty)}/elements"
+            : $"elements/{Uri.EscapeDataString(await ElementWebIdAsync(source, parentPath, ct).ConfigureAwait(false))}/elements";
+
+        return await ItemsAsync(
+            source,
+            collection + "?searchFullHierarchy=false",
+            item => new SourceEntityDescriptor(
+                Text(item, "Name") ?? string.Empty,
+                Text(item, "Description"),
+                Text(item, "Path"),
+                SourceUnitSymbol: null,
+                DataType: "Element"),
             ct).ConfigureAwait(false);
+    }
 
-        var result = new List<SourceEntityDescriptor>();
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>elements/{webId}/attributes</c>: <c>EntityPath</c> — повний шлях
+    /// атрибута (саме його потім читає <see cref="ReadAsync"/>), одиниця —
+    /// <c>DefaultUnitsName</c>, тип — <c>Type</c>.
+    /// </remarks>
+    public async Task<IReadOnlyList<SourceEntityDescriptor>> AttributesAsync(
+        int dataSourceId, string elementPath, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(elementPath);
 
-        if (elements.RootElement.TryGetProperty("Items", out var items))
-        {
-            foreach (var item in items.EnumerateArray())
+        var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
+        var webId = await ElementWebIdAsync(source, elementPath, ct).ConfigureAwait(false);
+        return await ItemsAsync(
+            source,
+            $"elements/{Uri.EscapeDataString(webId)}/attributes?searchFullHierarchy=false",
+            item =>
             {
-                result.Add(new SourceEntityDescriptor(
+                var units = Text(item, "DefaultUnitsName");
+                return new SourceEntityDescriptor(
                     Text(item, "Name") ?? string.Empty,
                     Text(item, "Description"),
                     Text(item, "Path"),
-                    SourceUnitSymbol: null,
-                    DataType: "Element"));
+                    string.IsNullOrWhiteSpace(units) ? null : units,
+                    Text(item, "Type"));
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    private async Task<string> ElementWebIdAsync(
+        Domain.Entities.External.DataSource source, string path, CancellationToken ct)
+    {
+        using var element = await GetAsync(
+            source.Endpoint, $"elements?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+            .ConfigureAwait(false);
+
+        return Text(element.RootElement, "WebId")
+               ?? throw new BusinessRuleException(
+                   SourceUnavailable,
+                   $"PI Web API не знайшов елемент {path}.",
+                   new Dictionary<string, object?>
+                   {
+                       ["messageKey"] = "err.ECR-INT-0503.catalogUnavailable",
+                       ["code"] = source.Code.ToString(),
+                       ["path"] = path,
+                   });
+    }
+
+    /// <summary><c>Items</c> колекції з переходом за <c>Links.Next</c> до стелі.</summary>
+    /// <remarks>
+    /// ⛔ <c>Links.Next</c> іде лише на той самий хост, що й джерело: інакше
+    /// заголовок автентифікації пішов би за адресою, яку назвала відповідь.
+    /// </remarks>
+    private async Task<List<SourceEntityDescriptor>> ItemsAsync(
+        Domain.Entities.External.DataSource source,
+        string path,
+        Func<JsonElement, SourceEntityDescriptor> map,
+        CancellationToken ct)
+    {
+        var result = new List<SourceEntityDescriptor>();
+        var origin = new Uri($"{source.Endpoint.TrimEnd('/')}/");
+        Uri? next = new(origin, path);
+
+        while (next is not null && result.Count < MaxItemsPerLevel)
+        {
+            // Q-222: `using`, щоб виняток розбору не лишав JsonDocument недиспозженим.
+            using var page = await GetAsync(next, path, source.SecretName, ct).ConfigureAwait(false);
+            next = null;
+
+            if (page.RootElement.TryGetProperty("Items", out var items))
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    result.Add(map(item));
+                }
+            }
+
+            if (page.RootElement.TryGetProperty("Links", out var links)
+                && Text(links, "Next") is { } link
+                && Uri.TryCreate(link, UriKind.Absolute, out var candidate)
+                && Uri.Compare(candidate, origin, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                next = candidate;
             }
         }
 
-        return result;
+        return result.Count > MaxItemsPerLevel ? result[..MaxItemsPerLevel] : result;
     }
 
     /// <inheritdoc />
@@ -167,10 +257,13 @@ public sealed class PiWebApiDataSource(
     /// ⛔ 4xx не повторюється: невірний шлях або відмова в доступі від
     /// повторення не виправляються, а лише подовжують збір на час усіх спроб.
     /// </remarks>
-    private async Task<JsonDocument> GetAsync(
+    private Task<JsonDocument> GetAsync(
         string endpoint, string path, string secretName, CancellationToken ct)
+        => GetAsync(new Uri($"{endpoint.TrimEnd('/')}/{path}"), path, secretName, ct);
+
+    private async Task<JsonDocument> GetAsync(
+        Uri uri, string path, string secretName, CancellationToken ct)
     {
-        var uri = new Uri($"{endpoint.TrimEnd('/')}/{path}");
         var delay = RetryDelay;
 
         for (var attempt = 1; ; attempt++)
