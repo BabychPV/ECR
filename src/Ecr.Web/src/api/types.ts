@@ -137,6 +137,20 @@ export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 /** Сторінка версій шаблону. */
 export type TemplateVersionPage = Schemas['PagedResultOfTemplateVersionSummary'];
 
+/**
+ * Картка шаблону разом із лічильником залежних (директива №15, `BE-26`).
+ *
+ * ⚠ `isActive: false` — шаблон архівований: для НОВИХ документів він більше не
+ * пропонується, наявні працюють далі.
+ */
+export type TemplateCard = Schemas['TemplateCard'];
+
+/** Скільки всього посилається на шаблон — ціна архівування. */
+export type TemplateDependents = Schemas['TemplateDependents'];
+
+/** Запит на зміну назви шаблону; коду в ньому немає — він незмінний. */
+export type RenameTemplateRequest = Schemas['RenameTemplateRequest'];
+
 /** Структура версії шаблону: аркуші, таблиці, колонки. */
 export type TemplateStructureDto = Schemas['TemplateStructureDto'];
 export type PeriodPolicyDto = Schemas['PeriodPolicyDto'];
@@ -206,6 +220,19 @@ export type RegistrySourceKind = Schemas['RegistrySourceKind'];
 
 /** Запис довідника. */
 export type RegistryEntryDto = Schemas['RegistryEntryDto'];
+
+/**
+ * Звіт імпорту записів довідника з CSV (`BE-24`).
+ *
+ * ⚠ Відповідь ЗАВЖДИ 200: помилки рядків — дані для того, хто імпортує, а не
+ * HTTP-відмова. `applied` — єдине поле, що каже, чи справді щось записано
+ * (`!dryRun && errors.length === 0`); рахувати це на клієнті заново означало б
+ * тримати другу копію правила «усе-або-нічого», яку сервер уже застосував.
+ */
+export type RegistryEntryImportReport = Schemas['RegistryEntryImportReport'];
+
+/** Один відхилений рядок звіту імпорту — див. {@link RegistryEntryImportReport}. */
+export type RegistryEntryImportError = Schemas['RegistryEntryImportError'];
 
 /**
  * Повний опис довідника для конструктора (`ФВ-8.12`).

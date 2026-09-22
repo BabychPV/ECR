@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Consistency;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Infrastructure.Jobs;
@@ -39,6 +41,9 @@ public sealed class ConsistencyIssuesControllerTests(SqlServerFixture sql)
 
     /// <summary>Право, під яким стоїть журнал знахідок.</summary>
     private const string ViewHealth = "System.ViewHealth";
+
+    /// <summary>Право, під яким стоїть прогін перевірки на вимогу (<c>BE-30</c>).</summary>
+    private const string RunJob = "System.RunJob";
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -159,6 +164,168 @@ public sealed class ConsistencyIssuesControllerTests(SqlServerFixture sql)
 
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
         Assert.Contains("ECR-REQ-0422", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "BE-30")]
+    public async Task Прогін_на_вимогу_вимагає_System_RunJob_і_лишає_слід_у_журналі_безпеки()
+    {
+        // ⛔ Єдине місце, де видно ОБИДВА справжні імені типу задачі. Ручний
+        // прогін ставиться маркером, нічний розклад — конкретним класом із
+        // `Ecr.Infrastructure`, якого прикладний шар не бачить і назвати
+        // типом не може; він звіряє спільний суфікс. Без цієї звірки
+        // перейменування класу зламало б перевірку «чи вже йде» МОВЧКИ:
+        // обробник просто перестав би бачити прогін у черзі.
+        Assert.True(RunConsistencyCheckHandler.IsConsistencyCheckCode(
+            typeof(Ecr.Application.Ports.IConsistencyCheckJob).FullName));
+        Assert.True(RunConsistencyCheckHandler.IsConsistencyCheckCode(typeof(ConsistencyCheckJob).FullName));
+
+        // ⚠ Бази `EcrTest_*` переживають прогін навмисно, тож незавершений
+        // рядок від ПОПЕРЕДНЬОГО запуску дав би тут `409` і читався б як
+        // дефект. Прибирання стосується рівно рядків цього ендпоінта.
+        await ClearInFlightChecksAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        var address = new Uri("/api/v1/consistency/run", UriKind.Relative);
+        var reason = $"BE-30 probe {Guid.NewGuid():N}";
+
+        using (var stranger = await SignedInAsync(app, ViewHealth).ConfigureAwait(true))
+        {
+            // ⛔ Право ЧИТАТИ журнал знахідок прогону не відкриває: дивитися
+            // на знахідки і запускати повний обхід усіх партицій — різні
+            // повноваження, і друге сід видає іменованим особам окремо.
+            var denied = await stranger
+                .PostAsJsonAsync(address, new { reason }).ConfigureAwait(true);
+
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+            Assert.Contains(
+                RunJob,
+                await denied.Content.ReadAsStringAsync().ConfigureAwait(true),
+                StringComparison.Ordinal);
+        }
+
+        try
+        {
+            using var allowed = await SignedInAsync(app, RunJob).ConfigureAwait(true);
+            var accepted = await allowed
+                .PostAsJsonAsync(address, new { reason }).ConfigureAwait(true);
+
+            Assert.True(
+                accepted.StatusCode == HttpStatusCode.Accepted,
+                $"{accepted.StatusCode}: {app.ErrorsText}");
+
+            var jobId = JsonDocument
+                .Parse(await accepted.Content.ReadAsStringAsync().ConfigureAwait(true))
+                .RootElement.GetProperty("jobId").GetString();
+
+            // ⚠ `202` — обіцянка, не результат: саме цим ідентифікатором
+            // клієнт опитує `GET /api/v1/jobs/{jobId}`.
+            Assert.False(string.IsNullOrWhiteSpace(jobId));
+
+            // ⛔ Головне твердження: ПРИЧИНА доїхала до `aud.SecurityEvent`.
+            // Прогін під небезпечним правом, про який журнал не знає «навіщо»,
+            // відповідає лише на «хто» — а питають тут саме про перше.
+            Assert.Equal(1, await SecurityEventsWithReasonAsync(reason).ConfigureAwait(true));
+        }
+        finally
+        {
+            await ClearInFlightChecksAsync().ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// Прогін, поки попередній ще йде, — <c>409 ECR-JOB-0409</c>, а не 422.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відмову кидає <c>BusinessRuleException</c>, а загальний арм для нього
+    /// — 422. Код і статус тут прибиті ЛІТЕРАЛАМИ: твердження проти константи
+    /// обробника рухалося б разом із нею. Незавершений прогін ставиться рядком
+    /// <c>itg.JobProgress</c> напряму — справжня задача могла б устигнути
+    /// завершитися, і тест плавав би.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "BE-30")]
+    public async Task Повторний_прогін_поки_йде_попередній_дає_409_ECR_JOB_0409()
+    {
+        await ClearInFlightChecksAsync().ConfigureAwait(true);
+
+        var busyJobId = $"be30-{Guid.NewGuid():N}";
+        await using (var db = new EcrDbContext(
+            new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options))
+        {
+            db.JobProgresses.Add(new JobProgress(
+                busyJobId, "Ecr.Tests.Probe.ConsistencyCheckJob", DateTime.UtcNow, null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        try
+        {
+            using var app = new EcrApiFactory(sql);
+            using var client = await SignedInAsync(app, RunJob).ConfigureAwait(true);
+
+            var refused = await client.PostAsJsonAsync(
+                new Uri("/api/v1/consistency/run", UriKind.Relative),
+                new { reason = "BE-30 second run" }).ConfigureAwait(true);
+
+            Assert.True(
+                refused.StatusCode == HttpStatusCode.Conflict,
+                $"{refused.StatusCode}: {await refused.Content.ReadAsStringAsync().ConfigureAwait(true)}");
+
+            var problem = JsonDocument
+                .Parse(await refused.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+
+            Assert.Equal("ECR-JOB-0409", problem.GetProperty("errorCode").GetString());
+            Assert.Equal("err.ECR-JOB-0409.consistencyCheckRunning", problem.GetProperty("messageKey").GetString());
+        }
+        finally
+        {
+            await ClearInFlightChecksAsync().ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// Прибирає незавершені рядки прогону перевірки з <c>itg.JobProgress</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Фільтр вузький: такі рядки створює РІВНО цей ендпоінт і нічний
+    /// розклад, якого в тестовому застосунку немає. Прибирати ширше означало б
+    /// нишком ламати сусідні тести черги.
+    /// </remarks>
+    private async Task ClearInFlightChecksAsync()
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE itg.JobProgress
+            WHERE State IN (N'Queued', N'Running')
+              AND JobCode LIKE N'%ConsistencyCheckJob';
+            """;
+
+        await command.ExecuteNonQueryAsync(CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>Скільки подій безпеки прогону несуть саме цю причину.</summary>
+    private async Task<int> SecurityEventsWithReasonAsync(string reason)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) FROM aud.SecurityEvent
+            WHERE EventType = @type AND DetailsJson LIKE @reason;
+            """;
+        command.Parameters.AddWithValue("@type", RunConsistencyCheckHandler.EventType);
+        command.Parameters.AddWithValue("@reason", $"%{reason}%");
+
+        return (int)(await command.ExecuteScalarAsync(CancellationToken.None).ConfigureAwait(false))!;
     }
 
     /// <summary>Проганяє справжню перевірку узгодженості на тій самій базі.</summary>

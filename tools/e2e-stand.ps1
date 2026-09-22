@@ -12,9 +12,10 @@
     починає перевіряти: чиста база, розгортання, застосунок, bootstrap →
     роль → іменований користувач → грант. Далі керування бере Playwright.
 
-    ⛔ Порт застосунку — 5080, бо саме туди проксіює dev-сервер Vite
-    (`vite.config.ts`). Інший порт означав би, що браузер стукає в порожнечу,
-    а падіння виглядало б як помилка тесту.
+    ⛔ Кожен стенд має СВІЙ dev-сервер Vite (`-WebPort`, типово `-Port`+1000),
+    який проксіює `/api` саме на свій `-Port` (`ECR_API_URL`). Спільний
+    фіксований 4173 з `reuseExistingServer` означав, що другий паралельний
+    стенд підхоплював Vite першого, а з ним — його API, базу й документ.
 
     ⚠ Паролі тут ТЕСТОВІ й живуть лише в цьому скрипті та в тимчасовій базі,
     яку він же видаляє. Це не послаблення `ФВ-6.11`: у продуктивній системі
@@ -28,21 +29,53 @@
     Тимчасова база; створюється і видаляється цим скриптом.
 
 .PARAMETER Port
-    Порт застосунку; має збігатися з ціллю проксі Vite.
+    Порт застосунку; стає ціллю проксі Vite цього стенда.
+
+.PARAMETER WebPort
+    Порт dev-сервера Vite для Playwright; 0 (типово) — `-Port` + 1000.
+    Зайнятий чужим процесом — стенд падає одразу, а не підхоплює чужий сервер.
 
 .PARAMETER Grep
     Фільтр назв прогонів Playwright; порожній — усі.
 
+.PARAMETER DataPath
+    Каталог файлів бази; передається в `setup-dev-db.ps1`. Не задано — діє
+    його умовчання (`H:\EcrData`, якщо є `H:`); `''` — типовий каталог
+    інстансу. Потрібен, коли на `H:` бракує ~16 ГБ, а на іншому диску є.
+
+.PARAMETER RequireFreeGb
+    Скільки вільного місця вимагати на диску даних; передається в
+    `setup-dev-db.ps1`. Не задано — обчислюється за профілем; `0` — без перевірки.
+
 .EXAMPLE
     powershell -File tools/e2e-stand.ps1
+    powershell -File tools/e2e-stand.ps1 -Server localhost -DataPath F:\EcrData
 #>
 [CmdletBinding()]
 param(
     [string] $Server = 'localhost\SQLEXPRESS',
     [string] $Database = 'EcrE2E',
     [int] $Port = 5080,
-    [string] $Grep = ''
+    [int] $WebPort = 0,
+    [string] $Grep = '',
+
+    # ⚠ Без умовчання навмисно: передається далі ЛИШЕ якщо задано явно, тож
+    # запуск без параметра поводиться рівно як раніше (умовчання вирішує
+    # `setup-dev-db.ps1`, а не дублюється тут і не розходиться з ним).
+    [string] $DataPath,
+    [double] $RequireFreeGb = -1
 )
+
+# ⚠ Масив аргументів, а не сплат: `setup-dev-db.ps1` викликається окремим
+# процесом. Порожній рядок PowerShell 5.1 нативній команді не передає, тож
+# `-DataPath ''` («типовий каталог інстансу») їде як `""`.
+$setupExtra = @()
+if ($PSBoundParameters.ContainsKey('DataPath')) {
+    $setupExtra += @('-DataPath', $(if ($DataPath) { $DataPath } else { '""' }))
+}
+if ($PSBoundParameters.ContainsKey('RequireFreeGb')) {
+    $setupExtra += @('-RequireFreeGb', [string] $RequireFreeGb)
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -117,15 +150,36 @@ function Call {
     return $null
 }
 
+if ($WebPort -eq 0) { $WebPort = $Port + 1000 }
+
+# ⛔ Playwright у стенді запускає власний Vite з `reuseExistingServer: false`
+# (`playwright.config.ts`, коли задано `E2E_WEB_PORT`), тож чужий сервер на
+# цьому порту він і так не підхопить — але впаде аж на кроці прогонів, після
+# хвилин розгортання, і з повідомленням Playwright. Тут — одразу й з PID.
+function Assert-WebPortFree {
+    $owners = @(Get-NetTCPConnection -State Listen -LocalPort $WebPort -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique)
+    if ($owners.Count -gt 0) {
+        $who = ($owners | ForEach-Object {
+            $p = Get-Process -Id $_ -ErrorAction SilentlyContinue
+            if ($p) { "$($p.ProcessName) ($_)" } else { "PID $_" }
+        }) -join ', '
+        Fail "порт Vite $WebPort уже зайнятий: $who. Це чужий сервер — не підхоплюю його; задай інший -WebPort."
+    }
+}
+
+Assert-WebPortFree
+$env:E2E_WEB_PORT = [string] $WebPort
+
 Write-Host ''
-Write-Host "Стенд Playwright на базі $Database" -ForegroundColor Cyan
+Write-Host "Стенд Playwright на базі $Database (API $Port, Vite $WebPort)" -ForegroundColor Cyan
 
 Step 'чиста база і розгортання через sqlcmd'
 $previousEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
     & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'setup-dev-db.ps1') `
-        -Server $Server -Database $Database -Documents 1 -BootstrapPassword $bootstrapPassword | Out-Null
+        -Server $Server -Database $Database -Documents 1 -BootstrapPassword $bootstrapPassword @setupExtra | Out-Null
 }
 finally {
     $ErrorActionPreference = $previousEap
@@ -221,8 +275,9 @@ try {
             'Calculation.View', 'Calculation.Publish', 'Calculation.Recalculate',
             'Security.ManageUsers', 'Security.ManageRoles', 'Security.ViewAudit',
             'Security.Simulate',
-            'Report.ViewRegulatory', 'Report.BuildSnapshot',
-            'Integration.Manage', 'System.ViewHealth', 'System.ManageLocalization')
+            'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.ViewCampaign',
+            'Integration.View', 'Integration.Manage', 'System.ViewHealth', 'System.ManageLocalization',
+            'System.ManageNotifications')
     } | Out-Null
 
     $roles = Call GET '/api/v1/roles'
@@ -267,6 +322,13 @@ try {
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
     } | Out-Null
 
+    # ⚠ Без перелогіну між двома PUT — навмисно. PUT грантів крутить
+    # SecurityStamp усіх членів ролі (`RotateStampsForRoleAsync`), зокрема й
+    # самого e2e-admin, але сервер тепер перевидає виконавцю cookie в тій самій
+    # відповіді (`3ec89e19`), а `-WebSession $session` у `Call` її підхоплює.
+    # Колишній обхід (повторний вхід тут) маскував би саме цю ваду: без
+    # перевидачі другий PUT отримав би 401 ECR-AUTH-0401, щойно мине кеш штампа.
+
     Call PUT "/api/v1/roles/$operatorRole/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Write'; isDeny = $false })
     } | Out-Null
@@ -295,6 +357,7 @@ try {
     Write-Host ''
 
     Step 'прогони Playwright'
+    Assert-WebPortFree
     Push-Location $client
     try {
         # ⛔ Q-222 (аудит): той самий Q-217 клас — без тимчасового послаблення

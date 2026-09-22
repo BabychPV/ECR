@@ -273,6 +273,10 @@ public sealed class TableRelationTests(SqlServerFixture sql)
                 CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.tableNotInVersion", error.Details?["messageKey"]);
+        Assert.Equal(
+            alien.TargetTableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            error.Details?["tableDefId"]);
     }
 
     [Fact]
@@ -292,6 +296,8 @@ public sealed class TableRelationTests(SqlServerFixture sql)
             () => Delete(db).HandleAsync(version.VersionId, version.RelationCode, CancellationToken.None));
 
         Assert.Equal("ECR-SCHM-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-SCHM-0409.templateRelationBreaking", error.Details?["messageKey"]);
+        Assert.Equal(version.RelationCode, error.Details?["relationCode"]);
 
         // Саме відмова, а не попередження: числа в документах рахувалися з
         // урахуванням зв'язку — і рядок мусить лишитися на місці.

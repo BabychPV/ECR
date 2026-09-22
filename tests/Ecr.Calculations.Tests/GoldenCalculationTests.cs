@@ -2,6 +2,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
@@ -21,6 +22,7 @@ namespace Ecr.Calculations.Tests;
 /// </remarks>
 public sealed class GoldenCalculationTests
 {
+    private const int MethodologyId = 5;
     private const int VersionId = 51;
     private const long CodEntry = 901;
     private const long TssEntry = 902;
@@ -159,6 +161,7 @@ public sealed class GoldenCalculationTests
             () => resolver.ResolveAsync(VersionId, "AMBIGUOUS", null, null, onDate, default));
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.constantAmbiguous", error.Details!["messageKey"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -213,10 +216,11 @@ public sealed class GoldenCalculationTests
             new ConstantResolver(_constants),
             new CalendarContext(),
             Units(),
-            periods ?? Periods());
+            periods ?? Periods(),
+            Bindings());
 
         var descriptor = new MethodologyDescriptor(
-            MethodologyId: 5,
+            MethodologyId,
             MethodologyVersionId: VersionId,
             Code: "WATER_DISCHARGE",
             VersionNumber: "1.0.0.0",
@@ -258,6 +262,50 @@ public sealed class GoldenCalculationTests
                .Returns(new PeriodBounds(new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31)));
 
         return periods;
+    }
+
+    /// <summary>
+    /// Колонки-приймачі фікстури: обидві оголошені з ШІСТЬМА знаками.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Шість знаків у цій фікстурі (`02c-fixtures.md` §7, `water-demo.json`)
+    /// — це ПОДАННЯ методології (`ФВ-9.16a`), і з 2026-09-20 воно задається
+    /// колонкою-приймачем, а не спільною константою рушія. Тому очікувані
+    /// числа тут не змінилися ані на знак: змінилося лише те, ЗВІДКИ рушій
+    /// бере шістку.
+    ///
+    /// ⚠ Масштаб береться з <see cref="ColumnDef"/>, а не пишеться числом у
+    /// словник: інакше тест доводив би, що модуль уміє читати словник, — а
+    /// доводити треба, що знаки задає конфігурація колонки.
+    /// </remarks>
+    private static ICalculationBindingStore Bindings()
+    {
+        var tons = Column("tons");
+        var gsec = Column("gsec");
+
+        var store = Substitute.For<ICalculationBindingStore>();
+        store.ListOutputScalesAsync(MethodologyId, Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, byte?>(StringComparer.OrdinalIgnoreCase)
+             {
+                 ["tons"] = tons.Scale,
+                 ["gsec"] = gsec.Scale,
+             });
+
+        return store;
+    }
+
+    /// <summary>Колонка-приймач із шістьма знаками — така, як у фікстурі.</summary>
+    private static ColumnDef Column(string code)
+    {
+        var column = new ColumnDef(
+            tableDefId: 3,
+            EcrCode.Create(code),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = code }),
+            ordinal: 0,
+            CellDataType.Calculated);
+
+        column.SetNumericFormat(precision: 28, scale: 6);
+        return column;
     }
 
     /// <summary>Довідник одиниць за <c>09-seed.sql</c> плюс похідна <c>g/s</c>.</summary>

@@ -157,9 +157,394 @@ public sealed partial class EndpointCoverageTests
     [Trait(TestCategories.Category, TestCategories.Architecture)]
     public void Кожен_рядок_якого_просить_клієнт_є_в_каталозі()
     {
+        // ⛔ Три сліпі плями попередньої версії сторожа, кожна — з реальним
+        // місцем у клієнті, яке через неї не перевірялося:
+        //   1. умовний вираз: `t(source === null ? 'sources.created' : 'sources.saved')`
+        //      — регулярка брала лише літерал ОДРАЗУ після дужки;
+        //   2. множина: `formatCount(n, 'sources.testEntities')` просить
+        //      `sources.testEntities.one`/`.other`, а в тексті є лише основа;
+        //   3. ключ у змінній: `t(problem.key, …)` — ключі `schedule.cron*`
+        //      живуть у `cronFormat.ts`, за три файли від виклику.
+        // Тепер (1) і (2) розбираються з тексту, а (3) — явним переліком
+        // `DynamicKeySites` із власним храповиком (два тести нижче).
+        var seeded = SeedCatalogKeys();
+        var scan = ClientKeyScan.Of(WebRoot());
+
+        var missing = new List<string>();
+
+        missing.AddRange(scan.Literals
+            .Where(u => !seeded.Contains(u.Key))
+            .Select(u => $"{u.Key} ({u.File}:{u.Line})"));
+
+        // ⚠ `formatCount` бере категорію з `Intl.PluralRules` і НЕ падає на
+        // `.other`, коли бракує потрібної форми (`plural.ts`). `one` і `other`
+        // — мінімум, який існує в кожній мові каталогу.
+        missing.AddRange(scan.PluralBases
+            .SelectMany(u => PluralForms.Select(form => (Key: $"{u.Key}.{form}", u.File, u.Line)))
+            .Where(u => !seeded.Contains(u.Key))
+            .Select(u => $"{u.Key} (множина, {u.File}:{u.Line})"));
+
+        missing.AddRange(DynamicKeySites
+            .SelectMany(site => site.Keys.Select(key => (Key: key, Site: site)))
+            .Where(u => !seeded.Contains(u.Key))
+            .Select(u => $"{u.Key} (через змінну: {u.Site.File} ← {u.Site.Producer})"));
+
+        var report = missing.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+
+        Assert.True(
+            report.Count == 0,
+            "Рядки, яких клієнт просить, а в 09-seed.sql їх немає:"
+            + Environment.NewLine + string.Join(Environment.NewLine, report));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Кожен_ключ_який_клієнт_передає_змінною_названий_у_переліку()
+    {
+        // ⛔ Храповик. Виклик `t(<не літерал>)` — це ключ, якого сторож вище
+        // не бачить із тексту. Кожне таке місце або стоїть у `DynamicKeySites`
+        // разом із ключами, які туди доходять, або цей тест червоний. Інакше
+        // нова динаміка прослизала б мовчки — рівно так, як жили
+        // `schedule.cron*` до цього сторожа.
+        var scan = ClientKeyScan.Of(WebRoot());
+
+        var listed = DynamicKeySites
+            .GroupBy(s => (s.File, s.Expression))
+            .ToDictionary(g => g.Key, g => g.Sum(s => s.Count));
+
+        var unlisted = scan.Dynamic
+            .GroupBy(d => (d.File, d.Expression))
+            .Where(g => g.Count() > listed.GetValueOrDefault(g.Key))
+            .SelectMany(g => g.Skip(listed.GetValueOrDefault(g.Key)))
+            .Select(d => $"  {d.File}:{d.Line}: t({d.Expression})")
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            unlisted.Count == 0,
+            "Ключ каталогу передано змінною, і сторож не знає, які рядки туди доходять. "
+            + "Або перепиши виклик літералом (умовний вираз над літералами — теж літерал), "
+            + "або допиши місце в EndpointCoverageTests.DynamicKeySites разом із ключами:"
+            + Environment.NewLine + string.Join(Environment.NewLine, unlisted));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Перелік_ключів_через_змінну_не_застарів()
+    {
+        // ⛔ Другий бік храповика (той самий прийом, що `UncheckedPermissionTests`):
+        // перелік, який лише росте, перестає бути заміром. Червоне, якщо
+        //   • місця зі списку в клієнті більше немає (виклик став літералом —
+        //     тоді ключі перевіряє вже основний сторож, а рядок тут зайвий);
+        //   • ключа зі списку більше не породжує названий файл;
+        //   • файл-джерело породжує ключ, якого в списку немає, — тобто
+        //     перелік тихо відстав від коду.
+        var web = WebRoot();
+        var scan = ClientKeyScan.Of(web);
+        var stale = new List<string>();
+
+        var found = scan.Dynamic
+            .GroupBy(d => (d.File, d.Expression))
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        foreach (var group in DynamicKeySites.GroupBy(s => (s.File, s.Expression)))
+        {
+            var expected = group.Sum(s => s.Count);
+            var actual = found.GetValueOrDefault(group.Key);
+            if (actual < expected)
+            {
+                stale.Add(
+                    $"  {group.Key.File}: t({group.Key.Expression}) — у клієнті {actual} із {expected}; "
+                    + $"прибери зайве з DynamicKeySites разом із ключами "
+                    + $"[{string.Join(", ", group.SelectMany(s => s.Keys))}].");
+            }
+        }
+
+        var requested = scan.Literals.Select(l => l.Key)
+            .Concat(DynamicKeySites.SelectMany(s => s.Keys))
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var producer in DynamicKeySites.Where(s => s.Producer is not null).GroupBy(s => s.Producer!))
+        {
+            var path = Path.Combine(web, producer.Key.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path))
+            {
+                stale.Add($"  {producer.Key}: файла немає — прибери або виправ Producer у DynamicKeySites.");
+                continue;
+            }
+
+            var strings = TypeScriptSource.Parse(File.ReadAllText(path)).Strings;
+
+            foreach (var key in producer.SelectMany(s => s.Keys).Distinct(StringComparer.Ordinal))
+            {
+                var produced = strings.Any(s => s.Interpolated
+                    ? s.Head.Length > 0 && key.StartsWith(s.Head, StringComparison.Ordinal)
+                    : string.Equals(s.Text, key, StringComparison.Ordinal));
+
+                if (!produced)
+                {
+                    stale.Add($"  {key}: {producer.Key} його більше не породжує — прибери з DynamicKeySites.");
+                }
+            }
+
+            foreach (var literal in strings.Where(s => !s.Interpolated && CatalogKeyShape().IsMatch(s.Text)))
+            {
+                if (!requested.Contains(literal.Text))
+                {
+                    stale.Add($"  {literal.Text}: {producer.Key} його породжує, а в DynamicKeySites його немає — допиши.");
+                }
+            }
+        }
+
+        Assert.True(
+            stale.Count == 0,
+            "DynamicKeySites розійшовся з клієнтом:" + Environment.NewLine + string.Join(Environment.NewLine, stale.Distinct(StringComparer.Ordinal)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Architecture)]
+    public void Сканер_ключів_бачить_код_і_пропускає_коментарі()
+    {
+        // ⛔ Самоперевірка. Сторож по тексту джерел падає на двох речах: на
+        // коментарі (бере згадку за виклик) і на переносі рядка (не бачить
+        // виклику, розірваного форматером). Обидві — тут, на зразку, а не
+        // «колись у клієнті».
+        const string sample = """
+            // t('comment.line')
+            /* t('comment.block') */
+            const url = 'http://example/'; // t('comment.tail')
+            const a = t('plain.key');
+            const b = t(
+              flag
+                ? 'wrapped.yes' // t('comment.inside')
+                : 'wrapped.no',
+            );
+            const c = t(x === 'saving' ? 'grid.saving' : 'grid.saved');
+            const d = t(problem.key, problem.params);
+            const e = t(`prefix.${kind}`);
+            const f = t(statusKey('sheet', 'Draft'));
+            const g = `${t(key)}-${guid}`;
+            const h = <Text>Don't worry</Text>;
+            const h2 = <Text>{t('jsx.key')}</Text>;
+            const i = value.replace(/'/g, '');
+            const j = formatCount(n, 'plural.base');
+            const k = i18n.t('method.call');
+            export function t(key: string) {}
+            // коментар, у якому щось з'явилося
+            const l = t('x.afterLineComment');
+            /* блок, у якому щось з'явилося */
+            const m = t('x.afterBlockComment');
+            const n = <Box>{/* JSX-коментар: з'явився */}{t('x.afterJsxComment')}</Box>;
+            const o = <Text>з'явився</Text>;
+            const p = t('x.afterJsxText');
+            const q = <Text>з'явився {t('x.sameLineAfterJsxText')}</Text>;
+            const r = <Text>Don't {t('x.betweenApostrophes')} — it's</Text>;
+            const s = <Text>'{t('x.quotedJsxText')}'</Text>;
+            """;
+
+        var scan = ClientKeyScan.Scan("sample.tsx", sample);
+
+        Assert.Equal(
+            [
+                "grid.saved", "grid.saving", "jsx.key", "plain.key", "status.sheet.Draft", "wrapped.no", "wrapped.yes",
+                "x.afterBlockComment", "x.afterJsxComment", "x.afterJsxText", "x.afterLineComment",
+                "x.betweenApostrophes", "x.quotedJsxText", "x.sameLineAfterJsxText",
+            ],
+            scan.Literals.Select(l => l.Key).Order(StringComparer.Ordinal));
+
+        Assert.Equal(
+            ["`prefix.${kind}`", "key", "problem.key"],
+            scan.Dynamic.Select(d => d.Expression).Order(StringComparer.Ordinal));
+
+        Assert.Equal(["plural.base"], scan.PluralBases.Select(p => p.Key));
+
+        // Число літералом: сканер, що перестав бачити виклики, дав би порожній
+        // клієнт — і всі три сторожі вище позеленіли б мовчки.
+        var real = ClientKeyScan.Of(WebRoot());
+        Assert.True(real.Literals.Count >= 1000, $"Розібрано підозріло мало ключів: {real.Literals.Count}.");
+        Assert.Contains(real.Literals, l => l.Key == "sources.saved");
+        Assert.Contains(real.PluralBases, p => p.Key == "sources.testEntities");
+    }
+
+    /// <summary>Форми множини, які вимагаються для кожної основи <c>formatCount</c>.</summary>
+    private static readonly string[] PluralForms = ["one", "other"];
+
+    /// <summary>
+    /// Місця, де клієнт передає ключ каталогу ЗМІННОЮ, і ключі, які туди
+    /// доходять.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Храповик у два боки (<c>Кожен_ключ_який_клієнт_передає_змінною_названий_у_переліку</c>,
+    /// <c>Перелік_ключів_через_змінну_не_застарів</c>). <c>Expression</c> — текст
+    /// першого аргументу без коментарів, пробіли зведені до одного.
+    ///
+    /// ⚠ <c>Producer = null</c> — ключ приходить ІЗ СЕРВЕРА (<c>messageKey</c>,
+    /// <c>title</c> відповіді). Клієнт їх не знає за побудовою; наявність
+    /// <c>err.*</c>-рядків для серверних кодів стережуть <c>ErrorTitleCatalogTests</c>
+    /// і <c>MessageKeyRatchetTests</c>, не цей перелік.
+    ///
+    /// ⚠ Ключі з шаблону над серверним переліком (<c>notifications.event.${…}</c>)
+    /// перелічені станом на 2026-09-21 — тими значеннями переліку сервера, які
+    /// є зараз. Новий член переліку без рядка тут цей сторож НЕ побачить.
+    /// </remarks>
+    private static readonly DynamicKeySite[] DynamicKeySites =
+    [
+        new("app/AppLayout.tsx", "route.handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
+            "Пункт меню: labelKey маршруту."),
+        new("app/Breadcrumbs.tsx", "handle.labelKey", 1, "app/routes.ts", RouteLabelKeys,
+            "Крихта: labelKey маршруту."),
+
+        new("features/grid/permissions.ts", "Hints[reason]", 1, "features/grid/permissions.ts",
+            [
+                "deny.NoGrant", "deny.PeriodNotOpenYet", "deny.PeriodClosed", "deny.OutOfAccessWindow",
+                "deny.DocumentSubmitted", "deny.DocumentApproved", "deny.ColumnReadOnly", "deny.RowReadOnly",
+                "deny.CalculatedCell", "deny.ProjectArchived", "deny.ArchivingInProgress", "deny.BusinessRule",
+                "deny.SimulationReadOnly", "deny.OutsidePermitWindow",
+            ],
+            "Підказка сірої комірки за причиною заборони."),
+
+        new("features/workflow/jobLabel.ts", "key", 2, "features/workflow/jobLabel.ts",
+            [
+                "jobs.kind.recalculation", "jobs.kind.formulaRecalculation", "jobs.kind.excelExport",
+                "jobs.kind.excelImport", "jobs.kind.materializeCollectedData", "jobs.kind.reportSnapshot",
+                "jobs.kind.collection",
+            ],
+            "Назва типу фонової задачі (KindKeys)."),
+
+        new("pages/admin/HealthPage.tsx", "translationKey", 1, "pages/admin/HealthPage.tsx",
+            [
+                "health.database.edition", "health.database.effectiveMode", "health.database.majorVersion",
+                "health.database.rcsi", "health.database.archiveBatchSize", "health.database.filegroups",
+                "health.database.missingFilegroups", "health.database.partitionsAhead",
+                "health.database.limitations",
+            ],
+            "Підпис поля /health/db (FieldLabelKeys)."),
+
+        new("features/projects/CreateProjectModal.tsx", "ProjectFieldLabelKey[field]", 1,
+            "features/projects/CreateProjectModal.tsx",
+            ["periods.code", "periods.name", "periods.timeZone", "periods.templateVersion", "periods.policy", "periods.customCount"],
+            "Перелік бракуючих полів форми проєкту."),
+
+        new("pages/admin/SnapshotsPage.tsx", "blockedReason", 1, "pages/admin/SnapshotsPage.tsx",
+            ["snapshots.parametersUnknown", "snapshots.parametersBlocked"],
+            "Причина, чому зріз не можна замовити."),
+        new("features/reports/SnapshotFormatBadge.tsx", "look.label", 1, "features/reports/SnapshotFormatBadge.tsx",
+            ["snapshots.formatLegacy", "snapshots.formatUnknown"],
+            "Позначка формату чисел зрізу (legacy/unknown; current не позначається)."),
+        new("features/reports/SnapshotFormatBadge.tsx", "look.hint", 1, "features/reports/SnapshotFormatBadge.tsx",
+            ["snapshots.formatLegacyHint", "snapshots.formatUnknownHint"],
+            "Підказка до позначки формату чисел зрізу."),
+
+        new("features/integration/CollectionScheduleTab.tsx", "problem.key", 1, "features/integration/cronFormat.ts",
+            ["schedule.cronEmpty", "schedule.cronTooLong", "schedule.cronFieldCount", "schedule.cronDayQuestion", "schedule.cronField"],
+            "Помилка cron-виразу (cronProblem)."),
+
+        new("features/integration/DataSourceFormModal.tsx", "key", 1, "features/integration/DataSourceFormModal.tsx",
+            ["err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceCodeTaken"],
+            "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
+
+        new("features/notifications/ChannelsPanel.tsx", "`notifications.kind.${channel.kind}`", 1,
+            "features/notifications/ChannelsPanel.tsx",
+            ["notifications.kind.Smtp", "notifications.kind.TeamsWebhook"],
+            "NotificationChannelKind сервера."),
+        new("features/notifications/DeliveriesPanel.tsx", "`notifications.event.${row.eventKind}`", 1,
+            "features/notifications/DeliveriesPanel.tsx", NotificationEventKeys,
+            "NotificationEventKind сервера."),
+        new("features/notifications/RulesMatrixPanel.tsx", "`notifications.event.${eventKind}`", 1,
+            "features/notifications/RulesMatrixPanel.tsx", NotificationEventKeys,
+            "NotificationEventKind сервера."),
+        new("pages/admin/ExpressionsPage.tsx", "`expressions.check.${check}`", 1, "pages/admin/ExpressionsPage.tsx",
+            ["expressions.check.Cycle", "expressions.check.References", "expressions.check.Types", "expressions.check.Units"],
+            "SkippedChecks перевірки виразу."),
+
+        new("shared/ui/StatusBadge.tsx", "statusKey(kind, state)", 1, "shared/ui/StatusBadge.tsx",
+            [.. StatusKeys("sheet"), .. StatusKeys("period"), .. StatusKeys("job"), .. StatusKeys("version"),
+             .. StatusKeys("project"), .. StatusKeys("health"), .. StatusKeys("severity"),
+             .. StatusKeys("collectionRun"), .. StatusKeys("snapshot"), .. StatusKeys("notificationDelivery")],
+            "Бейдж статусу: уся таблиця statusTable."),
+        new("pages/admin/ExpressionsPage.tsx", "statusKey('version', v.status)", 1, "shared/ui/StatusBadge.tsx",
+            StatusKeys("version"), "Статус версії виразу."),
+        new("pages/admin/MethodologyVersionsPage.tsx", "statusKey('version', version.status)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("version"), "Статус версії методології."),
+        new("pages/admin/PeriodsPage.tsx", "statusKey('project', p.status)", 1, "shared/ui/StatusBadge.tsx",
+            StatusKeys("project"), "Статус проєкту."),
+        new("features/notifications/RulesMatrixPanel.tsx", "statusKey('severity', value)", 1,
+            "shared/ui/StatusBadge.tsx", StatusKeys("severity"), "Серйозність правила сповіщення."),
+
+        // Основа множини — у формах `.one`/`.other`, їх перевіряє основний сторож.
+        new("shared/format/plural.ts", "`${keyBase}.${category}`", 1, null, [],
+            "formatCount: основу бере з другого аргументу виклику."),
+
+        // Ключі із сервера.
+        new("features/expressions/markers.ts", "diagnostic.messageKey", 1, null, [], "messageKey діагностики виразу."),
+        new("shared/ui/problemText.ts", "problem.title", 1, null, [], "title problem+json, коли він — ключ каталогу."),
+        new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
+        new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
+        new("features/jobs/JobFacts.tsx", "errorKey(errorCode)", 1, null, [], "errorCode провалу фонової задачі — код каталогу помилок сервера."),
+        new("features/registries/RegistryImportPanel.tsx", "error.messageKey", 1, null, [],
+            "messageKey рядка звіту імпорту записів довідника (BE-24, RegistryEntryImportError) — "
+            + "реюзить відкритий набір ключів валідації UpsertRegistryEntryHandler, клієнт його не перелічує."),
+    ];
+
+    // ⚠ Властивості, а не поля: `DynamicKeySites` вище ініціалізується раніше
+    // за поля, оголошені нижче, і побачив би в них `null`.
+    private static string[] RouteLabelKeys =>
+    [
+        "nav.documents", "password.title", "nav.templates", "version.title", "tables.relationsTitle",
+        "nav.registries", "registries.constructor", "nav.methodologies", "methodologies.versionsTitle",
+        "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping",
+        "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
+        "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
+    ];
+
+    private static string[] NotificationEventKeys =>
+    [
+        "notifications.event.JobFailed", "notifications.event.ConsistencyIssuesFound",
+        "notifications.event.PartitionsRunningOut", "notifications.event.CollectionFailed",
+        "notifications.event.ExportFailed",
+    ];
+
+    /// <summary>Стани <c>statusTable</c> у <c>StatusBadge.tsx</c> станом на 2026-09-21.</summary>
+    private static string[] StatusKeys(string kind) => kind switch
+    {
+        "sheet" => Status(kind, "Draft", "Submitted", "Approved", "Rejected"),
+        "period" => Status(kind, "Scheduled", "Open", "Grace", "Closed"),
+        "job" => Status(kind, "Queued", "Running", "Succeeded", "Failed", "Cancelled", "Unknown", "Unavailable"),
+        "version" => Status(kind, "Draft", "Published", "Deprecated"),
+        "project" => Status(kind, "Draft", "Active", "Archived"),
+        "health" => Status(kind, "Healthy", "Degraded", "Unhealthy"),
+        "severity" => Status(kind, "Info", "Warning", "Error"),
+        "collectionRun" => Status(kind, "Succeeded", "Degraded", "Failed"),
+        "snapshot" => Status(kind, "Draft", "Approved", "Submitted"),
+        "notificationDelivery" => Status(kind, "Sent", "Failed", "Suppressed"),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Невідомий різновид статусу."),
+    };
+
+    private static string[] Status(string kind, params string[] states)
+        => [.. states.Select(state => $"status.{kind}.{state}")];
+
+    /// <summary>Місце, де ключ каталогу передано змінною.</summary>
+    /// <param name="File">Файл виклику відносно <c>src/Ecr.Web/src</c>.</param>
+    /// <param name="Expression">Перший аргумент <c>t(…)</c>, нормалізований.</param>
+    /// <param name="Count">Скільки таких викликів у файлі.</param>
+    /// <param name="Producer">Файл, де ці ключі написані; <c>null</c> — сервер.</param>
+    /// <param name="Keys">Ключі, які можуть дійти до виклику.</param>
+    /// <param name="Why">Що це за місце.</param>
+    private sealed record DynamicKeySite(
+        string File, string Expression, int Count, string? Producer, string[] Keys, string Why);
+
+    private static string WebRoot()
+    {
         var web = Path.Combine(SolutionRoot(), "src", "Ecr.Web", "src");
         Assert.True(Directory.Exists(web), $"Немає {web}.");
+        return web;
+    }
 
+    private static HashSet<string> SeedCatalogKeys()
+    {
         var seed = File.ReadAllText(
             Path.Combine(SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
 
@@ -168,20 +553,117 @@ public sealed partial class EndpointCoverageTests
             .ToHashSet(StringComparer.Ordinal);
 
         Assert.NotEmpty(seeded);
-
-        var missing = Directory
-            .EnumerateFiles(web, "*.ts*", SearchOption.AllDirectories)
-            .Where(f => !f.Contains("__tests__", StringComparison.Ordinal))
-            .SelectMany(f => UiKeyRegex.Matches(WithoutComments(File.ReadAllText(f)))
-                .Select(m => new { File = Path.GetFileName(f), Key = m.Groups[1].Value }))
-            .Where(u => !seeded.Contains(u.Key))
-            .Select(u => $"{u.Key} ({u.File})")
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToList();
-
-        Assert.Empty(missing);
+        return seeded;
     }
+
+    /// <summary>Ключі, які клієнт просить у каталогу, — розібрані з тексту.</summary>
+    /// <param name="Literals">Ключі-літерали першого аргументу <c>t(…)</c>, усі гілки умовного виразу.</param>
+    /// <param name="PluralBases">Основи множини з другого аргументу <c>formatCount(…)</c>.</param>
+    /// <param name="Dynamic">Виклики, ключ яких із тексту не видно.</param>
+    private sealed record ClientKeyScan(
+        List<ClientKeyUse> Literals, List<ClientKeyUse> PluralBases, List<ClientDynamicUse> Dynamic)
+    {
+        public static ClientKeyScan Of(string web)
+        {
+            var result = new ClientKeyScan([], [], []);
+
+            var files = Directory
+                .EnumerateFiles(web, "*.*", SearchOption.AllDirectories)
+                .Where(f => f.EndsWith(".ts", StringComparison.Ordinal) || f.EndsWith(".tsx", StringComparison.Ordinal))
+                .Where(f => !f.EndsWith(".d.ts", StringComparison.Ordinal))
+
+                // Тести клієнта підставляють власні рядки — вимагати їх у
+                // каталозі означало б забороняти перевіряти обробку промаху.
+                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}__tests__{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                .Where(f => !f.Contains(".test.", StringComparison.Ordinal) && !f.Contains(".spec.", StringComparison.Ordinal));
+
+            foreach (var file in files)
+            {
+                var relative = Path.GetRelativePath(web, file).Replace('\\', '/');
+                result.Add(relative, File.ReadAllText(file));
+            }
+
+            return result;
+        }
+
+        public static ClientKeyScan Scan(string file, string text)
+        {
+            var result = new ClientKeyScan([], [], []);
+            result.Add(file, text);
+            return result;
+        }
+
+        private void Add(string file, string text)
+        {
+            var source = TypeScriptSource.Parse(text);
+
+            foreach (var call in source.Calls("t"))
+            {
+                if (call.Arguments.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var branch in source.Branches(call.Arguments[0], ResolveStatusKey))
+                {
+                    if (branch.Literal is not null)
+                    {
+                        Literals.Add(new ClientKeyUse(branch.Literal, file, source.LineOf(call.Index)));
+                    }
+                    else
+                    {
+                        Dynamic.Add(new ClientDynamicUse(file, branch.Dynamic!, source.LineOf(call.Index)));
+                    }
+                }
+            }
+
+            foreach (var call in source.Calls("formatCount"))
+            {
+                if (call.Arguments.Count < 2)
+                {
+                    continue;
+                }
+
+                foreach (var branch in source.Branches(call.Arguments[1]))
+                {
+                    if (branch.Literal is not null)
+                    {
+                        PluralBases.Add(new ClientKeyUse(branch.Literal, file, source.LineOf(call.Index)));
+                    }
+                    else
+                    {
+                        Dynamic.Add(new ClientDynamicUse(file, "formatCount:" + branch.Dynamic, source.LineOf(call.Index)));
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// <c>statusKey('sheet', 'Draft')</c> → <c>status.sheet.Draft</c>: будівник
+        /// ключа з двома літералами — той самий літерал, лише записаний інакше.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ Правило дзеркалить <c>statusKey</c> у <c>StatusBadge.tsx</c>. Якщо
+        /// форма ключа там зміниться, розбіжність покаже
+        /// <c>Перелік_ключів_через_змінну_не_застарів</c>: шаблон <c>status.</c>
+        /// зникне з файла-джерела.
+        /// </remarks>
+        private static string? ResolveStatusKey(string expression)
+            => StatusKeyCall().Match(expression) is { Success: true } m
+                ? $"status.{m.Groups[1].Value}.{m.Groups[2].Value}"
+                : null;
+    }
+
+    private sealed record ClientKeyUse(string Key, string File, int Line);
+
+    private sealed record ClientDynamicUse(string File, string Expression, int Line);
+
+    [GeneratedRegex(@"^statusKey\(\s*'(\w+)'\s*,\s*'(\w+)'\s*\)$")]
+    private static partial Regex StatusKeyCall();
+
+    /// <summary>Рядок, схожий на ключ каталогу: <c>група.ім'я</c>, починається з малої.</summary>
+    [GeneratedRegex(@"^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9-]+)+$")]
+    private static partial Regex CatalogKeyShape();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -222,7 +704,13 @@ public sealed partial class EndpointCoverageTests
         var seed = File.ReadAllText(Path.Combine(
             SolutionRoot(), "src", "Ecr.Infrastructure", "Persistence", "Sql", "09-seed.sql"));
 
-        var keys = SeedKeyRegex.Matches(seed).Select(m => m.Groups[1].Value).ToList();
+        // ⚠ Лише блок MERGE: секція змінених текстів над ним законно називає
+        // ті самі ключі вдруге (старе → нове), і MERGE вона не валить.
+        var start = seed.IndexOf("MERGE sys_ecr.UiString AS t", StringComparison.Ordinal);
+        var end = start < 0 ? -1 : seed.IndexOf("WHEN NOT MATCHED", start, StringComparison.Ordinal);
+        Assert.True(end > start, "У 09-seed.sql немає блоку MERGE sys_ecr.UiString AS t — сторож дивиться не туди.");
+
+        var keys = SeedKeyRegex.Matches(seed[start..end]).Select(m => m.Groups[1].Value).ToList();
         Assert.NotEmpty(keys);
 
         var duplicates = keys
@@ -821,15 +1309,6 @@ public sealed partial class EndpointCoverageTests
 
     [GeneratedRegex(@"\{[^{}]*\}")]
     private static partial Regex BraceRegex { get; }
-
-    /// <summary>Виклик <c>t('ключ')</c> у клієнті.</summary>
-    /// <remarks>
-    /// ⚠ Символ перед <c>t</c> обов'язковий: без нього вираз ловить <c>it(</c>
-    /// із тестів і оголошує назву тесту незнайденим ключем інтерфейсу.
-    /// Крапка в ключі відсіює решту однобуквених функцій.
-    /// </remarks>
-    [GeneratedRegex(@"[^A-Za-z0-9_$]t\('([a-zA-Z][A-Za-z0-9]*\.[A-Za-z0-9-]+)'")]
-    private static partial Regex UiKeyRegex { get; }
 
     /// <summary>Оголошення права константою в застосунку.</summary>
     /// <remarks>

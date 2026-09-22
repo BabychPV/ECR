@@ -36,4 +36,6 @@ export const Routes = [
   { path: '/admin/audit', name: 'audit' },
   { path: '/admin/consistency', name: 'consistency' },
   { path: '/admin/ui-strings', name: 'ui-strings' },
+  { path: '/admin/notifications', name: 'notifications' },
+  { path: '/admin/campaign', name: 'campaign' },
 ];

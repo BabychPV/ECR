@@ -1457,8 +1457,11 @@ public interface IJobProgress
     public Task ReportAsync(int percent, string? message, CancellationToken ct);
 }
 
-/// <summary>Стан фонової задачі.</summary>
-public sealed record JobStatus(string JobId, string State, int Percent, string? Message, string? Error);
+/// <summary>Стан фонової задачі. Поля після Error — BE-08.</summary>
+public sealed record JobStatus(
+    string JobId, string State, int Percent, string? Message, string? Error,
+    int? Attempt = null, string? CorrelationId = null, int? MaxAttempts = null,
+    DateTime? CreatedAt = null, string? ErrorCode = null, long? DocumentId = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.
@@ -2134,6 +2137,19 @@ public interface ICollectionRunner
 }
 ```
 
+#### `ICollectionScheduleStore`
+
+Розклади збору (`ext.CollectionSchedule`) для редагування з інтерфейсу (`BE-21b`, ФВ-14.3). Окремо від `ICollectionStore`: той обслуговує ПРОГІН збору і живе в адаптерах джерела, а цей — конфігурацію, яку править людина. Розклад завжди віддається разом із кодом і підписом сутності джерела (`ScheduledSourceEntity`): сам по собі він має лише `SourceEntityId`, і перелік із голими числами не каже, ЩО збирається за цим cron.
+
+```csharp
+public interface ICollectionScheduleStore
+{
+    public Task<IReadOnlyList<ScheduledSourceEntity>> ListAsync(CancellationToken ct);
+    public Task<ScheduledSourceEntity?> FindAsync(int collectionScheduleId, CancellationToken ct);
+    public void Remove(CollectionSchedule schedule);
+}
+```
+
 #### `IConsistencyIssueReader`
 
 Знахідка перевірки узгодженості, як її бачить читач. Ідентифікатор рядка
@@ -2184,6 +2200,58 @@ public interface IDocumentStore
 складу локально при кожній зміні вибору аркушів, тим самим правилом, що й
 `ValidateCompositionAsync` (лише `RequiresAll`/`RequiresOne` — `Excludes`
 сервер сьогодні не перевіряє, і клієнт навмисно цього не вигадує).
+
+#### `IDocumentDeletionStore`
+
+Видалення документа-чернетки (`DELETE /api/v1/documents/{id}`, право
+`Document.Delete`, рішення людини 2026-09-21 «лише чернетки»). Обидва методи —
+в одній транзакції: стани аркушів читаються під `UPDLOCK, HOLDLOCK`, домен
+(`DraftDocumentDeletion`) вирішує, чи це чернетка, і лише тоді дані видаляються
+явно від листя до кореня (каскадів на `doc.Document` немає). `aud.CellChange`
+не чіпається; видалення лягає в `aud.SecurityEvent` (`DocumentDeleted`).
+
+```csharp
+public interface IDocumentDeletionStore
+{
+    public Task<DocumentWorkflowFacts> LockWorkflowFactsAsync(long documentId, CancellationToken ct);
+    public Task<int> DeleteAsync(long documentId, CancellationToken ct);
+}
+```
+
+#### `IDocumentKeyStore`
+
+Зміна бізнес-ключа документа (ФВ-3.9, `POST /api/v1/documents/{id}/business-key`,
+право `Document.ChangeKey`). В одній транзакції: документ під `UPDLOCK`, стани
+аркушів — через `IDocumentDeletionStore.LockWorkflowFactsAsync`, зайнятість ключа —
+під `UPDLOCK, HOLDLOCK`. Поданий/погоджений аркуш, зайнятий ключ чи застарілий
+`expectedBusinessKey` — `409 ECR-DOC-0409`; без причини — `422 ECR-DOC-0422`.
+Старий і новий ключ із причиною — в `aud.SecurityEvent` (`DocumentKeyChanged`).
+
+```csharp
+public interface IDocumentKeyStore
+{
+    public Task<Document?> FindForUpdateAsync(long documentId, CancellationToken ct);
+    public Task<bool> IsKeyTakenAsync(int projectId, string businessKey, long exceptDocumentId, CancellationToken ct);
+}
+```
+
+#### `IMethodologyVersionDeletionStore`
+
+Видалення версії-чернетки методології (`DELETE /api/v1/methodologies/{id}/versions/{vid}`,
+право `Calculation.EditFormula`, `BE-25`). Обидва методи — в одній транзакції: версія
+читається під `UPDLOCK, HOLDLOCK` разом із фактом, що нею вже рахували
+(`calc.CalculationResult` або `arc.CalculationResult`); домен
+(`MethodologyVersion.EnsureDeletable`) вирішує, і лише тоді вміст видаляється явно
+(усі FK на `calc.MethodologyVersion` — `Restrict`). Слід — `aud.SecurityEvent`
+(`MethodologyVersionDeleted`).
+
+```csharp
+public interface IMethodologyVersionDeletionStore
+{
+    public Task<(MethodologyVersion Version, bool UsedInCalculations)?> LockAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<int> DeleteAsync(int methodologyVersionId, CancellationToken ct);
+}
+```
 
 #### `IColumnDefSearchStore`
 
@@ -2272,6 +2340,20 @@ public interface IJobProgressStore
 }
 ```
 
+#### `ICorrelationIdAccessor`
+
+Кореляція поточного HTTP-запиту (`X-Correlation-Id`, та сама, що в лозі) для
+планувальника: задача, поставлена запитом, несе її в `itg.JobProgress` і в
+рядки власного логу (BE-08). Поза запитом — `null`, і планувальник генерує
+нову. Реалізація — `Ecr.Api` (`HttpCorrelationIdAccessor`).
+
+```csharp
+public interface ICorrelationIdAccessor
+{
+    public string? CorrelationId { get; }
+}
+```
+
 #### `IConsistencyMetrics`
 
 Видимість знахідок `ConsistencyCheckJob` у метриках (директива №11, T10 #41).
@@ -2353,6 +2435,25 @@ public interface INotificationSender
 }
 ```
 
+#### `INotificationDispatchStore`
+
+Дані РОЗСИЛКИ каналами (`BE-34`): знімок конфігурації «подія × канал» і журнал доставок `itg.NotificationDelivery`. Окремо від `INotificationStore` навмисно — той обслуговує екран керування каналами, а цей фонову задачу без користувача. У тому ж файлі — `NotificationEvent`, `NotificationMessage`, `NotificationDispatchPlan`, `NotificationDispatchResult` і порт `INotificationChannelSender` (доставка в конкретний канал із бази, на відміну від `INotificationSender` — транспорту процесу).
+
+```csharp
+public interface INotificationDispatchStore
+{
+    public Task<NotificationDispatchPlan> GetPlanAsync(CancellationToken ct);
+    public Task<bool> WasSentSinceAsync(int channelId, string eventKey, DateTime since, CancellationToken ct);
+    public Task AppendDeliveryAsync(NotificationDelivery delivery, CancellationToken ct);
+}
+
+public interface INotificationChannelSender
+{
+    public NotificationChannelKind Kind { get; }
+    public Task SendAsync(NotificationChannel channel, NotificationMessage message, CancellationToken ct);
+}
+```
+
 #### `IPeriodStore`
 
 Доступ до проєктів і їхніх періодів для календаря і адміністративних операцій над періодами.
@@ -2381,6 +2482,21 @@ public interface IPrincipalNameResolver
     public interface IPrincipalNameResolver
     public string? ResolveSid(string accountName);
     public string? ResolveName(string sid);
+}
+```
+
+#### `INotificationStore`
+
+Канали сповіщень (`sys_ecr.NotificationChannel`, `BE-33`). У тому ж файлі — `INotificationSecretProtector`: захист секрету каналу перед записом; зворотної дії в порту немає навмисно — API секрету не читає.
+
+```csharp
+public interface INotificationStore
+{
+    public Task<IReadOnlyList<NotificationChannel>> ListChannelsAsync(CancellationToken ct);
+    public Task<NotificationChannel?> FindChannelAsync(int id, CancellationToken ct);
+    public Task<bool> IsChannelNameTakenAsync(string name, int? exceptChannelId, CancellationToken ct);
+    public void AddChannel(NotificationChannel channel);
+    public Task<int> RemoveChannelWithRulesAsync(NotificationChannel channel, CancellationToken ct);
 }
 ```
 
@@ -2429,6 +2545,20 @@ public interface IRegistryStore
 }
 ```
 
+#### `IRegistryDraftStore`
+
+Чернетки опису довідників `cfg.RegistryDefinitionDraft` (BE-24 крок 2): одна
+на довідник, публікація застосовує її і видаляє.
+
+```csharp
+public interface IRegistryDraftStore
+{
+    public Task<RegistryDefinitionDraft?> FindAsync(int registryDefId, CancellationToken ct);
+    public void Add(RegistryDefinitionDraft draft);
+    public void Remove(RegistryDefinitionDraft draft);
+}
+```
+
 #### `IReportDefinitionStore`
 
 Описи звітів (rpt.ReportDef) та їхні версії.
@@ -2437,7 +2567,7 @@ public interface IRegistryStore
 public interface IReportDefinitionStore
 {
     public interface IReportDefinitionStore
-    public Task<int?> FindCurrentVersionIdAsync(string code, CancellationToken ct);
+    public Task<ReportVersionRef?> FindCurrentVersionAsync(string code, CancellationToken ct);
 }
 ```
 
@@ -2472,6 +2602,22 @@ public interface IResourceNameResolver
 }
 ```
 
+#### `IRuleCoverageReader`
+
+Матриця покриття «рядки × правила» (ФВ-13.9): живі рядки примірників таблиць
+прив'язок методології за вікно періодів, згруповані в SQL за значеннями колонок,
+які згадують правила, з лічильниками рядків і різних документів. Класифікацію
+робить застосунок (`MethodologyRuleMatcher.Classify`), не порт.
+
+```csharp
+public interface IRuleCoverageReader
+{
+    public Task<IReadOnlyList<RuleCoverageCombination>> ReadAsync(
+        IReadOnlyList<int> tableDefIds, IReadOnlyList<int> columnDefIds,
+        int periodFrom, int periodTo, int limit, CancellationToken ct);
+}
+```
+
 #### `ISecretProvider`
 
 Значення секрету за його іменем.
@@ -2481,6 +2627,20 @@ public interface ISecretProvider
 {
     public interface ISecretProvider
     public string? Find(string secretName);
+}
+```
+
+#### `ISnapshotWorkbookWriter`
+
+Складає книгу `.xlsx` зі зрізу звітності (`R7`, `D-52a`). Окремий порт, а не
+метод `IExcelExporter`: той будує книгу ДОКУМЕНТА — аркуші шаблону, стилі,
+формули, карту для зворотного імпорту, — а зріз є одним пласким аркушем, який
+ніколи не повертається в систему.
+
+```csharp
+public interface ISnapshotWorkbookWriter
+{
+    public Task<Stream> WriteAsync(SnapshotWorkbook workbook, CancellationToken ct);
 }
 ```
 
@@ -2529,6 +2689,141 @@ public interface IDocumentListSummaryStore
 }
 ```
 
+#### `ISearchStore`
+
+Пошук даних для командної палітри (`BE-19`): документи (межа — ті самі
+гранти проєкту, що й `IDocumentStore.ListAsync`), шаблони, активні довідники;
+підрядок коду чи будь-якого перекладу назви, стеля на тип.
+
+```csharp
+public interface ISearchStore
+{
+    public Task<IReadOnlyList<SearchRow>> SearchAsync(
+        string term, SearchScope scope, int perKind, CancellationToken ct);
+}
+```
+
+#### `ICampaignSummaryStore`
+
+Огляд кампанії звітності за період (`BE-22`): проєкти з лічильниками етапів,
+за кодом проєкту, зі стелею переліку. **Межі грантів тут немає навмисно** —
+рішення людини `Q15-07`: огляд відкриває окреме право `Report.ViewCampaign`,
+а не грант на проєкт, і віддає лише лічильники, без значень.
+
+```csharp
+public interface ICampaignSummaryStore
+{
+    public Task<CampaignProjectPage> ListAsync(int periodKey, int limit, CancellationToken ct);
+}
+```
+
+#### `ICollectionRunReader`
+
+Журнал прогонів збору (`itg.CollectionRun`, ФВ-5.23) — лише читання: сторінка
+новіші першими (курсор за `Id` униз) з фільтрами з'єднання, сутності, стану й
+проміжку початку, і деталь із текстом помилки та покритими інтервалами.
+
+```csharp
+public interface ICollectionRunReader
+{
+    public Task<PagedResult<CollectionRunView>> ListAsync(
+        CollectionRunFilter filter, CursorRequest page, CancellationToken ct);
+    public Task<CollectionRunDetail?> FindAsync(long id, CancellationToken ct);
+}
+```
+
+#### `IDataSourceStore`
+
+Конфігурація підключень (`ext.DataSource`) для екрана джерел (`BE-21`,
+ФВ-14.3): перелік разом із лічильниками того, що на джерело спирається, пошук
+для правки (**вимкнені джерела теж**), зайнятість коду, додавання і вилучення.
+
+Окремий порт, а не метод у `ICollectionStore`: той обслуговує ЗБІР і бачить
+лише чинні джерела (`FindDataSourceAsync` відсіює `IsActive = 0`) — для
+збирача правильно, для конфігуратора згубно.
+
+```csharp
+public interface IDataSourceStore
+{
+    public Task<IReadOnlyList<DataSourceRow>> ListAsync(CancellationToken ct);
+    public Task<DataSource?> FindAsync(int dataSourceId, CancellationToken ct);
+    public Task<bool> IsCodeTakenAsync(string code, int? exceptId, CancellationToken ct);
+    public Task<DataSourceUsage> CountUsageAsync(int dataSourceId, CancellationToken ct);
+    public void Add(DataSource source);
+    public void Remove(DataSource source);
+}
+```
+
+#### `ISourceCatalogReader`
+
+Каталог імен джерела для мапінгу (ФВ-13.13); реалізація — `PiAfCatalogReader`,
+тільки читання (D-44). Споживач — `GET /api/v1/data-sources/{id}/catalog`
+(`path`, `search`, `cursor`, `limit` 1–200, типово 50): без `path` — кореневі
+елементи, зі шляхом — дочірні елементи й атрибути з UOM. Межа очікування —
+`Integration:CatalogTimeoutSeconds` (10 с); не вклалось, джерело лежить або
+вимкнене — `503 ECR-INT-0503` (`catalogTimeout` / `catalogUnavailable`),
+відмова в автентифікації — `502 ECR-INT-0502`.
+
+```csharp
+public interface ISourceCatalogReader
+{
+    public Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(int dataSourceId, string? parentPath, CancellationToken ct);
+    public Task<IReadOnlyList<SourceEntityDescriptor>> AttributesAsync(int dataSourceId, string elementPath, CancellationToken ct);
+}
+```
+
+> ⚠ **«Перевірити конфігурацію» (ФВ-13.17), `POST /api/v1/data-sources/{id}/probe`,
+> тіло `{ path }` (1–500 символів).** До першого збору: пробне читання ОДНОГО
+> значення тим самим адаптером, яким потім збиратимуть
+> (`IExternalDataSource.ReadAsync`, вікно 30 днів назад, без запису в постійну
+> таблицю). Успіх — `{ path, hasValue, valueNumeric, valueString, unitSymbol,
+> timestamp, quality }`; `hasValue = false` — шлях є в каталозі, але точки у
+> вікні немає. Існування шляху перевіряє КАТАЛОГ (`ISourceCatalogReader`, той
+> самий обхід, що для ФВ-13.13, не дубльований) — шлях, якого каталог того
+> самого рівня не бачить, дає `404 ECR-INT-0404`
+> (`err.ECR-INT-0404.sourcePathNotFound`) з `suggestions`: до 5 найближчих імен
+> за відстанню Левенштейна серед елементів і атрибутів того ж рівня; рівень без
+> жодного елемента — той самий `404`, `suggestions: []`. Таймаут і недоступність
+> — та сама конвенція, що в каталозі: `503 ECR-INT-0503`
+> (`probeTimeout`/`probeUnavailable`), відмова автентифікації — `502 ECR-INT-0502`.
+
+> ⛔ **Джерела даних — без сховища секретів** (`BE-21`, пряме рішення людини на
+> `Q15-06`): «Windows-автентифікація службового облікового запису; секретів у
+> застосунку немає». Тому в `SaveDataSourceRequest` поля секрету НЕМАЄ і
+> маршруту `PUT …/{id}/secret` не існує — на відміну від каналів сповіщень, де
+> секрет (пароль SMTP, URL вебхука) неминучий. У відповіді лишається
+> `hasSecret`: ознака того, що середовище все-таки дає секрет під це джерело
+> (`ISecretProvider`, ім'я `DataSource.<CODE>`), без самого значення.
+>
+> ⛔ Наслідок, на який і поставлено перевірку: коли сховища секретів немає,
+> єдиний спосіб покласти пароль у базу — вписати його в НЕСЕКРЕТНЕ поле. Для
+> транспорту `Sql` адреса і є рядком з'єднання, тож `POST`/`PUT` відмовляють
+> (`422 ECR-REQ-0422`, `err.ECR-REQ-0422.dataSourceEndpointCarriesSecret`)
+> адресі з `Password=`, `Pwd=`, `sig=`, ключем API або частиною
+> `scheme://user:pass@host`. Відмова не повторює введеного, але називає поле:
+> `field` = `endpoint` | `secondaryEndpoint`; несуть обидві — `endpoint`
+> (перевірка в порядку полів форми, до першої відмови).
+>
+> ⚠ **Версія рядка.** `DataSourceView.rowVersion` — Base64 від
+> `ext.DataSource.RowVersion`. `PUT` і `DELETE /api/v1/data-sources/{id}`
+> вимагають `If-Match` із цим значенням (у лапках або голим) — той самий
+> контракт, що в розкладах збору: заголовка немає — `422 ECR-REQ-0422`
+> (`err.ECR-REQ-0422.dataSourceIfMatch`); версія чужа — `409 ECR-JOB-0409`
+> (`err.ECR-JOB-0409.dataSourceChanged`, у деталях — чинна `rowVersion`).
+> Перевірка йде після права й пошуку рядка, до перевірки тіла.
+>
+> ⛔ `DELETE /api/v1/data-sources/{id}` — **заборона, не каскад**. Джерело із
+> сутностями збору або розкладами дає `409 ECR-JOB-0409` із лічильниками в
+> деталях: каскад стер би `ext.RawDataPoint` і журнал покриття, за якими вже
+> пораховані й підписані документи. Джерело, з якого більше не збирають,
+> вимикається (`isActive = false`) — це оборотно.
+>
+> ⚠ `POST /api/v1/data-sources/{id}/test` опитує джерело ТИМ САМИМ адаптером,
+> яким потім збиратимуть (`IExternalDataSource.DiscoverAsync`). Причина
+> обов'язкова і йде в `aud.SecurityEvent`; друга проба того самого джерела під
+> час чинної — `409 ECR-JOB-0409`. Відмова джерела — це `{ ok: false, error }`
+> зі статусом `200`, а не помилка запиту.
+
 #### `ITemplateStructure`
 
 Синхронний доступ до вже завантаженого знімка структури версії.
@@ -2565,6 +2860,36 @@ public interface IUnitStore
     public Task<Unit?> FindUnitByCodeAsync(string code, CancellationToken ct);
     public Task<bool> DimensionExistsAsync(byte dimensionId, CancellationToken ct);
     public void AddUnit(Unit unit);
+}
+```
+
+#### `IWhereUsedStore`
+
+«Де використовується» константа методики і колонка шаблону (ФВ-8.14).
+
+```csharp
+public interface IWhereUsedStore
+{
+    public Task<int?> FindConstantMethodologyAsync(int methodologyVersionId, string code, CancellationToken ct);
+    public Task<IReadOnlyList<VersionFormulaText>> ListVersionFormulasAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<bool> ColumnExistsAsync(int columnDefId, CancellationToken ct);
+    public Task<UsageResponse> FindColumnUsageAsync(int columnDefId, int take, CancellationToken ct);
+}
+```
+
+#### `IUserPreferenceStore`
+
+Налаштування інтерфейсу користувача `sec.UserPreference` (BE-20). Кожен метод
+бере `userId` явно: чужих налаштувань порт не бачить.
+
+```csharp
+public interface IUserPreferenceStore
+{
+    public Task<IReadOnlyList<UserPreference>> ListAsync(int userId, CancellationToken ct);
+    public Task<UserPreference?> FindAsync(int userId, string key, CancellationToken ct);
+    public Task<int> CountAsync(int userId, CancellationToken ct);
+    public void Add(UserPreference preference);
+    public void Remove(UserPreference preference);
 }
 ```
 
@@ -2606,6 +2931,10 @@ public interface IValidationResultStore
     public Task<ValidationSummary?> GetLatestAsync(long documentId, int periodKey, CancellationToken ct);
 }
 ```
+
+#### `IDocumentVersionStore`
+
+Версії документа для порівняння (ФВ-5.22): зрізи подання `calc.SubmissionSnapshot`, поточні комірки в тій самій формі, підписи рядків (зокрема видалених) і коди колонок. Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionStore.cs`.
 
 #### `IWorkflowStore`
 
@@ -2721,7 +3050,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-AUTH-0429` | 429 | вичерпано хвилинну межу спроб входу з АДРЕСИ (`S-10`); у відповіді `Retry-After`. Обліковка при цьому не заблокована — це `ECR-AUTH-0423`, інший суб'єкт і інша дія користувача |
 | `ECR-ACCS-0403` | 403 | відмова `IAccessDecisionService`; у `Extensions2.reason` — `EditDenyReason` |
 | `ECR-SEC-0404` | 404 | користувача або ролі не існує (або роль вимкнена) |
-| `ECR-SEC-0409` | 409 | роль із таким кодом уже існує (`UQ_Role`) |
+| `ECR-SEC-0409` | 409 | конфлікт зі станом безпеки: роль із таким кодом уже існує (`UQ_Role`), роль вбудована чи зайнята; дія над власним записом або над останнім адміністратором (BE-12) |
 | `ECR-USR-0422` | 422 | дані облікового запису не проходять перевірку: алерти без пошти, доменний запис без SID, локальний без разового пароля |
 | `ECR-USR-0409` | 409 | обліковий запис із таким іменем уже існує |
 | `ECR-TMPL-0404` | 404 | шаблон або версія не знайдені |
@@ -2737,6 +3066,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-CFG-4221` | 422 | `Project.TimeZoneId` не є відомим ідентифікатором IANA: порожньо, невідомий пояс, Windows-ідентифікатор (`Central Asia Standard Time`) або зсув (`+05:00`) |
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту |
+| `ECR-REQ-0429` | 429 | КОРИСТУВАЧ вичерпав межу частоти запитів (пошук `GET /api/v1/search`, типово 30 за 10 с, `Security:RateLimit:SearchPermit`/`SearchWindowSeconds`); у відповіді `Retry-After` |
 | `ECR-SCHM-0409` | 409 | `Breaking`-зміна у версії з документами (ФВ-7.4) |
 | `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
@@ -2766,14 +3096,14 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-0422` | 422 | перемикання `SourceKind` у відкритому періоді (ФВ-8.9) |
 | `ECR-REG-4091` | 409 | довідник із таким кодом уже є |
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
-| `ECR-UOM-0422` | 422 | конверсія між різними розмірностями (ФВ-16.3) |
+| `ECR-UOM-0422` | 422 | конверсія одиниць неможлива. Заголовок нейтральний, випадок каже `messageKey`-подробиця: різні розмірності (ФВ-16.3, `incompatibleDimensions`), нульовий множник одиниці на конверсії (`zeroFactor`), явна конверсія не для цієї пари (`explicitConversionMismatch`), множник ≤ 0 на заведенні чи зміні одиниці (`factorMustBePositive`, BE-15) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
-| `ECR-UOM-4091` | 422 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
+| `ECR-UOM-4091` | 409 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
-| `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15) |
+| `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15), **або** не змінюються її множник і зсув (`unitFactorInUse`), **або** одиницю змінили між читанням і записом — `If-Match` не збігся з `rowVersion` (`unitChanged`, `UpdateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
-| `ECR-CALC-0409` | 409 | публікація методології автором останньої правки (D-40) |
-| `ECR-CALC-0422` | 422 | публікація без зеленого тесту (ФВ-9.12) |
+| `ECR-CALC-0409` | 409 | стан методології чи версії не дозволяє дію. Заголовок нейтральний, випадок каже `messageKey`-подробиця (як у `ECR-JOB-0409`): публікація автором версії (D-40, `authorCannotPublish`), погодження власного перерахунку закритого періоду (D-40, `ownRecalculationApproval`), видалення не-чернетки (`versionNotDraft`) або версії, якою вже рахували (`versionUsedInCalculations`, BE-25); також зміна не-чернетки, чужий дочірній запис, зайнятий номер версії чи дата чинності |
+| `ECR-CALC-0422` | 422 | запит до методології невалідний. Заголовок нейтральний («Invalid methodology request»), випадок каже `messageKey`-подробиця: публікація без зеленого тесту (ФВ-9.12, `publishNoGreenTest`), без причини (`publishNoReason`), без дати чинності (`publishNoEffectiveDate`), з проблемами перевірок (`publishChecksFailed`) чи золотого набору (`goldenSetEmpty`, `goldenSetDiverged`); невалідні константа, формула, правило, імпорт чи залежність; порожнє вікно періодів матриці покриття (`coverageWindow`, ФВ-13.9) |
 | `ECR-CALC-0431` | 422 | `^` у діалекті методологій — це XOR, а не степінь |
 | `ECR-CALC-0432` | 422 | токен `@Arg` у виразі, якого немає в оголошеному списку аргументів формули: збірка його не підставить (директива ПК-1 №05 §7, пастка 2) |
 | `ECR-CALC-0433` | 422 | функція ярусу `Extension` у версії з `NumericMode = Legacy`: відтворювати їй нічого (`02b` §8) |
@@ -2786,15 +3116,16 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-IMP-0422` | 422 | імпорт xlsx: структура файлу не відповідає шаблону |
 | `ECR-INT-0503` | 503 | зовнішнє джерело недоступне; збір перейде в catch-up |
 | `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9) |
-| `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена |
+| `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена; **або** немає самого мапінгу поля (`messageKey` розрізняє: `sourceEntity` / `fieldMap`) |
 | `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
+| `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`) |
 | `ECR-INT-0502` | 502 | джерело **відмовило в автентифікації**: збір зупинено, у наздоганяння НЕ йде (`H-20`) |
 | `ECR-RPT-0404` | 404 | звіту з таким кодом немає або жодну версію не опубліковано |
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
 | `ECR-RPT-4091` | 409 | опис звіту з таким кодом уже є (`UQ_ReportDef`); код і є адресою побудови |
 | `ECR-RPT-0422` | 422 | опис звіту не складається: порожня назва, немає колонок, невідомий тип колонки чи джерело рядків |
 | `ECR-JOB-0404` | 404 | фонової задачі з таким ідентифікатором немає; **або** деталь у планувальнику не пережила перезапуск сервера (сховище черги в пам'яті, D-66) — ручний перезапуск неможливий |
-| `ECR-JOB-0409` | 409 | стан задачі не дозволяє дію: ручний перезапуск не-`Failed` задачі (директива №11, T10 #40) **або** скасування задачі, яка вже не `Queued`/`Running` (BE-02) |
+| `ECR-JOB-0409` | 409 | стан задачі не дозволяє дію: ручний перезапуск не-`Failed` задачі (директива №11, T10 #40), скасування задачі, яка вже не `Queued`/`Running` (BE-02), **або** розклад збору, змінений іншим редактором між читанням і записом — `If-Match` не збігся з `rowVersion` (BE-21b), **або** спроба завести другий розклад для сутності джерела, яка вже має свій (BE-21c), **або** прогін перевірки узгодженості, коли попередній ще `Queued`/`Running` (`consistencyCheckRunning`, BE-30), **або** видалення джерела даних, на яке ще спираються сутності чи розклади (`dataSourceInUse`), **або** тест з'єднання джерела, коли попередній ще йде (`dataSourceTestRunning`), **або** з'єднання, змінене іншим редактором — `If-Match` не збігся з `rowVersion` (`dataSourceChanged`). Константа каталогу — `ErrorCodes.JobStateConflict` |
 | `ECR-SYS-0500` | 500 | необроблена помилка; у логах — `CorrelationId` |
 | `ECR-SYS-0503` | 503 | система в стані архівації (`IsArchiving`) |
 
@@ -2849,8 +3180,15 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/login/local` | — | 3 |
 | `POST` | `/api/v1/logout` | — | 1 |
 | `GET` | `/api/v1/me` | — | 1 |
+| `GET` | `/api/v1/me/preferences` | — | 4 |
+| `PUT` | `/api/v1/me/preferences/{key}` | — | 4 |
+| `DELETE` | `/api/v1/me/preferences/{key}` | — | 4 |
 | `GET` | `/api/v1/templates` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates` | `Template.Edit` | 1 |
+| `GET` | `/api/v1/templates/{id}` | `Template.View` | 1 |
+| `PUT` | `/api/v1/templates/{id}` | `Template.Edit` | 1 |
+| `POST` | `/api/v1/templates/{id}/archive` | `Template.Edit` | 1 |
+| `POST` | `/api/v1/templates/{id}/restore` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/{id}/versions` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates/{id}/versions` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/clone` | `Template.Edit` | 1 |
@@ -2860,6 +3198,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
 | `GET` | `/api/v1/column-defs/search` | `Template.View` | 7 |
+| `GET` | `/api/v1/column-defs/{id}/usage` | `Template.View` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/access-matrix` | `Template.View` | 3 |
 | `GET` | `/api/v1/template-versions/{id}/relations` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/relations/{code}` | `Template.Edit` | 7 |
@@ -2900,6 +3239,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
+| `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
+| `POST` | `/api/v1/documents/{id}/business-key` | `Document.ChangeKey` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
@@ -2910,6 +3251,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
+| `GET` | `/api/v1/documents/{id}/versions` | `Document.View` | 3 |
+| `GET` | `/api/v1/documents/{id}/compare` | `Document.View` | 3 |
 | `POST` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
@@ -2925,11 +3268,16 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/email` | `Security.ManageUsers` | 3 |
+| `POST` | `/api/v1/users/{id}/reset-password` | `Security.ManageUsers` | 3 |
+| `POST` | `/api/v1/users/{id}/lock` | `Security.ManageUsers` | 3 |
+| `POST` | `/api/v1/users/{id}/unlock` | `Security.ManageUsers` | 3 |
 | `GET` | `/api/v1/units` | — | 4 |
 | `POST` | `/api/v1/units` | `Uom.EditCatalog` | 4 |
 | `POST` | `/api/v1/units/convert` | — | 4 |
 | `GET` | `/api/v1/units/{id}/usage` | `Uom.EditCatalog` | 4 |
 | `DELETE` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
+| `GET` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
+| `PUT` | `/api/v1/units/{id}` | `Uom.EditCatalog` | 4 |
 | `GET` | `/api/v1/methodologies` | `Calculation.View` | 4 |
 | `POST` | `/api/v1/methodologies` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions` | `Calculation.View` | 7 |
@@ -2939,6 +3287,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/formulas/{code}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}` | `Calculation.EditConstant` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rules` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/rules/{code}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |
@@ -2948,6 +3297,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/tests` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/tests/{code}` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/modes` | `Calculation.EditFormula` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/coverage` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |
+| `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-results` | `Calculation.View` | 7 |
@@ -2968,7 +3321,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/users/{id}/alerts` | `Security.ManageUsers` | 5 |
 | `GET` | `/api/v1/audit/cells` | `Security.ViewAudit` | 3 |
 | `GET` | `/api/v1/audit/structure` | `Security.ViewAudit` | 7 |
+| `GET` | `/api/v1/audit/structure/export.csv` | `Security.ViewAudit` | 7 |
 | `GET` | `/api/v1/consistency/issues` | `System.ViewHealth` | 5 |
+| `POST` | `/api/v1/consistency/run` | `System.RunJob` | 5 |
 | `GET` | `/api/v1/health/facts` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/health/partitions/script` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/jobs` | `System.ViewHealth` | 5 |
@@ -2979,10 +3334,29 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
+| `POST` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
+| `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
+| `DELETE` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
+| `GET` | `/api/v1/collection-runs` | `Integration.View` | 7 |
+| `GET` | `/api/v1/collection-runs/{id}` | `Integration.View` | 7 |
+| `GET` | `/api/v1/data-sources` | `Integration.View` | 7 |
+| `POST` | `/api/v1/data-sources` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
+| `DELETE` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
+| `POST` | `/api/v1/data-sources/{id}/test` | `Integration.Manage` | 7 |
+| `GET` | `/api/v1/data-sources/{id}/catalog` | `Integration.Manage` | 7 |
+| `POST` | `/api/v1/data-sources/{id}/probe` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/entity-field-maps/{id}/pause` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/entity-field-maps/{id}/resume` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/entity-field-maps/{id}/accept-unit-change` | `Integration.Manage` | 5 |
+| `DELETE` | `/api/v1/entity-field-maps/{id}` | `Integration.Manage` | 5 |
+| `GET` | `/api/v1/campaign/summary` | `Report.ViewCampaign` | 5 |
 | `GET` | `/api/v1/reports/snapshots` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports/snapshots/{id}/verify` | `Report.ViewRegulatory` | 5 |
 | `GET` | `/api/v1/reports/snapshots/{id}/rows` | `Report.ViewRegulatory` | 5 |
+| `GET` | `/api/v1/reports/snapshots/{id}/export.xlsx` | `Report.Export` | 5 |
 | `POST` | `/api/v1/reports/{code}/build` | `Report.BuildSnapshot` | 5 |
 | `GET` | `/api/v1/languages` | — (будь-який автентифікований) | 3 |
 | `GET` | `/api/v1/public/bootstrap` | — (анонімний) | 7 |
@@ -2991,6 +3365,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/ui-strings/{lang}/{key}` | `System.ManageLocalization` | 3 |
 | `GET` | `/api/v1/ui-strings/coverage` | `System.ManageLocalization` | 7 |
 | `GET` | `/api/v1/ui-strings?lang=&missingOnly=` | `System.ManageLocalization` | 7 |
+| `GET` | `/api/v1/ui-strings/export.csv?lang=` | `System.ManageLocalization` | 7 |
+| `POST` | `/api/v1/ui-strings/import?lang=&dryRun=` | `System.ManageLocalization` | 7 |
 | `POST` | `/api/v1/security/simulation` | `Security.Simulate` | 3 |
 | `DELETE` | `/api/v1/security/simulation` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/my-groups` | — (власний сеанс) | 3 |
@@ -2998,17 +3374,39 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/security/group-assignments` | `Security.ManageUsers` | 3 |
 | `DELETE` | `/api/v1/security/group-assignments/{id}` | `Security.ManageUsers` | 3 |
+| `GET` | `/api/v1/notifications/channels` | `System.ManageNotifications` | 7 |
+| `POST` | `/api/v1/notifications/channels` | `System.ManageNotifications` | 7 |
+| `PUT` | `/api/v1/notifications/channels/{id}` | `System.ManageNotifications` | 7 |
+| `DELETE` | `/api/v1/notifications/channels/{id}` | `System.ManageNotifications` | 7 |
+| `PUT` | `/api/v1/notifications/channels/{id}/secret` | `System.ManageNotifications` | 7 |
+| `POST` | `/api/v1/notifications/channels/{id}/test` | `System.ManageNotifications` | 7 |
+| `GET` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
+| `PUT` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
+| `GET` | `/api/v1/notifications/deliveries` | `System.ManageNotifications` | 7 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |
-| `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` | 8 |
+| `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` + `Registry.Publish` | 8 |
+| `GET` | `/api/v1/registries/{code}/definition/draft` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/registries/{code}/definition/draft` | `Registry.EditDefinition` | 8 |
+| `DELETE` | `/api/v1/registries/{code}/definition/draft` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
+| `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
+| `GET` | `/api/v1/search` | — (кожен тип під правом свого переліку й грантами проєкту) | 8 |
+
+> ✎ 2026-09-21: `GET /sources/{id}/mapping/preview` — `fields[].isActive`
+> (обов'язкове; `false` — мапінг призупинений, `BE-27`, і його точки адрес не
+> дають). `GET /units/{id}/usage` і `GET /registries/{code}/usage` — `kind`
+> лише з `UsageKinds` (`Ecr.Application/Common/UsageKinds.cs`), значення на
+> дроті незмінні.
 
 > **`GET /jobs?mine=true` — межа доступу, а не фільтр зручності** (`BE-08`,
 > `Q-156`). Параметри переліку: `state` (`Queued`, `Running`, `Succeeded`,
@@ -3032,6 +3430,79 @@ public sealed class NotFoundException(string errorCode, string message)
 > ⚠ Невідомий `state` і `limit` поза межами — `422` (`ECR-REQ-0422`), а не
 > мовчазне звуження: друкарська помилка у фільтрі інакше відповідала б
 > «таких задач немає».
+
+> **`GET /api/v1/notifications/deliveries` — параметри** (`BE-33`): `limit`
+> (1…200, `0` = 50), `cursor`, `channelId`, `status` (`Sent`, `Failed`,
+> `Suppressed`). Обидва фільтри необов'язкові й звужують САМ ЗАПИТ: журнал
+> відкривають із шухляди каналу, і сторінка, відфільтрована після вибірки,
+> віддавала б там два рядки з п'ятдесяти, а «більше немає» означало б «більше
+> немає в цих п'ятдесяти».
+>
+> ⚠ Невідомий `status` — `422 ECR-REQ-0422`
+> (`err.ECR-REQ-0422.notificationDeliveryStatus`), як і `state` у задачах.
+> Приймається лише ІМ'Я зі списку: число переліку (`2`) — не значення фільтра.
+>
+> ⚠ `channelId` — фільтр, а не адресація: неіснуючий канал дає порожню
+> сторінку, а не `404`. Журнал переживає видалення каналу навмисно.
+
+> **`GET /api/v1/collection-schedules` — параметр** (`UI-09`): `dataSource` —
+> код з'єднання (`DataSource.Code`), необов'язковий. Звужує САМ ЗАПИТ (до стелі
+> переліку в 1000): вкладку розкладу відкривають із шухляди з'єднання.
+> Невідомий код — порожній перелік, а не `404`, як `channelId` вище. Кожен рядок
+> несе `dataSourceId` і `dataSourceCode`; ті самі два поля має й
+> `GET /api/v1/sources`.
+
+> ✎ **2026-09-20 — `settings` каналу Smtp: транспорт із налаштувань застосунку.**
+> Канал тримає рівно `recipients` (адресати) і `title` (для пошти — префікс
+> теми, для Teams — заголовок картки). Сервер, порт, TLS і адресу відправника
+> бере ПРОЦЕС (`Smtp:Host`, `Smtp:Port`, `Smtp:UseStartTls`, `Smtp:From`;
+> пароль — за іменем секрету, `ФВ-6.11`).
+>
+> ⛔ `host`, `port`, `useTls`, `from` у тілі `POST`/`PUT …/channels` — `422
+> ECR-REQ-0422`, ключ `err.ECR-REQ-0422.notificationChannelTransportFromConfiguration`.
+> Досі форма їх приймала, а `SmtpChannelSender` ігнорував: екран обіцяв
+> налаштування, якого не ставалося, і лист однаково йшов транспортом процесу.
+> Мовчки відкинути їх було б тим самим обманом, лише тихішим.
+>
+> ⚠ Канали, збережені ДО зміни, читаються далі: зайві поля старого
+> `SettingsJson` — невідомі члени, `System.Text.Json` їх пропускає, і у видачі
+> їх просто немає. Перше ж збереження такого каналу прибирає їх і зі сховища.
+>
+> ⚠ Адресати перевіряються ЯК АДРЕСИ (`MailAddress.TryCreate`): для Smtp
+> порожній перелік — `422` (`…notificationChannelInvalid`), рядок, що адресою
+> не є, — `422` (`…notificationChannelRecipientInvalid`). Друкарська помилка
+> інакше спливала б аж рядком `Failed` у журналі доставок.
+>
+> ⚠ У відповіді кожного каналу є `transportFromConfiguration`: `true` для
+> Smtp — екрану є чим пояснити відсутність полів сервера; `false` для Teams,
+> де адреса доставки живе в секреті самого каналу.
+>
+> ✎ **2026-09-21 — `transportConfigured` (адитивне).** Чи є каналу чим
+> доставляти: Smtp — `INotificationSender.IsConfigured` процесу (те саме, що
+> `notificationTransport.isConfigured` у `GET /health/facts`; порожній
+> `Smtp:Host` → `false`), Teams — `hasSecret` (секрет і є адресою вебхука).
+> ⛔ Лише булеве: хост, адресант, порт у відповідь не йдуть.
+>
+> ✎ **2026-09-21 — «налаштовано» = «можна надіслати».** Для Smtp і
+> `isConfigured`, і `transportConfigured` — `true` лише коли непорожні (після
+> trim) **обидва** `Smtp:Host` і `Smtp:From`; хост без адресанта → `false`, і
+> `OutboxDispatcher` лишає події в черзі без спроби. Умова одна —
+> `SmtpNotificationSender.IsConfigured`.
+
+> ✎ **R7 — `GET /reports/snapshots/{id}/export.xlsx`.** Книга приходить
+> ВІДПОВІДДЮ, без `202` і фонової задачі: аркуш плаский, стеля —
+> `ExportSnapshotHandler.MaxRows` = 50 000 рядків, понад неї `422 ECR-RPT-0422`,
+> ключ `err.ECR-RPT-0422.exportTooLarge`. Доступ — `Report.Export` ПЛЮС грант
+> `Read` на проєкт зрізу; чужий зріз = неіснуючий (`404`), як у `…/rows`.
+>
+> ⚠ **Числа в книзі мають 15 значущих цифр, а не 16.** Excel зберігає число
+> `double` — це формат книги, не наш вибір, — тож `decimal(38,16)` бази в неї
+> повністю не поміщається. Для звірки без утрат лишається `GET …/rows`, де
+> число їде десятковим. Рішення «усюди 16 знаків» стосується ЗБЕРІГАННЯ;
+> книга його не витримує, і мовчати про це дорожче, ніж назвати.
+>
+> ⛔ D-52a не зсувається: це вивантаження ЗРІЗУ, а не державної форми. PDF
+> держформи лишається в SSRS (`D-52`).
 
 > **Опис звіту — дані, а не конструктор звітів** (`ФВ-10.4`, `ФВ-10.6`,
 > директива №09 `W7`). Веб-переглядач і конструктор звітів ТЗ виносить за
@@ -3057,6 +3528,54 @@ public sealed class NotFoundException(string errorCode, string message)
 > (схема 2 `RulesJson`, `02b` §8a). Зламане правило — `422 ECR-RPT-0422`,
 > ключ `err.ECR-RPT-0422.rule` (`ruleNo`, `part`, `reason`), при СТВОРЕННІ версії.
 >
+> ✎ R6 (`D-52a`): там само — необов'язкове
+> `parameters: [{ code, type, required, default }]` (`02b` §8a): те, на що
+> посилається `@Code` у виразах правил. Типи — `Number`/`Text`/`Boolean`/`Date`,
+> той самий словник, що в `POST /expressions/validate`. Зламане оголошення —
+> `422 ECR-RPT-0422`, ключ `err.ECR-RPT-0422.parameter`; `default` не того типу —
+> `err.ECR-RPT-0422.parameterType`.
+>
+> ✎ R8 (`D-52a`): там само — необов'язкове
+> `layout: { groupBy, totals: [{ column, fn }], showGroupHeader }` (`02b` §8a):
+> **одна** група й підсумки (`sum`/`count`/`avg`/`min`/`max`). Колонки
+> групування й підсумків мусять бути ОПИСАНІ у версії, `sum`/`avg` — лише над
+> числовими; інакше `422 ECR-RPT-0422`, ключ `err.ECR-RPT-0422.layout` (`part`,
+> `reason`).
+>
+> ⛔ Макет **не змінює зрізу**: `rpt.ReportRow` лишається плоским, а
+> `ContentHash` — тим самим, що й без макета (`D-53`, зміна адитивна). Він
+> застосовується на ВИДАЧІ — `GET …/rows` віддає рядки в порядку груп і додає
+> поля `groups`, `totals`, `showGroupHeader`, а книга `.xlsx` малює ті самі
+> групи й підсумки, беручи числа з тієї самої сторінки. ⚠ Групи й підсумки
+> рахуються по всьому зрізу, тож приходять однакові на кожній сторінці; з
+> макетом `cursor` означає «скільки рядків уже віддано», а не останній `RowNo`
+> (без макета це те саме число).
+>
+> ✎ R9 (`D-52a`): кожна колонка в `columns` приймає необов'язкове
+> `nameL10n: { "<код мови>": "<підпис>" }` (`02b` §8a) — підпис колонки мовами
+> каталогу. Порожня назва або ключ, що не є кодом мови, — `422 ECR-RPT-0422`,
+> ключ `err.ECR-RPT-0422.columnName` (`columnCode`, `language`, `part`).
+>
+> ⚠ `GET …/rows` віддає в кожній колонці `name` — підпис уже МОВОЮ ЗАПИТУ
+> (`ICurrentUser.Language`: профіль → `Accept-Language` → `en`), із розгорнутим
+> фолбеком `мова → en → код колонки`. Заголовки книги `.xlsx` — ті самі, з тієї
+> самої сторінки. Опис без `nameL10n` дає `name` = `code`, тобто рівно те, що
+> віддавалося до `R9`.
+>
+> ⛔ Назва — ПОДАННЯ: у `rpt.ReportRow` вона не потрапляє, і `ContentHash` її не
+> бачить (`D-53`). Інакше перейменована колонка читалася б сумою як підміна
+> звіту.
+>
+> ⛔ **Значення** параметрів задаються при побудові — `POST /reports/{code}/build`,
+> поле `parameters: { "Code": значення }`, — і зводяться з оголошеннями чинної
+> версії В ОБРОБНИКУ, до постановки задачі в чергу. Тому невідоме ім'я
+> (`err.ECR-RPT-0422.parameterUnknown`), обов'язковий параметр без значення і без
+> `default` (`err.ECR-RPT-0422.parameterRequired`) і значення не того типу
+> (`err.ECR-RPT-0422.parameterType`) дають `422` у відповіді на сам запит. У
+> задачі це було б «задача завершилася помилкою» через хвилину, коли запит давно
+> повернув `202` і виправляти вже нема чого. Використані значення (із
+> підставленими замовчуваннями) лягають у `rpt.ReportSnapshot.ParametersJson`.
+>
 > ⚠ Публікація (`POST …/publish`) стоїть під тим самим правом, що й
 > редагування, а не під власним. Це НЕ те саме, що публікація методології
 > (`Calculation.Publish`, `D-40`, правило чотирьох очей): та тихо змінює числа
@@ -3071,6 +3590,28 @@ public sealed class NotFoundException(string errorCode, string message)
 > вивантажувати». Авторство державної форми — інша річ, і роздати його кожному
 > погоджувачу правкою одного рядка каталогу було б зміною повноважень людей
 > без жодного рішення (`ФВ-6.12`, `D-40`).
+>
+> ⛔ `GET /api/v1/campaign/summary?periodKey=` (`BE-22`) — огляд кампанії по
+> ВСІХ проєктах періоду: лічильники етапів (`documents`, `draft`, `submitted`,
+> `approved`, `rejected`) і скільки побудовано поточних зрізів. **Межі грантів
+> тут немає навмисно** — пряме рішення людини на `Q15-07`: замість неї окреме
+> право `Report.ViewCampaign`, яке видається явно. Тому воно теж небезпечне
+> (`IsDangerous = 1`) і з шаблону `Report.%` не приїжджає. Значень у відповіді
+> немає жодного — лише лічильники; інакше право на огляд стало б обходом
+> грантів. Перелік має стелю `GetCampaignSummaryHandler.MaxProjects`, і
+> `totalProjects` каже, скільки проєктів насправді: обрізана відповідь не
+> прикидається повною.
+>
+> ✎ 2026-09-21 (адитивно): `totals { projects, documents, draft, submitted,
+> approved, rejected, snapshots, done, overdue, atRisk, inProgress }` — по ВСІХ
+> проєктах періоду одним агрегатом, без стелі переліку; у кожному рядку —
+> `progress` (`Done`/`Overdue`/`AtRisk`/`InProgress`) і `submissionDeadline`
+> (строк подання = `Period.ComputedGraceAt`, момент `Open → Grace`, у поясі
+> проєкту, виключно; `null` — межі не пораховано). «Готово» — усі документи
+> затверджено **і** є поточний зріз; «прострочено» — строк минув; «під
+> ризиком» — до останнього дня подання ≤ `Campaign:AtRiskDays` (типово 3) діб
+> поясу проєкту. Рішення людини, підтверджене в чаті клієнтської сесії
+> 2026-09-21; правило — `CampaignProgressRule`.
 
 > **Опис довідника і його записи — різні маршрути** (`ФВ-8.12`).
 > `GET /registries` віддає перелік для вибору: десятки довідників, самі

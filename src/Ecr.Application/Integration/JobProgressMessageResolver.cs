@@ -58,6 +58,45 @@ public static class JobProgressMessageResolver
         }
     }
 
+    /// <summary>
+    /// Резолвить повідомлення цілого переліку з ОДНИМ завантаженням каталогу
+    /// (BE-08): перелік опитується кожні кілька секунд, і каталог на рядок
+    /// коштував би з'єднання на рядок. Без жодного конверта каталог не
+    /// вантажиться зовсім; збій каталогу — сирі рядки, як і в одиночній формі.
+    /// </summary>
+    public static async Task<IReadOnlyList<string?>> ResolveManyAsync(
+        IUiStringCatalog catalog, string languageCode, IReadOnlyList<string?> rawMessages, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(rawMessages);
+
+        var result = rawMessages.ToArray();
+        UiStringCatalog? strings = null;
+
+        for (var i = 0; i < result.Length; i++)
+        {
+            if (result[i] is not { } raw || !JobProgressMessageCodec.TryDecode(raw, out var envelope))
+            {
+                continue;
+            }
+
+            try
+            {
+                strings ??= await catalog.GetScopedAsync(languageCode, UiStringScope.Private, ct)
+                    .ConfigureAwait(false);
+                result[i] = Resolve(envelope, strings);
+            }
+#pragma warning disable CA1031 // Той самий принцип, що в ResolveAsync: сирий конверт кращий за виняток.
+            catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
+            {
+                return rawMessages;
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Резолвить один рівень конверта, рекурсивно розгортаючи <see cref="JobProgressMessageEnvelope.Inner"/>.</summary>
     private static string Resolve(JobProgressMessageEnvelope envelope, UiStringCatalog strings)
     {

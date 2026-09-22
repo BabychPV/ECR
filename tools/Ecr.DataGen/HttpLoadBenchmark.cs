@@ -1263,10 +1263,21 @@ public sealed class HttpLoadBenchmark
         // ⚠ Фільтр за базою обов'язковий: кеш планів спільний на інстанс, і без
         // `t.dbid = DB_ID()` у число потрапили б плани сусідніх стендів
         // (EcrDev, EcrTest_*) — тобто чужа робота читалася б як наша вада.
+        // ⛔ Плани своєї бази відбираються за `dm_exec_plan_attributes('dbid')`
+        // ДО `dm_exec_sql_text`: та відкриває базу плану, і чужа база в
+        // SINGLE_USER чи в процесі CREATE/DROP валила замір (Msg 924). Як у
+        // `WritePathPlanCacheTests.PlanCountAsync`.
         command.CommandText = """
-            SELECT CAST(COUNT(*) AS float)
+            SET NOCOUNT ON;
+            DECLARE @own TABLE (plan_handle varbinary(64) PRIMARY KEY);
+            INSERT @own
+            SELECT cp.plan_handle
             FROM sys.dm_exec_cached_plans AS cp
-            CROSS APPLY sys.dm_exec_sql_text(cp.plan_handle) AS t
+            CROSS APPLY sys.dm_exec_plan_attributes(cp.plan_handle) AS a
+            WHERE a.attribute = 'dbid' AND CONVERT(int, a.value) = DB_ID();
+            SELECT CAST(COUNT(*) AS float)
+            FROM @own AS o
+            CROSS APPLY sys.dm_exec_sql_text(o.plan_handle) AS t
             WHERE t.text LIKE '%MERGE doc.CellValue%' AND t.dbid = DB_ID();
             """;
 

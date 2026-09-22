@@ -32,6 +32,17 @@ public interface IJobProgressStore
     /// <summary>Як часто процес-власник підтверджує, що задача жива.</summary>
     public static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Межа стовпця <c>itg.JobProgress.Error</c> — <c>nvarchar(2000)</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На відміну від <c>Message</c>, текст лягає сюди БЕЗ кодування, тож
+    /// межу видно напряму. Але джерело те саме — <c>ex.Message</c> довільної
+    /// довжини, — і пастка та сама: аварія, чиє повідомлення перелічує сотню
+    /// сутностей, зробила б із запису провалу другий виняток.
+    /// </remarks>
+    public const int MaxErrorLength = 2000;
+
     /// <summary>Реєструє початок задачі.</summary>
     /// <summary>
     /// Фіксує ПОСТАНОВКУ задачі в чергу.
@@ -47,17 +58,30 @@ public interface IJobProgressStore
     /// задачу, яку щойно прийняли, — і вважає, що вона загубилася.
     /// </remarks>
     /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
+    /// <param name="correlationId">Кореляція запиту-постановника (BE-08).</param>
+    /// <param name="documentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
     public Task QueueAsync(
-        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null);
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
+        string? correlationId = null, long? documentId = null);
 
-    public Task StartAsync(string jobId, string jobCode, DateTime utcNow, CancellationToken ct);
+    /// <summary>Реєструє старт прогону.</summary>
+    /// <param name="jobId">Ідентифікатор задачі.</param>
+    /// <param name="jobCode">Код задачі.</param>
+    /// <param name="utcNow">Момент старту в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <param name="attempt">Номер спроби від 1 (BE-08).</param>
+    /// <param name="correlationId">Кореляція прогону (BE-08); <c>null</c> — лишити наявну.</param>
+    public Task StartAsync(
+        string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int attempt = 1,
+        string? correlationId = null);
 
     /// <summary>Оновлює прогрес.</summary>
     public Task ReportAsync(string jobId, int percent, string? message, DateTime utcNow, CancellationToken ct);
 
-    /// <summary>Фіксує завершення.</summary>
+    /// <summary>Фіксує завершення; <paramref name="errorCode"/> — код каталогу при провалі (BE-08).</summary>
     public Task FinishAsync(
-        string jobId, string state, string? errorMessage, DateTime utcNow, CancellationToken ct);
+        string jobId, string state, string? errorMessage, DateTime utcNow, CancellationToken ct,
+        string? errorCode = null);
 
     /// <summary>
     /// Повертає раніше провалену задачу в стан «у черзі» (D-134, №11 T10 #40).

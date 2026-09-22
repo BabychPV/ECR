@@ -1,6 +1,7 @@
 import type { components } from '@/api/schema';
 import type { TemplateColumnDto } from '@/api/types';
 import type { LocalizedValue } from '@/shared/ui/LocalizedInput';
+import { normalizeDecimal } from '@/shared/format';
 import { type StyleDraft, whyCannotSaveStyle } from './style';
 
 /**
@@ -174,7 +175,13 @@ export function columnDraftOf(column: TemplateColumnDto, full?: ColumnDefDto): C
  * код» не мінялося, коли причина насправді була в символах, а не в порожньому
  * полі.
  */
-export type ColumnBlocker = 'CodeEmpty' | 'CodeInvalid' | 'Header' | 'Scale' | 'StyleCode';
+export type ColumnBlocker =
+  | 'CodeEmpty'
+  | 'CodeInvalid'
+  | 'Header'
+  | 'Scale'
+  | 'StyleCode'
+  | 'StyleFontSize';
 
 /** Чому чернетку ще не можна зберегти; `null` — можна. */
 export function whyCannotSaveColumn(draft: ColumnDraft): ColumnBlocker | null {
@@ -193,6 +200,27 @@ export function whyCannotSaveColumn(draft: ColumnDraft): ColumnBlocker | null {
   // ПЕРШИМ (`columnApi.ts`), і недійсний код там дав би сиру відмову сервера
   // замість цієї, зрозумілої одразу на формі.
   if (draft.style !== null && whyCannotSaveStyle(draft.style) !== null) return 'StyleCode';
+
+  /*
+   * ⛔ Розмір шрифту — `decimal` контракту, і поле тепер текстове
+   * (`StyleEditor.tsx`): «не число» стало можливим станом, якого `NumberInput`
+   * просто не давав ввести. Без цієї перевірки `12pt` поїхало б у
+   * `PUT …/styles/{code}` і повернулося сирою відмовою сервера — а `saveColumn`
+   * шле стиль ПЕРШИМ (`columnApi.ts`), тож колонка не збереглася б теж.
+   *
+   * ⚠ `fontSize === null` сюди не потрапляє навмисно: `null` контракт читає як
+   * «розмір теми за замовчуванням», тобто це заповнене значення, а не порожнеча.
+   *
+   * ⚠ Перевірка тут, а не у `whyCannotSaveStyle`: той файл зараз править інша
+   * сесія (див. звіт), і дві правки в одному файлі коштували б конфлікту.
+   */
+  if (
+    draft.style !== null &&
+    draft.style.fontSize !== null &&
+    normalizeDecimal(draft.style.fontSize) === null
+  ) {
+    return 'StyleFontSize';
+  }
 
   return null;
 }

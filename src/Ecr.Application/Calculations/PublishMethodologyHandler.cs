@@ -57,11 +57,20 @@ public sealed class PublishMethodologyHandler(
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не публікує методології.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401",
+                "Анонімний запит не публікує методології.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var methodology = await methodologies.FindByVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
 
@@ -74,7 +83,12 @@ public sealed class PublishMethodologyHandler(
             throw new BusinessRuleException(
                 "ECR-CALC-0422",
                 $"Публікація версії {version.Version} без дати набуття чинності неможлива: "
-                + "без неї невідомо, які періоди рахувати цією версією.");
+                + "без неї невідомо, які періоди рахувати цією версією.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.publishNoEffectiveDate",
+                    ["version"] = version.Version,
+                });
         }
 
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
@@ -184,7 +198,8 @@ public sealed class PublishMethodologyHandler(
             throw new BusinessRuleException(
                 "ECR-CALC-0422",
                 "Формули версії мають бути збережені до публікації: "
-                + "топологічний порядок зіставляється за ідентифікаторами.");
+                + "топологічний порядок зіставляється за ідентифікаторами.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.formulasNotSaved" });
         }
 
         var byCode = formulas.ToDictionary(f => f.Code, f => f.Id, StringComparer.OrdinalIgnoreCase);
@@ -247,13 +262,19 @@ public sealed class PublishMethodologyHandler(
         if (!ordering.IsSuccess)
         {
             var byId = formulas.ToDictionary(f => f.Id, f => f.Code);
+            var cycleLength = ordering.CyclePath?.Count ?? 0;
 
             throw new BusinessRuleException(
                 "ECR-TMPL-4221",
                 Ecr.Expressions.Graph.CycleDescription.Describe(
                     ordering.CyclePath,
                     id => byId.TryGetValue(id, out var code) ? code : id.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture)));
+                        System.Globalization.CultureInfo.InvariantCulture)),
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-4221.formulaCycle",
+                    ["cycleLength"] = cycleLength.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         var position = 0;
@@ -328,7 +349,12 @@ public sealed class PublishMethodologyHandler(
             $"Версія оголошена в режимі {NumericMode.Legacy}, тобто обіцяє відтворити числа "
             + "чинного рушія, але використовує функції, яких той не обчислює: "
             + $"{string.Join("; ", found)}. Або приберіть їх, або переведіть версію в "
-            + $"{NumericMode.Strict} з нової дати дії.");
+            + $"{NumericMode.Strict} з нової дати дії.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0433.legacyExtensionFunction",
+                ["functionCount"] = found.Count.ToString(CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>
@@ -411,7 +437,14 @@ public sealed class PublishMethodologyHandler(
     {
         if (problems.Count > 0)
         {
-            throw new BusinessRuleException("ECR-CALC-0422", MethodologyPublishChecks.Describe(problems));
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                MethodologyPublishChecks.Describe(problems),
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.publishChecksFailed",
+                    ["count"] = problems.Count,
+                });
         }
     }
 
@@ -581,7 +614,12 @@ public sealed class PublishMethodologyHandler(
                 "ECR-CALC-0422",
                 $"Публікацію версії {version.Version} відхилено: золотого набору немає жодного "
                 + "випадку. «Тестів немає, отже все гаразд» зробило б публікацію без перевірки "
-                + "схожою на публікацію з перевіркою (ФВ-9.12).");
+                + "схожою на публікацію з перевіркою (ФВ-9.12).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.goldenSetEmpty",
+                    ["version"] = version.Version,
+                });
         }
 
         var divergences = GoldenSet.Divergences(verdicts);
@@ -592,6 +630,9 @@ public sealed class PublishMethodologyHandler(
             + $"величин — {divergences.Count}. {string.Join("; ", divergences)}.",
             new Dictionary<string, object?>
             {
+                ["messageKey"] = "err.ECR-CALC-0422.goldenSetDiverged",
+                ["version"] = version.Version,
+                ["count"] = divergences.Count,
                 ["goldenSet"] = verdicts.Where(v => !v.IsGreen).ToList(),
             });
     }

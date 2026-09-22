@@ -279,6 +279,33 @@ describe('Breadcrumbs — маршрут глибиною 4 (шаблон, ве�
     expect(screen.queryByRole('button', { name: 'Show all breadcrumbs' })).toBeNull();
   });
 
+  it('крихта з назвою шаблону веде на КАРТКУ шаблону, а не на перелік', async () => {
+    /*
+     * ⛔ `UI-09`: доти крихта вела на `/admin/templates` — бо на самому
+     * сегменті `:id` сторінки не було, і посилання туди вело б у глухий кут.
+     * Тепер там картка шаблону, і людина, що натискає назву шаблону в
+     * крихтах, чекає саме її: перелік на один рівень вище вже є окремою
+     * крихтою «Templates» поруч.
+     *
+     * ⚠ Перевіряється `href` САМЕ ЦІЄЇ крихти, а не будь-якого посилання:
+     * посилання на перелік у ланцюжку лишається (перша крихта), і пошук «чи
+     * є десь `/admin/templates/1`» не відрізнив би виправлення від випадку,
+     * коли крихта назви й далі веде на перелік.
+     */
+    const queryClient = client();
+    seedTemplatesAndVersion(queryClient);
+    const user = userEvent.setup();
+
+    show(relationsRouter('/admin/templates/1/versions/7/relations'), queryClient);
+
+    await screen.findByText('1.0');
+    await user.click(screen.getByRole('button', { name: 'Show all breadcrumbs' }));
+
+    const template = await screen.findByRole('link', { name: 'TPL1' });
+
+    expect(template.getAttribute('href')).toBe('/admin/templates/1');
+  });
+
   it('маршрут з ОДНІЄЮ крихтою (без предків) не показує breadcrumbs узагалі', () => {
     const queryClient = client();
     const router = createMemoryRouter(

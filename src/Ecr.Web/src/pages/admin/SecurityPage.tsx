@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, useState, type JSX } from 'react';
+import { Suspense, lazy, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -15,7 +15,6 @@ import {
   Table,
   Text,
   TextInput,
-  Tooltip,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
@@ -32,11 +31,14 @@ import type {
   UserView,
 } from '@/api/types';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
+import { UserAdminActions } from '@/features/security/UserAdminActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -55,6 +57,16 @@ import { t } from '@/shared/i18n';
  * би читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
  */
 const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+
+/** Без адреси алерти нікуди надсилати — перемикач вимкнено з названою причиною (`D-125`). */
+function noEmail(user: UserView): boolean {
+  return user.email === null || user.email === '';
+}
+
+/** Id видимої причини поруч із вимкненим перемикачем — ціль `aria-describedby`. */
+function alertsReasonId(userId: number): string {
+  return `security-alerts-reason-${userId}`;
+}
 
 /**
  * Вкладка грантів — за `import()`.
@@ -272,9 +284,18 @@ export function SecurityPage(): JSX.Element {
     queryFn: () => apiFetch<PermissionCatalogItem[]>('/api/v1/permissions'),
   });
 
+  // ⚠ `?? []` лишається лише для «ще їде» й заглушок із `null`. ВІДМОВА сюди
+  // не доходить: матриця стоїть за `AsyncBoundary` з `permissionCatalog.error`,
+  // форма ролі — за `ErrorAlert`. Інакше відмова каталогу малювала матрицю без
+  // жодної колонки прав, і це читалося як «у ролей немає прав».
   const permissions = [...(permissionCatalog.data ?? [])].sort((a, b) =>
     a.code.localeCompare(b.code),
   );
+
+  const retryReferences = (): void => {
+    if (roles.error !== null) void roles.refetch();
+    if (permissionCatalog.error !== null) void permissionCatalog.refetch();
+  };
 
   return (
     <>
@@ -313,14 +334,17 @@ export function SecurityPage(): JSX.Element {
 
       {tab === 'roles' && (
         <AsyncBoundary<RoleView[]>
-          isPending={roles.isPending}
-          error={roles.error}
+          isPending={roles.isPending || permissionCatalog.isPending}
+          // ⛔ Матриця — це ролі × права: без каталогу прав її немає, є лише
+          // перелік ролей із порожніми рядками. Тому відмова БУДЬ-ЯКОГО з двох
+          // запитів — відмова матриці, а не «малюємо, що приїхало».
+          error={roles.error ?? permissionCatalog.error}
           data={roles.data}
           isEmpty={(all) => all.length === 0}
           emptyTitle={t('security.noRoles')}
           emptyHint={t('security.noRolesHint')}
           skeleton="table"
-          onRetry={() => void roles.refetch()}
+          onRetry={retryReferences}
         >
           {(all) => (
           // ⛔ `overflowX` тут стояв НА самій `<Table>` — без обмеження
@@ -405,6 +429,11 @@ export function SecurityPage(): JSX.Element {
       {/* ⛔ Гранти — окрема вкладка, а не колонка в матриці прав. Права
           відповідають на питання «що людина вміє», гранти — «до чого саме»;
           без другої відповіді перша не відкриває нічого (`A7-22`). */}
+      {/* ⛔ Ролі потрібні ВСІМ вкладкам (вибір ролі в грантах, групах, доступі),
+          а межа помилки вище живе лише на «Ролях». Без цього банера відмова
+          `GET /roles` на інших вкладках давала порожні випадні списки мовчки. */}
+      {tab !== 'roles' && <ErrorAlert error={roles.error} onRetry={retryReferences} />}
+
       {tab === 'grants' && (
         <Suspense fallback={null}>
           <GrantsPanel roles={roles.data ?? []} />
@@ -438,6 +467,7 @@ export function SecurityPage(): JSX.Element {
                 <Table.Th>{t('security.access')}</Table.Th>
                 <Table.Th>{t('security.alerts')}</Table.Th>
                 <Table.Th>{t('security.userState')}</Table.Th>
+                <Table.Th>{t('security.lastSignIn')}</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -479,11 +509,13 @@ export function SecurityPage(): JSX.Element {
                   <Table.Td>
                     {/* ⛔ Без пошти перемикач ВИМКНЕНИЙ, а не «вмикається і
                         мовчки не працює»: увімкнений адресат, якому нічого не
-                        надсилається, виглядає як налаштований (`D-125`). */}
-                    <Tooltip
-                      label={t('security.alertsNeedEmail')}
-                      disabled={user.email !== null && user.email !== ''}
-                    >
+                        надсилається, виглядає як налаштований (`D-125`).
+                        ⚠ Причину видно ТЕКСТОМ поруч і прив'язано
+                        `aria-describedby`, а не `Tooltip`: вимкнений перемикач
+                        не фокусується і не отримує наведення в частині
+                        браузерів, тож причина під мишею була недосяжна з
+                        клавіатури взагалі. */}
+                    <Group gap="xs" wrap="nowrap">
                       <Switch
                         size="xs"
                         aria-label={`${t('security.alerts')} · ${user.userName}`}
@@ -497,15 +529,19 @@ export function SecurityPage(): JSX.Element {
                         // погасли, — рівно та поведінка, від якої список
                         // перестає бути списком.
                         disabled={
-                          user.email === null ||
-                          user.email === '' ||
-                          (alerts.isPending && alerts.variables?.id === user.id)
+                          noEmail(user) || (alerts.isPending && alerts.variables?.id === user.id)
                         }
+                        aria-describedby={noEmail(user) ? alertsReasonId(user.id) : undefined}
                         onChange={(event) =>
                           alerts.mutate({ id: user.id, value: event.currentTarget.checked })
                         }
                       />
-                    </Tooltip>
+                      {noEmail(user) && (
+                        <Text id={alertsReasonId(user.id)} size="xs" c="dimmed" maw={220}>
+                          {t('security.alertsNeedEmail')}
+                        </Text>
+                      )}
+                    </Group>
                   </Table.Td>
                   <Table.Td>
                     <Group gap="xs">
@@ -539,7 +575,17 @@ export function SecurityPage(): JSX.Element {
                         user.id !== session.data?.userId && (
                           <StartSimulationButton userId={user.id} />
                         )}
+
+                      {/* Блокування й скидання пароля (`BE-12`); право і «не себе» — всередині. */}
+                      <UserAdminActions user={user} />
                     </Group>
+                  </Table.Td>
+                  <Table.Td>
+                    {/* ⛔ `null` — «жодного разу не входив», а не «дані ще не
+                        приїхали» (`BE-12`): дефолтне тире `Timestamp`
+                        перекрито тим самим ключем каталогу, що вже несе це
+                        значення для `CollectionScheduleTab.lastRunAt`. */}
+                    <Timestamp value={user.lastSignInAt} fallback={t('sources.never')} />
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -578,6 +624,10 @@ export function SecurityPage(): JSX.Element {
             клієнті все одно не можна — сервер приймає лише коди з каталогу,
             і показувати поле вільного вводу означало б обіцяти те, що
             завершиться відмовою. */}
+        {/* ⛔ Каталог не приїхав — причина замість порожнього місця, і «Зберегти»
+            вимкнено: роль без прав, збережена тому, що прапорців не було, —
+            не вибір адміністратора. */}
+        <ErrorAlert error={permissionCatalog.error} onRetry={retryReferences} />
         <ScrollArea h={220}>
           <Stack gap="xs">
             {permissions.map((permission) => (
@@ -624,7 +674,9 @@ export function SecurityPage(): JSX.Element {
             {t('common.cancel')}
           </Button>
           <Button
-            disabled={roleCode.trim().length === 0 || !hasAnyText(roleName)}
+            disabled={
+              roleCode.trim().length === 0 || !hasAnyText(roleName) || permissionCatalog.error !== null
+            }
             loading={createRole.isPending}
             onClick={() => createRole.mutate()}
           >
@@ -713,6 +765,7 @@ export function SecurityPage(): JSX.Element {
 
         {/* ⛔ Ролі задаються ОДРАЗУ. Обліковий запис без жодної ролі
             виглядає працездатним і не може нічого. */}
+        <ErrorAlert error={roles.error} onRetry={retryReferences} />
         <MultiSelect
           mt="sm"
           label={t('security.roles')}
@@ -728,9 +781,12 @@ export function SecurityPage(): JSX.Element {
             {t('common.cancel')}
           </Button>
           <Button
+            // ⛔ Ролі не приїхали (банер сторінки каже чому) — не зберігаємо:
+            // порожній перелік ролей тут не вибір, а відмова довідника.
             disabled={
               userName.trim().length === 0
               || (provider === 'Local' && oneTimePassword.length === 0)
+              || roles.error !== null
             }
             loading={createUser.isPending}
             onClick={() => createUser.mutate()}

@@ -45,6 +45,39 @@ export function density(): Density {
   }
 }
 
+/**
+ * Щільність, яку користувач колись обирав сам; `null` — вибору не було.
+ *
+ * ⚠ Окремо від `density()`: та повертає дефолт, і «обрав compact» від «нічого
+ * не обирав» за нею не відрізнити — а від цього залежить, чи переносити
+ * значення на сервер (`BE-20`).
+ */
+export function storedDensity(): Density | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(DensityKey);
+    return raw === 'compact' || raw === 'comfortable' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ті, кому треба знати про ВИБІР щільності (`BE-20`: синхронізація з сервером).
+ *
+ * ⚠ Реєстр, а не імпорт фічі: `shared` не знає, хто слухає (той самий прийом,
+ * що й `shared/ui/unsavedSources`).
+ */
+const chosenListeners = new Set<(value: Density) => void>();
+
+/** Підписує на вибір щільності; повертає відписку. */
+export function onDensityChosen(listener: (value: Density) => void): () => void {
+  chosenListeners.add(listener);
+
+  return () => {
+    chosenListeners.delete(listener);
+  };
+}
+
 /** Запам'ятовує вибір щільності. */
 export function setDensity(value: Density): void {
   try {
@@ -52,6 +85,8 @@ export function setDensity(value: Density): void {
   } catch {
     // Налаштування вигляду — не привід ламати роботу.
   }
+
+  for (const notify of [...chosenListeners]) notify(value);
 }
 
 /** Ті, кому треба перемалюватися, коли щільність змінилася. */
@@ -132,4 +167,20 @@ function rowHeightSnapshot(): number {
  */
 export function useRowHeight(): number {
   return useSyncExternalStore(subscribeDensity, rowHeightSnapshot, rowHeightSnapshot);
+}
+
+/**
+ * Обрана щільність — підписка, що сама перемальовує компонент.
+ *
+ * ⚠ Той самий реєстр (`subscribeDensity`), що й у `useRowHeight()`: обидва
+ * читають ту саму подію `applyDensity()`, лише знімок різний (значення проти
+ * пікселів). Компонент, якому потрібне САМЕ значення (`Density`) —
+ * перемикач у `UserMenu` — раніше не мав способу підписатися і замість
+ * цього перечитував стан через форсований ремонт (`key={generation}`) від
+ * батька: той хак розмонтовував усе піддерево `UserMenu` щоразу, коли
+ * щільність приходила ззовні (сервер, `BE-20`), і губив відкритий стан
+ * `Menu`. Ця підписка читає значення напряму, без ремонту.
+ */
+export function useDensity(): Density {
+  return useSyncExternalStore(subscribeDensity, density, density);
 }

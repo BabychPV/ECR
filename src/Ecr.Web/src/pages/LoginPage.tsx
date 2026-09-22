@@ -1,5 +1,6 @@
-﻿import { useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -15,9 +16,17 @@ import {
   Title,
 } from '@mantine/core';
 import { BrandMark } from '@/shared/ui/BrandMark';
-import { useNavigate } from 'react-router-dom';
-import { apiFetch, EcrApiError } from '@/api/client';
-import type { LocalLoginRequest } from '@/api/types';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { apiFetch, EcrApiError, LOGIN_REASON_PARAM } from '@/api/client';
+import type { CurrentUserDto, LocalLoginRequest } from '@/api/types';
+import {
+  anyLostEdits,
+  clearLostEdits,
+  peekLostEdits,
+  restorableCount,
+  type LostEdits,
+} from '@/features/grid/lostEdits';
+import { safeReturnPath } from '@/shared/safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
   isCatalogFailed,
@@ -83,6 +92,45 @@ const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabInd
  */
 const LANGUAGE_LABEL = 'Interface language';
 
+/*
+ * Пропозиція повернути незбережені правки (`features/grid/lostEdits.ts`).
+ *
+ * ⚠ Ключі `login.restoreEdits.title`, `login.restoreEdits.text` ({count},
+ * {documentId}), `login.restoreEdits.continue`, `login.restoreEdits.discard` —
+ * область public; рядки сіду заводить інтегратор.
+ *
+ * ✎ Попередні ключі `login.lostEdits.*` більше не використовуються: вони
+ * повідомляли «правки втрачено, введіть їх заново», а слід тепер несе самі
+ * правки й пропонує їх ПОВЕРНУТИ. Лишити старий текст над новою кнопкою
+ * означало б збрехати про те, що станеться після натискання.
+ */
+
+/** Слід саме цього користувача — `userId` з профілю щойно відкритої сесії. */
+async function ownLostEdits(): Promise<{ userId: number; edits: LostEdits } | null> {
+  try {
+    const me = await apiFetch<CurrentUserDto>('/api/v1/me');
+    const edits = peekLostEdits(me.userId);
+
+    // ⛔ Слід із нульовим відновлюваним вмістом не показується: банер
+    // «Відновити 0 змін» обіцяє дію, якої не буде.
+    return edits === null || restorableCount(edits) === 0
+      ? null
+      : { userId: me.userId, edits };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Пояснення, чому людину повернули на вхід після обриву сесії.
+ *
+ * ⚠ Ключ `login.sessionInvalidated` має бути в ПУБЛІЧНОМУ зрізі сіду (0):
+ * рядок заводить інтегратор; до того сторож каталогу червоний — очікувано.
+ */
+function sessionInvalidatedText(): string {
+  return t('login.sessionInvalidated');
+}
+
 /**
  * Вхід: доменний і локальний.
  *
@@ -92,10 +140,13 @@ const LANGUAGE_LABEL = 'Interface language';
  */
 export function LoginPage(): JSX.Element {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const sessionInvalidated = searchParams.get(LOGIN_REASON_PARAM) === 'session-invalidated';
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [lost, setLost] = useState<{ userId: number; edits: LostEdits } | null>(null);
 
   // Перемальовує сторінку, коли каталог доїхав (інакше видно самі ключі).
   useCatalog();
@@ -126,7 +177,17 @@ export function LoginPage(): JSX.Element {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
 
-      navigate('/', { replace: true });
+      // ⚠ Слід втрачених правок читається лише ПІСЛЯ входу і лише свого
+      // користувача: до входу невідомо, чий він, а показати його будь-кому
+      // означало б розкрити чужу роботу на спільному комп'ютері.
+      const found = anyLostEdits() ? await ownLostEdits() : null;
+      if (found !== null) {
+        setLost(found);
+        return;
+      }
+
+      // Повернення туди, де людина була, — лише на внутрішній шлях.
+      navigate(safeReturnPath(searchParams.get('from')), { replace: true });
     } catch (failure) {
       // ⚠ Текст помилки — від сервера. Невірний пароль і неіснуючий
       // користувач дають ОДНАКОВУ відповідь: різниця між ними — це спосіб
@@ -157,6 +218,48 @@ export function LoginPage(): JSX.Element {
       <Center h="100vh">
         <Card withBorder w={380} p="lg">
           <ErrorAlert error={CATALOG_LOAD_FAILED} />
+        </Card>
+      </Center>
+    );
+  }
+
+  /*
+   * ⛔ Пропозиція, а не некролог (макет `screen-document.js:342`: «Discard» +
+   * «Restore N unsaved changes»). Самі правки лежать у сліді й чекають на
+   * документі — тут лише вибір: піти по них або стерти слід.
+   *
+   * ⚠ «Відхилити» стирає слід ОДРАЗУ й лишає людину на вході з формою: це
+   * єдина точка, де можна сказати «мені це не потрібно», не відкриваючи
+   * документа. Без неї відмовитися від правок можна було б лише пройшовши
+   * туди, куди йти не хотілося.
+   */
+  if (lost !== null) {
+    const count = restorableCount(lost.edits);
+
+    return (
+      <Center h="100vh">
+        <Card withBorder w={380} p="lg">
+          <Stack gap="sm">
+            <Alert color="statusWarning" role="alert" title={t('login.restoreEdits.title')}>
+              {t('login.restoreEdits.text', {
+                count,
+                documentId: lost.edits.documentId,
+              })}
+            </Alert>
+            <Button onClick={() => navigate(safeReturnPath(lost.edits.from), { replace: true })}>
+              {t('login.restoreEdits.continue')}
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => {
+                clearLostEdits(lost.userId);
+                setLost(null);
+                navigate(safeReturnPath(searchParams.get('from')), { replace: true });
+              }}
+            >
+              {t('login.restoreEdits.discard')}
+            </Button>
+          </Stack>
         </Card>
       </Center>
     );
@@ -227,6 +330,17 @@ export function LoginPage(): JSX.Element {
           }}
         >
           <Stack gap="sm">
+            {/*
+              * Сервер обірвав чинну сесію штампом безпеки (`401 ECR-AUTH-0401`
+              * з тілом) — пояснюємо, чому людину повернули. Звичайний «не
+              * входив» причини не несе й банера не має.
+              */}
+            {sessionInvalidated && (
+              <Alert color="blue" variant="light" data-login-reason="session-invalidated">
+                {sessionInvalidatedText()}
+              </Alert>
+            )}
+
             {/*
               * ⛔ Кнопка доменного входу малюється лише тоді, коли схема
               * Negotiate СПРАВДІ зареєстрована на сервері

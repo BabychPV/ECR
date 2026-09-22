@@ -101,6 +101,41 @@ public sealed class ContainerTests(SqlServerFixture sql)
         Assert.Empty(stale);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-34")]
+    public void Кожен_транспорт_каналу_має_зареєстрованого_відправника()
+    {
+        // ⛔ Незареєстрований транспорт не ламає нічого видимого: диспетчер
+        // акуратно пише рядок `Failed` «відправника не зареєстровано» і йде
+        // далі. Тобто правило на такий канал заводиться, екран показує його
+        // ввімкненим, а сповіщення не доходить НІКОЛИ — і єдине місце, де це
+        // видно, журнал доставок, куди дивляться вже після інциденту.
+        //
+        // ⚠ Перевіряється КОНТЕЙНЕР, а не перелік класів: відправник, який
+        // існує і не зареєстрований, поводиться точно так само, як відсутній.
+        using var app = new EcrApiFactory(sql);
+        using var scope = app.Services.CreateScope();
+
+        var senders = scope.ServiceProvider
+            .GetServices<Ecr.Application.Ports.INotificationChannelSender>()
+            .ToList();
+
+        Assert.NotEmpty(senders);
+
+        var missing = Enum.GetValues<Ecr.Domain.Entities.Notifications.NotificationChannelKind>()
+            .Where(kind => !senders.Exists(s => s.Kind == kind))
+            .Select(kind => kind.ToString())
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            missing.Count == 0,
+            "Транспорти каналів без зареєстрованого відправника — правила на них мовчки не доходять: "
+            + string.Join(", ", missing));
+    }
+
     /// <summary>Контролери, чиї обробники належать пізнішим етапам.</summary>
     /// <remarks>
     /// Це не «дозволені винятки», а розклад: кожен етап прибирає свій рядок,

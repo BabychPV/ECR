@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Button, Group } from '@mantine/core';
+import { Anchor, Button, Group, SegmentedControl } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -16,6 +16,28 @@ export interface ExportButtonProps {
   periodKey: number;
   /** Мова книги; береться з профілю. */
   language: string;
+}
+
+/**
+ * Формат вивантаження (ФВ-4.2). Ті самі три значення, що приймає сервер
+ * (`POST …/export` тіло `ExportRequest.format`); четвертого немає й додавати
+ * нема звідки — перелік валідних значень визначає СЕРВЕР (422
+ * `err.ECR-REQ-0422.exportFormatUnknown` на будь-яке інше), тому клієнт не
+ * дублює цю перевірку — він лише не дає обрати нічого поза цими трьома.
+ */
+type ExportFormat = 'xlsx' | 'csv' | 'json';
+
+/**
+ * Підписи перемикача формату — самі значення, а не переклад лейблів, беруться
+ * з каталогу (`t()`), щоб не заводити четвертий літерал в UI поруч із трьома
+ * дозволеними значеннями контракту.
+ */
+function exportFormatOptions(): { value: ExportFormat; label: string }[] {
+  return [
+    { value: 'xlsx', label: t('document.exportFormatXlsx') },
+    { value: 'csv', label: t('document.exportFormatCsv') },
+    { value: 'json', label: t('document.exportFormatJson') },
+  ];
 }
 
 /**
@@ -58,9 +80,16 @@ export function ExportButton({
 }: ExportButtonProps): JSX.Element {
   const [jobId, setJobId] = useState<string | null>(null);
 
+  // ⚠ Локальний стан, не адреса: вибір формату живе рівно доти, доки відкрита
+  // ця кнопка (сам документ), і повторний вибір після перезавантаження
+  // сторінки — прийнятна ціна за те, щоб не заводити ще один параметр у URL
+  // заради перемикача, який мало хто чіпає частіше, ніж раз на сесію.
+  const [format, setFormat] = useState<ExportFormat>('xlsx');
+
   const start = useMutation({
     mutationFn: () =>
       apiEnqueue(`/api/v1/documents/${documentId}/export`, {
+        format,
         includeFormulas: true,
         includeStyles: true,
         language,
@@ -112,6 +141,15 @@ export function ExportButton({
 
   return (
     <Group gap="xs">
+      <SegmentedControl
+        size="xs"
+        aria-label={t('document.exportFormat')}
+        value={format}
+        onChange={(value) => setFormat(value as ExportFormat)}
+        disabled={start.isPending || building}
+        data={exportFormatOptions()}
+      />
+
       <Button
         size="xs"
         variant="default"

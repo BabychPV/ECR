@@ -41,10 +41,20 @@ public sealed class UpsertRegistryEntryHandler(
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401",
+                "Анонімний запит не змінює довідники.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var definition = await registries.FindDefinitionByIdAsync(dto.RegistryDefId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Довідника {dto.RegistryDefId} не існує.");
+            ?? throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Довідника {dto.RegistryDefId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0404.registryId",
+                    ["registryDefId"] = dto.RegistryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // Код валідується як EcrCode (D-89) — тим самим правилом, що коди
         // колонок і шаблонів. Окреме «майже таке саме» правило для довідників
@@ -58,7 +68,7 @@ public sealed class UpsertRegistryEntryHandler(
         entry.Rename(dto.Display);
         entry.SetParent(dto.ParentEntryId);
 
-        await ApplyValuesAsync(definition, entry, dto.Values, ct).ConfigureAwait(false);
+        await ApplyValuesAsync(registries, definition, entry, dto.Values, ct).ConfigureAwait(false);
 
         // ⛔ Вікно дії сюди НЕ приймається, хоча воно є полем запису: його
         // зміна тягне перерахунок IsOrphaned (ФВ-8.13a), і зроблена мимохідь
@@ -79,8 +89,17 @@ public sealed class UpsertRegistryEntryHandler(
     /// ⚠ Тип береться з опису поля, а не з типу переданого об'єкта. Інакше
     /// число, що прийшло рядком із JSON, лягло б у <c>ValueString</c> — і поле
     /// «ліміт» перестало б порівнюватися й сумуватися, не давши жодної помилки.
+    /// <para>
+    /// ⚠ <c>internal static</c>, а не приватний метод екземпляра: єдине місце,
+    /// де валідується тип, обов'язковість і склад полів запису довідника, і
+    /// імпорт CSV (`BE-24`, <c>ImportRegistryEntriesHandler</c>) кличе САМЕ цей
+    /// метод — не копіює правило вдруге. <paramref name="registries"/>
+    /// передається параметром замість поля екземпляра: метод раніше читав
+    /// лише це поле, тож перетворення на static нічого не втратило.
+    /// </para>
     /// </remarks>
-    private async Task ApplyValuesAsync(
+    internal static async Task ApplyValuesAsync(
+        IRegistryStore registries,
         Domain.Entities.Configuration.RegistryDef definition,
         RegistryEntry entry,
         IReadOnlyDictionary<string, object?> values,
@@ -101,7 +120,13 @@ public sealed class UpsertRegistryEntryHandler(
             // виглядає як збережене.
             throw new BusinessRuleException(
                 "ECR-REG-0422",
-                $"Довідник «{definition.Code}» не має полів: {string.Join(", ", unknown)}.");
+                $"Довідник «{definition.Code}» не має полів: {string.Join(", ", unknown)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.unknownFields",
+                    ["registryCode"] = definition.Code,
+                    ["fields"] = string.Join(", ", unknown),
+                });
         }
 
         var existing = entry.IsPersisted
@@ -133,14 +158,27 @@ public sealed class UpsertRegistryEntryHandler(
         {
             throw new BusinessRuleException(
                 "ECR-REG-0422",
-                $"Не заповнені обов'язкові поля довідника «{definition.Code}»: {string.Join(", ", missing)}.");
+                $"Не заповнені обов'язкові поля довідника «{definition.Code}»: {string.Join(", ", missing)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.requiredFieldsMissing",
+                    ["registryCode"] = definition.Code,
+                    ["fields"] = string.Join(", ", missing),
+                });
         }
     }
 
     private async Task<RegistryEntry> LoadAsync(long id, int registryDefId, CancellationToken ct)
     {
         var entry = await registries.FindEntryAsync(id, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Запису довідника {id} не існує.");
+            ?? throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Запису довідника {id} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0404.registryEntry",
+                    ["entryId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // Переносити запис між довідниками не можна: у комірках лежить його Id,
         // а колонка оголошує LookupRegistryDefId — після переносу значення
@@ -149,7 +187,14 @@ public sealed class UpsertRegistryEntryHandler(
         {
             throw new BusinessRuleException(
                 "ECR-REG-0422",
-                $"Запис {id} належить довіднику {entry.RegistryDefId}, а не {registryDefId}.");
+                $"Запис {id} належить довіднику {entry.RegistryDefId}, а не {registryDefId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.entryWrongRegistry",
+                    ["entryId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["ownerRegistryDefId"] = entry.RegistryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["registryDefId"] = registryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         return entry;

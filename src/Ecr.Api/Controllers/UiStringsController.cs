@@ -26,8 +26,63 @@ public sealed class UiStringsController(
     GetUiStringsHandler get,
     SetUiStringHandler set,
     GetUiStringCoverageHandler coverage,
-    ListUiStringsHandler list) : ControllerBase
+    ListUiStringsHandler list,
+    ExportUiStringsCsvHandler export,
+    UiStringImportHandler import,
+    IConfiguration configuration) : ControllerBase
 {
+    /// <summary>Експорт перекладу в CSV: <c>key, scope, en, &lt;lang&gt;, updatedAt</c>. Право <c>System.ManageLocalization</c>.</summary>
+    /// <remarks>UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.</remarks>
+    /// <param name="lang">Мова перекладу (не мова за замовчуванням).</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("export.csv")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(FileResult))]
+    [Produces("text/csv")]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Export([FromQuery] string lang, CancellationToken ct)
+    {
+        var csv = await export.HandleAsync(lang, ct).ConfigureAwait(false);
+        var bytes = new System.Text.UTF8Encoding(true).GetPreamble()
+            .Concat(System.Text.Encoding.UTF8.GetBytes(csv)).ToArray();
+
+        return File(bytes, "text/csv; charset=utf-8", $"ui-strings-{lang}.csv");
+    }
+
+    /// <summary>Імпорт перекладу з CSV. Право <c>System.ManageLocalization</c>.</summary>
+    /// <remarks>
+    /// Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна
+    /// помилка або <c>dryRun</c> — не записано нічого. Стеля файлу —
+    /// <c>Localization:ImportMaxBytes</c>.
+    /// </remarks>
+    /// <param name="lang">Мова перекладу.</param>
+    /// <param name="dryRun">Лише перевірка.</param>
+    /// <param name="file">CSV у кодуванні UTF-8.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("import")]
+    [Authorize]
+    [ProducesResponseType<UiStringImportReport>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Import(
+        [FromQuery] string lang, [FromQuery] bool dryRun, IFormFile file, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        var maxBytes = configuration.GetValue("Localization:ImportMaxBytes", UiStringImportHandler.DefaultMaxBytes);
+
+        // Понад стелю файл не читається — обробник відмовить після перевірки права.
+        var content = string.Empty;
+        if (file.Length <= maxBytes)
+        {
+            using var reader = new StreamReader(file.OpenReadStream(), System.Text.Encoding.UTF8);
+            content = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+        }
+
+        return Ok(await import.HandleAsync(lang, content, file.Length, maxBytes, dryRun, ct).ConfigureAwait(false));
+    }
+
     /// <summary>Покриття перекладу по мовах. Право <c>System.ManageLocalization</c>.</summary>
     /// <remarks>
     /// ⚠ Літеральний сегмент <c>coverage</c> виграє в шаблону <c>{lang}</c> за

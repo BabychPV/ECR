@@ -200,7 +200,7 @@ public sealed class MethodologyTestCaseConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.InputJson).IsRequired();
         builder.Property(x => x.ExpectedJson).IsRequired();
-        builder.Property(x => x.Tolerance).HasColumnType("decimal(28,10)").HasDefaultValue(0m);
+        builder.Property(x => x.Tolerance).HasColumnType("decimal(34,16)").HasDefaultValue(0m);
 
         // ⚠ Унікальність у межах ВЕРСІЇ, а не методології: тест належить
         // конкретній версії, і клон версії має право змінити очікуване число.
@@ -263,7 +263,7 @@ public sealed class MethodologyConstantConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Category).HasMaxLength(64);
         builder.Property(x => x.Kind).HasColumnName("Kind");
-        builder.Property(x => x.Value).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
 
         // 400 — та сама межа, що в `calc.CalculationInput.ValueString`: у
         // корпусі найдовше нечислове значення — `'LPG - СУГ'`.
@@ -494,7 +494,7 @@ public sealed class CalculationResultConfiguration : IEntityTypeConfiguration<Ca
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.SourceRowKey).HasMaxLength(100);
         builder.Property(x => x.OutputCode).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Value).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
         builder.Property(x => x.SubstanceEntryId).HasConversion<int?>();
 
         builder.HasIndex(x => new { x.PeriodKey, x.DocumentId, x.MethodologyVersionId, x.OutputCode })
@@ -523,7 +523,7 @@ public sealed class CalculationInputConfiguration : IEntityTypeConfiguration<Cal
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.SourceRowKey).HasMaxLength(100);
         builder.Property(x => x.ArgumentCode).HasMaxLength(64).IsRequired();
-        builder.Property(x => x.Value).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
         builder.Property(x => x.ValueString).HasMaxLength(400);
 
         builder.HasOne<CalculationRun>().WithMany().HasForeignKey(x => x.CalculationRunId)
@@ -544,7 +544,7 @@ public sealed class CalculationStepConfiguration : IEntityTypeConfiguration<Calc
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.StepCode).HasMaxLength(64).IsRequired();
         builder.Property(x => x.Expression).HasMaxLength(2000);
-        builder.Property(x => x.Value).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.Value).HasColumnType("decimal(34,16)");
         builder.Property(x => x.Masked).HasColumnName("MaskedZero").HasDefaultValue(Domain.Enums.MaskedZeroReason.None);
 
         // ⛔ Фільтрований індекс, а не звичайний. Замаскованих кроків мало —

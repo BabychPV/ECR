@@ -367,8 +367,11 @@ public sealed class OutputScenarios(SqlServerFixture sql)
         var exportId = exportJob.TryGetProperty("message", out var m) ? m.GetString() : null;
         Assert.False(string.IsNullOrWhiteSpace(exportId), "повідомлення прогресу задачі експорту не несе exportId, за яким забрати файл.");
 
-        var download = await author.Client.GetAsync(
-            new Uri($"/api/v1/documents/{doc.DocumentId}/export/{exportId}", UriKind.Relative));
+        // UX-09: «Мої задачі» дає посилання з самої задачі — завантажуємо саме за ним.
+        var resultUrl = exportJob.TryGetProperty("resultUrl", out var r) ? r.GetString() : null;
+        Assert.Equal($"/api/v1/documents/{doc.DocumentId}/export/{exportId}", resultUrl);
+
+        var download = await author.Client.GetAsync(new Uri(resultUrl!, UriKind.Relative));
         Assert.Equal(HttpStatusCode.OK, download.StatusCode);
         var bytes = await download.Content.ReadAsByteArrayAsync();
         Assert.True(bytes.Length > 0, "експортована книга порожня.");

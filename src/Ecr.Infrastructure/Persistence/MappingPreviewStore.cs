@@ -43,9 +43,11 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
             return null;
         }
 
+        // ⚠ Призупинені теж: людина щойно поставила паузу й має побачити саме
+        // її, а не зникнення мапінгу з перегляду. Ознака їде тим самим запитом.
         var maps = await db.EntityFieldMaps
             .AsNoTracking()
-            .Where(m => m.SourceEntityId == sourceEntityId && m.IsActive)
+            .Where(m => m.SourceEntityId == sourceEntityId)
             .OrderBy(m => m.SourceField)
             .Take(MaxMaps)
             .Select(m => new
@@ -57,6 +59,10 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
                 m.TransformCode,
                 m.SourceUnitId,
                 m.TargetUnitId,
+                m.IsActive,
+                m.PendingSourceUnitCode,
+                m.PendingSourceUnitId,
+                m.PendingSourceUnitDetectedAt,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -123,7 +129,10 @@ public sealed class MappingPreviewStore(EcrDbContext db) : IMappingPreviewStore
                 target is not null,
                 Aggregation(m.TransformCode),
                 Code(units, m.SourceUnitId),
-                Code(units, m.TargetUnitId));
+                Code(units, m.TargetUnitId),
+                m.IsActive,
+                PendingSourceUnitChange.From(
+                    m.PendingSourceUnitCode, m.PendingSourceUnitId, m.PendingSourceUnitDetectedAt));
         });
 
         return new MappingPreviewData(

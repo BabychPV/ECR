@@ -15,7 +15,7 @@ namespace Ecr.Infrastructure.Integration;
 /// (`ФВ-6.11`): у конфігурації лежить `ECR_Smtp__SecretName`, а не значення.
 /// Пароль у `appsettings.json` — це пароль у системі контролю версій.
 ///
-/// ⚠ Без заданого `Host` відправник **не вважається налаштованим** і черга
+/// ⚠ Без заданих `Host` і `From` відправник **не вважається налаштованим** і черга
 /// накопичує далі. Це не помилка конфігурації, а нормальний стан контуру, де
 /// пошту ще не підключили; задача каже про це вголос у зведенні, і події не
 /// позначаються невдалими.
@@ -40,8 +40,16 @@ public sealed class SmtpNotificationSender(IConfiguration configuration, ISecret
 
     private string? Host => Value("Host");
 
+    private string? From => Value("From");
+
     /// <inheritdoc />
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(Host);
+    /// <remarks>
+    /// ⛔ «Налаштовано» = «можна надіслати»: потрібні і хост, і адресант. Лише
+    /// хост раніше давав «налаштовано» в <c>/health/facts</c>, у каналі й у
+    /// диспетчері, а кожна відправка падала на «From не задано» — і черга
+    /// спалювала спроби, замість накопичуватися.
+    /// </remarks>
+    public bool IsConfigured => Host is not null && From is not null;
 
     /// <inheritdoc />
     public async Task SendAsync(
@@ -52,7 +60,7 @@ public sealed class SmtpNotificationSender(IConfiguration configuration, ISecret
         if (!IsConfigured)
         {
             throw new InvalidOperationException(
-                "SMTP не налаштовано: задайте ECR_Smtp__Host. Події лишаються в черзі.");
+                "SMTP не налаштовано: задайте ECR_Smtp__Host і ECR_Smtp__From. Події лишаються в черзі.");
         }
 
         if (recipients.Count == 0)
@@ -60,10 +68,7 @@ public sealed class SmtpNotificationSender(IConfiguration configuration, ISecret
             throw new InvalidOperationException("Адресатів не визначено.");
         }
 
-        var from = Value("From")
-                   ?? throw new InvalidOperationException("ECR_Smtp__From не задано.");
-
-        using var message = new MailMessage { From = new MailAddress(from), Subject = subject, Body = body };
+        using var message = new MailMessage { From = new MailAddress(From!), Subject = subject, Body = body };
 
         foreach (var recipient in recipients)
         {

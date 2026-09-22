@@ -188,6 +188,10 @@ Step 'Складання' {
     & dotnet build (Join-Path $root 'Ecr.sln') -v q --nologo
 }
 
+# ⛔ Гейт ліцензій (D-12, D-82): граф NuGet береться з obj/project.assets.json,
+# тож крок іде ПІСЛЯ складання (restore). Політика — contracts/license-policy.json.
+Step 'Ліцензії NuGet' { & node (Join-Path $root 'tools/license-check.mjs') nuget }
+
 Step 'Тести .NET' {
     if ($TestSql) {
         # ⚠ Через оточення, а не аргументом: фікстура читає саме `ECR_TEST_SQL`
@@ -342,6 +346,9 @@ if (-not $SkipClient) {
         # через чужі релізи, і його вимкнули б разом із робочим. Їхній стан
         # виводиться довідково нижче.
         Step 'Безпека залежностей' { & $npm audit --omit=dev --audit-level=high }
+
+        # ⛔ Гейт ліцензій (D-12, D-82): усі пакети lock-файла, разом із dev.
+        Step 'Ліцензії npm' { & node (Join-Path $root 'tools/license-check.mjs') npm }
 
         Step 'Аудит інструментів (довідково)' {
             & $npm audit

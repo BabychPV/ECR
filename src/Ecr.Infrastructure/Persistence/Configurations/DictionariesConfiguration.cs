@@ -87,10 +87,10 @@ public sealed class RegistryValueConfiguration : IEntityTypeConfiguration<Regist
         builder.Property(x => x.RegistryEntryId).HasConversion<int>();
         builder.Property(x => x.ValueString).HasMaxLength(1000);
 
-        // decimal(28,10) — та сама точність, що в комірках. Інша тут означала б,
+        // decimal(34,16) — та сама точність, що в комірках. Інша тут означала б,
         // що ліміт дозволу і виміряне значення округляються по-різному, і
         // порівняння «перевищено чи ні» залежало б від того, звідки взяли число.
-        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(34,16)");
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
         builder.Property(x => x.ValueRefEntryId).HasConversion<int?>();
 

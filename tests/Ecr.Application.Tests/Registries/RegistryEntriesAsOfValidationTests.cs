@@ -47,6 +47,7 @@ public sealed class RegistryEntriesAsOfValidationTests
 
         Assert.Equal(Ecr.Domain.Errors.ErrorCodes.RequestInvalid, error.ErrorCode);
         Assert.Contains("asOf", error.Message, StringComparison.Ordinal);
+        Assert.Equal("err.ECR-REQ-0422.asOfRequired", error.Details!["messageKey"]);
 
         // ⛔ Перевірка йде ДО походу в базу: «довідника немає» було б іншою
         // відповіддю на те саме питання і послало б шукати не туди.

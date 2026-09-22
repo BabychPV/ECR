@@ -4,5 +4,6 @@ export {
   type DataTableColumn,
   type SortDirection,
   type SortKey,
+  type SortScalar,
   type SortState,
 } from './types';

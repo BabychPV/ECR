@@ -8,7 +8,7 @@ namespace Ecr.Domain.Entities.Calculations;
 /// у документ він приходить посиланням через <c>cfg.CalculationBinding</c>.
 /// </summary>
 /// <remarks>
-/// Тип — <c>decimal(28,10)</c>, ніколи <c>float</c> (ФВ-9.11): на мільйонах
+/// Тип — <c>decimal(34,16)</c>, ніколи <c>float</c> (ФВ-9.11): на мільйонах
 /// рядків подвійна точність дає розбіжність, яку неможливо пояснити методологу.
 /// </remarks>
 public sealed class CalculationResult : Entity<long>

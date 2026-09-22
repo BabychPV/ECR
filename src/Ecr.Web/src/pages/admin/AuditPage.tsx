@@ -14,6 +14,7 @@ import {
 import type { CellChangePage } from '@/api/types';
 import { cellChangeOrigins, isSingleCell, useCellChanges } from '@/features/audit/api';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
+import { StructureExportButton } from '@/features/audit/StructureExportButton';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -145,6 +146,7 @@ export function AuditPage(): JSX.Element {
         }
       />
 
+      {structure && <StructureExportButton from={fromDate} to={toDate} />}
       {structure && <StructureChangesPanel key={`${fromDate}:${toDate}`} from={fromDate} to={toDate} />}
 
       {/* ⚠ Відступ усередині цієї обгортки НАВМИСНО не зсунуто: зсув — це

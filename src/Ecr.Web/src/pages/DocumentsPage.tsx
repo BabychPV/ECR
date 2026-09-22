@@ -1,16 +1,22 @@
 ﻿import { useState, type JSX } from 'react';
-import { Button, Group, NumberInput, Stack, Table, Text } from '@mantine/core';
+import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { DocumentPage, PagedProjects } from '@/api/types';
+import type { PagedProjects } from '@/api/types';
+import { listDocuments, type DocumentListPage } from '@/features/documents/api';
 import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
+import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
+import { useDocumentListFilters } from '@/features/documents/documentListFilters';
+import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -34,14 +40,19 @@ export function DocumentsPage(): JSX.Element {
   const [creating, setCreating] = useState(false);
   const session = useSession();
 
+  // `BE-09b`: стан і «мої» — теж в адресі; без періоду стан у запит не йде.
+  const filters = useDocumentListFilters(periodKey);
+
   const query = useQuery({
-    queryKey: ['documents', periodKey, cursor],
+    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine, filters.hasLateEdits],
     queryFn: () =>
-      apiFetch<DocumentPage>(
-        `/api/v1/documents?limit=50` +
-          (periodKey === null ? '' : `&periodKey=${periodKey}`) +
-          (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
-      ),
+      listDocuments({
+        periodKey,
+        cursor,
+        state: filters.state,
+        mine: filters.mine,
+        hasLateEdits: filters.hasLateEdits,
+      }),
   });
 
   // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`
@@ -52,8 +63,22 @@ export function DocumentsPage(): JSX.Element {
     queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
   });
 
-  const projectCodeOf = (projectId: number): string =>
-    projects.data?.items.find((project) => project.id === projectId)?.code ?? String(projectId);
+  /**
+   * ⛔ Директива D15 §0, правило L10. Тут стояло
+   * `…?.code ?? String(projectId)`, тож відмова `GET /api/v1/projects`
+   * повертала колонку рівно в той стан, який прибрав аудит-пас 5: голий
+   * числовий ідентифікатор у переліку на десятки рядків. Оператор відкриває
+   * не той документ — і ніщо не каже, що підпис просто не прочитався.
+   *
+   * ⚠ Число з екрана не ховається: без коду воно єдине, що лишається від
+   * адреси документа. Змінюється ФОРМА — `<Code>` замість тексту, тобто
+   * «це ідентифікатор», а не «це назва проєкту», плюс видима причина над
+   * таблицею.
+   */
+  const projectCodeOf = (projectId: number): JSX.Element | string =>
+    projects.data?.items.find((project) => project.id === projectId)?.code ?? (
+      <Code>{projectId}</Code>
+    );
 
   /**
    * ⛔ UI-walkthrough F3: посилання було зібране як `/documents/${id}` — без
@@ -87,13 +112,22 @@ export function DocumentsPage(): JSX.Element {
                 (некерований DOM встигав показати введене), але жоден запит
                 ніколи не бачив `periodKey` в адресі. `useUrlParamsSetter`
                 оновлює обидва параметри ОДНИМ переходом. */}
-            <NumberInput
+            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+                Формат `periodKey` і місце в адресі — БЕЗ змін, лише
+                стрілки, що крокують календарем (не `+1`), і підпис. */}
+            <PeriodPicker
               size="xs"
               miw={120}
-              label={t('documents.period')}
-              value={periodKey ?? ''}
+              value={periodKey}
               onChange={(value) => {
-                setUrlParams({ periodKey: typeof value === 'number' ? value : null, cursor: null });
+                // ⚠ Період прибрано — прибирається й фільтр стану: без періоду
+                // він однаково не діє, а повернення періоду не має мовчки
+                // відновлювати звуження, якого на екрані вже не видно.
+                setUrlParams(
+                  value !== null
+                    ? { periodKey: value, cursor: null }
+                    : { periodKey: null, cursor: null, state: null },
+                );
               }}
             />
 
@@ -115,19 +149,48 @@ export function DocumentsPage(): JSX.Element {
        * зверху червона смуга, під нею таблиця з заголовками і жодним рядком —
        * тобто «даних немає» там, де сервер відмовив (`ФВ-14.22`).
        */}
-      <AsyncBoundary<DocumentPage>
+      {/* ⚠ Фільтри — ПОЗА межею станів: коли фільтр нічого не знайшов, саме
+          ними людина й виходить із порожнього стану. */}
+      <DocumentListFilterBar periodKey={periodKey} filters={filters} />
+
+      {/* ⚠ Смуга — теж ПОЗА межею: її лічильники фільтрують перелік, і під
+          межею кожен клік знімав би її разом із фокусом на час запиту, а
+          порожній результат — ховав би кнопку, якою фільтр і знімають. */}
+      <DocumentListSummaryStrip periodKey={periodKey} filters={filters} />
+
+      {/*
+       * ⛔ Три порожні стани не виглядають однаково (L10): «фільтр нічого не
+       * знайшов» — власний заголовок і кнопка скидання; «документів немає» —
+       * колишній текст про відкриття періоду; відмова — стан помилки межі
+       * (перевіряється першою, до порожнечі). Сказати «документів немає» там,
+       * де їх сховав фільтр, — неправда, з якою йдуть створювати дублікат.
+       */}
+      <AsyncBoundary<DocumentListPage>
         isPending={query.isPending}
         error={query.error}
         data={query.data}
         isEmpty={(page) => page.items.length === 0}
-        emptyTitle={t('documents.empty')}
-        emptyHint={t('documents.emptyHint')}
+        emptyTitle={filters.active ? t('documents.noMatch') : t('documents.empty')}
+        emptyHint={filters.active ? t('documents.noMatchHint') : t('documents.emptyHint')}
+        emptyAction={
+          filters.active ? (
+            <Button size="xs" variant="default" onClick={filters.reset}>
+              {t('documents.resetFilters')}
+            </Button>
+          ) : undefined
+        }
         skeleton="table"
         onRetry={() => void query.refetch()}
       >
         {(page) => (
           <>
-            <DocumentListSummaryStrip periodKey={periodKey} />
+            {/* ⛔ Відмова переліку проєктів — окрема від відмови переліку
+                документів (та під власною межею вище): сама таблиця приїхала,
+                не прочиталися лише підписи проєктів. Тому банер тут, а не
+                замість таблиці. */}
+            {projects.error !== null && (
+              <ErrorAlert error={projects.error} onRetry={() => void projects.refetch()} />
+            )}
 
             <Table striped highlightOnHover className="ecr-sticky-head">
               <Table.Thead>
@@ -162,7 +225,16 @@ export function DocumentsPage(): JSX.Element {
                         <Link to={documentHref(document.id)}>{document.businessKey}</Link>
                       )}
                     </Table.Td>
-                    <Table.Td>{projectCodeOf(document.projectId)}</Table.Td>
+                    <Table.Td>
+                      {/* ⚠ Доки перелік у дорозі, місце тримає скелет, а не
+                          число: інакше на кожному відкритті сторінки колонка
+                          на мить показувала б ідентифікатори. */}
+                      {projects.isPending ? (
+                        <Skeleton height={12} width={60} radius="sm" data-projects="pending" />
+                      ) : (
+                        projectCodeOf(document.projectId)
+                      )}
+                    </Table.Td>
                     <Table.Td>{document.sheetCount}</Table.Td>
                     <Table.Td>
                       {/* ⛔ UI-walkthrough F6: за період, якого немає в
@@ -233,6 +305,8 @@ export function DocumentsPage(): JSX.Element {
                             {document.modifiedByDisplayName}
                           </Text>
                         )}
+                        {/* `BE-09b`: пізні правки за період (без періоду — за будь-який). */}
+                        {document.hasLateEdits && <LateEditsMark />}
                       </Stack>
                     </Table.Td>
                   </Table.Tr>

@@ -90,6 +90,8 @@ public sealed class MethodologyAuthoringTests
             () => version.EditRule(foreign, """{"kind":"stack"}""", 1, isActive: true));
 
         Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.childWrongVersion", error.Details!["messageKey"]);
+        Assert.Equal("offshore", error.Details!["code"]);
         Assert.Equal("{}", foreign.MatchJson);
     }
 
@@ -135,14 +137,17 @@ public sealed class MethodologyAuthoringTests
         var noValue = Assert.Throws<DomainException>(
             () => version.EditConstant(constant, null, TonneUnit, null, ConstantKind.Numeric));
         Assert.Equal("ECR-CALC-0422", noValue.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.constantNoValue", noValue.Details!["messageKey"]);
 
         var noUnit = Assert.Throws<DomainException>(
             () => version.EditConstant(constant, 1m, null, null, ConstantKind.Numeric));
         Assert.Equal("ECR-CALC-0422", noUnit.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.constantNoUnit", noUnit.Details!["messageKey"]);
 
         var noText = Assert.Throws<DomainException>(
             () => version.EditConstant(constant, null, null, "   ", ConstantKind.Text));
         Assert.Equal("ECR-CALC-0422", noText.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.constantNoText", noText.Details!["messageKey"]);
 
         Assert.Equal(2.5m, constant.Value);
     }
@@ -166,6 +171,7 @@ public sealed class MethodologyAuthoringTests
                 () => version.EditRule(rule, empty, 1, isActive: true));
 
             Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+            Assert.Equal("err.ECR-CALC-0422.ruleNoPredicate", error.Details!["messageKey"]);
         }
 
         Assert.Equal("{}", rule.MatchJson);

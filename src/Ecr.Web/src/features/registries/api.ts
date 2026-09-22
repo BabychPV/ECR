@@ -1,7 +1,11 @@
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { CreateRegistryDto, RegistryDefDto } from '@/api/types';
+import type { components } from '@/api/schema';
+import type { CreateRegistryDto, RegistryDefDto, RegistryEntryImportReport } from '@/api/types';
+
+/** «Де використовується» — єдина форма `GET /…/usage` (директива №15). */
+export type UsageResponse = components['schemas']['UsageResponse'];
 
 /*
  * ⛔ Адреса в КОЖНІЙ функції записана повністю, а не збирається з помічника.
@@ -25,6 +29,20 @@ export function createRegistry(body: CreateRegistryDto): Promise<RegistryDefDto>
   });
 }
 
+/**
+ * Де використано ВИЗНАЧЕННЯ довідника (`BE-24`): колонки шаблонів, поля
+ * сусідніх довідників, речовини методологій, сутності джерел.
+ *
+ * ⛔ Це інше питання, ніж `entryReferences` нижче: той каже, чому не вдалося
+ * прибрати ОДИН запис, а це — що зламається, якщо чіпати довідник цілком.
+ *
+ * ⚠ `total` і довжина `items` — різні числа: перелік обрізаний двадцятьма
+ * першими, лічильник чесний.
+ */
+export function registryUsage(code: string): Promise<UsageResponse> {
+  return apiFetch<UsageResponse>(`/api/v1/registries/${encodeURIComponent(code)}/usage`);
+}
+
 /** Код відмови «на запис посилаються дані» (`ФВ-8.6`, `ФВ-8.7`). */
 const ENTRY_IN_USE = 'ECR-REG-0409';
 
@@ -43,6 +61,37 @@ export function entryReferences(error: unknown): number | null {
   const references = error.problem.extensions2?.['references'];
 
   return typeof references === 'number' ? references : null;
+}
+
+/**
+ * Імпортує записи довідника з CSV (`BE-24`, крок 3).
+ *
+ * ⚠ Один ендпоінт на обидва виклики перегляду і застосування: контракт НЕ
+ * несе токена прев'ю, як `ImportPanel.tsx` (той документний імпорт), а
+ * розрізняє намір самим булевим `dryRun`. Другий виклик підтверджує намір
+ * повторним читанням ТОГО САМОГО файлу — токена, який можна пред'явити
+ * замість файлу, тут немає взагалі.
+ *
+ * ⛔ Відповідь ЗАВЖДИ `200`: помилки рядків (`RegistryEntryImportReport.errors`)
+ * — дані для того, хто імпортує, не HTTP-відмова. `EcrApiError` тут виникає
+ * лише на `403`/`404`/`422` (право, довідник, колонки файлу) — до того, як
+ * сервер устигає прочитати бодай один рядок даних.
+ */
+export function importRegistryEntries(
+  code: string,
+  file: File,
+  dryRun: boolean,
+): Promise<RegistryEntryImportReport> {
+  const form = new FormData();
+
+  // ⚠ Ім'я поля — `file`, як і в `ImportPanel.tsx`: контролер приймає
+  // `IFormFile file`, і будь-яке інше ім'я дає 400 з порожнім тілом.
+  form.append('file', file);
+
+  return apiFetch<RegistryEntryImportReport>(
+    `/api/v1/registries/${encodeURIComponent(code)}/entries/import?dryRun=${dryRun ? 'true' : 'false'}`,
+    { method: 'POST', body: form },
+  );
 }
 
 /**

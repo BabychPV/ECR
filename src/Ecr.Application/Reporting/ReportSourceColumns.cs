@@ -24,6 +24,15 @@ public static class ReportSourceColumns
     /// <summary>Числове значення — лягає у <c>ValueNumeric</c>.</summary>
     public const string Number = "number";
 
+    /// <summary>Дата — лягає у <c>ValueDate</c>.</summary>
+    /// <remarks>
+    /// ⚠ Жодне поле джерела нижче дат не має (<c>PeriodKey</c> — число), але
+    /// <c>rpt.ReportRow.ValueDate</c> і <see cref="ReportDefinitionSpec.ColumnKinds"/>
+    /// їх знають, і споживачі зрізу (<c>R7</c>) мусять називати цей тип не
+    /// літералом: збіг рядків «date» у трьох файлах ніщо не стереже.
+    /// </remarks>
+    public const string Date = "date";
+
     /// <summary>Поля джерела <see cref="ReportDefinitionSpec.CalculationResults"/>.</summary>
     /// <remarks>
     /// Перші п'ять — ті, що будівник писав до <c>D-52a</c> завжди; решта —

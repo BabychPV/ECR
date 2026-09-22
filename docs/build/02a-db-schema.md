@@ -9,7 +9,7 @@
 > * автор дії — `…ByUserId int` → `sec.User(Id)`, **ніколи не SID** (`R-A2`);
 > * коди — `nvarchar(64)`, шаблон `^[A-Za-z][A-Za-z0-9_]{0,63}$` (`R-B6`);
 > * локалізовані назви — одна колонка `…L10n nvarchar(max)` з JSON;
-> * емісії й обчислені величини — `decimal(28,10)`; **`float` заборонений**;
+> * емісії й обчислені величини — `decimal(34,16)` (`D-148`); **`float` заборонений**;
 > * soft delete — `IsDeleted bit` + `DeletedAt` + `DeletedByUserId`.
 
 ## Зміст
@@ -783,6 +783,23 @@ CREATE TABLE cfg.RegistryRuleDef
 );
 GO
 
+-- Чернетка опису довідника (BE-24 крок 2, міграція BE24RegistryDefinitionDraft):
+-- поля й правила, ще не застосовані до cfg.RegistryDef. Одна на довідник;
+-- публікація (право Registry.Publish) застосовує її і видаляє рядок.
+CREATE TABLE cfg.RegistryDefinitionDraft
+(
+    RegistryDefId         int            NOT NULL,
+    BaseDefinitionVersion int            NOT NULL,
+    ContentJson           nvarchar(max)  NOT NULL,
+    Reason                nvarchar(1000) NOT NULL,
+    UpdatedByUserId       int            NOT NULL,
+    UpdatedAt             datetime2(3)   NOT NULL,
+    RowVersion            rowversion     NOT NULL,
+    CONSTRAINT PK_RegistryDefinitionDraft PRIMARY KEY (RegistryDefId),
+    CONSTRAINT FK_RegDraft_Registry FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding
@@ -952,7 +969,7 @@ CREATE TABLE dic.RegistryValue
     RegistryEntryId     int            NOT NULL,
     RegistryFieldDefId  int            NOT NULL,
     ValueString         nvarchar(1000) NULL,
-    ValueNumeric        decimal(28,10) NULL,
+    ValueNumeric        decimal(34,16) NULL,
     ValueDate           datetime2(3)   NULL,
     ValueBool           bit            NULL,
     ValueRefEntryId     int            NULL,
@@ -1192,7 +1209,7 @@ CREATE TABLE doc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,   -- денормалізовано під складений FK
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,10) NULL,
+    ValueNumeric         decimal(34,16) NULL,        -- D-148; precision 34 → 18 цілих розрядів, 17 Б на рядок
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,
@@ -1223,7 +1240,7 @@ CREATE TABLE doc.DocumentIndexValue
     DocumentId   bigint         NOT NULL,
     ColumnDefId  int            NOT NULL,
     ValueString  nvarchar(400)  NULL,
-    ValueNumeric decimal(28,10) NULL,
+    ValueNumeric decimal(34,16) NULL,
     ValueDate    datetime2(3)   NULL,
     CONSTRAINT PK_DocumentIndexValue PRIMARY KEY (Id),
     CONSTRAINT UQ_DocumentIndexValue UNIQUE (DocumentId, ColumnDefId),
@@ -1339,7 +1356,7 @@ CREATE TABLE calc.MethodologyFormula
     OutputUnitId          int            NULL,
     -- Формула діалекту B повертає і ТЕКСТ: у корпусі це 'В пределе норматива',
     -- 'Сверхнорматив', 'Превышение!!!' (02b §8, поправка 2-біс). Без оголошеного
-    -- типу такий результат пішов би в calc.CalculationResult.Value decimal(28,10).
+    -- типу такий результат пішов би в calc.CalculationResult.Value decimal(34,16).
     ResultType            tinyint        NOT NULL CONSTRAINT DF_MF_Result DEFAULT(0),  -- FormulaResultType
     -- Порядок НЕ зберігається: він топологічний і рахується при Publish (ФВ-9.4).
     -- Це поле — результат обчислення, а не введення користувача.
@@ -1367,7 +1384,7 @@ CREATE TABLE calc.MethodologyConstant
     Code                 nvarchar(64)   NOT NULL,
     Category             nvarchar(64)   NULL,
     Kind                 tinyint        NOT NULL CONSTRAINT DF_MC_Kind DEFAULT(0),  -- ConstantKind
-    Value                decimal(28,10) NULL,      -- лише Kind = Numeric і лише коли розібралося
+    Value                decimal(34,16) NULL,      -- лише Kind = Numeric і лише коли розібралося
     TextValue            nvarchar(400)  NULL,      -- текст, мітка або СИРИЙ рядок джерела
     UnitId               int            NULL,      -- лише Kind = Numeric: вимір — властивість числа
     -- Напівінтервал [ValidFrom, ValidTo): ValidTo — перший НЕчинний день
@@ -1473,7 +1490,7 @@ CREATE TABLE calc.CalculationResult
     SourceRowKey         nvarchar(100)  NULL,
     SubstanceEntryId     int            NULL,
     OutputCode           nvarchar(64)   NOT NULL,
-    Value                decimal(28,10) NOT NULL,   -- float заборонений (D-30)
+    Value                decimal(34,16) NOT NULL,   -- float заборонений (D-30); 16 знаків — D-148
     UnitId               int            NOT NULL,
     CONSTRAINT PK_CalculationResult PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CRes_Run    FOREIGN KEY (CalculationRunId)     REFERENCES calc.CalculationRun (Id),
@@ -1498,7 +1515,7 @@ CREATE TABLE calc.CalculationInput
     DocumentId       bigint         NOT NULL,
     SourceRowKey     nvarchar(100)  NULL,
     ArgumentCode     nvarchar(64)   NOT NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(34,16) NULL,
     ValueString      nvarchar(400)  NULL,
     UnitId           int            NULL,
     CONSTRAINT PK_CalculationInput PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
@@ -1520,7 +1537,7 @@ CREATE TABLE calc.CalculationStep
     StepOrder        int            NOT NULL,
     StepCode         nvarchar(64)   NOT NULL,
     Expression       nvarchar(2000) NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(34,16) NULL,
     TraceJson        nvarchar(max)  NULL,
     CONSTRAINT PK_CalculationStep PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CStep_Run FOREIGN KEY (CalculationRunId) REFERENCES calc.CalculationRun (Id)
@@ -1620,7 +1637,7 @@ CREATE TABLE rpt.ReportRow
     RowNo        int            NOT NULL,
     ColumnCode   nvarchar(64)   NOT NULL,
     ValueString  nvarchar(1000) NULL,
-    ValueNumeric decimal(28,10) NULL,
+    ValueNumeric decimal(34,16) NULL,
     ValueDate    datetime2(3)   NULL,
     CONSTRAINT PK_ReportRow PRIMARY KEY CLUSTERED (SnapshotId, RowNo, ColumnCode),
     CONSTRAINT FK_RepRow_Snap FOREIGN KEY (SnapshotId) REFERENCES rpt.ReportSnapshot (Id)
@@ -1669,6 +1686,7 @@ CREATE TABLE ext.DataSource
     Catalog           nvarchar(200) NULL,
     MaxParallel       int           NOT NULL CONSTRAINT DF_DS_Par DEFAULT(4),
     IsActive          bit           NOT NULL CONSTRAINT DF_DS_Act DEFAULT(1),
+    RowVersion        rowversion    NOT NULL,   -- If-Match для PUT/DELETE з'єднання
     CONSTRAINT PK_DataSource PRIMARY KEY (Id),
     CONSTRAINT UQ_DataSource UNIQUE (Code)
 );
@@ -1741,6 +1759,11 @@ CREATE TABLE ext.CollectionSchedule
     IsEnabled      bit          NOT NULL CONSTRAINT DF_CS_En   DEFAULT(1),
     LastRunAt      datetime2(3) NULL,
     Watermark      datetime2(3) NULL,   -- оптимізація, не стан: втрата не коштує даних
+    -- Стан ПОСТАНОВКИ в планувальник (не збору): розклад із невалідним cron
+    -- на старті пропускається, і без цих полів це видно лише в журналі.
+    LastError      nvarchar(400) NULL,
+    LastErrorAt    datetime2(3) NULL,
+    RowVersion     rowversion   NOT NULL,   -- оптимістична конкуренція редагування
     CONSTRAINT PK_CollectionSchedule PRIMARY KEY (Id),
     CONSTRAINT UQ_CollectionSchedule UNIQUE (SourceEntityId),
     CONSTRAINT FK_CS_Entity FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id)
@@ -1755,7 +1778,7 @@ CREATE TABLE ext.RawDataPoint
     SourceEntityId int            NOT NULL,
     SourcePath     nvarchar(400)  NOT NULL,
     [Timestamp]    datetime2(3)   NOT NULL,
-    ValueNumeric   decimal(28,10) NULL,
+    ValueNumeric   decimal(34,16) NULL,
     ValueString    nvarchar(1000) NULL,
     UnitId         int            NULL,
     Quality        nvarchar(32)   NULL,
@@ -1982,6 +2005,8 @@ CREATE TABLE sec.[User]
     SecurityStamp  nvarchar(64)  NOT NULL,
     FailedAttempts int           NOT NULL CONSTRAINT DF_User_Failed DEFAULT(0),
     LockedUntil    datetime2(3)  NULL,
+    -- Останній УСПІШНИЙ вхід, UTC (BE-12); ставиться лише входом, не запитом.
+    LastSignInAt   datetime2(3)  NULL,
     -- Пароль виданий разово і має бути змінений при першому вході (D-97).
     -- Доки прапорець стоїть, дозволені лише зміна пароля і вихід.
     MustChangePassword bit       NOT NULL CONSTRAINT DF_User_MustChg DEFAULT(0),
@@ -2134,6 +2159,19 @@ CREATE TABLE sec.LoginAttempt
 GO
 
 CREATE INDEX IX_LoginAttempt_User ON sec.LoginAttempt (UserName, AttemptedAt DESC) ON [INDEXES];
+GO
+
+-- Налаштування інтерфейсу користувача (BE-20, міграція BE20UserPreference):
+-- ключ → JSON. Ключ — з білого списку обробника, значення до 8 КБ, до 200 ключів.
+CREATE TABLE sec.UserPreference
+(
+    UserId    int           NOT NULL,
+    [Key]     varchar(100)  NOT NULL,
+    ValueJson nvarchar(max) NOT NULL,
+    UpdatedAt datetime2(3)  NOT NULL,
+    CONSTRAINT PK_UserPreference PRIMARY KEY (UserId, [Key]),
+    CONSTRAINT FK_UserPreference_User FOREIGN KEY (UserId) REFERENCES sec.[User] (Id)
+);
 GO
 
 CREATE TABLE sec.DataProtectionKey
@@ -2350,6 +2388,11 @@ CREATE TABLE itg.JobProgress
     StartedAt  datetime2(3)  NOT NULL,
     UpdatedAt  datetime2(3)  NOT NULL,
     [Error]    nvarchar(2000) NULL,
+    Attempt       int           NULL,  -- BE-08: спроба від 1; NULL — ще не стартувала
+    CorrelationId nvarchar(64)  NULL,  -- BE-08: той самий, що в лозі запиту й задачі
+    CreatedAt     datetime2(3)  NULL,  -- BE-08: перша постановка; старт і перезапуск не чіпають; NULL — розклад
+    ErrorCode     varchar(32)   NULL,  -- BE-08: код каталогу помилок провалу (ErrorCodes)
+    DocumentId    bigint        NULL,  -- BE-08: документ задачі, з payload при постановці
     CONSTRAINT PK_JobProgress PRIMARY KEY (JobId)
 );
 GO
@@ -2382,7 +2425,10 @@ CREATE TABLE calc.TestCase
     -- Допуск потрібен саме тому, що числа рахуються в decimal з округленням
     -- на кожному кроці: побітова рівність дала б червоний тест від зміни
     -- порядку доданків, яка нічого не змінює по суті.
-    Tolerance            decimal(18,10) NOT NULL,
+    -- ⚠ Тут стояло decimal(18,10), а в CalculationsConfiguration.cs — (28,10):
+    -- розбіжність жила з самого початку й видно її не було. Переведено разом
+    -- із рештою calc.* на (34,16) (D-148), тепер документ і код збігаються.
+    Tolerance            decimal(34,16) NOT NULL,
     CONSTRAINT PK_TestCase PRIMARY KEY (Id),
     CONSTRAINT UQ_TestCase UNIQUE (MethodologyVersionId, Code),
     CONSTRAINT CK_TC_Tolerance CHECK (Tolerance >= 0),
@@ -2421,7 +2467,7 @@ CREATE TABLE sys_ecr.NotificationChannel
     Kind             tinyint        NOT NULL,   -- NotificationChannelKind: 1 Smtp, 2 TeamsWebhook
     Name             nvarchar(100)  NOT NULL,
     IsEnabled        bit            NOT NULL DEFAULT(1),
-    SettingsJson     nvarchar(max)  NOT NULL,   -- НЕсекретне: host, port, useTls, from, recipients[] | заголовок картки Teams
+    SettingsJson     nvarchar(max)  NOT NULL,   -- НЕсекретне: recipients[], title. ⚠ 2026-09-20: полів транспорту (host/port/useTls/from) тут більше немає — сервер SMTP бере процес із Smtp:*; у рядках, записаних раніше, вони лишилися й просто не читаються
     SecretProtected  varbinary(max) NULL,       -- пароль SMTP | URL вебхука; блоб DataProtection. API його НЕ повертає
     RowVersion       rowversion     NOT NULL,
     ModifiedAt       datetime2(3)   NOT NULL,
@@ -2523,7 +2569,7 @@ CREATE TABLE arc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,10) NULL,
+    ValueNumeric         decimal(34,16) NULL,        -- дзеркало doc.CellValue (D-148)
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,
@@ -2563,7 +2609,7 @@ CREATE TABLE arc.CalculationResult
     SourceRowKey         nvarchar(100)  NULL,
     SubstanceEntryId     int            NULL,
     OutputCode           nvarchar(64)   NOT NULL,
-    Value                decimal(28,10) NOT NULL,
+    Value                decimal(34,16) NOT NULL,
     UnitId               int            NOT NULL,
     INDEX CCI_arc_CalculationResult CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
@@ -2578,7 +2624,7 @@ CREATE TABLE arc.CalculationStep
     StepOrder        int            NOT NULL,
     StepCode         nvarchar(64)   NOT NULL,
     Expression       nvarchar(2000) NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(34,16) NULL,
     TraceJson        nvarchar(max)  NULL,
     INDEX CCI_arc_CalculationStep CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
@@ -2700,8 +2746,10 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @RunId bigint, @k int, @srcCount bigint, @srcChk bigint, @srcSum decimal(38,10);
-    DECLARE @dstCount bigint, @dstChk bigint, @dstSum decimal(38,10);
+    -- Масштаб сум — як у джерела (D-148). З 10 знаками обидві суми округлилися б
+    -- однаково, збіг лишився б, і знаки 11–16 перестали б доводити будь-що.
+    DECLARE @RunId bigint, @k int, @srcCount bigint, @srcChk bigint, @srcSum decimal(38,16);
+    DECLARE @dstCount bigint, @dstChk bigint, @dstSum decimal(38,16);
 
     INSERT INTO itg.ArchiveRun (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status)
     VALUES (@ProjectId, N'ToArchive', @FromPeriodKey, @ToPeriodKey, SYSUTCDATETIME(), N'Running');
@@ -2851,6 +2899,11 @@ GO
 -- Спершу роздачі (`FK_RolePerm_Perm` без каскаду), потім саме право.
 DELETE FROM sec.RolePermission WHERE PermissionCode = N'Template.Migrate';
 DELETE FROM sec.Permission     WHERE Code           = N'Template.Migrate';
+-- Рішення людини 2026-09-21 (сторож UncheckedPermissionTests): `Calculation.EditScript`
+-- — скриптів у системі немає; `Report.MarkSubmitted` — зріз стає поданим лише як
+-- наслідок подання аркуша, ручна позначка дала б позначити поданим неподане.
+DELETE FROM sec.RolePermission WHERE PermissionCode IN (N'Calculation.EditScript', N'Report.MarkSubmitted');
+DELETE FROM sec.Permission     WHERE Code           IN (N'Calculation.EditScript', N'Report.MarkSubmitted');
 GO
 
 -- Функціональні права
@@ -2867,10 +2920,15 @@ USING (VALUES
   (N'Period.Configure',         N'Period',      0), (N'Period.Reopen',        N'Period',      1),
   (N'Calculation.View',         N'Calculation', 0), (N'Calculation.EditFormula',  N'Calculation', 0),
   (N'Calculation.EditConstant', N'Calculation', 0), (N'Calculation.EditRule',     N'Calculation', 0),
-  (N'Calculation.EditScript',   N'Calculation', 1), (N'Calculation.Publish',      N'Calculation', 1),
+  (N'Calculation.Publish',      N'Calculation', 1),
   (N'Calculation.Recalculate',  N'Calculation', 0), (N'Calculation.ManageRequiredInputs', N'Calculation', 0),
   (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
-  (N'Report.MarkSubmitted',     N'Report',      0), (N'Report.Export',        N'Report',      0),
+  (N'Report.Export',            N'Report',      0),
+  -- ⚠ Обидва НЕБЕЗПЕЧНІ (1) заради фільтра `IsDangerous = 0` у MERGE роздач:
+  -- шаблон `Report.%` вбудованого `Approver` їх не бере. `Report.EditDefinition`
+  -- — авторство державної форми (`ФВ-10.4`); `Report.ViewCampaign` (`BE-22`,
+  -- рішення `Q15-07`) — огляд кампанії по ВСІХ проєктах без межі грантів.
+  (N'Report.EditDefinition',    N'Report',      1), (N'Report.ViewCampaign',  N'Report',      1),
   (N'Integration.View',         N'Integration', 0), (N'Integration.Manage',   N'Integration', 1),
   (N'Integration.EditSchedule', N'Integration', 0),
   (N'Uom.EditCatalog',          N'Uom',         0),
@@ -2878,7 +2936,8 @@ USING (VALUES
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
   (N'System.ManageLocalization', N'System',     0),
-  (N'System.ManageNotifications', N'System',    1)   -- BE-32: небезпечне, як Integration.Manage
+  (N'System.ManageNotifications', N'System',    1),  -- BE-32: небезпечне, як Integration.Manage
+  (N'Document.ChangeKey',       N'Document',    1)   -- ФВ-3.9: зміна бізнес-ключа, небезпечне
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -3099,7 +3158,7 @@ GO
 > вперше спрацювати через рік.
 
 > **Небезпечні права не потрапляють у вбудовані ролі автоматично.**
-> `Calculation.EditScript`, `Calculation.Publish`, `Security.*`,
+> `Calculation.Publish`, `Security.*`,
 > `Integration.Manage`, `System.RunJob` видаються **іменованим** особам окремо
 > (ФВ-6.12, D-40). Seed створює ролі порожніми за небезпечними правами
 > навмисно — це не пропуск.

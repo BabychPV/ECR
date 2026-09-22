@@ -346,6 +346,20 @@ function blockerLabel(blocker: ColumnBlocker): string {
       return t('columns.errHeader');
     case 'Scale':
       return t('columns.errScale');
+
+    /*
+     * ⛔ Обидві причини стилю доти падали в `default` і показувалися ГОЛИМ
+     * кодом (`StyleCode`, `StyleFontSize`): людина бачила слово з переліку
+     * розробника замість речення про те, що саме виправити.
+     *
+     * ⚠ `default` лишається — але тепер він означає рівно «причина, якої
+     * клієнт ще не знає», і код у ньому виглядає як пропуск, а не як
+     * нормальний підпис.
+     */
+    case 'StyleCode':
+      return t('columns.errStyleCode');
+    case 'StyleFontSize':
+      return t('columns.errStyleFontSize');
     default:
       return blocker;
   }

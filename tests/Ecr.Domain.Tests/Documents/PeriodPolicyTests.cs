@@ -28,6 +28,9 @@ public sealed class PeriodPolicyTests
                 yearGraceOffsetDays: 45));
 
         Assert.Equal("ECR-PRD-4225", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-4225.graceAfterHardClose", error.Details!["messageKey"]);
+        Assert.Equal("50", error.Details["graceOffsetDays"]);
+        Assert.Equal("45", error.Details["hardCloseOffsetDays"]);
     }
 
     [Fact]
@@ -51,6 +54,8 @@ public sealed class PeriodPolicyTests
             () => new PeriodPolicy(EcrCode.Create("BAD"), 0, 15, 45, yearGraceOffsetDays: -1));
 
         Assert.Equal("ECR-PRD-4225", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-4225.negativeYearGrace", error.Details!["messageKey"]);
+        Assert.Equal("-1", error.Details["yearGraceOffsetDays"]);
     }
 
     [Fact]

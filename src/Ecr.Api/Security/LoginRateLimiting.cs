@@ -9,6 +9,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Localization;
 using Ecr.Application.Ports;
 using Ecr.Domain.Errors;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Ecr.Api.Security;
 
@@ -24,12 +25,11 @@ namespace Ecr.Api.Security;
 /// захищає ОБЛІКОВКУ, а процесор сервера з'їдають спроби під іменами, яких
 /// немає, і жодне блокування на них не спрацьовує.
 ///
-/// ⚠ Обмежувач — глобальний (<c>GlobalLimiter</c>), а не атрибут
-/// <c>[EnableRateLimiting]</c> на дії. Причина не стильова: атрибут працює лише
-/// після <c>UseRouting</c>, тобто дорогий шлях спершу пройшов би добір
-/// маршруту, прив'язку моделі й фільтри — а сенс саме в тому, щоб скинути
-/// зайве навантаження якомога раніше. Заразом межа лишається в одному файлі
-/// поруч із поясненням, а не розповзається атрибутами по контролерах.
+/// ⚠ Обмежувач входу — глобальний (<c>GlobalLimiter</c>) за префіксом шляху:
+/// межа лишається в одному файлі поруч із поясненням. Middleware стоїть ПІСЛЯ
+/// автентифікації (цього вимагає межа пошуку за користувачем,
+/// <see cref="SearchRateLimitPolicy"/>); для анонімного входу без cookie це
+/// лише кілька перевірок у пам'яті, тож PBKDF2 однаково не починається.
 ///
 /// ⚠ Вікно фіксоване (одна хвилина) і черги немає (<c>QueueLimit = 0</c>):
 /// черга під атакою — це пам'ять, яку нападник наповнює безкоштовно.
@@ -195,25 +195,39 @@ public static class LoginRateLimiting
                         })
                     : RateLimitPartition.GetNoLimiter(UnlimitedPartition));
 
-            options.OnRejected = static async (rejection, ct) =>
-            {
-                var context = rejection.HttpContext;
-                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            options.OnRejected = static (rejection, ct) =>
+                new ValueTask(RejectAsync(rejection, RejectionCode, RejectionDetailKey, RejectionDetail, ct));
 
-                // ⚠ `Retry-After` — не косметика: без нього клієнт (і будь-який
-                // скрипт розгортання) може лише вгадувати, коли повторити, і
-                // типово вгадує «зараз», тобто продовжує те саме навантаження.
-                if (rejection.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
-                {
-                    context.Response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds))
-                        .ToString(CultureInfo.InvariantCulture);
-                }
-
-                await WriteProblemAsync(context, ct).ConfigureAwait(false);
-            };
+            // Межа пошуку (BE-19) — іменована політика: їй потрібен користувач,
+            // тобто вона діє лише після автентифікації (див. `Program.cs`).
+            options.AddPolicy<string, SearchRateLimitPolicy>(SearchRateLimitPolicy.PolicyName);
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// Відповідь 429: <c>Retry-After</c> і <c>problem+json</c> із заданим кодом.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Спільна для всіх політик: форма відмови одна, різняться лише код і подробиця.
+    /// </remarks>
+    internal static async Task RejectAsync(
+        OnRejectedContext rejection, string code, string detailKey, string detailFallback, CancellationToken ct)
+    {
+        var context = rejection.HttpContext;
+        context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+
+        // ⚠ `Retry-After` — не косметика: без нього клієнт (і будь-який
+        // скрипт розгортання) може лише вгадувати, коли повторити, і
+        // типово вгадує «зараз», тобто продовжує те саме навантаження.
+        if (rejection.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.Response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds))
+                .ToString(CultureInfo.InvariantCulture);
+        }
+
+        await WriteProblemAsync(context, code, detailKey, detailFallback, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -285,7 +299,8 @@ public static class LoginRateLimiting
     /// <c>Map</c> лишається страхувальною сіткою для синхронного шляху, який
     /// колись кине цей код сам.
     /// </remarks>
-    private static async Task WriteProblemAsync(HttpContext context, CancellationToken ct)
+    private static async Task WriteProblemAsync(
+        HttpContext context, string code, string detailKey, string detailFallback, CancellationToken ct)
     {
         var correlationId = context.Items.TryGetValue(CorrelationIdMiddleware.ItemKey, out var raw)
             ? raw as string ?? string.Empty
@@ -295,15 +310,15 @@ public static class LoginRateLimiting
         {
             Status = StatusCodes.Status429TooManyRequests,
             Title = await ResolveAsync(
-                context, UiStringResolver.ErrorKeyPrefix + RejectionCode, RejectionCode).ConfigureAwait(false),
-            Detail = await ResolveAsync(context, RejectionDetailKey, RejectionDetail).ConfigureAwait(false),
-            Type = $"https://ecr.ncoc.kz/errors/{RejectionCode}",
+                context, UiStringResolver.ErrorKeyPrefix + code, code).ConfigureAwait(false),
+            Detail = await ResolveAsync(context, detailKey, detailFallback).ConfigureAwait(false),
+            Type = $"https://ecr.ncoc.kz/errors/{code}",
             Instance = context.Request.Path,
-            ErrorCode = RejectionCode,
+            ErrorCode = code,
             CorrelationId = correlationId,
         };
 
-        problem.Extensions["errorCode"] = RejectionCode;
+        problem.Extensions["errorCode"] = code;
         problem.Extensions["correlationId"] = correlationId;
 
         context.Response.ContentType = ProblemJson;

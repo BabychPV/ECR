@@ -135,15 +135,7 @@ public sealed class RecalculateDocumentHandler(
 
             if (denial != Calculations.RecalculationWriteDenial.None)
             {
-                throw new Errors.BusinessRuleException(
-                    Calculations.RecalculationWritePolicy.ErrorCode,
-                    Calculations.RecalculationWritePolicy.Explain(denial, periodKey.Value),
-                    new Dictionary<string, object?>
-                    {
-                        ["documentId"] = documentId,
-                        ["periodKey"] = periodKey.Value,
-                        ["denial"] = denial.ToString(),
-                    });
+                throw Calculations.RecalculationWritePolicy.Reject(denial, periodKey.Value, documentId);
             }
         }
 

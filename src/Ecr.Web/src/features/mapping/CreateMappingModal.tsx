@@ -5,6 +5,8 @@ import { useMutation } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
 import type { AggregationKind, FieldTargetKind } from '@/api/types';
 import { createEntityFieldMap } from './api';
+import { PiAfCatalogButton } from './PiAfCatalogPicker';
+import { PiAfProbeAction } from './PiAfProbeAction';
 import { t } from '@/shared/i18n';
 
 /** Способи згортання точок періоду (`D-118`), у порядку показу форми. */
@@ -30,12 +32,24 @@ const AggregationOptions: readonly Exclude<AggregationKind, null>[] = [
  */
 export function CreateMappingModal({
   sourceEntityId,
+  dataSourceId,
   initialSourceField,
   opened,
   onClose,
   onCreated,
 }: {
   readonly sourceEntityId: number;
+
+  /**
+   * З'єднання, якому належить сутність, — щоб шлях можна було ВИБРАТИ з
+   * каталогу джерела, а не набрати руками (`ФВ-13.13`).
+   *
+   * ⚠ Необов'язковий: форма живе й там, де з'єднання невідоме (перелік
+   * сутностей ще не прийшов). Тоді кнопки каталогу просто немає, а поле
+   * лишається текстовим — тобто нічого не ламається.
+   */
+  readonly dataSourceId?: number | undefined;
+
   readonly initialSourceField?: string;
   readonly opened: boolean;
   readonly onClose: () => void;
@@ -83,6 +97,21 @@ export function CreateMappingModal({
           value={sourceField}
           onChange={(event) => setSourceField(event.currentTarget.value)}
         />
+
+        {/* ⛔ Кнопка каталогу стоїть ПІД полем шляху і поруч із ним, а не в
+            шапці вікна: вона заповнює саме це поле, і жодне інше. Права
+            перевіряє вона сама — форма про них не знає. */}
+        {dataSourceId !== undefined && (
+          <PiAfCatalogButton dataSourceId={dataSourceId} onPick={setSourceField} />
+        )}
+
+        {/* ⛔ «Перевірити» (`ФВ-13.17`) — ДО першого збору: пробує РЕАЛЬНЕ
+            джерело тим самим шляхом, що вписаний чи підставлений вище, і
+            показує, чи він справді щось читає. Права перевіряє сама, як і
+            кнопка каталогу. */}
+        {dataSourceId !== undefined && (
+          <PiAfProbeAction dataSourceId={dataSourceId} path={sourceField} onPickSuggestion={setSourceField} />
+        )}
 
         <Select
           label={t('mapping.createKind')}

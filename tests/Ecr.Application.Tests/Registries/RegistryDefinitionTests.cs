@@ -58,7 +58,8 @@ public sealed class RegistryDefinitionTests
         _user.UserId.Returns(9);
         _user.CorrelationId.Returns("test");
 
-        Allow("Registry.View", "Registry.EditDefinition");
+        // BE-24 крок 2: пряме збереження публікує одразу — тому і `Registry.Publish`.
+        Allow("Registry.View", "Registry.EditDefinition", "Registry.Publish");
 
         _permits = Definition("PERMIT", PermitsId);
         _substances = Definition("SUBSTANCE", SubstancesId);
@@ -197,6 +198,8 @@ public sealed class RegistryDefinitionTests
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
         Assert.Contains("чотири", error.Message, StringComparison.Ordinal);
+        Assert.Equal("err.ECR-REG-0422.unknownRuleKind", error.Details?["messageKey"]);
+        Assert.Equal("ValidityWindow", error.Details?["ruleKind"]);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
@@ -255,6 +258,8 @@ public sealed class RegistryDefinitionTests
             () => Saves().HandleAsync("PERMIT", request, default));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.fieldRemoved", error.Details?["messageKey"]);
+        Assert.Equal("1", error.Details?["missingCount"]);
         Assert.Equal(4, _permits.Fields.Count);
     }
 
@@ -271,6 +276,7 @@ public sealed class RegistryDefinitionTests
         var code = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Saves().HandleAsync("PERMIT", Request(fields: renamed), default));
         Assert.Equal("ECR-REG-0422", code.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.fieldCodeImmutable", code.Details?["messageKey"]);
 
         var retyped = Fields();
         retyped[3] = retyped[3] with { DataType = "String" };
@@ -278,6 +284,7 @@ public sealed class RegistryDefinitionTests
         var type = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Saves().HandleAsync("PERMIT", Request(fields: retyped), default));
         Assert.Equal("ECR-REG-0422", type.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.fieldTypeImmutable", type.Details?["messageKey"]);
     }
 
     [Fact]
@@ -295,6 +302,8 @@ public sealed class RegistryDefinitionTests
             () => Saves().HandleAsync("PERMIT", Request(fields: fields), default));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.newFieldRequired", error.Details?["messageKey"]);
+        Assert.Equal("HazardClass", error.Details?["fieldCode"]);
         Assert.Equal(4, _permits.Fields.Count);
     }
 
@@ -326,6 +335,7 @@ public sealed class RegistryDefinitionTests
             () => Saves().HandleAsync("BARE", request, default));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.noKeyField", error.Details?["messageKey"]);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
@@ -337,6 +347,7 @@ public sealed class RegistryDefinitionTests
             () => Saves().HandleAsync("PERMIT", Request(reason: "   "), default));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.definitionReasonRequired", error.Details?["messageKey"]);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 

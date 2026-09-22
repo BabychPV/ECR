@@ -43,6 +43,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryDef> RegistryDefs => Set<RegistryDef>();
     public DbSet<RegistryFieldDef> RegistryFieldDefs => Set<RegistryFieldDef>();
     public DbSet<RegistryRuleDef> RegistryRuleDefs => Set<RegistryRuleDef>();
+    public DbSet<RegistryDefinitionDraft> RegistryDefinitionDrafts => Set<RegistryDefinitionDraft>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom
@@ -75,6 +76,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<PasswordPolicy> PasswordPolicies => Set<PasswordPolicy>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+    public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
 
     // wf
     public DbSet<ApprovalRoute> ApprovalRoutes => Set<ApprovalRoute>();
@@ -256,11 +258,29 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     {
         ArgumentNullException.ThrowIfNull(configurationBuilder);
 
-        // decimal(28,10) скрізь: точність задається один раз, а не забувається
+        // decimal(34,16) скрізь: точність задається один раз, а не забувається
         // в кожній новій колонці. float і double не використовуються ніде —
         // порядок додавання змінює результат, і звірка з еталоном стає
         // неможливою (D-30).
-        configurationBuilder.Properties<decimal>().HavePrecision(28, 10);
+        //
+        // ⚠ Конвенція переводиться ПІСЛЯ міграцій типів і навмисно останньою:
+        // усі тринадцять стовпців вимірюваних величин оголошені явно, тож ця
+        // зміна не мусить давати жодної нової міграції — і
+        // `has-pending-model-changes` після неї це й доводить. Зроби її першою
+        // — і кожна наступна міграція несла б фасети, яких ніхто не замовляв.
+        //
+        // ⚠ 34, а не 28 (`D-148`, пряме рішення людини 2026-09-21). Precision
+        // 28 при масштабі 16 лишає 12 цілих розрядів, а множник
+        // `MWh → 3 600 000 000` із каталогу одиниць виводить уже 278 МВт·год за
+        // цю межу. Ціна названа й не нульова, на відміну від переходу 10 → 16:
+        // ширина `decimal` залежить ЛИШЕ від precision, і 28 — межа категорії
+        // (20–28 → 13 Б, 29–38 → 17 Б), тобто +4 Б на рядок, +12.4 % розміру
+        // `doc.CellValue`.
+        //
+        // ⚠ Стеля не тут: `System.Decimal` несе 29 значущих цифр, тож при
+        // масштабі 16 із бази читається щонайбільше 13 цілих розрядів, а не 18
+        // (виміряно; `CellValueScale16Tests` тримає це твердженням).
+        configurationBuilder.Properties<decimal>().HavePrecision(34, 16);
 
         // Локалізований текст — одна колонка nvarchar(max) із JSON (ФВ-2.2).
         // Конвенція, а не налаштування на кожну властивість: інакше перша ж

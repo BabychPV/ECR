@@ -154,7 +154,12 @@ public sealed class MethodologyConstant : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Константа «{code.Value}»: вид {kind} створюється конструктором зі значенням decimal.");
+                $"Константа «{code.Value}»: вид {kind} створюється конструктором зі значенням decimal.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantKindNeedsNumber",
+                    ["code"] = code.Value,
+                });
         }
 
         if (string.IsNullOrWhiteSpace(text))
@@ -162,7 +167,12 @@ public sealed class MethodologyConstant : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Константа «{code.Value}» виду {kind} без тексту: порожній рядок не є "
-                + "ні міткою категорії, ні значенням (поправка 2-біс директиви ПК-1 №05).");
+                + "ні міткою категорії, ні значенням (поправка 2-біс директиви ПК-1 №05).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantNoText",
+                    ["code"] = code.Value,
+                });
         }
 
         return new MethodologyConstant
@@ -207,7 +217,12 @@ public sealed class MethodologyConstant : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Числова константа «{code.Value}» без одиниці: перевірка розмірностей "
-                + "без неї неможлива (ФВ-16.1).");
+                + "без неї неможлива (ФВ-16.1).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantNoUnit",
+                    ["code"] = code.Value,
+                });
         }
 
         if (TryParseNumeric(rawValue, out var parsed))
@@ -349,7 +364,12 @@ public sealed class MethodologyConstant : Entity<int>
                 throw new DomainException(
                     "ECR-CALC-0422",
                     $"Числова константа «{Code}» без одиниці: перевірка розмірностей "
-                    + "без неї неможлива (ФВ-16.1).");
+                    + "без неї неможлива (ФВ-16.1).",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.constantNoUnit",
+                        ["code"] = Code,
+                    });
             }
 
             if (value is not { } number)
@@ -357,7 +377,12 @@ public sealed class MethodologyConstant : Entity<int>
                 throw new DomainException(
                     "ECR-CALC-0422",
                     $"Константа «{Code}» оголошена числовою без значення: порожнє число — "
-                    + "не «нуль за замовчуванням», а рішення, якого ніхто не ухвалив.");
+                    + "не «нуль за замовчуванням», а рішення, якого ніхто не ухвалив.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.constantNoValue",
+                        ["code"] = Code,
+                    });
             }
 
             Kind = ConstantKind.Numeric;
@@ -373,7 +398,12 @@ public sealed class MethodologyConstant : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Константа «{Code}» виду {kind} без тексту: порожній рядок не є "
-                + "ні міткою категорії, ні значенням (поправка 2-біс директиви ПК-1 №05).");
+                + "ні міткою категорії, ні значенням (поправка 2-біс директиви ПК-1 №05).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantNoText",
+                    ["code"] = Code,
+                });
         }
 
         Kind = kind;

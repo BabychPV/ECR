@@ -173,6 +173,7 @@ public sealed class CreateUnitTests
             default));
 
         Assert.Equal("ECR-UOM-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-UOM-0422.factorMustBePositive", error.Details?["messageKey"]);
 
         _units.DidNotReceive().AddUnit(Arg.Any<Unit>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());

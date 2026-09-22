@@ -95,6 +95,19 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
         {
             switch (entry.Entity)
             {
+                case Domain.Entities.Documents.Document document when entry.State == EntityState.Modified:
+                    // Зміна ключа (ФВ-3.9): `UPDLOCK, HOLDLOCK` у `DocumentKeyStore.IsKeyTakenAsync`
+                    // закриває гонитву, але якщо `UQ_Document` таки спрацює — та сама відмова,
+                    // що й у перевірки до запису, а не 500.
+                    return new ConcurrencyConflictException(
+                        "ECR-DOC-0409",
+                        $"Ключ «{document.BusinessKey}» уже має інший документ проєкту.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-DOC-0409.rekeyDuplicate",
+                            ["businessKey"] = document.BusinessKey,
+                        });
+
                 case Domain.Entities.Documents.Document document:
                     // ⛔ `DAT-09`. `DocumentStore.NextBusinessKeyAsync` підбирає
                     // номер запитом `COUNT` + «чи вільний» — TOCTOU: два

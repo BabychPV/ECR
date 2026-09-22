@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
@@ -116,6 +116,16 @@ function show(): void {
 function alertsSwitchOf(userName: string): HTMLInputElement {
   return screen.getByLabelText(new RegExp(`security\\.alerts.*${userName}`)) as HTMLInputElement;
 }
+
+/**
+ * ⚠ Вкладка користувачів монтує поруч лінивий `GroupAssignmentsPanel`; його
+ * холодний `import()` (30–130 мс у спокої, 300–540 мс під навантаженням)
+ * інакше йшов усередині таймауту тесту. Прогрівається модуль, не обхід:
+ * панель і далі монтується через `lazy()` сторінки.
+ */
+beforeAll(async () => {
+  await import('@/features/security/GroupAssignmentsPanel');
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

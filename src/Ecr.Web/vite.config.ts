@@ -1,6 +1,71 @@
-﻿import { defineConfig } from 'vite';
+﻿import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import {
+  UnusedMantineComponents,
+  findPrunedClassesInUse,
+  mantineClassesIn,
+  pruneCss,
+} from './src/app/mantineCssPrune';
+
+/**
+ * Відсікає з `@mantine/core/styles.css` стилі компонентів, яких у збірці
+ * немає (`src/app/mantineCssPrune.ts` — чому і як; `D-132`).
+ *
+ * ⚠ Лише `build`: у `vite dev` і у vitest стилі лишаються повними — там
+ * бюджету немає, а зайвий компонент без стилів у розробці був би пасткою.
+ *
+ * ⛔ Відсікання — у `transform`, ДО збирання, а не правкою готового CSS у
+ * `generateBundle`: хеш імені файла рахується від вмісту, і правка після
+ * хешування дала б той самий `index-<хеш>.css` із різним вмістом у різних
+ * збірках — отруєний кеш у браузері.
+ *
+ * ⛔ Після збирання — перевірка, що жоден JS-чанк не вживає класу
+ * відсіченого компонента. Інакше перший `<Slider>` у коді мовчки малювався б
+ * без стилів; так — `npm run build` червоний і каже, який рядок прибрати.
+ */
+function pruneUnusedMantineCss(): Plugin {
+  const stylesDir = path.resolve(__dirname, 'node_modules/@mantine/core/styles');
+  const owner = new Map<string, string>();
+
+  for (const component of UnusedMantineComponents) {
+    const css = readFileSync(path.join(stylesDir, `${component}.css`), 'utf8');
+    for (const cls of mantineClassesIn(css)) owner.set(cls, component);
+  }
+
+  const dead = new Set(owner.keys());
+  let applied = false;
+
+  return {
+    name: 'ecr:prune-unused-mantine-css',
+    apply: 'build',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!/[\\/]@mantine[\\/]core[\\/]styles\.css(\?.*)?$/.test(id)) return null;
+
+      applied = true;
+      return { code: pruneCss(code, dead), map: null };
+    },
+    generateBundle(_options, bundle) {
+      if (!applied) {
+        this.error('`@mantine/core/styles.css` не пройшов через відсікання — перевір шлях імпорту.');
+      }
+
+      const code = Object.values(bundle).flatMap((item) =>
+        item.type === 'chunk' ? [item.code] : [],
+      );
+      const inUse = findPrunedClassesInUse(code, dead);
+      if (inUse.size === 0) return;
+
+      const components = [...new Set([...inUse].map((cls) => owner.get(cls)))].join(', ');
+      this.error(
+        `Ужито компонент(и) Mantine, чиї стилі відсічені: ${components}. ` +
+          'Прибери їх з `UnusedMantineComponents` у `src/app/mantineCssPrune.ts`.',
+      );
+    },
+  };
+}
 
 /*
  * ⛔ Директива паралельного аудиту (2026-09-11, Wave 0 / PR-0.2): кілька
@@ -14,7 +79,7 @@ const vitePort = Number(process.env.ECR_VITE_PORT ?? 5173);
 const apiUrl = process.env.ECR_API_URL ?? 'http://localhost:5080';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), pruneUnusedMantineCss()],
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
   },

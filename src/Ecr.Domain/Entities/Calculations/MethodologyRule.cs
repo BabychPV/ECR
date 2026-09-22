@@ -97,7 +97,12 @@ public sealed class MethodologyRule : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Правило «{Code}» без предиката: порожній рядок не збігається з жодним рядком "
-                + "документа, а «вся таблиця» записується як `{}`.");
+                + "документа, а «вся таблиця» записується як `{}`.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.ruleNoPredicate",
+                    ["code"] = Code,
+                });
         }
 
         MatchJson = matchJson;

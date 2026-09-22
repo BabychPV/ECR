@@ -52,7 +52,14 @@ public sealed class ReportRowRules
 
     private readonly IReadOnlyList<Compiled> _rules;
 
-    private ReportRowRules(IReadOnlyList<Compiled> rules) => _rules = rules;
+    private ReportRowRules(IReadOnlyList<Compiled> rules, IReadOnlyList<ReportParameterSpec> parameters)
+    {
+        _rules = rules;
+        Parameters = parameters;
+    }
+
+    /// <summary>Параметри, які оголошує версія (<c>R6</c>): на них і посилаються <c>@Name</c>.</summary>
+    public IReadOnlyList<ReportParameterSpec> Parameters { get; }
 
     /// <summary>Чи правил немає — тоді побудова йде шляхом схеми 1 без змін.</summary>
     public bool IsEmpty => _rules.Count == 0;
@@ -70,13 +77,13 @@ public sealed class ReportRowRules
 
         if (parsed.Schema != Schema)
         {
-            return new ReportRowRules([]);
+            return new ReportRowRules([], []);
         }
 
         // `ReportRules.Parse` щойно прочитав цей самий JSON — він розбирається.
         var stored = JsonSerializer.Deserialize<ReportRulesCommand>(rulesJson!, Options);
 
-        return Compile(parsed.Schema, parsed.RowSource, stored?.Rules, describedColumns);
+        return Compile(parsed.Schema, parsed.RowSource, stored?.Rules, describedColumns, stored?.Parameters);
     }
 
     /// <summary>Перевіряє правила й готує їх до застосування.</summary>
@@ -84,19 +91,22 @@ public sealed class ReportRowRules
     /// <param name="rowSource">Джерело рядків: воно задає, які колонки бачить вираз.</param>
     /// <param name="rules">Правила в порядку застосування.</param>
     /// <param name="describedColumns">Коди колонок опису версії.</param>
+    /// <param name="parameters">Параметри версії (<c>R6</c>); <c>null</c> — жодного.</param>
     /// <exception cref="BusinessRuleException">Правило зламане — з його номером (від 1).</exception>
     public static ReportRowRules Compile(
         int schema, string rowSource, IReadOnlyList<ReportRuleCommand>? rules,
-        IReadOnlyCollection<string> describedColumns)
+        IReadOnlyCollection<string> describedColumns,
+        IReadOnlyList<ReportParameterCommand>? parameters = null)
     {
         ArgumentNullException.ThrowIfNull(describedColumns);
 
         rules ??= [];
 
-        if (rules.Count > 0 && schema != Schema)
+        if ((rules.Count > 0 || parameters is { Count: > 0 }) && schema != Schema)
         {
-            // ⛔ Схема 1 правил не читає: прийняти їх означало б мовчки проігнорувати.
-            throw Invalid(1, "schema", $"правила несе лише схема {Schema}, а не {schema}");
+            // ⛔ Схема 1 ні правил, ні параметрів не читає: прийняти їх означало
+            // б мовчки проігнорувати.
+            throw Invalid(1, "schema", $"правила й параметри несе лише схема {Schema}, а не {schema}");
         }
 
         if (rules.Count > MaxRules)
@@ -104,10 +114,14 @@ public sealed class ReportRowRules
             throw Invalid(MaxRules + 1, "count", $"правил більше за {MaxRules}");
         }
 
+        // ⛔ Параметри перевіряються ПЕРШИМИ: тип кожного з них входить в
+        // оточення, за яким перевіряються вирази правил.
+        var declared = ReportParameters.Compile(parameters);
+
         var scope = new ReportExpressionScope(
             ReportSourceColumns.CodesOf(rowSource)
                 .Select(code => KeyValuePair.Create(code, TypeOf(ReportSourceColumns.KindOf(rowSource, code)))),
-            []);
+            declared.Select(p => KeyValuePair.Create(p.Code, p.Type)));
 
         var compiled = new List<Compiled>(rules.Count);
 
@@ -139,23 +153,30 @@ public sealed class ReportRowRules
             compiled.Add(new Compiled(when, set.Column, Expression(no, "value", set.Value, scope, type), type));
         }
 
-        return new ReportRowRules(compiled);
+        return new ReportRowRules(compiled, declared);
     }
 
     /// <summary>Застосовує правила до рядка по порядку; <c>set</c> бачать наступні правила.</summary>
     /// <param name="row">Поля джерела за кодом; присвоєння змінюють словник на місці.</param>
+    /// <param name="parameters">
+    /// Значення параметрів звіту (<c>R6</c>) за іменем; <c>null</c> — жодного, і
+    /// тоді <c>@Name</c> у виразі дав би <c>#NAME?</c>. Такого виразу тут бути
+    /// не може: невідоме ім'я відхиляє <see cref="Compile"/>.
+    /// </param>
     /// <returns><c>false</c> — рядок приховано.</returns>
     /// <exception cref="BusinessRuleException">Вираз на цьому рядку дав помилку — з номером правила.</exception>
-    public bool Apply(Dictionary<string, object?> row)
+    public bool Apply(Dictionary<string, object?> row, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         ArgumentNullException.ThrowIfNull(row);
+
+        var values = parameters ?? ReportParameters.None;
 
         for (var no = 1; no <= _rules.Count; no++)
         {
             var rule = _rules[no - 1];
 
             // ⛔ `null` (порожня колонка, §6.2) — НЕ «так»: правило не спрацьовує.
-            if (Evaluate(no, "when", rule.When, row).Value is not true)
+            if (Evaluate(no, "when", rule.When, row, values).Value is not true)
             {
                 continue;
             }
@@ -165,7 +186,7 @@ public sealed class ReportRowRules
                 return false;
             }
 
-            var value = Evaluate(no, "value", rule.Value!, row);
+            var value = Evaluate(no, "value", rule.Value!, row, values);
 
             if (!value.IsNull && value.Type != rule.Type)
             {
@@ -179,9 +200,10 @@ public sealed class ReportRowRules
     }
 
     private static ExpressionValue Evaluate(
-        int no, string part, ParsedExpression expression, Dictionary<string, object?> row)
+        int no, string part, ParsedExpression expression, Dictionary<string, object?> row,
+        IReadOnlyDictionary<string, object?> parameters)
     {
-        var value = ReportEvaluation.Evaluate(expression, new ReportRowContext(row, []));
+        var value = ReportEvaluation.Evaluate(expression, new ReportRowContext(row, parameters));
 
         // ⛔ Гучно: пропущене правило дало б зріз, який виглядає правильним.
         return value.IsError ? throw Invalid(no, part, $"обчислення дало {value.ErrorCode}") : value;

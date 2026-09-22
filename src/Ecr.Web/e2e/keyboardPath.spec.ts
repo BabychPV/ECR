@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page, type Response } from '@playwright/test';
 import { expectFocusRing, expectFocusTrapped, expectFocusVisible, focusState } from './focus';
 
 /**
@@ -38,7 +38,13 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
   );
 
   test('від входу до виходу самою лише клавіатурою', async ({ page }) => {
-    test.slow();
+    // ⚠ Явний бюджет замість `test.slow()` (30 с × 3 = 90 с). На спокійній
+    // машині прохід іде 84 с — упритул до стелі; на завантаженій (десятки
+    // процесів `dotnet` паралельних сесій) один лише `GET …/tables/730` ішов
+    // 14.9 с, а `POST …/submit` не відповідав і за 30 с. Нижче кожен запис на
+    // сервер чекається ЗА ВІДПОВІДДЮ (`waitForResponse`), а не за годинником,
+    // тож бюджет прогону мусить ці відповіді вміщати.
+    test.setTimeout(360_000);
 
     // ── 1. Вхід ───────────────────────────────────────────────────────────
     await page.goto('/login');
@@ -70,13 +76,50 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 
     // ── 2. Після переходу фокус не загубився ─────────────────────────────
-    await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
+    // ⛔ Заголовок — САМЕ в `<main>`, а не перший-ліпший. `waitForURL` вище
+    // проходить, щойно змінився шлях, а вміст маршруту ще вантажиться: `<main>`
+    // порожній, і `getByRole('heading').first()` знаходив заголовок не нового
+    // екрана. Фокус у цю мить законно на `body` — `PageHeader.tsx` переносить
+    // його на заголовок при МОНТУВАННІ сторінки. Траса падіння: фокус читався
+    // через 20 мс після зміни URL, `<main>` у знімку порожній.
+    await expect(
+      page.getByRole('main').getByRole('heading').first(),
+      'сторінка після входу не відрендерилася',
+    ).toBeVisible({ timeout: 30_000 });
 
-    const afterLogin = await focusState(page);
-    expect(afterLogin.tag, 'після входу фокус загубився на body').not.toBe('body');
+    // ⚠ `expect.poll`, а не одне читання: фокус переносить `useEffect` після
+    // коміту рендера, тобто щонайменше на кадр пізніше за появу заголовка.
+    // Дефект — фокус, що НЕ приходить узагалі, — і далі червоний.
+    await expect
+      .poll(async () => (await focusState(page)).tag, {
+        message: 'після входу фокус загубився на body',
+        timeout: 10_000,
+      })
+      .not.toBe('body');
 
     // ── 3. Період ────────────────────────────────────────────────────────
-    await expectFocusRing(page, page.getByLabel(/Period|Період/i).first(), 'поле періоду');
+    // ⛔ UI-06 (`PeriodPicker.tsx`) додав до поля періоду ДВІ сусідні кнопки
+    // ‹ › зі своїми aria-label (`period.previous`/`period.next`,
+    // `Sql/09-seed.sql:1214-1215` — «Previous period»/«Next period»), і обидва
+    // підрядки теж збігаються з `/Period|Період/i`. `getByLabel(...).first()`
+    // у DOM-порядку `<Group>` (‹, поле, ›) резолвився в кнопку «‹», а щойно
+    // після входу період ще не обрано — `value === null` — тож ОБИДВІ стрілки
+    // вимкнені (`PeriodPicker.tsx`: `disabled={disabled || prevValue === null}`).
+    // Вимкнений елемент не приймає programmatic-фокус (HTML: не «focusable
+    // area»), тож `target.focus()` у `expectFocusRing` не зрушував фокуса
+    // взагалі, і перевірка падала «фокус на <body>» — не тому, що поле
+    // недоступне з клавіатури, а тому що локатор резолвився не в поле.
+    // Той самий клас дефекту вже описаний нижче для `Password` (рядок
+    // ~256-261: кнопка-тумблер видимості пароля теж мала aria-label із
+    // підрядком «password») — і виправлення те саме: роль звужує пошук до
+    // самого поля. `NumberInput` усередині `PeriodPicker` рендерить
+    // `<input type="text">` (роль `textbox`), `ActionIcon` — `<button>`
+    // (роль `button`), тож роль однозначно відкидає обидві стрілки.
+    await expectFocusRing(
+      page,
+      page.getByRole('textbox', { name: /Period|Період/i }).first(),
+      'поле періоду',
+    );
     await page.keyboard.press('Control+a');
     await page.keyboard.type(PeriodKey);
 
@@ -94,6 +137,15 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // ── 5. Таблиця ───────────────────────────────────────────────────────
     const grid = page.locator('revo-grid').first();
     await expect(grid, "сітка не з'явилася — далі йти нема куди").toBeVisible({ timeout: 30_000 });
+
+    // ⛔ Видима сітка — ще не сітка з даними. Елемент `revo-grid` є одразу, а
+    // рядки з'являються після `GET …/tables/{id}`, який під навантаженням ішов
+    // 14.9 с. Вставка в сітку без рядків не породжувала жодного `PATCH`, і
+    // прохід мовчки йшов подавати незмінений аркуш.
+    await expect(
+      grid.locator('revogr-data .rgCell').first(),
+      'рядки сітки не завантажилися',
+    ).toBeVisible({ timeout: 60_000 });
 
     // ⚠ Grid — веб-компонент, і його внутрішній фокус живе у shadow DOM.
     // Тому сюди заходимо фокусом на контейнер, а далі стрілками, як людина.
@@ -116,11 +168,21 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await page.evaluate(async () => {
       await navigator.clipboard.writeText('101\t102\n103\t104');
     });
+
+    // ⚠ Слухач ставиться ДО натискання: відповідь може прийти раніше, ніж
+    // рядок після `press` почне її чекати.
+    const saved = waitForWrite(page, 'PATCH', 'cells');
     await page.keyboard.press('Control+v');
 
     // ── 7. Збереження ────────────────────────────────────────────────────
     // Ctrl+S — той самий рефлекс, що в Excel; без нього оператор шукає кнопку.
     await page.keyboard.press('Control+s');
+
+    // ⛔ Подання — ПІСЛЯ підтвердженого збереження. Раніше `Submit` натискався,
+    // поки `PATCH` ще летів (траса: `PATCH` ішов 4.4 с, `submit` відправлено
+    // на 0.7 с раніше за його відповідь) — два записи того самого аркуша
+    // навперегін.
+    expect((await saved).status(), 'сервер не прийняв вставку').toBe(200);
 
     // ── 8. Дії робочого процесу ──────────────────────────────────────────
     // ⛔ До аудиту (`A7-39`) тут не було нічого, крім «Подати»: затвердити
@@ -144,7 +206,17 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await expect(submit, 'у шапці немає кнопки подання').toBeVisible({ timeout: 10_000 });
 
     await expectFocusRing(page, submit, 'кнопка подання');
+    const submitted = waitForWrite(page, 'POST', 'submit');
     await page.keyboard.press('Enter');
+
+    // ⛔ Спершу ВІДПОВІДЬ сервера, потім бейдж. Подання синхронне
+    // (`SubmitSheetHandler`: свіжа валідація аркуша й зріз УСІХ його таблиць
+    // в одній транзакції) — фонової задачі воно не чекає, але під
+    // навантаженням іде десятки секунд. Бейдж за 15 с від натискання падав
+    // «лишився Draft» при запиті, що ще летів; закритий контекст обривав його,
+    // транзакція відкочувалась, і наступний прогін бачив той самий Draft —
+    // тобто траса виглядала як «сервер проковтнув подання».
+    expect((await submitted).status(), 'сервер не прийняв подання').toBe(204);
 
     // ⚠ Стан читається з бейджа активної вкладки (`DocumentPage.tsx`,
     // `document.sheetStates`), а не з тосту: тост каже, що запит пройшов,
@@ -170,7 +242,9 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     await expect(approve, 'у шапці немає кнопки затвердження').toBeVisible({ timeout: 10_000 });
 
     await expectFocusRing(page, approve, 'кнопка затвердження');
+    const approved = waitForWrite(page, 'POST', 'approve');
     await page.keyboard.press('Enter');
+    expect((await approved).status(), 'сервер не прийняв затвердження').toBe(204);
 
     await expect(activeTab, 'аркуш не перейшов у Approved').toContainText('Approved', {
       timeout: 15_000,
@@ -224,6 +298,39 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // ⛔ Escape закриває діалог І ПОВЕРТАЄ фокус тому, хто його відкрив.
     // Інакше людина без миші опиняється на початку сторінки і йде табом
     // заново — щоразу, коли передумала.
+    //
+    // ⚠ Де саме стоїть фокус після 12 Tab, залежить від ЧАСУ: поля назви
+    // (`LocalizedInput`, по одному на мову) з'являються лише після
+    // `GET /api/v1/languages`, і в трасі падіння ця відповідь прийшла посеред
+    // обходу — між 2-м і 3-м Tab. Кількість зупинок змінилася з 7 на 10, і
+    // 12-й Tab лягав на поле поясу — `Select searchable`, який на фокусі сам
+    // розкриває список. Escape у розкритому комбобоксі закриває СПИСОК, а не
+    // діалог (шар за шаром, WAI-ARIA combobox; Mantine позначає таке поле
+    // `data-mantine-stop-propagation`) — це правильна поведінка, а не дефект.
+    // Тому шар списку знімається окремим Escape і перевіряється окремо: діалог
+    // мусить лишитися відкритим, а список — закритися.
+    //
+    // ⚠ Ознака розкритого списку — `aria-controls` на сфокусованому полі, що
+    // вказує на наявний `listbox`. `aria-expanded` Mantine на `Select` НЕ
+    // ставить (`withExpandedAttribute: false` у `Combobox.Target`), а
+    // `aria-controls` — лише поки список відкритий.
+    const openListbox = async (): Promise<boolean> =>
+      page.evaluate(() => {
+        const id = document.activeElement?.getAttribute('aria-controls');
+        return id !== null && id !== undefined && document.getElementById(id) !== null;
+      });
+
+    if (await openListbox()) {
+      await page.keyboard.press('Escape');
+      await expect
+        .poll(openListbox, { message: 'Escape не закрив розкритий список у діалозі', timeout: 5_000 })
+        .toBe(false);
+      await expect(
+        page.getByRole('dialog'),
+        'Escape у розкритому списку закрив увесь діалог, а не лише список',
+      ).toBeVisible();
+    }
+
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toBeHidden({ timeout: 10_000 });
 
@@ -264,6 +371,10 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     // нічого, а `test.skip` на хуки не поширюється.
     if (PeriodKey === '' || DocumentId === '') return;
 
+    // ⚠ Хук має власний бюджет (умовчання — 30 с), а вхід, документ і
+    // повернення в роботу під навантаженням у нього не вміщаються.
+    testInfo.setTimeout(180_000);
+
     const baseURL = testInfo.project.use.baseURL;
     if (baseURL === undefined) {
       throw new Error('у конфігурації немає baseURL — відновлювати базову лінію нема де');
@@ -280,8 +391,20 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
       await page.keyboard.press('Enter');
       await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30_000 });
 
+      // ⚠ Стан аркуша приходить із `GET /documents/{id}`, а вкладки — з
+      // `GET …/tables`; вкладка без стану показує `Draft` за умовчанням. Під
+      // навантаженням перший ішов 1.8 с проти 1.5 с другого, тож стан без
+      // цього очікування читався до відповіді — і хук тихо лишав аркуш
+      // `Approved` наступному прогону.
+      const documentLoaded = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'GET' &&
+          new URL(response.url()).pathname === `/api/v1/documents/${DocumentId}`,
+        { timeout: 90_000 },
+      );
       await page.goto(`/documents/${DocumentId}?periodKey=${PeriodKey}`);
       await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 });
+      await documentLoaded;
 
       // ⚠ Стан читається з бейджа активної вкладки — сирий рядок стану
       // сервера (`SheetState` з `transitions.ts`), не переклад.
@@ -310,7 +433,9 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
 
       const confirm = dialog.getByRole('button', { name: /Return for edits|Повернути/i });
       await confirm.focus();
+      const reopened = waitForWrite(page, 'POST', 'reopen');
       await page.keyboard.press('Enter');
+      expect((await reopened).status(), 'сервер не прийняв повернення в роботу').toBe(204);
 
       await expect(activeTab, 'аркуш не повернувся в Draft').toContainText('Draft', {
         timeout: 15_000,
@@ -320,3 +445,23 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
     }
   });
 });
+
+/**
+ * Відповідь на запис документа (`PATCH …/cells`, `POST …/submit` тощо).
+ *
+ * ⚠ Викликати ДО дії, що породжує запит: інакше відповідь може прийти
+ * раніше, ніж її почнуть чекати.
+ *
+ * ⚠ 90 с — не «з запасом на всяк випадок». Це стеля для ОДНОГО запису на
+ * завантаженій машині: у трасах `GET …/tables/730` ішов 14.9 с, а подання не
+ * відповіло й за 30 с. Відповідь, що не прийшла за 90 с, — уже не повільність,
+ * а зависання, і падіння назве сам запит, а не бейдж за три кроки від нього.
+ */
+function waitForWrite(page: Page, method: string, action: string): Promise<Response> {
+  const path = `/api/v1/documents/${DocumentId}/${action}`;
+
+  return page.waitForResponse(
+    (response) => response.request().method() === method && new URL(response.url()).pathname === path,
+    { timeout: 90_000 },
+  );
+}

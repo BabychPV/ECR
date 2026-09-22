@@ -28,7 +28,7 @@ namespace Ecr.Api.Tests;
 /// «рівно два рядки» залежало б від порядку прогону сусідів.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class AuditStructureJournalTests(SqlServerFixture sql)
+public sealed partial class AuditStructureJournalTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Audit-Structure-2026!";
 
@@ -178,7 +178,7 @@ public sealed class AuditStructureJournalTests(SqlServerFixture sql)
         => page.GetProperty("items").EnumerateArray().ToList();
 
     /// <summary>Один рядок журналу — прямим ADO, бо <c>aud.*</c> поза моделлю EF.</summary>
-    private async Task WriteAsync(string entityType, int author, string operation = "Test")
+    private async Task WriteAsync(string entityType, int author, string operation = "Test", string? reason = null)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync().ConfigureAwait(false);
@@ -186,20 +186,22 @@ public sealed class AuditStructureJournalTests(SqlServerFixture sql)
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO aud.StructureChange
-                (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation, ChangedByUserId)
-            VALUES (@changedAt, 0, @entityType, 1, 0, @operation, @author);
+                (ChangedAt, TemplateVersionId, EntityType, EntityId, ChangeClass, Operation, ChangeReason, ChangedByUserId)
+            VALUES (@changedAt, 0, @entityType, 1, 0, @operation, @reason, @author);
             """;
 
         command.Parameters.AddWithValue("@changedAt", DateTime.UtcNow);
         command.Parameters.AddWithValue("@entityType", entityType);
         command.Parameters.AddWithValue("@operation", operation);
+        command.Parameters.AddWithValue("@reason", (object?)reason ?? DBNull.Value);
         command.Parameters.AddWithValue("@author", author);
 
         await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     /// <summary>Роль із правами → користувач → вхід.</summary>
-    private async Task<HttpClient> LoginAsync(EcrApiFactory app, string[] permissions)
+    private async Task<HttpClient> LoginAsync(
+        Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> app, string[] permissions)
     {
         await using var db = new EcrDbContext(
             new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
@@ -231,7 +233,7 @@ public sealed class AuditStructureJournalTests(SqlServerFixture sql)
                 new { userName = name, password = Password })
             .ConfigureAwait(false);
 
-        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {app.ErrorsText}");
+        Assert.True(login.IsSuccessStatusCode, $"{login.StatusCode}: {(app as EcrApiFactory)?.ErrorsText}");
 
         return client;
     }

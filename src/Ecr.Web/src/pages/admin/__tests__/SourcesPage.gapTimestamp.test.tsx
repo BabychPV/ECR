@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { formatDate, formatDateTime } from '@/shared/format';
@@ -91,6 +92,13 @@ function respond(): void {
         });
       }
 
+      if (url.endsWith('/api/v1/data-sources')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       if (url.endsWith('/api/v1/sources')) {
         return new Response(JSON.stringify(sources), {
           status: 200,
@@ -108,9 +116,11 @@ function show(): void {
 
   render(
     <MantineProvider theme={testTheme}>
-      <QueryClientProvider client={client}>
-        <SourcesPage />
-      </QueryClientProvider>
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <SourcesPage />
+        </QueryClientProvider>
+      </MemoryRouter>
     </MantineProvider>,
   );
 }

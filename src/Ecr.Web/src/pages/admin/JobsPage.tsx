@@ -22,8 +22,23 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { showApiError } from '@/shared/ui/notify';
 import { useCancelJob, useRecentJobs } from '@/features/jobs/api';
+import {
+  JobAttempt,
+  JobDocumentLink,
+  JobFailure,
+  JobResultLink,
+  JobRetry,
+  jobAuthor,
+} from '@/features/jobs/JobFacts';
 import { humanizeJobId, jobKindLabel } from '@/features/workflow/jobLabel';
 import { t } from '@/shared/i18n';
+import { generatePath } from 'react-router-dom';
+import { routes } from '@/app/routes';
+
+/** Адреса документа задачі — з реєстру маршрутів (`JobFacts` про маршрути не знає). */
+function documentHrefOf(id: number): string {
+  return generatePath(routes.documentDetail.path, { id: String(id) });
+}
 
 /**
  * Стани, у яких задачу ще є що скасовувати.
@@ -141,9 +156,27 @@ export function JobsPage(): JSX.Element {
               <StatusBadge kind="job" state={status.state} />
             </Group>
 
+            {/* ⚠ BE-08: спроба, момент постановки й документ задачі. Картка —
+                місце для всього, що не влізло в сім колонок переліку (L5). */}
+            <Group gap="md">
+              <JobAttempt attempt={status.attempt} maxAttempts={status.maxAttempts} />
+              {status.createdAt !== null && status.createdAt !== undefined && (
+                <Text size="xs" c="dimmed">
+                  {t('jobs.createdAt')}: <Timestamp value={status.createdAt} />
+                </Text>
+              )}
+              <JobDocumentLink documentId={status.documentId} documentHrefOf={documentHrefOf} />
+            </Group>
+
             <Progress value={status.percent} animated={status.state === 'Running'} />
 
             {status.message !== null && <Text size="sm">{status.message}</Text>}
+
+            <JobFailure
+              state={status.state}
+              errorCode={status.errorCode}
+              correlationId={status.correlationId}
+            />
 
             {/* ⛔ Текст помилки — без стека (ФВ-6.11): стек виносить назовні
                 шляхи, імена і подекуди значення. */}
@@ -297,7 +330,12 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
           {
             key: 'jobCode',
             label: t('jobs.recentCode'),
-            render: (job) => jobKindLabel(job.jobCode),
+            render: (job) => (
+              <Stack gap="xs">
+                <Text size="sm">{jobKindLabel(job.jobCode)}</Text>
+                <JobDocumentLink documentId={job.documentId} documentHrefOf={documentHrefOf} />
+              </Stack>
+            ),
             sortValue: (job) => jobKindLabel(job.jobCode),
             minWidth: 180,
           },
@@ -308,7 +346,45 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                вгадано: ключ колонки — `state`, тобто `DataTable` бере
                `row['state']` сам. Зайвий проп виглядав би як необхідний і
                спонукав би копіювати його в колонки, де він теж зайвий. */
-            render: (job) => <StatusBadge kind="job" state={job.state} />,
+            render: (job) => (
+              <Stack gap="xs">
+                <StatusBadge kind="job" state={job.state} />
+                {/* ⚠ BE-08+: `JobSummary` тепер несе те саме `maxAttempts`, що й
+                    `JobStatus` картки — «спроба N з M», коли обидва відомі. */}
+                <JobAttempt attempt={job.attempt} maxAttempts={job.maxAttempts} />
+                <JobFailure
+                  state={job.state}
+                  errorCode={job.errorCode}
+                  correlationId={job.correlationId}
+                />
+              </Stack>
+            ),
+          },
+          {
+            /* ⛔ Уже перекладене сервером мовою читача — показується як є.
+               `t()` над ним дав би `⟦…⟧` замість тексту. */
+            key: 'message',
+            label: t('jobs.recentMessage'),
+            sortable: false,
+            render: (job) => job.message ?? '',
+          },
+          {
+            key: 'createdByDisplayName',
+            label: t('jobs.createdBy'),
+            render: (job) => jobAuthor(job.createdByDisplayName),
+            sortValue: (job) => jobAuthor(job.createdByDisplayName),
+          },
+          {
+            /* ⚠ Постановка, не старт: сусідня колонка `startedAt` перезаписується
+               при запуску, ця — ні. `null` — задача за розкладом. */
+            key: 'createdAt',
+            label: t('jobs.createdAt'),
+            render: (job) =>
+              job.createdAt === null || job.createdAt === undefined ? (
+                ''
+              ) : (
+                <Timestamp value={job.createdAt} />
+              ),
           },
           {
             /* ⚠ Момент СТАРТУ, не постановки: `JobProgress.Begin` перезаписує
@@ -330,27 +406,58 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             label: '',
             sortable: false,
             render: (job) => (
-              /* ⚠ `wrap="nowrap"`: дві дії в одному рядку таблиці не мають
-                 переносити одна одну на другий рядок і рвати висоту рядків. */
-              <Group gap="xs" wrap="nowrap">
-                <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
-                  {t('jobs.recentWatch')}
-                </Button>
-
-                {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
-                    нічого, і сервер відповів би `409` (`ECR-JOB-0409`) —
-                    кнопка, приречена на відмову, гірша за її відсутність. */}
-                {isCancellable(job.state) && (
-                  <Button
-                    variant="subtle"
-                    size="xs"
-                    color="statusError"
-                    onClick={() => setConfirming(job)}
-                  >
-                    {t('jobs.cancel')}
+              <Stack gap="xs">
+                {/* ⚠ `wrap="nowrap"`: дії в одному рядку таблиці не мають
+                    переносити одна одну на другий рядок і рвати висоту рядків. */}
+                <Group gap="xs" wrap="nowrap">
+                  <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
+                    {t('jobs.recentWatch')}
                   </Button>
-                )}
-              </Group>
+
+                  {/* ⛔ Лише `Queued`/`Running`: термінальній задачі скасовувати
+                      нічого, і сервер відповів би `409` (`ECR-JOB-0409`) —
+                      кнопка, приречена на відмову, гірша за її відсутність. */}
+                  {isCancellable(job.state) && (
+                    <Button
+                      variant="subtle"
+                      size="xs"
+                      color="statusError"
+                      onClick={() => setConfirming(job)}
+                    >
+                      {t('jobs.cancel')}
+                    </Button>
+                  )}
+                </Group>
+
+                {/*
+                 * UX-09, директива №11, T10 #40 — той самий підхід, що вже діє
+                 * в шухляді «My tasks» (`MyTasksDrawer.tsx`): ті самі
+                 * компоненти `JobFacts`, той самий критерій показу.
+                 *
+                 * ⛔ `hasViewHealth` — буквально `true`, не заглушка. Сам
+                 * маршрут `/admin/jobs` вимагає `System.ViewHealth`
+                 * (`routes.ts` → `adminJobs.handle.permission`, застосовує
+                 * `RouteGuard`) — тобто кожен, хто взагалі бачить цей рядок,
+                 * право вже має. `isOwnJob` тому байдужий для видимості
+                 * (`canRestartJob`: `state === 'Failed' && (isOwnJob ||
+                 * hasViewHealth)`) і лишається `false` буквально, а не
+                 * підмінює встановлений факт власності — на відміну від
+                 * шухляди «My tasks», де перелік ВЖЕ звужено до власних
+                 * (`mine=true`), тут перелік може містити чужі задачі
+                 * (`mineOnly` вимкнено за замовчуванням), і `isOwnJob=true`
+                 * тут було б вигадкою.
+                 */}
+                <Group gap="xs" wrap="nowrap">
+                  <JobRetry
+                    jobId={job.jobId}
+                    state={job.state}
+                    isOwnJob={false}
+                    hasViewHealth
+                    onRestarted={() => void queryClient.invalidateQueries({ queryKey: ['jobs'] })}
+                  />
+                  <JobResultLink resultUrl={job.resultUrl} />
+                </Group>
+              </Stack>
             ),
           },
         ]}

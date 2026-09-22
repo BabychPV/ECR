@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useMemo, type JSX } from 'react';
 import { Alert, Button, Group, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
@@ -43,13 +43,31 @@ export function FormulaEditor({
 }): JSX.Element {
   const blocker = whyCannotSaveFormula(draft);
 
-  const placement: ExpressionPlacement = {
-    templateVersionId,
-    tableDefId: draft.tableDefId,
-    ...(draft.scope === 'Column'
-      ? { columnDefId: Number(draft.target) }
-      : { rowKey: draft.target }),
-  };
+  // ⛔ Розміщення мемоізується — так само, як у двох інших викликачів
+  // (`ExpressionsPage.tsx`, `MethodologyVersionsPage.tsx`), і з тієї самої
+  // причини, названої в самому `ExpressionEditor.tsx`: ОБИДВА його асинхронні
+  // ефекти — склад мови (`GET /expressions/metadata`) і перевірка при введенні
+  // (`POST /expressions/validate`) — тримають `placement` у переліку
+  // залежностей, тобто звіряються ЗА ПОСИЛАННЯМ. Об'єктний літерал у тілі
+  // компонента — нове посилання на КОЖЕН перерендер, а перерендер тут дає не
+  // лише набір формули: будь-яке сусіднє поле форми, що піднімає стан батька,
+  // перезапускає обидва ефекти й шле два зайві запити на кожне натискання
+  // клавіші. Затримка `ValidateDelay` від цього не рятує — вона відмірюється
+  // заново, а не поглинає повтор.
+  //
+  // ⚠ Залежності — СКАЛЯРИ з чернетки, а не сама `draft`: чернетка теж
+  // перестворюється на кожну зміну тексту виразу (`onChange` віддає
+  // `{ ...draft, expression }`), і залежність від неї повернула б рівно ту
+  // саму ваду, лише з зайвим `useMemo` навколо.
+  const { tableDefId, scope, target } = draft;
+  const placement = useMemo<ExpressionPlacement>(
+    () => ({
+      templateVersionId,
+      tableDefId,
+      ...(scope === 'Column' ? { columnDefId: Number(target) } : { rowKey: target }),
+    }),
+    [templateVersionId, tableDefId, scope, target],
+  );
 
   return (
     <Stack gap="sm">

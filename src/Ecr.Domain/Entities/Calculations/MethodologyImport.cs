@@ -58,7 +58,8 @@ public sealed class MethodologyImport : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Методологія {ownerMethodologyId} імпортує саму себе: власні формули "
-                + "видно виразам без оголошення.");
+                + "видно виразам без оголошення.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.selfImport" });
         }
 
         MethodologyVersionId = methodologyVersionId;

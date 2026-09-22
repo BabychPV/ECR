@@ -125,14 +125,7 @@ public sealed class RunCalculationHandler(
             var denial = RecalculationWritePolicy.Check(period.State, submitted, approval is not null);
             if (denial != RecalculationWriteDenial.None)
             {
-                throw new BusinessRuleException(
-                    RecalculationWritePolicy.ErrorCode,
-                    RecalculationWritePolicy.Explain(denial, period.PeriodKey),
-                    new Dictionary<string, object?>
-                    {
-                        ["periodKey"] = period.PeriodKey,
-                        ["denial"] = denial.ToString(),
-                    });
+                throw RecalculationWritePolicy.Reject(denial, period.PeriodKey);
             }
         }
 
@@ -199,14 +192,16 @@ public sealed class RunCalculationHandler(
         {
             throw new BusinessRuleException(
                 "ECR-CALC-4221",
-                "Погодження перерахунку закритого періоду без причини не приймається.");
+                "Погодження перерахунку закритого періоду без причини не приймається.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-4221.approvalReasonRequired" });
         }
 
         if (approval.ApprovedByUserId == currentUser.UserId)
         {
             throw new BusinessRuleException(
                 "ECR-CALC-0409",
-                "Погодити власний перерахунок закритого періоду не можна (правило чотирьох очей, D-40).");
+                "Погодити власний перерахунок закритого періоду не можна (правило чотирьох очей, D-40).",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0409.ownRecalculationApproval" });
         }
     }
 }

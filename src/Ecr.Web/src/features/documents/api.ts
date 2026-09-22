@@ -80,6 +80,60 @@ export function summarize(tables: readonly TableStatus[]): FillSummary {
   };
 }
 
+/**
+ * Видаляє документ-чернетку (право `Document.Delete`).
+ *
+ * ⚠ Не чернетка (хоч один аркуш подано, погоджено, відхилено або вже був у
+ * погодженні) — `409` `ECR-DOC-0409`, причина в `messageKey`; чужий — `404`.
+ */
+export function deleteDocument(documentId: number): Promise<void> {
+  return apiFetch<void>(`/api/v1/documents/${String(documentId)}`, { method: 'DELETE' });
+}
+
+/** Рядок переліку документів (`hasLateEdits` — `BE-09b`); тип — зі згенерованої схеми. */
+export type DocumentSummary = components['schemas']['DocumentSummary'];
+
+/** Сторінка переліку документів. */
+export type DocumentListPage = components['schemas']['PagedResultOfDocumentSummary'];
+
+/** Значення фільтра `state` — імена `DocumentStatus` на сервері; інше сервер відхиляє `422`. */
+export type DocumentStateFilter = 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
+
+/** Параметри переліку документів (`BE-09b`). */
+export interface DocumentListParams {
+  periodKey: number | null;
+  cursor?: string | null;
+  /** ⚠ Лише разом із `periodKey`: без періоду стан не визначений (`D-93`), сервер відповість `422`. */
+  state?: DocumentStateFilter | null;
+  /** Лише документи, де я автор або подавав аркуш. */
+  mine?: boolean;
+  /**
+   * Лише документи з пізніми правками (`IsLateEdit`, `D-70`).
+   *
+   * ⚠ На відміну від `state`, діє БЕЗ `periodKey` — за будь-який період
+   * (`BE-09b`): не робити його залежним від обраного періоду.
+   */
+  hasLateEdits?: boolean;
+}
+
+/**
+ * Сторінка переліку документів із фільтрами.
+ *
+ * ⚠ Порожні параметри НЕ йдуть у запит: `state=` без значення сервер читає як
+ * «без фільтра», але `mine=false` у адресі — лише шум у посиланні. Так само
+ * `hasLateEdits` іде в запит лише коли `true`.
+ */
+export function listDocuments(params: DocumentListParams): Promise<DocumentListPage> {
+  const query = new URLSearchParams({ limit: '50' });
+  if (params.periodKey !== null) query.set('periodKey', String(params.periodKey));
+  if (params.cursor) query.set('cursor', params.cursor);
+  if (params.state) query.set('state', params.state);
+  if (params.mine) query.set('mine', 'true');
+  if (params.hasLateEdits) query.set('hasLateEdits', 'true');
+
+  return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
+}
+
 /** Лічильники над переліком документів (`BE-09`); тип — зі згенерованої схеми. */
 export type DocumentListSummary = components['schemas']['DocumentListSummaryResponse'];
 
@@ -104,5 +158,46 @@ export function useDocumentListSummary(
     queryKey: ['documents', 'summary', periodKey],
     queryFn: () => documentListSummary(periodKey ?? 0),
     enabled: periodKey !== null,
+  });
+}
+
+/** Право, під яким сервер приймає зміну бізнес-ключа документа (ФВ-3.9). */
+export const ChangeDocumentKeyPermission = 'Document.ChangeKey';
+
+/**
+ * Найдовший бізнес-ключ документа — дзеркало
+ * `ChangeDocumentKeyHandler.MaxKeyLength` (колонка `doc.Document.BusinessKey`).
+ */
+export const BusinessKeyMaxLength = 200;
+
+/** Параметри зміни бізнес-ключа документа. */
+export interface ChangeDocumentKeyParams {
+  readonly documentId: number;
+  /** Новий ключ. */
+  readonly businessKey: string;
+  /** Ключ, який людина БАЧИТЬ на екрані зараз; розбіжність із чинним — `409 rekeyStale`. */
+  readonly expectedBusinessKey: string;
+  /** Причина; обов'язкова, лягає в аудит. */
+  readonly reason: string;
+}
+
+/**
+ * Змінює бізнес-ключ документа (ФВ-3.9): право `Document.ChangeKey` + грант
+ * Write на проєкт.
+ *
+ * ⚠ Ключ зайнятий — `409` `err.ECR-DOC-0409.rekeyDuplicate`; поданий чи
+ * погоджений аркуш — `409` `err.ECR-DOC-0409.rekeyLocked`; `expectedBusinessKey`
+ * розійшовся з чинним (хтось уже змінив ключ) — `409` `err.ECR-DOC-0409.rekeyStale`;
+ * причина порожня чи ключ поза 1–200 символів або збігається з чинним — `422`
+ * `err.ECR-DOC-0422.rekeyReasonRequired`/`rekeyKeyInvalid`.
+ */
+export function changeDocumentBusinessKey(params: ChangeDocumentKeyParams): Promise<void> {
+  return apiFetch<void>(`/api/v1/documents/${String(params.documentId)}/business-key`, {
+    method: 'POST',
+    body: JSON.stringify({
+      businessKey: params.businessKey,
+      expectedBusinessKey: params.expectedBusinessKey,
+      reason: params.reason,
+    } satisfies components['schemas']['ChangeDocumentKeyRequest']),
   });
 }

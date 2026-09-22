@@ -69,10 +69,15 @@ export interface RouteCrumbConfig {
 
   /**
    * Явна ціль посилання крихти, якщо вона НЕ збігається з власним `pathname`
-   * збігу — синтетичний вузол вкладеності (`admin-template-section` нижче)
-   * не має власної сторінки (голий `/admin/templates/:id` рендерить лише
-   * порожній `Outlet`), тож крихта веде на найближчий чинний маршрут (перелік
-   * шаблонів), а не в глухий кут.
+   * збігу.
+   *
+   * ✎ 2026-09-21 (`UI-09`). Тут стояло обґрунтування «вузол не має власної
+   * сторінки, тож крихта веде на перелік шаблонів, а не в глухий кут». Глухого
+   * кута більше немає — у `admin-template-section` з'явився індексний лист
+   * (картка шаблону). Саме поле лишається потрібним (ціль крихти не завжди
+   * збігається з `pathname`), а от його єдиний чинний виклик тепер тримається
+   * не на цій причині, а на межі картки `UI-09` — див. коментар біля
+   * `adminTemplateSection` нижче.
    */
   linkTo?: string;
 }
@@ -84,6 +89,21 @@ export interface RouteHandle {
 
   /** Право (`sec.Permission.Code`), потрібне для показу пункту; без нього — доступно всім. */
   permission?: string;
+
+  /**
+   * Права, КОЖНЕ з яких саме по собі теж відкриває маршрут — «`permission`
+   * АБО будь-яке з цих». Без `permission` поле не діє. Читати лише через
+   * `canAccessRoute()` (`routeAccess.ts`), не порівнювати `permission` руками.
+   *
+   * ⚠ Окреме поле, а не `permission: string | string[]`: відмова
+   * (`AccessDeniedPage`) і далі називає ОДНЕ право — те, що називає сервер у
+   * своєму `403`, — а сторож `S-02` (`AuthScenarios.cs`) і далі бачить
+   * значення `permission` рядковим літералом.
+   *
+   * ⛔ Не пиши тут приклад поля з лапками: `S-02` читає цей файл як текст,
+   * разом із коментарями, і взяв би вміст лапок за право, якого немає в сіді.
+   */
+  alsoPermittedBy?: readonly string[];
 
   /** Ключ іконки навбару (`navIcons`, `src/app/navIcons.tsx`) — резолвиться в
    *  компонент inline SVG на споживачі (`AppLayout.tsx`, `NavLink leftSection`).
@@ -159,12 +179,23 @@ export const routes = {
     handle: { labelKey: 'nav.templates', permission: 'Template.Edit', icon: 'templates' },
     showInNav: true,
   },
-  // ⚠ Синтетичний вузол вкладеності (`PR #2`, `TemplateVersionLayout`) —
-  // не окрема сторінка (голий `/admin/templates/:id` рендерить лише
-  // `Outlet`, без листа). Існує в реєстрі РІВНО заради breadcrumbs (`PR #3`):
-  // `router.tsx` передає цей `handle` самому layout-маршруту, і саме тут
-  // резолвиться людиночитна НАЗВА ШАБЛОНУ для сегмента `:id`, спільного для
-  // версії й зв'язків таблиць нижче.
+  // ⚠ Вузол вкладеності (`PR #2`, `TemplateVersionLayout`): `router.tsx`
+  // передає цей `handle` самому layout-маршруту, і саме тут резолвиться
+  // людиночитна НАЗВА ШАБЛОНУ для сегмента `:id`, спільного для версії й
+  // зв'язків таблиць нижче (breadcrumbs, `PR #3`).
+  //
+  // ✎ 2026-09-21 (`UI-09`): тут стояло «не окрема сторінка — голий шлях
+  // рендерить лише `Outlet`, без листа». Це більше НЕ так: у цього рівня
+  // з'явився індексний лист — картка шаблону (`TemplateCardPage`,
+  // `router.tsx`). Запис другим рядком реєстру він не отримав навмисно:
+  // `routeConfig.test.ts` стереже унікальність шляхів, а шлях листа — рівно
+  // цей.
+  //
+  // ✎ 2026-09-21: `crumb.linkTo: '/admin/templates'` знято. Він вів крихту з
+  // назвою шаблону на ПЕРЕЛІК, бо на самому сегменті сторінки не було. Тепер
+  // там картка, і крихта веде туди, куди вказує її власний `pathname` —
+  // перелік на рівень вище й так є окремою крихтою «Templates» поруч
+  // (`Breadcrumbs.test.tsx`, «крихта з назвою шаблону веде на КАРТКУ»).
   adminTemplateSection: {
     id: 'admin-template-section',
     path: '/admin/templates/:id',
@@ -174,7 +205,6 @@ export const routes = {
         ancestorIds: ['admin-templates'],
         resolveParam: 'id',
         resolveWith: 'templateName',
-        linkTo: '/admin/templates',
       },
     },
   },
@@ -270,7 +300,16 @@ export const routes = {
   adminSources: {
     id: 'admin-sources',
     path: '/admin/sources',
-    handle: { labelKey: 'nav.sources', permission: 'Integration.Manage', icon: 'sources' },
+    // ⚠ `Integration.View` АБО `Integration.Manage` — так само, як сервер
+    // пускає до `GET /api/v1/data-sources`, і відмова називає `View`, як і
+    // серверний `403`. Лише з `View` сторінка показує з'єднання без дій, а
+    // таблиця сутностей збору (`/api/v1/sources`, лише `Manage`) — відмову.
+    handle: {
+      labelKey: 'nav.sources',
+      permission: 'Integration.View',
+      alsoPermittedBy: ['Integration.Manage'],
+      icon: 'sources',
+    },
     showInNav: true,
   },
   adminMapping: {
@@ -289,6 +328,24 @@ export const routes = {
     id: 'admin-snapshots',
     path: '/admin/snapshots',
     handle: { labelKey: 'nav.snapshots', permission: 'Report.ViewRegulatory', icon: 'snapshots' },
+    showInNav: true,
+  },
+  /**
+   * Огляд звітної кампанії періоду (`BE-22`): хто її затримує.
+   *
+   * ⛔ Право — `Report.ViewCampaign`, те саме, що вимагає
+   * `GetCampaignSummaryHandler`. Воно окреме й небезпечне (`Q15-07`): екран
+   * показує ВСІ проєкти періоду, не звужуючи їх грантами.
+   */
+  adminCampaign: {
+    id: 'admin-campaign',
+    path: '/admin/campaign',
+    handle: {
+      labelKey: 'nav.campaign',
+      permission: 'Report.ViewCampaign',
+      icon: 'campaign',
+      skeletonShape: 'table',
+    },
     showInNav: true,
   },
   adminAudit: {
@@ -314,6 +371,24 @@ export const routes = {
     id: 'admin-ui-strings',
     path: '/admin/ui-strings',
     handle: { labelKey: 'nav.uiStrings', permission: 'System.ManageLocalization', icon: 'uiStrings' },
+    showInNav: true,
+  },
+  /**
+   * Канали, правила й журнал доставок сповіщень (`BE-33`, рішення 2.3
+   * директиви №15).
+   *
+   * ⚠ Право — `System.ManageNotifications` (те саме, що вимагають
+   * `NotificationChannelsController` і `NotificationRulesController`): екран
+   * не лише показує, хто й що отримує, а й заводить канали з секретами.
+   */
+  adminNotifications: {
+    id: 'admin-notifications',
+    path: '/admin/notifications',
+    handle: {
+      labelKey: 'nav.notifications',
+      permission: 'System.ManageNotifications',
+      icon: 'notifications',
+    },
     showInNav: true,
   },
   adminHealth: {

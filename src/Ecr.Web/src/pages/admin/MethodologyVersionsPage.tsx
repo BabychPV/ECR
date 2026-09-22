@@ -41,9 +41,12 @@ import {
   mayEditContent,
   type FormulaDraft,
 } from '@/features/methodologies/draft';
+import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAction';
+import { VersionDiffModal } from '@/features/methodologies/VersionDiffModal';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -82,6 +85,31 @@ const MethodologyOutputsPanel = lazyPanel('MethodologyOutputsPanel');
 const MethodologyRequiredInputsPanel = lazyPanel('MethodologyRequiredInputsPanel');
 const MethodologyRulesPanel = lazyPanel('MethodologyRulesPanel');
 const MethodologyTestsPanel = lazyPanel('MethodologyTestsPanel');
+
+/**
+ * ⚠ Матриця покриття правил — ВЛАСНИЙ чанк, а не восьмий експорт
+ * `MethodologyContentPanels.tsx`: нова функціональність іде в нові файли, і
+ * власний `import()` тримає її поза чанком маршруту рівно так само, як
+ * `lazyPanel` тримає сім попередніх. Спільного модуля вона не потребує —
+ * ні станів, ні чернеток панелей змісту вона не читає.
+ */
+const MethodologyRuleCoveragePanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/RuleCoveragePanel');
+
+  return { default: loaded.MethodologyRuleCoveragePanel };
+});
+
+/**
+ * ⚠ Покриття «виходи → колонки» (`BE-25`) — теж ВЛАСНИЙ чанк, тим самим
+ * прийомом і з тієї самої причини, що й матриця покриття правил вище: нова
+ * функціональність, власний `import()`, жодних спільних станів чи чернеток
+ * панелей змісту не читає.
+ */
+const MethodologyCoveragePanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/MethodologyCoveragePanel');
+
+  return { default: loaded.MethodologyCoveragePanel };
+});
 
 /**
  * Конфігуратор версії методології: формули чернетки (`ФВ-9.15`).
@@ -173,6 +201,10 @@ export function MethodologyVersionsPage(): JSX.Element {
   });
 
   const all = useMemo(() => versions.data ?? [], [versions.data]);
+
+  // BE-25: видалення чернетки й порівняння версій — у `features/methodologies/`.
+  const versionDeletion = useDeleteVersionAction({ methodologyId, allowed: mayEdit });
+  const [compareTarget, setCompareTarget] = useState<MethodologyDraftVersionDto | null>(null);
 
   // ⚠ Обрана версія — стан, але за замовчуванням береться ЧЕРНЕТКА, а не
   // перша в переліку: екран існує заради редагування, і відкривати його на
@@ -306,6 +338,8 @@ export function MethodologyVersionsPage(): JSX.Element {
         }
       />
 
+      {versionDeletion.refusal}
+
       <AsyncBoundary<MethodologyDraftVersionDto[]>
         isPending={versions.isPending && known}
         error={versions.error}
@@ -396,6 +430,20 @@ export function MethodologyVersionsPage(): JSX.Element {
                           {t('methodologies.publish')}
                         </Button>
                       )}
+
+                      {/* ⚠ Лише коли є з чим порівнювати: з однією версією
+                          діалог відкривався б без базової версії. */}
+                      {list.length > 1 && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() => setCompareTarget(version)}
+                        >
+                          {t('methodologies.compare')}
+                        </Button>
+                      )}
+
+                      {versionDeletion.triggerFor(version)}
                     </Group>
                   </Table.Td>
                 </Table.Tr>
@@ -574,6 +622,34 @@ export function MethodologyVersionsPage(): JSX.Element {
             methodologyId={methodologyId}
             editable={can(session.data, 'Calculation.EditRule')}
           />
+
+          {/* ⚠ Стоїть ОСТАННЬОЮ і навмисно: матриця покриття — не ще один
+              шматок змісту версії, а перевірка того, що складене вище справді
+              зачіпає рядки. Правило без жодного рядка й рядок без жодного
+              правила обидва дають перерахунок, що завершується успіхом і не
+              рахує нічого, — і побачити це можна лише коли решта вже задана.
+
+              ⚠ Права на редагування панель не питає: вона нічого не змінює,
+              а `Calculation.View` уже є в кожного, хто відкрив цей екран. */}
+          <MethodologyRuleCoveragePanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+          />
+
+          {/* ⚠ Покриття «виходи → колонки» — ПІСЛЯ матриці покриття правил, а
+              не перед нею: обидві лише ПОКАЗУЮТЬ наслідки того, що складено
+              вище (рядок без правила й вихід без активної прив'язки — різні
+              питання, `BE-25` проти `ФВ-13.9`), тож порядок між ними не
+              змінює сенсу жодної з двох. Разом вони й лишаються межею стека:
+              спершу редагування (панелі вище), далі — дві незалежні
+              перевірки того, що з ним стане.
+
+              ⚠ Права не питає, як і сусідня панель: `Calculation.View` уже є
+              в кожного, хто відкрив цей екран. */}
+          <MethodologyCoveragePanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+          />
           </Suspense>
         </>
       )}
@@ -597,22 +673,45 @@ export function MethodologyVersionsPage(): JSX.Element {
             data-autofocus
           />
 
-          <Select
-            label={t('methodologies.copyFrom')}
-            description={t('methodologies.copyFromHint')}
-            placeholder={t('methodologies.emptyDraft')}
-            clearable
-            value={copyFrom}
-            data={all.map((version) => ({
-              value: String(version.id),
-              // ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
-              // Тому підпис береться тим самим ключем каталогу, яким малює
-              // `StatusBadge`: інакше та сама версія називалася б у таблиці
-              // мовою користувача, а тут — англійським `Published`.
-              label: `${version.versionNumber} · ${t(statusKey('version', version.status))}`,
-            }))}
-            onChange={setCopyFrom}
-          />
+          {/*
+           * ⛔ Відмова `GET …/versions` робила цей перелік ПОРОЖНІМ і мовчала
+           * (`D15-00`, L10). Порожнеча тут має готове хибне прочитання, і воно
+           * коштує найдорожче саме в цьому діалозі: поруч стоїть плейсхолдер
+           * «порожня чернетка», тож нуль варіантів читається як «копіювати нема
+           * з чого — це перша версія методології». Людина, яка прийшла сюди
+           * ЄДИНИМ дозволеним шляхом зміни опублікованої версії (`ФВ-9.1`,
+           * клон), натомість заводить порожню чернетку — і далі пише формули з
+           * нуля замість того, щоб правити копію чинних.
+           *
+           * ⚠ Банер сторінки під модалкою (`AsyncBoundary` над таблицею) цього
+           * не рятує: модалка перекриває сторінку, і користувач бачить лише її
+           * вміст.
+           *
+           * ⚠ Порядок — `error` → `isPending` → дані. Під час першого запиту
+           * перелік НЕДОСТУПНИЙ, а не порожній: вимкнений контрол не обіцяє
+           * фактів, яких ще ніхто не читав.
+           */}
+          {versions.error !== null ? (
+            <ErrorAlert error={versions.error} onRetry={() => void versions.refetch()} />
+          ) : (
+            <Select
+              label={t('methodologies.copyFrom')}
+              description={t('methodologies.copyFromHint')}
+              placeholder={t('methodologies.emptyDraft')}
+              clearable
+              disabled={versions.isPending}
+              value={copyFrom}
+              data={all.map((version) => ({
+                value: String(version.id),
+                // ⚠ У варіанті списку компонента бути не може — потрібен РЯДОК.
+                // Тому підпис береться тим самим ключем каталогу, яким малює
+                // `StatusBadge`: інакше та сама версія називалася б у таблиці
+                // мовою користувача, а тут — англійським `Published`.
+                label: `${version.versionNumber} · ${t(statusKey('version', version.status))}`,
+              }))}
+              onChange={setCopyFrom}
+            />
+          )}
 
           {/* ⛔ Показується лише для ПОРОЖНЬОЇ чернетки: клон бере рівень із
               джерела, і поле вводу поруч із обраним джерелом обіцяло б вибір,
@@ -727,26 +826,43 @@ export function MethodologyVersionsPage(): JSX.Element {
               }
             />
 
-            {editing.resultType === 'Number' && (
-              <Select
-                label={t('methodologies.outputUnit')}
-                description={t('methodologies.outputUnitHint')}
-                placeholder={t('methodologies.noUnit')}
-                clearable
-                searchable
-                value={editing.outputUnitId === null ? null : String(editing.outputUnitId)}
-                data={(units.data ?? []).map((unit) => ({
-                  value: String(unit.id),
-                  label: unit.code,
-                }))}
-                onChange={(value) =>
-                  setEditing({
-                    ...editing,
-                    outputUnitId: value === null ? null : Number(value),
-                  })
-                }
-              />
-            )}
+            {/*
+             * ⛔ `GET /api/v1/units` збирався через `?? []`, і його відмова
+             * давала перелік із нуля варіантів (`D15-00`, L10). Прочитання
+             * порожнечі тут однозначне й хибне: плейсхолдер каже «без одиниці»,
+             * тож людина читає «жодної одиниці в системі не заведено» — і
+             * зберігає ЧИСЛОВУ формулу безрозмірною. Сервер таку формулу
+             * приймає (`outputUnitId` необов'язковий), тож помилка не
+             * спливає ніде: вимір — властивість числа (`ФВ-16.6`), і число без
+             * нього доїжджає до звіту як є.
+             *
+             * ⚠ Перелік не малюється зовсім: вимкнений `Select` із нулем
+             * варіантів однаково виглядав би як факт про світ.
+             */}
+            {editing.resultType === 'Number' &&
+              (units.error !== null ? (
+                <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
+              ) : (
+                <Select
+                  label={t('methodologies.outputUnit')}
+                  description={t('methodologies.outputUnitHint')}
+                  placeholder={t('methodologies.noUnit')}
+                  clearable
+                  searchable
+                  disabled={units.isPending}
+                  value={editing.outputUnitId === null ? null : String(editing.outputUnitId)}
+                  data={(units.data ?? []).map((unit) => ({
+                    value: String(unit.id),
+                    label: unit.code,
+                  }))}
+                  onChange={(value) =>
+                    setEditing({
+                      ...editing,
+                      outputUnitId: value === null ? null : Number(value),
+                    })
+                  }
+                />
+              ))}
 
             <Button
               disabled={
@@ -898,6 +1014,15 @@ export function MethodologyVersionsPage(): JSX.Element {
           </Stack>
         )}
       </Modal>
+
+      {versionDeletion.dialog}
+
+      <VersionDiffModal
+        methodologyId={methodologyId}
+        versions={all}
+        target={compareTarget}
+        onClose={() => setCompareTarget(null)}
+      />
     </Stack>
   );
 }

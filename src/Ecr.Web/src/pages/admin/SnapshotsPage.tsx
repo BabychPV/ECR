@@ -1,5 +1,19 @@
 import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, NumberInput, ScrollArea, Select, Table, Text } from '@mantine/core';
+import {
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Group,
+  Modal,
+  ScrollArea,
+  Select,
+  Stack,
+  Switch,
+  Table,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -14,9 +28,24 @@ import type {
 import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { ReportDefinitionsModal } from '@/features/reports/ReportDefinitionsModal';
+import { snapshotExportUrl } from '@/features/reports/api';
+import { SnapshotFormatBadge } from '@/features/reports/SnapshotFormatBadge';
+import {
+  NoParameters,
+  defaultDraft,
+  missingRequired,
+  readReportParameters,
+  toParametersBody,
+  type ParameterDraft,
+  type ParameterValue,
+  type ReportParameterDeclaration,
+} from '@/features/reports/parameters';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -26,6 +55,22 @@ import { localized } from '@/shared/i18n/localized';
 
 // ⚠ За `import()`: бюджет маршруту тісний, а рядки зрізу відкривають рідко.
 const SnapshotRowsModal = lazy(() => import('@/features/reports/SnapshotRowsModal'));
+
+/**
+ * Поле дати — теж за `import()`, і не заради стилю.
+ *
+ * ⛔ `@mantine/dates` тягне за собою `dayjs`, і зі СТАТИЧНИМ імпортом цей
+ * маршрут важив 259.3 КБ gzip — тобто ламав гейт `D-132` (межа 250; за
+ * `import()` вийшло 245.4).
+ * Поле з'являється лише в діалозі побудови й лише для звіту, що оголосив
+ * параметр типу `Date`; вантажити його всім, хто просто дивиться перелік
+ * зрізів, нема за що — рівно той аргумент, яким винесений Monaco.
+ */
+const DateInput = lazy(async () => {
+  const module = await import('@mantine/dates');
+
+  return { default: module.DateInput };
+});
 
 /**
  * Зрізи регламентної звітності.
@@ -82,10 +127,68 @@ export function SnapshotsPage(): JSX.Element {
   // опублікованою версією. Показати решту означало б пропонувати варіанти,
   // кожен другий з яких відмовляє без пояснення (побудова бере лише
   // `Published`).
+  //
+  // ⛔ `?? []` — лише для «ще їде»: ВІДМОВУ переліку показує `referenceError`
+  // нижче, а не «опублікованих звітів немає» (це була б неправда про дані).
   const buildable = (reportDefs.data ?? []).filter(
     (definition) =>
       definition.isActive && definition.versions.some((v) => v.status === 'Published'),
   );
+
+  // ⛔ `R6`: параметри звіту (`@Name`). Оголошення читаються з `rulesJson`
+  // ОПУБЛІКОВАНОЇ версії — саме її бере побудова
+  // (`IReportDefinitionStore.FindCurrentVersionAsync`), і чернетка опису тут ні
+  // до чого.
+  const selectedDefinition = code === null ? undefined : buildable.find((d) => d.code === code);
+  const publishedVersion = selectedDefinition?.versions.find((v) => v.status === 'Published');
+
+  // ⚠ Доки звіт не обрано, питання «які в нього параметри» не стоїть — це не
+  // «прочитати не вдалося». Кнопку побудови й так тримає `code === null`.
+  const parameters =
+    code === null ? NoParameters : readReportParameters(publishedVersion?.rulesJson);
+
+  // ⛔ Чернетка тримається РАЗОМ із кодом звіту, а не окремим станом, який
+  // скидає ефект: ефект виконується ПІСЛЯ рендера, тобто існував би кадр, у
+  // якому поля вже від нового звіту, а значення ще від старого — і саме такий
+  // кадр поїхав би в запит, натисни людина побудову досить швидко.
+  const [draft, setDraft] = useState<{ code: string | null; values: ParameterDraft }>({
+    code: null,
+    values: {},
+  });
+
+  const values =
+    draft.code === code
+      ? draft.values
+      : defaultDraft(parameters.kind === 'declared' ? parameters.items : []);
+
+  const setValue = (name: string, value: ParameterValue): void =>
+    setDraft({ code, values: { ...values, [name]: value } });
+
+  /*
+   * ⛔ Деградація в бік ЗАБОРОНИ (`D15` §0, `L10`). Два стани блокують
+   * побудову, і причини в них РІЗНІ:
+   *   - оголошення прочитати не вдалося — побудова наосліп або впаде `422`,
+   *     або пройде без параметра й дасть зріз, який виглядає нормальним;
+   *   - обов'язковий параметр без значення — сервер однаково відмовить `422`,
+   *     але дізнатися про це з екрана ДО кліку дешевше, ніж із невдалої задачі.
+   *
+   * ⚠ «Параметрів немає» — ТРЕТІЙ стан, і він нічого не блокує.
+   */
+  const blockedReason =
+    parameters.kind === 'unreadable'
+      ? 'snapshots.parametersUnknown'
+      : missingRequired(parameters.items, values).length > 0
+        ? 'snapshots.parametersBlocked'
+        : null;
+
+  // Довідники сторінки (проєкти у фільтрі, описи звітів у двох вікнах): їхня
+  // відмова — банер над переліком; сам перелік зрізів від них не залежить.
+  const referenceError = projects.error ?? reportDefs.error;
+
+  const retryReferences = (): void => {
+    if (projects.error !== null) void projects.refetch();
+    if (reportDefs.error !== null) void reportDefs.refetch();
+  };
 
   const snapshots = useQuery({
     queryKey: ['snapshots', projectId, periodKey],
@@ -108,11 +211,18 @@ export function SnapshotsPage(): JSX.Element {
   const [jobId, setJobId] = useState<string | null>(null);
 
   const build = useMutation({
-    mutationFn: () =>
-      apiEnqueue(`/api/v1/reports/${encodeURIComponent(code ?? '')}/build`, {
+    mutationFn: () => {
+      // ⚠ Поле `parameters` з'являється в тілі ЛИШЕ коли параметри оголошені:
+      // для звіту без них запит лишається побайтно таким, яким був до `R6`.
+      const declared = parameters.kind === 'declared' ? parameters.items : [];
+      const body = toParametersBody(declared, values);
+
+      return apiEnqueue(`/api/v1/reports/${encodeURIComponent(code ?? '')}/build`, {
         projectId: projectId ?? 0,
         periodKey: buildPeriod,
-      } satisfies BuildSnapshotRequest),
+        ...(body === undefined ? {} : { parameters: body }),
+      } satisfies BuildSnapshotRequest);
+    },
     onSuccess: (job) => {
       setJobId(job.jobId);
       setBuilding(false);
@@ -195,16 +305,22 @@ export function SnapshotsPage(): JSX.Element {
               onChange={(value) => setProjectId(value === null ? null : Number(value))}
             />
 
-            <NumberInput
-              size="xs"
-              miw={110}
-              label={t('documents.period')}
-              value={periodKey ?? ''}
-              onChange={(value) => setPeriodKey(typeof value === 'number' ? value : null)}
-            />
+            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+                `periodKey` тут — САМ фільтр (може лишатися `null` — «без
+                періоду», запит до `/api/v1/reports/snapshots` тоді йде без
+                параметра); `setPeriodKey` уже приймає `number | null`, тож
+                підставляється напряму, без обгортки `typeof`. */}
+            <PeriodPicker size="xs" miw={110} value={periodKey} onChange={setPeriodKey} />
 
+            {/* ⛔ Вікно описів на відмові показало б «описів немає» — і запросило б
+                завести дублікат. Вимкнено, доки перелік не приїде. */}
             {can(session.data, 'Report.EditDefinition') && (
-              <Button size="xs" variant="default" onClick={() => setManaging(true)}>
+              <Button
+                size="xs"
+                variant="default"
+                disabled={reportDefs.error !== null}
+                onClick={() => setManaging(true)}
+              >
                 {t('reportDefs.manage')}
               </Button>
             )}
@@ -217,6 +333,8 @@ export function SnapshotsPage(): JSX.Element {
           </Group>
         }
       />
+
+      <ErrorAlert error={referenceError} onRetry={retryReferences} />
 
       <AsyncBoundary<ReportSnapshotSummary[]>
         isPending={snapshots.isPending}
@@ -274,6 +392,38 @@ export function SnapshotsPage(): JSX.Element {
                       >
                         {t('snapshots.viewRows')}
                       </Button>
+
+                      {/*
+                        ⛔ Посилання, а не `fetch` із кнопки: вивантаження
+                        автентифікується тією самою cookie, що й сторінка, тож
+                        браузер завантажує книгу сам (`snapshotExportUrl` — це
+                        URL-білдер, не запит). Кнопка, яка тягла б файл у
+                        пам'ять і віддавала його `Blob`-посиланням, додала б
+                        крок, який нічого не вирішує.
+
+                        ⚠ Право `Report.Export` — окреме від перегляду рядків:
+                        книга виходить за межі системи, і той, хто може
+                        подивитися зріз на екрані, не обов'язково може винести
+                        його назовні.
+
+                        ⚠ Межа Excel названа ПОРУЧ із дією, а не у довідці:
+                        числа в книзі мають 15 значущих цифр, і той, хто звіряє
+                        до останнього знаку, мусить дізнатися про це ДО
+                        вивантаження, а не після. Для звірки без утрат лишається
+                        перегляд рядків поруч.
+
+                        ⚠ Межа — `Hint`, а не `title`: посилання вже в порядку
+                        табуляції, тож опис прив'язано до нього самого
+                        (`aria-describedby`) і показано на фокусі — кнопка «i»
+                        поруч додала б другу зупинку заради того самого тексту.
+                      */}
+                      {can(session.data, 'Report.Export') && (
+                        <Hint label={t('snapshots.exportHint')}>
+                          <Anchor size="xs" href={snapshotExportUrl(snapshot.id)} download>
+                            {t('snapshots.export')}
+                          </Anchor>
+                        </Hint>
+                      )}
                     </Group>
                   </Table.Td>
                   <Table.Td>
@@ -285,7 +435,13 @@ export function SnapshotsPage(): JSX.Element {
                         каталогу (`status.snapshot.*`), а `miw="fit-content"`
                         (UI-аудит-пас 8, lane6, п.9) тепер живе в самому
                         `StatusBadge`, а не на сторінці. */}
-                    <StatusBadge kind="snapshot" state={snapshot.status} />
+                    {/* ⚠ Формат чисел (2026-09-21): поданий зріз не
+                        перебудовується, тож старий показує менше знаків —
+                        позначка каже, що це формат, а не дефект. */}
+                    <Group gap="xs" wrap="nowrap">
+                      <StatusBadge kind="snapshot" state={snapshot.status} />
+                      <SnapshotFormatBadge format={snapshot.hashFormat} />
+                    </Group>
                   </Table.Td>
                   <Table.Td>
                     {/* ⛔ Контрольна сума показується цілком, а не обрізаною:
@@ -316,7 +472,7 @@ export function SnapshotsPage(): JSX.Element {
           label={t('snapshots.code')}
           description={t('snapshots.codeHint')}
           placeholder={t('snapshots.pickReport')}
-          nothingFoundMessage={t('snapshots.noPublished')}
+          nothingFoundMessage={reportDefs.isSuccess ? t('snapshots.noPublished') : null}
           data={buildable.map((definition) => ({
             value: definition.code,
             label: `${localized(definition.nameL10n) || definition.code} (${definition.code})`,
@@ -326,18 +482,57 @@ export function SnapshotsPage(): JSX.Element {
           data-autofocus
         />
 
-        {buildable.length === 0 && (
+        {/* ⛔ «Опублікованих немає» — твердження про ДАНІ; на відмові (і поки
+            перелік їде) його казати не можна. */}
+        <ErrorAlert error={reportDefs.error} onRetry={retryReferences} />
+
+        {reportDefs.isSuccess && buildable.length === 0 && (
           <Text size="xs" c="dimmed" mt="xs">
             {t('snapshots.noPublished')}
           </Text>
         )}
 
-        <NumberInput
-          mt="sm"
-          label={t('documents.period')}
-          value={buildPeriod}
-          onChange={(value) => setBuildPeriod(typeof value === 'number' ? value : buildPeriod)}
-        />
+        {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+            `buildPeriod` — локальний стан діалогу побудови, ніколи не `null`
+            (стартує з `currentPeriodKey()`); `value ?? buildPeriod` зберігає
+            стару поведінку очищеного поля — воно НЕ скидало вибір, а
+            лишало те, що вже було. `PeriodPicker` не має власного `mt`, тож
+            відступ — на обгортці `Box`, як і раніше в цьому діалозі. */}
+        <Box mt="sm">
+          <PeriodPicker
+            value={buildPeriod}
+            onChange={(value) => setBuildPeriod(value ?? buildPeriod)}
+          />
+        </Box>
+
+        {/* ⛔ Поля параметрів — лише коли їх СПРАВДІ оголошено. «Прочитати не
+            вдалося» не малює порожньої секції: порожня секція читається як
+            «параметрів немає», тобто як протилежне твердження. */}
+        {parameters.kind === 'declared' && parameters.items.length > 0 && (
+          <Stack gap="xs" mt="sm">
+            <Text size="sm" fw={600}>
+              {t('snapshots.parameters')}
+            </Text>
+
+            {parameters.items.map((declaration) => (
+              <ParameterField
+                key={declaration.code}
+                declaration={declaration}
+                value={values[declaration.code] ?? null}
+                onChange={(value) => setValue(declaration.code, value)}
+              />
+            ))}
+          </Stack>
+        )}
+
+        {/* ⛔ `AsyncBoundary` тут навмисно НЕ використано: її `<Title order={4}>`
+            всередині модалки рве `heading-order` і валить гейт `a11y`. Причина
+            блокування — текстом, і вона названа, а не «побудова недоступна». */}
+        {blockedReason !== null && (
+          <Text size="xs" c="statusError" mt="sm" role="alert">
+            {t(blockedReason)}
+          </Text>
+        )}
 
         <Text size="xs" c="dimmed" mt="sm">
           {t('snapshots.buildHint')}
@@ -348,7 +543,7 @@ export function SnapshotsPage(): JSX.Element {
             {t('common.cancel')}
           </Button>
           <Button
-            disabled={code === null}
+            disabled={code === null || blockedReason !== null}
             loading={build.isPending}
             onClick={() => build.mutate()}
           >
@@ -373,6 +568,95 @@ export function SnapshotsPage(): JSX.Element {
 }
 
 type SnapshotVerifyResponse = components['schemas']['SnapshotVerifyResponse'];
+
+/**
+ * Поле одного параметра звіту (`R6`).
+ *
+ * ⛔ Вид поля диктує ОГОЛОШЕННЯ, а не здогад: `Boolean` — тумблер, `Date` —
+ * `DateInput` (нижче), локаль і формат яких показ одним текстовим полем на
+ * всі типи загубив би.
+ *
+ * ✎ 2026-09-22: `Number` — теж `TextInput`, а не `NumberInput` (`R6`,
+ * `b0045915`). Сервер тепер приймає значення параметра і числом JSON, і
+ * рядком (крапка, до 16 знаків дробу, пробіли навколо й експонента `1e3`
+ * допустимі) і сам перевіряє формат (`422 ECR-RPT-0422.parameterType`).
+ * `NumberInput` натомість проганяє введене через IEEE-754 ще ДО відправки —
+ * той самий аргумент, що вже для `factor`/`offset` одиниці виміру
+ * (`UnitEditModal.tsx`, `shared/format/decimal.ts`): 16-й знак дробу
+ * `NumberInput` губить, а `1e3` або округлить, або не прийме. Клієнт формату
+ * не перевіряє — лише порожнє обов'язкове поле, як і для `Text`; значення йде
+ * в тіло запиту рядком, без `Number()`.
+ *
+ * ⛔ Дата — `DateInput`, а не `<TextInput type="date">`: нативне поле бере
+ * формат з ОС, а не з локалі продукту (`D15-09`), і той самий запис читався б
+ * як третє вересня в одного користувача і як дев'яте березня в іншого.
+ */
+function ParameterField(props: {
+  declaration: ReportParameterDeclaration;
+  value: ParameterValue;
+  onChange: (value: ParameterValue) => void;
+}): JSX.Element {
+  const { declaration, value } = props;
+
+  // ⚠ Обов'язковість названа СЛОВОМ, а не самою зірочкою: зірочка поруч із
+  // іменем параметра, яке придумав методолог, читається як частина імені.
+  const description = declaration.required ? t('snapshots.parameterRequired') : undefined;
+
+  if (declaration.type === 'Boolean') {
+    return (
+      <Switch
+        label={declaration.code}
+        description={description}
+        checked={value === true}
+        onChange={(event) => props.onChange(event.currentTarget.checked)}
+      />
+    );
+  }
+
+  if (declaration.type === 'Number') {
+    return (
+      <TextInput
+        label={declaration.code}
+        description={description}
+        withAsterisk={declaration.required}
+        inputMode="decimal"
+        value={typeof value === 'string' ? value : ''}
+        onChange={(event) => props.onChange(event.currentTarget.value)}
+      />
+    );
+  }
+
+  if (declaration.type === 'Date') {
+    return (
+      // ⚠ `fallback={null}`: заглушка на місці одного поля форми блимала б
+      // рівно ті мілісекунди, за які їде чанк, і читалася б як збій. Побудову
+      // це не відкриває — обов'язкове поле лишається порожнім, доки поле не
+      // змонтоване, а порожнє обов'язкове тримає кнопку заблокованою.
+      <Suspense fallback={null}>
+        <DateInput
+          label={declaration.code}
+          description={description}
+          withAsterisk={declaration.required}
+          // Формат заданий кодом — однозначний і не залежить від локалі браузера.
+          valueFormat="YYYY-MM-DD"
+          clearable
+          value={value instanceof Date ? value : null}
+          onChange={(next) => props.onChange(next)}
+        />
+      </Suspense>
+    );
+  }
+
+  return (
+    <TextInput
+      label={declaration.code}
+      description={description}
+      withAsterisk={declaration.required}
+      value={typeof value === 'string' ? value : ''}
+      onChange={(event) => props.onChange(event.currentTarget.value)}
+    />
+  );
+}
 
 /**
  * Дія «Перевірити» й її підсумок у рядку зрізу (BE-17).

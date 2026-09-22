@@ -53,6 +53,30 @@ export function unitReferences(error: unknown): UsageResponse | null {
   };
 }
 
+/** Одиниця для правки: зі словниками мов і версією вмісту (BE-15). */
+export type UnitDetail = components['schemas']['UnitDetail'];
+export type UpdateUnitBody = components['schemas']['UpdateUnitRequest'];
+
+/** Одиниця для форми правки; право `Uom.EditCatalog`. */
+export function getUnit(unitId: number): Promise<UnitDetail> {
+  return apiFetch<UnitDetail>(`/api/v1/units/${unitId}`);
+}
+
+/**
+ * Змінює позначення, назву і — поки на одиницю ніщо не посилається — множник
+ * і зсув.
+ *
+ * ⛔ `If-Match` несе `rowVersion` тієї версії, яку ПОКАЗАЛИ людині (той самий
+ * контракт, що `updateDataSource`). Чужа версія — `409 unitChanged`.
+ */
+export function updateUnit(unitId: number, body: UpdateUnitBody, rowVersion: string): Promise<UnitDetail> {
+  return apiFetch<UnitDetail>(`/api/v1/units/${unitId}`, {
+    method: 'PUT',
+    headers: { 'If-Match': `"${rowVersion}"` },
+    body: JSON.stringify(body),
+  });
+}
+
 /**
  * Заводить нову похідну одиницю (UI-аудит, lane 4).
  *

@@ -76,24 +76,48 @@ public sealed class CollectionRunnerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task Зміна_UOM_атрибута_зупиняє_збір_і_позначає_прогін_невдалим()
+    [Trait("Requirement", "ФВ-16.9")]
+    public async Task Зміна_UOM_атрибута_ставить_на_паузу_лише_його_мапінг_а_решта_збирається()
     {
         var world = new World();
         world.Maps.Add(Map(sourceUnitId: KilogramId));
+        var other = EntityFieldMap.ToColumn(SourceEntityId, "other", columnDefId: 8);
+        other.SetUnits(KilogramId, TonneId);
+        world.Maps.Add(other);
 
-        // Джерело повернуло тонни там, де в мапінгу оголошено кілограми.
+        // «tag» повертає тонни там, де оголошено кілограми; «other» — як оголошено.
         world.Source.ReadAsync(Arg.Any<CollectionRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new CollectionResult(
-                [new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "t", "Good")], [], null));
+            .Returns(call => call.ArgAt<CollectionRequest>(0).SourcePath == "tag"
+                ? new CollectionResult([new SourceDataPoint("tag", Now.AddHours(-2), 10m, null, "t", "Good")], [], null)
+                : new CollectionResult([new SourceDataPoint("other", Now.AddHours(-2), 5m, null, "kg", "Good")], [], null));
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => world.Runner.RunAsync(
-                SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None));
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: повернути в SaveAsync кидок `EnsureDeclaredUnit`
+        // — прогін знову падає цілим, і тут червоніє відсутність винятку.
+        await world.Runner.RunAsync(
+            SourceEntityId, Now.AddDays(-1), Now, world.Progress, CancellationToken.None);
 
-        Assert.Equal("ECR-INT-0422", error.ErrorCode);
+        await world.Store.Received(1).PauseForSourceUnitChangeAsync(
+            Arg.Any<int>(), "t", TonneId, Arg.Any<CancellationToken>());
+
+        // Точки «other» записані, точки «tag» — ні: мовчазної конверсії немає.
+        await world.Store.Received().UpsertRawPointsAsync(
+            Arg.Any<long>(), SourceEntityId,
+            Arg.Is<IReadOnlyList<SourceDataPoint>>(p => p.Count == 1 && p[0].SourcePath == "other"),
+            Arg.Any<CancellationToken>());
+        await world.Store.DidNotReceive().UpsertRawPointsAsync(
+            Arg.Any<long>(), Arg.Any<int>(),
+            Arg.Is<IReadOnlyList<SourceDataPoint>>(p => p.Any(x => x.SourcePath == "tag")),
+            Arg.Any<CancellationToken>());
 
         await world.Store.Received().FinishRunAsync(
-            Arg.Any<long>(), "Failed", Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            Arg.Any<long>(), "Degraded", Arg.Is<int>(n => n > 0),
+            Arg.Is<string?>(m => m != null && m.StartsWith("ECR-INT-0422", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+
+        // Інтервал непокритий: після рішення людини його забере наздоганяння.
+        await world.Store.DidNotReceive().WriteCoverageAsync(
+            Arg.Any<long>(), Arg.Any<int>(),
+            Arg.Is<IReadOnlyList<TimeInterval>>(i => i.Count > 0), Arg.Any<CancellationToken>());
     }
 
     [Fact]

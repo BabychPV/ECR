@@ -23,11 +23,15 @@ import { useDisclosure } from '@mantine/hooks';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
+import { canAccessRoute } from './routeAccess';
 import { navRoutes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
+import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
+import { MyTasksLauncher } from '@/features/jobs/MyTasksLauncher';
+import { SearchLauncher } from '@/features/search/SearchLauncher';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
-import { can, useSession } from '@/shared/session/useSession';
+import { useSession } from '@/shared/session/useSession';
 import { isCatalogResolved, language, loadCatalog, t } from '@/shared/i18n';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { BrandMark } from '@/shared/ui/BrandMark';
@@ -178,6 +182,16 @@ export function AppLayout(): JSX.Element {
 
   const me = session.data;
 
+  // Налаштування користувача з сервера (`BE-20`) — лише після входу.
+  // ⚠ Повернене число раніше йшло в `key={preferencesGeneration}` на
+  // `UserMenu` нижче: форсований ремонт, щоб перемикач щільності перечитав
+  // значення, яке приїхало з сервера ПІСЛЯ першого рендера. Хак губив
+  // відкритий стан `Menu` щоразу, коли синхронізація приходила, поки меню
+  // було відкрите. `UserMenu` тепер підписаний на щільність сам
+  // (`useDensity()`, `shared/theme/preferences.ts`) — виклик лишається
+  // лише заради побічного ефекту синхронізації з сервером.
+  usePreferenceSync(me !== undefined);
+
   // Приватний каталог рядків тягнеться після входу і мовою профілю (D-114).
   useEffect(() => {
     if (me === undefined) return;
@@ -320,6 +334,17 @@ export function AppLayout(): JSX.Element {
                   <EndSimulationButton />
                 </>
               )}
+              {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}
+              <SearchLauncher />
+
+              {/* ⛔ «My tasks» (UI-07, UX-09) — БЕЗ перевірки права, навмисно:
+                  директива №15, бекенд §BE-08 — «шухляда «My tasks» у шапці
+                  (усі ролі)». Чужого тут не видно за побудовою: запит іде з
+                  `mine=true`, і власника бере сервер із сеансу, не клієнт із
+                  параметра (`Q-156`). Умова права сховала б перелік саме від
+                  тих, заради кого він існує. У статичному бандлі — лише кнопка
+                  й лічильник; шухляда — динамічним `import()`, як палітра. */}
+              <MyTasksLauncher />
               <UserMenu userName={me.userName ?? '—'} />
             </Group>
           </Group>
@@ -328,10 +353,11 @@ export function AppLayout(): JSX.Element {
         <AppShell.Navbar p="xs">
           <ScrollArea>
             {navRoutes
-              .filter((route) => route.handle.permission === undefined || can(me, route.handle.permission))
+              .filter((route) => canAccessRoute(me, route.handle))
               .map((route) => (
-                // тиснути те, що все одно дасть 403. Той самий фільтр
-                // одночасно захищає прогрів за наміром (`PR nav-arch #5`):
+                // Фільтр ховає пункти навігації, на які немає права: нема
+                // сенсу пропонувати тиснути те, що все одно дасть 403. Той
+                // самий фільтр одночасно захищає прогрів за наміром (`PR nav-arch #5`):
                 // пункту без права тут просто НЕМА в дереві, тож немає й
                 // елемента, на який можна навести курсор/фокус, — прогрів
                 // для нього фізично не може спрацювати. Іконка (`PR

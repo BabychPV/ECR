@@ -232,6 +232,7 @@ public sealed class MethodologyImportResolutionTests
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
         Assert.Contains("бібліотекою", error.Message, StringComparison.Ordinal);
+        Assert.Equal("err.ECR-CALC-0422.publishChecksFailed", error.Details!["messageKey"]);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

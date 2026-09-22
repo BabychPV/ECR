@@ -124,6 +124,25 @@ public sealed class FakeUserStore : IUserStore
         => Task.FromResult(HasDomainAdmin);
 
     /// <inheritdoc />
+    /// <remarks>Лише особисті призначення — як і бойове сховище: групові членства чужих сесій невідомі.</remarks>
+    public Task<int> CountActivePermissionHoldersAsync(
+        string permissionCode, int? exceptUserId, DateTime utcNow, CancellationToken ct)
+    {
+        var rolesWithPermission = Roles
+            .Where(r => r.IsActive && r.Permissions.Contains(permissionCode, StringComparer.Ordinal))
+            .Select(r => r.Code)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var holders = Grants
+            .Where(g => rolesWithPermission.Contains(g.RoleCode))
+            .Select(g => g.UserName)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return Task.FromResult(_users.Count(u =>
+            holders.Contains(u.UserName) && u.IsActive && !u.IsLockedOut(utcNow) && u.Id != exceptUserId));
+    }
+
+    /// <inheritdoc />
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct)
         => Task.FromResult(_users.Find(u => string.Equals(u.WindowsSid, sid, StringComparison.Ordinal)));
 
@@ -231,7 +250,7 @@ public sealed class FakeUserStore : IUserStore
             .Select(u => new UserView(
                 u.Id, u.UserName, u.DisplayName, u.Provider,
                 u.IsActive, u.IsBootstrapAdmin, u.MustChangePassword, u.IsLockedOut(utcNow),
-                u.Email, u.ReceivesAlerts))
+                u.Email, u.ReceivesAlerts, u.LastSignInAt))
             .ToList();
 
         return Task.FromResult(new PagedResult<UserView>(items, NextCursor: null, TotalCount: items.Count));

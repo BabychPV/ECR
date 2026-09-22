@@ -7,6 +7,7 @@ import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { ColumnDto, CreateRowRequest, RegistryDefDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
 import { cellAppearanceOf } from './cellAppearance';
+import { cellDisplay, cellText, isNumericColumn } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
@@ -38,9 +39,19 @@ import { cellsOfSaveError } from './saveErrors';
 import {
   TableCornerAnchor,
   clampSelection,
+  trackFocusedCell,
   trackSelection,
   type GridSelection,
 } from './selection';
+import { publishFocus } from './focusStore';
+import { GridFormulaBar } from './GridFormulaBar';
+import {
+  columnTotals,
+  isTotalsRow,
+  totalsRow,
+  type ColumnTotal,
+  type GridTotalsRow,
+} from './gridTotals';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
@@ -114,6 +125,32 @@ function rowLabelOf(row: TableSliceDto['rows'][number]): string {
  */
 function hasRowLabels(slice: TableSliceDto): boolean {
   return slice.rows.some((row) => row.label !== null && row.label.length > 0);
+}
+
+/**
+ * Переводить індекс колонки СІТКИ (те, що несуть події RevoGrid і читає
+ * `selection.ts` — `GridSelection.anchor.columnIndex`, `SelectionRange.from/
+ * toColumn`) в індекс колонки ДАНИХ (`data.columns`, тобто `slice.columns`).
+ *
+ * ⛔ Коли є підписи рядків, `gridColumns` (нижче) вставляє колонку
+ * `RowLabelProp` ПЕРШОЮ — і зсуває решту колонок на одну позицію праворуч.
+ * `selection.ts` про це не знає навмисно (модуль розбирає сиру подію, без
+ * контексту зрізу — див. коментар над `FocusedCell`): `columnIndex`/`x`/`x1`
+ * там — координати у ВІДРЕНДЕРЕНИХ колонках. Без цього перетворення
+ * `onPaste`/`onCopy` на будь-якій таблиці з підписами рядків (практично всі
+ * форми з фіксованими рядками) працюють зі зсувом на одну колонку праворуч:
+ * та сама категорія дефекту, що аудит §10.1 уже закривав для якоря рядка.
+ *
+ * @returns Індекс у `data.columns`, кламплений до 0. Колонка підпису сама —
+ * `readonly`, тож для неї немає відповідного індексу в `data.columns`; кут
+ * `gridColumnIndex === 0` (сама колонка підпису, коли підписи є) зводиться до
+ * першої колонки ДАНИХ, а не до від'ємного індексу — так вставка в підпис
+ * мовчки нічого туди не пише (`planPaste` однаково працює лише з кодами
+ * `data.columns`), а копіювання з діапазону, що зачіпає підпис, не тягне за
+ * собою зайву колонку даних за межею вибраного.
+ */
+function dataColumnIndexOf(gridColumnIndex: number, data: TableSliceDto): number {
+  return hasRowLabels(data) ? Math.max(0, gridColumnIndex - 1) : gridColumnIndex;
 }
 
 /**
@@ -453,6 +490,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // ⚠ Виділення теж належить ЦЬОМУ зрізу: індекси рядка 50 в іншій таблиці
     // вказують на інші дані, і вставка пішла б від чужого якоря.
     selection.current = null;
+
+    // ⚠ І фокус — з тієї самої причини (`UI-08`): рядок формули показував би
+    // вираз колонки з тим самим номером, але з іншої таблиці.
+    publishFocus(tableInstanceId, periodKey, null);
+
     setWidths(readWidths(tableInstanceId));
     touchHistory();
 
@@ -594,6 +636,24 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     lookupEntriesQueries.forEach((query) => void query.refetch());
   };
 
+  /**
+   * Підсумки колонок — `UI-08`.
+   *
+   * ⛔ Залежить і від `pending`: сума має відповідати тому, що ВИДНО, а
+   * незбережена правка видна одразу. `pending` і так змінюється на кожну
+   * правку (від нього залежить `flags` вище), тож жодного зайвого
+   * перемальовування це не додає — саме тому підсумок і не живе в окремому
+   * стані з власним оновленням.
+   *
+   * ⚠ Від `data` він теж залежить, а `data` після `CL-01…03` не
+   * перезапитується на збереження — тобто лічильник рендерів на `PATCH` цей
+   * рядок не рухає.
+   */
+  const totals = useMemo(
+    () => (data === undefined ? new Map<string, ColumnTotal>() : columnTotals(data, { pending, overrides })),
+    [data, pending, overrides],
+  );
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -606,8 +666,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             requiredInputByCell,
             saveErrorByCell,
             lookupEntriesByRegistryId,
+            totals,
           ),
-    [data, readOnly, flags, widths, requiredInputByCell, saveErrorByCell, lookupEntriesByRegistryId],
+    [
+      data,
+      readOnly,
+      flags,
+      widths,
+      requiredInputByCell,
+      saveErrorByCell,
+      lookupEntriesByRegistryId,
+      totals,
+    ],
   );
 
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
@@ -616,6 +686,34 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rows = useMemo(
     () => (data === undefined ? [] : gridRows(data, overrides)),
     [data, overrides],
+  );
+
+  /**
+   * Закріплений рядок підсумків — `UI-08`.
+   *
+   * ⛔ `pinnedBottomSource` бібліотеки, а не власний `<div>` під сіткою.
+   * Сітка горизонтально прокручується (до 60 колонок), і намальований поруч
+   * рядок лишався б на місці, доки дані їдуть убік, — тобто підписував би
+   * суми не тим колонкам. RevoGrid 4.11 закріплення знизу підтримує
+   * (`pinnedBottomSource` у `@revolist/revogrid/dist/types/components.d.ts`),
+   * і рядок прокручується разом із колонками.
+   *
+   * ⚠ Порожній масив, доки зрізу немає: `undefined` бібліотека читає як
+   * «властивість не задано» і в частині шляхів падає на `.length`.
+   */
+  const pinnedTotals = useMemo<GridTotalsRow[]>(
+    () =>
+      data === undefined || totals.size === 0
+        ? []
+        : [
+            totalsRow(
+              data,
+              totals,
+              t('grid.totalsRowLabel'),
+              hasRowLabels(data) ? RowLabelProp : null,
+            ),
+          ],
+    [data, totals],
   );
 
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
@@ -637,11 +735,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // обрано»: Ctrl+V одразу після завантаження не має падати в нікуди.
       const anchor = selection.current?.anchor ?? TableCornerAnchor;
 
+      // ⛔ `anchor.columnIndex` — індекс у сітці (див. `dataColumnIndexOf`):
+      // на таблиці з підписами рядків без цієї поправки вставка лягала на
+      // одну колонку правіше від тієї, куди справді клацнув оператор.
+      const dataAnchor = {
+        rowIndex: anchor.rowIndex,
+        columnIndex: dataColumnIndexOf(anchor.columnIndex, data),
+      };
+
       const plan = planPaste(
         parseClipboard(text),
         data.rows.map((row) => row.rowKey),
         data.columns.map((column) => column.code),
-        anchor,
+        dataAnchor,
         guardOf(data),
       );
 
@@ -663,10 +769,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         const column = byCode.get(target.columnCode);
         const value = coerce(target.value, column?.dataType);
 
-        if (typeof value === 'number' && column !== undefined) {
-          const fixed = roundToScale(value, column);
+        if (column !== undefined) {
+          // ⛔ Сюди йде СИРИЙ текст буфера, а не `coerce`-нуте число:
+          // `Number(text)` уже втратив би знаки, яких у `decimal(25,16)`
+          // рівно шістнадцять (`rounding.ts`).
+          const fixed = roundToScale(target.value, column);
 
           if (fixed !== null) {
+            // ✎ 2026-09-21: борг закрито. Тут стояло `const applied =
+            // Number(fixed)` з поясненням «сервер десяткове рядком ще не
+            // приймає» — тобто весь рядковий шлях округлення закінчувався
+            // поверненням у `double` за один крок до мережі, і шістнадцятий
+            // знак зникав саме на головному шляху введення. Після `e470777a`
+            // сервер приймає `decimal` рядком, а `PatchCell.value` — `unknown`,
+            // тож рядок їде як є: те, що показано оператору в переліку
+            // «округлено», і те, що лежить у тілі запиту, — один і той самий
+            // текст.
             roundedNow.push({
               rowKey: target.rowKey,
               columnCode: target.columnCode,
@@ -861,19 +979,36 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       if (data === undefined) return;
 
+      // ⛔ `selection.current.range.from/toColumn` — індекси в сітці (див.
+      // `dataColumnIndexOf`): без поправки Ctrl+C на таблиці з підписами
+      // рядків копіював вікно, зсунуте на одну колонку, і за межею вибраного
+      // діапазону міг прихопити зайву колонку.
       const range =
         selection.current === null
           ? null
-          : clampSelection(selection.current.range, data.rows.length, data.columns.length);
+          : clampSelection(
+              {
+                ...selection.current.range,
+                fromColumn: dataColumnIndexOf(selection.current.range.fromColumn, data),
+                toColumn: dataColumnIndexOf(selection.current.range.toColumn, data),
+              },
+              data.rows.length,
+              data.columns.length,
+            );
 
       const rows = range === null ? data.rows : data.rows.slice(range.fromRow, range.toRow + 1);
       const columns =
         range === null ? data.columns : data.columns.slice(range.fromColumn, range.toColumn + 1);
 
       event.preventDefault();
+
+      // ⛔ `cellText`, а не `String(...)`: після `e470777a` десяткове приходить
+      // рядком у масштабі колонки, і `String()` клав би в буфер
+      // `5.0000000000` замість `5` — у КОЖНУ комірку аркуша, який оператор
+      // потім вставляє в Excel. Число те саме, аркуш — нечитабельний.
       event.clipboardData.setData(
         'text/plain',
-        toClipboard(rows.map((row) => columns.map((column) => String(row.cells[column.code] ?? '')))),
+        toClipboard(rows.map((row) => columns.map((column) => cellText(row.cells[column.code])))),
       );
     },
     [data],
@@ -977,19 +1112,30 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rowSize = useRowHeight();
 
   const gridListenersCleanup = useRef<(() => void)[]>([]);
-  const gridContainerRef = useCallback((node: HTMLDivElement | null) => {
-    for (const cleanup of gridListenersCleanup.current) cleanup();
-    gridListenersCleanup.current = [];
+  const gridContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      for (const cleanup of gridListenersCleanup.current) cleanup();
+      gridListenersCleanup.current = [];
 
-    if (node === null) return;
+      if (node === null) return;
 
-    gridListenersCleanup.current = [
-      installEnterKeyCompat(node),
-      trackSelection(node, (next) => {
-        selection.current = next;
-      }),
-    ];
-  }, []);
+      gridListenersCleanup.current = [
+        installEnterKeyCompat(node),
+        trackSelection(node, (next) => {
+          selection.current = next;
+        }),
+
+        // ⛔ `UI-08`: фокус публікується у СХОВИЩЕ, а не в стан компонента.
+        // Стан тут коштував би перебудови всього опису колонок (`gridColumns`,
+        // до 60 замикань) на кожну стрілку клавіатури; сховище будить рівно
+        // `GridFormulaBar` (`focusStore.ts`).
+        trackFocusedCell(node, (cell) => {
+          publishFocus(tableInstanceId, periodKey, cell);
+        }),
+      ];
+    },
+    [tableInstanceId, periodKey],
+  );
 
   return (
     /*
@@ -1152,10 +1298,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
                 {t('grid.conflictItem', {
                   row: conflict.rowKey,
                   column: conflict.columnCode,
+                  // ⚠ `cellText`, не `String(...)`: чуже значення приходить тим
+                  // самим десятковим рядком, і «їхнє значення 12.4000000000»
+                  // у реченні, за яким людина вирішує «беру їхнє / лишаю
+                  // своє», читалося б як інше число.
                   value:
                     conflict.theirValue === null || conflict.theirValue === undefined
                       ? t('grid.conflictNoValue')
-                      : String(conflict.theirValue),
+                      : cellText(conflict.theirValue),
 
                   // ⚠ `null` означає «невідомо», і воно так і написано словом.
                   // Порожнє місце на цьому рядку читалося б як «ніхто».
@@ -1205,6 +1355,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
+      {/* ⛔ `UI-08`: рядок формули НАД сіткою — там, де він стоїть в Excel і
+          де око шукає «що в комірці, на якій я стою». Під сіткою його
+          закривав би закріплений рядок підсумків. */}
+      {data !== undefined && (
+        <GridFormulaBar
+          tableInstanceId={tableInstanceId}
+          periodKey={periodKey}
+          slice={data}
+          columns={columns}
+          rows={rows}
+          labelProp={RowLabelProp}
+          pending={pending}
+        />
+      )}
+
       <div ref={gridContainerRef} style={{ display: 'contents' }}>
         <RevoGrid
           theme="compact"
@@ -1213,6 +1378,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           resize
           columns={columns}
           source={rows}
+          pinnedBottomSource={pinnedTotals}
           readonly={readOnly}
           onBeforeedit={onBeforeEdit}
           onAfteredit={onAfterEdit}
@@ -1229,7 +1395,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         <List size="sm">
           {rounded.map((cell) => (
             <List.Item key={cellKey(cell.rowKey, cell.columnCode)}>
-              {cell.rowKey} · {cell.columnCode} — {cell.original} → {String(cell.applied)}
+              {cell.rowKey} · {cell.columnCode} — {cell.original} → {cell.applied}
             </List.Item>
           ))}
         </List>
@@ -1302,6 +1468,12 @@ export function gridColumns(
   // `StatesBatchAsync` (`Q-325`, коментар вище) — по одному запиту на кожну
   // з них замість одного на довідник.
   lookupEntriesByRegistryId: ReadonlyMap<number, readonly RegistryEntryDto[]> = new Map(),
+
+  // ⛔ `UI-08`: підсумки потрібні САМІЙ колонці, а не лише рядку моделі —
+  // кількість заповнених комірок їде підказкою на клітинці підсумку. Сума без
+  // «скільки значень її склало» читається як підсумок по ВСІХ рядках колонки,
+  // хоч би скільки з них були порожні.
+  totals: ReadonlyMap<string, ColumnTotal> = new Map(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -1365,11 +1537,61 @@ export function gridColumns(
               lookupCellDisplay(props.value, lookupEntries),
           }),
 
+      /*
+       * ⛔ Показ десяткового (`e470777a`). Доти числова комірка малювалася
+       * тим, що RevoGrid зробить із значення моделі сама, — і це працювало
+       * рівно доти, доки `decimal` був JSON-числом: `JSON.parse` мовчки
+       * прибирав хвостові нулі, тож `5.0000000000` доїжджало як `5`. Тепер
+       * значення приходить РЯДКОМ і малюється як є: оператор бачить
+       * `5.0000000000` у кожній комірці, де ввів `5`.
+       *
+       * ⚠ Формат — `shared/format` і жодного власного правила: `en` →
+       * `1,234.5`, `ru`/`kk` → `1 234,5`. І жодного `Number(...)` на шляху:
+       * шістнадцятий знак має дійти до екрана, а `double` його не тримає.
+       *
+       * ⚠ Лише ПОКАЗ. Редактор RevoGrid бере значення з моделі рядка, а не з
+       * шаблону, тож у полі введення лишається сам запис — і Ctrl+C віддає
+       * його ж (`cellText`, вище), бо групування розрядів Excel прочитав би
+       * як текст.
+       *
+       * ⚠ Колонка `Lookup` сюди не потрапляє: її шаблон уже заданий вище, і
+       * порядок полів це гарантує — `dataType` у них різний.
+       */
+      ...(lookupEntries !== null || !isNumericColumn(column)
+        ? {}
+        : {
+            cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
+          }),
+
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
       // «сюди не вставиться» мають відповідати одним правилом.
-      readonly: ({ model }) => readOnly || !decide(slice, rowKeyOf(model), column).editable,
+      //
+      // ⛔ `UI-08`: рядок підсумків — ЗАВЖДИ лише для читання, і перевіряється
+      // він ПЕРШИМ. Це не «про всяк випадок»: його `__rowKey` у зрізі
+      // відсутній, а `decide()` на невідомому рядку звичайної колонки чесно
+      // віддає «можна» (запис у `cellPermissions` немає — отже дозвіл). Без
+      // цієї перевірки RevoGrid відкрив би редактор на сумі, а `captureEdit`
+      // мовчки викинув би введене — правка, яка виглядає зробленою і нікуди
+      // не доїжджає.
+      readonly: ({ model }) =>
+        isTotalsRow(model) || readOnly || !decide(slice, rowKeyOf(model), column).editable,
 
       cellProperties: ({ model }) => {
+        // ⛔ `UI-08`: підсумок — не комірка документа. Ні станів
+        // (`cellStateOf` рахує їх для рядка, якого в зрізі немає), ні
+        // маркерів помилок, ні підказок про права: усе це стосувалося б
+        // рядка, якого користувач не вводив.
+        if (isTotalsRow(model)) {
+          const total = totals.get(column.code);
+
+          return {
+            'data-grid-totals': 'cell',
+            ...(total === undefined
+              ? {}
+              : { title: t('grid.totalsCellHint', { count: total.count }) }),
+          };
+        }
+
         const rowKey = rowKeyOf(model);
         const state = cellStateOf(slice, rowKey, column, flags, readOnly);
         const key = cellKey(rowKey, column.code);

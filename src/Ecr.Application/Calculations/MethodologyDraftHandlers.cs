@@ -1,4 +1,5 @@
 // src/Ecr.Application/Calculations/MethodologyDraftHandlers.cs
+using System.Globalization;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -41,7 +42,13 @@ public sealed class ListMethodologyVersionsHandler(
 
         var methodology = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Методології {methodologyId} не існує.");
+                "ECR-CALC-0404",
+                $"Методології {methodologyId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.methodology",
+                    ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var versions = await drafts.GetAllVersionsAsync(methodologyId, ct).ConfigureAwait(false);
 
@@ -123,11 +130,19 @@ public sealed class CreateMethodologyVersionHandler(
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException(
-                "ECR-AUTH-0401", "Анонімний запит не створює версій методології.");
+                "ECR-AUTH-0401",
+                "Анонімний запит не створює версій методології.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var methodology = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Методології {methodologyId} не існує.");
+                "ECR-CALC-0404",
+                $"Методології {methodologyId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.methodology",
+                    ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var draft = await BuildAsync(methodology, versionNumber, copyFromVersionId, level, userId, ct)
             .ConfigureAwait(false);
@@ -165,7 +180,13 @@ public sealed class CreateMethodologyVersionHandler(
 
         var source = await drafts.FindVersionAsync(sourceId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {sourceId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {sourceId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = sourceId.ToString(CultureInfo.InvariantCulture),
+                });
 
         // ⚠ Джерело мусить належати ЦІЙ методології. Інакше клон успадкував би
         // формули чужого модуля, лишившись у переліку версій цього — і
@@ -175,7 +196,14 @@ public sealed class CreateMethodologyVersionHandler(
             throw new BusinessRuleException(
                 "ECR-CALC-0409",
                 $"Версія {sourceId} належить методології {source.MethodologyId}, "
-                + $"а не {methodology.Id}: клонувати її сюди не можна.");
+                + $"а не {methodology.Id}: клонувати її сюди не можна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.versionWrongMethodology",
+                    ["versionId"] = sourceId.ToString(CultureInfo.InvariantCulture),
+                    ["sourceMethodologyId"] = source.MethodologyId.ToString(CultureInfo.InvariantCulture),
+                    ["targetMethodologyId"] = methodology.Id.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ Рівень береться з ДЖЕРЕЛА, а не з запиту. Клон, який змінив рівень
@@ -278,7 +306,13 @@ public sealed class SaveMethodologyFormulaHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var existing = await drafts
             .FindFormulaAsync(methodologyVersionId, formulaCode.Value, ct)
@@ -344,11 +378,24 @@ public sealed class DeleteMethodologyFormulaHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var formula = await drafts.FindFormulaAsync(methodologyVersionId, code, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Формули «{code}» у версії {methodologyVersionId} немає.");
+                "ECR-CALC-0404",
+                $"Формули «{code}» у версії {methodologyVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.formula",
+                    ["formulaCode"] = code,
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         version.RemoveFormula(formula);
         drafts.Remove(formula);

@@ -43,7 +43,9 @@ const styles = [
     id: 5,
     code: 'AmountStyle',
     fontName: 'Calibri',
-    fontSize: 11,
+    // ⚠ Рядок, як на дроті: `fontSize` — `decimal` контракту (`e470777a`),
+    // і число тут описувало б відповідь, якої сервер уже не віддає.
+    fontSize: '11',
     isBold: true,
     isItalic: false,
     foregroundArgb: -16777216,

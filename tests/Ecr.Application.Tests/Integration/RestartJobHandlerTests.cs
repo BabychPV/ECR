@@ -56,10 +56,15 @@ public sealed class RestartJobHandlerTests
         _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
             .Returns(new JobStatus(JobId, "Running", 40, null, null));
 
+        // ⛔ Мутаційний доказ (`err.ECR-JOB-0409.notFailed`): прибери
+        // `messageKey` з цього кидка в `RestartJobHandler.HandleAsync` — рівно
+        // це твердження червоніє, ErrorCode лишається тим самим кодом
+        // конфлікту, що й в інших відмовах стану задачі.
         var denied = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(JobId, CancellationToken.None));
 
         Assert.Equal(RestartJobHandler.NotFailedErrorCode, denied.ErrorCode);
+        Assert.Equal("err.ECR-JOB-0409.notFailed", denied.Details!["messageKey"]);
         await _jobs.DidNotReceiveWithAnyArgs().RestartAsync(default!, default);
     }
 
@@ -71,8 +76,11 @@ public sealed class RestartJobHandlerTests
         _jobs.GetStatusAsync("unknown", Arg.Any<CancellationToken>())
             .Returns(new JobStatus("unknown", "Unknown", 0, null, null));
 
-        await Assert.ThrowsAsync<NotFoundException>(
+        var ex = await Assert.ThrowsAsync<NotFoundException>(
             () => Handler().HandleAsync("unknown", CancellationToken.None));
+
+        // Той самий факт, що в `CancelJobHandler`: задачі немає.
+        Assert.Equal("err.ECR-JOB-0404.job", ex.Details!["messageKey"]);
     }
 
     [Fact]
@@ -87,22 +95,31 @@ public sealed class RestartJobHandlerTests
             .Returns(new JobStatus(JobId, "Failed", 0, null, "щось пішло не так"));
         _jobs.RestartAsync(JobId, Arg.Any<CancellationToken>()).Returns(false);
 
-        await Assert.ThrowsAsync<NotFoundException>(
+        var ex = await Assert.ThrowsAsync<NotFoundException>(
             () => Handler().HandleAsync(JobId, CancellationToken.None));
+
+        // ⚠ Той самий тип і код, що «задачі не існує» (`err.ECR-JOB-0404.job`
+        // вище) — інший факт, тому окремий `messageKey`, а не той самий.
+        Assert.Equal("err.ECR-JOB-0404.restartUnavailable", ex.Details!["messageKey"]);
     }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "T10-40")]
-    public async Task Без_ViewHealth_перезапуск_відхиляється()
+    public async Task Без_ViewHealth_чужу_задачу_перезапустити_не_можна()
     {
+        // UX-09: власну задачу автор повторює без права (JobRestartOwnerTests);
+        // чужу — ні. Існування перевіряється ДО права, як у CancelJobHandler.
         _user.UserId.Returns(Viewer);
         _access.BuildProfileAsync(Viewer, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Viewer }.Build());
+        _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(JobId, "Failed", 0, null, "boom"));
+        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(Viewer + 1);
 
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Handler().HandleAsync(JobId, CancellationToken.None));
 
-        await _jobs.DidNotReceiveWithAnyArgs().GetStatusAsync(default!, default);
+        await _jobs.DidNotReceiveWithAnyArgs().RestartAsync(default!, default);
     }
 }

@@ -77,7 +77,13 @@ public sealed class UnitConverter
                 throw new DomainException(
                     "ECR-UOM-0422",
                     $"Явна конверсія описує {explicitConversion.FromUnitId} → {explicitConversion.ToUnitId}, "
-                    + $"а запитано {from.Id} → {to.Id}.");
+                    + $"а запитано {from.Id} → {to.Id}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-UOM-0422.explicitConversionMismatch",
+                        ["from"] = from.Code,
+                        ["to"] = to.Code,
+                    });
             }
 
             return (value * explicitConversion.Factor) + explicitConversion.Offset;
@@ -93,7 +99,15 @@ public sealed class UnitConverter
                 "ECR-UOM-0422",
                 $"Конверсія {from.Code} → {to.Code} неможлива: різні розмірності "
                 + $"({from.DimensionId} і {to.DimensionId}). Потрібен контекстний коефіцієнт, "
-                + "а він належить методології, не довіднику одиниць.");
+                + "а він належить методології, не довіднику одиниць.",
+                new Dictionary<string, object?>
+                {
+                    // Заголовок коду нейтральний (ним же відмовляє множник ≤ 0 на
+                    // зміні одиниці) — причину каже messageKey.
+                    ["messageKey"] = "err.ECR-UOM-0422.incompatibleDimensions",
+                    ["from"] = from.Code,
+                    ["to"] = to.Code,
+                });
         }
 
         // ⛔ Захист СИМЕТРИЧНИЙ — і `from`, і `to`. Перевіряти лише `to` було
@@ -104,14 +118,16 @@ public sealed class UnitConverter
         {
             throw new DomainException(
                 "ECR-UOM-0422",
-                $"Одиниця {from.Code} має нульовий множник переходу до бази: конверсія неможлива.");
+                $"Одиниця {from.Code} має нульовий множник переходу до бази: конверсія неможлива.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-UOM-0422.zeroFactor", ["code"] = from.Code });
         }
 
         if (to.FactorToBase == 0m)
         {
             throw new DomainException(
                 "ECR-UOM-0422",
-                $"Одиниця {to.Code} має нульовий множник переходу до бази: конверсія неможлива.");
+                $"Одиниця {to.Code} має нульовий множник переходу до бази: конверсія неможлива.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-UOM-0422.zeroFactor", ["code"] = to.Code });
         }
 
         // Маршрут через базову одиницю. Зсув потрібен лише температурі, але

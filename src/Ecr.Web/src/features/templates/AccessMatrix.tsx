@@ -1,11 +1,12 @@
 import { useState, type JSX } from 'react';
-import { Alert, Badge, Button, Group, Modal, Table, Text, Tooltip } from '@mantine/core';
+import { Alert, Badge, Button, Group, Modal, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { AccessMatrixCellDto, AccessMatrixDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { Hint } from '@/shared/ui/Hint';
 import { t } from '@/shared/i18n';
 
 /**
@@ -79,13 +80,16 @@ export function AccessMatrix({ templateVersionId }: { templateVersionId: number 
                         {/* ⛔ Позначка стоїть на АРКУШІ, а не на клітинці:
                             правило залежить від даних у кожному періоді
                             однаково, і дванадцять однакових значків читалися б
-                            як дванадцять різних застережень. */}
+                            як дванадцять різних застережень.
+                            ⚠ `Hint` із `focusable`: бейдж не в порядку
+                            табуляції, і під `Tooltip` застереження бачила
+                            лише миша. */}
                         {sheet.dependsOnData && (
-                          <Tooltip label={t('version.accessMatrixDataHint')} multiline w={280}>
+                          <Hint label={t('version.accessMatrixDataHint')} focusable>
                             <Badge ml="xs" size="xs" variant="outline" color="statusWarning">
                               {t('version.accessMatrixData')}
                             </Badge>
-                          </Tooltip>
+                          </Hint>
                         )}
                       </Table.Td>
                       {sheet.cells.map((cell) => (
@@ -117,6 +121,13 @@ export function AccessMatrix({ templateVersionId }: { templateVersionId: number 
  * ⛔ Стан несе **знак**, а не лише колір (`ФВ-14.18`): близько 8 % чоловіків
  * не розрізняють частину кольорів, а матриця з дванадцяти стовпців — саме те
  * місце, де око шукає різницю швидко й помиляється.
+ *
+ * ⚠ Знак — `role="img"` з назвою стану: `aria-label` на голому `<span>`
+ * (роль `generic`) читачі ігнорують. Причина (`detail`) — через `Hint` із
+ * фокусом, бо під `Tooltip` її бачила лише миша. Клітинка без причини
+ * зупинки табуляції НЕ отримує: назва стану вже є в `aria-label`, легенда —
+ * над таблицею, а двісті однакових зупинок у матриці `аркуш × 12` зробили б
+ * її непрохідною з клавіатури.
  */
 function Cell({ cell }: { cell: AccessMatrixCellDto }): JSX.Element {
   const label =
@@ -128,18 +139,25 @@ function Cell({ cell }: { cell: AccessMatrixCellDto }): JSX.Element {
 
   const sign = cell.state === 'Editable' ? '·' : cell.state === 'Partial' ? '◑' : '✕';
 
+  const mark = (
+    <Text
+      span
+      role="img"
+      aria-label={label}
+      c={
+        cell.state === 'Editable' ? 'dimmed' : cell.state === 'Partial' ? 'statusWarning' : 'statusError'
+      }
+      fw={cell.state === 'Editable' ? 400 : 700}
+    >
+      {sign}
+    </Text>
+  );
+
+  if (cell.detail === null || cell.detail === '') return mark;
+
   return (
-    <Tooltip label={cell.detail ?? label} multiline w={280}>
-      <Text
-        span
-        aria-label={label}
-        c={
-          cell.state === 'Editable' ? 'dimmed' : cell.state === 'Partial' ? 'statusWarning' : 'statusError'
-        }
-        fw={cell.state === 'Editable' ? 400 : 700}
-      >
-        {sign}
-      </Text>
-    </Tooltip>
+    <Hint label={cell.detail} focusable>
+      {mark}
+    </Hint>
   );
 }

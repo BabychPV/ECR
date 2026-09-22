@@ -60,6 +60,26 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, BoundTableName>> ListTableNamesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        if (tableDefIds.Count == 0)
+        {
+            return new Dictionary<int, BoundTableName>();
+        }
+
+        var rows = await db.TableDefs
+            .AsNoTracking()
+            .Where(t => tableDefIds.Contains(t.Id))
+            .Select(t => new { t.Id, t.Code, t.NameL10n })
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.ToDictionary(r => r.Id, r => new BoundTableName(r.Code, r.NameL10n));
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> ListColumnCodesAsync(
         IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
     {
@@ -110,6 +130,35 @@ public sealed class CalculationBindingStore(EcrDbContext db) : ICalculationBindi
             .ConfigureAwait(false);
 
         return ids.ToHashSet();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, byte?>> ListOutputScalesAsync(
+        int methodologyId, CancellationToken ct)
+    {
+        var rows = await (
+                from binding in db.CalculationBindings.AsNoTracking()
+                where binding.MethodologyId == methodologyId && binding.IsActive
+                join column in db.ColumnDefs.AsNoTracking()
+                    on binding.ColumnDefId equals column.Id
+                where !column.IsDeleted
+                select new { binding.OutputCode, column.Scale })
+            .Take(MaxBindings)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Порівняння кодів — без урахування регістру: `MethodologyOutput.Code`
+        // і `CalculationBinding.OutputCode` — це той самий `EcrCode`, який
+        // СУБД зіставляє за своїм collation, а .NET за замовчуванням — ні.
+        // Ordinal тут означав би «прив'язки немає» на різниці в одній літері.
+        return rows
+            .GroupBy(r => r.OutputCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+
+                // Колонка без масштабу просить усі знаки — вона й перемагає.
+                g => g.Any(r => r.Scale is null) ? (byte?)null : g.Max(r => r.Scale),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />

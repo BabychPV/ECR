@@ -1,11 +1,15 @@
 import { useEffect } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { showApiError } from '@/shared/ui/notify';
+import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSources';
+import { onBeforeLoginRedirect } from '@/api/client';
+import { recordLostEdits } from './lostEdits';
 import {
   cellKey,
   discardPendingRows,
   hasPending,
   openDocument,
+  pendingCount,
   pendingSlices,
   resetPending,
   subscribePending,
@@ -228,7 +232,7 @@ export function flushAutosave(): void {
  * користувача тиснути «вийти» не читаючи, тобто ламає саме те, заради чого
  * діалог існує.
  */
-export const AutosaveSettleMs = 3_000;
+export const AutosaveSettleMs = UnsavedSettleMs;
 
 /**
  * Зберігає все незбережене і чекає на результат.
@@ -286,6 +290,20 @@ export async function flushAutosaveAndSettle(
 }
 
 /**
+ * Сітка оголошує себе джерелом незбережених змін для `UnsavedGuard`.
+ *
+ * ⚠ На рівні модуля, а не в монтуванні сітки: сховище правок — модульне й
+ * переживає розмонтування сітки (`pendingStore.ts`), тож і джерело мусить
+ * жити стільки ж. Модуль підвантажується разом із будь-якою сторінкою, що
+ * вміє створити правку, — раніше правок бути не може.
+ */
+registerUnsavedSource('grid', {
+  hasUnsaved: hasPending,
+  unsavedCount: pendingCount,
+  flush: flushAutosaveAndSettle,
+});
+
+/**
  * Зберігає безхазяйний зріз від імені ДОКУМЕНТА.
  *
  * ⚠ Результат: успіх — правки зникають зі сховища й лягають у кеш зрізу, тож
@@ -337,8 +355,16 @@ async function saveOrphanSlice(
  * діалог «є незбережені зміни») — крок 3 `D14-12`; цей хук навмисно не
  * вигадує для нього половинчастого рішення.
  */
-export function useDocumentPending(documentId: number): void {
+export function useDocumentPending(documentId: number, ownerUserId?: number): void {
   const queryClient = useQueryClient();
+
+  // ⚠ `401` перезавантажує сторінку, і правки зникають разом із пам'яттю:
+  // зберегти їх уже нема чим, тож лишаємо слід для сторінки входу
+  // (`lostEdits.ts`), прив'язаний до власника.
+  useEffect(
+    () => onBeforeLoginRedirect((from) => recordLostEdits(ownerUserId, from)),
+    [ownerUserId],
+  );
 
   useEffect(() => {
     openDocument(documentId);

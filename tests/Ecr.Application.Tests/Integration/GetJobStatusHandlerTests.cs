@@ -64,6 +64,7 @@ public sealed class GetJobStatusHandlerTests
             () => Handler().HandleAsync(JobId, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("err.ECR-AUTH-0403.jobNotYours", denied.Details!["messageKey"]);
     }
 
     [Fact]

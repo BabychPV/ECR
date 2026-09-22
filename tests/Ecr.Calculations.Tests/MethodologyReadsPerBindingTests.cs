@@ -198,6 +198,7 @@ public sealed class MethodologyReadsPerBindingTests
         services.AddSingleton(metadata);
         services.AddSingleton(units);
         services.AddSingleton(Substitute.For<IConstantStore>());
+        services.AddSingleton(Substitute.For<ICalculationBindingStore>());
         services.AddSingleton(Substitute.For<ICalculationResultStore>());
         services.AddSingleton(Substitute.For<IUnitOfWork>());
         services.AddSingleton<IFormulaEngine, RealFormulaEngine>();

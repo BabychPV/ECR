@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { sameCellValue } from './cellValue';
 import type { PendingEdit } from './useCellPatch';
 
 /**
@@ -152,6 +153,19 @@ export function putPendingEdit(
  * ⚠ Саме рядки, а не комірки: доки patch летів, користувач міг правити ту саму
  * комірку далі, і прибрати «все, що було в запиті» означало б стерти правку,
  * якої сервер не бачив.
+ *
+ * ✎ 2026-09-21. «Правку встигли змінити» звірялося ПОСИЛАННЯМ на об'єкт
+ * (`keepChangedAfter.get(key) !== edit`), і це був не той критерій. Патч
+ * будують і шляхи, які в сховище не пишуть узагалі — вставка з буфера,
+ * undo/redo (`DocumentGrid.applyHistory`), безхазяйний зріз
+ * (`autosave.saveOrphanSlice`): у знімку `sent` там лежать НОВІ об'єкти, тож
+ * будь-яка правка сховища в тому ж рядку виглядала «новішою» і позначку
+ * незбереженої не втрачала, хоч сервер щойно записав те саме значення.
+ *
+ * ⛔ Тепер звіряється ЗНАЧЕННЯ, і саме тому — рядком. Після `e470777a`
+ * `decimal` їде рядком, тож одне й те саме число законно існує як `5`, `'5'` і
+ * `'5.0000000000'`; `!==` (як і `String(a) !== String(b)`) відповів би
+ * «змінилося» на кожну таку пару, і позначка не знімалася б НІКОЛИ.
  */
 export function discardPendingRows(
   tableInstanceId: number,
@@ -167,12 +181,29 @@ export function discardPendingRows(
 
   for (const [key, edit] of current) {
     const sent = rows.has(edit.rowKey);
-    const newer = keepChangedAfter !== undefined && keepChangedAfter.get(key) !== edit;
+    const newer = keepChangedAfter !== undefined && !wasSent(keepChangedAfter.get(key), edit);
 
     if (!sent || newer) next.set(key, edit);
   }
 
   replacePendingSlice(tableInstanceId, periodKey, next);
+}
+
+/**
+ * Чи саме ЦЕ значення сервер щойно прийняв.
+ *
+ * ⛔ Комірки, якої в патчі не було (`sent === undefined`), він не стосується
+ * взагалі — вона лишається незбереженою. Це не те саме, що «значення інше»:
+ * рядок патчу міг нести дві комірки з трьох.
+ *
+ * ⚠ `isEmpty` звіряється окремо від значення: «тут свідомо порожньо» і «стерти
+ * комірку» — різні наміри при однаковому `value: null` (`R-B4`), і зводити їх
+ * до однієї рівності означало б підтвердити не те, що надіслали.
+ */
+function wasSent(sent: PendingEdit | undefined, edit: PendingEdit): boolean {
+  if (sent === undefined) return false;
+
+  return sent.isEmpty === edit.isEmpty && sameCellValue(sent.value, edit.value);
 }
 
 /** Скільки незбережених комірок у ВСЬОМУ документі. */

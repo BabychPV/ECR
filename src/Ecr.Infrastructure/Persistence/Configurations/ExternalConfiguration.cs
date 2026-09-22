@@ -30,6 +30,7 @@ public sealed class DataSourceConfiguration : IEntityTypeConfiguration<DataSourc
         builder.Property(x => x.Catalog).HasColumnName("Catalog").HasMaxLength(200);
         builder.Property(x => x.MaxParallel).HasDefaultValue(4);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
+        builder.Property(x => x.RowVersion).IsRowVersion();
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_DataSource");
     }
 }
@@ -103,6 +104,13 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
         builder.Property(x => x.TargetRowKey).HasMaxLength(100);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
 
+        // ФВ-16.9: позначка «чекає рішення про одиницю». Id без FK навмисно:
+        // одиницю можуть прибрати з довідника до рішення, і тоді «прийняти»
+        // має відповісти 422, а не впасти на зовнішньому ключі.
+        builder.Property(x => x.PendingSourceUnitCode).HasMaxLength(64);
+        builder.Property(x => x.PendingSourceUnitDetectedAt).HasColumnType("datetime2(3)");
+        builder.Ignore(x => x.HasPendingSourceUnitChange);
+
         builder.HasIndex(x => new { x.SourceEntityId, x.SourceField })
                .IsUnique().HasDatabaseName("UQ_EntityFieldMap");
 
@@ -129,11 +137,14 @@ public sealed class CollectionScheduleConfiguration : IEntityTypeConfiguration<C
 
         builder.ToTable("CollectionSchedule", "ext");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.CronExpression).HasMaxLength(100).IsRequired();
+        builder.Property(x => x.CronExpression).HasMaxLength(CollectionSchedule.MaxCronLength).IsRequired();
         builder.Property(x => x.LookbackDays).HasDefaultValue(7);
         builder.Property(x => x.IsEnabled).HasDefaultValue(true);
         builder.Property(x => x.LastRunAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.Watermark).HasColumnType("datetime2(3)");
+        builder.Property(x => x.LastError).HasMaxLength(CollectionSchedule.MaxLastErrorLength);
+        builder.Property(x => x.LastErrorAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.RowVersion).IsRowVersion();
 
         // Один розклад на сутність: два означали б два незалежні watermark, і
         // проміжок між ними не покривав би ніхто.
@@ -157,7 +168,7 @@ public sealed class RawDataPointConfiguration : IEntityTypeConfiguration<RawData
         builder.HasKey(x => x.Id);
         builder.Property(x => x.SourcePath).HasMaxLength(400).IsRequired();
         builder.Property(x => x.Timestamp).HasColumnName("Timestamp").HasColumnType("datetime2(3)");
-        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(34,16)");
         builder.Property(x => x.ValueString).HasMaxLength(1000);
         builder.Property(x => x.Quality).HasMaxLength(32);
         builder.Property(x => x.RetrievedAt).HasColumnType("datetime2(3)").IsRequired();
@@ -284,6 +295,12 @@ public sealed class CollectionRunConfiguration : IEntityTypeConfiguration<Collec
 
         builder.HasOne<SourceEntity>().WithMany().HasForeignKey(x => x.SourceEntityId)
                .HasConstraintName("FK_CRun_Entity");
+
+        // Журнал прогонів (CollectionRunReader): фільтр за сутністю + «новіші першими»
+        // за Id. Без індексу — зворотний скан PK з фільтром після seek.
+        builder.HasIndex(x => new { x.SourceEntityId, x.Id }, "IX_CollectionRun_SourceEntityId_Id")
+               .IsDescending(false, true)
+               .IncludeProperties(x => new { x.StartedAt, x.Status, x.PointsRetrieved, x.FinishedAt });
     }
 }
 
@@ -306,6 +323,10 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
                .HasConstraintName("FK_CCov_Entity");
         builder.HasOne<CollectionRun>().WithMany().HasForeignKey(x => x.CollectionRunId)
                .HasConstraintName("FK_CCov_Run");
+
+        // Деталь прогону: покриття одного прогону в порядку CoveredFrom — seek без сортування.
+        builder.HasIndex(x => new { x.CollectionRunId, x.CoveredFrom }, "IX_CollectionCoverage_CollectionRunId")
+               .IncludeProperties(x => x.CoveredTo);
     }
 }
 
@@ -396,6 +417,11 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         builder.Property(x => x.UpdatedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.Error).HasColumnName("Error").HasMaxLength(2000);
         builder.Property(x => x.HeartbeatAt).HasColumnType("datetime2(3)");
+
+        // BE-08: обидві nullable — наявні рядки лишаються валідними без backfill.
+        builder.Property(x => x.CorrelationId).HasMaxLength(JobProgress.MaxCorrelationIdLength);
+        builder.Property(x => x.CreatedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.ErrorCode).HasMaxLength(JobProgress.MaxErrorCodeLength).IsUnicode(false);
 
         // ⛔ Та сама причина, що й в `IX_Outbox_Claim` (Q-241): прибирання на
         // старті фільтрує саме за парою (State, HeartbeatAt), і без індексу

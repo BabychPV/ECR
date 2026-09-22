@@ -1,10 +1,18 @@
 import { describe as suite, it, expect, beforeAll } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { JSX } from 'react';
 import { describe as report, findViolations } from '@/test/a11y';
 import { describeHits, findKeyLikeText } from '@/test/keyLikeText';
 import { loadCatalog } from '@/shared/i18n';
-import { Shell, Themes, registerA11yFetchMock } from '@/test/__tests__/a11yFixtures';
+import { routes } from '@/app/routes';
+import {
+  ScanShell,
+  Themes,
+  createScanClient,
+  registerA11yFetchMock,
+  settlePage,
+  type ParamRoute,
+} from '@/test/__tests__/a11yFixtures';
 import { LoginPage } from '@/pages/LoginPage';
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
 import { DocumentsPage } from '@/pages/DocumentsPage';
@@ -33,11 +41,25 @@ import { ExpressionsPage } from '@/pages/admin/ExpressionsPage';
  * маршрути не опинилися в одному воркері одночасно й не звели нанівець
  * виграш від паралелізму (`maxWorkers: 2`, `vitest.a11y.config.ts`).
  */
-const Pages: [string, () => JSX.Element][] = [
+/*
+ * ⛔ `/documents/1` — маршрут із параметром, тож рендериться на справжній
+ * адресі ({@link ParamRoute}). Під голим `Shell` `useParams().id` порожній, і
+ * сторінка просила документ `NaN` — тобто сканувалася не на тій адресі, яку
+ * бачить користувач. Див. той самий коментар у `part2`.
+ */
+const Pages: [string, () => JSX.Element, ParamRoute?][] = [
   ['/login', LoginPage],
   ['/change-password', ChangePasswordPage],
   ['/', DocumentsPage],
-  ['/documents/1', DocumentPage],
+  [
+    '/documents/1',
+    DocumentPage,
+    {
+      path: routes.documentDetail.path,
+      entry: '/documents/1',
+      content: () => screen.findByRole('heading', { name: /DOC-0001/ }, { timeout: 10_000 }),
+    },
+  ],
   ['/admin/templates', TemplatesPage],
   ['/admin/expressions', ExpressionsPage],
 ];
@@ -79,12 +101,17 @@ beforeAll(async () => {
 });
 
 suite.each(Themes)('Доступність маршрутів (%s)', (colorScheme) => {
-  it.each(Pages)('ФВ-14.16: %s не має порушень critical і serious', async (_path, Page) => {
+  it.each(Pages)('ФВ-14.16: %s не має порушень critical і serious', async (_path, Page, route) => {
+    const client = createScanClient();
     const { container } = render(
-      <Shell colorScheme={colorScheme}>
+      <ScanShell colorScheme={colorScheme} client={client} route={route}>
         <Page />
-      </Shell>,
+      </ScanShell>,
     );
+
+    // ⚠ Той самий сліпий кут, що й у ФВ-14.9: без очікування axe бачив лише
+    // те, що малюється до першої відповіді (див. `settleQueries`).
+    await settlePage(client, route);
 
     const violations = await findViolations(container);
 
@@ -93,15 +120,21 @@ suite.each(Themes)('Доступність маршрутів (%s)', (colorSchem
 });
 
 suite('Технічні ключі на екрані', () => {
-  it.each(Pages)('ФВ-14.9: %s показує людський текст, а не ключі', async (_path, Page) => {
+  it.each(Pages)('ФВ-14.9: %s показує людський текст, а не ключі', async (_path, Page, route) => {
     await loadCatalog('en', 'public');
     await loadCatalog('en', 'private');
 
+    const client = createScanClient();
     const { container } = render(
-      <Shell colorScheme="light">
+      <ScanShell colorScheme="light" client={client} route={route}>
         <Page />
-      </Shell>,
+      </ScanShell>,
     );
+
+    // ⚠ Див. `settleQueries`: без очікування сторож бачив лише те, що
+    // малюється до першої відповіді. Неактивні вкладки з `keepMounted={false}`
+    // не рендеряться й так — їхній вміст сторож не бачить за визначенням.
+    await settlePage(client, route);
 
     const hits = findKeyLikeText(container);
 

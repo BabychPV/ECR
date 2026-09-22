@@ -19,6 +19,21 @@
  * і виміряна частка різних пікселів залежала б від антиаліасингу, а не від
  * носія.
  */
+/*
+ * ⛔ Порт dev-сервера — свій у кожного стенда (`E2E_WEB_PORT` виставляє
+ * `tools/e2e-stand.ps1`). Раніше він був зашитий 4173 з
+ * `reuseExistingServer: true`, і другий паралельний стенд мовчки підхоплював
+ * Vite першого — а той проксіює `/api` на `ECR_API_URL` ПЕРШОГО стенда, тож
+ * обидва набори писали в одну базу й у той самий документ.
+ *
+ * ⚠ У стенді `reuseExistingServer: false`: зайнятий порт — це відмова, а не
+ * чужий сервер. Без стенда (локальний `npx playwright test`) — як було:
+ * 4173 і підхоплення вже піднятого `npm run dev`.
+ */
+const standWebPort = process.env['E2E_WEB_PORT'];
+const webPort = standWebPort ? Number(standWebPort) : 4173;
+const webUrl = `http://localhost:${webPort}`;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -45,7 +60,7 @@ export default defineConfig({
   reporter: [['list']],
 
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: webUrl,
     trace: 'retain-on-failure',
     screenshot: 'off',
 
@@ -109,9 +124,9 @@ export default defineConfig({
    * змінює кольорів і меж, а саме їх ми й міряємо.
    */
   webServer: {
-    command: 'npm run dev -- --port 4173 --strictPort',
-    url: 'http://localhost:4173',
-    reuseExistingServer: true,
+    command: `npm run dev -- --port ${webPort} --strictPort`,
+    url: webUrl,
+    reuseExistingServer: !standWebPort,
     timeout: 120_000,
   },
 });

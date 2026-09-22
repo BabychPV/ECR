@@ -109,6 +109,175 @@
 ⚠ 500-та (`ECR-SYS-0500`) у перелік не входила й не входить, але її стале
 речення теж тепер їде з каталогу (`err.ECR-SYS-0500.contactAdmin`).
 
+✎ **2026-09-22: конструктор довідника й перемикання master** —
+`RegistryDefinitionHandlers` (16) і `RegistryAdminHandlers` (9) закрито
+повністю, 25 кидків. Заголовки `ECR-REG-0422` і `ECR-REG-0409` стали
+нейтральними: у обох кодів кілька причин, яку саме — каже подробиця.
+
+✎ **2026-09-22: запис довідника й доменні відмови** — `UpsertRegistryEntryHandler`
+(6), `GetRegistryEntriesHandler` (2), `SetEntryValidityHandler` (2),
+`RegistryValue` (8), `RegistryEntryLink` (3), `RegistryRuleDef` (3),
+`RegistryDef` (2) закрито повністю, 26 кидків. Заголовок `ECR-REG-0404` став
+нейтральним («Registry item not found»): ним відмовляють і для довідника,
+запису, поля, правила.
+
+✎ **2026-09-22: документи й проєкти (домен)** — `Project` (3) і `PeriodPolicy`
+(2) закрито повністю, 5 кидків. Заголовки `ECR-PRD-0409` («Period state
+conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтральними. У
+області Documents лишились `ECR-TMPL-0404` про зламаний інваріант метаданих
+(`CreateRowHandler`, `GetTableSliceHandler`, `PatchCellsHandler`) і
+`RecalculateDocumentHandler` — його ключ має вибиратися за причиною разом із
+`RunCalculationHandler` і `RecalculationJob` (спільний `Explain`).
+
+✎ **2026-09-22: відмови перерахунку (`ECR-CALC-4221`)** — ключ вибирається за
+причиною в одному місці, `RecalculationWritePolicy.Reject`, і всі три маршрути
+(проєкт, документ, фонова задача) віддають ту саму подробицю:
+`.periodClosed {period}`, `.sheetsSubmitted {period}`, плюс
+`.approvalReasonRequired` у `RunCalculationHandler`. `RecalculateDocumentHandler`
+і `RecalculationJob` закрито повністю, `RunCalculationHandler` 5 → 3; 4 кидки.
+Заголовок `ECR-CALC-4221` став нейтральним («Recalculation is not allowed»).
+
+✎ **2026-09-22: методологія — авторинг, чернетки, публікація** —
+`MethodologyAuthoringHandlers` (12), `MethodologyDraftHandlers` (8),
+`MethodologyPublishChecks` (2), `MethodologyQueryHandlers` (1),
+`PublishMethodologyHandler` (4), доменні `Methodology` (2) і
+`MethodologyVersion` (3) закрито повністю, 32 кидки; 286 у 81 файлі → 254 у
+74 файлах. `RunCalculationHandler`, `CalculationPlan`, `CalculationOrchestrator`,
+`GenericCalculationModule` і `RecalculationService` в цей зріз свідомо не
+входили — інша частина «Calculations» (рушій, а не конфігуратор методолога).
+- `ECR-CALC-0404`: наявний `.version` {methodologyVersionId} перевикористано у
+  всіх 7 однакових кидках «версії методології не існує»; новий `.methodology`
+  {methodologyId} — методологія-контейнер (3 кидки); новий `.formula`
+  {formulaCode, methodologyVersionId} — видалення неіснуючої формули.
+- `ECR-CALC-0409`: новий `.codeTaken` {code, existingId} — код методології вже
+  зайнято; `.constantVariantsAmbiguous` {constantCode, methodologyVersionId,
+  variantCount} — кілька звужених варіантів константи за тим самим кодом;
+  `.versionWrongMethodology` {versionId, sourceMethodologyId,
+  targetMethodologyId} — джерело клону з чужої методології;
+  `.versionNumberTaken` {version, code} і `.effectiveDateTaken` {version,
+  effectiveFrom} — доменні конфлікти `Methodology`; `.draftRequired` {what,
+  version, status} і два варіанти чужого володіння —
+  `.formulaWrongVersion` {formulaCode, ownerVersionId, versionId} та
+  `.childWrongVersion` {what, code, ownerVersionId, versionId} — спільні
+  перевірки `MethodologyVersion`, використані з десятка місць кожна.
+- `ECR-TMPL-0404.column` {columnDefId} — наявний ключ, перевикористаний для
+  обох кидків «колонки не існує» (обов'язковий вхід, прив'язка виходу).
+- `ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для двох
+  анонімних відмов (створення версії, публікація).
+- Нові одноразові ключі за лічильником, а не повним переліком (перелік їде
+  структурою `Details`, а не English-текстом): `ECR-CALC-0432.undeclaredArguments`
+  {undeclaredCount}, `ECR-CALC-0438.missingColumns` {tableCount},
+  `ECR-CALC-0433.legacyExtensionFunction` {functionCount},
+  `ECR-TMPL-4221.formulaCycle` {cycleLength} — самі переліки (токенів, таблиць,
+  функцій) лишаються в `Details` окремими полями для клієнта, а Detail-речення
+  каже лише «скільки», не «що саме»: показати конкретні формули чи колонки
+  англійською без перекладу самих ідентифікаторів (кодів формул, таблиць)
+  сенсу не мало б.
+- Заголовки кодів не змінювались — усі п'ять уже були нейтральними з
+  попередніх раундів.
+
+✎ **2026-09-22: `RoleAndUserHandlers.cs` — найбільший файл боргу** закрито
+повністю, 23 кидки; 254 у 74 файлах → 231 у 73 файлах. Ролі (перелік,
+створення), користувачі (перелік, створення, ролі, адреса для сповіщень,
+прапорець алертів), межі чинності призначення (ФВ-6.16 — підміна ролі на час
+відпустки).
+- `err.ECR-AUTH-0401.signInRequired` і `err.ECR-AUTH-0403.permission` —
+  наявні ключі, перевикористані на всіх семи парах перевірки автентифікації й
+  права: той самий факт («увійдіть» / «бракує права X»), що вже несуть
+  `PermissionCheck` і половина обробників документів.
+- `err.ECR-REQ-0422.validityOrder` — наявний ключ (`AssignGroupRoleHandler`),
+  перевикористаний для другого з двох кидків `ValidateValidity`: «початок дії
+  пізніше за кінець» — одна причина незалежно від шляху (групове чи особисте
+  призначення).
+- `err.ECR-PWD-0422.tooShort` {minLength} — наявний ключ
+  (`ChangePasswordHandler`), перевикористаний для разового пароля при
+  створенні користувача: «пароль коротший за N символів» не залежить від
+  того, свій він чи виданий адміністратором.
+- `err.ECR-SEC-0404.userNotFound` {userId} — наявний ключ (`BE-12`,
+  адміністрування облікових записів), перевикористаний у `SetUserEmailHandler`
+  і `SetReceivesAlertsHandler` попри різне українське дієслово («не знайдено» /
+  «не існує») — той самий факт.
+- Нові ключі: `err.ECR-SEC-0404.permissionsUnknown` {permissions} і
+  `err.ECR-SEC-0404.rolesUnknown` {roles} — невідомі коди лишаються рядком
+  через кому (самі коди, а не переклад), як і `dangerousRoleNeedsConfirmation`
+  вище; `err.ECR-REQ-0422.validityRoleNotAssigned` {code} — перший із двох
+  кидків `ValidateValidity`; `err.ECR-USR-0422.windowsSidRequired` і
+  `err.ECR-USR-0422.initialPasswordRequired` — без підстановок.
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`, `ECR-AUTH-0403`,
+  `ECR-SEC-0404`, `ECR-USR-0422`, `ECR-REQ-0422` уже були нейтральними
+  (кілька причин під одним кодом) з попередніх раундів.
+
+✎ **2026-09-22: шаблони — правила доступу до періоду й зв'язки між
+таблицями** — `PeriodAccessRuleHandlers` (10) і доменний `PeriodAccessRuleDef`
+(4), `TableRelationHandlers` (8) і доменний `TableRelationDef` (5) закрито
+повністю, 27 кидків; 231 у 73 файлах → 204 у 69 файлах (зріз узятий від
+того самого замiру 254/74, що й запис про `RoleAndUserHandlers.cs` вище, —
+паралельно і без перетину файлів). Найбільша область боргу
+(`src/Ecr.Application/Templates/*` і відповідні сутності
+`src/Ecr.Domain/Entities/Configuration/*`) — цей зріз перший у ній, решта
+файлів області лишається на наступні проходи.
+- `ECR-TMPL-0422.tableNotInVersion` {tableDefId, versionId} — спільний ключ
+  для ДВОХ обробників (`PeriodAccessRuleMapper.EnsureBelongs` і
+  `TableRelationHandler.EnsureBelongs`): той самий факт «таблиця не в цій
+  версії», незалежно від того, яка дія до нього дійшла.
+- `ECR-TMPL-0404.templateVersion` {versionId} — наявний ключ (заведений
+  `Repository<T,TId>.GetAsync`, запис 2026-09-18), перевикористаний для трьох
+  однакових кидків «версії шаблону не існує» в `TableRelationHandlers`.
+- `ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для п'яти
+  кидків «сесія не містить користувача» (Create/Save/Delete правила доступу,
+  Save/Delete зв'язку).
+- Нові ключі: `ECR-TMPL-0422.periodAccessRuleNoTarget`, `.sheetNotInVersion`
+  {sheetDefId, versionId}, `.sourceWindowRequiresColumn`,
+  `.unknownPeriodAccessRuleKind` {ruleKind}, `.relativeWindowOffsetNotPositive`
+  {offset}, `.expressionRequired`, `.relationSelfLink` {relationCode,
+  tableDefId}, `.relationMatchRequired`/`.relationMatchNotObject`/
+  `.relationMatchInvalidJson` {relationCode}, `.relationUnknownOnSourceChange`
+  {onSourceChange}; `ECR-TMPL-0404.periodAccessRule` {ruleId, versionId} і
+  `.tableRelation` {relationCode, versionId}; `ECR-SCHM-0409.
+  templateRelationBreaking` {relationCode} — без `operation` у підстановці:
+  текст однаковий і для зміни, і для видалення зв'язку, дію клієнт знає з
+  методу запиту; `ECR-CFG-0422.hideRetired` — наявний код (уже вживаний
+  `StyleDef`/`EcrCode`), новий ключ для двох кидків «Hide» (конструктор і
+  `SetOutOfWindowBehavior`).
+- Заголовки кодів не змінювались: `ECR-TMPL-0422`/`ECR-TMPL-0404`/
+  `ECR-SCHM-0409`/`ECR-CFG-0422` уже були нейтральними.
+
+✎ **2026-09-22: заведення мапінгу джерела, перегляд і фонові задачі
+інтеграції** — `EntityFieldMapHandlers.cs` (11), `MappingPreviewHandlers.cs`
+(2) і `IntegrationHandlers.cs` (6) закрито повністю, 19 кидків; 204 у 69
+файлах → 185 у 66 файлах.
+- `err.ECR-INT-0404.sourceEntity` — наявний ключ (заведений `BE-21b`),
+  перевикористаний для трьох однакових кидків «сутності джерела не існує»
+  (`CreateEntityFieldMapHandler`, `PreviewMappingHandler`,
+  `CollectFromSourceHandler`): той самий факт незалежно від того, яка дія до
+  нього дійшла.
+- `err.ECR-UOM-0404.unitId` — наявний ключ (`Repository`/`Unit` заміри),
+  перевикористаний для одиниці джерела й одиниці цілі мапінгу (ФВ-16.9): те
+  саме «одиниці з таким id немає в довіднику» незалежно від межі.
+- `err.ECR-AUTH-0401.anonymous` і `err.ECR-AUTH-0403.jobNotYours` — наявні
+  ключі (`BE-08`, `BE-02`/T10-40), перевикористані в `GetJobStatusHandler`:
+  ті самі два факти («увійдіть» / «задача не ваша»), що вже несуть
+  `ListJobsHandler`, `RestartJobHandler` і `CancelJobHandler`.
+- `err.ECR-JOB-0404.job` — наявний ключ (`BE-02`, скасування задачі),
+  перевикористаний у `RestartJobHandler` для того самого факту «задачі не
+  існує».
+- Нові ключі: `err.ECR-REQ-0422.entityFieldMapSourceField`,
+  `.entityFieldMapColumnExtraField`, `.entityFieldMapColumnRequired`,
+  `.entityFieldMapRegistryFieldExtraColumn`,
+  `.entityFieldMapRegistryFieldRequired`, `.entityFieldMapTargetKindUnknown` —
+  валідація команди заведення мапінгу, кожна причина власним реченням;
+  `err.ECR-INT-0405.column` {columnDefId} і `.registryField`
+  {registryFieldDefId} — дві цілі мапінгу, яких немає, під спільним кодом
+  `ECR-INT-0405`; `err.ECR-REQ-0422.mappingPreviewWindow` {fromUtc, toUtc} —
+  перевернуте вікно перегляду; `err.ECR-JOB-0409.notFailed` {jobId, state} і
+  `err.ECR-JOB-0404.restartUnavailable` {jobId} — ручний перезапуск задачі
+  (T10 #40, UX-09): стан не `Failed`, і деталь не пережила перезапуск
+  сервера — два різні факти під тим самим типом винятку в першому випадку і
+  тим самим кодом `ECR-JOB-0404` у другому, що й «задачі не існує».
+- Заголовки кодів не змінювались — `ECR-INT-0404`, `ECR-INT-0405`,
+  `ECR-UOM-0404`, `ECR-AUTH-0401`, `ECR-AUTH-0403`, `ECR-JOB-0404`,
+  `ECR-JOB-0409`, `ECR-REQ-0422` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -121,90 +290,53 @@
 | `src/Ecr.Api/Controllers/TemplateVersionsController.cs` | 2 |
 | `src/Ecr.Application/Audit/GetCellChangesHandler.cs` | 4 |
 | `src/Ecr.Application/Calculations/CalculationPlan.cs` | 1 |
-| `src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs` | 12 |
-| `src/Ecr.Application/Calculations/MethodologyDraftHandlers.cs` | 8 |
-| `src/Ecr.Application/Calculations/MethodologyPublishChecks.cs` | 2 |
-| `src/Ecr.Application/Calculations/MethodologyQueryHandlers.cs` | 1 |
-| `src/Ecr.Application/Calculations/PublishMethodologyHandler.cs` | 9 |
-| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 6 |
+| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 3 |
 | `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/RecalculateDocumentHandler.cs` | 1 |
-| `src/Ecr.Application/Integration/IntegrationHandlers.cs` | 6 |
 | `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
 | `src/Ecr.Application/Projects/ProjectQueryHandlers.cs` | 15 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
-| `src/Ecr.Application/Registries/GetRegistryEntriesHandler.cs` | 2 |
-| `src/Ecr.Application/Registries/RegistryAdminHandlers.cs` | 9 |
-| `src/Ecr.Application/Registries/RegistryDefinitionHandlers.cs` | 16 |
-| `src/Ecr.Application/Registries/SetEntryValidityHandler.cs` | 2 |
-| `src/Ecr.Application/Registries/UpsertRegistryEntryHandler.cs` | 6 |
 | `src/Ecr.Application/Reporting/ReportDefHandlers.cs` | 10 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 2 |
 | `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
 | `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
-| `src/Ecr.Application/Security/RoleAndUserHandlers.cs` | 23 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
-| `src/Ecr.Application/Sources/EntityFieldMapHandlers.cs` | 11 |
-| `src/Ecr.Application/Sources/MappingPreviewHandlers.cs` | 2 |
 | `src/Ecr.Application/Templates/ColumnDefHandlers.cs` | 6 |
 | `src/Ecr.Application/Templates/CreateTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
 | `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/PeriodAccessRuleHandlers.cs` | 10 |
 | `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/TableDefHandlers.cs` | 6 |
-| `src/Ecr.Application/Templates/TableRelationHandlers.cs` | 8 |
 | `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |
-| `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 4 |
+| `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Units/CreateUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
-| `src/Ecr.Calculations/CalculationOrchestrator.cs` | 2 |
-| `src/Ecr.Calculations/ConstantResolver.cs` | 3 |
+| `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
 | `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
-| `src/Ecr.Calculations/MethodologyResolver.cs` | 1 |
-| `src/Ecr.Domain/Entities/Calculations/CalculationRun.cs` | 1 |
-| `src/Ecr.Domain/Entities/Calculations/Methodology.cs` | 3 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyConstant.cs` | 6 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyDependency.cs` | 1 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyFormula.cs` | 3 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyImport.cs` | 1 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyRule.cs` | 1 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs` | 7 |
 | `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/ColumnDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
-| `src/Ecr.Domain/Entities/Configuration/PeriodAccessRuleDef.cs` | 4 |
-| `src/Ecr.Domain/Entities/Configuration/RegistryDef.cs` | 2 |
-| `src/Ecr.Domain/Entities/Configuration/RegistryRuleDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/SheetDef.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/TableDef.cs` | 5 |
-| `src/Ecr.Domain/Entities/Configuration/TableRelationDef.cs` | 5 |
 | `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
-| `src/Ecr.Domain/Entities/Dictionaries/RegistryEntryLink.cs` | 3 |
-| `src/Ecr.Domain/Entities/Dictionaries/RegistryValue.cs` | 8 |
-| `src/Ecr.Domain/Entities/Documents/PeriodPolicy.cs` | 2 |
-| `src/Ecr.Domain/Entities/Documents/Project.cs` | 3 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |
 | `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |
 | `src/Ecr.Domain/Entities/Security/User.cs` | 1 |
 | `src/Ecr.Domain/Services/PeriodCalendar.cs` | 3 |
-| `src/Ecr.Domain/Services/UnitConverter.cs` | 4 |
 | `src/Ecr.Domain/ValueObjects/PeriodKey.cs` | 1 |
 | `src/Ecr.Domain/ValueObjects/RowKey.cs` | 1 |
 | `src/Ecr.Domain/ValueObjects/SiteTimeZone.cs` | 1 |
 | `src/Ecr.Infrastructure/Jobs/QuartzJobScheduler.cs` | 1 |
-| `src/Ecr.Infrastructure/Jobs/RecalculationJob.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/DocumentStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/PeriodStore.cs` | 1 |

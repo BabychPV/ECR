@@ -128,6 +128,7 @@ public sealed class MethodologyPublishTests
         // рахувати нею, а які — попередньою, і VersionOn не має відповіді.
         // У схемі це CK_MV_Published.
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.publishNoEffectiveDate", error.Details!["messageKey"]);
         Assert.Null(_version.EffectiveFrom);
     }
 
@@ -282,11 +283,13 @@ public sealed class MethodologyPublishTests
             () => handler.HandleAsync(
                 1, 202601, new ClosedPeriodApproval(Reviewer, "треба"), CancellationToken.None));
         Assert.Equal("ECR-CALC-0409", own.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.ownRecalculationApproval", own.Details?["messageKey"]);
 
         var blank = await Assert.ThrowsAsync<BusinessRuleException>(
             () => handler.HandleAsync(
                 1, 202601, new ClosedPeriodApproval(Author, "  "), CancellationToken.None));
         Assert.Equal("ECR-CALC-4221", blank.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.approvalReasonRequired", blank.Details?["messageKey"]);
 
         // З погодженням від іншої людини і з причиною — проходить.
         _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
@@ -411,6 +414,7 @@ public sealed class MethodologyPublishTests
             () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.goldenSetDiverged", error.Details!["messageKey"]);
 
         // ⚠ Відмова називає РЕЧОВИНУ, вихід і обидва числа. Сама лічба
         // («знайдено проблем — 1») відправила б методолога перебирати всі

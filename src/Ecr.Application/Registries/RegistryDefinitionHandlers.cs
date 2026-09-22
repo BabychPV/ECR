@@ -41,9 +41,12 @@ public sealed class GetRegistryDefinitionHandler(
             .ConfigureAwait(false);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{code}» не існує.");
+            ?? throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Довідника «{code}» не існує.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code });
 
-        var all = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
+        var all =await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
         var byId = all.ToDictionary(d => d.Id, d => d.Code);
 
         var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
@@ -166,9 +169,12 @@ public sealed class GetRegistryHistoryHandler(
             .ConfigureAwait(false);
 
         var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{code}» не існує.");
+            ?? throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Довідника «{code}» не існує.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code });
 
-        var own = await audit
+        var own =await audit
             .ReadStructureChangesAsync(Types, definition.Id, Limit, ct)
             .ConfigureAwait(false);
 
@@ -265,19 +271,58 @@ public sealed class SaveRegistryDefinitionHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
+        // ⛔ BE-24 крок 2: пряме збереження — це збереження І публікація одним
+        // кроком, тож вимагає і права публікації. Інакше `Registry.Publish`
+        // обходився б цим самим маршрутом.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, PublishRegistryDefinitionHandler.Permission, ct)
+            .ConfigureAwait(false);
 
-        if (string.IsNullOrWhiteSpace(dto.Reason))
+        var userId = RequireUser(currentUser);
+        RequireReason(dto.Reason);
+
+        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+            ?? throw RegistryNotFound(code);
+
+        return await ApplyAsync(definition, dto, "SaveDefinition", userId, ct).ConfigureAwait(false);
+    }
+
+    internal static int RequireUser(ICurrentUser user)
+        => user.UserId
+           ?? throw new AccessDeniedException(
+               "ECR-AUTH-0401",
+               "Анонімний запит не змінює довідники.",
+               new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
+    internal static void RequireReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
         {
             throw new BusinessRuleException(
                 "ECR-REG-0422",
-                "Причина зміни опису обов'язкова: опис змінює те, як читаються вже збережені записи.");
+                "Причина зміни опису обов'язкова: опис змінює те, як читаються вже збережені записи.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.definitionReasonRequired" });
         }
+    }
 
-        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{code}» не існує.");
+    internal static NotFoundException RegistryNotFound(string code)
+        => new(
+            "ECR-REG-0404",
+            $"Довідника «{code}» не існує.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code });
 
+    /// <summary>
+    /// Застосовує повний стан опису, пише журнал і зберігає — однією транзакцією.
+    /// Спільне для прямого збереження і публікації чернетки.
+    /// </summary>
+    /// <param name="definition">Відстежуваний довідник.</param>
+    /// <param name="dto">Поля, правила, причина.</param>
+    /// <param name="operation">Дія в журналі: <c>SaveDefinition</c> або <c>PublishDefinition</c>.</param>
+    /// <param name="userId">Автор.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<int> ApplyAsync(
+        RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId, CancellationToken ct)
+    {
         var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
 
         var before = Snapshot(definition, rules);
@@ -293,7 +338,12 @@ public sealed class SaveRegistryDefinitionHandler(
             throw new BusinessRuleException(
                 "ECR-REG-0422",
                 $"Довідник «{definition.Code}» лишився б без жодного ключового поля: "
-                + "бізнес-ключ запису не було б із чого скласти.");
+                + "бізнес-ключ запису не було б із чого скласти.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.noKeyField",
+                    ["registryCode"] = definition.Code,
+                });
         }
 
         definition.BumpDefinitionVersion();
@@ -320,7 +370,7 @@ public sealed class SaveRegistryDefinitionHandler(
                     EntityType: "cfg.RegistryDef",
                     EntityId: definition.Id,
                     ChangeClass: ChangeClass.Guarded,
-                    Operation: "SaveDefinition",
+                    Operation: operation,
                     OldJson: before,
                     NewJson: after,
                     ChangeReason: dto.Reason,
@@ -357,7 +407,12 @@ public sealed class SaveRegistryDefinitionHandler(
                 "ECR-REG-0422",
                 "Поле довідника не видаляється: на його значення посилаються записи. "
                 + "Зробіть його необов'язковим — історія лишиться читабельною. "
-                + $"Полів у запиті бракує: {dropped.Count.ToString(CultureInfo.InvariantCulture)}.");
+                + $"Полів у запиті бракує: {dropped.Count.ToString(CultureInfo.InvariantCulture)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.fieldRemoved",
+                    ["missingCount"] = dropped.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         foreach (var field in wanted)
@@ -368,7 +423,13 @@ public sealed class SaveRegistryDefinitionHandler(
                 {
                     throw new NotFoundException(
                         "ECR-REG-0404",
-                        $"Поля {id.ToString(CultureInfo.InvariantCulture)} у довіднику «{definition.Code}» немає.");
+                        $"Поля {id.ToString(CultureInfo.InvariantCulture)} у довіднику «{definition.Code}» немає.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-0404.field",
+                            ["fieldId"] = id.ToString(CultureInfo.InvariantCulture),
+                            ["registryCode"] = definition.Code,
+                        });
                 }
 
                 // ⛔ Код і тип наявного поля не змінюються — див. XML-doc
@@ -379,14 +440,24 @@ public sealed class SaveRegistryDefinitionHandler(
                 {
                     throw new BusinessRuleException(
                         "ECR-REG-0422",
-                        $"Код поля «{target.Code}» не змінюється: на нього посилаються вирази і мапінг.");
+                        $"Код поля «{target.Code}» не змінюється: на нього посилаються вирази і мапінг.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-0422.fieldCodeImmutable",
+                            ["fieldCode"] = target.Code,
+                        });
                 }
 
                 if (!string.Equals(target.DataType.ToString(), field.DataType, StringComparison.Ordinal))
                 {
                     throw new BusinessRuleException(
                         "ECR-REG-0422",
-                        $"Тип поля «{target.Code}» не змінюється: він визначає, як читаються вже збережені значення.");
+                        $"Тип поля «{target.Code}» не змінюється: він визначає, як читаються вже збережені значення.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-0422.fieldTypeImmutable",
+                            ["fieldCode"] = target.Code,
+                        });
                 }
 
                 target.Update(field.NameL10n, field.Ordinal, field.IsRequired);
@@ -411,7 +482,13 @@ public sealed class SaveRegistryDefinitionHandler(
             if (!Enum.TryParse<CellDataType>(field.DataType, ignoreCase: false, out var dataType))
             {
                 throw new BusinessRuleException(
-                    "ECR-REG-0422", $"Тип поля «{field.DataType}» не існує.");
+                    "ECR-REG-0422",
+                    $"Тип поля «{field.DataType}» не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-REG-0422.unknownFieldType",
+                        ["dataType"] = field.DataType,
+                    });
             }
 
             var created = new RegistryFieldDef(
@@ -430,7 +507,12 @@ public sealed class SaveRegistryDefinitionHandler(
                 throw new BusinessRuleException(
                     "ECR-REG-0422",
                     $"Нове поле «{field.Code}» не може бути обов'язковим: наявні записи його не мають. "
-                    + "Заведіть його необов'язковим, заповніть і лише тоді вимагайте.");
+                    + "Заведіть його необов'язковим, заповніть і лише тоді вимагайте.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-REG-0422.newFieldRequired",
+                        ["fieldCode"] = field.Code,
+                    });
             }
 
             definition.AddField(created);
@@ -466,7 +548,13 @@ public sealed class SaveRegistryDefinitionHandler(
             if (!Enum.TryParse<ValidationSeverity>(rule.Severity, ignoreCase: false, out var severity))
             {
                 throw new BusinessRuleException(
-                    "ECR-REG-0422", $"Рівень «{rule.Severity}» не існує.");
+                    "ECR-REG-0422",
+                    $"Рівень «{rule.Severity}» не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-REG-0422.unknownSeverity",
+                        ["severity"] = rule.Severity,
+                    });
             }
 
             if (rule.Id is { } id)
@@ -475,7 +563,13 @@ public sealed class SaveRegistryDefinitionHandler(
                 {
                     throw new NotFoundException(
                         "ECR-REG-0404",
-                        $"Правила {id.ToString(CultureInfo.InvariantCulture)} у довіднику «{definition.Code}» немає.");
+                        $"Правила {id.ToString(CultureInfo.InvariantCulture)} у довіднику «{definition.Code}» немає.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-0404.rule",
+                            ["ruleId"] = id.ToString(CultureInfo.InvariantCulture),
+                            ["registryCode"] = definition.Code,
+                        });
                 }
 
                 // ⛔ Вид правила не змінюється: параметри і предикат означають
@@ -485,7 +579,12 @@ public sealed class SaveRegistryDefinitionHandler(
                 {
                     throw new BusinessRuleException(
                         "ECR-REG-0422",
-                        $"Вид правила «{target.Code}» не змінюється: заведіть нове правило потрібного виду.");
+                        $"Вид правила «{target.Code}» не змінюється: заведіть нове правило потрібного виду.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-0422.ruleKindImmutable",
+                            ["ruleCode"] = target.Code,
+                        });
                 }
 
                 target.Update(rule.Expression, severity, rule.MessageL10n, rule.ParametersJson);
@@ -501,7 +600,12 @@ public sealed class SaveRegistryDefinitionHandler(
                 throw new BusinessRuleException(
                     "ECR-REG-0422",
                     $"Виду правила «{rule.RuleKind}» не існує: видів довідникових правил рівно чотири — "
-                    + "RequiredWhen, UniqueWithin, Expression, CrossRegistry.");
+                    + "RequiredWhen, UniqueWithin, Expression, CrossRegistry.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-REG-0422.unknownRuleKind",
+                        ["ruleKind"] = rule.RuleKind,
+                    });
             }
 
             var created = new RegistryRuleDef(

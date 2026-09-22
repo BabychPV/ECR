@@ -68,6 +68,9 @@ public sealed class DataSource : Entity<int>
     public int MaxParallel { get; private set; }
     public bool IsActive { get; private set; }
 
+    /// <summary>Версія рядка: дві правки одного з'єднання не затирають одна одну.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
     /// <summary>Налаштовує транспорт.</summary>
     /// <param name="secondaryEndpoint">Запасна адреса.</param>
     /// <param name="catalog">Каталог джерела.</param>
@@ -79,6 +82,33 @@ public sealed class DataSource : Entity<int>
         SecondaryEndpoint = secondaryEndpoint;
         Catalog = catalog;
         MaxParallel = maxParallel;
+    }
+
+    /// <summary>
+    /// Змінює назву, транспорт, адресу і чи діє джерело (<c>BE-21</c>).
+    /// </summary>
+    /// <param name="name">Назва мовами каталогу.</param>
+    /// <param name="transport">Транспорт.</param>
+    /// <param name="endpoint">Адреса.</param>
+    /// <param name="isActive">Чи збирати з джерела.</param>
+    /// <remarks>
+    /// ⛔ <see cref="Code"/> і <see cref="SecretName"/> сюди не входять. Код —
+    /// природний ключ, на який посилаються сутності збору; ім'я секрету
+    /// виводиться з коду і теж не є полем форми (ФВ-6.11, рішення людини на
+    /// <c>Q15-06</c>: джерела ходять під службовим обліковим записом).
+    ///
+    /// ⚠ Транспорт змінний навмисно: вибір транспорту — налаштування, а не
+    /// гілка коду (ФВ-11.2). Джерело, яке переїхало з RTQP на Web API, інакше
+    /// довелося б заводити наново, втративши його сутності збору.
+    /// </remarks>
+    public void Update(LocalizedText name, ExternalTransport transport, string endpoint, bool isActive)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+
+        NameL10n = name;
+        Transport = transport;
+        Endpoint = endpoint;
+        IsActive = isActive;
     }
 
     /// <summary>Вимикає джерело; збір із нього припиняється.</summary>

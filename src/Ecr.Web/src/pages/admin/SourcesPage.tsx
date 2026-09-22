@@ -3,6 +3,8 @@ import { Badge, Button, Group, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
+import { DataSourcesTable } from '@/features/integration/DataSourcesTable';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
@@ -25,6 +27,16 @@ import { t } from '@/shared/i18n';
  */
 export function SourcesPage(): JSX.Element {
   const session = useSession();
+
+  /*
+   * ⚠ З'єднання (`UI-09`) — СЕКЦІЄЮ під сутностями, а не вкладкою `?tab=`:
+   * обидва переліки потрібні разом (лічильник сутностей у з'єднанні читається
+   * поруч із самими сутностями), а вкладка ховала б один із них.
+   *
+   * ⚠ Секція читає `?panel=`, тобто потребує маршрутизатора. У застосунку він
+   * є завжди; тести, що рендерять цю сторінку, обгортають її в
+   * `MemoryRouter`.
+   */
 
   const sources = useQuery({
     queryKey: ['sources'],
@@ -177,6 +189,17 @@ export function SourcesPage(): JSX.Element {
           }
         />
       }
-    />
+    >
+      <DataSourcesTable />
+
+      {/*
+       * ⚠ Журнал прогонів (ФВ-5.23) — секцією тут, а не власним маршрутом:
+       * право те саме, що вже відкриває цю сторінку (`Integration.View` АБО
+       * `Integration.Manage`), і власний маршрут ввів би новий `labelKey` у
+       * `routes.ts`, якого нема куди дописати в сторожа
+       * `EndpointCoverageTests.RouteLabelKeys` (деталь — `CollectionRunsPanel.tsx`).
+       */}
+      <CollectionRunsPanel />
+    </ListPage>
   );
 }

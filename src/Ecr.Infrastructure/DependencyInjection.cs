@@ -70,22 +70,39 @@ public static class DependencyInjection
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<ITableFillStore, TableFillStore>();
         services.AddScoped<IDocumentListSummaryStore, DocumentListSummaryStore>();
+        services.AddScoped<ICampaignSummaryStore, CampaignSummaryStore>();
+        services.AddSingleton(new Application.Reporting.CampaignProgressPolicy(Math.Max(0,
+            ReadInt(configuration, "Campaign:AtRiskDays", Application.Reporting.CampaignProgressPolicy.DefaultAtRiskDays))));
+
+        // Каталог джерела читають перед екраном: межа коротка, 1–60 с (ФВ-13.13).
+        services.AddSingleton(new Application.Integration.SourceCatalogPolicy(TimeSpan.FromSeconds(Math.Clamp(
+            ReadInt(configuration, "Integration:CatalogTimeoutSeconds", Application.Integration.SourceCatalogPolicy.DefaultTimeoutSeconds),
+            1, 60))));
         services.AddScoped<ITemplateVersionStore, TemplateVersionStore>();
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
+        services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();
+        services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
+        services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
+        services.AddScoped<ISearchStore, SearchStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
         services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IUnitStore, UnitStore>();
+        services.AddScoped<IWhereUsedStore, WhereUsedStore>();
+        services.AddScoped<IUserPreferenceStore, UserPreferenceStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
+        services.AddScoped<IRuleCoverageReader, RuleCoverageReader>();
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();
+        services.AddScoped<IMethodologyVersionDeletionStore, MethodologyVersionDeletionStore>();
         services.AddScoped<IConstantStore, ConstantStore>();
         services.AddScoped<ICalculationResultStore, CalculationResultStore>();
         services.AddScoped<ICalculationBindingStore, CalculationBindingStore>();
@@ -98,9 +115,11 @@ public static class DependencyInjection
         // ⛔ `Database:BulkBatchSize`, не `Sql:BulkBatchSize` (`S-11`). Тут
         // розбіжність коштувала найдорожче: файл оголошує 50 000, читач із
         // чужим префіксом брав СВІЙ дефолт 5 000, і масове завантаження йшло
-        // вдесятеро дрібнішими пакетами — без жодної ознаки ззовні.
+        // вдесятеро дрібнішими пакетами — без жодної ознаки ззовні. Дефолт
+        // читача тепер дорівнює файлу (50 000): SqlBulkCopy стрімить рядки з
+        // IDataReader, тож розмір пакета — межа транзакції, а не буфер у пам'яті.
         services.AddScoped(_ => new BulkCellLoader(
-            connectionString, ReadInt(configuration, "Database:BulkBatchSize", 5_000)));
+            connectionString, ReadInt(configuration, "Database:BulkBatchSize", 50_000)));
 
         // ⚠ Кеш метаданих — Scoped, а не Singleton, попри те що сам
         // IMemoryCache спільний: MetadataCache тримає EcrDbContext, а той
@@ -120,7 +139,7 @@ public static class DependencyInjection
         // ціною падіння автентифікації не є покращенням.
         //
         // ⚠ Пам'ять натомість тримає СТРОК: кожен запис у `Caching/**` має
-        // абсолютну стелю життя (30 хв метадані й профілі, 15 хв довідники,
+        // абсолютну стелю життя (`Cache:*SlidingMinutes`, 15 хв довідники,
         // 5 с ревізія), тож безмежного зростання немає й без `SizeLimit`.
         // Увімкнення ліміту з `Size` в УСІХ записувачів процесу — окремий
         // крок, і він має починатися з тих двох файлів.
@@ -214,7 +233,8 @@ public static class DependencyInjection
         services.AddScoped<IBackgroundJobScheduler>(sp => new Jobs.QuartzJobScheduler(
             sp.GetService<ISchedulerFactory>(),
             sp.GetService<IJobProgressStore>(),
-            sp.GetService<IClock>()));
+            sp.GetService<IClock>(),
+            sp.GetService<ICorrelationIdAccessor>()));
 
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`
@@ -232,6 +252,7 @@ public static class DependencyInjection
         services.AddScoped<Jobs.ConsistencyCheckJob>();
         services.AddScoped<Jobs.PartitionCheckJob>();
         services.AddScoped<Jobs.ReportRetentionJob>();
+        services.AddScoped<Jobs.ReportSnapshotFormatJob>();
         services.AddScoped<Jobs.NotificationJob>();
 
         // ⚠ Розсилка черги — окремий компонент, бо відправників двоє: зведення
@@ -259,18 +280,55 @@ public static class DependencyInjection
             services.AddSingleton<INotificationSender, Integration.SmtpNotificationSender>();
         }
 
+        // BE-33. ⛔ Перелік хостів вебхука — лише з конфігурації процесу:
+        // порожній перелік означає «жоден вебхук не приймається».
+        services.AddScoped<INotificationStore, Notifications.NotificationStore>();
+        services.AddSingleton<INotificationSecretProtector, Notifications.DataProtectionNotificationSecretProtector>();
+        services.AddSingleton(new Application.Notifications.WebhookUrlPolicy(
+            (configuration["Notifications:WebhookAllowedHostSuffixes"] ?? string.Empty).Split(';', ',')));
+
+        // BE-34. Диспетчер каналів і відправники транспортів.
+        // ⚠ Відправники реєструються як КОЛЕКЦІЯ (`IEnumerable<INotificationChannelSender>`):
+        // диспетчер обирає за транспортом каналу, а незареєстрований транспорт
+        // дає рядок `Failed` у журналі доставок, не тишу.
+        services.AddScoped<INotificationDispatchStore, Notifications.NotificationDispatchStore>();
+        services.AddScoped<Notifications.NotificationDispatcher>();
+        services.AddScoped<INotificationChannelSender, Notifications.TeamsWebhookSender>();
+
+        // ⚠ SMTP-канал іде поверх транспорту ПРОЦЕСУ, вибраного вище: адресатів
+        // дає канал, сервер і облікові дані — конфігурація. Без цього рядка
+        // кожне правило на SMTP-канал лишало б рядок `Failed` «відправника не
+        // зареєстровано» — чесний, але марний.
+        services.AddScoped<INotificationChannelSender, Notifications.SmtpChannelSender>();
+
+        // ⛔ Іменований клієнт, а не `new HttpClient`: власноруч створений тримає
+        // з'єднання після зміни DNS. Таймаут виставляє САМ відправник
+        // (`TeamsWebhookSender.Timeout`) — тут лише реєстрація фабрики, щоб
+        // забута тут лямбда не могла мовчки повернути типові 100 секунд.
+        services.AddHttpClient(Notifications.TeamsWebhookSender.HttpClientName);
+
         // ⚠ Задачі, які use-case називає МАРКЕРОМ, реєструються ще й за ним:
         // `EnqueueAsync<IReportSnapshotJob>` кладе в JobDataMap повне імʼя
         // саме маркера, і без цієї реєстрації адаптер Quartz не знайшов би
         // виконавця — черга приймала б завдання і не робила нічого.
         services.AddScoped<IReportSnapshotJob, Jobs.ReportSnapshotJob>();
         services.AddScoped<ICollectionJob, Jobs.CollectionJob>();
+
+        // ⚠ Та сама задача, що вже зареєстрована по типу вище: нічний розклад
+        // ставить її конкретним класом, а `POST /consistency/run` — маркером
+        // (`BE-30`). Без цього рядка ручний прогін приймався б у чергу й не
+        // виконувався б — черга без виконавця ззовні виглядає як «дуже довго».
+        services.AddScoped<IConsistencyCheckJob, Jobs.ConsistencyCheckJob>();
+
         services.AddScoped<IExcelExportJob, Jobs.ExcelExportJob>();
         services.AddScoped<IExcelImportJob, Jobs.ExcelImportJob>();
 
         // Сховища Етапу 5.
         services.AddScoped<IJobProgressStore, JobProgressStore>();
         services.AddScoped<ICollectionStore, CollectionStore>();
+        services.AddScoped<ICollectionScheduleStore, CollectionScheduleStore>();
+        services.AddScoped<IDataSourceStore, DataSourceStore>();
+        services.AddScoped<ICollectionRunReader, CollectionRunReader>();
         services.AddScoped<Ecr.Application.Sources.IMappingPreviewStore, MappingPreviewStore>();
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();

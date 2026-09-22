@@ -260,6 +260,51 @@ public sealed class ErrorContractTests(SqlServerFixture sql)
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Зайнятий_код_одиниці_повертає_409_а_не_422()
+    {
+        // ⛔ `CreateUnitHandler` кидає `BusinessRuleException("ECR-UOM-4091")`,
+        // і без правила суфікса він доїжджав як 422 «дані невірні».
+        var (status, code) = MapStatus(new Ecr.Application.Errors.BusinessRuleException(
+            "ECR-UOM-4091", "Одиниця «KG» уже існує."));
+
+        Assert.Equal(409, status);
+        Assert.Equal("ECR-UOM-4091", code);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Кожен_код_каталогу_409x_дає_409_з_будь_якого_типу_відмови()
+    {
+        // Сторож: новий `…-0409`/`…-409N` у `ErrorCodes` не може тихо поїхати
+        // як 422 через відсутній арм. Сусіди `…-0422`/`…-4223` — контроль.
+        var codes = typeof(ErrorCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f is { IsLiteral: true } && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToList();
+        var conflicts = codes.Where(c => System.Text.RegularExpressions.Regex.IsMatch(c, @"-(0409|409\d)$")).ToList();
+        Assert.Contains("ECR-UOM-4091", conflicts);
+
+        Assert.All(conflicts, c =>
+        {
+            Assert.Equal(409, MapStatus(new Ecr.Application.Errors.BusinessRuleException(c, "x")).Status);
+            Assert.Equal(409, MapStatus(new Ecr.Domain.Abstractions.DomainException(c, "x")).Status);
+        });
+        Assert.Equal(422, MapStatus(new Ecr.Application.Errors.BusinessRuleException("ECR-UOM-0422", "x")).Status);
+        Assert.Equal(422, MapStatus(new Ecr.Application.Errors.BusinessRuleException("ECR-PRD-4223", "x")).Status);
+    }
+
+    private static (int Status, string Code) MapStatus(Exception exception)
+    {
+        var map = typeof(ExceptionHandlingMiddleware)
+            .GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var (status, code, _, _) =
+            ((int, string, string, IReadOnlyDictionary<string, object?>?))map.Invoke(null, [exception])!;
+        return (status, code);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.8")]

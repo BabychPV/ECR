@@ -38,6 +38,10 @@ export function MappingPreviewPage(): JSX.Element {
     queryFn: () => apiFetch<SourceEntityStatus[]>('/api/v1/sources'),
   });
 
+  // З'єднання обраної сутності: каталог імен живе на з'єднанні, а не на
+  // сутності (`GET /api/v1/data-sources/{id}/catalog`).
+  const dataSourceId = (sources.data ?? []).find((source) => source.id === entityId)?.dataSourceId;
+
   // ⚠ Вікно рахується ОДИН раз на монтування. Інакше кожен рендер зсував би
   // межі на мілісекунди, `queryKey` змінювався б і сторінка перезапитувала б
   // сервер нескінченно.
@@ -82,6 +86,12 @@ export function MappingPreviewPage(): JSX.Element {
       {entityId !== null && (
         <CreateMappingModal
           sourceEntityId={entityId}
+          // ⚠ З'єднання береться з уже завантаженого переліку сутностей —
+          // окремого запиту сторінка не робить. Доки перелік не прийшов,
+          // пропа немає зовсім (`exactOptionalPropertyTypes`: `undefined` у
+          // пропі й відсутній проп — різні речі), і форма лишається без
+          // кнопки каталогу (`ФВ-13.13`).
+          {...(dataSourceId === undefined ? {} : { dataSourceId })}
           opened={createOpened}
           onClose={() => setCreateOpened(false)}
           onCreated={() => void queryClient.invalidateQueries({ queryKey: ['mapping-preview', entityId] })}
@@ -131,7 +141,7 @@ export function MappingPreviewPage(): JSX.Element {
               )}
 
               <MappingGaps preview={data} />
-              <MappingRows preview={data} />
+              <MappingRows preview={data} allowed={can(session.data, 'Integration.Manage')} />
             </>
           )}
         </AsyncBoundary>

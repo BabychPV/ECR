@@ -90,6 +90,12 @@ public sealed class SecurityStampValidator(EcrDbContext db, IMemoryCache cache, 
             && string.Equals(current, stampFromCookie, StringComparison.Ordinal);
     }
 
+    /// <summary>Чинний штамп активного користувача прямо з бази, повз кеш.</summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>null</c> — користувача немає або його вимкнено.</returns>
+    public Task<string?> ReadCurrentAsync(int userId, CancellationToken ct) => ReadStampAsync(userId, ct);
+
     /// <summary>Читає чинний штамп активного користувача.</summary>
     private async Task<string?> ReadStampAsync(int userId, CancellationToken ct)
         => await db.Users

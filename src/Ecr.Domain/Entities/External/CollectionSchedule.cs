@@ -18,6 +18,18 @@ public sealed class CollectionSchedule : Entity<int>
     /// <summary>Скільки днів перекривати назад за замовчуванням.</summary>
     private const int DefaultLookbackDays = 7;
 
+    /// <summary>Ширина стовпця <c>LastError</c>.</summary>
+    public const int MaxLastErrorLength = 400;
+
+    /// <summary>Ширина стовпця <c>CronExpression</c>.</summary>
+    /// <remarks>
+    /// ⚠ Межу перевіряє прикладний шар ДО бази: без неї довший вираз із
+    /// інтерфейсу доїжджав би до <c>SaveChanges</c> і повертався б
+    /// <c>500 SqlException</c> «String or binary data would be truncated» —
+    /// тобто про описку в cron користувач дізнавався б як про аварію сервера.
+    /// </remarks>
+    public const int MaxCronLength = 100;
+
     private CollectionSchedule() { }
 
     /// <summary>Створює розклад.</summary>
@@ -44,6 +56,39 @@ public sealed class CollectionSchedule : Entity<int>
 
     /// <summary>Оптимізація, не стан: втрата не коштує даних.</summary>
     public DateTime? Watermark { get; private set; }
+
+    /// <summary>Чому розклад не поставлено в планувальник; <c>null</c> — поставлено.</summary>
+    /// <remarks>
+    /// ⚠ Це стан ПОСТАНОВКИ, не збору: відмови самого збору живуть у
+    /// <c>itg.CollectionRun</c>. Без поля пропущений на старті розклад було
+    /// видно лише в журналі застосунку — тобто не тому, хто правив cron.
+    /// </remarks>
+    public string? LastError { get; private set; }
+
+    /// <summary>Коли постановка не вдалася.</summary>
+    public DateTime? LastErrorAt { get; private set; }
+
+    /// <summary>Версія рядка: два редактори розкладу не затирають один одного.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
+    /// <summary>Фіксує, що розклад не вдалося поставити.</summary>
+    /// <param name="error">Причина; обрізається до ширини стовпця.</param>
+    /// <param name="utcNow">Момент відмови.</param>
+    public void MarkInvalid(string error, DateTime utcNow)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(error);
+
+        var text = error.Trim();
+        LastError = text.Length <= MaxLastErrorLength ? text : text[..MaxLastErrorLength];
+        LastErrorAt = utcNow;
+    }
+
+    /// <summary>Знімає помилку постановки: розклад поставлено (або знято) успішно.</summary>
+    public void ClearError()
+    {
+        LastError = null;
+        LastErrorAt = null;
+    }
 
     /// <summary>Ставить перекриття назад.</summary>
     /// <param name="days">Скільки днів; від'ємне не має сенсу.</param>

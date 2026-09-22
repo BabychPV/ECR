@@ -322,9 +322,10 @@ public sealed class ImportAtomicityScenarios(SqlServerFixture sql)
     {
         var row = await RowAsync(client, doc.DocumentId, tableInstanceId);
 
+        // ⚠ Комірка приїжджає РЯДКОМ (`D-30`), і сценарій перевіряє значення,
+        // а не форму на дроті.
         return row.GetProperty("cells").TryGetProperty("A", out var cell)
-               && cell.ValueKind == JsonValueKind.Number
-            ? cell.GetDecimal()
+            ? JsonNumber.AsDecimalOrNull(cell)
             : null;
     }
 

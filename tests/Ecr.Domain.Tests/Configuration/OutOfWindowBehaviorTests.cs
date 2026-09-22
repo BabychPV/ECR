@@ -36,6 +36,7 @@ public sealed class OutOfWindowBehaviorTests
 #pragma warning restore CS0618
 
         Assert.Equal("ECR-CFG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CFG-0422.hideRetired", error.Details?["messageKey"]);
     }
 
     [Theory]

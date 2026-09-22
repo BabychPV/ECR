@@ -213,7 +213,7 @@ public sealed class JobCancelTests
     /// </remarks>
     private JobsController Controller() => new(
         new GetJobStatusHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
-        new ListJobsHandler(_jobs, _access, _user),
+        new ListJobsHandler(_jobs, _access, _user, new FakeUiStringCatalog()),
         new RestartJobHandler(_jobs, _access, _user),
         Handler());
 }

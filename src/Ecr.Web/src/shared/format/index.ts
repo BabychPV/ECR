@@ -15,5 +15,6 @@
 
 export { formatLocale } from './locale';
 export { formatDate, formatDateTime, formatTime, type DateLike } from './datetime';
-export { formatNumber } from './number';
+export { formatDecimal, formatNumber } from './number';
 export { formatCount, pluralCategory, type PluralCategory } from './plural';
+export { decimalEquals, normalizeDecimal } from './decimal';

@@ -1,6 +1,8 @@
 // src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs
+using System.Globalization;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Domain.Entities.Calculations;
@@ -158,10 +160,17 @@ public sealed class MethodologyVersion : Entity<int>
         // у ній того, що побачить інший.
         if (publishedByUserId == CreatedByUserId)
         {
+            // Власний messageKey обов'язковий: заголовок коду нейтральний, і без
+            // подробиці людина не дізналась би, що відмовило саме правило D-40.
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"Користувач {publishedByUserId} є автором версії {Version} і не може її опублікувати "
-                + "(правило чотирьох очей, D-40).");
+                + "(правило чотирьох очей, D-40).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.authorCannotPublish",
+                    ["version"] = Version,
+                });
         }
 
         // Причина обов'язкова (ФВ-14.7). Порожній рядок і пробіли — те саме,
@@ -170,7 +179,12 @@ public sealed class MethodologyVersion : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Публікація версії {Version} без причини зміни неможлива (ФВ-14.7).");
+                $"Публікація версії {Version} без причини зміни неможлива (ФВ-14.7).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.publishNoReason",
+                    ["version"] = Version,
+                });
         }
 
         // ⛔ Зелений тест обов'язковий (ФВ-9.12). Тести — це дані з очікуваним
@@ -180,7 +194,12 @@ public sealed class MethodologyVersion : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Публікація версії {Version} без зеленого тесту заборонена (ФВ-9.12).");
+                $"Публікація версії {Version} без зеленого тесту заборонена (ФВ-9.12).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.publishNoGreenTest",
+                    ["version"] = Version,
+                });
         }
 
         EffectiveFrom = effectiveFrom;
@@ -201,10 +220,55 @@ public sealed class MethodologyVersion : Entity<int>
         if (!IsPublished)
         {
             throw new DomainException(
-                "ECR-CALC-0422", $"Версія {Version} не опублікована: виводити з обігу нема чого.");
+                "ECR-CALC-0422",
+                $"Версія {Version} не опублікована: виводити з обігу нема чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.deprecateNotPublished",
+                    ["version"] = Version,
+                });
         }
 
         Status = TemplateVersionStatus.Deprecated;
+    }
+
+    /// <summary>
+    /// Дозволяє видалити версію: лише чернетку, якою ще не рахували (<c>BE-25</c>).
+    /// </summary>
+    /// <param name="usedInCalculations">Чи посилається на версію бодай один результат розрахунку (живий чи архівний).</param>
+    /// <exception cref="DomainException"><c>ECR-CALC-0409</c> із причиною в <c>reason</c>.</exception>
+    /// <remarks>
+    /// «Ніколи не публікувалась» = <see cref="TemplateVersionStatus.Draft"/>: стану,
+    /// що повертав би опубліковану версію в чернетку, немає. Результати перевіряються
+    /// окремо — без них видалена версія лишила б числа, які нічим пояснити.
+    /// </remarks>
+    public void EnsureDeletable(bool usedInCalculations)
+    {
+        if (Status != TemplateVersionStatus.Draft)
+        {
+            throw new DomainException(
+                ErrorCodes.MethodologyConflict,
+                $"Версія {Version} у стані {Status}: видалити можна лише чернетку.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.versionNotDraft",
+                    ["reason"] = Status.ToString(),
+                    ["version"] = Version,
+                });
+        }
+
+        if (usedInCalculations)
+        {
+            throw new DomainException(
+                ErrorCodes.MethodologyConflict,
+                $"Версією {Version} уже рахували: видалити її не можна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.versionUsedInCalculations",
+                    ["reason"] = "UsedInCalculations",
+                    ["version"] = Version,
+                });
+        }
     }
 
     /// <summary>
@@ -540,7 +604,14 @@ public sealed class MethodologyVersion : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"Формула «{formula.Code}» належить версії {formula.MethodologyVersionId}, "
-                + $"а не {Id}: правити її через цю версію не можна.");
+                + $"а не {Id}: правити її через цю версію не можна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.formulaWrongVersion",
+                    ["formulaCode"] = formula.Code,
+                    ["ownerVersionId"] = formula.MethodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                    ["versionId"] = Id.ToString(CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -561,7 +632,15 @@ public sealed class MethodologyVersion : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"{what} «{code}» належить версії {ownerVersionId}, а не {Id}: "
-                + "правити його через цю версію не можна.");
+                + "правити його через цю версію не можна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.childWrongVersion",
+                    ["what"] = what,
+                    ["code"] = code,
+                    ["ownerVersionId"] = ownerVersionId.ToString(CultureInfo.InvariantCulture),
+                    ["versionId"] = Id.ToString(CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -573,7 +652,14 @@ public sealed class MethodologyVersion : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"Версія {Version} у стані {Status}: змінювати {what} не можна. "
-                + "Опублікована версія незмінна — зміна це клон і нове вікно дії (ФВ-13.2).");
+                + "Опублікована версія незмінна — зміна це клон і нове вікно дії (ФВ-13.2).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.draftRequired",
+                    ["what"] = what,
+                    ["version"] = Version,
+                    ["status"] = Status.ToString(),
+                });
         }
     }
 }

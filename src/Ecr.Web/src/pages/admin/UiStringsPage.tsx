@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { SetUiStringRequest, UiStringCatalog, UiStringRevisionResponse } from '@/api/types';
+import { UiStringsCsvPanel } from '@/features/localization/UiStringsCsvPanel';
 import { useLanguages } from '@/shared/i18n/useLanguages';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -291,6 +292,13 @@ export function UiStringsPage(): JSX.Element {
         <ErrorAlert error={languages.error} onRetry={() => void languages.refetch()} />
       )}
 
+      {/* ⛔ `BE-13` ч.2: обмін перекладом через CSV. Редагування по одному полю
+          лишається — воно для виправлення підпису; CSV існує для іншої роботи:
+          віддати тисячу рядків термінологові й прийняти їх назад. Без цього
+          екрана обидві серверні дії були недосяжні, і сторож
+          `Кожна_дія_сервера_має_споживача_в_інтерфейсі` червонів саме на них. */}
+      <UiStringsCsvPanel />
+
       {/* ⚠ `Array.isArray`, а не довіра типові: тип обіцяє компілятор, а не
           мережа, і відповідь іншої форми мала б лишити сторінку без лічильників,
           а не без таблиці. */}
@@ -345,7 +353,9 @@ export function UiStringsPage(): JSX.Element {
 
                 return (
                   <Table.Tr key={key}>
-                    <Table.Td>
+                    {/* ⚠ `data-allow-dotted`: ключ каталогу тут — ДАНІ редактора,
+                        а не неперекладений напис (сторож `ФВ-14.9`, `D-138`). */}
+                    <Table.Td data-allow-dotted>
                       <Text size="xs">{key}</Text>
                     </Table.Td>
                     <Table.Td>{source}</Table.Td>

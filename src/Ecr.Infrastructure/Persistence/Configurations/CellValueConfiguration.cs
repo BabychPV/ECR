@@ -38,7 +38,7 @@ public sealed class CellValueConfiguration : IEntityTypeConfiguration<CellValue>
         builder.Property(x => x.TableDefId).HasColumnName("TableDefId");
 
         builder.Property(x => x.ValueString).HasMaxLength(1000);
-        builder.Property(x => x.ValueNumeric).HasPrecision(28, 10);
+        builder.Property(x => x.ValueNumeric).HasPrecision(34, 16);
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
 
         // ⛔ Директива registry-lookup, PR A1. Той самий прийом, що вже working
@@ -99,7 +99,13 @@ public sealed class CellValueConfiguration : IEntityTypeConfiguration<CellValue>
                .HasConstraintName("FK_CellValue_Unit")
                .OnDelete(DeleteBehavior.Restrict);
 
-        // ⚠ Жодного некластерного індексу. На ~108 млн рядків кожен коштує
-        // гігабайти; усі альтернативні доступи йдуть через doc.DocumentIndexValue.
+        // ⚠ Єдиний некластерний індекс — під підрахунок заповненості
+        // `tables/status` (TableFillStore): вузький (без значень), лише введені
+        // комірки. Виміряно на 2.06 млн комірок: читання 675 → 471, CPU
+        // 109–234 → 63–93 мс, ~44 МБ. PeriodKey першим — вимога 07 (THROW 50031);
+        // розміщення на ps_ByPeriodKey задає міграція BE21CellValueFillIndex.
+        builder.HasIndex(x => new { x.PeriodKeyValue, x.TableRowId, x.ColumnDefId })
+               .HasDatabaseName("IX_CellValue_Fill")
+               .HasFilter("[IsCalculated] = 0");
     }
 }

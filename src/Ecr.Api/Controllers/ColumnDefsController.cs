@@ -18,7 +18,8 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/column-defs")]
 [Authorize]
-public sealed class ColumnDefsController(SearchColumnDefsHandler search) : ControllerBase
+public sealed class ColumnDefsController(
+    SearchColumnDefsHandler search, ColumnUsageHandler usage) : ControllerBase
 {
     /// <summary>Пошук колонок. Право <c>Template.View</c>.</summary>
     /// <param name="q">Підрядок коду чи будь-якого перекладу заголовка; порожній — без фільтра.</param>
@@ -29,4 +30,14 @@ public sealed class ColumnDefsController(SearchColumnDefsHandler search) : Contr
     public async Task<IActionResult> Search(
         [FromQuery] string? q, [FromQuery] int limit, CancellationToken ct)
         => Ok(await search.HandleAsync(q, limit, ct).ConfigureAwait(false));
+
+    /// <summary>Де використовується колонка (ФВ-8.14). Право <c>Template.View</c>.</summary>
+    /// <param name="id">Колонка.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/usage")]
+    [ProducesResponseType<Ecr.Application.Common.UsageResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<Ecr.Application.Common.UsageResponse>> Usage(
+        int id, CancellationToken ct)
+        => Ok(await usage.HandleAsync(id, ct).ConfigureAwait(false));
 }

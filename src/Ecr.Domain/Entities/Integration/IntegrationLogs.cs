@@ -526,6 +526,42 @@ public sealed class JobProgress
     /// </remarks>
     public DateTime? HeartbeatAt { get; private set; }
 
+    /// <summary>Межа стовпця <see cref="CorrelationId"/> — як у <c>aud.*</c> і в <c>X-Correlation-Id</c>.</summary>
+    public const int MaxCorrelationIdLength = 64;
+
+    /// <summary>
+    /// Номер спроби поточного/останнього прогону: 1 — перший запуск, далі +1 на
+    /// кожен автоматичний повтор після збою (BE-08).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>null</c> — задача ще не стартувала або рядок старший за колонку.
+    /// Ручний перезапуск починає нову серію з 1 — так само, як лічильник
+    /// ретраїв Quartz (<c>QuartzJobScheduler.RestartAsync</c>).
+    /// </remarks>
+    public int? Attempt { get; private set; }
+
+    /// <summary>
+    /// Ідентифікатор кореляції: той самий, під яким у лог пишуться запит, що
+    /// поставив задачу, і рядки самої задачі (BE-08).
+    /// </summary>
+    public string? CorrelationId { get; private set; }
+
+    /// <summary>
+    /// Момент ПЕРШОЇ постановки в чергу, UTC (BE-08). Не перезаписується ні
+    /// стартом (<see cref="StartedAt"/> перезаписується), ні ручним перезапуском.
+    /// </summary>
+    /// <remarks>⚠ <c>null</c> — задача за розкладом (її ніхто не ставив) або рядок старший за колонку.</remarks>
+    public DateTime? CreatedAt { get; private set; }
+
+    /// <summary>Код каталогу помилок останнього провалу (BE-08); <c>null</c> — не провалювалась.</summary>
+    public string? ErrorCode { get; private set; }
+
+    /// <summary>Документ, якого стосується задача (BE-08); <c>null</c> — задача не документна.</summary>
+    public long? DocumentId { get; private set; }
+
+    /// <summary>Межа стовпця <see cref="ErrorCode"/>.</summary>
+    public const int MaxErrorCodeLength = 32;
+
     /// <summary>
     /// Підтверджує, що задача досі виконується.
     /// </summary>
@@ -548,12 +584,19 @@ public sealed class JobProgress
     /// не існує — і клієнт, який опитує його одразу, отримує <c>404</c> на
     /// задачу, яку щойно прийняли.
     /// </remarks>
-    public void Queue(DateTime utcNow)
+    /// <param name="correlationId">Кореляція запиту-постановника; <c>null</c> — лишити наявну.</param>
+    /// <param name="documentId">Документ задачі; <c>null</c> — лишити наявний.</param>
+    public void Queue(DateTime utcNow, string? correlationId = null, long? documentId = null)
     {
+        SetCorrelation(correlationId);
+        CreatedAt ??= utcNow;
+        DocumentId = documentId ?? DocumentId;
+        Attempt = null;
         State = "Queued";
         Percent = 0;
         Message = null;
         Error = null;
+        ErrorCode = null;
         UpdatedAt = utcNow;
 
         // ⚠ Биття оновлюється і тут. Задача в черзі ще не має власника, який
@@ -565,12 +608,19 @@ public sealed class JobProgress
 
     /// <summary>Ставить стан «виконується».</summary>
     /// <param name="utcNow">Момент старту в UTC.</param>
-    public void Begin(DateTime utcNow)
+    /// <param name="attempt">Номер спроби, від 1.</param>
+    /// <param name="correlationId">Кореляція прогону; <c>null</c> — лишити наявну.</param>
+    public void Begin(DateTime utcNow, int attempt = 1, string? correlationId = null)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(attempt, 1);
+
+        SetCorrelation(correlationId);
+        Attempt = attempt;
         State = "Running";
         Percent = 0;
         Message = null;
         Error = null;
+        ErrorCode = null;
         StartedAt = utcNow;
         UpdatedAt = utcNow;
         HeartbeatAt = utcNow;
@@ -595,13 +645,32 @@ public sealed class JobProgress
     /// <param name="state">"Succeeded" або "Failed".</param>
     /// <param name="error">Текст помилки при провалі.</param>
     /// <param name="utcNow">Момент завершення в UTC.</param>
-    public void Finish(string state, string? error, DateTime utcNow)
+    /// <param name="errorCode">Код каталогу помилок при провалі (BE-08).</param>
+    public void Finish(string state, string? error, DateTime utcNow, string? errorCode = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(state);
 
+        if (errorCode is not null)
+        {
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(errorCode.Length, MaxErrorCodeLength);
+        }
+
         State = state;
         Error = error;
+        ErrorCode = errorCode;
         UpdatedAt = utcNow;
         Percent = error is null ? 100 : Percent;
+    }
+
+    /// <summary>Ставить кореляцію, якщо її передали; довша за стовпець — відмова, не обрізання.</summary>
+    private void SetCorrelation(string? correlationId)
+    {
+        if (string.IsNullOrWhiteSpace(correlationId))
+        {
+            return;
+        }
+
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(correlationId.Length, MaxCorrelationIdLength);
+        CorrelationId = correlationId;
     }
 }

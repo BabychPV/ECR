@@ -163,6 +163,110 @@ public sealed class UiStringCatalogStore(EcrDbContext db, IMemoryCache memory) :
         return UiStringResolver.ComposeRaw(defaults, requested);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UiStringExportRow>> ListForExportAsync(string languageCode, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(languageCode);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+
+        // Порожній переклад = відсутній, як у ComposeRaw.
+        command.CommandText = """
+            SELECT e.[Key], e.Scope, e.Value, NULLIF(t.Value, N''),
+                   CASE WHEN t.Value <> N'' THEN t.ModifiedAt END
+              FROM sys_ecr.UiString e
+              LEFT JOIN sys_ecr.UiString t ON t.[Key] = e.[Key] AND t.LanguageCode = @lang
+             WHERE e.LanguageCode = @default
+             ORDER BY e.[Key];
+            """;
+        command.Parameters.AddWithValue("@lang", languageCode);
+        command.Parameters.AddWithValue("@default", UiStringResolver.DefaultLanguage);
+
+        var rows = new List<UiStringExportRow>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add(new UiStringExportRow(
+                reader.GetString(0),
+                (UiStringScope)reader.GetByte(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetDateTime(4)));
+        }
+
+        // Порядок — ординальний, як у ComposeRaw, а не за колацією бази.
+        return [.. rows.OrderBy(r => r.Key, StringComparer.Ordinal)];
+    }
+
+    /// <inheritdoc />
+    public async Task<int> SetManyAsync(IReadOnlyList<UiStringWrite> writes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(writes);
+
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        if (writes.Count == 0)
+        {
+            return await ReadRevisionAsync(connection, ct).ConfigureAwait(false);
+        }
+
+        await using var transaction = (SqlTransaction)await connection
+            .BeginTransactionAsync(IsolationLevel.ReadCommitted, ct).ConfigureAwait(false);
+
+        foreach (var write in writes)
+        {
+            await using var upsert = connection.CreateCommand();
+            upsert.Transaction = transaction;
+            upsert.CommandText = """
+                UPDATE sys_ecr.UiString
+                   SET Value = @value, Scope = @scope, ModifiedAt = @at, ModifiedByUserId = @user
+                 WHERE [Key] = @key AND LanguageCode = @lang;
+                IF @@ROWCOUNT = 0
+                    INSERT sys_ecr.UiString ([Key], LanguageCode, Value, Scope, ModifiedAt, ModifiedByUserId)
+                    VALUES (@key, @lang, @value, @scope, @at, @user);
+                """;
+            upsert.Parameters.AddWithValue("@key", write.Key);
+            upsert.Parameters.AddWithValue("@lang", write.LanguageCode);
+            upsert.Parameters.AddWithValue("@value", write.Value);
+            upsert.Parameters.AddWithValue("@scope", (byte)write.Scope);
+            upsert.Parameters.AddWithValue("@at", write.ModifiedAt);
+            upsert.Parameters.AddWithValue("@user", (object?)write.ModifiedByUserId ?? DBNull.Value);
+            await upsert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        int revision;
+        await using (var bump = connection.CreateCommand())
+        {
+            bump.Transaction = transaction;
+            bump.CommandText = """
+                UPDATE sys_ecr.UiStringRevision
+                   SET Revision = Revision + 1, ModifiedAt = @at
+                OUTPUT inserted.Revision
+                 WHERE Id = 1;
+                """;
+            bump.Parameters.AddWithValue("@at", writes[0].ModifiedAt);
+            var raw = await bump.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            revision = raw is null or DBNull ? 0 : Convert.ToInt32(raw, provider: null);
+        }
+
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+        return revision;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> LanguageExistsAsync(string languageCode, CancellationToken ct)
+    {
+        await using var connection = new SqlConnection(db.Database.GetConnectionString());
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sys_ecr.Language WHERE Code = @lang;";
+        command.Parameters.AddWithValue("@lang", languageCode);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(ct).ConfigureAwait(false), provider: null) > 0;
+    }
+
     /// <summary>Читає зріз мови з кешу або з бази.</summary>
     private async Task<UiStringCatalog> LoadAsync(string languageCode, UiStringScope? scope, CancellationToken ct)
     {

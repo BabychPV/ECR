@@ -96,7 +96,8 @@ export type StatusKind =
   | 'health'
   | 'severity'
   | 'collectionRun'
-  | 'snapshot';
+  | 'snapshot'
+  | 'notificationDelivery';
 
 /**
  * Таблиця `kind × state → tone` — **один об'єкт** (директива №15 §2).
@@ -231,6 +232,24 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     Draft: 'muted',
     Approved: 'neutral',
     Submitted: 'neutral',
+  },
+
+  /**
+   * `Ecr.Domain/Enums/Enums.cs` → `NotificationDeliveryStatus` (`BE-33`,
+   * `schema.d.ts`: `"Sent" | "Failed" | "Suppressed"`).
+   *
+   * ⛔ Окремий різновид, а не `job`, хоч слово `Failed` збігається: там падіння
+   * ЗАДАЧІ, тут — недоставлене сповіщення про неї. Звести їх означало б, що
+   * зміна одного словника мовчки перефарбує інший.
+   *
+   * ⚠ `Suppressed` — `muted`, не `warning`: подію навмисно не надіслали
+   * (дедуплікація за `eventKey`), це нормальна робота, а не привід
+   * розбиратися. Жовтий тут навчив би не дивитися на жовте.
+   */
+  notificationDelivery: {
+    Sent: 'neutral',
+    Failed: 'danger',
+    Suppressed: 'muted',
   },
 };
 

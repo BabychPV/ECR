@@ -54,12 +54,18 @@ public sealed class ReportSnapshotConfiguration : IEntityTypeConfiguration<Repor
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("ReportSnapshot", "rpt");
+        builder.ToTable("ReportSnapshot", "rpt", t => t.HasCheckConstraint(
+            "CK_ReportSnapshot_HashFormat", "[HashFormat] IN ('current', 'legacy')"));
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Status).HasDefaultValue(Domain.Enums.SnapshotStatus.Draft);
         builder.Property(x => x.IsCurrent).HasDefaultValue(false);
         builder.Property(x => x.RowCount).HasColumnName("RowCount").HasDefaultValue(0);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");
+
+        // D-53: колонка АДИТИВНА й nullable — `rpt.v_*` її не бачать, старі зрізи
+        // лишаються NULL, доки їх не класифікує фонова задача.
+        builder.Property(x => x.HashFormat).HasColumnType("varchar(8)");
+
         builder.Property(x => x.BuiltAt).HasColumnType("datetime2(3)").IsRequired();
 
         // ⚠ Унікальний ФІЛЬТРОВАНИЙ індекс: поточний зріз для трійки
@@ -97,7 +103,7 @@ public sealed class ReportRowConfiguration : IEntityTypeConfiguration<ReportRow>
 
         builder.Property(x => x.ColumnCode).HasMaxLength(64);
         builder.Property(x => x.ValueString).HasMaxLength(1000);
-        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(34,16)");
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
 
         builder.HasOne<ReportSnapshot>().WithMany().HasForeignKey(x => x.SnapshotId)
@@ -116,7 +122,7 @@ public sealed class DocumentIndexValueConfiguration : IEntityTypeConfiguration<D
         builder.ToTable("DocumentIndexValue", "doc");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.ValueString).HasMaxLength(400);
-        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(28,10)");
+        builder.Property(x => x.ValueNumeric).HasColumnType("decimal(34,16)");
         builder.Property(x => x.ValueDate).HasColumnType("datetime2(3)");
 
         builder.HasIndex(x => new { x.DocumentId, x.ColumnDefId })

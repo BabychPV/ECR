@@ -51,6 +51,8 @@ public static class DependencyInjection
         services.AddScoped<Security.ListUserRolesHandler>();
         services.AddScoped<Security.ReplaceUserRolesHandler>();
         services.AddScoped<Security.SetUserEmailHandler>();
+        services.AddScoped<Security.ResetUserPasswordHandler>();
+        services.AddScoped<Security.SetUserLockHandler>();
         services.AddScoped<Security.GetAccessDiagnosticsHandler>();
         services.AddScoped<DiffTemplateVersionsHandler>();
         services.AddScoped<PatchPresentationHandler>();
@@ -100,6 +102,13 @@ public static class DependencyInjection
         services.AddScoped<Templates.ListTemplatesHandler>();
         services.AddScoped<Templates.CreateTemplateHandler>();
         services.AddScoped<Templates.ListTemplateVersionsHandler>();
+
+        // Картка шаблону: читання з лічильником залежних, перейменування,
+        // архівування (директива №15, BE-26).
+        services.AddScoped<Templates.GetTemplateCardHandler>();
+        services.AddScoped<Templates.RenameTemplateHandler>();
+        services.AddScoped<Templates.SetTemplateArchivedHandler>();
+
         services.AddScoped<Projects.ListProjectsHandler>();
         services.AddScoped<Projects.CreateProjectHandler>();
         services.AddScoped<Projects.ActivateProjectHandler>();
@@ -142,12 +151,22 @@ public static class DependencyInjection
         services.AddScoped<Security.ListGroupRoleAssignmentsHandler>();
         services.AddScoped<Security.AssignGroupRoleHandler>();
         services.AddScoped<Security.RevokeGroupRoleHandler>();
+        services.AddScoped<Notifications.ListNotificationChannelsHandler>();
+        services.AddScoped<Notifications.SaveNotificationChannelHandler>();
+        services.AddScoped<Notifications.DeleteNotificationChannelHandler>();
+        services.AddScoped<Notifications.ReplaceNotificationChannelSecretHandler>();
+        services.AddScoped<Notifications.TestNotificationChannelHandler>();
+        services.AddScoped<Notifications.GetNotificationRulesHandler>();
+        services.AddScoped<Notifications.ReplaceNotificationRulesHandler>();
+        services.AddScoped<Notifications.ListNotificationDeliveriesHandler>();
         services.AddScoped<Security.CloneRoleHandler>();
         services.AddScoped<Security.ListUsersHandler>();
         services.AddScoped<Security.CreateUserHandler>();
         services.AddScoped<Audit.GetCellChangesHandler>();
         services.AddScoped<Audit.GetStructureChangesHandler>();
+        services.AddScoped<Audit.ExportStructureChangesHandler>();
         services.AddScoped<Consistency.GetConsistencyIssuesHandler>();
+        services.AddScoped<Consistency.RunConsistencyCheckHandler>();
         services.AddScoped<Projects.CloneProjectHandler>();
 
         // Періоди (модуль 3.4)
@@ -165,7 +184,11 @@ public static class DependencyInjection
         services.AddScoped<Workflow.SubmitSheetHandler>();
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
+        services.AddScoped<Documents.DeleteDocumentHandler>();
+        services.AddScoped<Documents.ChangeDocumentKeyHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
+        services.AddScoped<Documents.ListDocumentVersionsHandler>();
+        services.AddScoped<Documents.CompareDocumentVersionsHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
 
         // Локалізація (модуль 3.7)
@@ -180,16 +203,29 @@ public static class DependencyInjection
         services.AddScoped<Registries.SetEntryValidityHandler>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
+        services.AddScoped<Preferences.ListUserPreferencesHandler>();
+        services.AddScoped<Preferences.PutUserPreferenceHandler>();
+        services.AddScoped<Preferences.DeleteUserPreferenceHandler>();
         services.AddScoped<Units.ConvertUnitHandler>();
         services.AddScoped<Units.CreateUnitHandler>();
         services.AddScoped<Units.UnitUsageHandler>();
+        services.AddScoped<Calculations.ConstantUsageHandler>();
+        services.AddScoped<Templates.ColumnUsageHandler>();
         services.AddScoped<Units.DeleteUnitHandler>();
+        services.AddScoped<Units.GetUnitHandler>();
+        services.AddScoped<Units.UpdateUnitHandler>();
 
         // Крок 8 — конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила,
         // мапінг і історія опису.
         services.AddScoped<Registries.GetRegistryDefinitionHandler>();
         services.AddScoped<Registries.SaveRegistryDefinitionHandler>();
+        services.AddScoped<Registries.GetRegistryDefinitionDraftHandler>();
+        services.AddScoped<Registries.SaveRegistryDefinitionDraftHandler>();
+        services.AddScoped<Registries.PublishRegistryDefinitionHandler>();
+        services.AddScoped<Registries.DiscardRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
+        services.AddScoped<Registries.GetRegistryUsageHandler>();
+        services.AddScoped<Registries.ImportRegistryEntriesHandler>();
 
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.
         services.AddScoped<Expressions.ValidateExpressionHandler>();
@@ -221,11 +257,17 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SetMethodologyModesHandler>();
         services.AddScoped<Calculations.ListCalculationBindingsHandler>();
         services.AddScoped<Calculations.SaveCalculationBindingHandler>();
+        services.AddScoped<Calculations.DeleteMethodologyVersionHandler>();
+        services.AddScoped<Calculations.MethodologyCoverageHandler>();
+        services.AddScoped<Calculations.RuleCoverageHandler>();
+        services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
         services.AddScoped<Documents.GetCalculationResultsHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();
         services.AddScoped<Localization.ListUiStringsHandler>();
+        services.AddScoped<Localization.ExportUiStringsCsvHandler>();
+        services.AddScoped<Localization.UiStringImportHandler>();
 
         // ⚠ PatchCellsHandler і RecalculateDocumentHandler зареєстровані з
         // Етапу 3. Раніше їх не було через IBackgroundJobScheduler без
@@ -242,12 +284,15 @@ public static class DependencyInjection
         services.AddScoped<Documents.GetTableStatusHandler>();
         services.AddScoped<Documents.ExportDocumentHandler>();
         services.AddScoped<Documents.DownloadExportHandler>();
+        services.AddScoped<Documents.DocumentDataExporter>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();
         services.AddScoped<Reporting.BuildReportSnapshotHandler>();
         services.AddScoped<Reporting.VerifyReportSnapshotHandler>();
         services.AddScoped<Reporting.GetSnapshotRowsHandler>();
+        services.AddScoped<Reporting.ExportSnapshotHandler>();
+        services.AddScoped<Reporting.GetCampaignSummaryHandler>();
 
         // W7: опис звіту як ДАНІ (`ФВ-10.4`). Без цих чотирьох `rpt.ReportDef`
         // і `rpt.ReportVersion` не створювало ніщо — ні код, ні seed, ні
@@ -264,11 +309,41 @@ public static class DependencyInjection
         services.AddScoped<Integration.CancelJobHandler>();
         services.AddScoped<Integration.CollectionScheduleApplier>();
 
+        // BE-21b: розклад збору редагується з інтерфейсу (ФВ-14.3).
+        services.AddScoped<Integration.ListCollectionSchedulesHandler>();
+        services.AddScoped<Integration.CreateCollectionScheduleHandler>();
+        services.AddScoped<Integration.SaveCollectionScheduleHandler>();
+        services.AddScoped<Integration.DeleteCollectionScheduleHandler>();
+
+        // BE-21: конфігурація самих джерел і перевірка з'єднання (ФВ-14.3).
+        // ⚠ Ворота проби — СИНГЛТОН: вони стережуть паралельні запити до одного
+        // джерела, а scoped-екземпляр жив би рівно один запит і не стеріг би нічого.
+        services.AddSingleton<Integration.SourceProbeGate>();
+        services.AddScoped<Integration.ListDataSourcesHandler>();
+        services.AddScoped<Integration.SaveDataSourceHandler>();
+        services.AddScoped<Integration.DeleteDataSourceHandler>();
+        services.AddScoped<Integration.TestDataSourceConnectionHandler>();
+        services.AddScoped<Integration.BrowseSourceCatalogHandler>();
+
+        // ФВ-13.17: «Перевірити конфігурацію» до першого збору — пробне
+        // читання одного значення тим самим адаптером, що збір.
+        services.AddScoped<Integration.ProbeSourcePathHandler>();
+
+        // Журнал прогонів збору (ФВ-5.23).
+        services.AddScoped<Integration.ListCollectionRunsHandler>();
+        services.AddScoped<Integration.GetCollectionRunHandler>();
+
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
 
         // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
         services.AddScoped<Sources.CreateEntityFieldMapHandler>();
+
+        // BE-27: дії над наявним мапінгом — пауза/відновлення, приймання зміни
+        // одиниці джерела (ФВ-16.9), видалення з перевіркою наслідків.
+        services.AddScoped<Sources.SetEntityFieldMapPausedHandler>();
+        services.AddScoped<Sources.AcceptSourceUnitChangeHandler>();
+        services.AddScoped<Sources.DeleteEntityFieldMapHandler>();
 
         // BE-07: публічні дані екрана входу. Єдиний обробник, який НЕ перевіряє
         // жодного права — бо викликається до автентифікації; склад полів і
@@ -278,6 +353,9 @@ public static class DependencyInjection
         // BE-18: факти про процес і текст команди для DBA на `/admin/health`.
         services.AddScoped<Health.GetSystemFactsHandler>();
         services.AddScoped<Health.GetPartitionScriptHandler>();
+
+        // BE-19: пошук даних для командної палітри.
+        services.AddScoped<Search.SearchHandler>();
 
         // Доменні служби без стану
         services.AddSingleton<ChangeClassifier>();

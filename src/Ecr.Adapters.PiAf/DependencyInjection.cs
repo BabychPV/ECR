@@ -38,12 +38,22 @@ public static class DependencyInjection
         services.AddHttpClient<PiWebApiDataSource>()
             .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
 
-        services.AddScoped<IExternalDataSource, PiWebApiDataSource>();
+        // ⛔ Через ТИПІЗОВАНИЙ клієнт, а не `AddScoped<IExternalDataSource,
+        // PiWebApiDataSource>()`. Різниця не стильова: друга форма будує
+        // адаптер сама і бере `HttpClient` із контейнера — тобто клієнт із
+        // ІМЕНЕМ `""`, якого не торкнулося жодне налаштування вище. Саме на
+        // ньому й ходив збір: таймаут 30 с (Q-250) не діяв, лишалися типові
+        // 100 с, і «напівжива» відповідь джерела розтягувала одну спробу до
+        // ~306 с — рівно та поведінка, яку той коментар описує як виправлену.
+        // Знайдено `BE-21`: перевірка з'єднання в тесті пішла в справжню
+        // мережу попри підмінений транспорт названого клієнта.
+        services.AddScoped<IExternalDataSource>(sp => sp.GetRequiredService<PiWebApiDataSource>());
         services.AddScoped<IExternalDataSource, PiSqlClientDataSource>();
 
         services.AddScoped<SourceUnitConverter>();
         services.AddScoped<CatchUpPlanner>();
         services.AddScoped<PiAfCatalogReader>();
+        services.AddScoped<ISourceCatalogReader>(sp => sp.GetRequiredService<PiAfCatalogReader>());
         services.AddScoped<ICollectionRunner, CollectionRunner>();
 
         return services;

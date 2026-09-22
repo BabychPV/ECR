@@ -35,7 +35,15 @@ export type VerticalAlign = 0 | 1 | 2;
 export interface StyleDraft {
   readonly code: string;
   readonly fontName: string;
-  readonly fontSize: number | null;
+
+  /**
+   * ⚠ Рядок, не число, і це не формальність: `fontSize` — `decimal` контракту,
+   * а `decimal` їде рядком (`e470777a`). Чернетка тримає рівно те, що прийшло
+   * з сервера й що піде назад; `Number` тут не викликається взагалі — ані на
+   * читанні, ані на запису. Знадобиться число для CSS — перетворювати його
+   * має місце рендеру, один раз, а не модель.
+   */
+  readonly fontSize: string | null;
   readonly isBold: boolean;
   readonly isItalic: boolean;
   readonly foregroundHex: string;

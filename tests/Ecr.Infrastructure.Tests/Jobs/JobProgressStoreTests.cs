@@ -240,4 +240,112 @@ public sealed class JobProgressStoreTests(SqlServerFixture sql)
 
         Assert.Equal(Now.AddHours(-1), heartbeat);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-08")]
+    public async Task Спроба_і_кореляція_зберігаються_і_читаються_обома_шляхами()
+    {
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+        var jobId = $"be08-{Guid.NewGuid():N}";
+        var code = $"be08-{Guid.NewGuid():N}"[..20];
+
+        await store.QueueAsync(jobId, code, Now, CancellationToken.None, correlationId: "req-be08");
+
+        // До старту спроби немає — «0» чи «1» тут були б вигадкою.
+        var queued = await store.FindAsync(jobId, CancellationToken.None);
+        Assert.Null(queued!.Attempt);
+        Assert.Equal("req-be08", queued.CorrelationId);
+
+        await store.StartAsync(jobId, code, Now.AddSeconds(1), CancellationToken.None, attempt: 2);
+
+        // Старт без кореляції не стирає ту, що прийшла з постановки.
+        var status = await store.FindAsync(jobId, CancellationToken.None);
+        Assert.Equal(2, status!.Attempt);
+        Assert.Equal("req-be08", status.CorrelationId);
+
+        var listed = Assert.Single(await store.ListRecentAsync(
+            new Ecr.Application.Ports.JobListFilter(JobCode: code), 5, CancellationToken.None));
+        Assert.Equal(2, listed.Attempt);
+        Assert.Equal("req-be08", listed.CorrelationId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-08")]
+    public async Task Стан_несе_стелю_спроб_а_перелік_автора_і_повідомлення()
+    {
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+        var code = $"be08m-{Guid.NewGuid():N}"[..20];
+
+        var name = $"be08_{Guid.NewGuid():N}"[..20];
+        var user = new Ecr.Domain.Entities.Security.User(name, $"Author {name}", Ecr.Domain.Enums.AuthProvider.Local);
+        user.SetPassword("hash"); // CK_User_Provider: локальному користувачу потрібен хеш.
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var authored = $"be08a-{Guid.NewGuid():N}";
+        var system = $"be08s-{Guid.NewGuid():N}";
+        await store.QueueAsync(authored, code, Now, CancellationToken.None, createdByUserId: user.Id);
+        await store.QueueAsync(system, code, Now.AddSeconds(1), CancellationToken.None);
+        await store.ReportAsync(authored, 10, "phase-1", Now.AddSeconds(2), CancellationToken.None);
+
+        // Перша спроба + три ретраї QuartzJobAdapter — число літералом, не з константи.
+        Assert.Equal(4, (await store.FindAsync(authored, CancellationToken.None))!.MaxAttempts);
+
+        var listed = (await store.ListRecentAsync(
+                new Ecr.Application.Ports.JobListFilter(JobCode: code), 5, CancellationToken.None))
+            .ToDictionary(j => j.JobId, StringComparer.Ordinal);
+
+        Assert.Equal($"Author {name}", listed[authored].CreatedByDisplayName);
+        Assert.Equal("phase-1", listed[authored].Message);
+        Assert.Null(listed[system].CreatedByDisplayName);
+        Assert.Null(listed[system].Message);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-08")]
+    public async Task Постановка_документ_і_код_провалу_переживають_старт_і_перезапуск()
+    {
+        await using var db = sql.CreateContext();
+        var store = new JobProgressStore(db);
+        var code = $"be08c-{Guid.NewGuid():N}"[..20];
+        var doc = $"be08d-{Guid.NewGuid():N}";
+        var bare = $"be08b-{Guid.NewGuid():N}";
+
+        await store.QueueAsync(doc, code, Now, CancellationToken.None, documentId: 4242);
+        await store.StartAsync(doc, code, Now.AddMinutes(1), CancellationToken.None);
+        await store.FinishAsync(doc, "Failed", "boom", Now.AddMinutes(2), CancellationToken.None, "ECR-SYS-0500");
+
+        // Задача за розкладом: рядок з'являється на старті, постановки не було.
+        await store.StartAsync(bare, code, Now.AddMinutes(3), CancellationToken.None);
+
+        var failed = await store.FindAsync(doc, CancellationToken.None);
+        Assert.Equal(Now, failed!.CreatedAt); // не момент старту (Now + 1 хв)
+        Assert.Equal(4242L, failed.DocumentId);
+        Assert.Equal("ECR-SYS-0500", failed.ErrorCode);
+
+        var listed = (await store.ListRecentAsync(
+                new Ecr.Application.Ports.JobListFilter(JobCode: code), 5, CancellationToken.None))
+            .ToDictionary(j => j.JobId, StringComparer.Ordinal);
+        Assert.Equal(Now, listed[doc].CreatedAt);
+        Assert.Equal("ECR-SYS-0500", listed[doc].ErrorCode);
+        Assert.Equal(4242L, listed[doc].DocumentId);
+        Assert.Null(listed[bare].CreatedAt);
+        Assert.Null(listed[bare].ErrorCode);
+        Assert.Null(listed[bare].DocumentId);
+
+        // Ручний перезапуск: код провалу знято, постановка й документ — ті самі.
+        await store.RestartAsync(doc, Now.AddMinutes(5), CancellationToken.None);
+        var restarted = await store.FindAsync(doc, CancellationToken.None);
+        Assert.Null(restarted!.ErrorCode);
+        Assert.Equal(Now, restarted.CreatedAt);
+        Assert.Equal(4242L, restarted.DocumentId);
+    }
 }

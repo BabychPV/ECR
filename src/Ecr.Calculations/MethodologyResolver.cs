@@ -44,7 +44,13 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Методологія {methodologyId} не має версії, чинної на {onDate:yyyy-MM-dd}.");
+                $"Методологія {methodologyId} не має версії, чинної на {onDate:yyyy-MM-dd}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.noEffectiveVersion",
+                    ["methodologyId"] = methodologyId,
+                    ["date"] = onDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         return new MethodologyDescriptor(
@@ -123,9 +129,10 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
                 g => g.Key,
                 g => g.ToDictionary(
                     c => c.Address.ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    Text,
+                    c => MethodologyRuleMatcher.Text(c.Value),
                     StringComparer.Ordinal));
 
+        var compiled = MethodologyRuleMatcher.Compile(rules);
         var matched = new List<RowRuleMatch>();
 
         foreach (var (rowKey, rowId) in rowIds)
@@ -138,7 +145,8 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
             // сховищем за `Priority`, і перебирати далі означало б
             // дозволити загальному правилу «вся таблиця» мовчки перекрити
             // точніше, поставлене перед ним.
-            var winner = rules.FirstOrDefault(rule => MethodologyRuleMatcher.Matches(rule.MatchJson, values));
+            // Класифікація спільна з матрицею покриття (ФВ-13.9).
+            var winner = MethodologyRuleMatcher.Classify(compiled, values).Winner;
 
             if (winner is not null)
             {
@@ -148,13 +156,6 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
 
         return matched;
     }
-
-    /// <summary>Значення комірки як текст для порівняння в предикаті.</summary>
-    private static string? Text(CellRecord cell)
-        => cell.Value.ValueString
-           ?? cell.Value.ValueNumeric?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-           ?? cell.Value.ValueRegistryEntryId?.ToString(System.Globalization.CultureInfo.InvariantCulture)
-           ?? cell.Value.ValueBool?.ToString();
 }
 
 /// <summary>Рядок і правило, яке його закрило.</summary>

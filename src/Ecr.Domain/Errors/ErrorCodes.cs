@@ -76,7 +76,7 @@ public static class ErrorCodes
     /// <c>ExceptionHandlingMiddleware</c> — модалка збереження не показувала
     /// НІЧОГО, ні тосту, ні помилки поля.
     /// </remarks>
-    public const string RoleDuplicate = "ECR-SEC-0409";
+    public const string SecurityConflict = "ECR-SEC-0409";
 
     /// <summary>Дані облікового запису не проходять перевірку.</summary>
     /// <remarks>
@@ -110,6 +110,13 @@ public static class ErrorCodes
     /// нічого не вводила — параметр склав клієнт.
     /// </remarks>
     public const string RequestInvalid = "ECR-REQ-0422";
+
+    /// <summary>Користувач вичерпав межу частоти запитів (<c>ECR-REQ-0429</c>, пошук BE-19).</summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="TooManyLoginAttempts"/>: той про АДРЕСУ й вхід, а тут —
+    /// автентифікований користувач і його власні запити; минає сама, строк — у <c>Retry-After</c>.
+    /// </remarks>
+    public const string TooManyRequests = "ECR-REQ-0429";
 
     // Шаблони і схема
     public const string TemplateNotFound = "ECR-TMPL-0404";
@@ -320,6 +327,10 @@ public static class ErrorCodes
     /// </remarks>
     public const string RegistryDefDuplicate = "ECR-REG-4091";
 
+    /// <summary>
+    /// Конверсія одиниць неможлива. ⚠ Не лише різні розмірності: тим самим кодом
+    /// відмовляє й множник ≤ 0 на заведенні та зміні одиниці; випадок — у <c>messageKey</c>.
+    /// </summary>
     public const string UnitDimensionMismatch = "ECR-UOM-0422";
 
     /// <summary>Одиниці з таким кодом немає в довіднику (<c>ECR-UOM-0404</c>).</summary>
@@ -331,6 +342,17 @@ public static class ErrorCodes
     /// </summary>
     public const string UnitInUse = "ECR-UOM-0409";
 
+    /// <summary>Розмірності з таким ідентифікатором немає (<c>ECR-UOM-4041</c>).</summary>
+    public const string UnitDimensionNotFound = "ECR-UOM-4041";
+
+    /// <summary>Одиниця з таким кодом уже є (<c>ECR-UOM-4091</c>).</summary>
+    /// <remarks>
+    /// ⚠ §7 контракту дає цьому коду 422, хоча цифри кажуть 409 (як у
+    /// <see cref="RegistryDefDuplicate"/>). Статус не змінено — лише заведено
+    /// код у каталог; розбіжність названа окремо.
+    /// </remarks>
+    public const string UnitCodeTaken = "ECR-UOM-4091";
+
     /// <summary>
     /// Контекстний коефіцієнт у <c>uom.Conversion</c> (ФВ-16.5).
     /// </summary>
@@ -341,8 +363,19 @@ public static class ErrorCodes
     public const string UnitContextualCoefficient = "ECR-UOM-4221";
 
     // Розрахунки
-    public const string MethodologyFourEyes = "ECR-CALC-0409";
-    public const string MethodologyNoGreenTest = "ECR-CALC-0422";
+
+    /// <summary>
+    /// Стан методології чи версії не дозволяє дію. ⚠ Не лише чотири очі (D-40):
+    /// тим самим кодом відмовляє й видалення версії (BE-25); випадок — у <c>messageKey</c>.
+    /// </summary>
+    public const string MethodologyConflict = "ECR-CALC-0409";
+
+    /// <summary>
+    /// Невалідний запит до методології (<c>ECR-CALC-0422</c>). Кодом відмовляє
+    /// не лише публікація без зеленого тесту, тож заголовок нейтральний, а
+    /// випадок — у <c>messageKey</c>.
+    /// </summary>
+    public const string MethodologyInvalid = "ECR-CALC-0422";
     public const string RecalculateClosedPeriod = "ECR-CALC-4221";
 
     /// <summary>Версії методології не існує (<c>ECR-CALC-0404</c>).</summary>
@@ -370,7 +403,7 @@ public static class ErrorCodes
     /// правдоподібний результат. Замір корпусу — 38 таких токенів у двох
     /// формулах <c>Flert</c>.
     ///
-    /// ⚠ Окремий код, а не <see cref="MethodologyNoGreenTest"/>: у методолога
+    /// ⚠ Окремий код, а не <see cref="MethodologyInvalid"/>: у методолога
     /// тут рівно одна правильна дія — дописати токен у список аргументів
     /// формули, — і зводити це до загального «версія не пройшла перевірок»
     /// означало б сховати саме ту відповідь, яка потрібна.
@@ -403,7 +436,7 @@ public static class ErrorCodes
     /// зараз означало б зіткнення, щойно ці TODO стануть кодом.
     ///
     /// ⛔ Окремий код від <see cref="CellInvalid"/> (<c>ECR-CELL-0422</c>) і
-    /// від <see cref="MethodologyNoGreenTest"/>: тут рівно одна правильна дія —
+    /// від <see cref="MethodologyInvalid"/>: тут рівно одна правильна дія —
     /// заповнити названу колонку, — а суб'єкт відмови не комірка й не публікація
     /// версії, а РЯДОК документа з уже визначеною методологією.
     /// </remarks>
@@ -487,6 +520,26 @@ public static class ErrorCodes
     public const string EntityFieldMapTargetNotFound = "ECR-INT-0405";
 
     /// <summary>
+    /// Дія над мапінгом суперечить його стану (<c>ECR-INT-0409</c>,
+    /// директива №15, <c>BE-27</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один код на чотири стани — повторна пауза, відновлення непризупиненого,
+    /// приймання одиниці, яка вже оголошена, і видалення мапінгу, за яким уже
+    /// зібрано дані. Суб'єкт відмови той самий: мапінг не в тому стані, у
+    /// якому дія має сенс, і повторювати запит марно. ЯКИЙ саме стан —
+    /// каже <c>messageKey</c>, а не код; клієнт розрізняє їх саме ним.
+    ///
+    /// ⛔ Родина <c>INT</c> наявна; нової не заводилось (директива №15 §0.4).
+    /// Кидається двома шляхами — <c>DomainException</c> із самої сутності
+    /// (суфікс <c>-0409</c> мапить <c>ExceptionHandlingMiddleware</c>) і
+    /// <c>BusinessRuleException</c> із обробника видалення, якому потрібен
+    /// лічильник зібраних точок, а сутність його не знає. Другий шлях має
+    /// власний арм — без нього він доїхав би як 422.
+    /// </remarks>
+    public const string EntityFieldMapStateConflict = "ECR-INT-0409";
+
+    /// <summary>
     /// Джерело відмовило в автентифікації (<c>ECR-INT-0502</c>).
     /// </summary>
     /// <remarks>
@@ -511,6 +564,23 @@ public static class ErrorCodes
     /// автентифікації від повторення не минає — у цьому весь її сенс.
     /// </remarks>
     public const string SourceAuthenticationRefused = "ECR-INT-0502";
+
+    // Фонові задачі
+    /// <summary>Фонової задачі з таким ідентифікатором немає (<c>ECR-JOB-0404</c>).</summary>
+    public const string JobNotFound = "ECR-JOB-0404";
+
+    /// <summary>
+    /// Стан черги чи розкладу не дозволяє дію (<c>ECR-JOB-0409</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Код роками кидався сирим літералом у шести обробниках і в каталозі
+    /// не був — клієнт не міг за ним розгалузитися (<c>ClientErrorCodeTests</c>
+    /// червонить код поза каталогом). Один код на кілька станів: ЯКИЙ саме —
+    /// каже <c>messageKey</c>. Кидається і <c>BusinessRuleException</c>, і
+    /// <c>ConcurrencyConflictException</c>; перший має власний арм у
+    /// <c>ExceptionHandlingMiddleware</c>, без якого доїхав би як 422.
+    /// </remarks>
+    public const string JobStateConflict = "ECR-JOB-0409";
 
     // Звіти
     /// <summary>Звіту з таким кодом немає або жодну версію не опубліковано (<c>ECR-RPT-0404</c>).</summary>

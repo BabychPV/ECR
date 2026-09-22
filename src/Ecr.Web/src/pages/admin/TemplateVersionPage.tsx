@@ -57,6 +57,7 @@ import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -124,6 +125,10 @@ const PeriodAccessRuleManager = lazy(async () => ({
   default: (await import('@/features/templates/PeriodAccessRuleEditor')).PeriodAccessRuleManager,
 }));
 
+const TemplateColumnUsage = lazy(async () => ({
+  default: (await import('@/features/templates/ColumnUsage')).TemplateColumnUsage,
+}));
+
 /**
  * ⛔ `PresentationEditor` — єдиний із цих редакторів, що НЕ стоїть за
  * `{умова && …}`: він сам носить усередині `<Modal opened={column !== null}>`.
@@ -183,6 +188,11 @@ export function TemplateVersionPage(): JSX.Element {
   // адресуються не лише кодом, а й таблицею-власником (`W5.2`).
   const [columnEdit, setColumnEdit] = useState<{ tableId: number; draft: ColumnDraft } | null>(null);
   const [rowEdit, setRowEdit] = useState<{ tableId: number; draft: RowDraft } | null>(null);
+
+  // ФВ-8.14: id колонки, для якої зараз відкрито «де використовується».
+  // ⛔ Кнопка показується для КОЖНОЇ колонки завжди, незалежно від того, чи є
+  // в неї використання (`total: 0` теж чинний, а не привід ховати афордансу).
+  const [columnUsageFor, setColumnUsageFor] = useState<number | null>(null);
 
   // ⛔ Кеш повних відповідей ЦЬОГО сеансу, ключ — `tableId:код`. Структура
   // версії (`GET …/structure`) віддає колонку й рядок бідніше, ніж їх приймає
@@ -640,6 +650,27 @@ export function TemplateVersionPage(): JSX.Element {
        * ховає форму аркуша (`canEditSheets` вище читає той самий
        * `structure.data?.isEditable`).
        */}
+      {/*
+        ⛔ Директива D15 §0, правило L10: стан версії рахується як
+        `versionsList.data?.items.find(…)?.status`, тож при відмові
+        `GET /templates/{id}/versions` він `undefined` — рівно те саме
+        значення, що й «версії немає в переліку». Обидві кнопки нижче
+        (`canPublish`, `canWithdraw`) через це ЗНИКАЛИ, і адміністратор із
+        правом `Template.Publish` читав це як «версію вже опубліковано» або
+        «права немає» — і йшов шукати іншу версію чи іншу людину.
+
+        ⚠ Самі кнопки лишаються схованими: коли стан невідомий, дія має
+        деградувати в бік ЗАБОРОНИ (той самий висновок, що в `PeriodsPage`,
+        #452). Нове тут — видима причина замість мовчання.
+
+        ⚠ Банер лише тому, хто має право публікувати: решта цих кнопок не
+        бачить ніколи, і повідомлення про перелік, яким вони не
+        користуються, було б шумом.
+      */}
+      {can(session.data, 'Template.Publish') && versionsList.error !== null && (
+        <ErrorAlert error={versionsList.error} onRetry={() => void versionsList.refetch()} />
+      )}
+
       {can(session.data, 'Template.Edit') && structure.data?.isEditable === false && (
         <Alert color="statusWarning" variant="light" mb="sm">
           {t('version.structureFrozen')}
@@ -849,6 +880,14 @@ export function TemplateVersionPage(): JSX.Element {
                                     <Table.Td>{column.unitSymbol ?? '—'}</Table.Td>
                                     <Table.Td>
                                       <Group gap="xs" wrap="nowrap" justify="flex-end">
+                                        <Button
+                                          size="compact-xs"
+                                          variant="subtle"
+                                          data-column-usage="trigger"
+                                          onClick={() => setColumnUsageFor(column.id)}
+                                        >
+                                          {t('registries.tabUsage')}
+                                        </Button>
                                         {/* ⚠ Правка тут не потребує нової версії: підпис,
                                             порядок, формат і видимість — презентаційний
                                             шар, і його дозволено міняти в опублікованій
@@ -1133,6 +1172,18 @@ export function TemplateVersionPage(): JSX.Element {
               onSubmit={() => saveColumnMutation.mutate(columnEdit)}
               onCancel={() => setColumnEdit(null)}
             />
+          </Suspense>
+        )}
+      </Modal>
+
+      <Modal
+        opened={columnUsageFor !== null}
+        onClose={() => setColumnUsageFor(null)}
+        title={t('registries.tabUsage')}
+      >
+        {columnUsageFor !== null && (
+          <Suspense fallback={null}>
+            <TemplateColumnUsage columnDefId={columnUsageFor} />
           </Suspense>
         )}
       </Modal>

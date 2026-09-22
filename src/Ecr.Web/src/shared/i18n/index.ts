@@ -299,11 +299,40 @@ export function preferredLanguage(): Language {
   return languageCode(browser.slice(0, 2).toLowerCase());
 }
 
+/**
+ * Мова, яку користувач колись обирав сам; `null` — вибору не було (`BE-20`).
+ *
+ * ⚠ На відміну від `preferredLanguage()`, без мови браузера: переносити на
+ * сервер треба лише ВИБІР людини, а не здогад.
+ */
+export function storedLanguage(): Language | null {
+  const stored = safeGet('uiLanguage');
+  return stored !== null && stored.length > 0 ? stored : null;
+}
+
+/**
+ * Ті, кому треба знати про ВИБІР мови (`BE-20`: синхронізація з сервером).
+ *
+ * ⚠ Реєстр, а не імпорт фічі: `shared` не знає, хто слухає.
+ */
+const chosenListeners = new Set<(value: Language) => void>();
+
+/** Підписує на вибір мови; повертає відписку. */
+export function onLanguageChosen(listener: (value: Language) => void): () => void {
+  chosenListeners.add(listener);
+
+  return () => {
+    chosenListeners.delete(listener);
+  };
+}
+
 /** Запам'ятовує вибір мови. */
 export function setLanguage(value: Language): void {
   current = value;
   safeSet('uiLanguage', value);
   bumpCatalog();
+
+  for (const notify of [...chosenListeners]) notify(value);
 }
 
 /**

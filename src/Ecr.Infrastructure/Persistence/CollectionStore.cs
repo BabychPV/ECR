@@ -205,6 +205,71 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     }
 
     /// <inheritdoc />
+    public Task<EntityFieldMap?> FindFieldMapAsync(int fieldMapId, CancellationToken ct)
+        => db.EntityFieldMaps.FirstOrDefaultAsync(m => m.Id == fieldMapId, ct);
+
+    /// <inheritdoc />
+    public async Task PauseForSourceUnitChangeAsync(
+        int fieldMapId, string actualUnitCode, int? actualUnitId, CancellationToken ct)
+    {
+        // Мапінги збору читаються без відстеження, тож пауза — окремим
+        // відстежуваним читанням і власним збереженням.
+        var map = await db.EntityFieldMaps
+            .FirstOrDefaultAsync(m => m.Id == fieldMapId, ct)
+            .ConfigureAwait(false);
+
+        if (map is null)
+        {
+            return;
+        }
+
+        map.PauseForSourceUnitChange(actualUnitCode, actualUnitId, clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task RemoveFieldMapAsync(EntityFieldMap map, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+
+        db.EntityFieldMaps.Remove(map);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<CollectedFieldStats> CountCollectedAsync(
+        int sourceEntityId, string sourceField, CancellationToken ct)
+    {
+        // ⚠ Один запит на три числа, а не три запити. Лічильник тут — це
+        // подробиця відмови, і платити за неї трьома походами в таблицю, у
+        // якій мільйони рядків, не варто.
+        var stats = await db.RawDataPoints
+            .AsNoTracking()
+            .Where(p => p.SourceEntityId == sourceEntityId && p.SourcePath == sourceField)
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Points = g.Count(),
+                FirstAt = (DateTime?)g.Min(p => p.Timestamp),
+                LastAt = (DateTime?)g.Max(p => p.Timestamp),
+            })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return stats is null
+            ? new CollectedFieldStats(0, null, null)
+            : new CollectedFieldStats(stats.Points, stats.FirstAt, stats.LastAt);
+    }
+
+    /// <inheritdoc />
+    public Task<string?> FindUnitCodeAsync(int unitId, CancellationToken ct)
+        => db.Units
+            .AsNoTracking()
+            .Where(u => u.Id == unitId)
+            .Select(u => (string?)u.Code)
+            .FirstOrDefaultAsync(ct);
+
+    /// <inheritdoc />
     public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct)
         => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
 
@@ -245,10 +310,14 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
 
         var ids = entities.ConvertAll(e => e.Id);
 
+        // ⚠ Лише з'єднання цих сутностей: зовнішній ключ гарантує, що кожне
+        // знайдеться, тож код з'єднання ніколи не підміняється заглушкою.
+        var dataSourceIds = entities.Select(e => e.DataSourceId).Distinct().ToList();
+
         var transports = await db.DataSources
             .AsNoTracking()
-            .Take(MaxSourceEntities)
-            .Select(s => new { s.Id, s.Transport })
+            .Where(s => dataSourceIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Transport, s.Code })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -273,6 +342,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             .ConfigureAwait(false);
 
         var transportById = transports.ToDictionary(s => s.Id, s => s.Transport.ToString());
+        var codeById = transports.ToDictionary(s => s.Id, s => s.Code);
 
         var lastRun = runs
             .GroupBy(r => r.SourceEntityId)
@@ -304,7 +374,9 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 transportById.GetValueOrDefault(entity.DataSourceId, "—"),
                 entity.IsActive,
                 run is null ? null : new CollectionRunStatus(run.FinishedAt, run.Status, run.PointsRetrieved),
-                gaps.Count == 0 ? null : gaps[0].From);
+                gaps.Count == 0 ? null : gaps[0].From,
+                entity.DataSourceId,
+                codeById[entity.DataSourceId]);
         });
     }
 

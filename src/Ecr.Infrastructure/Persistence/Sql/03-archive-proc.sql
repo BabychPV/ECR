@@ -52,8 +52,21 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @k int, @srcCount bigint, @srcSum decimal(38,10);
-    DECLARE @dstCount bigint, @dstSum decimal(38,10);
+    -- ⛔ Масштаб сум — 16, як у `doc.CellValue.ValueNumeric` (`D-148`). З 10
+    -- знаками звірка не падала б, а ТИХО СЛАБШАЛА: обидві суми однаково
+    -- округлилися б, збіг лишився б, і знаки 11–16 перестали б доводити
+    -- будь-що.
+    --
+    -- ⚠ Precision лишається 38 і після переходу стовпця на `decimal(34,16)`,
+    -- і ширше вже НЕ БУВАЄ: 38 — максимум SQL Server, і рівно його дає
+    -- `SUM(decimal(34,16))` як власний тип результату (перевірено запитом), тож
+    -- оголошення точно збігається з тим, що рахується. Формальний запас над
+    -- стовпцем справді впав із 10¹⁰ до 10⁴ рядків (22 цілі розряди суми проти
+    -- 18 у стовпця), але ДОСЯЖНИЙ запас не змінився: `System.Decimal` несе лише
+    -- 29 значущих цифр, тож при масштабі 16 застосунок фізично не може записати
+    -- більше за ~7.9·10¹² (13 цілих розрядів) — а це 10⁹ рядків запасу.
+    DECLARE @k int, @srcCount bigint, @srcSum decimal(38,16);
+    DECLARE @dstCount bigint, @dstSum decimal(38,16);
     DECLARE @p1 int, @p12 int, @range nvarchar(40), @sql nvarchar(600);
     DECLARE @periods int = @ToPeriodKey - @FromPeriodKey + 1;
 
@@ -335,7 +348,7 @@ BEGIN
         --    джерелі, вже лежить в архіві».
         --------------------------------------------------------------------
         DECLARE @gapSrcCells bigint, @gapDstCells bigint;
-        DECLARE @gapSrcSum decimal(38,10), @gapDstSum decimal(38,10);
+        DECLARE @gapSrcSum decimal(38,16), @gapDstSum decimal(38,16);
         DECLARE @gapSrcRows bigint, @gapDstRows bigint;
         DECLARE @gapSrcInst bigint, @gapDstInst bigint;
 

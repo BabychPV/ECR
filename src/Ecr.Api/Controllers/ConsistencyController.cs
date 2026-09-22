@@ -6,16 +6,24 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Ecr.Api.Controllers;
 
-/// <summary>Читання журналу знахідок перевірки узгодженості.</summary>
+/// <summary>Журнал знахідок перевірки узгодженості і прогін її на вимогу.</summary>
 /// <remarks>
-/// ⛔ Журнал **тільки читається**, як і аудит: знахідку закриває той, хто
-/// усунув причину, а не той, хто на неї дивиться. Ендпоінта на зміну тут
-/// немає і не буде, доки не з'явиться сценарій «усунув — позначив».
+/// ⛔ Сам ЖУРНАЛ лишається тільки для читання, як і аудит: знахідку закриває
+/// той, хто усунув причину, а не той, хто на неї дивиться. Дії «взяти до
+/// відома» тут немає і не буде — це пряме рішення людини на <c>Q15-03</c>
+/// (директива №15, рішення 2): знахідка зникає сама, коли наступна перевірка
+/// проходить.
+///
+/// ⚠ Саме з цього рішення випливає дія <c>POST /run</c>. Якщо знахідку не
+/// можна зняти позначкою, єдиний спосіб зняти полагоджену знахідку з очей —
+/// прогнати перевірку ще раз; доти вона ходила лише за нічним розкладом, і
+/// той, хто усунув причину вранці, бачив її в переліку до наступної ночі.
 /// </remarks>
 [ApiController]
 [Route("api/v1/consistency")]
 [Authorize]
-public sealed class ConsistencyController(GetConsistencyIssuesHandler issues) : ControllerBase
+public sealed class ConsistencyController(
+    GetConsistencyIssuesHandler issues, RunConsistencyCheckHandler run) : ControllerBase
 {
     /// <summary>
     /// Знахідки перевірки узгодженості. Право <c>System.ViewHealth</c>.
@@ -59,4 +67,42 @@ public sealed class ConsistencyController(GetConsistencyIssuesHandler issues) : 
             .HandleAsync(ruleCode, openOnly, page, ct)
             .ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// Прогін перевірки узгодженості на вимогу. Право <c>System.RunJob</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>System.RunJob</c> — одне з восьми прав, які сід видає і які не
+    /// перевіряв жоден обробник (<c>BE-28</c>). Це його перший викликач.
+    ///
+    /// ⚠ <c>202</c>, не <c>200</c>: перевірка ходить по всіх партиціях і в
+    /// відповідь укластися не може. Стан клієнт дочитує тим самим
+    /// <c>GET /api/v1/jobs/{jobId}</c>, яким уже показує будь-який прогрес.
+    ///
+    /// ⚠ Перевірка вже в черзі або вже виконується — <c>409</c>
+    /// (<c>ECR-JOB-0409</c>) із її <c>jobId</c>, а не другий повний обхід тих
+    /// самих таблиць.
+    /// </remarks>
+    [HttpPost("run")]
+    [ProducesResponseType<Contracts.JobAcceptedResponse>(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Run(
+        [FromBody] RunConsistencyCheckRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Право перевіряє обробник (архітектурне правило 7): воно небезпечне,
+        // і рішення має ухвалюватися там само, де ставиться задача.
+        var jobId = await run.HandleAsync(request.Reason, ct).ConfigureAwait(false);
+
+        return Accepted(new Contracts.JobAcceptedResponse(jobId));
+    }
 }
+
+/// <summary>Запит на прогін перевірки узгодженості.</summary>
+/// <param name="Reason">
+/// Причина; обов'язкова, потрапляє в журнал безпеки (<c>aud.SecurityEvent</c>).
+/// </param>
+public sealed record RunConsistencyCheckRequest(string Reason);

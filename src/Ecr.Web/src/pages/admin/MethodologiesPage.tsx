@@ -5,7 +5,6 @@ import {
   Code,
   Group,
   Modal,
-  NumberInput,
   ScrollArea,
   Select,
   Stack,
@@ -31,6 +30,7 @@ import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -446,15 +446,29 @@ export function MethodologiesPage(): JSX.Element {
         title={t('methodologies.simulate')}
         size="lg"
       >
-        <NumberInput
-          label={t('documents.period')}
-          description={t('methodologies.simulatePeriodHint')}
+        {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+            `simulationPeriod` — локальний стан діалогу, ніколи не `null`
+            (стартує з `currentPeriodKey()`); `value ?? simulationPeriod`
+            зберігає стару поведінку очищеного поля — лишає попередній вибір.
+
+            ⚠ `description` тут раніше ніс `methodologies.simulatePeriodHint`
+            («нічого не зберігається»), а `PeriodPicker` власний `description`
+            уже віддає під підпис періоду мовою інтерфейсу — тексти не можуть
+            стояти в одному місці одночасно. Підказка не загублена, а винесена
+            окремим рядком під контролом.
+
+            ⚠ `data-autofocus` НЕ перенесено: `PeriodPicker` не проксує довільні
+            HTML-атрибути на внутрішній `NumberInput` (лише `id`), а розширювати
+            його API заради одного місця — поза межами цього завдання. Судження:
+            втрата дрібна (перший фокус у діалозі просто не встановлюється
+            автоматично), задокументовано тут і в звіті PR. */}
+        <PeriodPicker
           value={simulationPeriod}
-          onChange={(value) =>
-            setSimulationPeriod(typeof value === 'number' ? value : simulationPeriod)
-          }
-          data-autofocus
+          onChange={(value) => setSimulationPeriod(value ?? simulationPeriod)}
         />
+        <Text size="xs" c="dimmed" mt="xs">
+          {t('methodologies.simulatePeriodHint')}
+        </Text>
 
         <Button
           mt="md"

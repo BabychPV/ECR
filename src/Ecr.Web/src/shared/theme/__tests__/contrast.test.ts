@@ -1,8 +1,20 @@
 ﻿import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from '@mantine/core';
 import { describe, it, expect } from 'vitest';
-import { AA, contrast } from '../contrast';
-import { brand, cellState, statusError, statusSuccess, statusWarning, themeSurface } from '../theme';
+import { AA, contrast, flatten, parseColor } from '../contrast';
+import { cssVariablesResolver } from '../cssVariables';
+import {
+  brand,
+  brandTextOnDark,
+  cellState,
+  statusError,
+  statusSuccess,
+  statusWarning,
+  surfaces,
+  theme,
+  themeSurface,
+} from '../theme';
 
 // ⚠ Шлях від кореня проєкту, а не від import.meta.url: під jsdom
 // він не має схеми file:, і fileURLToPath кидає виняток.
@@ -121,6 +133,10 @@ describe('Контраст токенів (ФВ-14.17)', () => {
       // індекс 6. Темна схема: `outline` бере індекс 1
       // (`Math.max(primaryShade.dark - 4, 0)` = 1) — БЛІДИЙ відтінок навмисно:
       // на темному тлі яскравий/темний відтінок або зникає, або ріже очі.
+      // ✎ 2026-09-22: `cssVariables.ts` (`statusOutline`) перевизначає темний
+      // `outline` на `[3]` — `[1]` був майже білим, без статусного відтінку.
+      // Ця перевірка кортежу лишена як є; що бачить браузер, стереже
+      // `describe('статусні кольори: «outline» …')` нижче.
       expect(contrast(tuple[6], themeSurface.light.body)).toBeGreaterThanOrEqual(AA.nonText);
       expect(contrast(tuple[1], themeSurface.dark.body)).toBeGreaterThanOrEqual(AA.nonText);
     });
@@ -417,6 +433,280 @@ describe('Контраст токенів (ФВ-14.17)', () => {
     expect(contrast('#000000', '#ffffff')).toBeCloseTo(21, 5);
     expect(contrast('#777777', '#ffffff')).toBeCloseTo(4.48, 2);
     expect(contrast('#ffffff', '#ffffff')).toBeCloseTo(1, 5);
+  });
+});
+
+/**
+ * Текст `variant="subtle"`/`"light"` статусних кольорів — саме статусний, і
+ * читається на кожній поверхні сторінки.
+ *
+ * ⛔ Дефект, якого не бачив жоден поріг: у темній схемі Mantine бере текст
+ * `--mantine-color-<status>-light-color` за індексом
+ * `max(primaryShade.dark − 5, 0)` = `[0]` — майже білий (`#fff5f5` для помилки).
+ * Контраст такого тексту 9–17:1, тобто AA він проходить із запасом; зламано не
+ * читабельність, а сам зміст — кнопка «Видалити» виглядала як звичайний текст.
+ * Тому поруч із порогом стоїть вимога відтінку: текст мусить дорівнювати
+ * статусному тексту схеми (`--ecr-danger`/`-warning`/`-success`) і НЕ бути `[0]`.
+ *
+ * ⚠ Змінні беруться не з кортежу, а з того, що побачить браузер: вивід
+ * дефолтного резолвера Mantine, поверх нього — наш `cssVariablesResolver`
+ * (той самий порядок, що `getMergedVariables` у `@mantine/core`), з
+ * розгорнутими `var(...)`. Інакше тест перевіряв би індекс, який ми ВВАЖАЄМО
+ * взятим, а не той, що береться насправді.
+ */
+describe('статусні кольори: текст «subtle»/«light» — статусного відтінку', () => {
+  type Scheme = 'light' | 'dark';
+
+  /** Змінні схеми так, як їх злиє Mantine: дефолт, поверх — наш резолвер. */
+  function mergedVars(scheme: Scheme): Record<string, string> {
+    const full = mergeMantineTheme(DEFAULT_THEME, theme);
+    const base = defaultCssVariablesResolver(full);
+    const ours = cssVariablesResolver(full);
+
+    return { ...base.variables, ...base[scheme], ...ours.variables, ...ours[scheme] };
+  }
+
+  /** Значення змінної з розгорнутими `var(--x)`; відсутня — падіння. */
+  function deref(vars: Record<string, string>, name: string): string {
+    let value = vars[name];
+
+    for (let depth = 0; depth < 10 && value !== undefined; depth++) {
+      const ref = /^var\((--[\w-]+)\)$/.exec(value.trim());
+      if (ref === null) return value.trim().toLowerCase();
+      value = vars[ref[1]!];
+    }
+
+    throw new Error(`змінна «${name}» не розгортається в колір`);
+  }
+
+  const statuses = [
+    ['statusError', statusError, '--ecr-danger'],
+    ['statusWarning', statusWarning, '--ecr-warning'],
+    ['statusSuccess', statusSuccess, '--ecr-success'],
+  ] as const;
+
+  const cases = statuses.flatMap(([name, tuple, ecr]) =>
+    (['light', 'dark'] as const).map((scheme) => [name, scheme, tuple, ecr] as const),
+  );
+
+  /** Поверхні-«сторінки», на яких стоїть кнопка. */
+  const pages = ['ground', 'surface', 'sunken', 'raised'] as const;
+
+  it.each(cases)('«%s», схема «%s»: текст — статусний відтінок, не `[0]`', (name, scheme, tuple, ecr) => {
+    const vars = mergedVars(scheme);
+    const text = deref(vars, `--mantine-color-${name}-light-color`);
+
+    expect(text, `${scheme}: ${name} light-color`).not.toBe(tuple[0].toLowerCase());
+    expect(text, `${scheme}: ${name} light-color ≠ ${ecr}`).toBe(deref(vars, ecr));
+  });
+
+  it.each(cases)('«%s», схема «%s»: «subtle» читається на кожній поверхні', (name, scheme) => {
+    const vars = mergedVars(scheme);
+    const text = deref(vars, `--mantine-color-${name}-light-color`);
+
+    // `subtle` — прозоре тло, тобто текст лежить прямо на поверхні.
+    for (const page of pages) {
+      const bg = surfaces[scheme][page];
+
+      expect(contrast(text, bg), `${scheme}: ${name} на ${page}`).toBeGreaterThanOrEqual(AA.text);
+    }
+  });
+
+  /*
+   * ⚠ Композит `-light` (тло `variant="light"`) і `-light-hover` (тло наведення
+   * `subtle`) — лише темна схема. У світлій той самий композит на `sunken`
+   * (`#eef0f5`) дає помилці 4.11/3.99 і успіху 4.50/4.36 — це інший дефект
+   * (тло, а не текст; індекс тексту там правильний), і він названий у звіті
+   * PR, а не закритий тут мовчки.
+   *
+   * ✎ 2026-09-22: закрито — `statusLightBackground` у `cssVariables.ts`;
+   * перевірка світлої схеми — у тесті одразу нижче.
+   */
+  it.each(statuses)('«%s», темна схема: «light»/hover-тло не зʼїдає текст', (name) => {
+    const vars = mergedVars('dark');
+    const text = deref(vars, `--mantine-color-${name}-light-color`);
+
+    for (const page of pages) {
+      const bg = surfaces.dark[page];
+
+      for (const layer of ['light', 'light-hover'] as const) {
+        const tint = flatten(deref(vars, `--mantine-color-${name}-${layer}`), bg);
+
+        expect(contrast(text, tint), `dark: ${name} на ${layer} поверх ${page}`).toBeGreaterThanOrEqual(
+          AA.text,
+        );
+      }
+    }
+  });
+
+  /*
+   * Світла схема: тло `light` і наведення `subtle` — текст `[6]` читається на
+   * кожній поверхні, ВКЛЮЧНО з `sunken`, а тло лишається статусним: не
+   * прозоре-майже-ніщо і не сіре. «Статусне» тут вимірюється так: у тла,
+   * покладеного на поверхню, переважає той самий канал, що в статусного `[6]`
+   * (R — помилка/попередження, G — успіх), і з запасом ≥ 8 одиниць. Поверхні
+   * самі синюваті (`#eef0f5`: переважає B), тож сіре тло цю перевірку провалює.
+   */
+  function dominant(hex: string): string {
+    const { r, g, b } = parseColor(hex);
+    const sorted = [
+      ['r', r],
+      ['g', g],
+      ['b', b],
+    ] as const;
+    const [top, second] = [...sorted].sort((x, y) => y[1] - x[1]);
+
+    return top![1] - second![1] >= 8 ? top![0] : 'сіре';
+  }
+
+  it.each(statuses)('«%s», світла схема: «light»/hover-тло не зʼїдає текст `[6]`', (name, tuple) => {
+    const vars = mergedVars('light');
+    const text = deref(vars, `--mantine-color-${name}-light-color`);
+
+    expect(text).toBe(tuple[6].toLowerCase());
+
+    for (const page of pages) {
+      const bg = surfaces.light[page];
+
+      for (const layer of ['light', 'light-hover'] as const) {
+        const tint = flatten(deref(vars, `--mantine-color-${name}-${layer}`), bg);
+
+        expect(contrast(text, tint), `light: ${name} на ${layer} поверх ${page}`).toBeGreaterThanOrEqual(
+          AA.text,
+        );
+        expect(tint, `light: ${name} ${layer} поверх ${page} — не сама поверхня`).not.toBe(bg);
+        expect(dominant(tint), `light: ${name} ${layer} поверх ${page} — тло статусне, не сіре`).toBe(
+          dominant(tuple[6]),
+        );
+      }
+    }
+  });
+
+  /*
+   * `variant="outline"`: текст і межа — `--mantine-color-<c>-outline`, тло
+   * наведення — `-outline-hover` (`getCSSColorVariables`). У темній схемі
+   * Mantine бере `[1]` — майже білий; мусить бути статусний `--ecr-*`.
+   */
+  it.each(cases)('«%s», схема «%s»: «outline» — статусний відтінок, AA на кожній поверхні', (name, scheme, tuple, ecr) => {
+    const vars = mergedVars(scheme);
+    const outline = deref(vars, `--mantine-color-${name}-outline`);
+
+    expect(outline, `${scheme}: ${name} outline`).not.toBe(tuple[0].toLowerCase());
+    expect(outline, `${scheme}: ${name} outline`).not.toBe(tuple[1].toLowerCase());
+    expect(outline, `${scheme}: ${name} outline ≠ ${ecr}`).toBe(deref(vars, ecr));
+
+    // Темна: наведення — той самий відтінок, що межа (Mantine рахує його з
+    // того самого індексу). Світла: непрозоре `[0]` — `statusLightBackground`.
+    const hover = parseColor(deref(vars, `--mantine-color-${name}-outline-hover`));
+    const base = parseColor(scheme === 'dark' ? outline : tuple[0]);
+    expect([hover.r, hover.g, hover.b], `${scheme}: ${name} outline-hover`).toEqual([base.r, base.g, base.b]);
+
+    for (const page of pages) {
+      const bg = surfaces[scheme][page];
+      const hovered = flatten(deref(vars, `--mantine-color-${name}-outline-hover`), bg);
+
+      expect(contrast(outline, bg), `${scheme}: ${name} outline на ${page}`).toBeGreaterThanOrEqual(AA.text);
+      expect(contrast(outline, hovered), `${scheme}: ${name} outline на hover поверх ${page}`).toBeGreaterThanOrEqual(
+        AA.text,
+      );
+    }
+  });
+
+  /*
+   * `brand` (2026-09-22, «на розсуд команди»): текст/посилання ≥ 4.5, межа й
+   * кільце фокуса ≥ 3, білий на заливці ≥ 4.5 — обидві схеми. Текст — не
+   * `[0]`/`[1]` і того самого відтінку, що `brand[6]` (±5° HSL).
+   */
+  const allSurfaces = (scheme: Scheme): string[] => [
+    ...pages.map((p) => surfaces[scheme][p]),
+    surfaces[scheme].accentSoft,
+    surfaces[scheme].select,
+    surfaces[scheme].hover,
+    surfaces[scheme].calcBg,
+    surfaces[scheme].hatch,
+  ];
+
+  function hue(hex: string): number {
+    const { r, g, b } = parseColor(hex);
+    const [R, G, B] = [r / 255, g / 255, b / 255];
+    const max = Math.max(R, G, B);
+    const d = max - Math.min(R, G, B);
+    if (d === 0) return NaN;
+    const h = max === R ? ((G - B) / d) % 6 : max === G ? (B - R) / d + 2 : (R - G) / d + 4;
+
+    return (h * 60 + 360) % 360;
+  }
+
+  it.each(['light', 'dark'] as const)('brand, схема «%s»: текст, посилання, межа — фірмовий відтінок, AA', (scheme) => {
+    const vars = mergedVars(scheme);
+    const textVars = [
+      '--mantine-color-brand-light-color',
+      '--mantine-color-brand-text',
+      '--mantine-color-anchor',
+      '--ecr-accent-text',
+    ];
+
+    for (const v of [...textVars, '--mantine-color-brand-outline']) {
+      const color = deref(vars, v);
+
+      expect(color, `${scheme}: ${v}`).not.toBe(brand[0]);
+      expect(color, `${scheme}: ${v}`).not.toBe(brand[1]);
+      expect(Math.abs(hue(color) - hue(brand[6])), `${scheme}: ${v} — відтінок brand[6]`).toBeLessThanOrEqual(5);
+
+      const threshold = textVars.includes(v) ? AA.text : AA.nonText;
+      for (const bg of allSurfaces(scheme)) {
+        expect(contrast(color, bg), `${scheme}: ${v} на ${bg}`).toBeGreaterThanOrEqual(threshold);
+      }
+    }
+
+    // Текст `light`/`subtle` на власному тлі й тлі наведення поверх кожної поверхні;
+    // `outline` (текст ТЕЖ) — на своєму тлі наведення.
+    const text = deref(vars, '--mantine-color-brand-light-color');
+    const outline = deref(vars, '--mantine-color-brand-outline');
+
+    // Темна: ОДНЕ значення на все — інакше заміна `brandTextOnDark` за
+    // брендбуком зрушила б лише частину змінних. Тло наведення `outline` —
+    // того самого відтінку, що межа.
+    if (scheme === 'dark') {
+      for (const v of [...textVars, '--mantine-color-brand-outline']) {
+        expect(deref(vars, v), `dark: ${v} = brandTextOnDark`).toBe(brandTextOnDark);
+      }
+      const hoverRgb = parseColor(deref(vars, '--mantine-color-brand-outline-hover'));
+      const baseRgb = parseColor(brandTextOnDark);
+      expect([hoverRgb.r, hoverRgb.g, hoverRgb.b], 'dark: brand outline-hover').toEqual([
+        baseRgb.r,
+        baseRgb.g,
+        baseRgb.b,
+      ]);
+    }
+    for (const page of pages) {
+      const bg = surfaces[scheme][page];
+      for (const layer of ['light', 'light-hover'] as const) {
+        const tint = flatten(deref(vars, `--mantine-color-brand-${layer}`), bg);
+        expect(contrast(text, tint), `${scheme}: brand на ${layer} поверх ${page}`).toBeGreaterThanOrEqual(AA.text);
+      }
+      const hovered = flatten(deref(vars, '--mantine-color-brand-outline-hover'), bg);
+      expect(contrast(outline, bg), `${scheme}: brand outline на ${page}`).toBeGreaterThanOrEqual(AA.text);
+      expect(contrast(outline, hovered), `${scheme}: brand outline hover ${page}`).toBeGreaterThanOrEqual(AA.text);
+    }
+  });
+
+  it.each(['light', 'dark'] as const)('brand, схема «%s»: кільце фокуса ≥ 3 і білий на заливці ≥ 4.5', (scheme) => {
+    const vars = mergedVars(scheme);
+    // Кільце — `motion.css`: `brand-6` у світлій, `brand-4` у темній.
+    const focus = deref(vars, scheme === 'light' ? '--mantine-color-brand-6' : '--mantine-color-brand-4');
+    const filled = deref(vars, '--mantine-color-brand-filled');
+    const hover = deref(vars, '--mantine-color-brand-filled-hover');
+
+    for (const bg of allSurfaces(scheme)) {
+      expect(contrast(focus, bg), `${scheme}: фокус на ${bg}`).toBeGreaterThanOrEqual(AA.nonText);
+    }
+    expect(contrast('#ffffff', filled), `${scheme}: білий на filled`).toBeGreaterThanOrEqual(AA.text);
+    expect(contrast('#ffffff', hover), `${scheme}: білий на filled-hover`).toBeGreaterThanOrEqual(AA.text);
+  });
+
+  it('лінійка: `deref` падає на відсутній змінній, а не повертає `undefined`', () => {
+    expect(() => deref({}, '--mantine-color-statusError-light-color')).toThrow(/не розгортається/);
   });
 });
 

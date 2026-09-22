@@ -230,6 +230,26 @@ function MyGroupsIcon(): JSX.Element {
   );
 }
 
+/** Notifications — дзвінок. */
+function NotificationsIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13 6 9Z" />
+      <path d="M10 18.5a2 2 0 0 0 4 0" />
+    </Icon>
+  );
+}
+
+/** Campaign — прапорець на древку: у кампанії є фініш, і хтось до нього ще не дійшов. */
+function CampaignIcon(): JSX.Element {
+  return (
+    <Icon>
+      <path d="M5 21V4" />
+      <path d="M5 4h11l-2 4 2 4H5" />
+    </Icon>
+  );
+}
+
 /**
  * Ключ → компонент. Ключі відповідають рядковим значенням `handle.icon` у
  * `routes.ts` — один нав-пункт, один ключ, одна іконка.
@@ -251,6 +271,8 @@ export const navIcons: Record<string, () => JSX.Element> = {
   consistency: ConsistencyIcon,
   uiStrings: UiStringsIcon,
   health: HealthIcon,
+  notifications: NotificationsIcon,
+  campaign: CampaignIcon,
   myGroups: MyGroupsIcon,
 };
 

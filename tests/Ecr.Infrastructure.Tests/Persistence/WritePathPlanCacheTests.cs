@@ -169,16 +169,14 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
         // (а) Фільтр по базі зламаний — тоді нуль буде завжди, і тест мовчки
         //     проходив би на коді до `WR-01`. Це те, проти чого підлога й
         //     заведена.
-        // (б) План ВИТІСНЕНО з кешу. Кеш планів загальносерверний, і коли на
-        //     тому самому інстансі паралельно працюють інші прогони (у цій
-        //     сесії — до п'яти агентів на одній машині), чужа робота витісняє
-        //     наш план між записом і заміром. Це не дефект продукту й не
-        //     дефект фільтра — це шум спільного ресурсу.
+        // (б) План ВИТІСНЕНО з кешу чужим навантаженням між записом і
+        //     заміром. Теоретично можливо (кеш загальносерверний), але НЕ
+        //     спостерігалося: «плаваючі» падіння в повних прогонах мали іншу
+        //     причину — Msg 924 від `dm_exec_sql_text` на чужій базі в
+        //     SINGLE_USER/CREATE/DROP (виправлено в PlanCountAsync, 204689a9).
         //
-        // Перша редакція мала лише `plans >= 1` і читала (б) як (а): тест
-        // падав у трьох повних прогонах поспіль різними підмножинами, а
-        // поодинці був зелений. Тому тепер причина називається окремим
-        // зондом, і повідомлення відмови каже, що саме сталося.
+        // Захист лишається: нуль без підтвердження зондом — зламаний замір,
+        // нуль із підтвердженням — окрема, названа відмова.
         if (plans == 0)
         {
             Assert.True(
@@ -189,7 +187,7 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
 
             Assert.Fail(
                 $"Планів {what} у кеші: 0, хоча контрольний зонд фільтр "
-                + "підтвердив. Найімовірніше — план ВИТІСНЕНО з кешу чужим "
+                + "підтвердив. Можливо, план ВИТІСНЕНО з кешу чужим "
                 + "навантаженням на цьому ж інстансі SQL Server. Повтори "
                 + "прогін на вільній машині; якщо нуль лишається — це вже "
                 + "дефект заміру, а не шум.");
@@ -333,6 +331,16 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
     /// ⛔ Перша редакція цього тесту була через це ХИБНОЗЕЛЕНОЮ: «0 планів
     /// ≤ 2» проходить і на коді ДО <c>WR-01</c>. Тому в
     /// <see cref="AssertPlans"/> є не лише стеля, а й підлога.
+    ///
+    /// ⛔ Плани СВОЄЇ бази відбираються ДО виклику <c>dm_exec_sql_text</c>, у
+    /// табличну змінну. Кеш планів загальносерверний, а
+    /// <c>dm_exec_sql_text</c> для плану процедури/тригера відкриває базу, якій
+    /// той належить. Коли чужий прогін на тому ж інстансі переводить свою базу
+    /// в <c>SINGLE_USER</c> (прибирання <c>EcrTest_*</c>) або створює/видаляє
+    /// її, запит падав із «Database 'EcrTest_Api_…' is already open and can
+    /// only have one user» / «is in transition» — хоча до нашої бази не мав
+    /// стосунку. Фільтр <c>t.dbid = DB_ID()</c> у тому самому запиті не рятує:
+    /// порядок обчислення <c>CROSS APPLY</c> і <c>WHERE</c> не гарантований.
     /// </remarks>
     private async Task<int> PlanCountAsync(string pattern, CancellationToken ct)
     {
@@ -340,9 +348,16 @@ public sealed class WritePathPlanCacheTests(SqlServerFixture sql)
         await connection.OpenAsync(ct);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT COUNT(*)
+            SET NOCOUNT ON;
+            DECLARE @own TABLE (plan_handle varbinary(64) PRIMARY KEY);
+            INSERT @own
+            SELECT cp.plan_handle
             FROM sys.dm_exec_cached_plans AS cp
-            CROSS APPLY sys.dm_exec_sql_text(cp.plan_handle) AS t
+            CROSS APPLY sys.dm_exec_plan_attributes(cp.plan_handle) AS a
+            WHERE a.attribute = 'dbid' AND CONVERT(int, a.value) = DB_ID();
+            SELECT COUNT(*)
+            FROM @own AS o
+            CROSS APPLY sys.dm_exec_sql_text(o.plan_handle) AS t
             WHERE t.text LIKE @pattern AND t.dbid = DB_ID();
             """;
         command.Parameters.Add("@pattern", System.Data.SqlDbType.NVarChar, 200).Value = pattern;

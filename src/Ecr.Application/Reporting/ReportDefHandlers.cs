@@ -89,6 +89,10 @@ public static class ReportDefinitionSpec
             // решти кодів конфігурації.
             _ = EcrCode.Create(column.Code);
 
+            // ⛔ R9: назви перевіряються ТУТ, при створенні версії, — зламана
+            // назва інакше знайшлася б аж у заголовку вивантаженої книги.
+            ReportColumnNames.Require(column.Code, column.NameL10n);
+
             if (!Array.Exists(ColumnKinds, k => string.Equals(k, column.Kind, StringComparison.Ordinal)))
             {
                 throw new BusinessRuleException(
@@ -127,9 +131,14 @@ public static class ReportDefinitionSpec
     {
         var effective = rules ?? new ReportRulesCommand(CalculationResults);
 
-        // Без явної схеми: правила є — схема 2, немає — схема 1, побайтно як до R5.
+        // Без явної схеми: правила, параметри або макет є — схема 2, немає —
+        // схема 1, побайтно як до R5.
         var schema = effective.Schema
-            ?? (effective.Rules is { Count: > 0 } ? ReportRowRules.Schema : ReportRules.CurrentSchema);
+            ?? (effective.Rules is { Count: > 0 }
+                || effective.Parameters is { Count: > 0 }
+                || effective.Layout is not null
+                ? ReportRowRules.Schema
+                : ReportRules.CurrentSchema);
 
         if (!string.Equals(effective.RowSource, CalculationResults, StringComparison.Ordinal))
         {
@@ -152,10 +161,17 @@ public static class ReportDefinitionSpec
                 });
         }
 
-        // ⛔ Вирази правил перевіряються ТУТ, при створенні версії, тим самим кодом,
-        // яким їх застосує побудова: зламане правило не доживає до нічного зрізу.
+        // ⛔ Вирази правил і оголошення параметрів перевіряються ТУТ, при створенні
+        // версії, тим самим кодом, яким їх застосує побудова: зламане правило не
+        // доживає до нічного зрізу.
         _ = ReportRowRules.Compile(
-            schema, effective.RowSource, effective.Rules, [.. (columns ?? []).Select(c => c.Code)]);
+            schema, effective.RowSource, effective.Rules, [.. (columns ?? []).Select(c => c.Code)],
+            effective.Parameters);
+
+        // ⛔ R8: макет перевіряється ТИМ САМИМ кодом, яким його застосує видача.
+        // Підсумок над колонкою, якої в описі немає, інакше дійшов би до екрана
+        // порожнім числом замість відмови.
+        _ = ReportLayout.Compile(schema, effective.Layout, columns);
 
         // Версія схеми пишеться ЗАВЖДИ: опис без неї — це опис до D-52a.
         return JsonSerializer.Serialize(effective with { Schema = schema }, Options);
@@ -201,7 +217,18 @@ public static class ReportDefinitionSpec
 /// <summary>Колонка зрізу в описі версії звіту.</summary>
 /// <param name="Code">Код колонки; він же ключ у рядку зрізу.</param>
 /// <param name="Kind">Тип значення: <c>text</c>, <c>number</c> або <c>date</c>.</param>
-public sealed record ReportColumnCommand(string Code, string Kind);
+/// <param name="NameL10n">
+/// Підписи колонки мовами каталогу (<c>R9</c>); <c>null</c> — колонка
+/// підписується КОДОМ, тобто рівно як до <c>R9</c>. У JSON опису поля тоді
+/// немає взагалі, і <c>ColumnsJson</c> лишається побайтно тим самим.
+/// ⚠ На <c>rpt.ReportRow</c> і на <c>ContentHash</c> не впливає — це подання.
+/// </param>
+public sealed record ReportColumnCommand(
+    string Code,
+    string Kind,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyDictionary<string, string>? NameL10n = null);
 
 /// <summary>Правила відбору рядків зрізу.</summary>
 /// <param name="RowSource">
@@ -214,12 +241,28 @@ public sealed record ReportColumnCommand(string Code, string Kind);
 /// <param name="Rules">
 /// Правила рядка (схема 2) у порядку застосування; у JSON схеми 1 поля немає взагалі.
 /// </param>
+/// <param name="Parameters">
+/// Параметри звіту (схема 2, <c>R6</c>): на них посилаються вирази правил як
+/// <c>@Code</c>, а значення задаються при побудові зрізу. У JSON схеми 1 поля
+/// немає взагалі.
+/// </param>
+/// <param name="Layout">
+/// Макет зрізу (схема 2, <c>R8</c>): одна група й підсумки. У JSON схеми 1 поля
+/// немає взагалі. ⚠ На <c>rpt.ReportRow</c> і на <c>ContentHash</c> не впливає —
+/// застосовується на видачі.
+/// </param>
 public sealed record ReportRulesCommand(
     string RowSource,
     int? Schema = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<ReportRuleCommand>? Rules = null);
+    IReadOnlyList<ReportRuleCommand>? Rules = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<ReportParameterCommand>? Parameters = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    ReportLayoutCommand? Layout = null);
 
 /// <summary>
 /// Перелік описів звітів. Право <c>Report.ViewRegulatory</c>.

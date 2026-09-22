@@ -113,6 +113,66 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-30")]
+    public async Task Множник_їде_рядком_і_доносить_шістнадцятий_знак_після_коми()
+    {
+        // ⛔ Справжній HTTP, а не серіалізатор у пам'яті: між `decimal` і
+        // клієнтом лежать ДВА незалежні набори опцій (MVC і мінімальні API),
+        // і розійтися вони можуть непомітно. Значення з 16 знаками після коми
+        // у JSON-ЧИСЛІ клієнт прочитав би як 1.2345678901234568 — саме цього
+        // й вимагає уникнути контракт (`docs/build/02-contracts.md` §10).
+        //
+        // ⚠ `uom.Unit.FactorToBase` — `decimal(38,18)`, тобто всі 16 знаків
+        // переживають і запис у базу, і читання з неї.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        const string factor = "1.2345678901234567";
+        var code = $"p{Guid.NewGuid():N}"[..8];
+
+        // Множник надсилається РЯДКОМ, зсув — ЧИСЛОМ: читання мусить приймати
+        // обидві форми, інакше формат відповіді ламає наявних клієнтів запису.
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/v1/units", UriKind.Relative),
+            new
+            {
+                code,
+                symbolL10n = new Dictionary<string, string> { ["en"] = code },
+                nameL10n = new Dictionary<string, string> { ["en"] = code },
+                dimensionId = 1,
+                factorToBase = factor,
+                offsetToBase = 0,
+            }).ConfigureAwait(true);
+
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var created = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("factorToBase");
+
+        Assert.Equal(JsonValueKind.String, created.ValueKind);
+        Assert.Equal(factor, created.GetString());
+
+        // Другий прохід — уже з бази, іншим обробником: значення не зрізалося
+        // ні на записі, ні на читанні.
+        var listed = (await ReadAsync(client, "/api/v1/units").ConfigureAwait(true))
+            .EnumerateArray()
+            .Single(u => string.Equals(u.GetProperty("code").GetString(), code, StringComparison.Ordinal))
+            .GetProperty("factorToBase");
+
+        Assert.Equal(JsonValueKind.String, listed.ValueKind);
+
+        // ⚠ Хвостові нулі — це МАСШТАБ колонки (`decimal(38,18)`), а не втрата:
+        // `decimal` носить масштаб у собі, і `ToString` його друкує. Так само
+        // робив і попередній формат — `System.Text.Json` писав JSON-число
+        // `1.234567890123456700`; просто `JSON.parse` їх прибирав, а рядок —
+        // ні. Нормалізує подання клієнт (`shared/format/number.ts`), сервер
+        // не вигадує за нього, скільки знаків значущі.
+        Assert.Equal(factor, listed.GetString()!.TrimEnd('0'));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Недодатний_множник_у_запиті_відхиляється_422_а_не_зберігається()
     {
         // ⛔ Аудит §5.2 через справжній HTTP: порожнє числове поле форми
@@ -135,10 +195,8 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
                 offsetToBase = 0m,
             }).ConfigureAwait(true);
 
-        Assert.Equal(System.Net.HttpStatusCode.UnprocessableEntity, response.StatusCode);
-
-        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
-        Assert.Contains("ECR-UOM-0422", body, StringComparison.Ordinal);
+        await AssertProblemAsync(response, 422, "ECR-UOM-0422", "err.ECR-UOM-0422.factorMustBePositive")
+            .ConfigureAwait(true);
     }
 
     [Fact]
@@ -203,6 +261,149 @@ public sealed class UnitsControllerTests(SqlServerFixture sql)
             .ConfigureAwait(true);
 
         Assert.Equal(System.Net.HttpStatusCode.Conflict, kgRefused.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_одиниці_потребує_чинної_версії_застаріла_дає_409_і_рядок_не_змінюється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        var (id, code) = await CreateAsync(client).ConfigureAwait(true);
+        var read = await ReadAsync(client, $"/api/v1/units/{id}").ConfigureAwait(true);
+        var version = read.GetProperty("rowVersion").GetString()!;
+
+        var noHeader = await PutAsync(client, id, null, "Pound", 0.45m).ConfigureAwait(true);
+        await AssertProblemAsync(noHeader, 422, "ECR-REQ-0422", "err.ECR-REQ-0422.unitIfMatch").ConfigureAwait(true);
+
+        // Одиниця без посилань: множник змінюється разом із назвою.
+        var saved = await PutAsync(client, id, version, "Pound", 0.45m).ConfigureAwait(true);
+        Assert.Equal(System.Net.HttpStatusCode.OK, saved.StatusCode);
+        var body = JsonDocument.Parse(await saved.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.Equal("Pound", body.GetProperty("nameL10n").GetProperty("en").GetString());
+        Assert.Equal(code, body.GetProperty("code").GetString());
+        var fresh = body.GetProperty("rowVersion").GetString()!;
+        Assert.NotEqual(version, fresh);
+
+        // ⛔ Версія з відповіді PUT мусить збігатися з версією, прочитаною з бази
+        // (множник там у масштабі колонки), інакше наступна правка — хибний 409.
+        var reread = await ReadAsync(client, $"/api/v1/units/{id}").ConfigureAwait(true);
+        Assert.Equal(fresh, reread.GetProperty("rowVersion").GetString());
+
+        var stale = await PutAsync(client, id, version, "Stale", 0.45m).ConfigureAwait(true);
+        var problem = await AssertProblemAsync(stale, 409, "ECR-UOM-0409", "err.ECR-UOM-0409.unitChanged")
+            .ConfigureAwait(true);
+        Assert.Equal(fresh, problem.GetProperty("rowVersion").GetString());
+
+        var after = await ReadAsync(client, $"/api/v1/units/{id}").ConfigureAwait(true);
+        Assert.Equal("Pound", after.GetProperty("nameL10n").GetProperty("en").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Множник_одиниці_з_посиланнями_не_змінюється_409_а_назва_змінюється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+
+        var used = await CreateAsync(client).ConfigureAwait(true);
+        var other = await CreateAsync(client).ConfigureAwait(true);
+
+        var options = new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options;
+        await using (var db = new EcrDbContext(options))
+        {
+            db.UnitConversions.Add(new Ecr.Domain.Entities.Units.UnitConversion(
+                used.Id, other.Id, factor: 2m, offset: 0m, kind: 0, note: null));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var version = (await ReadAsync(client, $"/api/v1/units/{used.Id}").ConfigureAwait(true))
+            .GetProperty("rowVersion").GetString()!;
+
+        var refused = await PutAsync(client, used.Id, version, "Renamed", 3m).ConfigureAwait(true);
+        var problem = await AssertProblemAsync(refused, 409, "ECR-UOM-0409", "err.ECR-UOM-0409.unitFactorInUse")
+            .ConfigureAwait(true);
+        Assert.Equal("1", problem.GetProperty("total").GetString());
+
+        // Той самий множник (2.5, у базі — 2.500000000000000000) — не зміна.
+        var renamed = await PutAsync(client, used.Id, version, "Renamed", 2.5m).ConfigureAwait(true);
+        Assert.Equal(System.Net.HttpStatusCode.OK, renamed.StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_одиниці_без_права_403_неіснуючої_404_невалідне_тіло_422()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var editor = await SignedInAsync(app, "Uom.EditCatalog").ConfigureAwait(true);
+        using var reader = await SignedInAsync(app).ConfigureAwait(true);
+
+        var (id, _) = await CreateAsync(editor).ConfigureAwait(true);
+        var version = (await ReadAsync(editor, $"/api/v1/units/{id}").ConfigureAwait(true))
+            .GetProperty("rowVersion").GetString()!;
+
+        var denied = await PutAsync(reader, id, version, "Nope", 2.5m).ConfigureAwait(true);
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var missing = await PutAsync(editor, int.MaxValue, version, "Nope", 2.5m).ConfigureAwait(true);
+        await AssertProblemAsync(missing, 404, "ECR-UOM-0404", "err.ECR-UOM-0404.unitId").ConfigureAwait(true);
+
+        var blank = await PutAsync(editor, id, version, "  ", 2.5m).ConfigureAwait(true);
+        await AssertProblemAsync(blank, 422, "ECR-REQ-0422", "err.ECR-REQ-0422.unitInvalid").ConfigureAwait(true);
+
+        var zero = await PutAsync(editor, id, version, "Zero", 0m).ConfigureAwait(true);
+        var zeroProblem = await AssertProblemAsync(zero, 422, "ECR-UOM-0422", "err.ECR-UOM-0422.factorMustBePositive")
+            .ConfigureAwait(true);
+
+        // Заголовок коду спільний із «різними розмірностями»: про розмірності
+        // над відмовою множника він говорити не може.
+        var title = zeroProblem.GetProperty("title").GetString();
+        Assert.Equal("Invalid unit conversion", title);
+        Assert.DoesNotContain("dimension", title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("greater than zero", zeroProblem.GetProperty("detail").GetString(), StringComparison.Ordinal);
+
+        // Жодна з відмов не змінила рядка: версія та сама.
+        var after = await ReadAsync(editor, $"/api/v1/units/{id}").ConfigureAwait(true);
+        Assert.Equal(version, after.GetProperty("rowVersion").GetString());
+    }
+
+    private static async Task<HttpResponseMessage> PutAsync(
+        HttpClient client, int id, string? ifMatch, string name, decimal factor)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, new Uri($"/api/v1/units/{id}", UriKind.Relative))
+        {
+            Content = JsonContent.Create(new
+            {
+                symbolL10n = new Dictionary<string, string> { ["en"] = "x" },
+                nameL10n = new Dictionary<string, string> { ["en"] = name },
+                factorToBase = factor,
+                offsetToBase = 0m,
+            }),
+        };
+
+        if (ifMatch is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-Match", $"\"{ifMatch}\"");
+        }
+
+        return await client.SendAsync(request).ConfigureAwait(false);
+    }
+
+    private static async Task<JsonElement> AssertProblemAsync(
+        HttpResponseMessage response, int status, string errorCode, string messageKey)
+    {
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True((int)response.StatusCode == status, $"{response.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal(errorCode, problem.GetProperty("errorCode").GetString());
+        Assert.Equal(messageKey, problem.GetProperty("messageKey").GetString());
+
+        return problem;
     }
 
     private static async Task<JsonElement> ReadAsync(HttpClient client, string path)

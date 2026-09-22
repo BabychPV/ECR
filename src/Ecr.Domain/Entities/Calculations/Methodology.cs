@@ -1,4 +1,5 @@
 ﻿// src/Ecr.Domain/Entities/Calculations/Methodology.cs
+using System.Globalization;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -65,7 +66,14 @@ public sealed class Methodology : Entity<int>
         if (_versions.Any(v => string.Equals(v.Version, version.Version, StringComparison.Ordinal)))
         {
             throw new DomainException(
-                "ECR-CALC-0409", $"Версія {version.Version} методології {Code} уже існує.");
+                "ECR-CALC-0409",
+                $"Версія {version.Version} методології {Code} уже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.versionNumberTaken",
+                    ["version"] = version.Version,
+                    ["code"] = Code,
+                });
         }
 
         _versions.Add(version);
@@ -115,7 +123,13 @@ public sealed class Methodology : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Версія {version.Version} не належить методології {Code}.");
+                $"Версія {version.Version} не належить методології {Code}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.versionNotInMethodology",
+                    ["version"] = version.Version,
+                    ["code"] = Code,
+                });
         }
 
         var clash = _versions.FirstOrDefault(
@@ -127,7 +141,13 @@ public sealed class Methodology : Entity<int>
                 "ECR-CALC-0409",
                 $"Версія {clash.Version} уже чинна від {effectiveFrom:yyyy-MM-dd}: "
                 + "дві опубліковані версії від однієї дати роблять вибір методології неоднозначним "
-                + "(ФВ-13.3).");
+                + "(ФВ-13.3).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.effectiveDateTaken",
+                    ["version"] = clash.Version,
+                    ["effectiveFrom"] = effectiveFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                });
         }
 
         version.Publish(publishedByUserId, changeReason, effectiveFrom, testsPassed, utcNow);

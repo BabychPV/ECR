@@ -68,6 +68,10 @@ public sealed class PermissionDeniedDetailsTests
         Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
         Assert.NotNull(error.Details);
         Assert.Equal(ListRolesHandler.Permission, Assert.Contains("permission", error.Details!));
+
+        // ⚠ Q-341: без цього поля подробиця доїжджає клієнту сирим
+        // українським реченням незалежно від мови інтерфейсу.
+        Assert.Equal("err.ECR-AUTH-0403.permission", Assert.Contains("messageKey", error.Details!));
     }
 
     [Fact]
@@ -99,5 +103,9 @@ public sealed class PermissionDeniedDetailsTests
         Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
         Assert.NotNull(error.Details);
         Assert.Equal(ListUsersHandler.Permission, Assert.Contains("permission", error.Details!));
+
+        // ⚠ Q-341: те саме поле, що й у CreateRoleHandler — той самий факт
+        // («бракує права X»), і саме тому той самий ключ.
+        Assert.Equal("err.ECR-AUTH-0403.permission", Assert.Contains("messageKey", error.Details!));
     }
 }

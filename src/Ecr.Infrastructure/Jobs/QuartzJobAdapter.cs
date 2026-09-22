@@ -1,6 +1,8 @@
 using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Errors;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -107,7 +109,16 @@ public sealed partial class QuartzJobAdapter(
             return;
         }
 
-        await StartAsync(progress, jobId, typeName!, clock, context.CancellationToken).ConfigureAwait(false);
+        // BE-08: спроба від 1 (ретраї Quartz рахуються від 0), кореляція — та,
+        // що вже в логах запиту-постановника; scope несе її в УСІ рядки логу
+        // задачі (MEL-scope спільний для всіх логерів цього async-потоку).
+        var attemptNumber = CurrentAttempt(context) + 1;
+        var correlationId = CorrelationOf(context);
+        using var logScope = logger.BeginScope(
+            new Dictionary<string, object> { ["CorrelationId"] = correlationId });
+
+        await StartAsync(progress, jobId, typeName!, attemptNumber, correlationId, clock, context.CancellationToken)
+            .ConfigureAwait(false);
 
         // ⛔ Биття серця на весь час виконання. Прибирання на старті
         // (`IJobProgressStore.FailStaleAsync`) відрізняє покинуту задачу від
@@ -150,18 +161,30 @@ public sealed partial class QuartzJobAdapter(
         {
             var attempt = CurrentAttempt(context);
 
-            if (attempt < MaxRetryAttempts)
+            if (attempt < MaxRetryAttempts && IsWorthRetrying(ex))
             {
                 // ⚠ Ретрай — НЕ Failed. Клієнт, що опитує стан, має й далі
                 // бачити задачу «у виконанні», а не короткий спалах «провалу»,
                 // який за кілька секунд сам собою стає «виконується» знову.
-                await ScheduleRetryAsync(context, attempt, progress, clock, ex).ConfigureAwait(false);
+                await ScheduleRetryAsync(context, attempt, correlationId, progress, clock, ex).ConfigureAwait(false);
                 return;
             }
 
             // ⚠ Текст помилки в прогрес — БЕЗ стека (ФВ-6.11, D-11): стек
             // виносить назовні шляхи, імена і подекуди значення.
-            await FinishAsync(progress, jobId, "Failed", ex.Message, clock, CancellationToken.None)
+            //
+            // ⚠ І вкорочений до межі стовпця: `Error` тримає 2000 символів, а
+            // `ex.Message` не обмежений нічим.
+            await WriteProgressAsync(
+                    jobId,
+                    () => FinishAsync(
+                        progress,
+                        jobId,
+                        "Failed",
+                        JobProgressMessageCodec.Shorten(ex.Message, IJobProgressStore.MaxErrorLength),
+                        clock,
+                        CancellationToken.None,
+                        ErrorCodeOf(ex)))
                 .ConfigureAwait(false);
 
             LogJobFailed(logger, jobId, typeName ?? "—");
@@ -240,9 +263,10 @@ public sealed partial class QuartzJobAdapter(
     /// <summary>Скільки РЕТРАЇВ уже було — з даних триґера, що щойно відпрацював.</summary>
     private static int CurrentAttempt(IJobExecutionContext context)
     {
-        var map = context.Trigger.JobDataMap;
+        var map = context.Trigger?.JobDataMap;
 
-        return map.ContainsKey(QuartzJobScheduler.RetryAttemptKey)
+        return map is not null
+               && map.ContainsKey(QuartzJobScheduler.RetryAttemptKey)
                && int.TryParse(
                    map.GetString(QuartzJobScheduler.RetryAttemptKey), out var attempt)
             ? attempt
@@ -250,11 +274,63 @@ public sealed partial class QuartzJobAdapter(
     }
 
     /// <summary>
+    /// Кореляція прогону: триґер (ретрай, ручний перезапуск) → задача
+    /// (постановка) → нова (розклад: нічний прогін не має запиту-причини).
+    /// </summary>
+    private static string CorrelationOf(IJobExecutionContext context)
+    {
+        foreach (var map in new[] { context.Trigger?.JobDataMap, context.JobDetail.JobDataMap })
+        {
+            if (map is not null
+                && map.ContainsKey(QuartzJobScheduler.CorrelationKey)
+                && map.GetString(QuartzJobScheduler.CorrelationKey) is { Length: > 0 } id)
+            {
+                return id;
+            }
+        }
+
+        return Guid.NewGuid().ToString("N");
+    }
+
+    /// <summary>
+    /// Чи має сенс повторювати задачу після цього винятку.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перелічені типи — це ВЕРДИКТ про вже збережений стан, а не збій
+    /// дороги до нього: «зріз за період уже поданий» (<c>ECR-RPT-0409</c>),
+    /// «сутності немає», «права немає», «джерело не пускає» (<c>H-20</c>).
+    /// Той самий стан через 30 с дасть той самий вердикт, тож три ретраї
+    /// (30+60+120 = 210 с) лише ховають причину: користувач увесь цей час
+    /// бачить «виконується», а справжнє пояснення доїжджає аж наприкінці.
+    /// Провал із першої спроби показує його відразу.
+    /// <para>
+    /// ⛔ Розрізнення — лише за ТИПОМ винятку, ніколи за текстом
+    /// повідомлення: текст пишуть люди, і список за підрядком мовчки
+    /// перестане працювати від першої ж правки формулювання.
+    /// </para>
+    /// <para>
+    /// ⚠ Двох типів тут НЕМАЄ навмисно, і це не забудькуватість.
+    /// <see cref="BusinessRuleException"/> — ним із адаптерів збору приїжджає
+    /// <c>ECR-INT-0503</c> («джерело недоступне або відповідає надто
+    /// повільно»), тобто рівно та транзієнтна відмова, заради якої ретрай і
+    /// будували. <see cref="ConcurrencyConflictException"/> — конфлікт версій
+    /// минає сам, щойно повтор перечитає свіжий стан. Розширити перелік на
+    /// «усі помилки з кодом» означало б знову зламати те, що тут працює.
+    /// </para>
+    /// </remarks>
+    private static bool IsWorthRetrying(Exception ex)
+        => ex is not (DomainException
+            or NotFoundException
+            or AccessDeniedException
+            or SourceAuthenticationException);
+
+    /// <summary>
     /// Планує новий одноразовий триґер того самого <c>JobKey</c> з
     /// експоненційним відступом і пише в прогрес, ЩО задача повторює спробу.
     /// </summary>
-    private static async Task ScheduleRetryAsync(
-        IJobExecutionContext context, int attempt, IJobProgressStore? progress, IClock clock, Exception ex)
+    private async Task ScheduleRetryAsync(
+        IJobExecutionContext context, int attempt, string correlationId, IJobProgressStore? progress,
+        IClock clock, Exception ex)
     {
         var jobId = context.JobDetail.Key.Name;
         var nextAttempt = attempt + 1;
@@ -275,6 +351,8 @@ public sealed partial class QuartzJobAdapter(
             .ForJob(context.JobDetail.Key)
             .WithIdentity($"{jobId}-retry{nextAttempt}-{Guid.NewGuid():N}-trigger")
             .UsingJobData(QuartzJobScheduler.RetryAttemptKey, nextAttempt.ToString(CultureInfo.InvariantCulture))
+            // Повтор — та сама задача, отже та сама кореляція (і для розкладу теж).
+            .UsingJobData(QuartzJobScheduler.CorrelationKey, correlationId)
             .StartAt(startAt)
             .Build();
 
@@ -298,9 +376,56 @@ public sealed partial class QuartzJobAdapter(
                     ["error"] = ex.Message,
                 });
 
-            await progress.ReportAsync(
-                jobId, 0, JobProgressMessageCodec.Encode(envelope), clock.UtcNow, CancellationToken.None)
+            // ⛔ Саме тут жила найдорожча частина дефекту, знайденого наскрізною
+            // перевіркою (`tools/smoke.ps1`, крок 23). `ex.Message` ішов у
+            // конверт як є; українське повідомлення в JSON екранується по шість
+            // символів на літеру, тож конверт легко переростав `nvarchar(400)`,
+            // і SQL Server відповідав `Msg 2628`. Виняток летів із блоку
+            // `catch`: стан НІКОЛИ не ставав `Failed` (клієнт вічно бачив
+            // «виконується»), а триґер ретраю вже був поставлений рядком вище —
+            // задача мовчки перезапускалася кожні 30/60 с і падала знову.
+            // Разом із записом губився й текст причини — тобто рівно те, що не
+            // влізло.
+            await WriteProgressAsync(
+                    jobId,
+                    () => progress.ReportAsync(
+                        jobId,
+                        0,
+                        JobProgressMessageCodec.EncodeWithinLimit(envelope, "error"),
+                        clock.UtcNow,
+                        CancellationToken.None))
                 .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Виконує запис у сховище прогресу так, щоб ЙОГО власний збій не підмінив
+    /// собою результат задачі.
+    /// </summary>
+    /// <param name="jobId">Ідентифікатор задачі — для журналу.</param>
+    /// <param name="write">Сам запис.</param>
+    /// <remarks>
+    /// ⛔ Прогрес — це РОЗПОВІДЬ про задачу, а не сама задача. Виняток звідси
+    /// раніше підміняв справжню причину провалу (і скасовував перехід у
+    /// <c>Failed</c>) — той самий принцип, що вже діє для насоса биття серця й
+    /// для резолву повідомлення (<c>JobProgressMessageResolver</c>): збій
+    /// спостерігача йде в журнал, а не в результат.
+    ///
+    /// ⚠ Ковтається саме ЗАПИС, не задача: <c>JobExecutionException</c> нижче
+    /// кидається в будь-якому разі, тож Quartz і ручний перезапуск бачать
+    /// провал так само, як бачили.
+    /// </remarks>
+    private async Task WriteProgressAsync(string jobId, Func<Task> write)
+    {
+        try
+        {
+            await write().ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Причина — у ⛔ вище: результат задачі важливіший за запис про нього.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogProgressWriteFailed(logger, jobId, ex);
         }
     }
 
@@ -351,12 +476,27 @@ public sealed partial class QuartzJobAdapter(
     }
 
     private static Task StartAsync(
-        IJobProgressStore? store, string jobId, string code, IClock clock, CancellationToken ct)
-        => store is null ? Task.CompletedTask : store.StartAsync(jobId, code, clock.UtcNow, ct);
+        IJobProgressStore? store, string jobId, string code, int attempt, string correlationId, IClock clock,
+        CancellationToken ct)
+        => store is null
+            ? Task.CompletedTask
+            : store.StartAsync(jobId, code, clock.UtcNow, ct, attempt, correlationId);
 
     private static Task FinishAsync(
-        IJobProgressStore? store, string jobId, string state, string? error, IClock clock, CancellationToken ct)
-        => store is null ? Task.CompletedTask : store.FinishAsync(jobId, state, error, clock.UtcNow, ct);
+        IJobProgressStore? store, string jobId, string state, string? error, IClock clock, CancellationToken ct,
+        string? errorCode = null)
+        => store is null ? Task.CompletedTask : store.FinishAsync(jobId, state, error, clock.UtcNow, ct, errorCode);
+
+    /// <summary>
+    /// Код каталогу для провалу (BE-08): власний код доменної чи прикладної
+    /// помилки, інакше — <see cref="ErrorCodes.Internal"/> (непередбачена).
+    /// </summary>
+    private static string ErrorCodeOf(Exception ex) => ex switch
+    {
+        EcrException e => e.ErrorCode,
+        DomainException d => d.ErrorCode,
+        _ => ErrorCodes.Internal,
+    };
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {TypeName} ({JobId}) не зареєстрована.")]
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);
@@ -373,6 +513,11 @@ public sealed partial class QuartzJobAdapter(
         Level = LogLevel.Warning,
         Message = "Не вдалося записати биття серця задачі {JobId}; наступна спроба за інтервал.")]
     private static partial void LogHeartbeatFailed(ILogger logger, string jobId, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Не вдалося записати прогрес задачі {JobId}; на результат самої задачі це не впливає.")]
+    private static partial void LogProgressWriteFailed(ILogger logger, string jobId, Exception exception);
 }
 
 /// <summary>Прогрес, що пишеться у сховище.</summary>

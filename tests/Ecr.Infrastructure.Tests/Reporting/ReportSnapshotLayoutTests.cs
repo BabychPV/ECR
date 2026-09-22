@@ -22,6 +22,9 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 4, 1, 10, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>Мова запиту у видачі рядків (<c>R9</c>): нею підписуються колонки.</summary>
+    private const string Language = "en";
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -52,8 +55,26 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var hashes = await builder.VerifyAsync(snapshotId, CancellationToken.None);
         Assert.Equal(hashes!.Stored, hashes.Actual);
 
-        var page = await builder.RowsAsync(snapshotId, 0, 10, CancellationToken.None);
+        var page = await builder.RowsAsync(snapshotId, 0, 10, Language, CancellationToken.None);
         Assert.Equal(["Value", "UnitCode", "DocumentId"], page!.Columns.Select(c => c.Code));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Побудова_одразу_записує_формат_суми_current()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var version = await PublishedAsync(db, RuledColumnsJson);
+
+        var snapshotId = await new ReportSnapshotBuilder(db, new TestClock(Now)).BuildAsync(
+            version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        await using var fresh = chain.CreateContext();
+        Assert.Equal("current", await fresh.ReportSnapshots.AsNoTracking()
+            .Where(s => s.Id == snapshotId).Select(s => s.HashFormat).SingleAsync());
     }
 
     [Fact]
@@ -122,20 +143,20 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var snapshotId = await builder.BuildAsync(
             version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
 
-        var first = await builder.RowsAsync(snapshotId, 0, 1, CancellationToken.None);
+        var first = await builder.RowsAsync(snapshotId, 0, 1, Language, CancellationToken.None);
         var row = Assert.Single(first!.Rows);
         Assert.Equal(1, row.RowNo);
         Assert.Equal("E_CO2", row.Cells["OutputCode"]);
 
-        // Число без хвостових нулів масштабу `decimal(28,10)`.
+        // Число без хвостових нулів масштабу `decimal(34,16)`.
         Assert.Equal("12.5", ((decimal)row.Cells["Value"]!).ToString(CultureInfo.InvariantCulture));
         Assert.Equal(1, first.NextCursor);
 
-        var second = await builder.RowsAsync(snapshotId, first.NextCursor!.Value, 1, CancellationToken.None);
+        var second = await builder.RowsAsync(snapshotId, first.NextCursor!.Value, 1, Language, CancellationToken.None);
         Assert.Equal(2, Assert.Single(second!.Rows).RowNo);
         Assert.Null(second.NextCursor);
 
-        Assert.Null(await builder.RowsAsync(long.MaxValue, 0, 1, CancellationToken.None));
+        Assert.Null(await builder.RowsAsync(long.MaxValue, 0, 1, Language, CancellationToken.None));
     }
 
     private static readonly ReportColumnCommand[] RuledColumns = [new("OutputCode", "text"), new("Value", "number")];
@@ -202,6 +223,136 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
     }
 
     private const string RuledColumnsJson = """[{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"}]""";
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.17")]
+    public async Task Макет_не_чіпає_рядків_зрізу_і_суми_а_змінює_лише_видачу()
+    {
+        // ⛔ R8 цілиться рівно в це: макет — спосіб ПОКАЗУ. Якби він доїжджав
+        // до `rpt.ReportRow`, та сама версія з групуванням і без нього давала б
+        // різні контрольні суми — тобто сумою більше не можна було б довести,
+        // що звіт не змінився.
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        var plain = await PublishedAsync(db, RuledColumnsJson);
+        var grouped = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
+            new(
+                "CalculationResults",
+                Layout: new("OutputCode", [new("Value", "sum")], ShowGroupHeader: true)),
+            RuledColumns));
+
+        var plainId = await builder.BuildAsync(
+            plain.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+        var groupedId = await builder.BuildAsync(
+            grouped.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        Assert.Equal(await HashAsync(db, plainId), await HashAsync(db, groupedId));
+        Assert.Equal(
+            (await CellsAsync(db, plainId)).Select(Key), (await CellsAsync(db, groupedId)).Select(Key));
+
+        var page = await builder.RowsAsync(groupedId, 0, 10, Language, CancellationToken.None);
+        var groups = page!.Groups!;
+
+        Assert.Equal(["E_CO2", "E_NOX"], groups.Select(g => g.Value as string));
+        Assert.Equal(12.5m, Assert.Single(groups[0].Totals).Value);
+        Assert.Equal(17.5m, Assert.Single(page.Totals!).Value);
+        Assert.True(page.ShowGroupHeader);
+        Assert.Null(page.NextCursor);
+
+        // Зріз без макета віддається як до R8: полів групи й підсумку немає взагалі.
+        var flat = await builder.RowsAsync(plainId, 0, 10, Language, CancellationToken.None);
+        Assert.Null(flat!.Groups);
+        Assert.Null(flat.Totals);
+        Assert.False(flat.ShowGroupHeader);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Сторінка_зрізу_з_макетом_іде_за_групою_а_підсумок_не_залежить_від_сторінки()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        // Групування за `Value` ставить рядок 2 (5) перед рядком 1 (12.5).
+        var version = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
+            new("CalculationResults", Layout: new("Value", [new("Value", "sum")])), RuledColumns));
+
+        var snapshotId = await builder.BuildAsync(
+            version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        var first = await builder.RowsAsync(snapshotId, 0, 1, Language, CancellationToken.None);
+        var second = await builder.RowsAsync(snapshotId, first!.NextCursor!.Value, 1, Language, CancellationToken.None);
+
+        Assert.Equal(2, Assert.Single(first.Rows).RowNo);
+        Assert.Equal(1, Assert.Single(second!.Rows).RowNo);
+        Assert.Null(second.NextCursor);
+
+        // ⚠ Підсумок — по ВСЬОМУ зрізу, тож на обох сторінках він однаковий.
+        Assert.Equal(17.5m, Assert.Single(first.Totals!).Value);
+        Assert.Equal(17.5m, Assert.Single(second.Totals!).Value);
+    }
+
+    /// <summary>Колонки з підписами: три мови, дві мови й жодної.</summary>
+    private static readonly ReportColumnCommand[] NamedColumns =
+    [
+        new("Value", "number", new Dictionary<string, string>
+        {
+            ["en"] = "Amount", ["ru"] = "Объём", ["kz"] = "Мөлшері",
+        }),
+        new("UnitCode", "text", new Dictionary<string, string> { ["en"] = "Unit", ["kz"] = "Бірлік" }),
+        new("OutputCode", "text"),
+    ];
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Колонки_підписуються_мовою_запиту_з_фолбеком_через_en_до_коду()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+        var seeded = await SeedResultsAsync(chain, db);
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+
+        var named = await PublishedAsync(db, ReportDefinitionSpec.ColumnsJson(NamedColumns));
+        var plain = await PublishedAsync(
+            db, ReportDefinitionSpec.ColumnsJson([.. NamedColumns.Select(c => c with { NameL10n = null })]));
+
+        var namedId = await builder.BuildAsync(
+            named.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+        var plainId = await builder.BuildAsync(
+            plain.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
+
+        // Мова запиту є в описі — підпис саме нею.
+        var ru = await builder.RowsAsync(namedId, 0, 10, "ru", CancellationToken.None);
+        Assert.Equal(["Объём", "Unit", "OutputCode"], ru!.Columns.Select(c => c.Name));
+
+        // ⛔ Три ланки фолбеку в одному рядку: `uk` в описі немає ніде, тож
+        // `Value` і `UnitCode` приходять англійськими, а `OutputCode`, який
+        // назв не має взагалі, — власним КОДОМ.
+        var uk = await builder.RowsAsync(namedId, 0, 10, "uk", CancellationToken.None);
+        Assert.Equal(["Amount", "Unit", "OutputCode"], uk!.Columns.Select(c => c.Name));
+
+        // Опис БЕЗ назв віддається рівно як до R9: підпис дорівнює коду.
+        var flat = await builder.RowsAsync(plainId, 0, 10, "ru", CancellationToken.None);
+        Assert.Equal(flat!.Columns.Select(c => c.Code), flat.Columns.Select(c => c.Name));
+        Assert.Equal(["Value", "UnitCode", "OutputCode"], flat.Columns.Select(c => c.Name));
+
+        // ⛔ А рядки й сума від назв не залежать узагалі: назва — ПОДАННЯ.
+        // Якби вона доїжджала до `rpt.ReportRow`, перейменування колонки
+        // читалося б контрольною сумою як підміна звіту.
+        Assert.Equal(await HashAsync(db, plainId), await HashAsync(db, namedId));
+        Assert.Equal(
+            (await CellsAsync(db, plainId)).Select(Key), (await CellsAsync(db, namedId)).Select(Key));
+    }
 
     /// <summary>Два зрізи тих самих даних: без правил (схема 1) і з правилом (схема 2).</summary>
     private async Task<(long Plain, long Ruled, ReportSnapshotBuilder Builder, EcrDbContext Db)> BuildPairAsync(
@@ -280,7 +431,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
                     (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId)
                 VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {run.Id}, {methodologyVersion.Id},
                         {document.PeriodKey.Value}, {document.DocumentId}, {rowKey}, {output},
-                        CAST({text} AS decimal(28,10)), {unit.Id})
+                        CAST({text} AS decimal(34,16)), {unit.Id})
                 """);
         }
 

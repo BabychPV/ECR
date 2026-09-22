@@ -50,7 +50,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
         }
 
         await AddAsync(
-            "templateColumn",
+            UsageKinds.TemplateColumn,
             from c in db.ColumnDefs
             where c.UnitId == unitId
             join t in db.TableDefs on c.TableDefId equals t.Id
@@ -62,7 +62,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "registryField",
+            UsageKinds.RegistryField,
             from f in db.RegistryFieldDefs
             where f.UnitId == unitId
             join r in db.RegistryDefs on f.RegistryDefId equals r.Id
@@ -71,7 +71,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "methodologyConstant",
+            UsageKinds.MethodologyConstant,
             from c in db.MethodologyConstants
             where c.UnitId == unitId
             join v in db.MethodologyVersions on c.MethodologyVersionId equals v.Id
@@ -80,7 +80,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "methodologyFormula",
+            UsageKinds.MethodologyFormula,
             from f in db.MethodologyFormulas
             where f.OutputUnitId == unitId
             join v in db.MethodologyVersions on f.MethodologyVersionId equals v.Id
@@ -89,7 +89,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "methodologyOutput",
+            UsageKinds.MethodologyOutput,
             from o in db.MethodologyOutputs
             where o.UnitId == unitId
             join v in db.MethodologyVersions on o.MethodologyVersionId equals v.Id
@@ -98,7 +98,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "fieldMap",
+            UsageKinds.FieldMap,
             db.EntityFieldMaps
                 .Where(m => m.SourceUnitId == unitId || m.TargetUnitId == unitId)
                 .OrderBy(m => m.Id)
@@ -106,7 +106,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "unitConversion",
+            UsageKinds.UnitConversion,
             from c in db.UnitConversions
             where c.FromUnitId == unitId || c.ToUnitId == unitId
             join f in db.Units on c.FromUnitId equals f.Id
@@ -116,7 +116,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             .ConfigureAwait(false);
 
         await AddAsync(
-            "derivedUnit",
+            UsageKinds.DerivedUnit,
             db.Units
                 .Where(u => u.NumeratorUnitId == unitId || u.DenominatorUnitId == unitId)
                 .OrderBy(u => u.Id)
@@ -127,7 +127,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
         // вона не видаляється ніколи — і це видно тим самим переліком, без
         // окремого правила в обробнику.
         await AddAsync(
-            "dimensionBase",
+            UsageKinds.DimensionBase,
             db.Dimensions
                 .Where(d => d.BaseUnitId == unitId)
                 .OrderBy(d => d.Id)
@@ -151,7 +151,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
             total++;
             if (items.Count < take)
             {
-                items.Add(new UsageItemDto("data", table, table, null));
+                items.Add(new UsageItemDto(UsageKinds.Data, table, table, null));
             }
         }
 

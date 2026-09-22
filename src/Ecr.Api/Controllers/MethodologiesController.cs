@@ -33,6 +33,7 @@ public sealed class MethodologiesController(
     CreateMethodologyHandler createMethodology,
     ListMethodologyConstantsHandler listConstants,
     SaveMethodologyConstantHandler saveConstant,
+    ConstantUsageHandler constantUsage,
     ListMethodologyRulesHandler listRules,
     SaveMethodologyRuleHandler saveRule,
     ListMethodologyRequiredInputsHandler listRequiredInputs,
@@ -188,6 +189,18 @@ public sealed class MethodologiesController(
     public async Task<ActionResult<IReadOnlyList<MethodologyConstantDto>>> Constants(
         int id, int vid, CancellationToken ct)
         => Ok(await listConstants.HandleAsync(vid, ct).ConfigureAwait(false));
+
+    /// <summary>Формули версії, що посилаються на константу (ФВ-8.14). Право <c>Calculation.View</c>.</summary>
+    /// <param name="id">Методологія.</param>
+    /// <param name="vid">Версія.</param>
+    /// <param name="code">Код константи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}/versions/{vid:int}/constants/{code}/usage")]
+    [ProducesResponseType<UsageResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UsageResponse>> ConstantUsage(
+        int id, int vid, string code, CancellationToken ct)
+        => Ok(await constantUsage.HandleAsync(id, vid, code, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Записує константу версії-чернетки. Право <c>Calculation.EditConstant</c>.

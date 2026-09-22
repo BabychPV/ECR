@@ -4,7 +4,8 @@ using Microsoft.OpenApi;
 namespace Ecr.Api.Startup;
 
 /// <summary>
-/// Прибирає з числових схем альтернативу «або рядок».
+/// Приводить числові схеми до того, що сервер насправді пише: цілі — числом,
+/// <c>decimal</c> — рядком.
 /// </summary>
 /// <remarks>
 /// ⚠ <c>JsonSerializerDefaults.Web</c> вмикає
@@ -31,6 +32,26 @@ public sealed class NumericSchemaTransformer : IOpenApiSchemaTransformer
         OpenApiSchema schema, OpenApiSchemaTransformerContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // ⛔ `decimal` їде РЯДКОМ (`DecimalAsStringJsonConverter`), і схема
+        // мусить це казати. Без цієї гілки опис лишається без `type` взагалі:
+        // генератор схем не знає, що робить власний конвертер, і віддає
+        // «будь-що» — у клієнті це `unknown`, тобто типізований контракт
+        // мовчки зникає рівно на вимірюваних величинах.
+        if (IsDecimal(context.JsonTypeInfo.Type))
+        {
+            schema.Type = context.JsonTypeInfo.Type == typeof(decimal?)
+                ? JsonSchemaType.String | JsonSchemaType.Null
+                : JsonSchemaType.String;
+
+            // `format` описового призначення: клієнт бачить, що рядок несе
+            // число, а не текст. `double` тут був би прямою неправдою.
+            schema.Format = "decimal";
+            schema.Pattern = null;
+
+            return Task.CompletedTask;
+        }
 
         if (schema.Type is not { } type || !type.HasFlag(JsonSchemaType.String))
         {
@@ -53,4 +74,9 @@ public sealed class NumericSchemaTransformer : IOpenApiSchemaTransformer
 
         return Task.CompletedTask;
     }
+
+    /// <summary>Чи описує схема <c>decimal</c> або <c>decimal?</c>.</summary>
+    /// <param name="type">Тип, з якого зроблено схему.</param>
+    private static bool IsDecimal(Type type)
+        => type == typeof(decimal) || type == typeof(decimal?);
 }

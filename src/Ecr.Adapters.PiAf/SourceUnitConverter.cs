@@ -52,17 +52,8 @@ public sealed class SourceUnitConverter(UnitConverter converter, IUnitCatalog ca
         UnitCatalogSnapshot catalogSnapshot,
         string sourcePath)
     {
-        ArgumentNullException.ThrowIfNull(catalogSnapshot);
-
-        // Джерело не повідомило одиниці — порівнювати нема з чим. Це не
-        // «збіглося»: безрозмірність тут не підставляється, значення просто
-        // лягає в одиниці, оголошеній у мапінгу (ФВ-16.12).
-        if (string.IsNullOrWhiteSpace(actualSourceUnitCode) || declaredSourceUnitId is not { } declared)
-        {
-            return;
-        }
-
-        if (catalogSnapshot.Units.TryGetValue(actualSourceUnitCode, out var actual) && actual.Id == declared)
+        if (IsDeclaredUnit(declaredSourceUnitId, actualSourceUnitCode, catalogSnapshot)
+            || declaredSourceUnitId is not { } declared)
         {
             return;
         }
@@ -77,6 +68,26 @@ public sealed class SourceUnitConverter(UnitConverter converter, IUnitCatalog ca
                 ["declaredUnitId"] = declared,
                 ["actualUnitCode"] = actualSourceUnitCode,
             });
+    }
+
+    /// <summary>Чи збігається фактична одиниця з оголошеною (без винятку).</summary>
+    /// <param name="declaredSourceUnitId">Одиниця з мапінгу; <c>null</c> — не оголошена.</param>
+    /// <param name="actualSourceUnitCode">Одиниця, яку фактично повернуло джерело.</param>
+    /// <param name="catalogSnapshot">Знімок довідника.</param>
+    public static bool IsDeclaredUnit(
+        int? declaredSourceUnitId, string? actualSourceUnitCode, UnitCatalogSnapshot catalogSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(catalogSnapshot);
+
+        // Джерело не повідомило одиниці — порівнювати нема з чим. Це не
+        // «збіглося»: безрозмірність тут не підставляється, значення просто
+        // лягає в одиниці, оголошеній у мапінгу (ФВ-16.12).
+        if (string.IsNullOrWhiteSpace(actualSourceUnitCode) || declaredSourceUnitId is not { } declared)
+        {
+            return true;
+        }
+
+        return catalogSnapshot.Units.TryGetValue(actualSourceUnitCode, out var actual) && actual.Id == declared;
     }
 
     /// <summary>Конвертує значення на межі.</summary>

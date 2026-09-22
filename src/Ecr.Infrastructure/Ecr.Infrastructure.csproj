@@ -24,6 +24,10 @@
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.Extensions.Caching.SqlServer" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <!-- BE-34: IHttpClientFactory для вебхука Teams. Версія — з
+         Directory.Packages.props, пакет уже був у реєстрі стека (його вживає
+         Ecr.Adapters.PiAf); новий тут лише рядок посилання. -->
+    <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Quartz" />
     <PackageReference Include="Quartz.Extensions.Hosting" />
     <PackageReference Include="Quartz.Serialization.Json" />

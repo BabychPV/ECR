@@ -221,4 +221,50 @@ public sealed class OutboxDispatcherClaimTests(SqlServerFixture sql)
         await sender.DidNotReceive().SendAsync(
             Arg.Any<IReadOnlyList<string>>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
+
+    /// <summary>
+    /// Хост без адресанта — «не налаштовано»: подія чекає в черзі, спроба не
+    /// рахується. Інакше кожен прогін палив би спробу на «From не задано», і
+    /// після <c>MaxAttempts</c> лист ставав би <c>Failed</c> назавжди.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.4a")]
+    public async Task SMTP_без_адресанта_лишає_подію_в_черзі_без_спроби()
+    {
+        // ⚠ Найраніша дата — щоб під мутацією подія точно потрапила в партію
+        // (`OrderBy(CreatedAt)`), а не сховалася за чужими рядками спільної бази.
+        var createdAt = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var item = new NotificationOutboxItem(
+            "test.nofrom", $"Тема NOFROM-{Guid.NewGuid():N}", "Текст", "ops@example.local", createdAt);
+
+        await using (var setup = CreateContext())
+        {
+            setup.NotificationOutbox.Add(item);
+            await setup.SaveChangesAsync();
+        }
+
+        try
+        {
+            var sender = NotificationTransportTests.Sender(("Smtp:Host", "smtp.example.local"));
+
+            await using var db = CreateContext();
+            var (sent, _) = await new OutboxDispatcher(db, new TestClock(createdAt), sender)
+                .FlushAsync(CancellationToken.None);
+
+            Assert.Equal(0, sent);
+
+            await using var verify = CreateContext();
+            var stored = await verify.NotificationOutbox.AsNoTracking().SingleAsync(n => n.Id == item.Id);
+            Assert.Equal(("Pending", 0), (stored.State, stored.Attempts));
+        }
+        finally
+        {
+            // ⛔ Рядок, що лишився Pending, забрав би собі перший SendAsync у
+            // `Два_одночасних_флешери_…` і зламав би там лічильник.
+            await using var cleanup = CreateContext();
+            await cleanup.NotificationOutbox.Where(n => n.Id == item.Id).ExecuteDeleteAsync();
+        }
+    }
 }

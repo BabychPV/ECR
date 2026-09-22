@@ -48,6 +48,36 @@ public sealed class ReportSnapshotImmutabilityTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.17")]
+    [Trait("Requirement", "ФВ-10.2")]
+    public void Зріз_народжений_поданим_завершується_рівно_раз()
+    {
+        // ⚠ Статус успадковується від ДАНИХ (D-65): аркуші періоду вже подані,
+        // тож зріз НАРОДЖУЄТЬСЯ `Submitted` — ще не маючи ні рядків, ні суми.
+        var snapshot = new ReportSnapshot(
+            reportVersionId: 1, projectId: 3, periodKey: 202601,
+            SnapshotStatus.Submitted, Now, builtByUserId: null);
+
+        // ⛔ Перше завершення мусить пройти: перебудовувати тут ще нічого.
+        // Доки умовою був самий лише статус, воно відмовляло `ECR-RPT-0409` —
+        // і зріз за поданий період не будувався ВЗАГАЛІ, тобто рівно тоді,
+        // коли він і потрібен регуляторові (`tools/smoke.ps1`, крок 23).
+        snapshot.Complete(rowCount: 10, contentHash: [1], calculationRunId: 7, parametersJson: null);
+
+        Assert.Equal(10, snapshot.RowCount);
+
+        // ⛔ А друге — ні: тепер зріз справді побудований, і його вміст
+        // лишається тим, який бачив регулятор.
+        var error = Assert.Throws<DomainException>(
+            () => snapshot.Complete(rowCount: 11, contentHash: [2], calculationRunId: 8, parametersJson: null));
+
+        Assert.Equal(ErrorCodes.ReportImmutable, error.ErrorCode);
+        Assert.Equal(10, snapshot.RowCount);
+        Assert.Equal(new byte[] { 1 }, snapshot.ContentHash);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Finding", "H-23b")]
     public void Поданий_зріз_не_міняє_статусу()
     {

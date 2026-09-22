@@ -24,8 +24,16 @@ namespace Ecr.Infrastructure.Jobs;
 /// похідної ознаки. Причина лишається на місці й лишається видимою.
 /// </para>
 /// </remarks>
+/// <remarks>
+/// ⚠ Реалізує ще й <see cref="IConsistencyCheckJob"/> — маркер, яким прикладний
+/// шар ставить ту саму перевірку НА ВИМОГУ (<c>BE-30</c>,
+/// <c>POST /api/v1/consistency/run</c>). Нічний розклад
+/// (<c>RecurringScheduleService</c>) лишається на конкретному типі, тож у
+/// черзі задача має два різні <c>JobCode</c>.
+/// </remarks>
 public sealed class ConsistencyCheckJob(
-    EcrDbContext db, IOrphanScanner scanner, IClock clock, IConsistencyMetrics metrics) : IBackgroundJob
+    EcrDbContext db, IOrphanScanner scanner, IClock clock, IConsistencyMetrics metrics)
+    : IBackgroundJob, IConsistencyCheckJob
 {
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "consistency-check";

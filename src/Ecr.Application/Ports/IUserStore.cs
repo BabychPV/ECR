@@ -34,6 +34,17 @@ public interface IUserStore
     /// </remarks>
     public Task<bool> HasActiveDomainAdminAsync(string permissionCode, CancellationToken ct);
 
+    /// <summary>
+    /// Скільки активних незаблокованих записів тримає <paramref name="permissionCode"/>
+    /// через ЧИННЕ особисте призначення, крім <paramref name="exceptUserId"/> (BE-12).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Групові призначення не рахуються: членство в групах відоме лише з квитка
+    /// власної сесії (<c>P-02</c>), тож чужого «адміністратора через групу» сховище не бачить.
+    /// </remarks>
+    public Task<int> CountActivePermissionHoldersAsync(
+        string permissionCode, int? exceptUserId, DateTime utcNow, CancellationToken ct);
+
     /// <summary>Обліковий запис за SID каталогу.</summary>
     public Task<User?> FindByWindowsSidAsync(string sid, CancellationToken ct);
 

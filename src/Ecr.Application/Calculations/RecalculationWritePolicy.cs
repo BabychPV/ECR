@@ -112,4 +112,42 @@ public static class RecalculationWritePolicy
             _ => $"Період {key} перераховувати можна.",
         };
     }
+
+    /// <summary>Ключ каталогу для причини відмови (<c>err.ECR-CALC-4221.&lt;причина&gt;</c>).</summary>
+    /// <param name="denial">Причина відмови.</param>
+    public static string MessageKey(RecalculationWriteDenial denial) => denial switch
+    {
+        RecalculationWriteDenial.PeriodClosed => "err.ECR-CALC-4221.periodClosed",
+        RecalculationWriteDenial.SheetsSubmitted => "err.ECR-CALC-4221.sheetsSubmitted",
+        _ => throw new ArgumentOutOfRangeException(nameof(denial), denial, "Відмови немає."),
+    };
+
+    /// <summary>
+    /// Відмова перерахунку — однакова для всіх трьох маршрутів (проєкт, документ, задача).
+    /// </summary>
+    /// <param name="denial">Причина відмови (не <see cref="RecalculationWriteDenial.None"/>).</param>
+    /// <param name="periodKey">Період, якого стосується відмова.</param>
+    /// <param name="documentId">Документ, якщо маршрут про нього знає.</param>
+    /// <remarks>
+    /// Сирі <c>periodKey</c> (число) і <c>denial</c> лишаються для клієнта без змін;
+    /// резолвер підставляє лише рядки, тому для тексту — окреме поле <c>period</c>.
+    /// </remarks>
+    public static Errors.BusinessRuleException Reject(
+        RecalculationWriteDenial denial, int periodKey, object? documentId = null)
+    {
+        var details = new Dictionary<string, object?>
+        {
+            ["messageKey"] = MessageKey(denial),
+            ["period"] = periodKey.ToString(CultureInfo.InvariantCulture),
+            ["periodKey"] = periodKey,
+            ["denial"] = denial.ToString(),
+        };
+
+        if (documentId is not null)
+        {
+            details["documentId"] = documentId;
+        }
+
+        return new Errors.BusinessRuleException(ErrorCode, Explain(denial, periodKey), details);
+    }
 }

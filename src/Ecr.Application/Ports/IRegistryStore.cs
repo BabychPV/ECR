@@ -107,6 +107,28 @@ public interface IRegistryStore
     public Task<int> CountReferencesAsync(long registryEntryId, CancellationToken ct);
 
     /// <summary>
+    /// «Де використано» ВИЗНАЧЕННЯ довідника: хто посилається на сам довідник,
+    /// а не на окремий його запис (директива №15, <c>BE-24</c>).
+    /// </summary>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="take">Скільки посилань віддати переліком.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Це ІНШЕ питання, ніж <see cref="CountReferencesAsync"/>. Той питає
+    /// «чи можна прибрати цей рядок довідника»; цей — «що зламається, якщо
+    /// чіпати довідник цілком»: колонки шаблонів із типом <c>Lookup</c>, поля
+    /// сусідніх довідників, речовини методологій і сутності зовнішніх джерел.
+    /// Сьогодні перевипустити чи перезібрати довідник можна наосліп.
+    ///
+    /// ⚠ <c>doc.CellValue</c> потрапляє сюди ОДНИМ рядком, без підрахунку —
+    /// так само, як в <c>UnitStore</c>. Таблиця партиціонована й найбільша в
+    /// системі: точне число коштувало б повного проходу по партиціях, а для
+    /// відповіді «дані вже написані з цього довідника» досить факту.
+    /// </remarks>
+    public Task<Common.UsageResponse> FindDefinitionUsageAsync(
+        int registryDefId, int take, CancellationToken ct);
+
+    /// <summary>
     /// Чи є хоч один період у стані <c>Open</c> або <c>Grace</c>.
     /// </summary>
     /// <remarks>

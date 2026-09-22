@@ -1,18 +1,25 @@
 ﻿import { useEffect, useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Badge, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import type {
   DocumentPeriodRequest,
   DocumentSummary,
   DocumentTableDto,
   ValidationResultResponse,
 } from '@/api/types';
+import { useBusinessKeyChangeAction } from '@/features/documents/BusinessKeyChangeAction';
+import {
+  DeleteDocumentPermission,
+  useDeleteDocumentAction,
+} from '@/features/documents/DeleteDocumentAction';
+import { DocumentVersionCompare } from '@/features/documents/DocumentVersionCompare';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
+import { RestoreEditsBanner } from '@/features/grid/RestoreEditsBanner';
 import { ExportButton } from '@/features/export/ExportButton';
 import { CalculationResultsPanel } from '@/features/methodologies/CalculationResultsPanel';
 import { ImportPanel } from '@/features/import/ImportPanel';
@@ -24,6 +31,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -216,8 +224,41 @@ export function DocumentPage(): JSX.Element {
    * Що показувати в панелі: свіже — **лише для своєї адреси** — інакше
    * прочитане, інакше нічого.
    */
-  const shownValidation =
-    (fresh?.scope === scope ? fresh.result : null) ?? lastValidation.data ?? null;
+  const freshForScope = fresh?.scope === scope ? fresh.result : null;
+  const shownValidation = freshForScope ?? lastValidation.data ?? null;
+
+  /*
+   * ⛔ «Прочитати не вдалося» — це НЕ «ще не перевіряли», і до цього місця
+   * обидва стани були для екрана одним і тим самим: `403`, `500` і обрив
+   * мережі дають те саме
+   * `data === undefined`, тобто `shownValidation === null`, тобто панель
+   * зауважень не малювалася ЗОВСІМ. Документ, у якому на сервері вже лежать
+   * БЛОКУВАЛЬНІ помилки, виглядав рівно як неперевірений і чистий: оператор
+   * тиснув «Подати» й діставав відмову `ECR-SUB-*` без жодного попередження на
+   * екрані — або вважав документ готовим.
+   *
+   * ⚠ Це той самий дефект, проти якого застерігає коментар до запиту вище
+   * («зелений напис під документом, якого ніхто не перевіряв»), лише з
+   * протилежним знаком: не зелений напис під неперевіреним, а порожнеча під
+   * перевіреним. Стани тепер три, і в цьому порядку: відмова → очікування →
+   * дані.
+   *
+   * ⚠ `404` лишається «ще не перевіряли» — саме так відповідає
+   * `DocumentsController.LastValidation`, і банер під кожним документом, якого
+   * ніхто не перевіряв, був би тим самим шумом, лише червоним.
+   *
+   * ⚠ Свіжий прогін ЦІЄЇ адреси знімає невідомість: результат уже на екрані,
+   * і невдале читання того, що лежало в базі, більше нікого не вводить в
+   * оману.
+   *
+   * ⛔ Саме `ErrorAlert`, а не `AsyncBoundary`: обгортка малює власний
+   * `<Title order={4}>` посеред сторінки, у якої заголовок уже є, і рве
+   * `heading-order` (гейти `a11y (dark)`/`a11y (light)`).
+   */
+  const unreadableValidation =
+    freshForScope !== null || isNotValidatedYet(lastValidation.error)
+      ? null
+      : (lastValidation.error ?? null);
 
   /*
    * ⛔ `useMemo`, а не виклик на кожному рендері, — і це не мікрооптимізація.
@@ -266,7 +307,24 @@ export function DocumentPage(): JSX.Element {
    * ⚠ Імпорт статичний і бюджет чанка (`D-132`) не чіпає: `autosave.ts` не
    * тягне ядро `RevoGrid` — воно лишається за виразом `import()` вище.
    */
-  useDocumentPending(documentId);
+  useDocumentPending(documentId, session.data?.userId);
+
+  // Видалення чернетки: кнопка — у шапці, відмова сервера — банером під нею.
+  const deletion = useDeleteDocumentAction({
+    documentId,
+    document: summary.data,
+    sheetCodes: sheets.map((s) => s.code),
+    allowed: can(session.data, DeleteDocumentPermission),
+  });
+
+  // Зміна номера справи (бізнес-ключа, ФВ-3.9): кнопка — у шапці, `rekeyStale`
+  // — банером під нею; решта відмов лишається в самому діалозі (форма, яку
+  // можна виправити).
+  const businessKeyChange = useBusinessKeyChangeAction({
+    documentId,
+    document: summary.data,
+    periodKey,
+  });
 
   return (
     /*
@@ -303,12 +361,16 @@ export function DocumentPage(): JSX.Element {
         }
         actions={
           <Group gap="xs">
-            <NumberInput
+            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+                `value ?? periodKey` зберігає стару поведінку очищеного поля:
+                воно НЕ звужувало документ до «без періоду» (тут період
+                обов'язковий — `urlPeriod ?? currentPeriodKey()` нижче), а
+                просто лишало те, що вже було. */}
+            <PeriodPicker
               size="xs"
               miw={110}
-              label={t('documents.period')}
               value={periodKey}
-              onChange={(value) => setPeriodKey(typeof value === 'number' ? value : periodKey)}
+              onChange={(value) => setPeriodKey(value ?? periodKey)}
             />
             <Button
               size="xs"
@@ -346,9 +408,27 @@ export function DocumentPage(): JSX.Element {
                 state={state}
               />
             )}
+
+            {businessKeyChange.trigger}
+
+            {deletion.trigger}
           </Group>
         }
       />
+
+      {businessKeyChange.refusal}
+
+      {deletion.refusal}
+
+      {/* ⛔ `ФВ-3.6`, `D14-12` крок 3: правки, що загинули з сесією, лежать у
+          вкладці (`features/grid/lostEdits.ts`) і чекають ТУТ — раніше їх
+          нікуди було покласти. Банер над сітками, а не під ними: пропозиція,
+          яку видно лише після прокрутки до дев'яносто першої таблиці, — це
+          пропозиція, якої немає.
+
+          ⚠ Статичний імпорт бюджету чанка не чіпає (`D-132`): компонент
+          працює зі сховищем правок і зрізом, ядра `RevoGrid` не торкаючись. */}
+      <RestoreEditsBanner documentId={documentId} userId={session.data?.userId} />
 
       {/* ⛔ `BE-10`. Компонент сам вирішує, чи малюватися: доки сервер не
           відповів, він повертає `null`, а не «0 з 0» — заповненість, якої ще
@@ -357,16 +437,50 @@ export function DocumentPage(): JSX.Element {
           кажуть про документ за період цілком, а не про активний аркуш. */}
       <SheetFillSummary documentId={documentId} periodKey={periodKey} />
 
+      {/* ⚠ Причина стоїть РІВНО ТАМ, де мала б стояти панель зауважень, і
+          перед нею: «зауваження прочитати не вдалося» — твердження про той
+          самий предмет, і побачити його має той, хто прийшов дивитися на
+          зауваження, а не той, хто відкрив консоль.
+
+          ⚠ Панель нижче лишається БЕЗУМОВНОЮ: якщо відмовив лише ПОВТОРНИЙ
+          запит, прочитане раніше нікуди не поділося (React Query тримає
+          `data`), і ховати його заради банера означало б втратити відомі
+          зауваження. Тоді на екрані обидва — «ось що ми знали» і «оновити не
+          вдалося», а не одне замість одного. */}
+      {unreadableValidation !== null && (
+        <ErrorAlert
+          error={unreadableValidation}
+          onRetry={() => {
+            void lastValidation.refetch();
+          }}
+        />
+      )}
+
       {/* ⚠ Панель — ПІД заголовком і НАД вкладками: зауваження стосуються
           документа за період цілком, а не активного аркуша, і сховати їх під
           вкладку означало б показувати їх лише тому, хто вгадав, куди
-          дивитися. */}
+          дивитися.
+
+          ⚠ Доступність кнопки «Подати» від цього стану НЕ залежить і не
+          залежала: її показ рахує `SheetActions` за станом аркуша й рівнем
+          гранта (`features/workflow/SheetActions.tsx`), валідації він не
+          питає. Тобто невідомість кнопки не ВІДКРИВАЄ — вона лише лишала
+          оператора без єдиного попередження перед натисканням; банер вище це
+          й закриває. Гейт подання за помилками — на сервері (`ECR-SUB-*`). */}
       <ValidationPanel messages={shownValidation?.messages ?? null} />
 
       {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —
           про всі аркуші документа за період. Згорнутий, і до розгортання
           запиту не робить; порожній — не малюється зовсім. */}
       <WorkflowHistory documentId={documentId} periodKey={periodKey} />
+
+      {/* ⛔ `ФВ-5.22`. Поруч із журналом переходів, а не у вкладці аркуша, і з
+          тієї самої причини: версія — це зріз ПОДАННЯ документа за період, і
+          різниця охоплює всі його таблиці одразу. Під вкладкою активного аркуша
+          її бачив би лише той, хто вгадав, куди дивитися.
+
+          ⚠ Згорнутий, як і журнал: до розгортання не робить жодного запиту. */}
+      <DocumentVersionCompare documentId={documentId} periodKey={periodKey} />
 
       <Tabs value={active?.code ?? null} onChange={setSheet}>
         <Tabs.List>
@@ -379,50 +493,84 @@ export function DocumentPage(): JSX.Element {
             </Tabs.Tab>
           ))}
         </Tabs.List>
+
+        {/* ⛔ Кожна вкладка має СВОЮ панель: Mantine ставить вкладці
+            `aria-controls` на id панелі, і без панелі посилання висіло в
+            повітрі (axe `aria-valid-attr-value`, critical; спіймано, щойно
+            гейт почав чекати даних). Неактивні — порожні: `keepMounted` у
+            `Tabs` не ввімкнено, тож вміст вони не рендерять.
+
+            ⚠ Активна панель — ОКРЕМИЙ елемент на сталому місці дерева, а не
+            елемент того ж списку з ключем аркуша: інакше перемикання аркуша
+            перемонтовувало б сітку (важкий RevoGrid і стан лінивого
+            монтажу). Так, як і раніше, сітка лише отримує нові `tables`. */}
+        {sheets
+          .filter((s) => s.code !== active?.code)
+          .map((s) => (
+            <Tabs.Panel key={s.code} value={s.code}>
+              {null}
+            </Tabs.Panel>
+          ))}
+
+        {/* ⚠ `pt="md"` і `Stack` відтворюють відступи, які раніше давав
+            зовнішній `Stack` сторінки між вкладками й сіткою. */}
+        {active !== undefined && (
+          <Tabs.Panel value={active.code} pt="md">
+            <Stack>
+              {/* ⚠ Три стани чанка сітки замість `<Suspense>`: вантажиться —
+                  заглушка ПО ОДНІЙ НА ТАБЛИЦЮ (кількість таблиць відома до
+                  завантаження чанка, і одна смужка замість дев'яноста однієї
+                  збрехала б про розмір сторінки, яка зараз з'явиться); не
+                  завантажився — помилка з кнопкою «повторити», бо порожній
+                  екран із заглушками тут не відрізнити від того самого
+                  дефекту, який ця картка закриває; завантажився — таблиці. */}
+              {gridModule.error !== null && (
+                <ErrorAlert error={gridModule.error} onRetry={gridModule.reload} />
+              )}
+
+              {/* ⚠ Заглушка чанка повторює розкладку `SheetTables`: заголовок
+                  таблиці ПЛЮС смужка зарезервованої висоти. Обидва — не
+                  прикраса. Заголовок робить осмисленою прокрутку по ще не
+                  завантаженій сторінці (і з'являється він одразу, а не після
+                  чанка сітки), а висота слота мусить збігатися з тією, яку
+                  тримає `SheetTables` (`TableSlotMinHeight`), інакше поява
+                  чанка перекладає всю сторінку під курсором. Числове значення
+                  тут не імпортується з модуля сітки навмисно: це той самий
+                  модуль, який ця гілка й чекає, і статичний імпорт із нього
+                  повернув би `RevoGrid` у чанк маршруту (`D-132`). */}
+              {gridModule.error === null && gridModule.component === null && (
+                <Stack gap="xs">
+                  {active.tables.map((table) => (
+                    <Stack
+                      key={table.tableInstanceId}
+                      gap="xs"
+                      style={{ minHeight: 'calc(70vh + 96px)' }}
+                    >
+                      <Text fw={600}>{localized(table.tableNameL10n)}</Text>
+                      <Skeleton height="60vh" radius="sm" />
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+
+              {gridModule.component !== null && (
+                <gridModule.component
+                  documentId={documentId}
+                  periodKey={periodKey}
+                  readOnly={readOnly}
+                  tables={active.tables}
+                />
+              )}
+            </Stack>
+          </Tabs.Panel>
+        )}
       </Tabs>
 
-      {/* ⚠ Три стани чанка сітки замість `<Suspense>`: вантажиться —
-          заглушка ПО ОДНІЙ НА ТАБЛИЦЮ (кількість таблиць відома до
-          завантаження чанка, і одна смужка замість дев'яноста однієї
-          збрехала б про розмір сторінки, яка зараз з'явиться); не
-          завантажився — помилка з кнопкою «повторити», бо порожній екран із
-          заглушками тут не відрізнити від того самого дефекту, який ця
-          картка закриває; завантажився — таблиці. */}
-      {gridModule.error !== null && (
+      {/* ⚠ Без аркушів панелі немає, а відмова чанка має лишатися видимою —
+          як і до появи панелі. Заглушка й сітка без аркуша не малювалися й
+          раніше. */}
+      {active === undefined && gridModule.error !== null && (
         <ErrorAlert error={gridModule.error} onRetry={gridModule.reload} />
-      )}
-
-      {/* ⚠ Заглушка чанка повторює розкладку `SheetTables`: заголовок таблиці
-          ПЛЮС смужка зарезервованої висоти. Обидва — не прикраса. Заголовок
-          робить осмисленою прокрутку по ще не завантаженій сторінці (і
-          з'являється він одразу, а не після чанка сітки), а висота слота
-          мусить збігатися з тією, яку тримає `SheetTables`
-          (`TableSlotMinHeight`), інакше поява чанка перекладає всю сторінку
-          під курсором. Числове значення тут не імпортується з модуля сітки
-          навмисно: це той самий модуль, який ця гілка й чекає, і статичний
-          імпорт із нього повернув би `RevoGrid` у чанк маршруту (`D-132`). */}
-      {gridModule.error === null && gridModule.component === null && (
-        <Stack gap="xs">
-          {active?.tables.map((table) => (
-            <Stack
-              key={table.tableInstanceId}
-              gap="xs"
-              style={{ minHeight: 'calc(70vh + 96px)' }}
-            >
-              <Text fw={600}>{localized(table.tableNameL10n)}</Text>
-              <Skeleton height="60vh" radius="sm" />
-            </Stack>
-          ))}
-        </Stack>
-      )}
-
-      {gridModule.component !== null && active !== undefined && (
-        <gridModule.component
-          documentId={documentId}
-          periodKey={periodKey}
-          readOnly={readOnly}
-          tables={active.tables}
-        />
       )}
 
       {/* ⛔ Числа методологій — окремо від сітки, і це `D-69`: у комірку
@@ -442,6 +590,18 @@ export function DocumentPage(): JSX.Element {
       )}
     </AsyncBoundary>
   );
+}
+
+/**
+ * Чи означає відмова читання «перевірку ще не запускали».
+ *
+ * ⛔ Рівно `404` і рівно від НАШОГО API. Усе інше — `403` (права на читання
+ * підсумку), `500`, обрив мережі, відповідь проксі — це «невідомо», а
+ * «невідомо», показане як «нічого», і є та сама неправда про готовність
+ * документа, проти якої написаний коментар до запиту.
+ */
+function isNotValidatedYet(error: unknown): boolean {
+  return error instanceof EcrApiError && error.problem.status === 404;
 }
 
 /** Аркуш із його таблицями. */

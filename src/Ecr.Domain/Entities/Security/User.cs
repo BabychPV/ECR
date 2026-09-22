@@ -91,6 +91,10 @@ public sealed class User : Entity<int>
     public int FailedAttempts { get; private set; }
     public DateTime? LockedUntil { get; private set; }
 
+    /// <summary>Момент останнього УСПІШНОГО входу (UTC); <c>null</c> — не входив ніколи (BE-12).</summary>
+    /// <remarks>Ставиться лише входом, не кожним запитом: інакше це був би «останній запит».</remarks>
+    public DateTime? LastSignInAt { get; private set; }
+
     /// <summary>Пароль виданий разово; доки прапорець стоїть — лише зміна пароля і вихід (ФВ-6.18).</summary>
     public bool MustChangePassword { get; private set; }
 
@@ -220,11 +224,38 @@ public sealed class User : Entity<int>
         return true;
     }
 
-    /// <summary>Скидає лічильник після вдалого входу.</summary>
-    public void RegisterSuccessfulLogin()
+    /// <summary>Межа адміністративного блокування: «доки не розблокують» (BE-12).</summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="DateTime.MaxValue"/>: його сьомий знак дробу не влазить у
+    /// <c>datetime2(3)</c> і округлився б за межу типу. Окремої колонки немає —
+    /// блокування лягає в ту саму <see cref="LockedUntil"/>, яку вже читають вхід і перелік.
+    /// </remarks>
+    public static readonly DateTime AdministrativeLockUntil = new(9999, 12, 31, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>Чи заблокував запис адміністратор (а не лічильник невдалих спроб).</summary>
+    public bool IsLockedByAdministrator => LockedUntil == AdministrativeLockUntil;
+
+    /// <summary>Блокує запис безстроково і обриває всі його сесії (BE-12).</summary>
+    public void LockByAdministrator()
+    {
+        LockedUntil = AdministrativeLockUntil;
+        RefreshSecurityStamp();
+    }
+
+    /// <summary>Знімає будь-яке блокування — адміністративне чи після невдалих спроб.</summary>
+    public void Unlock()
+    {
+        LockedUntil = null;
+        FailedAttempts = 0;
+    }
+
+    /// <summary>Скидає лічильник після вдалого входу і запам'ятовує його момент.</summary>
+    /// <param name="utcNow">Момент входу.</param>
+    public void RegisterSuccessfulLogin(DateTime utcNow)
     {
         FailedAttempts = 0;
         LockedUntil = null;
+        LastSignInAt = utcNow;
     }
 
     /// <summary>Вимикає bootstrap-запис. **Не видаляє**: він потрібен в аудиті.</summary>

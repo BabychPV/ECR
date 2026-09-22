@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
 import { statusTable } from '@/shared/ui/StatusBadge';
@@ -63,6 +64,13 @@ function respond(): void {
         );
       }
 
+      if (url.includes('/api/v1/data-sources')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       if (url.includes('/api/v1/sources')) {
         return new Response(JSON.stringify(sources), {
           status: 200,
@@ -80,9 +88,11 @@ function show(): void {
 
   render(
     <MantineProvider>
-      <QueryClientProvider client={client}>
-        <SourcesPage />
-      </QueryClientProvider>
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <SourcesPage />
+        </QueryClientProvider>
+      </MemoryRouter>
     </MantineProvider>,
   );
 }
@@ -123,14 +133,25 @@ describe('SourcesPage: стан останнього збору', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) =>
-        String(input).includes('/api/v1/sources')
-          ? new Response(JSON.stringify([sourceWith('Aborted', 9)]), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            })
-          : new Response(JSON.stringify(null), { status: 200 }),
-      ),
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/api/v1/data-sources')) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        if (url.includes('/api/v1/sources')) {
+          return new Response(JSON.stringify([sourceWith('Aborted', 9)]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        return new Response(JSON.stringify(null), { status: 200 });
+      }),
     );
     show();
 

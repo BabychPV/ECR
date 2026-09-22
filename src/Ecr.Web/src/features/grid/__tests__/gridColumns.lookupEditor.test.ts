@@ -78,11 +78,28 @@ function lookupColumnOf(columns: ReturnType<typeof gridColumns>) {
 
 describe('gridColumns — Lookup-колонка: dropdown записів довідника (директива registry-lookup, PR A4)', () => {
   it('звичайна (не-Lookup) колонка не отримує ані editor, ані cellTemplate', () => {
-    const columns = gridColumns(slice(), false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map());
+    // ✎ 2026-09-21: колонку тут змінено з `Decimal` на `String`. Після
+    // `e470777a` ДЕСЯТКОВА колонка таки отримує `cellTemplate` — показ
+    // десяткового рядка (`cellValue.cellDisplay`), бо сервер більше не віддає
+    // число, а `"5.0000000000"` малювалося б як є. Твердження цього тесту —
+    // про `Lookup`, тож перевіряти його треба на колонці, до якої жоден із
+    // двох шаблонів стосунку не має.
+    const plain = slice({ columns: [column({ dataType: 'String' })] });
+    const columns = gridColumns(plain, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map());
     const found = lookupColumnOf(columns);
 
     expect(found.editor).toBeUndefined();
     expect(found.cellTemplate).toBeUndefined();
+  });
+
+  it('десяткова колонка має показ, але НЕ має Lookup-редактора', () => {
+    // ⚠ Дзеркало до попереднього: показ десяткового і dropdown довідника —
+    // різні речі, і зникнення одного не має тягти за собою друге.
+    const columns = gridColumns(slice(), false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map());
+    const found = lookupColumnOf(columns);
+
+    expect(found.editor).toBeUndefined();
+    expect(found.cellTemplate).toBeTypeOf('function');
   });
 
   it('Lookup-колонка з lookupRegistryDefId — редактор і показ підключені', () => {

@@ -17,6 +17,7 @@ namespace Ecr.Application.Documents;
 public sealed class CreateDocumentHandler(
     IMetadataCache metadata,
     IDocumentStore documents,
+    ITemplateVersionStore templates,
     IUnitOfWork uow,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
@@ -68,6 +69,28 @@ public sealed class CreateDocumentHandler(
                      ?? throw new AccessDeniedException(
                          "ECR-AUTH-0401", "Анонімний запит не може створювати документи.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        // ⛔ Архівований шаблон НЕ пропонується для нових документів (директива
+        // №15, `BE-26`). Правило стоїть саме тут, а не лише у фільтрі переліку:
+        // `templateVersionId` приходить із тіла запиту, і «не показувати в
+        // списку» означало б, що шаблон повністю придатний для кожного, хто
+        // знає число.
+        //
+        // ⚠ Наявні документи цього шаблону працюють далі — перевірка стоїть на
+        // СТВОРЕННІ й ніде більше. Документ назавжди лишається на своїй версії
+        // (рішення людини на `Q15-05`), тож заборона правок обірвала б звітний
+        // період посеред роботи.
+        var template = await templates.FindTemplateOfVersionAsync(templateVersionId, ct).ConfigureAwait(false)
+                       ?? throw new NotFoundException(
+                           "ECR-TMPL-0404", $"Версії шаблону {templateVersionId} не існує.",
+                           new Dictionary<string, object?>
+                           {
+                               ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                               ["versionId"] = templateVersionId.ToString(
+                                   System.Globalization.CultureInfo.InvariantCulture),
+                           });
+
+        template.EnsureOfferedForNewDocuments();
 
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
         var known = snapshot.Sheets.Select(s => s.Id).ToHashSet();

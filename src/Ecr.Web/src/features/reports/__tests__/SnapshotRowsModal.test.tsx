@@ -16,9 +16,19 @@ const Strings: Record<string, string> = {
   'snapshots.rowsEmpty': 'No rows',
 };
 
+/*
+ * ⚠ `name` — обов'язкове поле контракту (`R9`, `SnapshotColumn`): сервер
+ * розгортає фолбек «мова запиту → en → код» сам і порожнього підпису не
+ * віддає. Фікстура без нього малювала б порожню шапку — і це вже не перевірка
+ * екрана, а перевірка мока.
+ *
+ * ⚠ Тут підпис НАВМИСНО дорівнює коду: цей файл про сторінкування й порожній
+ * стан, і різниця «код проти назви» перевіряється там, де вона предмет
+ * (`SnapshotRowsModal.columnName.test.tsx`).
+ */
 const columns = [
-  { code: 'OutputCode', kind: 'text' },
-  { code: 'Value', kind: 'number' },
+  { code: 'OutputCode', kind: 'text', name: 'OutputCode' },
+  { code: 'Value', kind: 'number', name: 'Value' },
 ];
 
 const json = (body: unknown): Response =>

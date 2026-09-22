@@ -1,4 +1,5 @@
 // src/Ecr.Application/Calculations/MethodologyQueryHandlers.cs
+using System.Globalization;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -171,7 +172,13 @@ public sealed class SimulateMethodologyHandler(
             .FindByVersionAsync(methodologyVersionId, ct)
             .ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
         var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);

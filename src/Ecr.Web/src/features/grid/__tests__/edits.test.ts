@@ -59,7 +59,12 @@ describe('Правка в grid', () => {
     const captured = captureEdit(slice(), { columnCode: 'C1', rowKey: 'R1', raw: '12,5' });
 
     expect(captured).not.toBeNull();
-    expect(captured?.pending.value).toBe(12.5);
+
+    // ✎ 2026-09-21: було `toBe(12.5)`. Після `e470777a` `decimal` їде на
+    // сервер РЯДКОМ — `Number` на цьому шляху губив 16-й знак
+    // (`String(Number('1234.1234567890123456'))` дає `'1234.1234567890124'`).
+    // Кома вводу нормалізується, як і доти.
+    expect(captured?.pending.value).toBe('12.5');
 
     // ⚠ Без baseVersion наступний патч отримав би 409 на власних змінах —
     // конфлікт із самим собою, який неможливо пояснити користувачеві.
@@ -69,7 +74,9 @@ describe('Правка в grid', () => {
   it('крок історії пам’ятає попереднє значення', () => {
     const captured = captureEdit(slice(), { columnCode: 'C1', rowKey: 'R1', raw: '99' });
 
-    expect(captured?.step).toEqual({ rowKey: 'R1', columnCode: 'C1', before: 10, after: 99 });
+    // ⚠ `before` лишається числом: це те, що лежало у зрізі-фікстурі. `after`
+    // — рядок, бо саме рядком нове значення поїде на сервер (`e470777a`).
+    expect(captured?.step).toEqual({ rowKey: 'R1', columnCode: 'C1', before: 10, after: '99' });
   });
 
   it('правка забороненої комірки не захоплюється', () => {
@@ -97,6 +104,15 @@ describe('Правка в grid', () => {
     // ECR-CELL-0422 із назвою колонки, і це чесніше.
     expect(coerce('н/д', 'Decimal')).toBe('н/д');
     expect(coerce('', 'Decimal')).toBeNull();
+  });
+
+  it('правка, що не змінює значення, правкою не є', () => {
+    // ⛔ `e470777a`: сервер віддає значення в масштабі колонки, оператор бачить
+    // `10` і набирає `10`, а RevoGrid повідомляє `afteredit` на кожен вихід із
+    // редактора. Текстове порівняння назвало б це правкою, і комірка дістала б
+    // позначку незбереженої на порожньому місці.
+    expect(captureEdit(slice(), { columnCode: 'C1', rowKey: 'R1', raw: '10' })).toBeNull();
+    expect(captureEdit(slice(), { columnCode: 'C1', rowKey: 'R1', raw: '10.0000000000' })).toBeNull();
   });
 
   it('порожнє булеве не стає «ні»', () => {

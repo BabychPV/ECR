@@ -123,12 +123,17 @@ public sealed class SwitchRegistrySourceHandler(
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401",
+                "Анонімний запит не змінює довідники.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         if (registryCodes.Count == 0)
         {
             throw new BusinessRuleException(
-                "ECR-REG-0422", "Набір довідників порожній: перемикати нічого.");
+                "ECR-REG-0422",
+                "Набір довідників порожній: перемикати нічого.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.emptySwitchSet" });
         }
 
         // ⚠ Дубль у наборі — не дрібниця. Він означає, що набір складали не
@@ -143,7 +148,12 @@ public sealed class SwitchRegistrySourceHandler(
         {
             throw new BusinessRuleException(
                 "ECR-REG-0422",
-                $"Коди повторюються в наборі: {string.Join(", ", duplicates)}.");
+                $"Коди повторюються в наборі: {string.Join(", ", duplicates)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.duplicateCodes",
+                    ["codes"] = string.Join(", ", duplicates),
+                });
         }
 
         if (string.IsNullOrWhiteSpace(reason))
@@ -152,7 +162,9 @@ public sealed class SwitchRegistrySourceHandler(
             // набір разом» — єдине, на яке треба буде відповісти, і відповідь
             // має бути в журналі, а не в чиїйсь пам'яті.
             throw new BusinessRuleException(
-                "ECR-REG-0422", "Причина перемикання master обов'язкова.");
+                "ECR-REG-0422",
+                "Причина перемикання master обов'язкова.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.switchReasonRequired" });
         }
 
         // ⛔ СПЕРШУ розв'язуються ВСІ коди, і лише потім міняється хоч що
@@ -188,7 +200,10 @@ public sealed class SwitchRegistrySourceHandler(
             definitions.Add(
                 byCode.TryGetValue(code, out var definition)
                     ? definition
-                    : throw new NotFoundException("ECR-REG-0404", $"Довідника «{code}» не існує."));
+                    : throw new NotFoundException(
+                        "ECR-REG-0404",
+                        $"Довідника «{code}» не існує.",
+                        new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code }));
         }
 
         // ⚠ Питання ставиться ОДИН раз на весь набір і ГЛОБАЛЬНО, а не по
@@ -202,6 +217,7 @@ public sealed class SwitchRegistrySourceHandler(
                 + "заповнилася б за одним переліком записів, частина — за іншим.",
                 new Dictionary<string, object?>
                 {
+                    ["messageKey"] = "err.ECR-REG-0422.openPeriod",
                     ["registryCodes"] = string.Join(",", registryCodes),
                     ["to"] = kind.ToString(),
                 });
@@ -286,6 +302,7 @@ public sealed class SwitchRegistrySourceHandler(
 public sealed class DeleteRegistryEntryHandler(
     IRegistryStore registries,
     IUnitOfWork uow,
+    IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
@@ -318,10 +335,20 @@ public sealed class DeleteRegistryEntryHandler(
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401",
+                "Анонімний запит не змінює довідники.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Запису довідника {registryEntryId} не існує.");
+            ?? throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Запису довідника {registryEntryId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0404.registryEntry",
+                    ["entryId"] = registryEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⚠ Опис читається ДО перевірки посилань і до видалення — він потрібен
         // двічі: спершу щоб звірити належність довіднику, потім щоб підняти
@@ -357,6 +384,10 @@ public sealed class DeleteRegistryEntryHandler(
                 + "Закрийте його датою — історія лишиться читабельною, а в нових періодах він не пропонуватиметься.",
                 new Dictionary<string, object?>
                 {
+                    // Сирі числа лишаються для клієнта; резолвер підставляє лише рядки.
+                    ["messageKey"] = "err.ECR-REG-0409.entryReferenced",
+                    ["code"] = entry.Code,
+                    ["referenceCount"] = references.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["registryEntryId"] = registryEntryId,
                     ["references"] = references,
                 });
@@ -369,6 +400,35 @@ public sealed class DeleteRegistryEntryHandler(
         // що гірше, другою правдою про те, який саме довідник змінюється.
         definition.BumpDataRevision();
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ Слід у журналі структурних змін — як у сусідньої дії над тим самим
+        // записом (`SetEntryValidityHandler`, `Operation = "SetValidity"`). Без
+        // нього видалення лишало по собі лише прапорці `IsDeleted`/`DeletedAt`
+        // на самому рядку: побачити «хто прибрав запис, на який учора ще
+        // посилалися» можна було тільки в самому довіднику, і тільки доти, доки
+        // його не видалять удруге. Журнал довідника (`GET …/{code}/history`)
+        // при цьому мовчав, хоч відповідає саме на таке питання.
+        //
+        // ⚠ Аудит і збереження — ОДНІЄЮ транзакцією (`Q-244`): інакше збій між
+        // ними лишає журнал і довідник у різних станах.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
+                    TemplateVersionId: 0,
+                    EntityType: "dic.RegistryEntry",
+                    EntityId: checked((int)registryEntryId),
+                    ChangeClass: ChangeClass.Breaking,
+                    Operation: "Delete",
+                    OldJson: JsonSerializer.Serialize(
+                        new { registry = definition.Code, code = entry.Code }),
+                    NewJson: null,
+                    ChangeReason: $"Записів довідника «{definition.Code}» прибрано: 1.",
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
     }
 }

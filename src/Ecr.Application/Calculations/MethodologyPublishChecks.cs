@@ -210,7 +210,12 @@ public static class MethodologyPublishChecks
             + "правдоподібне число, а не помилку. Токенів поза списком: "
             + undeclared.Count.ToString(CultureInfo.InvariantCulture) + " — "
             + string.Join("; ", undeclared) + ".",
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["undeclared"] = undeclared });
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["undeclared"] = undeclared,
+                ["messageKey"] = "err.ECR-CALC-0432.undeclaredArguments",
+                ["undeclaredCount"] = undeclared.Count.ToString(CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>
@@ -315,7 +320,12 @@ public static class MethodologyPublishChecks
             + "клітинки колонки з тим самим кодом у таблиці, до якої прив'язана методологія цим "
             + "аргументом; колонки з таким кодом там немає — розрахунок мовчки порахує null без "
             + "жодної помилки. Проблемні таблиці: " + string.Join(" | ", problems) + ".",
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["problems"] = problems });
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["problems"] = problems,
+                ["messageKey"] = "err.ECR-CALC-0438.missingColumns",
+                ["tableCount"] = problems.Count.ToString(CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>
@@ -405,7 +415,7 @@ public static class MethodologyPublishChecks
         }
 
         // ⛔ Оголошений вихід лягає в `calc.CalculationResult.Value
-        // decimal(28,10)` — колонка числова, іншої там немає. Текстовий
+        // decimal(34,16)` — колонка числова, іншої там немає. Текстовий
         // результат методології сьогодні нікуди подіти (див. `H-24b`, крок I.15),
         // і мовчазна спроба записати його дала б нуль у звіті.
         if (formula.ResultType == FormulaResultType.Text && outputCodes.Contains(formula.Code))

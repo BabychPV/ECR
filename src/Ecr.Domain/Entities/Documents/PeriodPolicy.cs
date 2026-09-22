@@ -73,14 +73,25 @@ public sealed class PeriodPolicy : Entity<int>
                 ErrorCodes.PeriodPolicyOrderInvalid,
                 $"Пільговий строк ({graceOffsetDays} дн.) не може бути довшим за жорстке "
                 + $"закриття ({hardCloseOffsetDays} дн.): період закрився б остаточно раніше, ніж "
-                + "скінчився б власний пільговий строк.");
+                + "скінчився б власний пільговий строк.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4225.graceAfterHardClose",
+                    ["graceOffsetDays"] = graceOffsetDays.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["hardCloseOffsetDays"] = hardCloseOffsetDays.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (yearGraceOffsetDays < 0)
         {
             throw new DomainException(
                 ErrorCodes.PeriodPolicyOrderInvalid,
-                $"Річний пільговий строк ({yearGraceOffsetDays} дн.) не може бути від'ємним.");
+                $"Річний пільговий строк ({yearGraceOffsetDays} дн.) не може бути від'ємним.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4225.negativeYearGrace",
+                    ["yearGraceOffsetDays"] = yearGraceOffsetDays.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         OpenOffsetDays = openOffsetDays;

@@ -30,11 +30,19 @@ const seed = readFileSync(
   'utf8',
 );
 
-/** Усі значення каталогу з `09-seed.sql`. */
-function catalogValues(): { key: string; value: string }[] {
-  const rows = [...seed.matchAll(/\(N'([^']+)',\s*N'[a-z]{2}',\s*N'([^']*)'/g)];
+/**
+ * Усі значення каталогу — лише з блоку MERGE `sys_ecr.UiString`. ⚠ Над ним
+ * лежать секції «змінені тексти» (старе значення) і «прибрані ключі» того ж
+ * вигляду `(N'key', N'en', N'…'`: без обрізки вони потрапили б у кандидати.
+ */
+function catalogValues(): { key: string; lang: string; value: string }[] {
+  const start = seed.indexOf('MERGE sys_ecr.UiString AS t');
+  const end = seed.indexOf(') AS s ([Key], Lang, Val, Scope)', start);
+  if (start < 0 || end < 0) throw new Error('09-seed.sql: не знайдено блоку MERGE sys_ecr.UiString');
 
-  return rows.map((row) => ({ key: row[1] ?? '', value: row[2] ?? '' }));
+  const rows = [...seed.slice(start, end).matchAll(/\(N'([^']+)',\s*N'([a-z]{2})',\s*N'([^']*)'/g)];
+
+  return rows.map((row) => ({ key: row[1] ?? '', lang: row[2] ?? '', value: row[3] ?? '' }));
 }
 
 function Shell({ children }: { children: ReactNode }): JSX.Element {
@@ -55,6 +63,14 @@ afterEach(() => {
 });
 
 describe('Найдовший рядок каталогу', () => {
+  it('кожна пара (ключ, мова) читається з сіду рівно один раз — без старих значень', () => {
+    const pairs = catalogValues().map((row) => `${row.key}|${row.lang}`);
+    const repeated = pairs.filter((pair, i) => pairs.indexOf(pair) !== i);
+
+    expect(pairs.length).toBeGreaterThan(1000);
+    expect(repeated).toEqual([]);
+  });
+
   it('у каталозі є рядки, довші за 60 символів', () => {
     const longest = catalogValues().sort((a, b) => b.value.length - a.value.length)[0];
 

@@ -103,7 +103,7 @@ public sealed class MethodologyPublishChecksTests
         const string verdict = "if(@Excess > 0, 'Сверхнорматив', 'В пределе норматива')";
 
         // ⛔ Оголошена числовою, така формула пише текст у
-        // `calc.CalculationResult.Value decimal(28,10)`.
+        // `calc.CalculationResult.Value decimal(34,16)`.
         var wrong = Check([Formula("Verdict", verdict, FormulaResultType.Number)], [], []);
         Assert.Contains(wrong, p => p.Contains("лише текст", StringComparison.Ordinal));
 
@@ -152,6 +152,8 @@ public sealed class MethodologyPublishChecksTests
             "Flert_Emission", "@Total * @Density / @Duration", "Total;Density"));
 
         Assert.Equal("ECR-CALC-0432", thrown.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0432.undeclaredArguments", thrown.Details!["messageKey"]);
+        Assert.Equal("1", thrown.Details!["undeclaredCount"]);
 
         // Поіменно: методологу треба знати, ЯКИЙ токен дописати в список.
         Assert.Contains("Duration", thrown.Message, StringComparison.Ordinal);

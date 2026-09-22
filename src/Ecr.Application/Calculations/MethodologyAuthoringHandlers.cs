@@ -1,4 +1,5 @@
 // src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs
+using System.Globalization;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -76,7 +77,13 @@ public sealed class CreateMethodologyHandler(
             throw new BusinessRuleException(
                 "ECR-CALC-0409",
                 $"Методологія «{methodologyCode.Value}» уже існує (ідентифікатор {clash.Id}): "
-                + "код — те, чим на неї посилаються імпорти і прив'язки.");
+                + "код — те, чим на неї посилаються імпорти і прив'язки.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.codeTaken",
+                    ["code"] = methodologyCode.Value,
+                    ["existingId"] = clash.Id.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         var methodology = new Methodology(
@@ -187,7 +194,13 @@ public sealed class SaveMethodologyConstantHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var candidates = await drafts
             .GetConstantsByCodeAsync(methodologyVersionId, constantCode.Value, ct)
@@ -205,7 +218,14 @@ public sealed class SaveMethodologyConstantHandler(
             throw new BusinessRuleException(
                 "ECR-CALC-0409",
                 $"Константа «{constantCode.Value}» має {candidates.Count} варіантів звуження у версії "
-                + $"{methodologyVersionId}: за самим кодом неоднозначно, який із них правити.");
+                + $"{methodologyVersionId}: за самим кодом неоднозначно, який із них правити.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.constantVariantsAmbiguous",
+                    ["constantCode"] = constantCode.Value,
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                    ["variantCount"] = candidates.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         var existing = candidates.Count == 1 ? candidates[0] : null;
@@ -331,7 +351,13 @@ public sealed class SaveMethodologyRuleHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var existing = await drafts
             .FindRuleAsync(methodologyVersionId, ruleCode.Value, ct)
@@ -379,7 +405,13 @@ public sealed class ListMethodologyRequiredInputsHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var requiredInputs = await drafts.GetAllRequiredInputsAsync(methodologyVersionId, ct)
             .ConfigureAwait(false);
@@ -450,7 +482,13 @@ public sealed class SaveMethodologyRequiredInputHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         // ⚠ Лише ІСНУВАННЯ колонки. Тип тут НЕ перевіряється, і це не пропуск:
         // обов'язковий ВХІД методології — це, як правило, саме колонка ручного
@@ -459,7 +497,12 @@ public sealed class SaveMethodologyRequiredInputHandler(
         _ = await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-TMPL-0404",
-                $"Колонки {columnDefId} не існує або її видалено: обов'язковий вхід нема до чого прив'язати.");
+                $"Колонки {columnDefId} не існує або її видалено: обов'язковий вхід нема до чого прив'язати.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.column",
+                    ["columnDefId"] = columnDefId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var hintText = hint is null ? null : new LocalizedText(hint);
 
@@ -569,7 +612,13 @@ public sealed class SaveMethodologyOutputHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var existing = await drafts
             .FindOutputAsync(methodologyVersionId, outputCode.Value, ct)
@@ -669,7 +718,13 @@ public sealed class SaveMethodologyTestCaseHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var existing = await drafts
             .FindTestCaseAsync(methodologyVersionId, testCode.Value, ct)
@@ -739,7 +794,13 @@ public sealed class SetMethodologyModesHandler(
 
         var version = await drafts.FindVersionAsync(methodologyVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Версії методології {methodologyVersionId} не існує.");
+                "ECR-CALC-0404",
+                $"Версії методології {methodologyVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.version",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Заборону «опублікована незмінна» тримає домен, а не ця дія:
         // `SetModes` сам вимагає чернетки (`ECR-CALC-0409`).
@@ -771,7 +832,14 @@ public sealed class ListCalculationBindingsHandler(
 
         var found = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
 
-        return [.. found.Select(MethodologyAuthoringMap.Binding)];
+        // Назви таблиць — одним запитом на весь перелік, не по запиту на прив'язку.
+        var tables = await bindings
+            .ListTableNamesAsync([.. found.Select(b => b.TableDefId).Distinct()], ct)
+            .ConfigureAwait(false);
+
+        return [.. found.Select(b => tables.TryGetValue(b.TableDefId, out var table)
+            ? MethodologyAuthoringMap.Binding(b) with { TableCode = table.Code, TableNameL10n = table.NameL10n }
+            :MethodologyAuthoringMap.Binding(b))];
     }
 }
 
@@ -834,12 +902,23 @@ public sealed class SaveCalculationBindingHandler(
 
         _ = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                "ECR-CALC-0404", $"Методології {methodologyId} не існує.");
+                "ECR-CALC-0404",
+                $"Методології {methodologyId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.methodology",
+                    ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var column = await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-TMPL-0404",
-                $"Колонки {columnDefId} не існує або її видалено: прив'язати вихід нема до чого.");
+                $"Колонки {columnDefId} не існує або її видалено: прив'язати вихід нема до чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.column",
+                    ["columnDefId"] = columnDefId.ToString(CultureInfo.InvariantCulture),
+                });
 
         RequireComputedColumn(column);
 

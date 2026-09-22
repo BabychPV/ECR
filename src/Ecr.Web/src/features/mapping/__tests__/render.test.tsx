@@ -39,7 +39,12 @@ const Preview: MappingPreview = {
       sourceUnitCode: 'kg',
       targetUnitCode: 't',
       pointCount: 2,
-      foldedValue: 42.5,
+      // ⚠ Рядок, як і на дроті: `decimal` у відповідях їде рядком
+      // (`e470777a`), тому й фікстура має бути такою — інакше вона перевіряла
+      // б форму, якої сервер уже не надсилає.
+      foldedValue: '42.5',
+      isActive: true,
+      pendingSourceUnitChange: null,
     },
     {
       fieldMapId: 2,
@@ -53,13 +58,15 @@ const Preview: MappingPreview = {
       targetUnitCode: 't',
       pointCount: 0,
       foldedValue: null,
+      isActive: true,
+      pendingSourceUnitChange: null,
     },
   ],
   rows: [
     {
       sourcePath: 'Flare_01_CO',
       timestamp: '2026-09-02T01:00:00Z',
-      valueNumeric: 10,
+      valueNumeric: '10',
       valueString: null,
       quality: 'Good',
       outcome: 'Materialized',
@@ -79,6 +86,34 @@ const Preview: MappingPreview = {
       header: 'CH4 mass',
       isRequired: true,
       isUnfillable: true,
+    },
+  ],
+};
+
+/**
+ * Те саме, плюс призупинений мапінг (`BE-27`) на поле, яке сервер через це
+ * поклав у «йде нікуди»: адреси й розриви він рахує лише за діючими.
+ */
+const WithPaused: MappingPreview = {
+  ...Preview,
+  fields: [
+    ...Preview.fields,
+    {
+      fieldMapId: 3,
+      sourceField: 'Flare_01_NOx',
+      // ⚠ Стан «лягає в комірку» навмисно: сервер рахує його й для
+      // призупиненого, і саме тому екран не має права його показувати.
+      outcome: 'Materialized',
+      targetRowKey: 'Flare_01',
+      targetColumnDefId: 103,
+      targetColumnCode: 'NOX_MASS',
+      aggregation: 'Sum',
+      sourceUnitCode: 'kg',
+      targetUnitCode: 't',
+      pointCount: 7,
+      foldedValue: '9.5',
+      isActive: false,
+      pendingSourceUnitChange: null,
     },
   ],
 };
@@ -124,6 +159,85 @@ describe('Перегляд мапінгу: реальні рядки', () => {
 
     expect(screen.getByText('42.5')).toBeDefined();
     expect(screen.getAllByText(/kg\s*→\s*t/).length).toBe(Preview.fields.length);
+  });
+});
+
+describe('Перегляд мапінгу: призупинений мапінг', () => {
+  function mapRow(sourceField: string): HTMLElement {
+    const table = screen.getByText('⟦mapping.maps⟧').parentElement!.querySelector('table')!;
+    const cell = within(table).getByText(sourceField);
+
+    return cell.closest('tr')!;
+  }
+
+  it('призупинений мапінг позначено і без адреси', () => {
+    show(<MappingRows preview={WithPaused} />);
+
+    const row = mapRow('Flare_01_NOx');
+
+    expect(within(row).getByText('⟦mapping.paused⟧')).toBeDefined();
+    expect(row.getAttribute('data-mapping-state')).toBe('paused');
+    // Приглушення — токеном, а не літералом кольору.
+    expect(row.style.color).toBe('var(--ecr-muted)');
+    // ⛔ Він нікуди не пише: ні адреси, ні числа «в комірці», ні стану.
+    expect(screen.queryByText('Flare_01 · NOX_MASS')).toBeNull();
+    expect(screen.queryByText('9.5')).toBeNull();
+    expect(within(row).queryByText('⟦mapping.materialized⟧')).toBeNull();
+    // Те, що пояснює вже зібране, лишається.
+    expect(within(row).getByText('7')).toBeDefined();
+  });
+
+  it('діючий поруч лишається діючим: адреса і стан на місці', () => {
+    show(<MappingRows preview={WithPaused} />);
+
+    const row = mapRow('Flare_01_CO');
+
+    expect(within(row).getByText('Flare_01 · CO_MASS')).toBeDefined();
+    expect(within(row).queryByText('⟦mapping.paused⟧')).toBeNull();
+    expect(row.hasAttribute('data-mapping-state')).toBe(false);
+  });
+
+  it('лічильник рахує діючі окремо від призупинених', () => {
+    show(<MappingRows preview={WithPaused} />);
+
+    expect(screen.getByTestId('mapping-counts').textContent).toBe(
+      '⟦mapping.mapsSummary (active=2, paused=1)⟧',
+    );
+  });
+
+  it('дзеркало: усі діючі — жодної позначки паузи й лічильника', () => {
+    show(<MappingRows preview={Preview} />);
+
+    expect(screen.queryByText('⟦mapping.paused⟧')).toBeNull();
+    expect(document.querySelector('[data-mapping-state="paused"]')).toBeNull();
+    expect(screen.queryByTestId('mapping-counts')).toBeNull();
+  });
+
+  it('на екрані поле лише з призупиненим мапінгом стоїть у «йде нікуди»', () => {
+    show(<MappingGaps preview={WithPaused} />);
+
+    const table = screen.getByText('⟦mapping.unmapped⟧').parentElement!.querySelector('table')!;
+
+    expect(within(table).getByText('Flare_01_NOx')).toBeDefined();
+  });
+
+  it('призупинений без рядків розривом не значиться', () => {
+    show(
+      <MappingGaps
+        preview={{
+          ...Preview,
+          fields: [
+            Preview.fields[0]!,
+            { ...Preview.fields[1]!, isActive: false },
+          ],
+          unmappedSourceFields: [],
+          uncoveredColumns: [],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText('Flare_1_CO')).toBeNull();
+    expect(screen.getByText(/mapping\.noGaps/)).toBeDefined();
   });
 });
 

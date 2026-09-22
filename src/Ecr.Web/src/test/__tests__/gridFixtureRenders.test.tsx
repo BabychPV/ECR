@@ -78,10 +78,26 @@ describe('Прилад a11y віддає сітку з КОМІРКАМИ, а н
       { timeout: 5000 },
     );
 
-    const cells = [...container.querySelectorAll('.rgCell')];
+    /*
+     * ⚠ `UI-08` додав до сітки ЗАКРІПЛЕНИЙ рядок підсумків
+     * (`pinnedBottomSource`), і його комірки — теж `.rgCell`. Розділено їх
+     * явно, а не підправлено число: сторож тут про те, що прилад віддає
+     * КОМІРКИ ЗРІЗУ зі станами, і «6 стало 9» без пояснення наступного разу
+     * прочиталося б як «фікстура знову з'їхала».
+     *
+     * ⚠ Заразом це й перевірка, що закріплений рядок доходить до СПРАВЖНЬОГО
+     * RevoGrid, а не лише до заглушки в
+     * `features/grid/__tests__/DocumentGrid.formulaTotals.test.tsx`.
+     */
+    const all = [...container.querySelectorAll('.rgCell')];
+    const totals = all.filter((cell) => cell.hasAttribute('data-grid-totals'));
+    const cells = all.filter((cell) => !cell.hasAttribute('data-grid-totals'));
 
     // Три колонки × два рядки зрізу.
     expect(cells).toHaveLength(6);
+
+    // І три комірки підсумків — по одній на колонку.
+    expect(totals).toHaveLength(3);
 
     // Звичайна редагована комірка — та сама, що була виміряна на 1.35 : 1:
     // жодного класу стану, отже жодного нашого фону, отже колір тексту бере

@@ -28,6 +28,7 @@ public sealed class CreateDocumentHandlerTests
 
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
+    private readonly ITemplateVersionStore _templates = Substitute.For<ITemplateVersionStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
@@ -62,6 +63,18 @@ public sealed class CreateDocumentHandlerTests
         _documents.NextBusinessKeyAsync(
                 AccessBuilder.ProjectId, TemplateVersionId, Arg.Any<CancellationToken>())
             .Returns("P10-V2-0001");
+
+        // ⚠ Шаблон версії В ОБІГУ: із `BE-26` створення документа питає про
+        // нього, бо архівований шаблон для нових документів не пропонується
+        // (`Template.EnsureOfferedForNewDocuments`). Доказ самого правила — на
+        // живому HTTP (`Ecr.Api.Tests/TemplateCardTests`); тут шаблон потрібен
+        // рівно для того, щоб перевірятися було чому.
+        _templates.FindTemplateOfVersionAsync(TemplateVersionId, Arg.Any<CancellationToken>())
+            .Returns(new Template(
+                EcrCode.Create("TPL"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Template" }),
+                createdByUserId: 9,
+                Now));
     }
 
     [Fact]
@@ -105,8 +118,45 @@ public sealed class CreateDocumentHandlerTests
         Assert.Null(document.NameL10n);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.1")]
+    public async Task Архівований_шаблон_не_пропонується_для_нового_документа()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ №2 (частина друга). Прибрати виклик
+        // `template.EnsureOfferedForNewDocuments()` у `CreateDocumentHandler`
+        // — і червоним стає рівно цей тест: архівований шаблон лишається
+        // повністю придатним для кожного, хто знає `templateVersionId`, а
+        // «не пропонується» звужується до вигляду списку.
+        //
+        // ⚠ Правило стоїть на СТВОРЕННІ й ніде більше: наявні документи цього
+        // шаблону працюють далі (рішення людини на `Q15-05`).
+        var archived = new Template(
+            EcrCode.Create("TPLARC"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Archived" }),
+            createdByUserId: 9,
+            Now);
+        archived.Archive();
+
+        _templates.FindTemplateOfVersionAsync(TemplateVersionId, Arg.Any<CancellationToken>())
+            .Returns(archived);
+
+        var error = await Assert.ThrowsAsync<DomainException>(() => Create(name: null));
+
+        // ⚠ Саме КОД: суфікс `-0409` і є тим, що перетворює відмову на 409 у
+        // `ExceptionHandlingMiddleware`. Перевіряти текст означало б прибити
+        // до тесту речення, яке клієнтові все одно їде з каталогу.
+        Assert.Equal("ECR-TMPL-0409", error.ErrorCode);
+
+        // Документа не з'явилося: без цього твердження тест лишався б зеленим
+        // і на системі, яка спершу створює, а потім згадує перевірити шаблон.
+        Assert.DoesNotContain(
+            _documents.ReceivedCalls(),
+            c => string.Equals(c.GetMethodInfo().Name, nameof(IDocumentStore.AddAsync), StringComparison.Ordinal));
+    }
+
     private async Task<long> Create(IReadOnlyDictionary<string, string>? name)
-        => await new CreateDocumentHandler(_metadata, _documents, _uow, _access, _user, _clock)
+        => await new CreateDocumentHandler(_metadata, _documents, _templates, _uow, _access, _user, _clock)
             .HandleAsync(AccessBuilder.ProjectId, TemplateVersionId, [SheetId], name, CancellationToken.None);
 
     private Document AddedDocument()

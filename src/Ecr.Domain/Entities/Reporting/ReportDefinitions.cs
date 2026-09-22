@@ -152,6 +152,25 @@ public sealed class ReportSnapshot : Entity<long>
     public int RowCount { get; private set; }
 
     public byte[]? ContentHash { get; private set; }
+
+    /// <summary>
+    /// Яким форматом пораховано <see cref="ContentHash"/>: <c>current</c> або
+    /// <c>legacy</c> (до BE-17); <c>null</c> — ще не визначено.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Зберігається, а не виводиться в запиті: визначення читає ВСІ рядки
+    /// зрізу. Старі зрізи класифікує фонова задача, нові пишуться <c>current</c>.
+    /// </remarks>
+    public string? HashFormat { get; private set; }
+
+    /// <summary>Записує формат суми, якщо його ще не визначено; відомий не перезаписує.</summary>
+    /// <param name="format"><c>current</c> або <c>legacy</c>.</param>
+    public void RecordHashFormat(string format)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(format);
+        HashFormat ??= format;
+    }
+
     public DateTime BuiltAt { get; private set; }
     public int? BuiltByUserId { get; private set; }
 
@@ -160,6 +179,15 @@ public sealed class ReportSnapshot : Entity<long>
     /// <param name="contentHash">Контрольна сума вмісту.</param>
     /// <param name="calculationRunId">Прогін, з якого взяті числа.</param>
     /// <param name="parametersJson">Параметри побудови.</param>
+    /// <exception cref="DomainException">Зріз уже побудований і поданий.</exception>
+    /// <remarks>
+    /// ⚠ Правило — проти ПЕРЕбудови, тому дивиться не лише на статус. Статус
+    /// успадковується від ДАНИХ (D-65), тож зріз за періодом, аркуші якого вже
+    /// подані, НАРОДЖУЄТЬСЯ <c>Submitted</c> — і поки умова була одна, він не
+    /// завершувався жодного разу: побудова за поданий період відмовляла
+    /// «зріз поданий» на зрізі, який ще нічим не був, тобто рівно тоді, коли
+    /// зріз потрібен регуляторові.
+    /// </remarks>
     public void Complete(int rowCount, byte[]? contentHash, long? calculationRunId, string? parametersJson)
     {
         // ⛔ Поданий зріз не перебудовується (ФВ-9.17, ER-C-11). Без цієї
@@ -167,7 +195,13 @@ public sealed class ReportSnapshot : Entity<long>
         // мінятися не міг, а ЧИСЛА — могли, бо повторна побудова спокійно
         // переписала б `RowCount` і контрольну суму. Регулятор отримав би той
         // самий зріз із іншим вмістом і тією самою позначкою «подано».
-        if (Status == SnapshotStatus.Submitted)
+        //
+        // ⚠ Ознака «вже побудований» — `ContentHash`, і вона в самій сутності:
+        // ставить її лише це завершення, і вона переживає перечитування з бази.
+        // `RowCount` не годиться (зріз із нуля рядків законний і дає 0), а
+        // прапорець від викликача відкрив би саме ту діру, від якої правило
+        // захищає, — перебудову «чесно» попросили б дозволити.
+        if (Status == SnapshotStatus.Submitted && ContentHash is not null)
         {
             throw new DomainException(
                 ErrorCodes.ReportImmutable,
@@ -193,6 +227,15 @@ public sealed class ReportSnapshot : Entity<long>
     /// показати інші числа закривається НОВИМ зрізом, інакше звіт,
     /// роздрукований учора, і той самий звіт сьогодні дали б різні числа без
     /// жодного сліду.
+    /// <para>
+    /// ⚠ Асиметрія з <see cref="Complete"/> НАВМИСНА: тут перевірка на
+    /// <see cref="ContentHash"/> була б послабленням, а не виправленням. Статус
+    /// <c>Submitted</c> ставить ще й <see cref="MarkSubmitted"/> — на зріз, який
+    /// міг не мати ні рядків, ні суми, — і саме такий зріз не має права
+    /// повернутися в <c>Draft</c>: він зник би з регуляторної вʼюхи. Свіжого,
+    /// ще не завершеного зрізу цей метод і не бачить: побудова його сюди не
+    /// передає, а <c>RefreshStatusAsync</c> на поданому виходить раніше.
+    /// </para>
     /// </remarks>
     public void RefreshStatus(SnapshotStatus status)
     {
@@ -257,7 +300,7 @@ public sealed class ReportRow
 
     public string? ValueString { get; private set; }
 
-    /// <summary><c>decimal(28,10)</c>; <c>float</c> заборонений (D-30).</summary>
+    /// <summary><c>decimal(34,16)</c>; <c>float</c> заборонений (D-30).</summary>
     public decimal? ValueNumeric { get; private set; }
 
     public DateTime? ValueDate { get; private set; }

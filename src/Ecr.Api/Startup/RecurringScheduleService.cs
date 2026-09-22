@@ -114,6 +114,12 @@ public sealed partial class RecurringScheduleService(
             .ScheduleAsync<Infrastructure.Jobs.ReportRetentionJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // Класифікація формату суми старих зрізів (рішення 2026-09-21): у запиті
+        // переліку її не робить ніхто, тож без цього рядка старі лишалися б `unknown`.
+        await scheduler
+            .ScheduleAsync<Infrastructure.Jobs.ReportSnapshotFormatJob>(NightlyCron, null, CancellationToken.None)
+            .ConfigureAwait(false);
+
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.PeriodStateJob>(HourlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
@@ -148,8 +154,9 @@ public sealed partial class RecurringScheduleService(
         // cron: у розкладі саме сутність, а не «інтеграція взагалі». Спільна
         // задача на всі джерела означала б, що недоступність одного затримує
         // решту.
+        // ⚠ З відстеженням: постановка лишає на розкладі стан (`LastError`),
+        // і зберігається він одним `SaveChanges` після циклу — лише змінені рядки.
         var schedules = await db.CollectionSchedules
-            .AsNoTracking()
             .Where(s => s.IsEnabled)
             .OrderBy(s => s.Id)
             .Take(MaxCollectionSchedules)
@@ -161,11 +168,42 @@ public sealed partial class RecurringScheduleService(
                 scheduler,
                 scope.ServiceProvider.GetRequiredService<Application.Integration.CollectionScheduleApplier>(),
                 logger,
+                scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>().UtcNow,
                 CancellationToken.None)
             .ConfigureAwait(false);
 
+        await SaveCollectionScheduleStateAsync(db, logger, CancellationToken.None).ConfigureAwait(false);
+
         LogSchedulesDone(logger, applied, nightlyRecalcCount);
     }
+
+    /// <summary>
+    /// Зберігає стан постановки (<c>LastError</c>), який лишив цикл.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Збій запису старту НЕ валить: розклади вже стоять у планувальнику, а
+    /// стан — лише підказка для інтерфейсу. Але й не мовчить — помилка в журналі.
+    /// Конфлікт версії рядка (розклад саме правлять) — той самий випадок.
+    /// </remarks>
+    public static async Task SaveCollectionScheduleStateAsync(EcrDbContext db, ILogger logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex)
+        {
+            LogCollectionStateNotSaved(logger, ex.InnerException?.Message ?? ex.Message);
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Старт: стан постановки розкладів збору (LastError) НЕ збережено: {Reason}. "
+            + "Розклади поставлено; в інтерфейсі стан може бути застарілим.")]
+    private static partial void LogCollectionStateNotSaved(ILogger logger, string reason);
 
     /// <summary>
     /// Ставить розклади збору; повертає, скільки поставлено.
@@ -176,12 +214,17 @@ public sealed partial class RecurringScheduleService(
     /// редагується з інтерфейсу, інакше одна описка була б «кнопкою зламати
     /// прод із затримкою» — до найближчого перезапуску. Збій САМОГО
     /// планувальника — як і раніше виняток, і старт він валить.
+    /// <para>
+    /// ⚠ Метод лишає стан НА СУТНОСТЯХ (пропущений — <c>MarkInvalid</c>,
+    /// поставлений — <c>ClearError</c>); зберігає його той, хто викликав.
+    /// </para>
     /// </remarks>
     public static async Task<int> ApplyCollectionSchedulesAsync(
         IReadOnlyList<Domain.Entities.External.CollectionSchedule> schedules,
         IBackgroundJobScheduler scheduler,
         Application.Integration.CollectionScheduleApplier applier,
         ILogger logger,
+        DateTime utcNow,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(schedules);
@@ -202,6 +245,11 @@ public sealed partial class RecurringScheduleService(
             {
                 LogCollectionCronInvalid(
                     logger, schedule.SourceEntityId, schedule.CronExpression, cronError ?? string.Empty);
+
+                // Журнал читає оператор, а cron правив адміністратор інтеграції:
+                // без стану в рядку пропущений розклад з інтерфейсу не видно.
+                schedule.MarkInvalid(
+                    string.IsNullOrWhiteSpace(cronError) ? "Invalid cron expression." : cronError, utcNow);
                 continue;
             }
 
@@ -223,6 +271,7 @@ public sealed partial class RecurringScheduleService(
             // замість затримки). Тепер тип і payload знає лише
             // `CollectionScheduleApplier` — той самий, що його кличе редагування.
             await applier.ApplyAsync(schedule, ct).ConfigureAwait(false);
+            schedule.ClearError();
             applied++;
         }
 

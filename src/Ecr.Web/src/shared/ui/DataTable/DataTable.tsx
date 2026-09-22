@@ -1,8 +1,20 @@
 import { useMemo, useState, type JSX, type ReactNode } from 'react';
 import { Button, Group, ScrollArea, Table, Text, UnstyledButton } from '@mantine/core';
 import { AsyncBoundary } from '../AsyncBoundary';
-import { formatLocale, formatNumber } from '@/shared/format';
-import { MaxColumns, type DataTableColumn, type SortKey, type SortState } from './types';
+import {
+  decimalEquals,
+  formatDecimal,
+  formatLocale,
+  formatNumber,
+  normalizeDecimal,
+} from '@/shared/format';
+import {
+  MaxColumns,
+  type DataTableColumn,
+  type SortKey,
+  type SortScalar,
+  type SortState,
+} from './types';
 
 /**
  * Таблиця переліку набору (`KIT.md` §6.5, директива №15 §2, Шар 3, крок
@@ -120,6 +132,20 @@ export interface DataTableProps<Row> {
 
   /** Висота області прокручування; без неї — висота за вмістом (`auto`). */
   readonly height?: number | string | undefined;
+
+  /**
+   * Сортування, з яким таблиця ВІДКРИВАЄТЬСЯ; без нього — порядок сервера.
+   *
+   * ⛔ Це стан шапки, а не пресортований масив: `aria-sort` і стрілка на старті
+   * кажуть правду про порядок рядків, а клацання продовжує цикл від нього
+   * (зростання → спадання → порядок сервера). Пресортування в екрані давало
+   * порядок, про який шапка мовчала (`aria-sort="none"` на впорядкованій
+   * колонці).
+   *
+   * ⚠ Читається ОДИН раз, при монтуванні — як початкове значення стану. Зміна
+   * пропу пізніше не скидає вибір людини.
+   */
+  readonly defaultSort?: SortState | undefined;
 }
 
 /**
@@ -163,9 +189,98 @@ function sortKeyOf<Row>(column: DataTableColumn<Row>, row: Row): SortKey {
 }
 
 /** Чи вважається значення відсутнім для сортування. */
-function isMissing(value: SortKey): boolean {
+function isMissing(value: SortScalar): boolean {
   return value === null || value === undefined || value === '';
 }
+
+/**
+ * Чи є ключ сортування кортежем.
+ *
+ * ⚠ Власний предикат, а не голий `Array.isArray`: на `readonly`-масиві той не
+ * звужує гілку «не масив», і компілятор лишив би в ній кортеж.
+ */
+function isTuple(value: SortKey): value is readonly SortScalar[] {
+  return Array.isArray(value);
+}
+
+/**
+ * Десяткове з API приїжджає РЯДКОМ (`e470777a`), і для числової колонки це
+ * означає дві різні поломки одразу.
+ *
+ * ⛔ Сортування: `'10' < '9'` за будь-яким колатором — тобто десяткова колонка
+ * впорядковується як текст, і «найбільше значення» вгорі ним не є. Числову
+ * гілку `compareKeys` рятує `typeof a === 'number'`, а рядок до неї не доходить.
+ *
+ * ⛔ Показ: `typeof raw === 'number'` так само не спрацьовує, і замість
+ * `1,234.5` у клітинці лишається сире `1234.5000000000` — без роздільників
+ * розрядів і з хвостом нулів масштабу колонки.
+ *
+ * ⚠ Обидві гілки вмикає `column.num`, а не «рядок схожий на число»: код виду
+ * `'007'` теж нормалізується в число, і автоматичне розпізнавання перетворило б
+ * його на `7` та переставило б колонку кодів у числовому порядку.
+ */
+
+/** Скільки знаків у дробовій частині канонічного рядка. */
+function scaleOf(canonical: string): number {
+  const dot = canonical.indexOf('.');
+
+  return dot < 0 ? 0 : canonical.length - dot - 1;
+}
+
+/**
+ * Канонічний десятковий рядок як ціле число заданого масштабу.
+ *
+ * ⚠ `bigint`, а не `number`: рівно щоб не втратити те, заради чого сервер і
+ * перевів `decimal` у рядок. `decimal(28,16)` не вміщається в IEEE-754.
+ */
+function scaled(canonical: string, scale: number): bigint {
+  const dot = canonical.indexOf('.');
+  const digits = dot < 0 ? canonical : canonical.slice(0, dot) + canonical.slice(dot + 1);
+
+  return BigInt(digits + '0'.repeat(scale - scaleOf(canonical)));
+}
+
+/**
+ * Порядок двох десяткових рядків; `null` — принаймні один із них не десятковий.
+ *
+ * ⛔ Розбір — лише `normalizeDecimal`, рівність — лише `decimalEquals`
+ * (`shared/format/decimal.ts`): та сама одиниця приходить як `'1'`, `'1.0'` або
+ * `'1.0000000000'` залежно від масштабу колонки, і другий нормалізатор,
+ * написаний тут, розійшовся б із першим мовчки.
+ */
+function compareDecimals(left: string, right: string): number | null {
+  const a = normalizeDecimal(left);
+  const b = normalizeDecimal(right);
+
+  if (a === null || b === null) return null;
+  if (decimalEquals(a, b)) return 0;
+
+  const scale = Math.max(scaleOf(a), scaleOf(b));
+
+  return scaled(a, scale) < scaled(b, scale) ? -1 : 1;
+}
+
+/**
+ * Скільки знаків дробової частини показує числова клітинка переліку.
+ *
+ * ⛔ Три — це ДЕФОЛТ `Intl.NumberFormat`, а не нове рішення: доти тут стояв
+ * `new Intl.NumberFormat(locale)` без опцій, і значення з чотирма знаками вже
+ * тоді їхало на екран округленим (`1234.1235` → `1,234.124`). Число названо
+ * явно рівно тому, що мовчазний дефолт цього не казав.
+ *
+ * ⛔ Політика саме така, бо числова клітинка поруч малюється `formatNumber(raw)`
+ * так само без опцій: друга політика дробової частини дала б в одній колонці
+ * два різні формати того самого поняття.
+ *
+ * ⚠ Це НЕ та сама стеля, що в зрізі звітності (`SnapshotRowsModal`, `D15-09`,
+ * десять знаків). Різниця існувала й до зведення копій в одне місце; тепер вона
+ * хоч і лишається, але видима — окремим аргументом, а не окремою функцією.
+ *
+ * ⛔ Дефолт свідомо НЕ змінено разом із появою `exact`: скільки знаків показує
+ * перелік — відкрите рішення людини. Колонка, якій округлення шкодить,
+ * відмовляється від нього поіменно (`DataTableColumn.exact`).
+ */
+const CellFractionCeiling = 3;
 
 /**
  * Порівняння двох значень колонки з урахуванням напрямку.
@@ -179,8 +294,34 @@ function isMissing(value: SortKey): boolean {
  * ⚠ Рядки порівнює `Intl.Collator` локаллю ПРОДУКТУ, а не оператор `<`: у
  * казахській і російській порядок літер не збігається з кодами UTF-16, і
  * `'Ә' < 'Б'` дало б порядок, якого не існує в жодній абетці.
+ *
+ * ⚠ `numeric` (`column.num`) вмикає ЧИСЛОВЕ порівняння десяткових рядків, і
+ * лише воно: у текстовій колонці той самий перемикач переставив би коди.
+ * Нерозпізнане значення числової колонки спадає на колатор — інакше рядок, що
+ * числом не є, зник би з порядку зовсім.
  */
-function compareKeys(a: SortKey, b: SortKey, sign: number, collator: Intl.Collator): number {
+function compareKeys(
+  a: SortKey,
+  b: SortKey,
+  sign: number,
+  collator: Intl.Collator,
+  numeric: boolean,
+): number {
+  // Кортеж — поелементно; кожен елемент за тими ж правилами, включно з
+  // пропусками в кінці. Скаляр проти кортежу — як кортеж з одного елемента.
+  if (isTuple(a) || isTuple(b)) {
+    const left: readonly SortScalar[] = isTuple(a) ? a : [a];
+    const right: readonly SortScalar[] = isTuple(b) ? b : [b];
+
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+      const order = compareKeys(left[index], right[index], sign, collator, numeric);
+
+      if (order !== 0) return order;
+    }
+
+    return 0;
+  }
+
   const aMissing = isMissing(a);
   const bMissing = isMissing(b);
 
@@ -193,10 +334,23 @@ function compareKeys(a: SortKey, b: SortKey, sign: number, collator: Intl.Collat
   if (typeof a === 'number' && typeof b === 'number') return (a - b) * sign;
   if (typeof a === 'boolean' && typeof b === 'boolean') return (Number(a) - Number(b)) * sign;
 
+  if (numeric) {
+    const order = compareDecimals(String(a), String(b));
+
+    if (order !== null) return order * sign;
+  }
+
   return collator.compare(String(a), String(b)) * sign;
 }
 
-/** Наступний стан сортування за клацанням: зростання → спадання → як було. */
+/**
+ * Наступний стан сортування за клацанням: зростання → спадання → порядок
+ * сервера.
+ *
+ * ⚠ Третій клац веде до `null`, а не назад до `defaultSort`: інакше колонку
+ * початкового порядку неможливо було б «відпустити» — вона ходила б по колу
+ * зростання ↔ спадання, і порядок сервера став би недосяжним.
+ */
 function nextSort(current: SortState | null, key: string): SortState | null {
   if (current === null || current.key !== key) return { key, direction: 'asc' };
   if (current.direction === 'asc') return { key, direction: 'desc' };
@@ -240,6 +394,7 @@ export function DataTable<Row>({
   selectedKey,
   caption,
   height,
+  defaultSort,
 }: DataTableProps<Row>): JSX.Element {
   /*
    * ⛔ `L5` кидає ВИНЯТОК у режимі розробки, а не пише в консоль (`KIT.md`
@@ -263,7 +418,7 @@ export function DataTable<Row>({
     );
   }
 
-  const [sort, setSort] = useState<SortState | null>(null);
+  const [sort, setSort] = useState<SortState | null>(defaultSort ?? null);
 
   const collator = useMemo(() => new Intl.Collator(formatLocale()), []);
 
@@ -281,7 +436,13 @@ export function DataTable<Row>({
      * самого ключа вважають незмінними.
      */
     return [...rows].sort((left, right) =>
-      compareKeys(sortKeyOf(column, left), sortKeyOf(column, right), sign, collator),
+      compareKeys(
+        sortKeyOf(column, left),
+        sortKeyOf(column, right),
+        sign,
+        collator,
+        column.num === true,
+      ),
     );
   }, [rows, sort, columns, collator]);
 
@@ -505,8 +666,36 @@ function Cell<Row>({
 
   if (raw === null || raw === undefined) return null;
 
-  if (typeof raw === 'number') return <>{formatNumber(raw)}</>;
-  if (typeof raw === 'string') return <>{raw}</>;
+  const magnitude = column.num === true;
+
+  /*
+   * ⛔ `exact` — перед будь-яким форматуванням: значення їде на екран дослівно.
+   * Рядок — як прийшов (включно з масштабом колонки), `number` — `String`, без
+   * `Intl`. Лише так множник `0.4535923700` не стає `0.454`.
+   */
+  if (magnitude && column.exact === true) {
+    if (typeof raw === 'string' || typeof raw === 'number') return <>{String(raw)}</>;
+  }
+
+  /*
+   * ⛔ `formatNumber` — лише для ВЕЛИЧИНИ (`num`). Доти тут стояло безумовне
+   * `formatNumber(raw)`, і ідентифікатор `1234` у колонці без `num` їхав на
+   * екран як `1,234` — числом, якого в базі немає. Екрани обходили це власним
+   * `render: String(…)`; тепер колонка, що не сказала `num`, показує число як є.
+   */
+  if (typeof raw === 'number') return <>{magnitude ? formatNumber(raw) : String(raw)}</>;
+
+  if (typeof raw === 'string') {
+    // ⛔ Лише числова колонка: `'007'` у колонці кодів теж нормалізується — і
+    // поїхав би на екран сімкою.
+    if (magnitude) {
+      const shown = formatDecimal(raw, undefined, CellFractionCeiling);
+
+      if (shown !== null) return <>{shown}</>;
+    }
+
+    return <>{raw}</>;
+  }
 
   // Булеве, об'єкт, масив: скалярного показу не мають — малює `render`.
   return null;

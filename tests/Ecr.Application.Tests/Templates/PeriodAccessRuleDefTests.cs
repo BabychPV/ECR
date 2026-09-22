@@ -122,6 +122,7 @@ public sealed class PeriodAccessRuleDefTests
                 CancellationToken.None));
 
         Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.sourceWindowRequiresColumn", error.Details?["messageKey"]);
         _rules.DidNotReceive().Add(Arg.Any<PeriodAccessRuleDef>());
     }
 
@@ -133,6 +134,7 @@ public sealed class PeriodAccessRuleDefTests
             () => Create().HandleAsync(1, CreateCommand(), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.periodAccessRuleNoTarget", error.Details?["messageKey"]);
     }
 
     [Fact]
@@ -143,6 +145,8 @@ public sealed class PeriodAccessRuleDefTests
             () => Create().HandleAsync(1, CreateCommand(sheetDefId: 999), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.sheetNotInVersion", error.Details?["messageKey"]);
+        Assert.Equal("999", error.Details?["sheetDefId"]);
     }
 
     [Fact]
@@ -190,6 +194,7 @@ public sealed class PeriodAccessRuleDefTests
             () => Save().HandleAsync(1, 42, command, CancellationToken.None));
 
         Assert.Equal("ECR-CFG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CFG-0422.hideRetired", error.Details?["messageKey"]);
     }
 
     [Fact]
@@ -205,6 +210,7 @@ public sealed class PeriodAccessRuleDefTests
                 CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.periodAccessRule", error.Details?["messageKey"]);
     }
 
     [Fact]
@@ -230,6 +236,7 @@ public sealed class PeriodAccessRuleDefTests
             () => Delete().HandleAsync(1, 42, CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.periodAccessRule", error.Details?["messageKey"]);
     }
 
     [Fact]

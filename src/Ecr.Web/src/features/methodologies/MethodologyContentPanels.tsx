@@ -12,7 +12,6 @@ import {
   Text,
   Textarea,
   TextInput,
-  Tooltip,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
@@ -29,9 +28,12 @@ import type {
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import { normalizeDecimal } from '@/shared/format';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import {
@@ -49,6 +51,7 @@ import {
   saveMethodologyRule,
   saveMethodologyTestCase,
 } from './api';
+import { MethodologyConstantUsage } from './ConstantUsage';
 
 /**
  * Список колонок для пошуку за назвою (директива "пошук колонки за назвою
@@ -61,17 +64,81 @@ import {
  * колонки (`SaveCalculationBindingHandler`), тому й колонку для вибору
  * потрібно шукати серед усіх, а не лише в межах контексту цього екрана.
  */
-function useColumnDefOptions(): { value: string; label: string }[] {
+interface ColumnDefChoices {
+  /**
+   * Пункти `Select`.
+   *
+   * ⛔ Порожньо тут означає РІВНО ОДНЕ — колонок справді немає. Доки запит їде
+   * або відмовив, викликач не малює `Select` узагалі (`error`/`isPending`
+   * нижче), тож порожній перелік більше не є трьома різними станами одразу.
+   */
+  readonly options: { value: string; label: string }[];
+
+  /** Відмова читання; `null` — запит удався. */
+  readonly error: unknown;
+
+  /** Чи перелік іще їде. */
+  readonly isPending: boolean;
+
+  /** Повторити читання. */
+  readonly refetch: () => void;
+}
+
+function useColumnDefOptions(): ColumnDefChoices {
   const columns = useQuery({
     queryKey: ['column-defs-search'],
     queryFn: () => apiFetch<ColumnDefSearchResultDto[]>('/api/v1/column-defs/search?limit=200'),
     staleTime: 60 * 1000,
   });
 
-  return (columns.data ?? []).map((column) => ({
-    value: String(column.id),
-    label: `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`,
-  }));
+  return {
+    options: (columns.data ?? []).map((column) => ({
+      value: String(column.id),
+      label: `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`,
+    })),
+    error: columns.error,
+    isPending: columns.isPending,
+    refetch: () => {
+      void columns.refetch();
+    },
+  };
+}
+
+/**
+ * Вибір із допоміжного довідника, який МОЖЕ не приїхати (директива №15, §0,
+ * `L10`).
+ *
+ * ⛔ Раніше кожен такий `Select` наповнювався через `?? []`, і порожній перелік
+ * означав три різні речі одразу: «довідник порожній», «ще їде», «сервер
+ * відмовив». Людина читає найгірше з трьох — ПЕРШЕ, бо саме воно схоже на
+ * факт: «колонки такої немає», «одиниць у системі немає». І діє за цим фактом:
+ * іде перевіряти, чи опублікована версія шаблону, або зберігає константу без
+ * одиниці, або вирішує, що виходи тут завести неможливо.
+ *
+ * ⚠ Порядок той самий, що в `AsyncBoundary`: помилка ПЕРШОЮ, бо невдалий запит
+ * теж лишає дані порожніми. Різниця лише в тому, що сама `AsyncBoundary` тут
+ * не годиться — вона малює власний `<Title order={4}>` порожнього стану, а
+ * всередині модалки це рве `heading-order` і валить гейт `a11y`.
+ *
+ * ⚠ «Ще їде» — НЕДОСТУПНИЙ контрол, а не порожній: людина бачить поле на його
+ * місці (розмітка не стрибає), але не може обрати з переліку, якого ще немає.
+ */
+function ChoiceField({
+  error,
+  isPending,
+  onRetry,
+  children,
+}: {
+  readonly error: unknown;
+  readonly isPending: boolean;
+  readonly onRetry: () => void;
+  readonly children: (disabled: boolean) => JSX.Element;
+}): JSX.Element {
+  if (error !== null && error !== undefined) {
+    return <ErrorAlert error={error} onRetry={onRetry} />;
+  }
+
+  return children(isPending);
 }
 
 /**
@@ -159,6 +226,11 @@ export function MethodologyConstantsPanel({
 }: PanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<ConstantDraft | null>(null);
+  // ФВ-8.14: код константи, для якої зараз відкрито «де використовується».
+  // ⛔ Кнопка показується для КОЖНОГО рядка завжди, незалежно від того, чи
+  // є в константи використання (`total: 0` теж чинний, а не привід ховати
+  // афордансу — на відміну від рядків без даних деінде).
+  const [usageFor, setUsageFor] = useState<string | null>(null);
 
   const constants = useQuery({
     queryKey: queryKeys.methodologies.constants(versionId),
@@ -179,7 +251,12 @@ export function MethodologyConstantsPanel({
         // поля означало б, що константа, переведена з тексту в число, тягне за
         // собою суперечливий рядок — а `IsResolved` вважав би розібраним те,
         // що ним не є.
-        value: draft.kind === 'Numeric' ? Number(draft.value) : null,
+        //
+        // ⛔ Тут стояло `Number(draft.value)`, і воно коштувало двічі: 16-й
+        // знак коефіцієнта зникав дорогою, а порожнє поле їхало як `0` —
+        // тобто правдоподібне й неправильне число замість відмови. Рядок
+        // іде на сервер як є, а порожнє поле кнопка не випускає.
+        value: draft.kind === 'Numeric' ? draft.value.trim() : null,
         unitId: draft.kind === 'Numeric' ? draft.unitId : null,
         textValue: draft.kind === 'Numeric' ? null : draft.textValue,
         validFrom: draft.validFrom === '' ? null : draft.validFrom,
@@ -256,28 +333,38 @@ export function MethodologyConstantsPanel({
                     <Timestamp value={constant.validTo} dateOnly fallback={Unbounded} />
                   </Table.Td>
                   <Table.Td>
-                    {editable && (
+                    <Group gap="xs" wrap="nowrap" justify="flex-end">
                       <Button
                         size="compact-xs"
                         variant="subtle"
-                        onClick={() =>
-                          setEditing({
-                            code: constant.code,
-                            kind: constant.kind,
-                            value: constant.value === null ? '' : String(constant.value),
-                            textValue: constant.textValue ?? '',
-                            unitId: constant.unitId,
-                            validFrom: constant.validFrom ?? '',
-                            validTo: constant.validTo ?? '',
-                            category: constant.category ?? '',
-                            source: constant.source ?? '',
-                            isNew: false,
-                          })
-                        }
+                        data-constant-usage="trigger"
+                        onClick={() => setUsageFor(constant.code)}
                       >
-                        {t('methodologies.editFormula')}
+                        {t('registries.tabUsage')}
                       </Button>
-                    )}
+                      {editable && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() =>
+                            setEditing({
+                              code: constant.code,
+                              kind: constant.kind,
+                              value: constant.value === null ? '' : String(constant.value),
+                              textValue: constant.textValue ?? '',
+                              unitId: constant.unitId,
+                              validFrom: constant.validFrom ?? '',
+                              validTo: constant.validTo ?? '',
+                              category: constant.category ?? '',
+                              source: constant.source ?? '',
+                              isNew: false,
+                            })
+                          }
+                        >
+                          {t('methodologies.editFormula')}
+                        </Button>
+                      )}
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -326,19 +413,34 @@ export function MethodologyConstantsPanel({
                   value={editing.value}
                   onChange={(event) => setEditing({ ...editing, value: event.currentTarget.value })}
                 />
-                <Select
-                  label={t('methodologies.outputUnit')}
-                  description={t('methodologies.constantUnitHint')}
-                  searchable
-                  value={editing.unitId === null ? null : String(editing.unitId)}
-                  data={(units.data ?? []).map((unit) => ({
-                    value: String(unit.id),
-                    label: unit.code,
-                  }))}
-                  onChange={(value) =>
-                    setEditing({ ...editing, unitId: value === null ? null : Number(value) })
-                  }
-                />
+                {/* ⛔ Тут ціна порожнечі — ТИХО БЕЗРОЗМІРНА КОНСТАНТА. Одиниця
+                    в константі необов'язкова (`unitId: number | null`), тож
+                    сервер приймає запис без неї й нічого не каже. Порожній
+                    перелік читався як «одиниць у системі немає», людина
+                    зберігала коефіцієнт без одиниці — і відмова ЧИТАННЯ
+                    довідника перетворювалася на неправильні дані. */}
+                <ChoiceField
+                  error={units.error}
+                  isPending={units.isPending}
+                  onRetry={() => void units.refetch()}
+                >
+                  {(disabled) => (
+                    <Select
+                      label={t('methodologies.outputUnit')}
+                      description={t('methodologies.constantUnitHint')}
+                      searchable
+                      disabled={disabled}
+                      value={editing.unitId === null ? null : String(editing.unitId)}
+                      data={(units.data ?? []).map((unit) => ({
+                        value: String(unit.id),
+                        label: unit.code,
+                      }))}
+                      onChange={(value) =>
+                        setEditing({ ...editing, unitId: value === null ? null : Number(value) })
+                      }
+                    />
+                  )}
+                </ChoiceField>
               </>
             ) : (
               <TextInput
@@ -380,13 +482,24 @@ export function MethodologyConstantsPanel({
             />
 
             <Button
-              disabled={editing.code.trim().length === 0}
+              disabled={
+                editing.code.trim().length === 0 ||
+                // ⚠ Числова константа без розбірного числа не зберігається:
+                // доти порожнє поле мовчки їхало нулем.
+                (editing.kind === 'Numeric' && normalizeDecimal(editing.value) === null)
+              }
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >
               {t('methodologies.save')}
             </Button>
           </Stack>
+        )}
+      </Modal>
+
+      <Modal opened={usageFor !== null} onClose={() => setUsageFor(null)} title={t('registries.tabUsage')}>
+        {usageFor !== null && (
+          <MethodologyConstantUsage methodologyId={methodologyId} versionId={versionId} code={usageFor} />
         )}
       </Modal>
     </>
@@ -545,6 +658,28 @@ export function MethodologyRulesPanel({
           // редактор міг згодом додати друге правило й ніколи не помітити,
           // що воно вже недосяжне, — доти, доки хтось не почне з'ясовувати,
           // чому розрахунок не бачить рядків, які має бачити.
+          // ⛔ А тепер те, що робило саме ці два попередження гіршими за їх
+          // відсутність. Кнопка «Додати правило» стоїть ПОЗА `AsyncBoundary`,
+          // тож при відмові `GET …/rules` таблиця показує банер, а діалог усе
+          // одно відкривається — з `otherRules`, зібраним через `?? []`, тобто
+          // ПОРОЖНІМ. Обидві перевірки нижче мовчать (`maxOtherPriority === null`,
+          // `blockingCatchAll === undefined`), і catch-all із пріоритетом 1
+          // зберігається без жодного слова, перекривши всі точніші правила.
+          //
+          // ⛔ Тобто рівно тоді, коли клієнт НЕ ЗНАЄ, які правила вже є, він
+          // повідомляє, що конфлікту немає. Запобіжник, який деградує в бік
+          // ДОЗВОЛУ, — гірший за відсутній: він ще й заспокоює.
+          //
+          // ⚠ Ховати «Додати правило» не треба: завести правило законно й при
+          // недоступному переліку. Недоступним стає лише ЗБЕРЕЖЕННЯ — і поруч
+          // стоїть причина з кодом відмови, а не мертва кнопка (той самий
+          // висновок, що в `pages/admin/PeriodsPage.tsx` про архівацію).
+          //
+          // ⚠ `data === undefined` тут не зайве поруч із `error`: доки запит у
+          // дорозі, перелік так само невідомий, і висновок «конфлікту немає»
+          // так само не має підстав.
+          const rulesUnknown = rules.error !== null || rules.data === undefined;
+
           const otherRules = (rules.data ?? []).filter((rule) => editing.isNew || rule.code !== editing.code);
           const editingIsCatchAll = isCatchAllMatchJson(editing.matchJson);
           const maxOtherPriority =
@@ -562,6 +697,16 @@ export function MethodologyRulesPanel({
 
           return (
           <Stack gap="sm">
+            {/* ⚠ Помилка ПЕРШОЮ — той самий порядок, що в `AsyncBoundary` і в
+                `ChoiceField` вище. Сама `AsyncBoundary` тут не годиться: її
+                `<Title order={4}>` усередині модалки рве `heading-order` і
+                валить гейти `a11y (dark)`/`a11y (light)`.
+
+                ⚠ Доки запит у дорозі, `rules.error === null`, і банера немає
+                зовсім (`ErrorAlert` повертає `null`) — недоступна кнопка там
+                самоусувається за секунду, як і `disabled` у `ChoiceField`. */}
+            <ErrorAlert error={rules.error} onRetry={() => void rules.refetch()} />
+
             <TextInput
               label={t('methodologies.code')}
               value={editing.code}
@@ -615,8 +760,15 @@ export function MethodologyRulesPanel({
               onChange={(event) => setEditing({ ...editing, isActive: event.currentTarget.checked })}
             />
 
+            {/* ⛔ `rulesUnknown` — не зручність, а межа: без переліку правил
+                обидва попередження вище нічого не перевіряють, тож зберегти
+                означало б зберегти НАОСЛІП. Причина стоїть банером угорі. */}
             <Button
-              disabled={editing.code.trim().length === 0 || editing.matchJson.trim().length === 0}
+              disabled={
+                rulesUnknown ||
+                editing.code.trim().length === 0 ||
+                editing.matchJson.trim().length === 0
+              }
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >
@@ -656,7 +808,7 @@ export function MethodologyRequiredInputsPanel({
 }: PanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<RequiredInputDraft | null>(null);
-  const columnOptions = useColumnDefOptions();
+  const columns = useColumnDefOptions();
 
   const requiredInputs = useQuery({
     queryKey: queryKeys.methodologies.requiredInputs(versionId),
@@ -727,12 +879,15 @@ export function MethodologyRequiredInputsPanel({
                           рядок і далі показував `Column: X, Severity: Block`
                           так, наче все гаразд, і далі блокував збереження
                           даних для колонки, яку методологія вже не пише. */}
+                      {/* ⚠ `Hint` із `focusable`, а не `Tooltip`: бейдж не в
+                          порядку табуляції, і `Tooltip` показував пояснення
+                          лише миші — з клавіатури його не було видно ніколи. */}
                       {!requiredInput.hasActiveBinding && (
-                        <Tooltip label={t('methodologies.requiredInputUnattachedHint')} multiline w={280}>
+                        <Hint label={t('methodologies.requiredInputUnattachedHint')} focusable>
                           <Badge size="xs" color="statusWarning" variant="outline">
                             {t('methodologies.requiredInputUnattached')}
                           </Badge>
-                        </Tooltip>
+                        </Hint>
                       )}
                     </Group>
                   </Table.Td>
@@ -782,20 +937,33 @@ export function MethodologyRequiredInputsPanel({
                 ColumnDefId": адміністратор більше не має пам'ятати
                 внутрішній ідентифікатор — вибір за назвою чи кодом,
                 той самий прийом, що вибір довідника в `ColumnEditor.tsx`. */}
-            <Select
-              label={t('methodologies.columnDefId')}
-              description={t('methodologies.requiredInputColumnHint')}
-              searchable
-              disabled={!editing.isNew}
-              value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
-              data={columnOptions}
-              onChange={(value) =>
-                setEditing({
-                  ...editing,
-                  columnDefId: value === null ? 0 : Number(value),
-                })
-              }
-            />
+            {/* ⛔ Відмова пошуку робила перелік порожнім, і пошук за назвою
+                відповідав «нічого не знайдено» на БУДЬ-ЯКИЙ запит. Людина
+                читає це як факт («такої колонки в шаблонах немає») і йде
+                перевіряти, чи опублікована версія шаблону, — замість
+                повторити запит. */}
+            <ChoiceField
+              error={columns.error}
+              isPending={columns.isPending}
+              onRetry={columns.refetch}
+            >
+              {(disabled) => (
+                <Select
+                  label={t('methodologies.columnDefId')}
+                  description={t('methodologies.requiredInputColumnHint')}
+                  searchable
+                  disabled={!editing.isNew || disabled}
+                  value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
+                  data={columns.options}
+                  onChange={(value) =>
+                    setEditing({
+                      ...editing,
+                      columnDefId: value === null ? 0 : Number(value),
+                    })
+                  }
+                />
+              )}
+            </ChoiceField>
 
             <Select
               label={t('methodologies.severity')}
@@ -924,6 +1092,14 @@ export function MethodologyOutputsPanel({
                 <Table.Tr key={output.id}>
                   <Table.Td>{output.code}</Table.Td>
                   <Table.Td>
+                    {/* ✎ Це `?? []` лишено НАВМИСНО, і межа тут чесна: коли
+                        довідник не приїхав, комірка показує сам `unitId` —
+                        тобто каже щось, а не мовчить. Людина бачить число
+                        замість коду й розуміє, що підпис не розв'язався;
+                        хибного факту («одиниці немає») тут не виникає, бо
+                        одиниця виходу обов'язкова й НЕпорожня за побудовою.
+                        Банер відмови в кожному рядку таблиці коштував би
+                        дорожче за користь. */}
                     {(units.data ?? []).find((u) => u.id === output.unitId)?.code ?? output.unitId}
                   </Table.Td>
                   <Table.Td>{output.ordinal}</Table.Td>
@@ -967,16 +1143,33 @@ export function MethodologyOutputsPanel({
               onChange={(event) => setEditing({ ...editing, code: event.currentTarget.value })}
             />
 
-            <Select
-              label={t('methodologies.outputUnit')}
-              description={t('methodologies.outputUnitRequiredHint')}
-              searchable
-              value={editing.unitId === null ? null : String(editing.unitId)}
-              data={(units.data ?? []).map((unit) => ({ value: String(unit.id), label: unit.code }))}
-              onChange={(value) =>
-                setEditing({ ...editing, unitId: value === null ? null : Number(value) })
-              }
-            />
+            {/* ⛔ Тут одиниця ОБОВ'ЯЗКОВА (кнопка нижче недоступна, доки
+                `unitId === null`), тож порожній перелік не псував даних — він
+                мовчав. Людина бачила порожній вибір і мертву кнопку
+                «Зберегти» й читала з цього, що виходи тут завести неможливо;
+                причини — відмови читання довідника — не бачив ніхто. */}
+            <ChoiceField
+              error={units.error}
+              isPending={units.isPending}
+              onRetry={() => void units.refetch()}
+            >
+              {(disabled) => (
+                <Select
+                  label={t('methodologies.outputUnit')}
+                  description={t('methodologies.outputUnitRequiredHint')}
+                  searchable
+                  disabled={disabled}
+                  value={editing.unitId === null ? null : String(editing.unitId)}
+                  data={(units.data ?? []).map((unit) => ({
+                    value: String(unit.id),
+                    label: unit.code,
+                  }))}
+                  onChange={(value) =>
+                    setEditing({ ...editing, unitId: value === null ? null : Number(value) })
+                  }
+                />
+              )}
+            </ChoiceField>
 
             <NumberInput
               label={t('methodologies.ordinal')}
@@ -1005,7 +1198,9 @@ interface TestDraft {
   readonly code: string;
   readonly inputJson: string;
   readonly expectedJson: string;
-  readonly tolerance: number;
+
+  /** ⚠ Рядок, не число: допуск — `decimal` контракту (`e470777a`). */
+  readonly tolerance: string;
   readonly isNew: boolean;
 }
 
@@ -1034,7 +1229,7 @@ export function MethodologyTestsPanel({
       saveMethodologyTestCase(methodologyId, versionId, draft.code, {
         inputJson: draft.inputJson,
         expectedJson: draft.expectedJson,
-        tolerance: draft.tolerance,
+        tolerance: draft.tolerance.trim(),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.methodologies.tests(versionId) });
@@ -1057,7 +1252,7 @@ export function MethodologyTestsPanel({
                 code: '',
                 inputJson: '{"periodKey":{"value":0},"arguments":[]}',
                 expectedJson: '{}',
-                tolerance: 0.0001,
+                tolerance: '0.0001',
                 isNew: true,
               })
             }
@@ -1156,21 +1351,24 @@ export function MethodologyTestsPanel({
               onChange={(event) => setEditing({ ...editing, expectedJson: event.currentTarget.value })}
             />
 
-            <NumberInput
+            {/* ⛔ `TextInput`, а не `NumberInput`: останній віддає в `onChange`
+                `floatValue`, тобто проганяє введене через IEEE-754 ще до
+                стану компонента. Допуск — `decimal` контракту, і його знаки
+                мають дійти до сервера тими самими, якими їх надрукували. */}
+            <TextInput
               label={t('methodologies.tolerance')}
               description={t('methodologies.toleranceHint')}
+              inputMode="decimal"
               value={editing.tolerance}
-              decimalScale={6}
-              onChange={(value) =>
-                setEditing({
-                  ...editing,
-                  tolerance: typeof value === 'number' ? value : editing.tolerance,
-                })
+              onChange={(event) =>
+                setEditing({ ...editing, tolerance: event.currentTarget.value })
               }
             />
 
             <Button
-              disabled={editing.code.trim().length === 0}
+              disabled={
+                editing.code.trim().length === 0 || normalizeDecimal(editing.tolerance) === null
+              }
               loading={save.isPending}
               onClick={() => save.mutate(editing)}
             >
@@ -1212,7 +1410,7 @@ export function MethodologyBindingsPanel({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<BindingDraft | null>(null);
-  const columnOptions = useColumnDefOptions();
+  const columns = useColumnDefOptions();
 
   const bindings = useQuery({
     queryKey: queryKeys.methodologies.bindings(methodologyId),
@@ -1327,20 +1525,32 @@ export function MethodologyBindingsPanel({
                 ColumnDefId": той самий прийом, що вибір довідника в
                 `ColumnEditor.tsx` — пошук наскрізь по всіх версіях, бо
                 прив'язка не обмежена ОДНІЄЮ таблицею. */}
-            <Select
-              label={t('methodologies.columnDefId')}
-              description={t('methodologies.columnDefIdHint')}
-              searchable
-              disabled={!editing.isNew}
-              value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
-              data={columnOptions}
-              onChange={(value) =>
-                setEditing({
-                  ...editing,
-                  columnDefId: value === null ? 0 : Number(value),
-                })
-              }
-            />
+            {/* ⛔ Той самий запит, та сама ціна, що в обов'язкових входах — і
+                саме тому обидва споживачі полагоджені разом: полагодити один
+                означало б лишити другий екран із тією самою мовчазною
+                порожнечею. */}
+            <ChoiceField
+              error={columns.error}
+              isPending={columns.isPending}
+              onRetry={columns.refetch}
+            >
+              {(disabled) => (
+                <Select
+                  label={t('methodologies.columnDefId')}
+                  description={t('methodologies.columnDefIdHint')}
+                  searchable
+                  disabled={!editing.isNew || disabled}
+                  value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
+                  data={columns.options}
+                  onChange={(value) =>
+                    setEditing({
+                      ...editing,
+                      columnDefId: value === null ? 0 : Number(value),
+                    })
+                  }
+                />
+              )}
+            </ChoiceField>
 
             <TextInput
               label={t('methodologies.outputCode')}

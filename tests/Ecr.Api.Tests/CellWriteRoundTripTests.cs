@@ -42,6 +42,32 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Write-RoundTrip-2026!";
 
+    /// <summary>
+    /// Шістнадцять знаків після коми, усі різні й жоден не нуль: обрізання на
+    /// будь-якому з них змінює РЯДОК, а не лише масштаб (<c>D-148</c>).
+    /// </summary>
+    private const string SixteenDigits = "0.1234567890123456";
+
+    /// <summary>
+    /// 278 МВт·год у базовій одиниці (джоуль) із шістнадцятьма знаками:
+    /// тринадцять цілих розрядів, яких <c>decimal(28,16)</c> не вміщав.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це наскрізний доказ РОЗШИРЕННЯ (precision 28 → 34, 2026-09-21).
+    /// Каталог одиниць має множник <c>MWh → 3 600 000 000</c>, тож звичайні
+    /// 278 МВт·год — це 1.0008·10¹² в базовій одиниці, а precision 28 при
+    /// масштабі 16 лишає рівно 12 цілих розрядів. До переходу цей самий запит
+    /// не округлявся, а відмовляв.
+    ///
+    /// ⚠ Чому НЕ 18 цілих розрядів, хоча стовпець їх тримає: 18 + 16 = 34
+    /// значущі цифри, а <c>System.Decimal</c> несе лише 29. Таке значення не
+    /// існує в CLR — <c>decimal.Parse</c> мовчки округлив би його ще до
+    /// відправки, і тест порівнював би огризок сам із собою. Стелю стовпця й
+    /// стелю CLR розводить окремий тест у
+    /// <c>Ecr.Infrastructure.Tests</c> (<c>CellValueScale16Tests</c>).
+    /// </remarks>
+    private const string ThirteenIntegerDigits = "1000800000000.1234567890123456";
+
     /// <summary>Пояс майданчика; той самий, який ставить <see cref="TestDocumentBuilder"/>.</summary>
     private static readonly TimeZoneInfo SiteZone = SiteTimeZone.Create("Asia/Almaty").ToTimeZoneInfo();
 
@@ -129,7 +155,15 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         var afterCreate = await ReadRowAsync(client, sliceUri, newRow, app).ConfigureAwait(true);
 
         Assert.Equal("мазут", afterCreate.GetProperty("cells").GetProperty(textColumn).GetString());
-        Assert.Equal(12.5m, afterCreate.GetProperty("cells").GetProperty(numberColumn).GetDecimal());
+
+        // ⛔ Числова комірка їде РЯДКОМ (`D-30`, `DecimalAsStringJsonConverter`):
+        // JSON-число на клієнті проходить через `JSON.parse`, тобто через
+        // IEEE-754, і 16-й знак `decimal(34,16)` зникає ще до того, як до
+        // нього можна дотягнутися. Хвостові нулі — масштаб самої колонки.
+        var createdNumber = afterCreate.GetProperty("cells").GetProperty(numberColumn);
+
+        Assert.Equal(JsonValueKind.String, createdNumber.ValueKind);
+        Assert.Equal("12.5", createdNumber.GetString()!.TrimEnd('0'));
 
         // ⚠ Версія рядка зі зрізу має збігатися з тією, яку віддав PATCH:
         // клієнт бере `baseVersion` саме звідси, і розбіжність означала б, що
@@ -174,11 +208,107 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         // ── 5. І оновлене значення теж видно наступним читанням ──────────
         var afterUpdate = await ReadRowAsync(client, sliceUri, newRow, app).ConfigureAwait(true);
 
-        Assert.Equal(41.75m, afterUpdate.GetProperty("cells").GetProperty(numberColumn).GetDecimal());
+        var updatedNumber = afterUpdate.GetProperty("cells").GetProperty(numberColumn);
+
+        Assert.Equal(JsonValueKind.String, updatedNumber.ValueKind);
+        Assert.Equal("41.75", updatedNumber.GetString()!.TrimEnd('0'));
 
         // ⚠ Текст залишився недоторканим: у батчі його не було, а «поле
         // відсутнє в запиті» означає «не чіпати», а не «стерти» (R-B4).
         Assert.Equal("мазут", afterUpdate.GetProperty("cells").GetProperty(textColumn).GetString());
+    }
+
+    [Theory]
+    [InlineData(SixteenDigits)]
+    [InlineData(ThirteenIntegerDigits)]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-148")]
+    public async Task Повна_ширина_числа_доживає_від_HTTP_до_бази_і_назад(string text)
+    {
+        // ⛔ Наскрізний доказ `D-148` («усюди 16 знаків»). Ланок, кожна з яких
+        // ріже МОВЧКИ, чотири: `JSON.parse`-подібна втрата на числі в тілі
+        // запиту (тому значення їде РЯДКОМ), `SqlMetaData` в
+        // `NormalizedCellStore`, тип `doc.CellValueTvp` і сам стовпець
+        // `doc.CellValue.ValueNumeric`. Жодна з них не відмовляє — усі
+        // округлюють і повертають `200`. Тому твердження одне й просте:
+        // введений текст і прочитаний текст збігаються ПОСИМВОЛЬНО.
+        //
+        // ⚠ Два випадки перевіряють РІЗНІ половини типу, і другий з'явився з
+        // переходом на `decimal(34,16)`: перший — масштаб (16 знаків після
+        // коми), другий — ширину цілої частини (13 розрядів). Другий на
+        // `(28,16)` не проходив узагалі: СУБД відмовляла «Arithmetic
+        // overflow», бо precision 28 при масштабі 16 лишає 12 цілих розрядів.
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+
+        // Друга колонка будівника — числова (перша `String`).
+        var numberColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .ElementAt(1);
+
+        var rowKey = $"D16{Guid.NewGuid():N}"[..12];
+
+        var applied = await client.PatchAsJsonAsync(patchUri, new
+        {
+            tableInstanceId = scenario.Document.TableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin = "UserEdit",
+            rows = new[]
+            {
+                new
+                {
+                    rowKey,
+                    baseVersion = (string?)null,
+                    cells = new object[] { new { columnCode = numberColumn, value = (object)text } },
+                },
+            },
+        }).ConfigureAwait(true);
+
+        Assert.True(
+            applied.StatusCode == HttpStatusCode.OK,
+            $"PATCH «{text}»: {applied.StatusCode}\n"
+            + $"{await applied.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        // ⚠ Читання йде тим самим шляхом, що й у клієнта, — зрізом, а не
+        // запитом до таблиці. Значення, яке доїхало до бази цілим, але
+        // втратило знак на видачі, — той самий дефект для того, хто звіряє
+        // звіт із базою.
+        var row = await ReadRowAsync(client, sliceUri, rowKey, app).ConfigureAwait(true);
+        var cell = row.GetProperty("cells").GetProperty(numberColumn);
+
+        Assert.Equal(JsonValueKind.String, cell.ValueKind);
+        Assert.Equal(text, cell.GetString());
+
+        // І в самій базі теж шістнадцять знаків, а не «щось, що зріз гарно
+        // надрукував»: зріз бере число зі сховища, і обидва твердження разом
+        // відрізняють цілий шлях від збігу на форматуванні.
+        await using var db = scenario.Builder.CreateContext();
+        var stored = await db.CellValues
+            .AsNoTracking()
+            .Where(c => c.PeriodKeyValue == scenario.PeriodKey
+                        && c.ColumnDefId == scenario.Document.ColumnDefIds[1])
+            .Select(c => c.ValueNumeric)
+            .SingleAsync()
+            .ConfigureAwait(true);
+
+        Assert.Equal(
+            text,
+            stored!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Fact]

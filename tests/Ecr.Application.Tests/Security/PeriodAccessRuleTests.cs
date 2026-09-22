@@ -349,10 +349,14 @@ public sealed class PeriodAccessRuleTests
         // ⛔ База ловить це `CK_PAR_Kind`, але база — остання лінія, а не
         // перша. Правило `SourceWindow` без колонки-джерела не блокує нічого
         // і виглядає працездатним.
-        Assert.Throws<DomainException>(
+        var offsetError = Assert.Throws<DomainException>(
             () => PeriodAccessRuleDef.ForRelativeWindow(Version, 0, OutOfWindowBehavior.ReadOnly));
+        Assert.Equal(
+            "err.ECR-TMPL-0422.relativeWindowOffsetNotPositive", offsetError.Details?["messageKey"]);
+        Assert.Equal("0", offsetError.Details?["offset"]);
 
-        Assert.Throws<DomainException>(
+        var expressionError = Assert.Throws<DomainException>(
             () => PeriodAccessRuleDef.ForExpression(Version, "   ", OutOfWindowBehavior.ReadOnly));
+        Assert.Equal("err.ECR-TMPL-0422.expressionRequired", expressionError.Details?["messageKey"]);
     }
 }

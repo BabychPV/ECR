@@ -27,7 +27,8 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class QuartzJobScheduler(
     ISchedulerFactory? schedulerFactory = null,
     IJobProgressStore? progress = null,
-    Ecr.Domain.Abstractions.IClock? clock = null) : IBackgroundJobScheduler
+    Ecr.Domain.Abstractions.IClock? clock = null,
+    ICorrelationIdAccessor? correlation = null) : IBackgroundJobScheduler
 {
     private const string UnavailableCode = "ECR-SYS-0503";
 
@@ -79,6 +80,16 @@ public sealed class QuartzJobScheduler(
     /// </remarks>
     public const string RecurringKey = "ecr.recurring";
 
+    /// <summary>
+    /// Ключ кореляції (BE-08): у даних задачі — від постановки, у даних
+    /// триґера — від ручного перезапуску чи ретраю; триґер важить більше.
+    /// </summary>
+    public const string CorrelationKey = "ecr.correlationId";
+
+    /// <summary>Кореляція запиту, що ставить задачу, або нова — поза запитом.</summary>
+    private string NewCorrelationId()
+        => correlation?.CorrelationId is { Length: > 0 } id ? id : Guid.NewGuid().ToString("N");
+
     /// <summary>Чи піднято планувальник.</summary>
     public bool IsConfigured => schedulerFactory is not null;
 
@@ -115,10 +126,14 @@ public sealed class QuartzJobScheduler(
         IScheduler instance, string jobId, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob
     {
+        var correlationId = NewCorrelationId();
+        var json = JsonSerializer.Serialize(payload, PayloadOptions);
+
         var builder = JobBuilder.Create<QuartzJobAdapter>()
             .WithIdentity(jobId)
-            .UsingJobData(PayloadKey, JsonSerializer.Serialize(payload, PayloadOptions))
-            .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name);
+            .UsingJobData(PayloadKey, json)
+            .UsingJobData(JobCodeKey, typeof(TJob).FullName ?? typeof(TJob).Name)
+            .UsingJobData(CorrelationKey, correlationId);
 
         // ⚠ Мітка постановки (`ФВ-12.2`). У базі момент постановки Є —
         // `QueueAsync` нижче створює рядок зі станом `Queued`, — але він НЕ
@@ -161,13 +176,33 @@ public sealed class QuartzJobScheduler(
         if (progress is not null && clock is not null)
         {
             await progress
-                .QueueAsync(jobId, typeof(TJob).FullName ?? typeof(TJob).Name, clock.UtcNow, ct, createdByUserId)
+                .QueueAsync(
+                    jobId, typeof(TJob).FullName ?? typeof(TJob).Name, clock.UtcNow, ct, createdByUserId,
+                    correlationId, DocumentIdOf(json))
                 .ConfigureAwait(false);
         }
 
         await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
 
         return jobId;
+    }
+
+    /// <summary>Документ задачі — числова властивість <c>documentId</c> кореня payload (BE-08).</summary>
+    /// <remarks>
+    /// ⚠ Судження: з payload, а не новим параметром порту. Документні задачі
+    /// (експорт, імпорт, перерахунок документа) вже несуть <c>DocumentId</c>
+    /// у тілі, а параметр змусив би кожного викликача дублювати те саме число.
+    /// </remarks>
+    private static long? DocumentIdOf(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+
+        return doc.RootElement.ValueKind == JsonValueKind.Object
+               && doc.RootElement.TryGetProperty("documentId", out var id)
+               && id.ValueKind == JsonValueKind.Number
+               && id.TryGetInt64(out var value)
+            ? value
+            : null;
     }
 
     /// <inheritdoc />
@@ -389,6 +424,7 @@ public sealed class QuartzJobScheduler(
             .ForJob(jobKey)
             .WithIdentity($"{jobId}-restart-{Guid.NewGuid():N}-trigger")
             .UsingJobData(RetryAttemptKey, "0")
+            .UsingJobData(CorrelationKey, NewCorrelationId())
             .StartNow()
             .Build();
 

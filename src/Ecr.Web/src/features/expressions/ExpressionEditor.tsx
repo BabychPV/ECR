@@ -1,9 +1,10 @@
-import { Alert, useComputedColorScheme } from '@mantine/core';
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { Alert, Stack, useComputedColorScheme } from '@mantine/core';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import type { ExpressionDialect, ExpressionMetadataDto, ExpressionValidationDto } from '@/api/types';
 import { expressionMetadata, validateExpression, type ExpressionPlacement } from './api';
 import { languageIdOf } from './dialect';
 import { t } from '@/shared/i18n';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import type { MonacoModule } from './monaco';
 
 /**
@@ -102,6 +103,59 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
+  // ── Відмова запиту складу мови ────────────────────────────────────────────
+  //
+  // ⛔ Директива №15 §0, правило `L10`: **відмова ≠ порожньо**. Відповідь на
+  // `GET /api/v1/expressions/metadata` — це ЄДИНЕ джерело переліку функцій,
+  // констант, аргументів і формул. Доки її немає, `metadata.current` лишається
+  // `undefined`, а `completionsFor` на `undefined` повертає ПОРОЖНІЙ перелік —
+  // тобто той самий екран, що й у діалекті, де функцій справді нема. Автор
+  // формули тисне `Ctrl+Space`, не бачить нічого й робить єдиний можливий
+  // висновок: підказок тут не буває. Далі він пише імена напам'ять, а
+  // підсвічування невідомих імен теж не вмикається (`applyGrammar` не
+  // викликано) — отже навіть друкарська помилка в імені лишається без ознаки.
+  //
+  // ⚠ Помилка тримається як `unknown`, а не як прапорець: `ErrorAlert` показує
+  // код відмови й кореляцію, а `403` (немає доступу до версії методології) і
+  // `500` — різні розмови з підтримкою.
+  const [metadataError, setMetadataError] = useState<unknown>(null);
+
+  // Лічильник спроб: зміна значення перезапускає ефект складу мови.
+  const [metadataAttempt, setMetadataAttempt] = useState(0);
+
+  const retryMetadata = useCallback(() => {
+    setMetadataError(null);
+    setMetadataAttempt((n) => n + 1);
+  }, []);
+
+  // ── Відмова запиту перевірки ──────────────────────────────────────────────
+  //
+  // ⛔ Те саме правило `L10` (**відмова ≠ порожньо**) і для другого запиту.
+  // `POST /api/v1/expressions/validate` — ЄДИНЕ джерело підкреслень: доки
+  // відповіді немає, `showDiagnostics` не викликано, і редактор виглядає
+  // точнісінько так, як на бездоганній формулі. Автор бачить чисте поле й
+  // робить єдиний можливий висновок — «помилок немає», — тоді як насправді
+  // ніхто нічого не перевіряв.
+  //
+  // ⛔ До цього тут стояв `throw error` усередині `void (async () => …)()`.
+  // Кинуте звідти не доходить до ЖОДНОЇ межі помилок React: async-IIFE нікому
+  // не віддає свій проміс, тож це просто неопрацьоване відхилення
+  // (`unhandledrejection` у браузері, «шум», що нічого не валить, у тестах).
+  // На екрані — рівно ніщо, як і до сусіднього фіксу складу мови.
+  //
+  // ⚠ `prev ?? error` — з тієї ж причини, що й у складі мови: новий об'єкт
+  // помилки в стані дає новий рендер, а рендер перезапускає цей самий ефект.
+  // Тотожне значення React відкидає без рендера, і цикл не починається.
+  const [validateError, setValidateError] = useState<unknown>(null);
+
+  // Лічильник спроб: зміна значення перезапускає ефект перевірки.
+  const [validateAttempt, setValidateAttempt] = useState(0);
+
+  const retryValidate = useCallback(() => {
+    setValidateError(null);
+    setValidateAttempt((n) => n + 1);
+  }, []);
+
   // ── Створення редактора ───────────────────────────────────────────────────
   useEffect(() => {
     let disposed = false;
@@ -185,25 +239,43 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
     let disposed = false;
 
     void (async () => {
-      const loaded = await expressionMetadata(dialect, placement ?? {});
-      if (disposed) return;
+      try {
+        const loaded = await expressionMetadata(dialect, placement ?? {});
+        if (disposed) return;
 
-      metadata.current = loaded;
+        metadata.current = loaded;
+        setMetadataError(null);
 
-      // ⛔ Підсвічування перезадається лише ТЕПЕР, коли перелік функцій
-      // відомий. Доти жодне ім'я не позначається невідомим: червоне через
-      // ненадісланий запит виглядає як помилка в тексті, і користувач
-      // починає правити те, що правильне.
-      const monaco = api.current;
-      if (monaco === null) return;
+        // ⛔ Підсвічування перезадається лише ТЕПЕР, коли перелік функцій
+        // відомий. Доти жодне ім'я не позначається невідомим: червоне через
+        // ненадісланий запит виглядає як помилка в тексті, і користувач
+        // починає правити те, що правильне.
+        const monaco = api.current;
+        if (monaco === null) return;
 
-      monaco.applyGrammar(languageIdOf(dialect), dialect, () => metadata.current);
+        monaco.applyGrammar(languageIdOf(dialect), dialect, () => metadata.current);
+      } catch (error) {
+        // ⛔ Без цього `catch` відмова була НЕОПРАЦЬОВАНИМ відхиленням
+        // проміса: у браузері це `unhandledrejection` (а в тестах — «шум»,
+        // який нічого не валить), на екрані — рівно ніщо.
+        if (disposed) return;
+
+        // ⚠ `prev ?? error`, а не просте присвоєння. `placement` прилітає
+        // об'єктним літералом принаймні з одного виклику
+        // (`features/templates/FormulaEditor.tsx`), тобто НОВИМ посиланням на
+        // кожен перерендер, і цей ефект там перезапускається щоразу. Запис
+        // нового об'єкта помилки в стан давав би новий рендер → новий запит →
+        // нову помилку, тобто нескінченний цикл із запитом на кожному оберті.
+        // Тотожне значення React відкидає без рендера, і цикл не починається;
+        // зняти прапорець може лише «повторити» (`retryMetadata`).
+        setMetadataError((prev: unknown) => prev ?? error);
+      }
     })();
 
     return () => {
       disposed = true;
     };
-  }, [ready, dialect, placement]);
+  }, [ready, dialect, placement, metadataAttempt]);
 
   // ── Перевірка при введенні ────────────────────────────────────────────────
   useEffect(() => {
@@ -234,13 +306,19 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
             monaco.showDiagnostics(model, result.diagnostics);
           }
 
+          setValidateError(null);
           onValidated?.(result);
         } catch (error) {
           // ⚠ Скасований запит — не помилка перевірки, а очікуваний наслідок
           // того, що текст змінився знову: користувача нема чим повідомляти.
+          // Це НОРМАЛЬНИЙ стан при швидкому введенні — банер на кожне
+          // натискання клавіші був би другою неправдою замість першої.
           if (isAbortError(error)) return;
 
-          throw error;
+          // ⛔ Справжня відмова стає ВИДИМОЮ: причина з кодом поруч із
+          // редактором. Тихе `throw` у цьому місці означало, що перевірка не
+          // відбулася, а екран про це не сказав нічого.
+          setValidateError((prev: unknown) => prev ?? error);
         }
       })();
     }, ValidateDelay);
@@ -253,7 +331,7 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
     // ⚠ `onValidated` навмисно поза переліком: викликач найчастіше передає
     // стрілку, і залежність від неї перезапускала б перевірку на кожен
     // перерендер батька — тобто перетворила б затримку на ніщо.
-  }, [ready, value, dialect, placement]);
+  }, [ready, value, dialect, placement, validateAttempt]);
 
   if (failed) {
     return (
@@ -263,5 +341,30 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
     );
   }
 
-  return <div ref={host} style={{ height: height ?? '8rem', width: '100%' }} />;
+  return (
+    <Stack gap="xs">
+      {/*
+        ⛔ Банер стоїть ПОРУЧ із редактором, а не ЗАМІСТЬ нього. Писати вираз
+        без підказок законно — склад мови їх лише пропонує, перевіряє все одно
+        сервер (`validateExpression`). Сховати чи заблокувати поле означало б
+        через недоступність довідника відібрати саму можливість роботи.
+
+        ⚠ `AsyncBoundary` тут не взято навмисно: вона малює власний
+        `<Title order={4}>`, що рве `heading-order` і валить гейти
+        `a11y (dark)`/`a11y (light)`.
+      */}
+      {metadataError !== null && <ErrorAlert error={metadataError} onRetry={retryMetadata} />}
+
+      {/*
+        ⛔ Так само ПОРУЧ, а не ЗАМІСТЬ: писати вираз без перевірки законно —
+        остаточне слово однаково за сервером у мить збереження, а редактор без
+        підкреслень лишається придатним для введення. Сховати чи заблокувати
+        поле через недоступну перевірку означало б відібрати роботу замість
+        того, щоб назвати причину.
+      */}
+      {validateError !== null && <ErrorAlert error={validateError} onRetry={retryValidate} />}
+
+      <div ref={host} style={{ height: height ?? '8rem', width: '100%' }} />
+    </Stack>
+  );
 }

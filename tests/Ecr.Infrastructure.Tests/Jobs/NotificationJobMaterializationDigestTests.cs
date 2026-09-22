@@ -3,6 +3,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Infrastructure.Integration;
 using Ecr.Infrastructure.Jobs;
+using Ecr.Infrastructure.Notifications;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -42,6 +43,25 @@ public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture s
     private EcrDbContext CreateContext()
         => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
 
+    /// <summary>
+    /// Конфігурація каналів (<c>BE-34</c>), у якій каналів НЕМАЄ.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Саме підміна, а не справжнє сховище: база в колекції <c>SqlServer</c>
+    /// спільна, і справжній знімок підхопив би канали сусідніх класів, дописавши
+    /// їм рядки доставок. Повернутий об'єкт лишається в руках тесту, щоб
+    /// перевірити ГОЛОВНЕ про цю залежність — що задача взагалі питає
+    /// конфігурацію каналів.
+    /// </remarks>
+    private static INotificationDispatchStore EmptyChannels()
+    {
+        var store = Substitute.For<INotificationDispatchStore>();
+        store.GetPlanAsync(Arg.Any<CancellationToken>())
+            .Returns(new NotificationDispatchPlan("none", [], []));
+
+        return store;
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -79,9 +99,15 @@ public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture s
         var sender = Substitute.For<INotificationSender>();
         sender.IsConfigured.Returns(false); // ⚠ Транспорт не налаштований (`P-13`): подія лишається Pending, не зникає.
         var dispatcher = new OutboxDispatcher(db, clock, sender);
-        var job = new NotificationJob(db, clock, dispatcher);
+        var channels = EmptyChannels();
+        var job = new NotificationJob(db, clock, dispatcher, new NotificationDispatcher(channels, [], clock));
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
+
+        // ⚠ `BE-34`: збій мусить дійти не лише в чергу процесу, а й у канали з
+        // бази. Тут каналів немає, тож перевіряється саме те, що задача їх
+        // ПИТАЄ — без цього виклику матриця правил була б декорацією.
+        await channels.Received().GetPlanAsync(Arg.Any<CancellationToken>());
 
         // Пошук за ВМІСТОМ, а не «останній за часом» (див. коментар класу):
         // саме той запис, куди мав потрапити ЦЕЙ jobId.
@@ -127,7 +153,8 @@ public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture s
         var sender = Substitute.For<INotificationSender>();
         sender.IsConfigured.Returns(false);
         var dispatcher = new OutboxDispatcher(db, clock, sender);
-        var job = new NotificationJob(db, clock, dispatcher);
+        var job = new NotificationJob(
+            db, clock, dispatcher, new NotificationDispatcher(EmptyChannels(), [], clock));
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 

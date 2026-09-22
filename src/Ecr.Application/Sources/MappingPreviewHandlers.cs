@@ -1,4 +1,5 @@
 // src/Ecr.Application/Sources/MappingPreviewHandlers.cs
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Security;
@@ -92,7 +93,12 @@ public sealed class PreviewMappingHandler(
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
                 $"Вікно перегляду порожнє: початок {from:O} не раніший за кінець {to:O}.",
-                new Dictionary<string, object?> { ["fromUtc"] = from, ["toUtc"] = to });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.mappingPreviewWindow",
+                    ["fromUtc"] = from.ToString("O", CultureInfo.InvariantCulture),
+                    ["toUtc"] = to.ToString("O", CultureInfo.InvariantCulture),
+                });
         }
 
         var data = await preview
@@ -100,7 +106,12 @@ public sealed class PreviewMappingHandler(
             .ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.SourceEntityNotFound,
-                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.");
+                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0404.sourceEntity",
+                    ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+                });
 
         return Compose(data, from, to);
     }
@@ -120,8 +131,11 @@ public sealed class PreviewMappingHandler(
         // Одне поле джерела може мати кілька мапінгів — те саме число лягає в
         // дві колонки. Списком, а не словником «поле → мапінг»: другий мапінг
         // мовчки зникав би з перегляду.
+        // ⚠ Призупинений мапінг (BE-27) точок нікуди не кладе, тож адреси
+        // рядків і «поле нікуди не лягає» рахуються лише за діючими; у
+        // `Fields` він лишається — з `IsActive = false`.
         var byField = new Dictionary<string, List<FieldMapRef>>(StringComparer.Ordinal);
-        foreach (var map in data.Maps)
+        foreach (var map in data.Maps.Where(m => m.IsActive))
         {
             if (!byField.TryGetValue(map.SourceField, out var list))
             {
@@ -184,7 +198,9 @@ public sealed class PreviewMappingHandler(
                 map.SourceUnitCode,
                 map.TargetUnitCode,
                 series.Count,
-                folded));
+                folded,
+                map.IsActive,
+                map.PendingSourceUnitChange));
         }
 
         return result;
@@ -385,6 +401,8 @@ public sealed record MappingPreview(
 /// <param name="TargetUnitCode">Одиниця, в якій значення лягає в ECR.</param>
 /// <param name="PointCount">Скільки реальних точок вікна під цей мапінг.</param>
 /// <param name="FoldedValue">Число, яке лягло б у комірку; <c>null</c> — нічого згортати.</param>
+/// <param name="IsActive">Мапінг діє; <c>false</c> — призупинений (<c>BE-27</c>), значень не пише.</param>
+/// <param name="PendingSourceUnitChange">Пауза через зміну одиниці джерела; <c>null</c> — її немає (ФВ-16.9).</param>
 public sealed record MappedFieldPreview(
     int FieldMapId,
     string SourceField,
@@ -396,7 +414,9 @@ public sealed record MappedFieldPreview(
     string? SourceUnitCode,
     string? TargetUnitCode,
     int PointCount,
-    decimal? FoldedValue);
+    decimal? FoldedValue,
+    bool IsActive,
+    PendingSourceUnitChange? PendingSourceUnitChange);
 
 /// <summary>Реальний рядок джерела разом із адресою, куди він лягає.</summary>
 /// <param name="SourcePath">Шлях атрибута в джерелі.</param>

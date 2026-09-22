@@ -1,4 +1,5 @@
 // src/Ecr.Application/Sources/EntityFieldMapHandlers.cs
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -58,7 +59,8 @@ public sealed class CreateEntityFieldMapHandler(
         if (string.IsNullOrWhiteSpace(command.SourceField))
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid, "Поле джерела (sourceField) не може бути порожнім.");
+                ErrorCodes.RequestInvalid, "Поле джерела (sourceField) не може бути порожнім.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapSourceField" });
         }
 
         // ⚠ Існування сутності джерела перевіряється ТУТ — так само, як у
@@ -67,7 +69,12 @@ public sealed class CreateEntityFieldMapHandler(
         _ = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.SourceEntityNotFound,
-                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.");
+                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0404.sourceEntity",
+                    ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+                });
 
         var map = await BuildTargetAsync(sourceEntityId, command, ct).ConfigureAwait(false);
 
@@ -96,19 +103,32 @@ public sealed class CreateEntityFieldMapHandler(
                 {
                     throw new BusinessRuleException(
                         ErrorCodes.RequestInvalid,
-                        "Мапінг на колонку (targetKind=Column) не приймає targetRegistryFieldDefId.");
+                        "Мапінг на колонку (targetKind=Column) не приймає targetRegistryFieldDefId.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapColumnExtraField",
+                        });
                 }
 
                 var columnDefId = command.TargetColumnDefId
                     ?? throw new BusinessRuleException(
                         ErrorCodes.RequestInvalid,
-                        "Мапінг на колонку (targetKind=Column) вимагає targetColumnDefId.");
+                        "Мапінг на колонку (targetKind=Column) вимагає targetColumnDefId.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapColumnRequired",
+                        });
 
                 if (!await sources.ColumnDefExistsAsync(columnDefId, ct).ConfigureAwait(false))
                 {
                     throw new NotFoundException(
                         ErrorCodes.EntityFieldMapTargetNotFound,
-                        $"Колонки {columnDefId} немає, або її видалено.");
+                        $"Колонки {columnDefId} немає, або її видалено.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-INT-0405.column",
+                            ["columnDefId"] = columnDefId.ToString(CultureInfo.InvariantCulture),
+                        });
                 }
 
                 return EntityFieldMap.ToColumn(sourceEntityId, command.SourceField, columnDefId);
@@ -118,26 +138,44 @@ public sealed class CreateEntityFieldMapHandler(
                 {
                     throw new BusinessRuleException(
                         ErrorCodes.RequestInvalid,
-                        "Мапінг на поле реєстру (targetKind=RegistryField) не приймає targetColumnDefId.");
+                        "Мапінг на поле реєстру (targetKind=RegistryField) не приймає targetColumnDefId.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapRegistryFieldExtraColumn",
+                        });
                 }
 
                 var registryFieldDefId = command.TargetRegistryFieldDefId
                     ?? throw new BusinessRuleException(
                         ErrorCodes.RequestInvalid,
-                        "Мапінг на поле реєстру (targetKind=RegistryField) вимагає targetRegistryFieldDefId.");
+                        "Мапінг на поле реєстру (targetKind=RegistryField) вимагає targetRegistryFieldDefId.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapRegistryFieldRequired",
+                        });
 
                 if (!await sources.RegistryFieldDefExistsAsync(registryFieldDefId, ct).ConfigureAwait(false))
                 {
                     throw new NotFoundException(
                         ErrorCodes.EntityFieldMapTargetNotFound,
-                        $"Поля реєстру {registryFieldDefId} немає.");
+                        $"Поля реєстру {registryFieldDefId} немає.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-INT-0405.registryField",
+                            ["registryFieldDefId"] = registryFieldDefId.ToString(CultureInfo.InvariantCulture),
+                        });
                 }
 
                 return EntityFieldMap.ToRegistryField(sourceEntityId, command.SourceField, registryFieldDefId);
 
             default:
                 throw new BusinessRuleException(
-                    ErrorCodes.RequestInvalid, $"Невідомий вид цілі мапінгу: {command.TargetKind}.");
+                    ErrorCodes.RequestInvalid, $"Невідомий вид цілі мапінгу: {command.TargetKind}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapTargetKindUnknown",
+                        ["targetKind"] = command.TargetKind.ToString(),
+                    });
         }
     }
 
@@ -153,32 +191,31 @@ public sealed class CreateEntityFieldMapHandler(
             && !await sources.UnitExistsAsync(sourceUnitId, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
-                ErrorCodes.UnitNotFound, $"Одиниці {sourceUnitId} немає в довіднику.");
+                ErrorCodes.UnitNotFound, $"Одиниці {sourceUnitId} немає в довіднику.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-UOM-0404.unitId",
+                    ["id"] = sourceUnitId.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         if (command.TargetUnitId is { } targetUnitId
             && !await sources.UnitExistsAsync(targetUnitId, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
-                ErrorCodes.UnitNotFound, $"Одиниці {targetUnitId} немає в довіднику.");
+                ErrorCodes.UnitNotFound, $"Одиниці {targetUnitId} немає в довіднику.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-UOM-0404.unitId",
+                    ["id"] = targetUnitId.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         map.SetUnits(command.SourceUnitId, command.TargetUnitId);
     }
 
     /// <summary>Складає DTO мапінгу для відповіді.</summary>
-    private static EntityFieldMapDto Map(EntityFieldMap map) => new(
-        map.Id,
-        map.SourceEntityId,
-        map.SourceField,
-        map.TargetKind,
-        map.TargetColumnDefId,
-        map.TargetRegistryFieldDefId,
-        map.SourceUnitId,
-        map.TargetUnitId,
-        map.TargetRowKey,
-        map.Aggregation,
-        map.IsActive);
+    private static EntityFieldMapDto Map(EntityFieldMap map) => EntityFieldMapLifecycle.Map(map);
 }
 
 /// <summary>Налаштування нового мапінгу, що приходять із форми конфігуратора.</summary>
@@ -217,6 +254,9 @@ public sealed record CreateEntityFieldMapCommand(
 /// <param name="TargetRowKey">Рядок-адресат; <c>null</c> — не матеріалізується.</param>
 /// <param name="Aggregation">Спосіб згортання точок періоду.</param>
 /// <param name="IsActive">Чи діє мапінг.</param>
+/// <param name="PendingSourceUnitChange">
+/// Збір помітив іншу одиницю джерела і поставив мапінг на паузу; <c>null</c> — ні (ФВ-16.9).
+/// </param>
 public sealed record EntityFieldMapDto(
     int Id,
     int SourceEntityId,
@@ -228,4 +268,19 @@ public sealed record EntityFieldMapDto(
     int? TargetUnitId,
     string? TargetRowKey,
     AggregationKind? Aggregation,
-    bool IsActive);
+    bool IsActive,
+    PendingSourceUnitChange? PendingSourceUnitChange);
+
+/// <summary>Зміна одиниці джерела, що чекає рішення людини (ФВ-16.9).</summary>
+/// <param name="ActualUnitCode">Одиниця, яку віддає джерело.</param>
+/// <param name="ActualUnitId">Її id у довіднику; <c>null</c> — її спершу треба завести.</param>
+/// <param name="DetectedAt">Коли збір це помітив.</param>
+public sealed record PendingSourceUnitChange(string ActualUnitCode, int? ActualUnitId, DateTime DetectedAt)
+{
+    /// <summary>Позначка мапінгу; <c>null</c> — рішення не чекається.</summary>
+    /// <param name="code">Код одиниці з позначки.</param>
+    /// <param name="unitId">Id одиниці з позначки.</param>
+    /// <param name="detectedAt">Час позначки.</param>
+    public static PendingSourceUnitChange? From(string? code, int? unitId, DateTime? detectedAt)
+        => code is null || detectedAt is not { } at ? null : new(code, unitId, at);
+}

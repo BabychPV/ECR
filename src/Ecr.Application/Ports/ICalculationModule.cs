@@ -92,6 +92,12 @@ public interface ICalculationModule
 /// <param name="Substances">Речовини версії; порожньо — один прогін без речовини.</param>
 /// <param name="Outputs">Оголошені виходи версії.</param>
 /// <param name="Period">Календарний контекст періоду за режимом версії (ФВ-16.11).</param>
+/// <param name="OutputScales">
+/// Код виходу → масштаб колонки-приймача (<c>cfg.ColumnDef.Scale</c>):
+/// скільки знаків несе саме цей вихід. Виходу немає в словнику або значення
+/// <c>null</c> — колонка масштабу не оголошує, і береться
+/// <c>NumericPolicy.DefaultOutputScale</c>.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -99,7 +105,8 @@ public sealed record CalculationBindingContext(
     IReadOnlyList<MethodologyFormula> Formulas,
     IReadOnlyList<MethodologySubstance> Substances,
     IReadOnlyList<MethodologyOutput> Outputs,
-    Ecr.Expressions.PeriodContext Period);
+    Ecr.Expressions.PeriodContext Period,
+    IReadOnlyDictionary<string, byte?> OutputScales);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.

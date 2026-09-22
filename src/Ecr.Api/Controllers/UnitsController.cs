@@ -3,6 +3,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Units;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Ecr.Api.Controllers;
 
@@ -12,8 +13,43 @@ namespace Ecr.Api.Controllers;
 [Authorize]
 public sealed class UnitsController(
     ListUnitsHandler list, ConvertUnitHandler convert, CreateUnitHandler create,
-    UnitUsageHandler usage, DeleteUnitHandler delete) : ControllerBase
+    UnitUsageHandler usage, DeleteUnitHandler delete, GetUnitHandler get, UpdateUnitHandler update)
+    : ControllerBase
 {
+    /// <summary>Одиниця для форми редагування разом із <c>rowVersion</c>.</summary>
+    /// <param name="id">Ідентифікатор одиниці.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{id:int}")]
+    [ProducesResponseType<UnitDetail>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UnitDetail>> Get(int id, CancellationToken ct)
+        => Ok(await get.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>Змінює позначення, назву і — поки на одиницю ніщо не посилається — коефіцієнти.</summary>
+    /// <param name="id">Ідентифікатор одиниці.</param>
+    /// <param name="request">Нові позначення, назва, множник і зсув.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// Потребує <c>If-Match</c> із <c>rowVersion</c>: немає — <c>422 ECR-REQ-0422</c>,
+    /// чужа версія — <c>409 ECR-UOM-0409</c>. Код, розмірність і ознака базової не змінюються.
+    /// </remarks>
+    [HttpPut("{id:int}")]
+    [ProducesResponseType<UnitDetail>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<UnitDetail>> Update(
+        int id, [FromBody] UpdateUnitRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var ifMatch = Request.Headers[HeaderNames.IfMatch].ToString();
+
+        return Ok(await update
+            .HandleAsync(id, request.SymbolL10n, request.NameL10n, request.FactorToBase, request.OffsetToBase, ifMatch, ct)
+            .ConfigureAwait(false));
+    }
+
     /// <summary>Де використовується одиниця: перші 20 посилань і загальна кількість.</summary>
     /// <param name="id">Ідентифікатор одиниці.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -133,6 +169,17 @@ public sealed record ConvertUnitRequest(decimal Value, string FromUnit, string T
 /// <param name="Value">Значення у цільовій одиниці.</param>
 /// <param name="Unit">Код цільової одиниці.</param>
 public sealed record ConvertUnitResponse(decimal Value, string Unit);
+
+/// <summary>Запит на зміну одиниці.</summary>
+/// <param name="SymbolL10n">Позначення мовами каталогу.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <param name="FactorToBase">Множник; змінюється лише в одиниці без посилань.</param>
+/// <param name="OffsetToBase">Зсув; змінюється лише в одиниці без посилань.</param>
+public sealed record UpdateUnitRequest(
+    IReadOnlyDictionary<string, string> SymbolL10n,
+    IReadOnlyDictionary<string, string> NameL10n,
+    decimal FactorToBase,
+    decimal OffsetToBase);
 
 /// <summary>Запит на заведення нової похідної одиниці.</summary>
 /// <param name="Code">Код, унікальний серед одиниць.</param>

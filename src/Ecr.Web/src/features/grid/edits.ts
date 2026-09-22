@@ -1,7 +1,9 @@
 import type { RowDto, TableSliceDto } from '@/api/types';
+import { sameCellValue } from './cellValue';
 import { parseNumber } from './clipboard';
 import { decide } from './permissions';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
+import { decimalTextOf } from './rounding';
 import type { CellEdit } from './undo';
 import type { PendingEdit } from './useCellPatch';
 
@@ -62,6 +64,19 @@ export function captureEdit(
   const after = coerce(signal.raw, column.dataType);
   const before = row.cells[signal.columnCode] ?? null;
 
+  // ⛔ Правка, яка НІЧОГО не змінює, не є правкою — і після переходу `decimal`
+  // на рядок це перестало бути дрібницею. Сервер віддає значення в масштабі
+  // колонки (`"5.0000000000"`), оператор бачить `5` і набирає `5`; RevoGrid
+  // повідомляє `afteredit` на кожен вихід із редактора, незалежно від того, чи
+  // змінився текст. Без цієї перевірки комірка отримувала б позначку
+  // незбереженої правки від самого лише заходу в неї — і лічильник «змінено
+  // комірок: N» показував би роботу, якої не було.
+  //
+  // ⛔ Порівняння саме ЗНАЧЕННЯ (`sameCellValue`), не тексту: `'5'` і
+  // `'5.0000000000'` — той самий `decimal`, а текстове порівняння назвало б їх
+  // різними й лишило б комірку брудною назавжди.
+  if (sameCellValue(after, before)) return null;
+
   return {
     pending: {
       rowKey: signal.rowKey,
@@ -103,7 +118,35 @@ export function valueOf(
  * нуль, який у звіті читається як вимірювання.
  */
 export function coerce(raw: string, dataType: string | undefined): unknown {
-  if (dataType === 'Decimal' || dataType === 'Int') {
+  /*
+   * ⛔ `Decimal` віддається РЯДКОМ, `Int` — числом, і розділені вони саме тому,
+   * що з `e470777a` це різні контракти на дроті: `decimal` серіалізується
+   * рядком в обидва боки, `int` лишається JSON-числом.
+   *
+   * ⛔ Чому рядок, а не `parseNumber(raw)`, як тут стояло. Замір у цьому
+   * репозиторії: `String(Number('1234.1234567890123456'))` дає
+   * `'1234.1234567890124'` — три знаки з двадцяти зникають ЩЕ ДО відправлення і
+   * зникають мовчки. `PatchCell.value` типізовано `unknown`, тобто рядок їде як
+   * є, і межа відправлення перестає бути точкою втрати точності.
+   *
+   * ⚠ `parseNumber` лишається ВОРОТАМИ, а не перетворювачем: саме його
+   * граматику (кома як десятковий роздільник, пробіли-розряди, відмова на
+   * `Infinity`) уже дзеркалить `roundToScale`, і розійтися їм не можна —
+   * значення, яке одне вважає числом, а друге ні, поїхало б на сервер
+   * неокругленим і отримало б `ECR-CELL-0422` на головному шляху введення.
+   *
+   * ⚠ Розгортає ввід `decimalTextOf` (`rounding.ts`), а не `normalizeDecimal`
+   * (`shared/format/decimal.ts`): другий описує ДРІТ і свідомо не знає ні коми,
+   * ні розрядних пробілів, ні експоненти, а в буфері Excel вони є щодня.
+   * Канон у обох той самий — це твердження в тесті, а не домовленість.
+   */
+  if (dataType === 'Decimal') {
+    if (parseNumber(raw) === null) return raw.trim().length === 0 ? null : raw;
+
+    return decimalTextOf(raw) ?? raw;
+  }
+
+  if (dataType === 'Int') {
     return parseNumber(raw) ?? (raw.trim().length === 0 ? null : raw);
   }
 

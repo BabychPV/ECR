@@ -784,7 +784,7 @@ cookie → суміш 80 % `GET` зрізу / 20 % `PATCH` з **різними**
 | `AR-03` ◐ | Порт названо форматом (`IExcelExporter`); `ФВ-4.2` (CSV/JSON) не реалізована | `IDocumentExporter { string Format }` + колекція — як уже зроблено для `IExternalDataSource`; CSV/JSON стають двома класами |
 | `AR-04` ◐ | `CellDataType` — 73 розгалуження в 16 файлах 4 шарів при коментарі «розширюваний без міграції» (`Enums.cs:47`) | Стратегія на тип (читання/запис/валідація/експорт/імпорт/порівняння) в одному реєстрі; розгалуження → виклик стратегії. `DAT-02` п. 1 (порівняння значень) — перший її метод |
 | `AR-05` ◐ | `TemplateVersionPage.tsx` > 1100 рядків, 6+ мутацій і вся структура версії в одному компоненті | Розбити за секціями під час `UX-07` |
-| `AR-06` ✔/◐ | Мертве: ✔ `IUnitOfWork.BeginTransactionAsync` (0 викликів, відома напівсправність, `UnitOfWork.cs:132-140`); ✔ `RollupDebounce`; ◐ `ITemplateStructure` + `CachedTemplateStructure` + запис `RevisionKey`; ◐ `CellStorageMode.Hybrid`/`SwitchStorage`; ◐ клієнт: `zustand`, `react-hook-form`, `zod`, `@formulajs/formulajs` без імпортів; ✔ `isRetryable` | Видалити окремими PR (рефакторинг — не разом із функціональним). `Hybrid` — після `MS-03` |
+| `AR-06` ✔/◐ | Мертве: ✔ `IUnitOfWork.BeginTransactionAsync` (0 викликів, відома напівсправність, `UnitOfWork.cs:132-140`); ✔ `RollupDebounce`; ✔ `ITemplateStructure` + `CachedTemplateStructure` + запис `RevisionKey` (прибрано `33a02ff8` / #346); ◐ `CellStorageMode.Hybrid`/`SwitchStorage`; ◐ клієнт: `zustand`, `react-hook-form`, `zod`, `@formulajs/formulajs` без імпортів; ✔ `isRetryable` | Видалити окремими PR (рефакторинг — не разом із функціональним). `Hybrid` — після `MS-03` |
 | `AR-07` | `Idempotency-Key` у `src` — 0 | На створювальні `POST`; до того — `DAT-09` |
 
 ---

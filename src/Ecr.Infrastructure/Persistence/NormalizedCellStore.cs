@@ -85,7 +85,7 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     /// <summary>Ім'я табличного типу в СУБД.</summary>
     private const string CellTvpTypeName = "doc.CellValueTvp";
 
-    /// <summary>Точність <c>doc.CellValue.ValueNumeric</c> — <c>decimal(28,10)</c>.</summary>
+    /// <summary>Точність <c>doc.CellValue.ValueNumeric</c> — <c>decimal(34,16)</c>.</summary>
     /// <remarks>
     /// ⛔ <c>WR-01</c>. Без явних <c>Precision</c>/<c>Scale</c>
     /// <c>Microsoft.Data.SqlClient</c> виводить їх ЗІ ЗНАЧЕННЯ: <c>1m</c> їде як
@@ -96,14 +96,30 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
     /// різним масштабом → <b>21 план</b> <c>MERGE doc.CellValue</c> у кеші.
     ///
     /// ⚠ Числа взяті з <c>CellValueConfiguration.cs:41</c>
-    /// (<c>HasPrecision(28, 10)</c>), а не «з голови»: параметр вужчий за
+    /// (<c>HasPrecision(34, 16)</c>), а не «з голови»: параметр вужчий за
     /// стовпець округлював би значення на клієнті ще до відправки — рівно та
     /// вада класу <c>DAT-03</c>, тільки для чисел.
+    ///
+    /// ⚠ 34, а не 28 (<c>D-148</c>, 2026-09-21). Precision 28 при масштабі 16
+    /// лишає лише <b>12</b> цілих розрядів, а каталог одиниць має множник
+    /// <c>MWh → 3 600 000 000</c> (база — джоуль), тобто вже 278 МВт·год
+    /// упираються в межу: <c>decimal(28,16)</c> відмовляє такому значенню
+    /// «Arithmetic overflow» (виміряно). 34 дає 18 цілих розрядів.
     /// </remarks>
-    private const byte NumericPrecision = 28;
+    private const byte NumericPrecision = 34;
 
-    /// <summary>Масштаб <c>doc.CellValue.ValueNumeric</c>.</summary>
-    private const byte NumericScale = 10;
+    /// <summary>
+    /// Масштаб <c>doc.CellValue.ValueNumeric</c> — шістнадцять знаків
+    /// (<c>D-148</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мусить збігатися зі стовпцем і з <c>doc.CellValueTvp</c>
+    /// (<c>15-cell-tvp.sql</c>) ТОЧНО. Менше значення тут не падає нічим:
+    /// <c>SqlMetaData.Adjust</c> округлює на КЛІЄНТІ, тобто СУБД отримує вже
+    /// огризок і чесно його зберігає. Саме тому всі три числа переводяться
+    /// одним комітом, а не «по черзі, як зручно».
+    /// </remarks>
+    private const byte NumericScale = 16;
 
     /// <summary>Масштаб <c>doc.CellValue.ValueDate</c> — <c>datetime2(3)</c>.</summary>
     /// <remarks>

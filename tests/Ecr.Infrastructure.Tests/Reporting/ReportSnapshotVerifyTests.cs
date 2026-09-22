@@ -15,7 +15,7 @@ namespace Ecr.Infrastructure.Tests.Reporting;
 /// </summary>
 /// <remarks>
 /// ⚠ Саме на базі, а не на підробці: вся складність — у колі через
-/// <c>decimal(28,10)</c> (масштаб числа після читання інший, ніж при побудові)
+/// <c>decimal(34,16)</c> (масштаб числа після читання інший, ніж при побудові)
 /// і в порядку рядків, який первинний ключ дає алфавітним за кодом колонки.
 /// Обидва дефекти на підробці невидимі.
 /// </remarks>
@@ -95,14 +95,19 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
 
         await using var db = chain.CreateContext();
 
-        // Засновок відтворення: з `decimal(28,10)` число повертається з
-        // масштабом 10 — так само `Value` приходило з `calc.CalculationResult`
+        // Засновок відтворення: з `decimal(34,16)` число повертається з
+        // масштабом 16 — так само `Value` приходить із `calc.CalculationResult`
         // у мить побудови. Зламається це — зламається й відтворення.
+        //
+        // ⚠ Число тут — «золоте» і рухається разом зі СТОВПЦЕМ: до міграції
+        // `D148ReportingAndSourceScale16` тут стояло «5.0000000000» (масштаб
+        // 10). Саме це твердження й доводить, що стовпець справді змінився, —
+        // інших доказів масштабу в цьому класі немає.
         var value = await db.ReportRows.AsNoTracking()
             .Where(r => r.SnapshotId == snapshotId && r.ColumnCode == "Value")
             .Select(r => r.ValueNumeric)
             .SingleAsync();
-        Assert.Equal("5.0000000000", value!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal("5.0000000000000000", value!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now))
             .VerifyAsync(snapshotId, CancellationToken.None);
@@ -132,7 +137,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
         // оголошує як `decimal(18,2)`, і `5.0000000001` доїхало б як `5.00` —
         // «підміна» нічого б не змінила, а тест звинуватив би продукт.
         var touched = await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE rpt.ReportRow SET ValueNumeric = CAST({tampered} AS decimal(28,10)) WHERE SnapshotId = {snapshotId} AND ColumnCode = {column}");
+            $"UPDATE rpt.ReportRow SET ValueNumeric = CAST({tampered} AS decimal(34,16)) WHERE SnapshotId = {snapshotId} AND ColumnCode = {column}");
         Assert.Equal(1, touched);
 
         var now = await db.ReportRows.AsNoTracking()
@@ -152,10 +157,10 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
 
     /// <summary>
     /// Рядки з масштабом чисел МИТІ ПОБУДОВИ: ідентифікатори — з <c>long</c>
-    /// (масштаб 0), значення — з <c>decimal(28,10)</c> (масштаб 10). Ціле
-    /// значення взято навмисно: «5» проти «5.0000000000» — саме та пастка.
+    /// (масштаб 0), значення — з <c>decimal(34,16)</c> (масштаб 16). Ціле
+    /// значення взято навмисно: «5» проти «5.0000000000000000» — саме та пастка.
     /// </summary>
-    private static List<ReportRow> LegacyRows(long snapshotId) =>
+    internal static List<ReportRow> LegacyRows(long snapshotId) =>
     [
         Cell(snapshotId, "DocumentId", null, 4217L),
         Cell(snapshotId, "RowKey", "row-1", null),
@@ -169,7 +174,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
     /// (дослівна копія з коміту 34e5370). ⛔ Не виражати через продуктовий
     /// код: тоді тест порівнював би відтворення із самим собою.
     /// </summary>
-    private static byte[] HashBeforeBe17(IReadOnlyList<ReportRow> rows)
+    internal static byte[] HashBeforeBe17(IReadOnlyList<ReportRow> rows)
     {
         var text = string.Join(
             '\n',
@@ -180,7 +185,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
         return System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text));
     }
 
-    private static Task<long> SeedAsync(TestDocumentBuilder chain)
+    internal static Task<long> SeedAsync(TestDocumentBuilder chain)
         => SeedAsync(
             chain,
             id =>
@@ -188,7 +193,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
 
                 // ⚠ Масштаб чисел — як при побудові: ідентифікатори цілі
                 // (масштаб 0), значення — дріб. Після кола через
-                // `decimal(28,10)` усе матиме масштаб 10, і сума мусить це
+                // `decimal(34,16)` усе матиме масштаб 16, і сума мусить це
                 // пережити.
                 Cell(id, "DocumentId", null, 4217L),
                 Cell(id, "RowKey", "row-1", null),
@@ -199,10 +204,10 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
             ReportSnapshotBuilder.ComputeHash);
 
     /// <summary>Зріз з одним рядком результату — у тому ж вигляді, що дає побудова.</summary>
-    private static async Task<long> SeedAsync(
+    internal static async Task<long> SeedAsync(
         TestDocumentBuilder chain,
         Func<long, List<ReportRow>> cells,
-        Func<IReadOnlyList<ReportRow>, byte[]> hash)
+        Func<IReadOnlyList<ReportRow>, byte[]?> hash)
     {
         var document = await chain.BuildAsync();
 

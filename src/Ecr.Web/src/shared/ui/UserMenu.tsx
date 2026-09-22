@@ -1,4 +1,4 @@
-﻿import { useState, type JSX } from 'react';
+﻿import type { JSX } from 'react';
 import {
   Button,
   Divider,
@@ -11,7 +11,7 @@ import {
 } from '@mantine/core';
 import { apiFetch } from '@/api/client';
 import { t } from '@/shared/i18n';
-import { applyDensity, density, setDensity, type Density } from '@/shared/theme/preferences';
+import { applyDensity, setDensity, useDensity, type Density } from '@/shared/theme/preferences';
 import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
 
 /**
@@ -24,10 +24,14 @@ import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
  */
 export function UserMenu({ userName }: { userName: string }): JSX.Element {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const [rows, setRows] = useState<Density>(density);
+  // ⚠ Підписка (`shared/theme/preferences.ts`), а не власний `useState`:
+  // компонент сам перечитує щільність, що прийшла ЗВІДКИ ЗАВГОДНО (клік
+  // нижче, `usePreferenceSync` після відповіді сервера, `KitchenSinkPage`).
+  // Батько (`AppLayout`) більше НЕ форсує ремонт через `key` — той хак
+  // губив відкритий стан `Menu`, а не «оновлював» перемикач.
+  const rows = useDensity();
 
   function changeDensity(value: Density): void {
-    setRows(value);
     setDensity(value);
     applyDensity(value);
   }

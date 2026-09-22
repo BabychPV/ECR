@@ -64,26 +64,87 @@ public interface IReportSnapshotBuilder
     /// <returns><c>null</c> — зрізу немає.</returns>
     public Task<SnapshotHashes?> VerifyAsync(long snapshotId, CancellationToken ct);
 
+    /// <summary>
+    /// Записує визначений формат суми (<c>current</c>/<c>legacy</c>) у зріз,
+    /// ЛИШЕ якщо там ще <c>NULL</c>: уже відомий формат не перезаписується.
+    /// </summary>
+    /// <returns>Чи змінено рядок.</returns>
+    public Task<bool> RecordHashFormatAsync(long snapshotId, string format, CancellationToken ct);
+
     /// <summary>Сторінка рядків зрізу в широкому вигляді (D-52a).</summary>
     /// <param name="snapshotId">Зріз.</param>
-    /// <param name="afterRowNo">Курсор: останній уже відданий <c>RowNo</c>; <c>0</c> — з початку.</param>
+    /// <param name="afterRowNo">
+    /// Курсор: останній уже відданий <c>RowNo</c>; <c>0</c> — з початку.
+    /// ⚠ З макетом (<c>R8</c>) порядок задає група, а не <c>RowNo</c>, і курсор
+    /// означає, скільки рядків уже віддано. Для зрізу без макета це те саме
+    /// число: <c>RowNo</c> суцільний і починається з одиниці.
+    /// </param>
     /// <param name="limit">Скільки рядків щонайбільше.</param>
+    /// <param name="language">
+    /// Мова, якою підписати колонки (<c>R9</c>): внутрішній код із
+    /// <c>ICurrentUser.Language</c>. ⚠ Параметр запиту, а не властивість зрізу —
+    /// той самий зріз двом користувачам віддається з різними заголовками й
+    /// однаковими даними.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <returns><c>null</c> — зрізу немає.</returns>
-    public Task<SnapshotRowsPage?> RowsAsync(long snapshotId, int afterRowNo, int limit, CancellationToken ct);
+    public Task<SnapshotRowsPage?> RowsAsync(
+        long snapshotId, int afterRowNo, int limit, string language, CancellationToken ct);
 }
 
 /// <summary>Сторінка рядків зрізу.</summary>
 /// <param name="Columns">Колонки в порядку опису версії.</param>
-/// <param name="Rows">Рядки за зростанням <c>RowNo</c>.</param>
+/// <param name="Rows">
+/// Рядки за зростанням <c>RowNo</c>, а з макетом (<c>R8</c>) — у порядку груп.
+/// </param>
 /// <param name="NextCursor">Курсор наступної сторінки; <c>null</c> — рядків більше немає.</param>
+/// <param name="Groups">
+/// Групи макета по ВСЬОМУ зрізу в порядку показу; <c>null</c> — версія
+/// групування не оголошує.
+/// </param>
+/// <param name="Totals">
+/// Підсумки по ВСЬОМУ зрізу; <c>null</c> — версія підсумків не оголошує.
+/// </param>
+/// <param name="ShowGroupHeader">
+/// Чи показувати рядок заголовка групи. ⚠ Групи й підсумки рахуються по ВСЬОМУ
+/// зрізу й тому приходять однакові на кожній сторінці: підсумок, що міняється
+/// від сторінки до сторінки, не є підсумком.
+/// </param>
 public sealed record SnapshotRowsPage(
-    IReadOnlyList<SnapshotColumn> Columns, IReadOnlyList<SnapshotRow> Rows, int? NextCursor);
+    IReadOnlyList<SnapshotColumn> Columns,
+    IReadOnlyList<SnapshotRow> Rows,
+    int? NextCursor,
+    IReadOnlyList<SnapshotRowGroup>? Groups = null,
+    IReadOnlyList<SnapshotTotal>? Totals = null,
+    bool ShowGroupHeader = false);
+
+/// <summary>Група рядків зрізу (<c>R8</c>, макет з однією групою).</summary>
+/// <param name="Column">Код колонки групування.</param>
+/// <param name="Value">Значення колонки, спільне для рядків групи; <c>null</c> — порожнє.</param>
+/// <param name="RowCount">
+/// Скільки рядків у групі. ⚠ По ВСЬОМУ зрізу — групи можуть не вміститися в
+/// одну сторінку, і саме за цим числом книга знає, де група закінчується.
+/// </param>
+/// <param name="Totals">Підсумки цієї групи; порожньо — підсумків не оголошено.</param>
+public sealed record SnapshotRowGroup(
+    string Column, object? Value, int RowCount, IReadOnlyList<SnapshotTotal> Totals);
+
+/// <summary>Порахований підсумок.</summary>
+/// <param name="Column">Код колонки.</param>
+/// <param name="Fn">Функція: <c>sum</c>, <c>count</c>, <c>avg</c>, <c>min</c>, <c>max</c>.</param>
+/// <param name="Value">Значення; <c>null</c> — рахувати не було з чого.</param>
+public sealed record SnapshotTotal(string Column, string Fn, object? Value);
 
 /// <summary>Колонка зрізу.</summary>
 /// <param name="Code">Код — ключ у <see cref="SnapshotRow.Cells"/>.</param>
 /// <param name="Kind">Тип значення: <c>text</c>, <c>number</c>, <c>date</c>.</param>
-public sealed record SnapshotColumn(string Code, string Kind);
+/// <param name="Name">
+/// Підпис колонки мовою запиту (<c>R9</c>), уже з розгорнутим фолбеком
+/// <c>мова → en → код</c> (<see cref="Reporting.ReportColumnNames"/>). ⚠ Ніколи
+/// не порожній: опис без назв підписує колонку її КОДОМ, тож споживачеві не
+/// треба знати про фолбек і тримати другу його копію.
+/// </param>
+public sealed record SnapshotColumn(string Code, string Kind, string Name);
 
 /// <summary>Рядок зрізу.</summary>
 /// <param name="RowNo">Номер рядка в зрізі.</param>
@@ -119,4 +180,13 @@ public sealed record ReportSnapshotSummary(
     bool IsCurrent,
     int RowCount,
     string? ContentHash,
-    DateTime BuiltAt);
+    DateTime BuiltAt)
+{
+    /// <summary>
+    /// Яким форматом пораховано суму: <c>current</c>, <c>legacy</c> (до BE-17) або
+    /// <c>unknown</c> — формат ще не визначено (старий зріз, який не звіряли й не
+    /// класифікувала нічна задача; зріз без суми; вміст не збігся за жодним форматом).
+    /// </summary>
+    /// <remarks>Читається зі збереженої колонки; перелік нічого не перераховує.</remarks>
+    public string HashFormat { get; init; } = Reporting.VerifyReportSnapshotHandler.FormatUnknown;
+}

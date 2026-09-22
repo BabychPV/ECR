@@ -206,6 +206,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit/structure/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт журналу структурних змін у CSV (`BE-16`). Право й фільтри — як у `structure`.
+         * @description Синхронний потік, а не фонова задача: стеля рядків (`Audit:ExportMaxRows`,
+         *     типово 100 000) тримає файл у межах одного запиту. Понад стелю — `422`.
+         *     Кодування — UTF-8 із BOM, щоб Excel не читав кирилицю як cp1251.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Початок вікна в UTC, включно. */
+                    from?: string;
+                    /** @description Кінець вікна в UTC, виключно. */
+                    to?: string;
+                    /** @description Тип сутності. */
+                    entityType?: string;
+                    /** @description Автор зміни — `UserId`. */
+                    changedByUserId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/change-password": {
         parameters: {
             query?: never;
@@ -263,6 +340,441 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/campaign/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Зведення кампанії за період. Право `Report.ViewCampaign`.
+         * @description ⚠ Період — обов'язковий параметр запиту, а не сегмент шляху: кампанія
+         *     не є ресурсом, який можна відкрити чи змінити, і `/campaign/202601`
+         *     обіцяв би саме це. Сусідні зведення адресуються так само
+         *     (`GET /documents/summary?periodKey`).
+         *
+         *     ⛔ Перелік проєктів НЕ звужується грантами користувача — рішення людини
+         *     `Q15-07`. Замість межі видимості тут окреме право, яке видають
+         *     свідомо; докладніше — у GetCampaignSummaryHandler.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Період кампанії (`Рік*100 + Номер`). */
+                    periodKey?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CampaignSummaryResponse"];
+                        "text/json": components["schemas"]["CampaignSummaryResponse"];
+                        "text/plain": components["schemas"]["CampaignSummaryResponse"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collection-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Прогони збору, новіші першими. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише прогони сутностей цього з'єднання. */
+                    dataSource?: number;
+                    /** @description Лише прогони цієї сутності збору. */
+                    entity?: number;
+                    /** @description `Running`, `Succeeded`, `Degraded`, `Failed`; інше — `422`. */
+                    state?: string;
+                    /** @description Початок прогону не раніше (UTC, включно). */
+                    from?: string;
+                    /** @description Початок прогону раніше (UTC, виключно). */
+                    to?: string;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..200; `0` — типове 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfCollectionRunView"];
+                        "text/json": components["schemas"]["PagedResultOfCollectionRunView"];
+                        "text/plain": components["schemas"]["PagedResultOfCollectionRunView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collection-runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Прогін із текстом помилки й покритими інтервалами. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор прогону. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionRunDetail"];
+                        "text/json": components["schemas"]["CollectionRunDetail"];
+                        "text/plain": components["schemas"]["CollectionRunDetail"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collection-schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Розклади разом із кодом сутності джерела, з'єднання і станом постановки.
+         * @description `dataSource` — код з'єднання: лише розклади його сутностей
+         *     (вкладка розкладу в шухляді з'єднання). Невідомий код — порожній перелік.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    dataSource?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionScheduleView"][];
+                        "text/json": components["schemas"]["CollectionScheduleView"][];
+                        "text/plain": components["schemas"]["CollectionScheduleView"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Заводить розклад для сутності джерела, у якої його ще немає.
+         * @description ⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.
+         *     Невалідний cron — `422 ECR-REQ-0422` ДО запису; сутності немає —
+         *     `404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateCollectionScheduleRequest"];
+                    "application/json": components["schemas"]["CreateCollectionScheduleRequest"];
+                    "text/json": components["schemas"]["CreateCollectionScheduleRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionScheduleView"];
+                        "text/json": components["schemas"]["CollectionScheduleView"];
+                        "text/plain": components["schemas"]["CollectionScheduleView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collection-schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Змінює cron і вмикає/вимикає розклад; потребує `If-Match`.
+         * @description Невалідний або задовгий cron — `422 ECR-REQ-0422` ДО запису;
+         *     чужа версія рядка — `409 ECR-JOB-0409`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateCollectionScheduleRequest"];
+                    "application/json": components["schemas"]["UpdateCollectionScheduleRequest"];
+                    "text/json": components["schemas"]["UpdateCollectionScheduleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionScheduleView"];
+                        "text/json": components["schemas"]["CollectionScheduleView"];
+                        "text/plain": components["schemas"]["CollectionScheduleView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Прибирає розклад і знімає задачу з планувальника; потребує `If-Match`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/column-defs/search": {
         parameters: {
             query?: never;
@@ -294,6 +806,58 @@ export interface paths {
                         "application/json": components["schemas"]["ColumnDefSearchResultDto"][];
                         "text/json": components["schemas"]["ColumnDefSearchResultDto"][];
                         "text/plain": components["schemas"]["ColumnDefSearchResultDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/column-defs/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Де використовується колонка (ФВ-8.14). Право `Template.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Колонка. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UsageResponse"];
+                        "text/json": components["schemas"]["UsageResponse"];
+                        "text/plain": components["schemas"]["UsageResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -384,6 +948,667 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consistency/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Прогін перевірки узгодженості на вимогу. Право `System.RunJob`.
+         * @description ⛔ `System.RunJob` — одне з восьми прав, які сід видає і які не
+         *     перевіряв жоден обробник (`BE-28`). Це його перший викликач.
+         *
+         *     ⚠ `202`, не `200`: перевірка ходить по всіх партиціях і в
+         *     відповідь укластися не може. Стан клієнт дочитує тим самим
+         *     `GET /api/v1/jobs/{jobId}`, яким уже показує будь-який прогрес.
+         *
+         *     ⚠ Перевірка вже в черзі або вже виконується — `409`
+         *     (`ECR-JOB-0409`) із її `jobId`, а не другий повний обхід тих
+         *     самих таблиць.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RunConsistencyCheckRequest"];
+                    "application/json": components["schemas"]["RunConsistencyCheckRequest"];
+                    "text/json": components["schemas"]["RunConsistencyCheckRequest"];
+                };
+            };
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/json": components["schemas"]["JobAcceptedResponse"];
+                        "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Перелік джерел. Право `Integration.View` або `Integration.Manage`.
+         * @description ⚠ Віддаються і вимкнені джерела: екран, з якого джерело вмикають назад,
+         *     без них показував би порожнє місце замість причини.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceView"][];
+                        "text/json": components["schemas"]["DataSourceView"][];
+                        "text/plain": components["schemas"]["DataSourceView"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Заводить джерело. Право `Integration.Manage`.
+         * @description Код зайнятий, назви немає, адреса задовга або несе облікові дані —
+         *     `422 ECR-REQ-0422` ДО запису.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveDataSourceRequest"];
+                    "application/json": components["schemas"]["SaveDataSourceRequest"];
+                    "text/json": components["schemas"]["SaveDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceView"];
+                        "text/json": components["schemas"]["DataSourceView"];
+                        "text/plain": components["schemas"]["DataSourceView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Змінює джерело. Право `Integration.Manage`.
+         * @description ⚠ Код не змінюється: на нього спираються сутності збору, і
+         *     перейменування ключа виглядало б як правка підпису, а було б переїздом
+         *     усієї конфігурації збору.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveDataSourceRequest"];
+                    "application/json": components["schemas"]["SaveDataSourceRequest"];
+                    "text/json": components["schemas"]["SaveDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceView"];
+                        "text/json": components["schemas"]["DataSourceView"];
+                        "text/plain": components["schemas"]["DataSourceView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Прибирає джерело, на яке ніщо не спирається. Право `Integration.Manage`.
+         * @description ⛔ Каскаду немає: джерело із сутностями збору або розкладами — це
+         *     `409 ECR-JOB-0409` із лічильниками в деталях. Видалення потягнуло б
+         *     за собою зібрані точки й журнал покриття, за якими вже пораховані
+         *     документи. Джерело, з якого більше не збирають, вимикається
+         *     (`isActive = false`). Потребує `If-Match`, як і зміна.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{id}/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Каталог імен джерела для мапінгу (ФВ-13.13). Право `Integration.Manage`.
+         * @description Без `path` — кореневі елементи; зі шляхом — дочірні елементи й
+         *     атрибути елемента. Джерело не відповіло в межу
+         *     `Integration:CatalogTimeoutSeconds` або лежить — `503 ECR-INT-0503`;
+         *     відмовило в автентифікації — `502 ECR-INT-0502`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    path?: string;
+                    search?: string;
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceCatalogPage"];
+                        "text/json": components["schemas"]["SourceCatalogPage"];
+                        "text/plain": components["schemas"]["SourceCatalogPage"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{id}/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * «Перевірити конфігурацію» до першого збору (ФВ-13.17). Право `Integration.Manage`.
+         * @description ⚠ Читає ОДНЕ значення тим самим адаптером, яким потім збиратимуть, і
+         *     нічого не зберігає — на відміну від `POST …/collect`. Шляху немає
+         *     в каталозі джерела — `404 ECR-INT-0404` з переліком найближчих
+         *     імен (`suggestions`, до 5) серед елементів каталогу того самого
+         *     рівня; джерело не відповіло в межу `Integration:CatalogTimeoutSeconds`
+         *     або лежить — `503 ECR-INT-0503`; відмова в автентифікації —
+         *     `502 ECR-INT-0502`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ProbeDataSourceRequest"];
+                    "application/json": components["schemas"]["ProbeDataSourceRequest"];
+                    "text/json": components["schemas"]["ProbeDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourcePathProbeResult"];
+                        "text/json": components["schemas"]["SourcePathProbeResult"];
+                        "text/plain": components["schemas"]["SourcePathProbeResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перевіряє з'єднання з джерелом. Право `Integration.Manage`.
+         * @description ⚠ `200`, а не `202`: проба читає ОДИН рівень каталогу джерела
+         *     і вкладається у відповідь — на відміну від збору, який іде по діапазону
+         *     і тому віддає `jobId`.
+         *
+         *     ⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це
+         *     `{ ok: false, error }`, а не помилка запиту. Проба цього ж джерела,
+         *     яка вже виконується, — `409 ECR-JOB-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["TestDataSourceRequest"];
+                    "application/json": components["schemas"]["TestDataSourceRequest"];
+                    "text/json": components["schemas"]["TestDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataSourceTestResult"];
+                        "text/json": components["schemas"]["DataSourceTestResult"];
+                        "text/plain": components["schemas"]["DataSourceTestResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -405,6 +1630,9 @@ export interface paths {
                     cursor?: string;
                     projectId?: number;
                     periodKey?: number;
+                    state?: string;
+                    mine?: boolean;
+                    hasLateEdits?: boolean;
                 };
                 header?: never;
                 path?: never;
@@ -727,7 +1955,54 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Видаляє документ-чернетку. Право `Document.Delete`.
+         * @description Лише чернетку: хоч один аркуш поданий, погоджений, відхилений або вже
+         *     проходив погодження — `409` `ECR-DOC-0409` із причиною.
+         *     Чужий документ — `404`, як і неіснуючий.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -769,6 +2044,85 @@ export interface paths {
                 };
                 /** @description Conflict */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/business-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.
+         * @description Причина обов'язкова (`422`); ключ зайнятий, застарілий `expectedBusinessKey`
+         *     або аркуш поданий/погоджений — `409` `ECR-DOC-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "application/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "text/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -833,6 +2187,72 @@ export interface paths {
                         "application/json": components["schemas"]["CalculationResultDto"][];
                         "text/json": components["schemas"]["CalculationResultDto"][];
                         "text/plain": components["schemas"]["CalculationResultDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Різниця версії `from` і версії `to` (або поточного стану, `to=current`):
+         *     змінені комірки, додані й видалені рядки; кожен перелік — не більше 1000, решта — `truncated`. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: number;
+                    to?: string;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentCompareDto"];
+                        "text/json": components["schemas"]["DocumentCompareDto"];
+                        "text/plain": components["schemas"]["DocumentCompareDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -923,7 +2343,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
+                        "application/json": components["schemas"]["FileResult"];
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                        "application/zip": components["schemas"]["FileResult"];
                     };
                 };
                 /** @description Not Found */
@@ -932,7 +2354,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "application/zip": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -1584,6 +3008,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Зрізи подання документа за період, найновіші перші, не більше 200. Право `Document.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentVersionDto"][];
+                        "text/json": components["schemas"]["DocumentVersionDto"][];
+                        "text/plain": components["schemas"]["DocumentVersionDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/workflow/history": {
         parameters: {
             query?: never;
@@ -1675,6 +3152,292 @@ export interface paths {
                         "application/json": components["schemas"]["EntityFieldMapDto"];
                         "text/json": components["schemas"]["EntityFieldMapDto"];
                         "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/entity-field-maps/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє мапінг. Право `Integration.Manage` (`BE-27`).
+         * @description ⛔ Мапінг, за яким уже зібрано дані, НЕ видаляється —
+         *     `409 ECR-INT-0409` з лічильником точок і межами вікна в
+         *     `details`. Мовчазне зникнення лишило б точки
+         *     `ext.RawDataPoint` без пояснення того, у якій вони одиниці й куди
+         *     лягали. Клієнт у відповідь пропонує паузу, а не повтор запиту — той
+         *     самий шаблон, що й «на запис довідника посилаються N комірок».
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/entity-field-maps/{id}/accept-unit-change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Приймає нову одиницю джерела (`ФВ-16.9`). Право `Integration.Manage`.
+         * @description ⛔ Зміна одиниці в джерелі ЗУПИНЯЄ збір (`ECR-INT-0422`) і не
+         *     приймається кодом: мовчазна конверсія «як здається» дає правдоподібні
+         *     числа, помилку в яких знаходять на звірці через місяць. Ця дія — єдиний
+         *     вихід із того стану, і тому вона лишає слід у журналі безпеки: хто,
+         *     коли, з якої одиниці на яку.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody?: {
+                content: {
+                    "application/*+json": null | components["schemas"]["AcceptSourceUnitChangeRequest"];
+                    "application/json": null | components["schemas"]["AcceptSourceUnitChangeRequest"];
+                    "text/json": null | components["schemas"]["AcceptSourceUnitChangeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/entity-field-maps/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Призупиняє мапінг. Право `Integration.Manage` (`BE-27`).
+         * @description ⛔ Пауза — не видалення: мапінг лишається на місці разом з одиницями й
+         *     адресою рядка, а збір за ним перестає писати значення. Це і є штатний
+         *     вихід для мапінгу, який уже зібрав дані й тому не видаляється.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/entity-field-maps/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Повертає призупинений мапінг у збір. Право `Integration.Manage`. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Мапінг. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/json": components["schemas"]["EntityFieldMapDto"];
+                        "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -2128,8 +3891,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth`
-         *     (директива №11, T10 #40).
+         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth` — або
+         *     автор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).
          * @description ⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:
          *     клієнт, що вже показує цю задачу, продовжує опитувати той самий
          *     `GET /jobs/{jobId}`.
@@ -2388,6 +4151,135 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Усі налаштування поточного користувача, за ключем. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UserPreferenceDto"][];
+                        "text/json": components["schemas"]["UserPreferenceDto"][];
+                        "text/plain": components["schemas"]["UserPreferenceDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/preferences/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Створює або замінює налаштування; тіло — саме JSON-значення. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ключ налаштування. */
+                    key: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["JsonElement"];
+                    "application/json": components["schemas"]["JsonElement"];
+                    "text/json": components["schemas"]["JsonElement"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UserPreferenceDto"];
+                        "text/json": components["schemas"]["UserPreferenceDto"];
+                        "text/plain": components["schemas"]["UserPreferenceDto"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видаляє налаштування; відсутнє — теж `204`. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ключ налаштування. */
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -2804,6 +4696,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Видаляє версію-чернетку. Право `Calculation.EditFormula`.
+         * @description Опублікована, виведена з обігу або вже використана в розрахунку версія —
+         *     `409 ECR-CALC-0409` із причиною в `reason` (рішення домену).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/constants": {
         parameters: {
             query?: never;
@@ -2933,6 +4890,173 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Формули версії, що посилаються на константу (ФВ-8.14). Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                    /** @description Код константи. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UsageResponse"];
+                        "text/json": components["schemas"]["UsageResponse"];
+                        "text/plain": components["schemas"]["UsageResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Матриця покриття версії: вихід → колонки. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyCoverageDto"];
+                        "text/json": components["schemas"]["MethodologyCoverageDto"];
+                        "text/plain": components["schemas"]["MethodologyCoverageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Різниця версії з базовою: формули, константи, тести. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Версія «було» тієї самої методології. */
+                    baseVersionId?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія «стало». */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyVersionDiffDto"];
+                        "text/json": components["schemas"]["MethodologyVersionDiffDto"];
+                        "text/plain": components["schemas"]["MethodologyVersionDiffDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -3544,6 +5668,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/versions/{vid}/rule-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Матриця покриття «рядки реальних даних × правила» (ФВ-13.9). Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише одна з таблиць прив'язок. */
+                    tableDefId?: number;
+                    /** @description Нижня межа вікна періодів; типово — початок минулого року. */
+                    periodFrom?: number;
+                    /** @description Верхня межа; типово — кінець поточного року. */
+                    periodTo?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RuleCoverageDto"];
+                        "text/json": components["schemas"]["RuleCoverageDto"];
+                        "text/plain": components["schemas"]["RuleCoverageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/versions/{vid}/rules": {
         parameters: {
             query?: never;
@@ -3822,6 +6018,511 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Усі канали за назвою. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"][];
+                        "text/json": components["schemas"]["NotificationChannelView"][];
+                        "text/plain": components["schemas"]["NotificationChannelView"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Створює ввімкнений канал без секрету. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateNotificationChannelRequest"];
+                    "application/json": components["schemas"]["CreateNotificationChannelRequest"];
+                    "text/json": components["schemas"]["CreateNotificationChannelRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"];
+                        "text/json": components["schemas"]["NotificationChannelView"];
+                        "text/plain": components["schemas"]["NotificationChannelView"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Змінює назву, стан і несекретні параметри.
+         * @description ⛔ `settings.host`, `port`, `useTls`, `from` не
+         *     приймаються: транспорт SMTP — налаштування застосунку, і канал його не
+         *     перевизначає (`422 ECR-REQ-0422`).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateNotificationChannelRequest"];
+                    "application/json": components["schemas"]["UpdateNotificationChannelRequest"];
+                    "text/json": components["schemas"]["UpdateNotificationChannelRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"];
+                        "text/json": components["schemas"]["NotificationChannelView"];
+                        "text/plain": components["schemas"]["NotificationChannelView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Видаляє канал разом із його правилами; журнал доставок лишається. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/channels/{id}/secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Замінює секрет (пароль SMTP або URL вебхука Teams); порожній — прибирає.
+         * @description ⛔ URL вебхука: лише `https` і хост із переліку
+         *     `Notifications:WebhookAllowedHostSuffixes`, інакше `422 ECR-REQ-0422`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceNotificationChannelSecretRequest"];
+                    "application/json": components["schemas"]["ReplaceNotificationChannelSecretRequest"];
+                    "text/json": components["schemas"]["ReplaceNotificationChannelSecretRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationChannelView"];
+                        "text/json": components["schemas"]["NotificationChannelView"];
+                        "text/plain": components["schemas"]["NotificationChannelView"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/channels/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Шле пробне повідомлення; відмова каналу — `ok: false`, а не помилка запиту. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationTestResult"];
+                        "text/json": components["schemas"]["NotificationTestResult"];
+                        "text/plain": components["schemas"]["NotificationTestResult"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Журнал доставок, новіші першими.
+         * @description ⛔ Ні секрету каналу, ні тіла повідомлення в журналі немає — лише
+         *     подія, канал, підсумок і причина відмови.
+         *
+         *     ⚠ Стеля сторінки — 200 (int ListNotificationDeliveriesHandler.MaxLimit),
+         *     менша за спільну: більше тут не читає ніхто, а базі коштує.
+         *
+         *     ⚠ Фільтри необов'язкові й звужують ЗАПИТ, а не видачу: у шухляді каналу
+         *     журнал відкривають саме з `channelId`, і сторінка на 50 рядків,
+         *     відфільтрована після вибірки, віддавала б там два.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Розмір сторінки 1..200; `0` — типове значення 50. */
+                    limit?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Лише доставки цього каналу; без нього — усі. */
+                    channelId?: number;
+                    /** @description Лише цей підсумок (`Sent`, `Failed`, `Suppressed`);
+                     *     невідоме значення — `422 ECR-REQ-0422`, а не мовчазне «усі». */
+                    status?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfNotificationDeliveryView"];
+                        "text/json": components["schemas"]["PagedResultOfNotificationDeliveryView"];
+                        "text/plain": components["schemas"]["PagedResultOfNotificationDeliveryView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Матриця «подія × канал» цілком.
+         * @description ⚠ `eventKinds` перелічує УСІ види подій, навіть ті, на які правила
+         *     ще немає: порожня клітинка матриці — це «правила немає», а не «такої
+         *     події не буває».
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/plain": components["schemas"]["NotificationRuleMatrix"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Замінює матрицю цілком; клітинка, якої немає в тілі, зникає.
+         * @description ⚠ Ідемпотентно: те саме тіло двічі дає той самий стан і не дублює
+         *     правил. Правило на неіснуючий канал — `404`, дві клітинки з однією
+         *     парою «подія + канал» — `422`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ReplaceNotificationRulesRequest"];
+                    "application/json": components["schemas"]["ReplaceNotificationRulesRequest"];
+                    "text/json": components["schemas"]["ReplaceNotificationRulesRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/json": components["schemas"]["NotificationRuleMatrix"];
+                        "text/plain": components["schemas"]["NotificationRuleMatrix"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/periods/{id}/reopen": {
         parameters: {
             query?: never;
@@ -3833,9 +6534,16 @@ export interface paths {
         put?: never;
         /**
          * Відкриває закритий період. Право `Period.Reopen`.
-         * @description Відкриття періоду і відкриття документа — <b>різні</b> операції з
-         *     різними правами (`D-67`). Причина обов'язкова: закритий період —
-         *     це поданий стан звітності, і його зміна має бути пояснена в аудиті.
+         * @description     Відкриття періоду і відкриття документа — <b>різні</b> операції з
+         *         різними правами (`D-67`). Причина обов'язкова: закритий період —
+         *         це поданий стан звітності, і його зміна має бути пояснена в аудиті.
+         *         ⚠ Це єдина ручна зміна стану періоду (рішення людини
+         *     Q15-02, директива №15 BE-29). Open, Close і
+         *     Archive лишаються за PeriodStateJob — стан періоду має
+         *     один календар, а не два джерела.
+         *         ⛔ Відкриття не закритого періоду — 409 ECR-PRD-0409, причина з
+         *     самих пробілів — 422 ECR-PRD-0422. Обидві відмови ухвалює домен
+         *     (Period.Reopen), а не цей контролер.
          */
         post: {
             parameters: {
@@ -3863,6 +6571,39 @@ export interface paths {
                 };
                 /** @description Forbidden */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4901,7 +7642,9 @@ export interface paths {
             };
         };
         /**
-         * Зберігає опис довідника: поля і правила. Право `Registry.EditDefinition`.
+         * Зберігає і одразу публікує опис довідника: поля і правила. Права
+         *     `Registry.EditDefinition` і `Registry.Publish` (`BE-24`: без
+         *     другого маршрут обходив би публікацію чернетки).
          * @description ⛔ Приймається ПОВНИЙ стан, а не набір правок. Опис довідника — це
          *     кілька десятків полів і одиниці правил; часткова правка вимагала б від
          *     клієнта тримати список того, що він змінив, і перша ж помилка в цьому
@@ -4962,6 +7705,252 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/definition/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Чернетка опису довідника, якщо є. Право `Registry.View` (`BE-24`). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                        "text/json": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                        "text/plain": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Зберігає чернетку опису; опублікований опис не змінюється. Право
+         *     `Registry.EditDefinition` (`BE-24`). */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                    "application/json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                    "text/json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionDraftDto"];
+                        "text/json": components["schemas"]["RegistryDefinitionDraftDto"];
+                        "text/plain": components["schemas"]["RegistryDefinitionDraftDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Скасовує чернетку опису без публікації. Право `Registry.EditDefinition` (`BE-24`). */
+        delete: {
+            parameters: {
+                query?: {
+                    /** @description Версія чернетки. У query, а не в тілі: тіло DELETE частина клієнтів і
+                     *     проксі відкидає, а більше нічого запит не несе. */
+                    rowVersion?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/definition/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Публікує чернетку опису. Право `Registry.Publish` (`BE-24`). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                    "application/json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                    "text/json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/plain": components["schemas"]["RegistryDefinitionVersionResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -5058,6 +8047,97 @@ export interface paths {
                         "application/json": components["schemas"]["RegistryEntryIdResponse"];
                         "text/json": components["schemas"]["RegistryEntryIdResponse"];
                         "text/plain": components["schemas"]["RegistryEntryIdResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/entries/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Імпорт записів довідника з CSV. Право `Registry.EditData` (`BE-24`).
+         * @description Звіт — завжди 200: помилки рядків є даними для того, хто імпортує.
+         *     Хоч одна помилка або `dryRun` — не записано нічого. Стеля файлу —
+         *     `Registries:ImportMaxBytes`. Колонки — коди полів ОПУБЛІКОВАНОГО
+         *     опису плюс `code`; валідація значень — та сама, що при ручному
+         *     редагуванні запису (UpsertRegistryEntryHandler).
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Лише перевірка. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryEntryImportReport"];
+                        "text/json": components["schemas"]["RegistryEntryImportReport"];
+                        "text/plain": components["schemas"]["RegistryEntryImportReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -5248,6 +8328,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Де використано довідник. Право `Registry.EditDefinition` (`BE-24`).
+         * @description     ⛔ Посилання на сам ДОВІДНИК, а не на окремий його запис: колонки
+         *         шаблонів типу `Lookup`, поля сусідніх довідників, речовини
+         *         методологій, сутності зовнішніх джерел. Відповідь потрібна ДО зміни
+         *         опису — сьогодні перевипустити довідник можна наосліп.
+         *         ⚠ total і довжина items — різні числа: перелік обрізаний
+         *     сторінкою, лічильник чесний.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UsageResponse"];
+                        "text/json": components["schemas"]["UsageResponse"];
+                        "text/plain": components["schemas"]["UsageResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports": {
         parameters: {
             query?: never;
@@ -5384,6 +8524,73 @@ export interface paths {
                         "application/json": components["schemas"]["ReportSnapshotSummary"][];
                         "text/json": components["schemas"]["ReportSnapshotSummary"][];
                         "text/plain": components["schemas"]["ReportSnapshotSummary"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/snapshots/{id}/export.xlsx": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Вивантажує зріз у `.xlsx`. Право `Report.Export`.
+         * @description ⚠ Файл у відповіді ОДРАЗУ, без `202` і фонової задачі, на відміну
+         *     від експорту документа: там книга на 500×60×12 не вкладається в жоден
+         *     таймаут, тут стеля — `ExportSnapshotHandler.MaxRows` рядків одного
+         *     плаского аркуша. Черга заради цього коштувала б користувачеві двох
+         *     зайвих кроків і GUID у руках.
+         *
+         *     ⛔ `D-52a` не зсувається: це ЗРІЗ, а не державна форма. PDF
+         *     держформи лишається в SSRS (`D-52`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Зріз. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -5555,6 +8762,28 @@ export interface paths {
                         "application/json": components["schemas"]["JobAcceptedResponse"];
                         "text/json": components["schemas"]["JobAcceptedResponse"];
                         "text/plain": components["schemas"]["JobAcceptedResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -6047,6 +9276,49 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Документи, шаблони й довідники за підрядком коду чи назви — лише видимі користувачу. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Підрядок; коротший за 2 символи — порожня відповідь. */
+                    q?: string;
+                    /** @description Стеля; `0` — 10, більше за 20 — обрізається до 20. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchHitDto"][];
+                        "text/json": components["schemas"]["SearchHitDto"][];
+                        "text/plain": components["schemas"]["SearchHitDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -8402,6 +11674,299 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Картка шаблону разом із лічильником залежних. Право `Template.View`.
+         * @description ⛔ Лічильник їде ТУТ, а не окремим ендпоінтом. Архівування без нього —
+         *     рішення наосліп: «більше не пропонувати» виглядає безпечно, доки не
+         *     видно, що на шаблоні вже сім проєктів і чотири сотні документів.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Змінює назву шаблону. Право `Template.Edit`.
+         * @description ⚠ Коду в запиті НЕМАЄ навмисно: він бізнес-ключ і незмінний. Поле, яке
+         *     приймають і мовчки ігнорують, гірше за відсутнє — воно обіцяє дію.
+         *     Опису мовами в моделі шаблону теж немає (колонки під нього в
+         *     `cfg.Template` не існує), тож картка редагує саме назву.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RenameTemplateRequest"];
+                    "application/json": components["schemas"]["RenameTemplateRequest"];
+                    "text/json": components["schemas"]["RenameTemplateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Архівує шаблон: для нових документів він більше не пропонується.
+         *     Право `Template.Edit`.
+         * @description ⛔ Наявні документи працюють далі — документ назавжди лишається на своїй
+         *     версії шаблону (рішення людини на `Q15-05`). Повторне архівування —
+         *     `409 ECR-TMPL-0409` від домену, не від цього контролера.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Повертає архівований шаблон в обіг. Право `Template.Edit`.
+         * @description ⚠ Дія існує, щоб архівування не було дверима в один бік: без неї
+         *     помилкове натискання виправлялося б запитом до бази повз продукт.
+         *     Шаблон, який і так в обігу, — `409 ECR-TMPL-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateCard"];
+                        "text/json": components["schemas"]["TemplateCard"];
+                        "text/plain": components["schemas"]["TemplateCard"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates/{id}/versions": {
         parameters: {
             query?: never;
@@ -8570,6 +12135,143 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui-strings/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт перекладу в CSV: `key, scope, en, &lt;lang&gt;, updatedAt`. Право `System.ManageLocalization`.
+         * @description UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу (не мова за замовчуванням). */
+                    lang?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui-strings/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Імпорт перекладу з CSV. Право `System.ManageLocalization`.
+         * @description Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна
+         *     помилка або `dryRun` — не записано нічого. Стеля файлу —
+         *     `Localization:ImportMaxBytes`.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу. */
+                    lang?: string;
+                    /** @description Лише перевірка. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UiStringImportReport"];
+                        "text/json": components["schemas"]["UiStringImportReport"];
+                        "text/plain": components["schemas"]["UiStringImportReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -8861,8 +12563,113 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
+        /** Одиниця для форми редагування разом із `rowVersion`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UnitDetail"];
+                        "text/json": components["schemas"]["UnitDetail"];
+                        "text/plain": components["schemas"]["UnitDetail"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /**
+         * Змінює позначення, назву і — поки на одиницю ніщо не посилається — коефіцієнти.
+         * @description Потребує `If-Match` із `rowVersion`: немає — `422 ECR-REQ-0422`,
+         *     чужа версія — `409 ECR-UOM-0409`. Код, розмірність і ознака базової не змінюються.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор одиниці. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UpdateUnitRequest"];
+                    "application/json": components["schemas"]["UpdateUnitRequest"];
+                    "text/json": components["schemas"]["UpdateUnitRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UnitDetail"];
+                        "text/json": components["schemas"]["UnitDetail"];
+                        "text/plain": components["schemas"]["UnitDetail"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         /**
          * Видаляє одиницю, на яку ніхто не посилається.
@@ -9146,6 +12953,164 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/lock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Блокує запис безстроково й обриває його сесії. Право `Security.ManageUsers` (BE-12).
+         * @description Себе й останнього адміністратора — `409 ECR-SEC-0409`; без причини — `422 ECR-USR-0422`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UserLockRequest"];
+                    "application/json": components["schemas"]["UserLockRequest"];
+                    "text/json": components["schemas"]["UserLockRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Скидає пароль локального запису на разовий. Право `Security.ManageUsers` (BE-12).
+         * @description Пароль задає адміністратор; у відповіді його немає. Далі — `MustChangePassword`,
+         *     сесії цілі обриваються. Власний запис і останній адміністратор — `409 ECR-SEC-0409`,
+         *     доменний запис — `422 ECR-USR-0422`, коротший за політику — `422 ECR-PWD-0422`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ResetPasswordRequest"];
+                    "application/json": components["schemas"]["ResetPasswordRequest"];
+                    "text/json": components["schemas"]["ResetPasswordRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}/roles": {
         parameters: {
             query?: never;
@@ -9230,6 +13195,70 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Знімає блокування — адміністративне чи після невдалих спроб. Право `Security.ManageUsers` (BE-12). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["UserLockRequest"];
+                    "application/json": components["schemas"]["UserLockRequest"];
+                    "text/json": components["schemas"]["UserLockRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -9367,6 +13396,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Запит на приймання зміни одиниці джерела (`ФВ-16.9`). */
+        AcceptSourceUnitChangeRequest: {
+            /**
+             * Format: int32
+             * @description Одиниця довідника, яку джерело віддає тепер; `null` — та, що помітив збір
+             *     (`pendingSourceUnitChange.actualUnitId`).
+             */
+            sourceUnitId: null | number;
+        };
         /** @description Відповідь на питання «чому в мене немає доступу» (`H-21`). */
         AccessDiagnosticsView: {
             /** @description Ролі, які людина має насправді. */
@@ -9553,6 +13591,14 @@ export interface components {
         AuthProvider: "Windows" | "Local";
         /** @description Запит на побудову зрізу. */
         BuildSnapshotRequest: {
+            /** @description Значення параметрів звіту за іменем (`R6`, `02b` §8a): число,
+             *     рядок, булеве або дата рядком — тип диктує ОГОЛОШЕННЯ параметра у версії.
+             *     Невідоме ім'я, обов'язковий параметр без значення і без `default` або
+             *     значення не того типу — `422 ECR-RPT-0422` одразу у відповіді на цей
+             *     запит, а не невдалою задачею через хвилину. */
+            parameters?: null | {
+                [key: string]: unknown;
+            };
             /**
              * Format: int32
              * @description Період.
@@ -9587,11 +13633,15 @@ export interface components {
             methodologyId: number;
             /** @description Який вихід методології лягає в колонку. */
             outputCode: string;
+            /** @description Код таблиці. Заповнює лише перелік прив'язок (`GET …/bindings`);
+             *     в інших відповідях — `null`. */
+            tableCode?: null | string;
             /**
              * Format: int32
              * @description Таблиця колонки-приймача.
              */
             tableDefId: number;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /**
          * @description Рівень драбини виразності для методології (ФВ-9.2).
@@ -9620,10 +13670,10 @@ export interface components {
              */
             unitId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення.
              */
-            value: number;
+            value: string;
         };
         /**
          * @description Джерело календарних величин періоду (D-78). Різниця конвенцій змінює всі
@@ -9631,6 +13681,160 @@ export interface components {
          * @enum {unknown}
          */
         CalendarMode: "Actual" | "Fixed365" | "Fixed360";
+        /**
+         * @description Де проєкт у кампанії відносно строку подання — відповідь на «хто затримує».
+         *     Правило — CampaignProgressRule.
+         * @enum {unknown}
+         */
+        CampaignProgress: "InProgress" | "AtRisk" | "Overdue" | "Done";
+        /** @description Один проєкт у огляді кампанії. */
+        CampaignProjectSummary: {
+            /**
+             * Format: int32
+             * @description Усі аркуші затверджено.
+             */
+            approved: number;
+            /**
+             * Format: int32
+             * @description Скільки документів у проєкті. `0` означає «кампанія тут ще не
+             *     починалася» — і це окрема відповідь, а не «все в чернетках».
+             */
+            documents: number;
+            /**
+             * Format: int32
+             * @description Документи, де є аркуш у чернетці (або ще без стану) і жодного відхиленого.
+             */
+            draft: number;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Класифікація проєкту в кампанії (CampaignProgressRule). */
+            progress: components["schemas"]["CampaignProgress"];
+            /** @description Код проєкту; ним перелік і впорядковано. */
+            projectCode: string;
+            /**
+             * Format: int32
+             * @description Проєкт.
+             */
+            projectId: number;
+            /**
+             * Format: int32
+             * @description Хоч один аркуш відхилено.
+             */
+            rejected: number;
+            /**
+             * Format: int32
+             * @description Скільки ПОТОЧНИХ зрізів звітності побудовано за цей період
+             *     (`rpt.ReportSnapshot.IsCurrent`). Останній етап кампанії: документи
+             *     затверджено, але доки зрізу немає — регулятор не отримав нічого.
+             */
+            snapshots: number;
+            /**
+             * Format: date-time
+             * @description Строк подання в поясі проєкту, ВИКЛЮЧНО: це момент переходу періоду
+             *     `Open → Grace` (`Period.ComputedGraceAt`, опівніч
+             *     `PeriodEnd + GraceOffsetDays`), після якого правки позначаються
+             *     пізніми (`D-70`). Останній день подання — доба ПЕРЕД цим моментом.
+             *     `null` — межі періоду ще не пораховано.
+             */
+            submissionDeadline: null | string;
+            /**
+             * Format: int32
+             * @description Усі аркуші подано або затверджено, і хоч один ще не затверджено.
+             */
+            submitted: number;
+        };
+        /** @description Огляд кампанії звітності за один період (`BE-22`). */
+        CampaignSummaryResponse: {
+            /**
+             * Format: int32
+             * @description Період кампанії — той самий для всіх рядків.
+             */
+            periodKey: number;
+            /** @description Проєкти за кодом; лише лічильники, без значень. */
+            projects: components["schemas"]["CampaignProjectSummary"][];
+            /**
+             * Format: int32
+             * @description Скільки проєктів мають цей період УСЬОГО. Більше за довжину
+             *     Projects — перелік обрізано стелею
+             *     int GetCampaignSummaryHandler.MaxProjects, і кампанія бачиться не
+             *     цілком.
+             */
+            totalProjects: number;
+            /** @description Підсумки по ВСІХ проєктах періоду, без стелі переліку. ⛔ Не сума
+             *     Projects: сума по обрізаній підмножині читалася б як
+             *     стан кампанії й брехала б саме тоді, коли проєктів більше за стелю. */
+            totals: components["schemas"]["CampaignTotals"];
+        };
+        /** @description Підсумки кампанії по всіх проєктах періоду. */
+        CampaignTotals: {
+            /**
+             * Format: int32
+             * @description Сума `Approved`.
+             */
+            approved: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.AtRisk.
+             */
+            atRisk: number;
+            /**
+             * Format: int32
+             * @description Документів у цих проєктах.
+             */
+            documents: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.Done.
+             */
+            done: number;
+            /**
+             * Format: int32
+             * @description Сума `Draft` по всіх проєктах.
+             */
+            draft: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.InProgress.
+             */
+            inProgress: number;
+            /**
+             * Format: int32
+             * @description Проєктів у стані CampaignProgress.Overdue.
+             */
+            overdue: number;
+            /**
+             * Format: int32
+             * @description Проєктів періоду; дорівнює `TotalProjects`.
+             */
+            projects: number;
+            /**
+             * Format: int32
+             * @description Сума `Rejected`.
+             */
+            rejected: number;
+            /**
+             * Format: int32
+             * @description Сума поточних зрізів.
+             */
+            snapshots: number;
+            /**
+             * Format: int32
+             * @description Сума `Submitted`.
+             */
+            submitted: number;
+        };
+        /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання
+         *     (string? SubmissionPayloadCell.Type): `null` — число або текст, інакше
+         *     `date|bool|ref|unit`. */
+        CellChangeDto: {
+            columnCode: string;
+            newType: null | string;
+            newValue: null | string;
+            oldType: null | string;
+            oldValue: null | string;
+            rowKey: string;
+            tableCode: string;
+        };
         /** @description Зміна комірки в журналі, як її бачить читач аудиту. */
         CellChangeView: {
             /**
@@ -9730,6 +13934,15 @@ export interface components {
          * @enum {unknown}
          */
         ChangeClass: "Presentation" | "Safe" | "Guarded" | "Breaking";
+        /** @description Запит на зміну бізнес-ключа документа (ФВ-3.9). */
+        ChangeDocumentKeyRequest: {
+            /** @description Новий ключ. */
+            businessKey: null | string;
+            /** @description Чинний ключ, який бачила людина; розбіжність — 409. */
+            expectedBusinessKey: null | string;
+            /** @description Причина; обов'язкова, лягає в аудит. */
+            reason: null | string;
+        };
         /** @description Запит на зміну пароля. */
         ChangePasswordRequest: {
             /** @description Поточний пароль. */
@@ -9765,6 +13978,30 @@ export interface components {
              */
             toUtc: string;
         };
+        /** @description Покритий прогоном інтервал (UTC). */
+        CollectionRunCoverage: {
+            /**
+             * Format: date-time
+             * @description Початок.
+             */
+            coveredFrom: string;
+            /**
+             * Format: date-time
+             * @description Кінець.
+             */
+            coveredTo: string;
+        };
+        /** @description Деталь прогону. */
+        CollectionRunDetail: {
+            /** @description Інтервали, які цей прогін покрив, за зростанням. */
+            coverage: components["schemas"]["CollectionRunCoverage"][];
+            /** @description Інтервалів більше за стелю — показано перші. */
+            coverageTruncated: boolean;
+            /** @description Текст помилки (до 2000 символів); `null` — без помилки. */
+            errorMessage: null | string;
+            /** @description Той самий рядок, що в переліку. */
+            run: components["schemas"]["CollectionRunView"];
+        };
         /** @description Підсумок прогону збору. */
         CollectionRunStatus: {
             /**
@@ -9779,6 +14016,114 @@ export interface components {
             pointsRetrieved: number;
             /** @description Статус: `Succeeded`, `Degraded`, `Failed`. */
             status: string;
+        };
+        /** @description Рядок журналу прогонів. */
+        CollectionRunView: {
+            /** @description Код з'єднання. */
+            dataSourceCode: string;
+            /**
+             * Format: int32
+             * @description З'єднання сутності.
+             */
+            dataSourceId: number;
+            /**
+             * Format: int64
+             * @description Тривалість; `null` — прогін ще триває.
+             */
+            durationMs: null | number;
+            /**
+             * Format: date-time
+             * @description Завершення; `null` — ще триває.
+             */
+            finishedAt: null | string;
+            /** @description Чи є текст помилки — сам текст лише в деталі. */
+            hasError: boolean;
+            /**
+             * Format: int64
+             * @description Ідентифікатор прогону.
+             */
+            id: number;
+            /** @description Наздоганяння пропущеного вікна. */
+            isCatchUp: boolean;
+            /**
+             * Format: int32
+             * @description Скільки значень отримано.
+             */
+            pointsRetrieved: number;
+            /**
+             * Format: date-time
+             * @description Початок зібраного інтервалу (UTC).
+             */
+            rangeFrom: string;
+            /**
+             * Format: date-time
+             * @description Кінець зібраного інтервалу (UTC).
+             */
+            rangeTo: string;
+            /** @description Код сутності. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність збору.
+             */
+            sourceEntityId: number;
+            /** @description Назва сутності; `null` — не задана. */
+            sourceEntityName: null | string;
+            /**
+             * Format: date-time
+             * @description Початок прогону (UTC).
+             */
+            startedAt: string;
+            /** @description `Running`, `Succeeded`, `Degraded` або `Failed`. */
+            status: string;
+            /**
+             * Format: int32
+             * @description Хто запустив; `null` — за розкладом.
+             */
+            triggeredByUserId: null | number;
+        };
+        /** @description Розклад збору — рядок екрана конфігуратора (ФВ-14.3, `BE-21b`). */
+        CollectionScheduleView: {
+            /** @description Вираз cron (формат Quartz, 6–7 полів). */
+            cron: string;
+            /** @description Код цього з'єднання — значення фільтра `?dataSource=`. */
+            dataSourceCode: string;
+            /**
+             * Format: int32
+             * @description З'єднання, якому належить сутність джерела.
+             */
+            dataSourceId: number;
+            /**
+             * Format: int32
+             * @description Ідентифікатор розкладу.
+             */
+            id: number;
+            /** @description Чи стоїть розклад у планувальнику. */
+            isEnabled: boolean;
+            /** @description Чому розклад НЕ поставлено; `null` — поставлено. ⚠ Це стан ПОСТАНОВКИ,
+             *     а не збору: відмови самого збору живуть у `itg.CollectionRun`. */
+            lastError: null | string;
+            /**
+             * Format: date-time
+             * @description Коли постановка не вдалася.
+             */
+            lastErrorAt: null | string;
+            /**
+             * Format: date-time
+             * @description Коли збір за цим розкладом відпрацював востаннє.
+             */
+            lastRunAt: null | string;
+            /** @description Версія рядка в Base64 — її ж клієнт повертає заголовком `If-Match`. */
+            rowVersion: string;
+            /** @description Код сутності в джерелі. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність джерела, яку збирають за цим розкладом.
+             */
+            sourceEntityId: number;
+            /** @description Підпис сутності; `null` — каталог джерела його не дав. */
+            sourceEntityName: null | string;
         };
         /** @description Колонка у відповіді на запис/читання через цей обробник. */
         ColumnDefDto: {
@@ -9914,20 +14259,32 @@ export interface components {
             /** @description Код цільової одиниці. */
             toUnit: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення; `decimal`, бо `float` заборонений (`D-30`).
              */
-            value: number;
+            value: string;
         };
         /** @description Результат конверсії одиниць. */
         ConvertUnitResponse: {
             /** @description Код цільової одиниці. */
             unit: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення у цільовій одиниці.
              */
-            value: number;
+            value: string;
+        };
+        /** @description Тіло створення розкладу. */
+        CreateCollectionScheduleRequest: {
+            /** @description Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`. */
+            cron: string;
+            /** @description Чи має розклад одразу стояти в планувальнику. */
+            isEnabled: boolean;
+            /**
+             * Format: int32
+             * @description Сутність джерела, яку збиратимуть за цим розкладом.
+             */
+            sourceEntityId: number;
         };
         /** @description Запит на створення документа. */
         CreateDocumentRequest: {
@@ -10015,6 +14372,14 @@ export interface components {
             level: components["schemas"]["CalculationLevel"];
             /** @description Номер нової версії; унікальний у межах методології (`UQ_MethodologyVersion`). */
             versionNumber: string;
+        };
+        /** @description Тіло створення каналу. */
+        CreateNotificationChannelRequest: {
+            /** @description Транспорт; після створення не змінюється. */
+            kind: components["schemas"]["NotificationChannelKind"];
+            /** @description Назва, унікальна серед каналів. */
+            name: string;
+            settings?: null | components["schemas"]["NotificationChannelSettingsInput"];
         };
         /** @description Запит на створення політики періодів (T6/#37). */
         CreatePeriodPolicyRequest: {
@@ -10165,19 +14530,19 @@ export interface components {
              */
             dimensionId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Множник переходу до базової одиниці розмірності.
              */
-            factorToBase: number;
+            factorToBase: string;
             /** @description Назва мовами каталогу. */
             nameL10n: {
                 [key: string]: string;
             };
             /**
-             * Format: double
+             * Format: decimal
              * @description Зсув; ненульовий лише для одиниць температури.
              */
-            offsetToBase: number;
+            offsetToBase: string;
             /** @description Позначення мовами каталогу. */
             symbolL10n: {
                 [key: string]: string;
@@ -10234,6 +14599,36 @@ export interface components {
             /** @description Ім'я для показу в шапці. */
             userName: null | string;
         };
+        /** @description Наслідок перевірки з'єднання; `Entities` — розмір каталогу джерела. */
+        DataSourceTestResult: {
+            /** Format: int32 */
+            entities: number;
+            error: null | string;
+            messageKey?: null | string;
+            ok: boolean;
+        };
+        /** @description Джерело даних — рядок екрана конфігуратора (`BE-21`, ФВ-14.3). */
+        DataSourceView: {
+            catalog: null | string;
+            code: string;
+            /** Format: int32 */
+            collectionSchedules: number;
+            endpoint: string;
+            hasSecret: boolean;
+            /** Format: int32 */
+            id: number;
+            isActive: boolean;
+            /** Format: int32 */
+            maxParallel: number;
+            nameL10n: {
+                [key: string]: string;
+            };
+            rowVersion: string;
+            secondaryEndpoint: null | string;
+            /** Format: int32 */
+            sourceEntities: number;
+            transport: components["schemas"]["ExternalTransport"];
+        };
         /** @description Запит на виведення версії з обігу. */
         DeprecateVersionRequest: {
             /** @description Причина; потрапляє в журнал публікацій. Обов'язкова: «чому цю версію
@@ -10266,6 +14661,22 @@ export interface components {
              * @description Зсув у тексті виразу.
              */
             position: number;
+        };
+        /** @description Різниця двох версій документа. `ToVersionId = null` — порівняння з поточним станом;
+         *     `Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems. */
+        DocumentCompareDto: {
+            addedRows: components["schemas"]["RowChangeDto"][];
+            changes: components["schemas"]["CellChangeDto"][];
+            /** Format: int64 */
+            documentId: number;
+            /** Format: int64 */
+            fromVersionId: number;
+            /** Format: int32 */
+            periodKey: number;
+            removedRows: components["schemas"]["RowChangeDto"][];
+            /** Format: int64 */
+            toVersionId: null | number;
+            truncated: boolean;
         };
         /** @description Створений документ. */
         DocumentIdResponse: {
@@ -10329,6 +14740,12 @@ export interface components {
              *     неправда, що `A7-28`.
              */
             errorCount?: null | number;
+            /**
+             * @description Чи є в журналі правки з позначкою `IsLateEdit` (`D-70`) — за період,
+             *     якщо його задано, інакше за будь-який (`BE-09b`).
+             * @default false
+             */
+            hasLateEdits: boolean;
             /**
              * Format: int64
              * @description Ідентифікатор.
@@ -10405,6 +14822,18 @@ export interface components {
              */
             tableOrdinal: number;
         };
+        /** @description Версія документа — зріз подання аркуша (ФВ-5.22). */
+        DocumentVersionDto: {
+            /** Format: int32 */
+            periodKey: number;
+            /** Format: int32 */
+            sheetDefId: number;
+            /** Format: date-time */
+            submittedAt: string;
+            submittedBy: string;
+            /** Format: int64 */
+            versionId: number;
+        };
         /**
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
@@ -10420,6 +14849,7 @@ export interface components {
             id: number;
             /** @description Чи діє мапінг. */
             isActive: boolean;
+            pendingSourceUnitChange: null | components["schemas"]["PendingSourceUnitChange"];
             /**
              * Format: int32
              * @description Сутність джерела.
@@ -10458,7 +14888,11 @@ export interface components {
         };
         /** @description Запит на експорт. */
         ExportRequest: {
-            /** @description Транслювати вирази в Excel-синтаксис (ФВ-4.2). */
+            /** @description `xlsx` (типово), `csv` (zip, файл на таблицю) або `json` — ФВ-4.2. */
+            format?: null | string;
+            /** @description Додати формули у вивантаження (ФВ-4.2): `xlsx` — транслювати вирази в
+             *     Excel-синтаксис; `csv`/`json` — сирий вираз мовою редактора
+             *     виразів проєкту (без трансляції, бо там немає сітки клітинок). */
             includeFormulas: boolean;
             /** @description Переносити стилі шаблону. */
             includeStyles: boolean;
@@ -10530,6 +14964,11 @@ export interface components {
              *     публікацію, якої не буде. */
             skippedChecks: string[];
         };
+        /**
+         * @description Транспорт до зовнішнього джерела (ФВ-11.2).
+         * @enum {unknown}
+         */
+        ExternalTransport: "PiWebApi" | "PiSqlClient" | "Sql";
         /**
          * @description Куди лягає поле джерела.
          * @enum {unknown}
@@ -10717,32 +15156,108 @@ export interface components {
         };
         /** @description Стан фонової задачі. */
         JobStatus: {
+            /**
+             * Format: int32
+             * @description Номер спроби від 1; `null` — ще не стартувала (BE-08).
+             */
+            attempt?: null | number;
+            /** @description Кореляція з логом і запитом-постановником (BE-08). */
+            correlationId?: null | string;
+            /**
+             * Format: date-time
+             * @description Перша постановка в чергу, UTC; `null` — розклад (BE-08).
+             */
+            createdAt?: null | string;
+            /**
+             * Format: int32
+             * @description Id автора; `null` — системна задача. Заповнює `GetJobStatusHandler`:
+             *     тіло бачить лише автор або власник `System.ViewHealth`.
+             */
+            createdByUserId?: null | number;
+            /**
+             * Format: int64
+             * @description Документ задачі; `null` — не документна (BE-08).
+             */
+            documentId?: null | number;
+            /** @description Текст провалу. */
             error: null | string;
+            /** @description Код каталогу помилок провалу (BE-08). */
+            errorCode?: null | string;
+            /** @description Ідентифікатор. */
             jobId: string;
+            /**
+             * Format: int32
+             * @description Скільки спроб задача має загалом: перша + автоматичні ретраї (BE-08);
+             *     `null` — стан не з журналу (`Unknown`/`Unavailable`).
+             */
+            maxAttempts?: null | number;
+            /** @description Повідомлення прогресу. */
             message: null | string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Прогрес у відсотках.
+             */
             percent: number;
+            /** @description Відносний шлях API до файлу результату (книга експорту) — лише для
+             *     `Succeeded` з файлом і читача з `Document.Export`; інакше `null` (UX-09). */
+            resultUrl?: null | string;
+            /** @description Стан. */
             state: string;
         };
         /** @description Задача в переліку черги — легша за JobStatus. */
         JobSummary: {
+            /**
+             * Format: int32
+             * @description Номер спроби від 1; `null` — ще не стартувала (BE-08).
+             */
+            attempt?: null | number;
+            /** @description Кореляція з логом і запитом-постановником (BE-08). */
+            correlationId?: null | string;
+            /**
+             * Format: date-time
+             * @description Перша постановка в чергу, UTC; `null` — розклад (BE-08).
+             */
+            createdAt?: null | string;
+            /** @description Ім'я автора; `null` — системна задача (BE-08). */
+            createdByDisplayName?: null | string;
+            /**
+             * Format: int32
+             * @description Id автора; `null` — системна задача. Видимість та сама, що й
+             *     CreatedByDisplayName — клієнт вирішує показ «Повторити».
+             */
+            createdByUserId?: null | number;
+            /**
+             * Format: int64
+             * @description Документ задачі; `null` — не документна (BE-08).
+             */
+            documentId?: null | number;
+            /** @description Код каталогу помилок провалу (BE-08). */
+            errorCode?: null | string;
             /** @description Код задачі (тип). */
             jobCode: string;
             /** @description Ідентифікатор. */
             jobId: string;
             /**
              * Format: int32
+             * @description Спроб загалом, як у int? JobStatus.MaxAttempts; рядок переліку завжди
+             *     з журналу, тож від сховища — завжди число, `null` лише від інших реалізацій.
+             */
+            maxAttempts?: null | number;
+            /** @description Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться
+             *     ОДИН раз на весь перелік (`JobProgressMessageResolver.ResolveManyAsync`),
+             *     а не на кожен рядок. */
+            message?: null | string;
+            /**
+             * Format: int32
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /** @description Як string? JobStatus.ResultUrl (UX-09). */
+            resultUrl?: null | string;
             /**
              * Format: date-time
-             * @description             Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.
-             *                 ⚠ Поле називається StartedAt, а не CreatedAt, бо саме це
-             *     зберігає стовпець: JobProgress.Begin перезаписує його в момент
-             *     запуску (IntegrationLogs.cs). Назва «створено» була б неправдою
-             *     для кожної задачі, що вже почала працювати, а окремого стовпця з
-             *     моментом постановки в itg.JobProgress немає.
+             * @description Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC
+             *     (`JobProgress.Begin` перезаписує його). Момент постановки — CreatedAt.
              */
             startedAt: string;
             /** @description Стан. */
@@ -10786,12 +15301,15 @@ export interface components {
              */
             fieldMapId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число, яке лягло б у комірку; `null` — нічого згортати.
              */
-            foldedValue: null | number;
+            foldedValue: null | string;
+            /** @description Мапінг діє; `false` — призупинений (`BE-27`), значень не пише. */
+            isActive: boolean;
             /** @description Стан мапінгу. */
             outcome: components["schemas"]["MappingOutcome"];
+            pendingSourceUnitChange: null | components["schemas"]["PendingSourceUnitChange"];
             /**
              * Format: int32
              * @description Скільки реальних точок вікна під цей мапінг.
@@ -10875,10 +15393,10 @@ export interface components {
              */
             timestamp: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число в одиниці ДЖЕРЕЛА.
              */
-            valueNumeric: null | number;
+            valueNumeric: null | string;
             /** @description Текст для нечислових атрибутів. */
             valueString: null | string;
         };
@@ -10926,11 +15444,62 @@ export interface components {
              */
             validTo: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число; `null` — нечислова або нерозібрана.
              */
-            value: null | number;
+            value: null | string;
         };
+        /** @description Покриття версії: які виходи куди лягають і які колонки чекають на вихід (`BE-25`). */
+        MethodologyCoverageDto: {
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            methodologyVersionId: number;
+            /** @description Кожен оголошений вихід з АКТИВНИМИ прив'язками; порожній перелік — вихід рахується,
+             *     але не лягає нікуди. */
+            outputs: components["schemas"]["MethodologyOutputCoverageDto"][];
+            /** @description Активні прив'язки, чий `outputCode` ця версія не оголошує: колонка чекає на
+             *     вихід, якого немає, і лишиться порожньою. */
+            waitingBindings: components["schemas"]["CalculationBindingDto"][];
+        };
+        /**
+         * @description Вид зміни.
+         * @enum {unknown}
+         */
+        MethodologyDiffChange: "Added" | "Removed" | "Changed";
+        /** @description Одна відмінність. */
+        MethodologyDiffItemDto: {
+            /** @description Головне значення в новій версії. */
+            after: null | string;
+            /** @description Головне значення в базовій версії (вираз, значення константи, очікування тесту). */
+            before: null | string;
+            /** @description Константа: категорія звуження; `null` — спільна або не константа. */
+            category: null | string;
+            /** @description Додано, прибрано чи змінено. */
+            change: components["schemas"]["MethodologyDiffChange"];
+            /** @description Які поля змінено; порожньо для доданого й прибраного. */
+            changedFields: string[];
+            /** @description Код запису. */
+            code: string;
+            /** @description Формула, константа чи тест. */
+            kind: components["schemas"]["MethodologyDiffItemKind"];
+            /**
+             * Format: int64
+             * @description Константа: речовина звуження.
+             */
+            substanceEntryId: null | number;
+            /**
+             * Format: date
+             * @description Константа: перший чинний день варіанта.
+             */
+            validFrom: null | string;
+        };
+        /**
+         * @description Що саме порівнюється у двох версіях.
+         * @enum {unknown}
+         */
+        MethodologyDiffItemKind: "Formula" | "Constant" | "TestCase";
         /** @description Версія методології в **конфігураторі** — на відміну від
          *     MethodologyVersionDto, тут є і чернетки. */
         MethodologyDraftVersionDto: {
@@ -11025,6 +15594,13 @@ export interface components {
             /** @description Чи змінився режим. */
             isChanged?: boolean;
         };
+        /** @description Один вихід версії і колонки, куди він лягає. */
+        MethodologyOutputCoverageDto: {
+            /** @description Активні прив'язки цього виходу. */
+            bindings: components["schemas"]["CalculationBindingDto"][];
+            /** @description Код виходу. */
+            code: string;
+        };
         /** @description Оголошений вихід версії — те, що методологія повертає (ФВ-16.6). */
         MethodologyOutputDto: {
             /** @description Код виходу — адреса, на яку посилається прив'язка. */
@@ -11099,22 +15675,22 @@ export interface components {
         /** @description Одна розбіжність результату на золотому наборі. */
         MethodologyResultDelta: {
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення нової версії.
              */
-            after: number;
+            after: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Значення попередньої версії; `null` — виходу не було.
              */
-            before: null | number;
+            before: null | string;
             /** @description Вихід методології. */
             outputCode: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Відносна зміна; `null`, якщо порівнювати нема з чим або було нуль.
              */
-            relativeChange?: null | number;
+            relativeChange?: null | string;
             /**
              * Format: int32
              * @description Речовина; `null` — вихід без речовини.
@@ -11176,10 +15752,25 @@ export interface components {
             /** @description Вхід прогону у формі `CalculationInput`. */
             inputJson: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Допуск порівняння; нуль — точна рівність.
              */
-            tolerance: number;
+            tolerance: string;
+        };
+        /** @description Різниця двох версій методології — лише читання (`BE-25`, макет `mv-compare`). */
+        MethodologyVersionDiffDto: {
+            /**
+             * Format: int32
+             * @description Версія, з якою порівнюють («було»).
+             */
+            baseVersionId: number;
+            /** @description Відмінності; порожній перелік — версії однакові за цими наборами. */
+            items: components["schemas"]["MethodologyDiffItemDto"][];
+            /**
+             * Format: int32
+             * @description Версія, яку порівнюють («стало»).
+             */
+            methodologyVersionId: number;
         };
         /** @description Версія методології. */
         MethodologyVersionDto: {
@@ -11210,6 +15801,145 @@ export interface components {
             traceLevel: components["schemas"]["TraceLevel"];
             /** @description Номер версії. */
             versionNumber: string;
+        };
+        /**
+         * @description Транспорт каналу сповіщень. Числа зберігаються в базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        NotificationChannelKind: "Smtp" | "TeamsWebhook";
+        /** @description Несекретні параметри каналу — рівно те, що лягає в `SettingsJson`. */
+        NotificationChannelSettings: {
+            /** @description SMTP: адресати. */
+            recipients?: null | string[];
+            /** @description SMTP: префікс теми; Teams: заголовок картки. */
+            title?: null | string;
+        };
+        /** @description Несекретні параметри каналу так, як їх надсилає клієнт. */
+        NotificationChannelSettingsInput: {
+            /** @description ⛔ Не приймається: відправник — із налаштувань застосунку. */
+            from?: null | string;
+            /** @description ⛔ Не приймається: сервер — із налаштувань застосунку. */
+            host?: null | string;
+            /**
+             * Format: int32
+             * @description ⛔ Не приймається: порт — із налаштувань застосунку.
+             */
+            port?: null | number;
+            /** @description SMTP: адресати. */
+            recipients?: null | string[];
+            /** @description SMTP: префікс теми; Teams: заголовок картки. */
+            title?: null | string;
+            /** @description ⛔ Не приймається: TLS — із налаштувань застосунку. */
+            useTls?: null | boolean;
+        };
+        /** @description Канал сповіщень — рядок екрана. Секрету тут немає й не буде. */
+        NotificationChannelView: {
+            /** @description Чи задано секрет — єдине, що про нього відомо клієнтові. */
+            hasSecret: boolean;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Чи ввімкнений. */
+            isEnabled: boolean;
+            /** @description Транспорт. */
+            kind: components["schemas"]["NotificationChannelKind"];
+            /**
+             * Format: date-time
+             * @description Остання зміна, UTC.
+             */
+            modifiedAt: string;
+            /** @description Назва. */
+            name: string;
+            /** @description Несекретні параметри. */
+            settings: components["schemas"]["NotificationChannelSettings"];
+            /** @description Чи є канал, чим доставляти. Пошта — bool INotificationSender.IsConfigured,
+             *     те саме джерело, що `notificationTransport.isConfigured` у `/health/facts`.
+             *     Teams — bool NotificationChannelView.HasSecret: секрет вебхука і Є його адресою, іншого
+             *     налаштування транспорту в Teams немає. ⛔ Лише булеве: хост, адресант чи порт
+             *     сюди не йдуть з тієї ж причини, з якої секрет write-only. */
+            transportConfigured: boolean;
+            /** @description Чи бере канал транспорт із налаштувань застосунку. `true` для пошти:
+             *     сервера в каналі немає й задати його нічим — екран має сказати це словами,
+             *     а не лишати порожнє місце там, де колись було поле. `false` для Teams,
+             *     де адреса доставки живе в секреті САМОГО каналу. */
+            transportFromConfiguration: boolean;
+        };
+        /**
+         * @description Підсумок спроби доставки. Числа зберігаються в базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        NotificationDeliveryStatus: "Sent" | "Failed" | "Suppressed";
+        /** @description Запис журналу доставок — рядок екрана. */
+        NotificationDeliveryView: {
+            /**
+             * Format: date-time
+             * @description Момент спроби, UTC.
+             */
+            at: string;
+            /**
+             * Format: int32
+             * @description Канал.
+             */
+            channelId: number;
+            /** @description Назва каналу; `null` — канал уже видалено, а журнал лишився. */
+            channelName: null | string;
+            /** @description Причина відмови — без стека й без секрету. */
+            error: null | string;
+            /** @description Ключ дедуплікації. */
+            eventKey: string;
+            /** @description Подія. */
+            eventKind: components["schemas"]["NotificationEventKind"];
+            /**
+             * Format: int64
+             * @description Ідентифікатор; він же курсор сторінки.
+             */
+            id: number;
+            /** @description Підсумок спроби. */
+            status: components["schemas"]["NotificationDeliveryStatus"];
+        };
+        /**
+         * @description Подія, про яку сповіщають. Числа зберігаються в базі — не перенумеровувати.
+         * @enum {unknown}
+         */
+        NotificationEventKind: "JobFailed" | "ConsistencyIssuesFound" | "PartitionsRunningOut" | "CollectionFailed" | "ExportFailed";
+        /** @description Матриця правил цілком. */
+        NotificationRuleMatrix: {
+            /** @description УСІ види подій, а не лише ті, на які правило вже є: інакше клієнт не мав би
+             *     з чого намалювати порожню клітинку, і «правила немає» виглядало б як
+             *     «події не існує». */
+            eventKinds: components["schemas"]["NotificationEventKind"][];
+            /** @description Заповнені клітинки. */
+            rules: components["schemas"]["NotificationRuleView"][];
+        };
+        /** @description Клітинка матриці «подія × канал». */
+        NotificationRuleView: {
+            /**
+             * Format: int32
+             * @description Канал.
+             */
+            channelId: number;
+            /** @description Подія. */
+            eventKind: components["schemas"]["NotificationEventKind"];
+            /** @description Чи діє правило. */
+            isEnabled: boolean;
+            /** @description Межа серйозності: правило пропускає події не нижчі за неї. */
+            minSeverity: components["schemas"]["NotificationSeverity"];
+        };
+        /**
+         * @description Серйозність події; правило пропускає події не нижчі за свою межу.
+         * @enum {unknown}
+         */
+        NotificationSeverity: "Info" | "Warning" | "Error";
+        /** @description Наслідок пробного повідомлення. */
+        NotificationTestResult: {
+            /** @description Причина відмови — без секрету; `null` за успіху. */
+            error: null | string;
+            /** @description Ключ каталогу для причини, якщо вона відома наперед. */
+            messageKey?: null | string;
+            /** @description Чи прийняв канал повідомлення. */
+            ok: boolean;
         };
         /** @description Транспорт сповіщень: що відомо з конфігурації, не більше. */
         NotificationTransportDto: {
@@ -11244,6 +15974,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfCollectionRunView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["CollectionRunView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfConsistencyIssueView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["ConsistencyIssueView"][];
@@ -11260,6 +16003,19 @@ export interface components {
         PagedResultOfDocumentSummary: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["DocumentSummary"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfNotificationDeliveryView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["NotificationDeliveryView"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
@@ -11391,6 +16147,21 @@ export interface components {
             cells: components["schemas"]["PatchCell"][];
             /** @description Ідентичність рядка. */
             rowKey: string;
+        };
+        /** @description Зміна одиниці джерела, що чекає рішення людини (ФВ-16.9). */
+        PendingSourceUnitChange: {
+            /** @description Одиниця, яку віддає джерело. */
+            actualUnitCode: string;
+            /**
+             * Format: int32
+             * @description Її id у довіднику; `null` — її спершу треба завести.
+             */
+            actualUnitId: null | number;
+            /**
+             * Format: date-time
+             * @description Коли збір це помітив.
+             */
+            detectedAt: string;
         };
         /** @description Правило доступу до періоду для відповіді API. */
         PeriodAccessRuleDto: {
@@ -11589,6 +16360,11 @@ export interface components {
              */
             presentationRevision: number;
         };
+        /** @description Тіло проби конфігурації мапінгу (ФВ-13.17). */
+        ProbeDataSourceRequest: {
+            /** @description Шлях мапінгу в джерелі, від 1 до 500 символів. */
+            path: null | string;
+        };
         ProblemDetails: {
             detail?: null | string;
             instance?: null | string;
@@ -11688,6 +16464,11 @@ export interface components {
              */
             effectiveFrom: null | string;
         };
+        /** @description Запит на публікацію чернетки опису. */
+        PublishRegistryDefinitionRequest: {
+            /** @description Версія чернетки, яку публікують. */
+            rowVersion: string;
+        };
         /** @description Запит на публікацію версії. */
         PublishVersionRequest: {
             /** @description Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —
@@ -11770,6 +16551,41 @@ export interface components {
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
         };
+        /** @description Чернетка опису довідника. */
+        RegistryDefinitionDraftDto: {
+            /**
+             * Format: int32
+             * @description Версія опублікованого опису, від якої відштовхується чернетка.
+             */
+            baseDefinitionVersion: number;
+            /** @description Поля чернетки. */
+            fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Причина зміни. */
+            reason: string;
+            /** @description Версія для наступного збереження чи публікації. */
+            rowVersion: string;
+            /** @description Правила чернетки. */
+            rules: components["schemas"]["RegistryRuleSaveDto"][];
+            /**
+             * Format: date-time
+             * @description Момент останнього збереження, UTC.
+             */
+            updatedAt: string;
+            /**
+             * Format: int32
+             * @description Хто зберіг востаннє.
+             */
+            updatedByUserId: number;
+        };
+        /** @description Стан чернетки опису довідника. */
+        RegistryDefinitionDraftStateResponse: {
+            /**
+             * Format: int32
+             * @description Поточна версія ОПУБЛІКОВАНОГО опису.
+             */
+            definitionVersion: number;
+            draft: null | components["schemas"]["RegistryDefinitionDraftDto"];
+        };
         /** @description Повний опис довідника для конструктора (`ФВ-8.12`): поля, зв'язки,
          *     правила, мапінг. */
         RegistryDefinitionDto: {
@@ -11835,6 +16651,43 @@ export interface components {
              * @description Запис.
              */
             id: number;
+        };
+        /** @description Помилка одного рядка імпорту записів довідника. */
+        RegistryEntryImportError: {
+            /** @description Поле, якого стосується помилка; `null` — помилка самого рядка (код,
+             *     дублікат), а не конкретного поля. */
+            field: null | string;
+            /** @description Код запису, як його записано у файлі. */
+            key: string;
+            /** @description Ключ тексту відмови в каталозі. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Номер рядка у файлі; заголовок — 1.
+             */
+            row: number;
+        };
+        /** @description Звіт імпорту записів довідника (`BE-24`, крок 3). */
+        RegistryEntryImportReport: {
+            /**
+             * Format: int32
+             * @description Нових записів.
+             */
+            added: number;
+            /** @description Чи записано зміни. */
+            applied: boolean;
+            /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
+            errors: components["schemas"]["RegistryEntryImportError"][];
+            /**
+             * Format: int32
+             * @description Наявних записів, для яких файл не передав жодного значення поля.
+             */
+            unchanged: number;
+            /**
+             * Format: int32
+             * @description Записів, у яких змінилося хоча б одне поле.
+             */
+            updated: number;
         };
         /** @description Створення або оновлення запису довідника. */
         RegistryEntryUpsertDto: {
@@ -12048,6 +16901,13 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** @description Запит на зміну назви шаблону. */
+        RenameTemplateRequest: {
+            /** @description Назва мовами каталогу; хоча б одна непорожня. */
+            nameL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Запит на відкриття поданого документа. */
         ReopenDocumentRequest: {
             /**
@@ -12069,7 +16929,8 @@ export interface components {
             reason: string;
             /**
              * Format: date-time
-             * @description До якого моменту період лишається відкритим; `null` — безстроково.
+             * @description До якого моменту період лишається відкритим; `null` — до кінця
+             *     поточної доби в поясі майданчика.
              */
             until: null | string;
         };
@@ -12083,6 +16944,16 @@ export interface components {
         ReplaceGrantsRequest: {
             /** @description Новий набір; порожній прибирає доступ ролі повністю. */
             grants: components["schemas"]["ResourceGrantDto"][];
+        };
+        /** @description Тіло заміни секрету. */
+        ReplaceNotificationChannelSecretRequest: {
+            /** @description Новий секрет; `null` або порожній — прибрати. */
+            secret: null | string;
+        };
+        /** @description Тіло заміни матриці правил. */
+        ReplaceNotificationRulesRequest: {
+            /** @description Заповнені клітинки; порожній перелік прибирає всі правила. */
+            rules: components["schemas"]["NotificationRuleView"][];
         };
         /** @description Запит на заміну набору ролей користувача. */
         ReplaceUserRolesRequest: {
@@ -12101,6 +16972,13 @@ export interface components {
             code: string;
             /** @description Тип значення: `text`, `number` або `date`. */
             kind: string;
+            /** @description Підписи колонки мовами каталогу (`R9`); `null` — колонка
+             *     підписується КОДОМ, тобто рівно як до `R9`. У JSON опису поля тоді
+             *     немає взагалі, і `ColumnsJson` лишається побайтно тим самим.
+             *     ⚠ На `rpt.ReportRow` і на `ContentHash` не впливає — це подання. */
+            nameL10n?: null | {
+                [key: string]: string;
+            };
         };
         /** @description Опис звіту разом із його версіями. */
         ReportDefinitionDto: {
@@ -12130,6 +17008,35 @@ export interface components {
             /** @description Параметри звіту — `@Name`. */
             parameters: null | components["schemas"]["ReportSymbolDeclaration"][];
         };
+        /** @description Макет зрізу (`RulesJson`, схема 2, секція `layout`). */
+        ReportLayoutCommand: {
+            /** @description Код колонки групування; `null` — плаский перелік, і тоді підсумки, якщо
+             *     вони задані, дають один підсумковий рядок. */
+            groupBy?: null | string;
+            /**
+             * @description Чи малювати рядок заголовка групи.
+             * @default false
+             */
+            showGroupHeader: boolean;
+            /** @description Підсумки в порядку опису. */
+            totals?: null | components["schemas"]["ReportTotalCommand"][];
+        };
+        /** @description Оголошення параметра звіту в описі версії (`RulesJson`, схема 2). */
+        ReportParameterCommand: {
+            /** @description Ім'я параметра без `@`; у виразі — `@Code`. */
+            code: string;
+            /** @description Значення, яке бере побудова, коли параметр не переданий; JSON-значення
+             *     оголошеного типу (дата — рядком). */
+            default?: unknown;
+            /**
+             * @description Чи побудова без значення неможлива. `Required` разом із `Default` —
+             *     законна пара: замовчування і є тим значенням, без якого не будують.
+             * @default false
+             */
+            required: boolean;
+            /** @description `Number`, `Text`, `Boolean` або `Date`; регістр не важить. */
+            type: string;
+        };
         /** @description Правило рядка зрізу: «умова → значення» або «умова → приховати рядок» (`D-52a`). */
         ReportRuleCommand: {
             /** @description Дія: рівно одна з `set` і `hideRow`. */
@@ -12152,6 +17059,11 @@ export interface components {
         };
         /** @description Правила відбору рядків зрізу. */
         ReportRulesCommand: {
+            layout?: null | components["schemas"]["ReportLayoutCommand"];
+            /** @description Параметри звіту (схема 2, `R6`): на них посилаються вирази правил як
+             *     `@Code`, а значення задаються при побудові зрізу. У JSON схеми 1 поля
+             *     немає взагалі. */
+            parameters?: null | components["schemas"]["ReportParameterCommand"][];
             /** @description Звідки беруться рядки. Єдине відоме будівнику значення —
              *     string ReportDefinitionSpec.CalculationResults. */
             rowSource: string;
@@ -12172,6 +17084,10 @@ export interface components {
             builtAt: string;
             /** @description Контрольна сума вмісту в hex; `null` — не рахувалася. */
             contentHash: null | string;
+            /** @description Яким форматом пораховано суму: `current`, `legacy` (до BE-17) або
+             *     `unknown` — формат ще не визначено (старий зріз, який не звіряли й не
+             *     класифікувала нічна задача; зріз без суми; вміст не збігся за жодним форматом). */
+            hashFormat?: string;
             /**
              * Format: int64
              * @description Ідентифікатор зрізу.
@@ -12209,6 +17125,13 @@ export interface components {
             /** @description `Number`, `Text`, `Boolean` або `Date`. */
             type: string;
         };
+        /** @description Підсумок над колонкою зрізу. */
+        ReportTotalCommand: {
+            /** @description Код ОПИСАНОЇ колонки версії. */
+            column: string;
+            /** @description Функція: `sum`, `count`, `avg`, `min`, `max`. */
+            fn: string;
+        };
         /** @description Версія опису звіту. */
         ReportVersionDto: {
             /** @description Опис колонок зрізу. */
@@ -12226,7 +17149,7 @@ export interface components {
             /** @description Правила відбору рядків. */
             rulesJson: string;
             /** @description `Draft` або `Published`. Зріз будується ЛИШЕ за опублікованою
-             *             (Task&lt;int?&gt; IReportDefinitionStore.FindCurrentVersionIdAsync(string code, CancellationToken ct)). */
+             *             (Task&lt;ReportVersionRef?&gt; IReportDefinitionStore.FindCurrentVersionAsync(string code, CancellationToken ct)). */
             status: string;
             /** @description Номер версії; унікальний у межах опису. */
             version: string;
@@ -12238,6 +17161,11 @@ export interface components {
          * @enum {unknown}
          */
         RequiredInputSeverity: "Block" | "Warn";
+        /** @description Адміністративне скидання пароля (BE-12). */
+        ResetPasswordRequest: {
+            /** @description Разовий пароль; власник змінить його при першому вході. */
+            newPassword: string;
+        };
         /** @description Ресурсний грант у вигляді, придатному для передавання. */
         ResourceGrantDto: {
             /** @description Явна заборона; перекриває будь-який дозвіл (ФВ-6.6). */
@@ -12302,6 +17230,13 @@ export interface components {
             /** @description Права ролі. */
             permissions: string[];
         };
+        /** @description Доданий або видалений рядок. */
+        RowChangeDto: {
+            /** Format: int64 */
+            rowId: number;
+            rowKey: string;
+            tableCode: string;
+        };
         /** @description Рядок у відповіді на запис/читання через цей обробник. */
         RowDefDto: {
             /** Format: int32 */
@@ -12353,6 +17288,75 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Одна комбінація значень (коди, не числа звітності) і що з нею роблять правила. */
+        RuleCoverageCombinationDto: {
+            /**
+             * Format: int32
+             * @description Кількість документів.
+             */
+            documents: number;
+            /** @description Усі збіжні правила; після переможця — нічия або затінені. */
+            matchedRuleCodes: string[];
+            /**
+             * Format: int64
+             * @description Кількість рядків.
+             */
+            rows: number;
+            /** @description Стан. */
+            state: components["schemas"]["RuleCoverageState"];
+            /** @description Значення в порядку `ColumnDefIds`; `null` — порожньо. */
+            values: string[];
+            /** @description Правило-переможець; `null` для розриву. */
+            winnerRuleCode: null | string;
+        };
+        /** @description Матриця покриття «рядки реальних даних × правила» версії методології. */
+        RuleCoverageDto: {
+            /** @description Колонки осі — ті, що згадують правила; порядок значень у комбінації. */
+            columnDefIds: number[];
+            /** @description Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків. */
+            combinations: components["schemas"]["RuleCoverageCombinationDto"][];
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            methodologyVersionId: number;
+            /**
+             * Format: int32
+             * @description Нижня межа вікна періодів (включно), фактично застосована.
+             */
+            periodFrom: number;
+            /**
+             * Format: int32
+             * @description Верхня межа (включно).
+             */
+            periodTo: number;
+            /** @description Активні правила в порядку пріоритету. */
+            rules: components["schemas"]["RuleCoverageRuleDto"][];
+            /** @description Таблиці, рядки яких бралися. */
+            tableDefIds: number[];
+            /** @description Комбінацій більше за стелю; показано найчисленніші. */
+            truncated: boolean;
+        };
+        /** @description Правило осі матриці. */
+        RuleCoverageRuleDto: {
+            /** @description Код правила. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Пріоритет; менше — вищий.
+             */
+            priority: number;
+        };
+        /**
+         * @description Стан комбінації значень у матриці покриття (ФВ-13.9).
+         * @enum {unknown}
+         */
+        RuleCoverageState: "Gap" | "Conflict" | "Covered";
+        /** @description Запит на прогін перевірки узгодженості. */
+        RunConsistencyCheckRequest: {
+            /** @description Причина; обов'язкова, потрапляє в журнал безпеки (`aud.SecurityEvent`). */
+            reason: string;
+        };
         /** @description Запит на прив'язку виходу методології до колонки документа. */
         SaveCalculationBindingRequest: {
             /** @description Вимкнена прив'язка не бере участі в прогоні. Законна одразу: її заводять
@@ -12413,6 +17417,33 @@ export interface components {
              */
             unitId: null | number;
         };
+        /** @description Тіло створення і зміни джерела. */
+        SaveDataSourceRequest: {
+            /** @description Каталог або база джерела. */
+            catalog?: null | string;
+            /** @description Код джерела; при зміні ігнорується. */
+            code: null | string;
+            /** @description Адреса або рядок з'єднання — без облікових даних. */
+            endpoint: null | string;
+            /**
+             * @description Чи збирати з джерела; при створенні ігнорується.
+             * @default true
+             */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Стеля паралельних звернень; `null` — типова.
+             */
+            maxParallel?: null | number;
+            /** @description Назва мовами каталогу; хоча б одна мова. */
+            nameL10n: null | {
+                [key: string]: string;
+            };
+            /** @description Запасна адреса; `null` — немає. */
+            secondaryEndpoint?: null | string;
+            /** @description Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`. */
+            transport: components["schemas"]["ExternalTransport"];
+        };
         /** @description Налаштування формули чернетки (`W5.3`). */
         SaveFormulaDefRequest: {
             /** @description Діалект, за яким читається вираз. */
@@ -12454,10 +17485,10 @@ export interface components {
              */
             validTo: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Число; обов'язкове для `Numeric`.
              */
-            value: null | number;
+            value: null | string;
         };
         /** @description Запит на запис формули версії-чернетки. */
         SaveMethodologyFormulaRequest: {
@@ -12527,12 +17558,12 @@ export interface components {
             /** @description Вхід прогону у формі `CalculationInput`. */
             inputJson: string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Допуск порівняння; нуль — точна рівність. ⚠ Потрібен саме тому, що числа
              *     рахуються з округленням: очікувати побітової рівності означало б червоний
              *     тест від зміни порядку доданків.
              */
-            tolerance: number;
+            tolerance: string;
         };
         /** @description Вид і налаштування нового правила доступу до періоду (`ФВ-2.15`). */
         SavePeriodAccessRuleRequest: {
@@ -12578,6 +17609,17 @@ export interface components {
              * @description Для `EditablePeriodOnly`: до якого номера періоду.
              */
             toSequence: null | number;
+        };
+        /** @description Запит на збереження чернетки опису (`BE-24` крок 2). */
+        SaveRegistryDefinitionDraftRequest: {
+            /** @description Повний перелік полів після правки. */
+            fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Причина зміни; при публікації йде в журнал. */
+            reason: string;
+            /** @description Версія чернетки, від якої відштовхується правка; `null` — чернетки ще немає. */
+            rowVersion: null | string;
+            /** @description Повний перелік правил після правки. */
+            rules: components["schemas"]["RegistryRuleSaveDto"][];
         };
         /** @description Запит на збереження опису довідника. */
         SaveRegistryDefinitionDto: {
@@ -12637,10 +17679,10 @@ export interface components {
             /** @description `null`/порожнє — шрифт теми за замовчуванням. */
             fontName: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description `null` — розмір теми за замовчуванням.
              */
-            fontSize: null | number;
+            fontSize: null | string;
             /**
              * Format: int32
              * @description Колір тексту, ARGB.
@@ -12734,6 +17776,20 @@ export interface components {
             scope: number;
             /** @description Рівень: `Info`, `Warning`, `Error`. */
             severity: components["schemas"]["ValidationSeverity"];
+        };
+        /** @description Один збіг пошуку палітри. Маршрут будує клієнт за Kind. */
+        SearchHitDto: {
+            /** @description Код; для документа — `BusinessKey`. */
+            code: string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор сутності.
+             */
+            id: number;
+            /** @description `document`, `template` або `registry`. */
+            kind: string;
+            /** @description Назва мовою запиту; немає назви — код. */
+            title: string;
         };
         /** @description Запит на зміну отримання алертів. */
         SetAlertsRequest: {
@@ -12853,7 +17909,7 @@ export interface components {
             /** @description Різниця з чинною опублікованою версією. Порожня — версія нічого не змінює;
              *     саме це і треба бачити перед публікацією (`ФВ-9.6`). */
             diffWithPublished: {
-                [key: string]: number;
+                [key: string]: string;
             };
             /** @description Чи зійшовся набір цілком. ⛔ Порожній набір — **не** зелений: «тестів
              *     немає, отже все гаразд» — саме та підміна, через яку публікація без
@@ -12861,7 +17917,7 @@ export interface components {
             isGreen: boolean;
             /** @description Код виходу → значення й одиниця. */
             outputs: {
-                [key: string]: number;
+                [key: string]: string;
             };
             /** @description Вердикт кожного тесту золотого набору (`ФВ-13.7`) — тим самим правилом,
              *     яким публікація вирішує, чи набір зелений. */
@@ -12890,6 +17946,11 @@ export interface components {
             code: string;
             /** @description Тип значення: `text`, `number`, `date`. */
             kind: string;
+            /** @description Підпис колонки мовою запиту (`R9`), уже з розгорнутим фолбеком
+             *     `мова → en → код` (ReportColumnNames). ⚠ Ніколи
+             *     не порожній: опис без назв підписує колонку її КОДОМ, тож споживачеві не
+             *     треба знати про фолбек і тримати другу його копію. */
+            name: string;
         };
         /** @description Рядок зрізу. */
         SnapshotRow: {
@@ -12903,17 +17964,53 @@ export interface components {
              */
             rowNo: number;
         };
+        /** @description Група рядків зрізу (`R8`, макет з однією групою). */
+        SnapshotRowGroup: {
+            /** @description Код колонки групування. */
+            column: string;
+            /**
+             * Format: int32
+             * @description Скільки рядків у групі. ⚠ По ВСЬОМУ зрізу — групи можуть не вміститися в
+             *     одну сторінку, і саме за цим числом книга знає, де група закінчується.
+             */
+            rowCount: number;
+            /** @description Підсумки цієї групи; порожньо — підсумків не оголошено. */
+            totals: components["schemas"]["SnapshotTotal"][];
+            /** @description Значення колонки, спільне для рядків групи; `null` — порожнє. */
+            value: unknown;
+        };
         /** @description Сторінка рядків зрізу. */
         SnapshotRowsPage: {
             /** @description Колонки в порядку опису версії. */
             columns: components["schemas"]["SnapshotColumn"][];
+            /** @description Групи макета по ВСЬОМУ зрізу в порядку показу; `null` — версія
+             *     групування не оголошує. */
+            groups?: null | components["schemas"]["SnapshotRowGroup"][];
             /**
              * Format: int32
              * @description Курсор наступної сторінки; `null` — рядків більше немає.
              */
             nextCursor: null | number;
-            /** @description Рядки за зростанням `RowNo`. */
+            /** @description Рядки за зростанням `RowNo`, а з макетом (`R8`) — у порядку груп. */
             rows: components["schemas"]["SnapshotRow"][];
+            /**
+             * @description Чи показувати рядок заголовка групи. ⚠ Групи й підсумки рахуються по ВСЬОМУ
+             *     зрізу й тому приходять однакові на кожній сторінці: підсумок, що міняється
+             *     від сторінки до сторінки, не є підсумком.
+             * @default false
+             */
+            showGroupHeader: boolean;
+            /** @description Підсумки по ВСЬОМУ зрізу; `null` — версія підсумків не оголошує. */
+            totals?: null | components["schemas"]["SnapshotTotal"][];
+        };
+        /** @description Порахований підсумок. */
+        SnapshotTotal: {
+            /** @description Код колонки. */
+            column: string;
+            /** @description Функція: `sum`, `count`, `avg`, `min`, `max`. */
+            fn: string;
+            /** @description Значення; `null` — рахувати не було з чого. */
+            value: unknown;
         };
         /** @description Підсумок перевірки зрізу. */
         SnapshotVerifyResponse: {
@@ -12927,10 +18024,37 @@ export interface components {
             /** @description Сума, записана при побудові (hex). */
             stored: string;
         };
+        /** @description Позиція каталогу джерела: елемент або атрибут. */
+        SourceCatalogItem: {
+            /** @description Ім'я в джерелі. */
+            code: string;
+            /** @description Тип значення в термінах джерела. */
+            dataType: null | string;
+            /** @description Опис із джерела. */
+            displayName: null | string;
+            /** @description `Element` або `Attribute`. */
+            kind: string;
+            /** @description Шлях в ієрархії AF. */
+            path: null | string;
+            /** @description UOM джерела; `null` — джерело одиниці не назвало. */
+            unitSymbol: null | string;
+        };
+        /** @description Сторінка каталогу; `NextCursor``null` — сторінка остання. */
+        SourceCatalogPage: {
+            items: components["schemas"]["SourceCatalogItem"][];
+            nextCursor: null | string;
+        };
         /** @description Сутність збору разом зі станом останнього прогону. */
         SourceEntityStatus: {
             /** @description Код у джерелі. */
             code: string;
+            /** @description Код цього з'єднання. */
+            dataSourceCode: string;
+            /**
+             * Format: int32
+             * @description З'єднання, якому належить сутність.
+             */
+            dataSourceId: number;
             /** @description Підпис для конфігуратора. */
             displayName: null | string;
             /** @description Шлях в ієрархії джерела. */
@@ -12950,6 +18074,30 @@ export interface components {
             oldestGap: null | string;
             /** @description Транспорт джерела (ФВ-11.2). */
             transport: string;
+        };
+        /** @description Наслідок пробного читання одного значення мапінгу (ФВ-13.17). */
+        SourcePathProbeResult: {
+            /** @description `false` — шлях є в каталозі джерела, але в пробному вікні
+             *             (int ProbeSourcePathHandler.ProbeWindowDays) для нього немає жодної точки. */
+            hasValue: boolean;
+            /** @description Шлях, який пробували. */
+            path: string;
+            /** @description Якість у термінах джерела. */
+            quality: null | string;
+            /**
+             * Format: date-time
+             * @description Мітка часу прочитаної точки; `null` — bool SourcePathProbeResult.HasValue хибне.
+             */
+            timestamp: null | string;
+            /** @description UOM джерела; `null` — джерело одиниці не назвало. */
+            unitSymbol: null | string;
+            /**
+             * Format: decimal
+             * @description Числове значення в одиниці джерела.
+             */
+            valueNumeric: null | string;
+            /** @description Текстове значення для нечислових атрибутів. */
+            valueString: null | string;
         };
         /** @description Запит на початок симуляції. */
         StartSimulationRequest: {
@@ -13005,8 +18153,8 @@ export interface components {
             borderJson: null | string;
             code: string;
             fontName: null | string;
-            /** Format: double */
-            fontSize: null | number;
+            /** Format: decimal */
+            fontSize: null | string;
             /** Format: int32 */
             foregroundArgb: null | number;
             /** Format: uint8 */
@@ -13204,6 +18352,28 @@ export interface components {
              */
             warningCount: null | number;
         };
+        /** @description Картка шаблону. */
+        TemplateCard: {
+            /** @description Код — бізнес-ключ; <b>незмінний</b>. */
+            code: string;
+            /**
+             * Format: date-time
+             * @description Момент створення, UTC.
+             */
+            createdAt: string;
+            /** @description Скільки всього посилається на шаблон. */
+            dependents: components["schemas"]["TemplateDependents"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description `false` — шаблон архівований: для нових документів не пропонується,
+             *             наявні працюють далі. */
+            isActive: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
         TemplateChangeDto: {
             /** @description Клас ризику; `Breaking` у версії з документами — відмова. */
             changeClass: components["schemas"]["ChangeClass"];
@@ -13244,6 +18414,29 @@ export interface components {
             ordinal: number;
             /** @description Позначення одиниці, якщо задана. */
             unitSymbol: null | string;
+        };
+        /** @description Скільки всього посилається на шаблон — ціна архівування. */
+        TemplateDependents: {
+            /**
+             * Format: int32
+             * @description Документів у цих проєктах.
+             */
+            documents: number;
+            /**
+             * Format: int32
+             * @description Проєктів, прив'язаних до будь-якої з версій.
+             */
+            projects: number;
+            /**
+             * Format: int32
+             * @description Із них опублікованих.
+             */
+            publishedVersions: number;
+            /**
+             * Format: int32
+             * @description Версій шаблону всього.
+             */
+            versions: number;
         };
         /** @description Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,
          *     `RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б
@@ -13361,15 +18554,15 @@ export interface components {
         /** @description Одна розбіжність: очікували одне, отримали інше. */
         TestCaseMismatch: {
             /**
-             * Format: double
+             * Format: decimal
              * @description Що вийшло; `null` — виходу не було взагалі.
              */
-            actual: null | number;
+            actual: null | string;
             /**
-             * Format: double
+             * Format: decimal
              * @description Що мало вийти.
              */
-            expected: number;
+            expected: string;
             /** @description Який вихід розійшовся. */
             outputCode: string;
             /**
@@ -13380,10 +18573,10 @@ export interface components {
              */
             substanceEntryId: null | number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Допуск порівняння; нуль означає точний збіг.
              */
-            tolerance: number;
+            tolerance: string;
         };
         /** @description Вердикт одного тесту золотого набору. */
         TestCaseVerdict: {
@@ -13393,6 +18586,11 @@ export interface components {
             isGreen: boolean;
             /** @description Розбіжності; порожньо, якщо тест зелений. */
             mismatches: components["schemas"]["TestCaseMismatch"][];
+        };
+        /** @description Тіло перевірки з'єднання. */
+        TestDataSourceRequest: {
+            /** @description Причина; обов'язкова, потрапляє в журнал безпеки. */
+            reason: string;
         };
         /**
          * @description Рівень деталізації трейсу розрахунку (ЗБР-3).
@@ -13436,6 +18634,45 @@ export interface components {
         UiStringCoverageResponse: {
             /** @description Увімкнені мови в порядку показу. */
             languages: components["schemas"]["UiStringCoverageDto"][];
+        };
+        /** @description Помилка одного рядка імпорту. */
+        UiStringImportError: {
+            /** @description Ключ, як його записано у файлі. */
+            key: string;
+            /** @description Ключ тексту відмови в каталозі. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Номер запису у файлі; заголовок — 1.
+             */
+            row: number;
+        };
+        /** @description Звіт імпорту перекладу. */
+        UiStringImportReport: {
+            /**
+             * Format: int32
+             * @description Нових перекладів.
+             */
+            added: number;
+            /** @description Чи записано зміни. */
+            applied: boolean;
+            /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
+            errors: components["schemas"]["UiStringImportError"][];
+            /**
+             * Format: int32
+             * @description Версія каталогу після імпорту.
+             */
+            revision: number;
+            /**
+             * Format: int32
+             * @description Тих самих, що вже в базі.
+             */
+            unchanged: number;
+            /**
+             * Format: int32
+             * @description Змінених.
+             */
+            updated: number;
         };
         /** @description Адміністративний перелік рядків мови — без fallback. */
         UiStringListResponse: {
@@ -13488,6 +18725,43 @@ export interface components {
              */
             tableDefId: number;
         };
+        /** @description Одиниця для форми редагування — з усім, що форма показує, і версією. */
+        UnitDetail: {
+            /** @description Код; не редагується. */
+            code: string;
+            /**
+             * Format: uint8
+             * @description Розмірність; не редагується.
+             */
+            dimensionId: number;
+            /**
+             * Format: decimal
+             * @description Множник переходу до базової одиниці.
+             */
+            factorToBase: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /** @description Базова одиниця розмірності; її коефіцієнти не редагуються. */
+            isBase: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: decimal
+             * @description Зсув переходу до базової одиниці.
+             */
+            offsetToBase: string;
+            /** @description Версія вмісту; повертається заголовком `If-Match`. */
+            rowVersion: string;
+            /** @description Позначення мовами каталогу. */
+            symbolL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Одиниця довідника. */
         UnitRef: {
             /** @description Код: `kg`, `t`, `m3`. */
@@ -13503,22 +18777,22 @@ export interface components {
              */
             dimensionId: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Множник переходу до базової одиниці розмірності.
              * @default 1
              */
-            factorToBase: number;
+            factorToBase: string;
             /**
              * Format: int32
              * @description Ідентифікатор.
              */
             id: number;
             /**
-             * Format: double
+             * Format: decimal
              * @description Зсув до базової; ненульовий лише в температури.
              * @default 0
              */
-            offsetToBase: number;
+            offsetToBase: string;
         };
         /** @description Поле джерела, яке не лягає нікуди. */
         UnmappedSourceField: {
@@ -13534,6 +18808,21 @@ export interface components {
             pointCount: number;
             /** @description Шлях атрибута в джерелі. */
             sourcePath: string;
+        };
+        /** @description Тіло зміни розкладу. */
+        UpdateCollectionScheduleRequest: {
+            /** @description Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`. */
+            cron: string;
+            /** @description Чи має розклад стояти в планувальнику. */
+            isEnabled: boolean;
+        };
+        /** @description Тіло зміни каналу. */
+        UpdateNotificationChannelRequest: {
+            /** @description Чи ввімкнений. */
+            isEnabled: boolean;
+            /** @description Назва. */
+            name: string;
+            settings?: null | components["schemas"]["NotificationChannelSettingsInput"];
         };
         /** @description Прив'язка й поведінка наявного правила доступу до періоду (`ФВ-2.15`). */
         UpdatePeriodAccessRuleRequest: {
@@ -13579,11 +18868,32 @@ export interface components {
              */
             yearGraceOffsetDays: number;
         };
+        /** @description Запит на зміну одиниці. */
+        UpdateUnitRequest: {
+            /**
+             * Format: decimal
+             * @description Множник; змінюється лише в одиниці без посилань.
+             */
+            factorToBase: string;
+            /** @description Назва мовами каталогу. */
+            nameL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: decimal
+             * @description Зсув; змінюється лише в одиниці без посилань.
+             */
+            offsetToBase: string;
+            /** @description Позначення мовами каталогу. */
+            symbolL10n: {
+                [key: string]: string;
+            };
+        };
         /** @description Одне місце, що посилається на ресурс. */
         UsageItemDto: {
             /** @description Ідентифікатор залежного об'єкта — рядком, бо ключі різних таблиць різного типу. */
             id: string;
-            /** @description Рід залежного об'єкта (`templateColumn`, `methodologyConstant`…). */
+            /** @description Рід залежного об'єкта — одне зі значень UsageKinds. */
             kind: string;
             /** @description Те, чим об'єкт упізнає людина: код. */
             label: string;
@@ -13609,6 +18919,23 @@ export interface components {
              */
             userId: number;
         };
+        /** @description Блокування або розблокування запису (BE-12). */
+        UserLockRequest: {
+            /** @description Причина; обов'язкова, до 400 символів, іде в журнал безпеки. */
+            reason: string;
+        };
+        /** @description Одне налаштування у відповіді API. */
+        UserPreferenceDto: {
+            /** @description Ключ. */
+            key: string;
+            /**
+             * Format: date-time
+             * @description Коли змінено востаннє, UTC.
+             */
+            updatedAt: string;
+            /** @description Значення — довільний JSON, який поклав клієнт. */
+            value: components["schemas"]["JsonElement"];
+        };
         /** @description Обліковий запис у переліку. */
         UserView: {
             /** @description Ім'я для показу. */
@@ -13626,6 +18953,11 @@ export interface components {
             isBootstrapAdmin: boolean;
             /** @description Заблокований після невдалих спроб. */
             isLockedOut: boolean;
+            /**
+             * Format: date-time
+             * @description Останній успішний вхід (UTC); `null` — не входив ніколи (BE-12).
+             */
+            lastSignInAt: null | string;
             /** @description Пароль виданий разово. */
             mustChangePassword: boolean;
             /** @description Провайдер входу. */

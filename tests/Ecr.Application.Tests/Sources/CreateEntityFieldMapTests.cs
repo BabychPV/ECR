@@ -163,6 +163,7 @@ public sealed class CreateEntityFieldMapTests
             () => Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.SourceEntityNotFound, ex.ErrorCode);
+        Assert.Equal("err.ECR-INT-0404.sourceEntity", ex.Details!["messageKey"]);
     }
 
     [Fact]
@@ -176,6 +177,8 @@ public sealed class CreateEntityFieldMapTests
             () => Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.EntityFieldMapTargetNotFound, ex.ErrorCode);
+        Assert.Equal("err.ECR-INT-0405.column", ex.Details!["messageKey"]);
+        Assert.Equal("100", ex.Details!["columnDefId"]);
 
         // ⛔ Запис не мав статися: перевірка цілі йде ДО AddFieldMapAsync, а не
         // «спробувати й відкотити» — сховище не має транзакції для одного INSERT.
@@ -196,6 +199,7 @@ public sealed class CreateEntityFieldMapTests
             () => Handler().HandleAsync(SourceEntityId, command, CancellationToken.None));
 
         Assert.Equal(ErrorCodes.EntityFieldMapTargetNotFound, ex.ErrorCode);
+        Assert.Equal("err.ECR-INT-0405.registryField", ex.Details!["messageKey"]);
     }
 
     [Fact]
@@ -210,6 +214,8 @@ public sealed class CreateEntityFieldMapTests
                 SourceEntityId, ColumnCommand(sourceUnitId: 11), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.UnitNotFound, ex.ErrorCode);
+        Assert.Equal("err.ECR-UOM-0404.unitId", ex.Details!["messageKey"]);
+        Assert.Equal("11", ex.Details!["id"]);
     }
 
     [Fact]
@@ -221,6 +227,7 @@ public sealed class CreateEntityFieldMapTests
             () => Handler().HandleAsync(SourceEntityId, ColumnCommand(targetColumnDefId: null), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.RequestInvalid, ex.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.entityFieldMapColumnRequired", ex.Details!["messageKey"]);
     }
 
     [Fact]
@@ -235,6 +242,7 @@ public sealed class CreateEntityFieldMapTests
             () => Handler().HandleAsync(SourceEntityId, command, CancellationToken.None));
 
         Assert.Equal(ErrorCodes.RequestInvalid, ex.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.entityFieldMapColumnExtraField", ex.Details!["messageKey"]);
     }
 
     [Fact]
@@ -242,9 +250,13 @@ public sealed class CreateEntityFieldMapTests
     [Trait("Requirement", "ECR-REQ-0422")]
     public async Task Порожнє_поле_джерела_відхиляється()
     {
+        // ⛔ Мутаційний доказ (`err.ECR-REQ-0422.entityFieldMapSourceField`):
+        // прибери `messageKey` з кидка в `CreateEntityFieldMapHandler.HandleAsync`
+        // — це твердження, і лише воно, червоніє; ErrorCode лишається тим самим.
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(SourceEntityId, ColumnCommand(sourceField: "  "), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.RequestInvalid, ex.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.entityFieldMapSourceField", ex.Details!["messageKey"]);
     }
 }

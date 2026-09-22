@@ -3,6 +3,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Units;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Units;
@@ -68,7 +69,7 @@ public sealed class CreateUnitHandler(
         if (clash is not null)
         {
             throw new BusinessRuleException(
-                "ECR-UOM-4091",
+                ErrorCodes.UnitCodeTaken,
                 $"Одиниця «{unitCode.Value}» уже існує (ідентифікатор {clash.Id}).",
                 new Dictionary<string, object?>
                 {
@@ -92,7 +93,7 @@ public sealed class CreateUnitHandler(
                 + "нуль згортає конверсію до константи, від'ємний — перевертає знак величини.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-UOM-0422",
+                    ["messageKey"] = "err.ECR-UOM-0422.factorMustBePositive",
                     ["code"] = unitCode.Value,
                     ["factorToBase"] = factorToBase.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
@@ -101,7 +102,7 @@ public sealed class CreateUnitHandler(
         if (!await units.DimensionExistsAsync(dimensionId, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
-                "ECR-UOM-4041", $"Розмірності з ідентифікатором {dimensionId} немає в довіднику.");
+                ErrorCodes.UnitDimensionNotFound, $"Розмірності з ідентифікатором {dimensionId} немає в довіднику.");
         }
 
         var unit = new Unit(

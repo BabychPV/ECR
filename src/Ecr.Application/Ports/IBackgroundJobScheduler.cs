@@ -173,33 +173,46 @@ public sealed record JobListFilter(
 /// <param name="Percent">Прогрес у відсотках.</param>
 /// <param name="UpdatedAt">Момент останнього оновлення в UTC.</param>
 /// <param name="StartedAt">
-/// Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC.
-/// <para>
-/// ⚠ Поле називається <c>StartedAt</c>, а не <c>CreatedAt</c>, бо саме це
-/// зберігає стовпець: <c>JobProgress.Begin</c> перезаписує його в момент
-/// запуску (<c>IntegrationLogs.cs</c>). Назва «створено» була б неправдою
-/// для кожної задачі, що вже почала працювати, а окремого стовпця з
-/// моментом постановки в <c>itg.JobProgress</c> немає.
-/// </para>
+/// Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC
+/// (<c>JobProgress.Begin</c> перезаписує його). Момент постановки — <paramref name="CreatedAt"/>.
 /// </param>
-/// <remarks>
-/// ⚠ Поля <c>Message</c> тут НЕМАЄ, хоч воно й лежить у тому самому рядку
-/// <c>itg.JobProgress</c>. Причина не в даних, а в резолві: повідомлення —
-/// структурований конверт, який локалізується мовою ЧИТАЧА (<c>Q-326</c>), а
-/// <c>JobProgressMessageResolver</c> приймає рядок по одному й на кожен
-/// виклик відкриває з'єднання по ревізію каталогу
-/// (<c>UiStringCatalogStore.LoadAsync</c>). Півсотні рядків переліку, який
-/// клієнт опитує кожні три секунди, коштували б півсотні з'єднань на запит.
-/// Щоб віддати повідомлення в переліку, резолверу потрібна форма, яка приймає
-/// ВЖЕ завантажений каталог, — окремий PR.
-/// </remarks>
+/// <param name="Attempt">Номер спроби від 1; <c>null</c> — ще не стартувала (BE-08).</param>
+/// <param name="CorrelationId">Кореляція з логом і запитом-постановником (BE-08).</param>
+/// <param name="CreatedByDisplayName">Ім'я автора; <c>null</c> — системна задача (BE-08).</param>
+/// <param name="Message">
+/// Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться
+/// ОДИН раз на весь перелік (<c>JobProgressMessageResolver.ResolveManyAsync</c>),
+/// а не на кожен рядок.
+/// </param>
+/// <param name="CreatedAt">Перша постановка в чергу, UTC; <c>null</c> — розклад (BE-08).</param>
+/// <param name="ErrorCode">Код каталогу помилок провалу (BE-08).</param>
+/// <param name="DocumentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
+/// <param name="MaxAttempts">
+/// Спроб загалом, як у <see cref="JobStatus.MaxAttempts"/>; рядок переліку завжди
+/// з журналу, тож від сховища — завжди число, <c>null</c> лише від інших реалізацій.
+/// </param>
+/// <param name="ResultUrl">Як <see cref="JobStatus.ResultUrl"/> (UX-09).</param>
+/// <param name="CreatedByUserId">
+/// Id автора; <c>null</c> — системна задача. Видимість та сама, що й
+/// <paramref name="CreatedByDisplayName"/> — клієнт вирішує показ «Повторити».
+/// </param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
     string State,
     int Percent,
     DateTime UpdatedAt,
-    DateTime StartedAt);
+    DateTime StartedAt,
+    int? Attempt = null,
+    string? CorrelationId = null,
+    string? CreatedByDisplayName = null,
+    string? Message = null,
+    DateTime? CreatedAt = null,
+    string? ErrorCode = null,
+    long? DocumentId = null,
+    int? MaxAttempts = null,
+    string? ResultUrl = null,
+    int? CreatedByUserId = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
@@ -215,7 +228,42 @@ public interface IJobProgress
 }
 
 /// <summary>Стан фонової задачі.</summary>
-public sealed record JobStatus(string JobId, string State, int Percent, string? Message, string? Error);
+/// <param name="JobId">Ідентифікатор.</param>
+/// <param name="State">Стан.</param>
+/// <param name="Percent">Прогрес у відсотках.</param>
+/// <param name="Message">Повідомлення прогресу.</param>
+/// <param name="Error">Текст провалу.</param>
+/// <param name="Attempt">Номер спроби від 1; <c>null</c> — ще не стартувала (BE-08).</param>
+/// <param name="CorrelationId">Кореляція з логом і запитом-постановником (BE-08).</param>
+/// <param name="MaxAttempts">
+/// Скільки спроб задача має загалом: перша + автоматичні ретраї (BE-08);
+/// <c>null</c> — стан не з журналу (<c>Unknown</c>/<c>Unavailable</c>).
+/// </param>
+/// <param name="CreatedAt">Перша постановка в чергу, UTC; <c>null</c> — розклад (BE-08).</param>
+/// <param name="ErrorCode">Код каталогу помилок провалу (BE-08).</param>
+/// <param name="DocumentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
+/// <param name="ResultUrl">
+/// Відносний шлях API до файлу результату (книга експорту) — лише для
+/// <c>Succeeded</c> з файлом і читача з <c>Document.Export</c>; інакше <c>null</c> (UX-09).
+/// </param>
+/// <param name="CreatedByUserId">
+/// Id автора; <c>null</c> — системна задача. Заповнює <c>GetJobStatusHandler</c>:
+/// тіло бачить лише автор або власник <c>System.ViewHealth</c>.
+/// </param>
+public sealed record JobStatus(
+    string JobId,
+    string State,
+    int Percent,
+    string? Message,
+    string? Error,
+    int? Attempt = null,
+    string? CorrelationId = null,
+    int? MaxAttempts = null,
+    DateTime? CreatedAt = null,
+    string? ErrorCode = null,
+    long? DocumentId = null,
+    string? ResultUrl = null,
+    int? CreatedByUserId = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.
@@ -275,3 +323,20 @@ public interface IReportSnapshotJob : IBackgroundJob;
 
 /// <summary>Маркер задачі збору із зовнішнього джерела.</summary>
 public interface ICollectionJob : IBackgroundJob;
+
+/// <summary>
+/// Маркер нічної перевірки узгодженості — щоб її можна було запустити НА
+/// ВИМОГУ (<c>BE-30</c>, «Run check now»).
+/// </summary>
+/// <remarks>
+/// ⚠ Потрібен із тієї самої причини, що й решта маркерів: реалізація живе в
+/// <c>Ecr.Infrastructure</c>, якого прикладний шар не бачить.
+/// <para>
+/// ⚠ Розклад (<c>RecurringScheduleService</c>) ставить ТУ САМУ задачу за
+/// конкретним типом, а не за цим маркером, і <c>JobCode</c> у
+/// <c>itg.JobProgress</c> — це повне ім'я типу, яким задачу поставили. Тобто
+/// назв у черзі ДВІ, і той, хто шукає перевірку серед незавершених задач, має
+/// впізнавати обидві (<c>RunConsistencyCheckHandler.IsConsistencyCheckCode</c>).
+/// </para>
+/// </remarks>
+public interface IConsistencyCheckJob : IBackgroundJob;

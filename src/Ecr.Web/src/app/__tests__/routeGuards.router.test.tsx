@@ -1,10 +1,11 @@
 import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, Outlet, RouterProvider } from 'react-router-dom';
 import type { CurrentUserDto } from '@/api/types';
+import { ForbiddenPage } from '@/app/ForbiddenPage';
 import { RouteGuard } from '@/app/RouteGuard';
 import { routes } from '@/app/routes';
 import { MeQueryKey } from '@/shared/session/useSession';
@@ -24,6 +25,13 @@ import { theme } from '@/shared/theme/theme';
  * директива (A3) вимагає тестом: «користувач без ролі не потрапляє; з
  * роллю — потрапляє» — на СПРАВЖНЬОМУ маршрутизаторі (навігація за адресою,
  * не прямий рендер компонента), для трьох різних прав, не одного.
+ *
+ * ✎ **`UI-09`, L-правило про доступ.** Дерево несе ТАКОЖ `/403` зі
+ * справжньою `ForbiddenPage` (не маркер-заглушку, на відміну від
+ * `RouteGuard.test.tsx`, де перевіряється лише факт навігації): саме тут —
+ * доказ, якого вимагає завдання картки: «перехід на захищений маршрут без
+ * права → редирект на `/403`, сторінка показує причину» — на СПРАВЖНЬОМУ
+ * маршрутизаторі, не ізольовано.
  */
 
 function meWith(permissions: string[]): CurrentUserDto {
@@ -85,6 +93,7 @@ function buildRouter(initialPath: string): ReturnType<typeof createMemoryRouter>
               },
             ],
           },
+          { path: '403', element: <ForbiddenPage /> },
         ],
       },
     ],
@@ -92,18 +101,23 @@ function buildRouter(initialPath: string): ReturnType<typeof createMemoryRouter>
   );
 }
 
-function renderAt(path: string, me: CurrentUserDto): ReturnType<typeof render> {
+function renderAt(
+  path: string,
+  me: CurrentUserDto,
+): { view: ReturnType<typeof render>; router: ReturnType<typeof buildRouter> } {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(MeQueryKey, me);
   const router = buildRouter(path);
 
-  return render(
+  const view = render(
     <MantineProvider theme={theme}>
       <QueryClientProvider client={client}>
         <RouterProvider router={router} />
       </QueryClientProvider>
     </MantineProvider>,
   );
+
+  return { view, router };
 }
 
 const cases = [
@@ -125,26 +139,34 @@ describe.each(cases)('$path — право $permission', ({ path, testId, permis
   });
 
   it('користувач З правом переходить на маршрут і бачить сторінку', () => {
-    renderAt(path, meWith([permission]));
+    const { view, router } = renderAt(path, meWith([permission]));
 
-    expect(screen.getByTestId(testId).textContent?.length).toBeGreaterThan(0);
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(view.getByTestId(testId).textContent?.length).toBeGreaterThan(0);
+    expect(view.queryByRole('alert')).toBeNull();
+    expect(router.state.location.pathname).toBe(path);
   });
 
-  it('користувач БЕЗ права бачить явну відмову замість сторінки — не порожній екран, не мовчазний редирект', () => {
-    renderAt(path, meWith([]));
+  it('користувач БЕЗ права редиректиться на /403 і бачить явну відмову з причиною — не порожній екран, не мовчазний редирект', () => {
+    const { view, router } = renderAt(path, meWith([]));
 
-    expect(screen.queryByTestId(testId)).toBeNull();
+    expect(view.queryByTestId(testId)).toBeNull();
 
-    const denial = screen.getByRole('alert');
+    // ⚠ UI-09: раніше відмова рендерилась INLINE на адресі `path`; тепер це
+    // СПРАВЖНЯ навігація на `/403` (`RouteGuard.tsx`: `<Navigate .../>`) —
+    // перевіряється й адреса, і те, що причина (право) пережила перехід
+    // через `state`, а не згубилась на ньому.
+    expect(router.state.location.pathname).toBe('/403');
+
+    const denial = view.getByRole('alert');
     expect(denial.textContent).not.toBe('');
     expect(denial.textContent).toContain(permission);
   });
 
-  it('користувач з ІНШИМ правом (не тим, що вимагає маршрут) так само бачить відмову', () => {
-    renderAt(path, meWith(['Unrelated.Permission']));
+  it('користувач з ІНШИМ правом (не тим, що вимагає маршрут) так само редиректиться на /403', () => {
+    const { view, router } = renderAt(path, meWith(['Unrelated.Permission']));
 
-    expect(screen.queryByTestId(testId)).toBeNull();
-    expect(screen.getByRole('alert')).toBeTruthy();
+    expect(view.queryByTestId(testId)).toBeNull();
+    expect(router.state.location.pathname).toBe('/403');
+    expect(view.getByRole('alert')).toBeTruthy();
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState, type JSX } from 'react';
 import {
   Alert,
   Badge,
@@ -7,10 +7,11 @@ import {
   Modal,
   ScrollArea,
   Select,
+  Stack,
   Table,
   Text,
   TextInput,
-  Tooltip,
+  Textarea,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -35,6 +36,7 @@ import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
@@ -43,6 +45,103 @@ import { formatDateTime } from '@/shared/format';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+
+/**
+ * Поле дати — за `import()`, і не заради стилю.
+ *
+ * ⛔ `@mantine/dates` тягне за собою `dayjs`, і зі СТАТИЧНИМ імпортом він уже
+ * ламав гейт `D-132` на `SnapshotsPage` (259.3 КБ gzip проти межі 250). Поле
+ * з'являється лише в діалозі перевідкриття — тобто в дії, яку робить один
+ * адміністратор кілька разів на рік; вантажити `dayjs` усім, хто просто
+ * дивиться календар періодів, нема за що.
+ */
+const DateInput = lazy(async () => {
+  const module = await import('@mantine/dates');
+
+  return { default: module.DateInput };
+});
+
+/**
+ * Годинник зони майданчика — для МАШИННОГО читання складників, не для екрана.
+ *
+ * ⚠ Локаль тут стала (`en-US`) і це не порушення `D15-09`: з цього
+ * форматувальника беруться самі числа (`formatToParts`), і жоден його символ
+ * на екран не потрапляє. Правило про локаль продукту стосується того, що
+ * ЧИТАЄ людина.
+ *
+ * ⚠ `try` — бо `timeZoneId` приходить із СЕРВЕРА, а не з нашого коду:
+ * невідома `Intl` зона кидає `RangeError`, і без перехоплення один поганий
+ * рядок у проєкті знімав би всю сторінку. Запасний варіант названий (UTC), а
+ * не прихований.
+ */
+const zoneClocks = new Map<string, Intl.DateTimeFormat>();
+
+function zoneClock(timeZoneId: string): Intl.DateTimeFormat {
+  const hit = zoneClocks.get(timeZoneId);
+  if (hit !== undefined) return hit;
+
+  const options: Intl.DateTimeFormatOptions = {
+    hour12: false,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  };
+
+  let made: Intl.DateTimeFormat;
+
+  try {
+    made = new Intl.DateTimeFormat('en-US', { ...options, timeZone: timeZoneId });
+  } catch {
+    made = new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' });
+  }
+
+  zoneClocks.set(timeZoneId, made);
+
+  return made;
+}
+
+/** Зсув зони від UTC у мілісекундах САМЕ в цю мить (літній час — теж мить). */
+function zoneOffsetMs(instant: number, timeZoneId: string): number {
+  const parts = zoneClock(timeZoneId).formatToParts(new Date(instant));
+
+  const at = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value ?? '0');
+
+  // ⚠ `% 24`: за `h24` північ приходить як «24», і без цього доба з'їжджала б
+  // рівно на межі, заради якої вся функція й потрібна.
+  const wall = Date.UTC(at('year'), at('month') - 1, at('day'), at('hour') % 24, at('minute'), at('second'));
+
+  return wall - instant;
+}
+
+/**
+ * Обрана КАЛЕНДАРНА дата → момент, до якого період лишається відкритим.
+ *
+ * ⛔ Межа — північ НАСТУПНОЇ доби в поясі МАЙДАНЧИКА, тобто дослівно те саме,
+ * що рахує сервер за порожнього `until` (`ReopenPeriodHandler.EndOfSiteDay`,
+ * `local.Date.AddDays(1)` → UTC, `D-68`). Два інших очевидних варіанти —
+ * неправильні:
+ *  - `date.toISOString()` дає ПІВНІЧ ПОЧАТКУ обраної доби, тобто вікно
+ *    коротше на добу: «відкрити до 30 вересня» закрилося б 29-го ввечері;
+ *  - північ у поясі ТОГО, ХТО ДИВИТЬСЯ, розходиться з поясом майданчика рівно
+ *    на різницю зсувів — для проєкту на `Asia/Aqtau` (+05:00), відкритого з
+ *    Астани (+06:00), це година рівно там, де вирішується «встиг чи не встиг»
+ *    (той самий дефект, про який попереджає підпис поясу над таблицею).
+ *
+ * ⚠ Два наближення, а не одне: зсув залежить від моменту, а момент — від
+ * зсуву. Перше наближення міряє зсув по цей бік переходу на літній час, друге
+ * — по той; для зон без переходу обидва дають те саме.
+ */
+export function endOfSiteDayUtc(day: Date, timeZoneId: string): string {
+  const wall = Date.UTC(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  const first = wall - zoneOffsetMs(wall, timeZoneId);
+
+  return new Date(wall - zoneOffsetMs(first, timeZoneId)).toISOString();
+}
 
 /**
  * Проєкти і календар їхніх періодів.
@@ -79,6 +178,13 @@ export function PeriodsPage(): JSX.Element {
 
   // Який період відкриваємо; `null` — діалог закритий.
   const [reopening, setReopening] = useState<number | null>(null);
+
+  // Причина і строк перевідкриття. Обидва скидаються ПРИ ВІДКРИТТІ діалогу
+  // (`openReopen` нижче), а не при закритті: причина попереднього відкриття,
+  // що лишилася в полі, — найтихіший спосіб підписати цю дію поясненням від
+  // зовсім іншого періоду (той самий вибір, що й у `ReasonModal`).
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenUntil, setReopenUntil] = useState<Date | null>(null);
 
   // Який період фіксуємо як поточний; `null` — діалог закритий.
   const [pinning, setPinning] = useState<number | null>(null);
@@ -256,15 +362,26 @@ export function PeriodsPage(): JSX.Element {
    * закритий період.
    */
   const reopenPeriod = useMutation({
-    mutationFn: (target: { id: number; reason: string }) =>
+    mutationFn: (target: { id: number; reason: string; until: string | null }) =>
       apiFetch(`/api/v1/periods/${target.id}/reopen`, {
         method: 'POST',
         body: JSON.stringify({
           reason: target.reason,
 
-          // ⚠ Безстроково. Вікно з датою — окреме поле, і порожнє за
-          // замовчуванням воно означало б «відкрити назавжди» мовчки.
-          until: null,
+          /*
+           * ⛔ Тут стояв жорсткий `until: null` із коментарем «Безстроково»
+           * — обіцянка, якої сервер не виконує НІКОЛИ. За порожнього `until`
+           * `ReopenPeriodHandler` бере `EndOfSiteDay` (`D-68`), тобто період
+           * закривається сам опівночі в поясі майданчика; безстрокового
+           * відкриття не існує в принципі. Людина натискала «відкрити»,
+           * читала «безстроково» і дізнавалася про межу вже по факту —
+           * наступного ранку, коли період знову закритий.
+           *
+           * ⚠ Тепер `null` лишається ЗНАЧЕННЯМ, а не замовчуванням, про яке
+           * мовчать: порожнє поле строку означає рівно те, що зробить сервер,
+           * і підпис під полем каже це словами.
+           */
+          until: target.until,
         } satisfies ReopenPeriodRequest),
       }),
     onSuccess: async () => {
@@ -359,6 +476,40 @@ export function PeriodsPage(): JSX.Element {
       message: recalcJob.data?.error ?? t('workflow.recalcFailed'),
     });
   }, [recalcJobId, recalcOutcome, recalcJob.data?.error, queryClient]);
+
+  /*
+   * ⚠ Пояс МАЙДАНЧИКА, а не той, у якому сидить адміністратор: строк
+   * перевідкриття — момент, і сервер міряє його саме цим поясом (`D-68`).
+   *
+   * ⚠ `?? 'UTC'` — гілка, якої в житті немає: діалог відкривається лише з
+   * рядка календаря, тобто `periods.data` на той момент уже приїхав. Названа
+   * вона тому, що мовчазний запасний пояс був би найтихішою з можливих
+   * неправд про строк.
+   */
+  const siteZone = periods.data?.timeZoneId ?? 'UTC';
+
+  // Те, що поїде в тіло запиту. `null` — порожнє поле, тобто «до кінця доби
+  // майданчика» рішенням СЕРВЕРА, а не нашим.
+  const reopenUntilIso = reopenUntil === null ? null : endOfSiteDayUtc(reopenUntil, siteZone);
+
+  /*
+   * ⛔ Строк, який уже минув, на сервер не їде. Домен його НЕ відхиляє —
+   * `Period.Reopen` бере будь-який момент, — і наслідок гірший за відмову:
+   * період переходить у `Grace` із межею в минулому, тобто найближчий прогін
+   * `PeriodStateJob` закриє його назад, і на екрані це виглядатиме як
+   * «кнопка не спрацювала».
+   *
+   * ⚠ Межа звіряється з МОМЕНТОМ, а не з календарною датою: обрана СЬОГОДНІШНЯ
+   * дата дає кінець сьогоднішньої доби майданчика — він ще попереду, і
+   * забороняти його нема за що.
+   */
+  const reopenUntilPast = reopenUntilIso !== null && Date.parse(reopenUntilIso) <= Date.now();
+
+  const openReopen = (periodId: number): void => {
+    setReopenReason('');
+    setReopenUntil(null);
+    setReopening(periodId);
+  };
 
   const manages = can(session.data, 'Project.Manage');
   const configures = can(session.data, 'Period.Configure');
@@ -532,11 +683,13 @@ export function PeriodsPage(): JSX.Element {
                   чисел політики (мітка `+15/45` у формі створення проєкту
                   показує лише два з чотирьох, і НЕ тут). Тултипи нижче
                   підставляють РЕАЛЬНІ числа активної політики проєкту
-                  (`calendar.policy`), а не переказують ярлик. */}
+                  (`calendar.policy`), а не переказують ярлик.
+                  ⚠ `Hint` із `focusable`, а не `Tooltip`: заголовок — текст,
+                  він не в порядку табуляції, і `Tooltip` показував формулу
+                  лише під мишею. Тепер — фокус, наведення і `aria-describedby`. */}
               <Table.Th>
-                <Tooltip
-                  multiline
-                  w={320}
+                <Hint
+                  focusable
                   label={t('periods.rangeHint', {
                     open: calendar.policy.openOffsetDays,
                     hardClose: calendar.policy.hardCloseOffsetDays,
@@ -546,13 +699,12 @@ export function PeriodsPage(): JSX.Element {
                   <Text span td="underline dotted" fw={600} size="sm">
                     {t('periods.range')}
                   </Text>
-                </Tooltip>
+                </Hint>
               </Table.Th>
               <Table.Th>{t('periods.state')}</Table.Th>
               <Table.Th>
-                <Tooltip
-                  multiline
-                  w={320}
+                <Hint
+                  focusable
                   label={t('periods.graceHint', {
                     grace: calendar.policy.graceOffsetDays,
                     hardClose: calendar.policy.hardCloseOffsetDays,
@@ -562,7 +714,7 @@ export function PeriodsPage(): JSX.Element {
                   <Text span td="underline dotted" fw={600} size="sm">
                     {t('periods.grace')}
                   </Text>
-                </Tooltip>
+                </Hint>
               </Table.Th>
               <Table.Th />
             </Table.Tr>
@@ -648,7 +800,7 @@ export function PeriodsPage(): JSX.Element {
                       <Button
                         size="compact-xs"
                         variant="subtle"
-                        onClick={() => setReopening(period.id)}
+                        onClick={() => openReopen(period.id)}
                       >
                         {t('periods.reopen')}
                       </Button>
@@ -800,18 +952,85 @@ export function PeriodsPage(): JSX.Element {
         </Group>
       </Modal>
 
-      <ReasonModal
+      {/*
+        ⛔ Не `ReasonModal`, і це не дублювання заради дублювання: перевідкриття
+        збирає ДВА значення — причину і строк, — а `ReasonModal` приймає рівно
+        одне поле і живе в `shared/ui`, тобто розширювати його заради одного
+        екрана означало б платити всіма його споживачами. Поведінка причини
+        лишається та сама: поле обов'язкове, кнопка вимкнена, доки воно порожнє.
+      */}
+      <Modal
         opened={reopening !== null}
-        title={t('periods.reopen')}
-        label={t('workflow.reason')}
-        description={t('periods.reopenHint')}
-        confirmLabel={t('periods.reopen')}
-        isPending={reopenPeriod.isPending}
-        onConfirm={(reason) => {
-          if (reopening !== null) reopenPeriod.mutate({ id: reopening, reason });
-        }}
         onClose={() => setReopening(null)}
-      />
+        title={t('periods.reopen')}
+      >
+        <Stack gap="xs">
+          <Textarea
+            label={t('workflow.reason')}
+            description={t('periods.reopenHint')}
+            value={reopenReason}
+            onChange={(event) => setReopenReason(event.currentTarget.value)}
+            minRows={3}
+            autosize
+            data-autofocus
+          />
+
+          {/*
+            ⚠ `Suspense` із порожнім запасним вузлом: поле їде окремим чанком, і
+            «завантаження…» на ті мілісекунди читалося б як несправність. Тиху
+            втрату строку це не відкриває — порожнє поле й означає `null`, тобто
+            рівно те саме, що напис під ним обіцяє.
+
+            ⛔ НЕ `minDate`: він мовчки відкидав би набрану вручну минулу дату,
+            і людина бачила б порожнє поле без жодного слова про те, чому. Межу
+            тут стереже видима причина нижче, а не зникле значення.
+          */}
+          <Suspense fallback={null}>
+            <DateInput
+              label={t('periods.reopenUntil')}
+              description={t('periods.reopenUntilHint')}
+              // Формат заданий кодом — однозначний і не залежить від локалі ОС.
+              valueFormat="YYYY-MM-DD"
+              clearable
+              value={reopenUntil}
+              onChange={setReopenUntil}
+              /*
+               * ⚠ Причина — власний рядок каталогу, а не позичений підпис
+               * стану. Доти тут стояв `periods.reopenedUntil` («open until
+               * {until}»), бо свого рядка не було; він читається як «період
+               * відкрито до…», хоча період ще НЕ відкривали — тобто описує
+               * наслідок замість причини відмови.
+               *
+               * ⛔ Сам запобіжник не дублює сервер: `Period.Reopen` минулий
+               * строк приймає, і період пішов би в `Grace` із межею в минулому,
+               * а наступний прогін `PeriodStateJob` закрив би його — мовчки.
+               */
+              error={reopenUntilPast ? t('periods.reopenUntilPast') : undefined}
+            />
+          </Suspense>
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setReopening(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              disabled={reopenReason.trim().length === 0 || reopenUntilPast}
+              loading={reopenPeriod.isPending}
+              onClick={() => {
+                if (reopening !== null) {
+                  reopenPeriod.mutate({
+                    id: reopening,
+                    reason: reopenReason.trim(),
+                    until: reopenUntilIso,
+                  });
+                }
+              }}
+            >
+              {t('periods.reopen')}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <ReasonModal
         opened={pinning !== null}

@@ -48,6 +48,8 @@ public sealed class ListReportSnapshotsHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⚠ Позначку формату (`HashFormat`) перелік бере зі збереженої колонки й
+        // нічого не перераховує: перерахунок читає всі рядки зрізу (рішення 2026-09-21).
         return await snapshots
             .ListAsync(projectId, periodKey, VisibleProjects(profile), ct)
             .ConfigureAwait(false);
@@ -120,13 +122,21 @@ public sealed class BuildReportSnapshotHandler(
     /// <param name="code">Код звіту.</param>
     /// <param name="projectId">Проєкт.</param>
     /// <param name="periodKey">Період.</param>
+    /// <param name="parameters">
+    /// Значення параметрів звіту (<c>R6</c>) за іменем; <c>null</c> — жодного.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <returns>Ідентифікатор задачі.</returns>
     /// <exception cref="NotFoundException">Звіту з таким кодом немає.</exception>
     /// <exception cref="AccessDeniedException">
     /// Немає гранта на проєкт — <c>ECR-AUTH-0403</c> (Q-239).
     /// </exception>
-    public async Task<string> HandleAsync(string code, int projectId, int periodKey, CancellationToken ct)
+    /// <exception cref="BusinessRuleException">
+    /// Значення параметрів не сходяться з оголошеннями версії — <c>ECR-RPT-0422</c>.
+    /// </exception>
+    public async Task<string> HandleAsync(
+        string code, int projectId, int periodKey,
+        IReadOnlyDictionary<string, object?>? parameters, CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
 
@@ -150,14 +160,21 @@ public sealed class BuildReportSnapshotHandler(
         // дати 404 одразу, а не через хвилину у вигляді задачі, яка
         // «завершилася помилкою»: користувач не зрозуміє, що просто помилився
         // в коді.
-        var versionId = await definitions.FindCurrentVersionIdAsync(code, ct).ConfigureAwait(false)
-                        ?? throw new NotFoundException(
-                            ErrorCodes.ReportNotFound,
-                            $"Звіту «{code}» немає або в нього немає чинної версії.");
+        var version = await definitions.FindCurrentVersionAsync(code, ct).ConfigureAwait(false)
+                      ?? throw new NotFoundException(
+                          ErrorCodes.ReportNotFound,
+                          $"Звіту «{code}» немає або в нього немає чинної версії.");
+
+        // ⛔ R6: значення параметрів зводяться з оголошеннями ТУТ, а не в задачі.
+        // Невідоме ім'я чи відсутній обов'язковий параметр — це помилка ЗАПИТУ, і
+        // користувач мусить побачити 422 одразу. У задачі те саме перетворилося б
+        // на «задача завершилася помилкою» через хвилину, коли виправляти вже
+        // нема чого — запит давно повернув 202.
+        var bound = ReportParameters.Bind(ReportParameters.Of(version.RulesJson), parameters);
 
         return await jobs
             .EnqueueAsync<IReportSnapshotJob>(
-                new ReportSnapshotTask(versionId, projectId, periodKey), ct)
+                new ReportSnapshotTask(version.Id, projectId, periodKey, bound.Json), ct)
             .ConfigureAwait(false);
     }
 }
@@ -201,6 +218,13 @@ public sealed class VerifyReportSnapshotHandler(
         // перевіряти»: зріз без суми довести свою незмінність не може.
         var format = MatchedFormat(hashes);
 
+        // Визначений формат зберігається для переліку; уже відомий не перезаписується
+        // (умова `IS NULL` — у самому UPDATE, див. `RecordHashFormatAsync`).
+        if (format is not null)
+        {
+            await snapshots.RecordHashFormatAsync(snapshotId, format, ct).ConfigureAwait(false);
+        }
+
         return new SnapshotVerifyResponse(format is not null, hashes.Stored, hashes.Actual, format);
     }
 
@@ -214,8 +238,17 @@ public sealed class VerifyReportSnapshotHandler(
     /// </remarks>
     public const string FormatLegacy = "legacy";
 
-    private static string? MatchedFormat(SnapshotHashes hashes)
+    /// <summary>Формат ще не визначено (лише в переліку зрізів; у базі це <c>NULL</c>).</summary>
+    public const string FormatUnknown = "unknown";
+
+    /// <summary>
+    /// Формат, за яким збігся вміст; <c>null</c> — суми немає або не збіглося за жодним.
+    /// ⛔ Єдине визначення на продукт: ним користуються і звірка, і нічна класифікація.
+    /// </summary>
+    public static string? MatchedFormat(SnapshotHashes hashes)
     {
+        ArgumentNullException.ThrowIfNull(hashes);
+
         if (hashes.Stored.Length == 0)
         {
             return null;
@@ -272,9 +305,12 @@ public sealed class GetSnapshotRowsHandler(
             throw NotFound(snapshotId);
         }
 
+        // ⚠ Мова — та сама, якою відповідають решта ендпоінтів
+        // (`ICurrentUser.Language`: профіль → `Accept-Language` → `en`).
         return await snapshots
                    .RowsAsync(
-                       snapshotId, Math.Max(cursor ?? 0, 0), Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit), ct)
+                       snapshotId, Math.Max(cursor ?? 0, 0), Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit),
+                       currentUser.Language, ct)
                    .ConfigureAwait(false)
                ?? throw NotFound(snapshotId);
     }
@@ -304,4 +340,9 @@ public sealed record SnapshotVerifyResponse(bool Matches, string Stored, string 
 /// <param name="ReportVersionId">Версія звіту.</param>
 /// <param name="ProjectId">Проєкт.</param>
 /// <param name="PeriodKey">Період.</param>
-public sealed record ReportSnapshotTask(int ReportVersionId, int ProjectId, int PeriodKey);
+/// <param name="ParametersJson">
+/// Значення параметрів звіту (<c>R6</c>), уже зведені з оголошеннями версії;
+/// <c>null</c> — версія параметрів не оголошує.
+/// </param>
+public sealed record ReportSnapshotTask(
+    int ReportVersionId, int ProjectId, int PeriodKey, string? ParametersJson = null);

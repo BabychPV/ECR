@@ -24,6 +24,15 @@ GO
 --
 -- Той самий шлях, що для `aud.*` (11) і `sys_ecr.*` (08): таблиця поза
 -- моделлю EF створюється скриптом і перевіряється тестом фізичної моделі.
+--
+-- ⛔ Скрипт СТВОРЮЄ, але не переводить: `IF OBJECT_ID(...) IS NULL` означає, що
+-- на вже розгорнутій базі зміна типу тут не застосується сама. Для `D-148`
+-- (масштаб 10 → 16) це свідомо лишено так: `ALTER COLUMN` на columnstore з
+-- мільярдами рядків — операція обслуговування, а не побічний ефект
+-- розгортання. Розбіжність не тиха: `arc.usp_ArchiveYear` звіряє
+-- `SUM(ValueNumeric)` джерела й архіву і ЗУПИНЯЄТЬСЯ з «розбіжність
+-- контрольних сум» (`03-archive-proc.sql`, тест `ArchiveJobTests`). Переведення
+-- наявного архіву — окремий крок у вікні обслуговування.
 
 IF SCHEMA_ID(N'arc') IS NULL EXEC(N'CREATE SCHEMA arc');
 GO
@@ -64,7 +73,7 @@ CREATE TABLE arc.CellValue
     ColumnDefId          int            NOT NULL,
     TableDefId           int            NOT NULL,
     ValueString          nvarchar(1000) NULL,
-    ValueNumeric         decimal(28,10) NULL,
+    ValueNumeric         decimal(34,16) NULL,
     ValueDate            datetime2(3)   NULL,
     ValueBool            bit            NULL,
     ValueRegistryEntryId int            NULL,
@@ -106,7 +115,7 @@ CREATE TABLE arc.CalculationResult
     SourceRowKey         nvarchar(100)  NULL,
     SubstanceEntryId     int            NULL,
     OutputCode           nvarchar(64)   NOT NULL,
-    Value                decimal(28,10) NOT NULL,
+    Value                decimal(34,16) NOT NULL,   -- дзеркало calc.CalculationResult (D-148)
     UnitId               int            NOT NULL,
     INDEX CCI_arc_CalculationResult CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
@@ -122,7 +131,7 @@ CREATE TABLE arc.CalculationStep
     StepOrder        int            NOT NULL,
     StepCode         nvarchar(64)   NOT NULL,
     Expression       nvarchar(2000) NULL,
-    Value            decimal(28,10) NULL,
+    Value            decimal(34,16) NULL,       -- дзеркало calc.CalculationStep (D-148)
     TraceJson        nvarchar(max)  NULL,
     INDEX CCI_arc_CalculationStep CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];

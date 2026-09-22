@@ -208,7 +208,7 @@ describe('Клац по показнику фільтрує перелік', () 
     expect(screen.queryByRole('button', { name: /breaking/ })).toBeNull();
   });
 
-  it('підказка доїжджає в title, а без неї атрибута немає (D15-06)', () => {
+  it('підказка йде через спільний Hint (aria-describedby), а без неї — нічого зайвого', () => {
     const items: StatStripItems = [
       stat('issues', 7, { hint: 'Filter the list: validation errors' }),
       stat('drafts', 3),
@@ -217,7 +217,20 @@ describe('Клац по показнику фільтрує перелік', () 
     const container = show(<StatStrip label="Summary" items={items} />);
     const nodes = container.querySelectorAll('[data-stat]');
 
-    expect(nodes[0]?.getAttribute('title')).toBe('Filter the list: validation errors');
+    // ⛔ Голого `title` більше немає — `Hint` описує показник через
+    // `aria-describedby`, що вказує на прихований вузол із тим самим текстом.
+    expect(nodes[0]?.hasAttribute('title')).toBe(false);
+
+    const describedBy = nodes[0]?.getAttribute('aria-describedby') ?? null;
+    expect(describedBy).toBeTruthy();
+
+    // ⚠ `useId()` дає значення з двокрапками (`:r3c:`) — не валідний CSS-
+    // селектор без екранування, тож пошук іде через `getElementById`, не
+    // `querySelector('#...')`.
+    const description = describedBy === null ? null : container.ownerDocument.getElementById(describedBy);
+    expect(description?.textContent).toBe('Filter the list: validation errors');
+
+    expect(nodes[1]?.hasAttribute('aria-describedby')).toBe(false);
     expect(nodes[1]?.hasAttribute('title')).toBe(false);
   });
 });

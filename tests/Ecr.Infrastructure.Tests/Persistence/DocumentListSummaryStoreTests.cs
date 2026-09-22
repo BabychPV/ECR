@@ -77,7 +77,7 @@ public sealed class DocumentListSummaryStoreTests(SqlServerFixture sql)
         await ArrangeAsync(db, chain, validated, status: null, errors: 0, earlierErrors: 5);
 
         var page = await new DocumentStore(db).ListAsync(
-            chain.ProjectId, new PeriodKeyFilter(chain.PeriodKey.Value), new CursorRequest(Limit: 50),
+            chain.ProjectId, new PeriodKeyFilter(chain.PeriodKey.Value), default, new CursorRequest(Limit: 50),
             visibleProjectIds: null, CancellationToken.None);
 
         var never = page.Items.Single(d => d.Id == chain.DocumentId);

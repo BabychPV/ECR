@@ -20,6 +20,12 @@ export interface EcrProblem {
   errorCode: string;
   correlationId: string;
   extensions2?: Record<string, unknown>;
+  /**
+   * Лише для `429`: через скільки секунд сервер дозволяє повтор (`Retry-After`).
+   * Поля немає, якщо заголовка немає або він не є цілим невід'ємним числом
+   * секунд (HTTP-date свідомо не розбирається: сервер ECR шле секунди).
+   */
+  retryAfterSeconds?: number;
 }
 
 /** Виняток клієнта API. */
@@ -91,16 +97,82 @@ export function newCorrelationId(): string {
   return `cid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * Причина, з якої людину повели на вхід.
+ *
+ * `session-invalidated` — сервер обірвав ЧИННУ сесію штампом безпеки
+ * (`SecurityStampMiddleware`: змінилися гранти, пароль, блокування) і
+ * відповів `401` з тілом `ECR-AUTH-0401`. Без причини — звичайний `401`
+ * cookie-схеми без тіла: людина просто не входила.
+ */
+export type LoginReason = 'session-invalidated';
+
+/** Параметр адреси входу, що несе причину. */
+export const LOGIN_REASON_PARAM = 'reason';
+
+/** Адреса сторінки входу з поверненням і (необов'язковою) причиною. */
+export function loginUrl(from: string, reason?: LoginReason): string {
+  const base = `${LOGIN_PATH}?from=${encodeURIComponent(from)}`;
+  return reason === undefined ? base : `${base}&${LOGIN_REASON_PARAM}=${reason}`;
+}
+
 /** Куди перенаправляти при 401; підміняється в тестах. */
-let redirectToLogin: (from: string) => void = (from) => {
+let redirectToLogin: (from: string, reason?: LoginReason) => void = (from, reason) => {
   if (typeof window !== 'undefined') {
-    window.location.assign(`${LOGIN_PATH}?from=${encodeURIComponent(from)}`);
+    window.location.assign(loginUrl(from, reason));
   }
 };
 
+/**
+ * Чи це обрив чинної сесії, а не «не входив».
+ *
+ * ⚠ Розрізняє ТІЛО: cookie-схема на анонімний запит віддає `401` без тіла
+ * (`OnRedirectToLogin`), а штамп безпеки кидає `AccessDeniedException` з
+ * `ECR-AUTH-0401`, і `ExceptionHandlingMiddleware` пише `problem+json`.
+ * Читається `clone()` — оригінальне тіло лишається недоторканим.
+ */
+async function loginReasonOf(response: Response): Promise<LoginReason | undefined> {
+  try {
+    const body = (await response.clone().json()) as { errorCode?: unknown };
+    return body.errorCode === 'ECR-AUTH-0401' ? 'session-invalidated' : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Підміняє поведінку при 401 — для тестів і для роутера. */
-export function setLoginRedirect(handler: (from: string) => void): void {
+export function setLoginRedirect(handler: (from: string, reason?: LoginReason) => void): void {
   redirectToLogin = handler;
+}
+
+/**
+ * Хто має щось зробити ПЕРЕД перенаправленням на вхід.
+ *
+ * ⚠ Перенаправлення — повне перезавантаження сторінки, і все, що жило лише в
+ * пам'яті (незбережені правки сітки), зникає разом із ним. Хук — останній
+ * момент, коли про це ще можна залишити слід (`features/grid/lostEdits.ts`).
+ * Транспорт не знає, ЩО саме записується: напрямок залежності той самий, що й
+ * у `setRequestLanguageTag`.
+ */
+const beforeLoginRedirect = new Set<(from: string) => void>();
+
+/** Реєструє дію перед перенаправленням на вхід; повертає зняття. */
+export function onBeforeLoginRedirect(hook: (from: string) => void): () => void {
+  beforeLoginRedirect.add(hook);
+
+  return () => {
+    beforeLoginRedirect.delete(hook);
+  };
+}
+
+function runBeforeLoginRedirect(from: string): void {
+  for (const hook of beforeLoginRedirect) {
+    try {
+      hook(from);
+    } catch {
+      // Збій хука не має зірвати перенаправлення.
+    }
+  }
 }
 
 /**
@@ -158,6 +230,17 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 /**
+ * Сирий `Response` для тіл, що не є JSON (файли: CSV-вивантаження аудиту).
+ *
+ * ⚠ Той самий шлях, що й `apiFetch`: кореляція, `Accept-Language`, cookie,
+ * перенаправлення на 401 і розбір `problem+json` у `EcrApiError`. Тіло
+ * успішної відповіді НЕ читається — його читає викликач (`blob()`/`text()`).
+ */
+export async function apiFetchResponse(path: string, init?: RequestInit): Promise<Response> {
+  return apiFetchRaw(path, init, false);
+}
+
+/**
  * Спільна частина: кореляція, cookie, розбір відмови.
  *
  * ⚠ Виділена не заради стислості, а тому, що інакше умовний запит довелося б
@@ -210,7 +293,9 @@ async function apiFetchRaw(
   // отримував шансу спрацювати до навігації). Ендпоінти входу відповідають
   // за власний `401` самі — тут перенаправляти нема куди й нема чого.
   if (response.status === 401 && path !== '/api/v1/login/local' && path !== '/api/v1/login/windows') {
-    redirectToLogin(typeof window === 'undefined' ? path : window.location.pathname);
+    const from = typeof window === 'undefined' ? path : window.location.pathname;
+    runBeforeLoginRedirect(from);
+    redirectToLogin(from, await loginReasonOf(response));
     /*
      * ⛔ Заголовок — із КАТАЛОГУ, не літералом. Тут стояло «Потрібна
      * автентифікація» українською — мовою, якої в продукті немає (`D-95`:
@@ -320,6 +405,32 @@ export async function apiEnqueue(path: string, body?: unknown): Promise<Accepted
  * що заборонено (`07-checkpoints` Етап 6).
  */
 async function problemOf(response: Response, correlationId: string): Promise<EcrProblem> {
+  const retryAfterSeconds = retryAfterOf(response);
+  const problem = await problemBodyOf(response, correlationId);
+
+  // ⚠ Лише за наявності — та сама причина, що й для `type`/`detail` нижче.
+  if (retryAfterSeconds !== undefined) problem.retryAfterSeconds = retryAfterSeconds;
+
+  return problem;
+}
+
+/**
+ * `Retry-After` відповіді `429` у секундах, або `undefined`.
+ *
+ * ⚠ Заголовок — єдине місце, де сервер передає строк: у тілі `problem+json`
+ * його немає. Без цього поля клієнт міг би лише вгадувати, коли повторити.
+ */
+function retryAfterOf(response: Response): number | undefined {
+  if (response.status !== 429) return undefined;
+
+  const raw = response.headers.get('Retry-After')?.trim();
+  if (raw === undefined || !/^\d+$/.test(raw)) return undefined;
+
+  const seconds = Number(raw);
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
+}
+
+async function problemBodyOf(response: Response, correlationId: string): Promise<EcrProblem> {
   const fallback: EcrProblem = {
     title: `HTTP ${response.status}`,
     status: response.status,

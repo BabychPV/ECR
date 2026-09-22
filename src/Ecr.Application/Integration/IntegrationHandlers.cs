@@ -1,4 +1,5 @@
 // src/Ecr.Application/Integration/IntegrationHandlers.cs
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -49,7 +50,12 @@ public sealed class CollectFromSourceHandler(
         _ = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.SourceEntityNotFound,
-                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.");
+                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0404.sourceEntity",
+                    ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+                });
 
         return await jobs
             .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, fromUtc, toUtc), ct)
@@ -144,7 +150,9 @@ public sealed class GetJobStatusHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymous" });
 
         var status = await jobs.GetStatusAsync(jobId, ct).ConfigureAwait(false);
 
@@ -155,14 +163,19 @@ public sealed class GetJobStatusHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
+        var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+
         if (!profile.Has(Permission))
         {
-            var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
             if (createdByUserId != userId)
             {
                 throw new AccessDeniedException(
                     "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                    new Dictionary<string, object?> { ["permission"] = Permission });
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
+                        ["permission"] = Permission,
+                    });
             }
         }
 
@@ -170,7 +183,53 @@ public sealed class GetJobStatusHandler(
             .ResolveAsync(catalog, currentUser.Language, status.Message, ct)
             .ConfigureAwait(false);
 
-        return status with { Message = resolvedMessage };
+        return status with
+        {
+            Message = resolvedMessage,
+            ResultUrl = JobResultUrl.For(
+                profile, jobId, null, status.State, status.Message, status.DocumentId),
+            CreatedByUserId = createdByUserId,
+        };
+    }
+}
+
+/// <summary>
+/// Посилання на файл результату завершеної задачі (UX-09, «Мої задачі»):
+/// зараз — лише книга експорту, <c>GET /api/v1/documents/{id}/export/{exportId}</c>.
+/// </summary>
+/// <remarks>
+/// ⚠ Ключ файлу задача експорту кладе в повідомлення прогресу
+/// (<c>ExcelExportJob</c>, 32 hex-символи); тому посилання рахується з СИРОГО
+/// повідомлення, до резолвера каталогу. Видимість — функціональне право
+/// маршруту завантаження (<c>Document.Export</c>); грант на документ той
+/// маршрут перевіряє сам при завантаженні.
+/// </remarks>
+public static class JobResultUrl
+{
+    private static readonly string ExportCode = typeof(IExcelExportJob).FullName!;
+    private static readonly string ExportIdPrefix = nameof(IExcelExportJob) + "-";
+
+    /// <summary>Відносний шлях API до файлу або <c>null</c>.</summary>
+    public static string? For(
+        AccessProfile profile, string jobId, string? jobCode, string state, string? rawMessage, long? documentId)
+    {
+        var isExport = jobCode is null
+            ? jobId.StartsWith(ExportIdPrefix, StringComparison.Ordinal)
+            : string.Equals(jobCode, ExportCode, StringComparison.Ordinal);
+
+        if (!isExport
+            || !string.Equals(state, "Succeeded", StringComparison.Ordinal)
+            || documentId is not { } doc
+            || rawMessage is not { Length: 32 } exportId
+            || !exportId.All(Uri.IsHexDigit)
+            || !profile.Has(Documents.DownloadExportHandler.Permission))
+        {
+            return null;
+        }
+
+        return string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"/api/v1/documents/{doc}/export/{exportId}");
     }
 }
 
@@ -186,7 +245,8 @@ public sealed class GetJobStatusHandler(
 public sealed class ListJobsHandler(
     IBackgroundJobScheduler jobs,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IUiStringCatalog catalog)
 {
     /// <summary>Стеля переліку: більше — сторінка, якої тут немає навмисно.</summary>
     /// <remarks>
@@ -303,13 +363,29 @@ public sealed class ListJobsHandler(
         // числа в сигнатурі немає.
         var filter = new JobListFilter(state, code, mine ? userId : null);
 
-        return await jobs.ListRecentAsync(filter, limit ?? MaxLimit, ct).ConfigureAwait(false);
+        var items = await jobs.ListRecentAsync(filter, limit ?? MaxLimit, ct).ConfigureAwait(false);
+
+        var messages = await JobProgressMessageResolver
+            .ResolveManyAsync(catalog, currentUser.Language, [.. items.Select(i => i.Message)], ct)
+            .ConfigureAwait(false);
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        return
+        [
+            .. items.Select((item, i) => item with
+            {
+                Message = messages[i],
+                ResultUrl = JobResultUrl.For(
+                    profile, item.JobId, item.JobCode, item.State, item.Message, item.DocumentId),
+            }),
+        ];
     }
 }
 
 /// <summary>
 /// Ручний перезапуск проваленої фонової задачі. Право <c>System.ViewHealth</c>
-/// (директива №11, T10 #40).
+/// — або автор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).
 /// </summary>
 /// <remarks>
 /// ⛔ До цього обробника провалену задачу МІГ повторити лише автоматичний
@@ -319,11 +395,10 @@ public sealed class ListJobsHandler(
 /// з'єднання), не мала способу сказати системі «спробуй знову» — лишалося
 /// ставити нову задачу вручну й губити її історію прогресу.
 /// <para>
-/// ⚠ Право — <c>System.ViewHealth</c>, те саме, що й перегляд і перелік, а не
-/// право автора власної задачі (як у <see cref="GetJobStatusHandler"/>):
-/// перезапуск — мутація стану системи, а не читання власного результату, і
-/// призначений для того, хто відповідає за чергу, а не для будь-кого, хто її
-/// поставив.
+/// ⚠ Межа права — та сама, що в <see cref="CancelJobHandler"/> (Q-156):
+/// до UX-09 тут вимагався лише <c>System.ViewHealth</c>, і автор проваленого
+/// експорту бачив у шухляді «Мої задачі» кнопку «Повторити», яка давала 403.
+/// Чужі й системні задачі (автор <c>null</c>) — як і раніше, лише з правом.
 /// </para>
 /// </remarks>
 public sealed class RestartJobHandler(
@@ -332,7 +407,7 @@ public sealed class RestartJobHandler(
     ICurrentUser currentUser)
 {
     /// <summary>Код помилки: задачу можна перезапустити, лише коли вона провалилась.</summary>
-    public const string NotFailedErrorCode = "ECR-JOB-0409";
+    public const string NotFailedErrorCode = ErrorCodes.JobStateConflict;
 
     /// <summary>Перезапускає провалену задачу.</summary>
     /// <param name="jobId">Ідентифікатор задачі.</param>
@@ -343,22 +418,59 @@ public sealed class RestartJobHandler(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        await ListTemplatesHandler
-            .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
-            .ConfigureAwait(false);
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?>
+                         {
+                             ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite",
+                         });
 
+        // Існування ПЕРЕД правом — той самий порядок, що в `CancelJobHandler`.
         var status = await jobs.GetStatusAsync(jobId, ct).ConfigureAwait(false);
 
         if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
         {
-            throw new NotFoundException("ECR-JOB-0404", $"Задачі {jobId} не існує.");
+            throw new NotFoundException(
+                ErrorCodes.JobNotFound, $"Задачі {jobId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0404.job",
+                    ["jobId"] = jobId,
+                });
+        }
+
+        // Автор повторює СВОЮ задачу без `System.ViewHealth` (UX-09, «Мої
+        // задачі»); чужу чи системну (автор `null`) — лише з правом.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        if (!profile.Has(GetJobStatusHandler.Permission))
+        {
+            var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+
+            if (ownerId is null || ownerId.Value != userId)
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Потрібне право {GetJobStatusHandler.Permission}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
+                        ["permission"] = GetJobStatusHandler.Permission,
+                    });
+            }
         }
 
         if (!string.Equals(status.State, "Failed", StringComparison.Ordinal))
         {
             throw new BusinessRuleException(
                 NotFailedErrorCode,
-                $"Задача {jobId} у стані «{status.State}», перезапустити можна лише провалену.");
+                $"Задача {jobId} у стані «{status.State}», перезапустити можна лише провалену.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0409.notFailed",
+                    ["jobId"] = jobId,
+                    ["state"] = status.State,
+                });
         }
 
         var restarted = await jobs.RestartAsync(jobId, ct).ConfigureAwait(false);
@@ -369,8 +481,13 @@ public sealed class RestartJobHandler(
             // сховище Quartz В ПАМ'ЯТІ (D-66) і не пережило перезапуск процесу
             // між провалом і спробою перезапуску.
             throw new NotFoundException(
-                "ECR-JOB-0404",
-                $"Задачу {jobId} не можна перезапустити: деталі задачі не пережили перезапуск сервера.");
+                ErrorCodes.JobNotFound,
+                $"Задачу {jobId} не можна перезапустити: деталі задачі не пережили перезапуск сервера.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0404.restartUnavailable",
+                    ["jobId"] = jobId,
+                });
         }
     }
 }
@@ -416,7 +533,7 @@ public sealed class CancelJobHandler(
     /// підставляється різна, і шукати «звідки цей 409» треба від дії, а не від
     /// сусіднього обробника.
     /// </remarks>
-    public const string NotActiveErrorCode = "ECR-JOB-0409";
+    public const string NotActiveErrorCode = ErrorCodes.JobStateConflict;
 
     /// <summary>Стани, у яких задачу ще є що скасовувати.</summary>
     /// <remarks>
@@ -459,7 +576,7 @@ public sealed class CancelJobHandler(
         if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
         {
             throw new NotFoundException(
-                "ECR-JOB-0404", $"Задачі {jobId} не існує.",
+                ErrorCodes.JobNotFound, $"Задачі {jobId} не існує.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-JOB-0404.job",

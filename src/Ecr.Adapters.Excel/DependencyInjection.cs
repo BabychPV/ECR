@@ -31,6 +31,10 @@ public static class DependencyInjection
         services.AddScoped<IExcelExporter, ExcelExporter>();
         services.AddScoped<IExcelImporter, ExcelImporter>();
 
+        // Книга зрізу звітності (R7). Без стану і без портів — тому Singleton:
+        // усе, що їй треба, приходить аргументом.
+        services.AddSingleton<ISnapshotWorkbookWriter, SnapshotWorkbookWriter>();
+
         return services;
     }
 }

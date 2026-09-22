@@ -78,6 +78,65 @@ public interface ICollectionStore
     /// </summary>
     public Task<EntityFieldMap> AddFieldMapAsync(EntityFieldMap map, CancellationToken ct);
 
+    /// <summary>
+    /// Мапінг за ідентифікатором — <b>відстежуваний</b>; <c>null</c>, якщо
+    /// його немає (<c>BE-27</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Саме відстежуваний. Копія без відстеження прийняла б
+    /// <c>Pause()</c>/<c>Resume()</c>/<c>AcceptSourceUnitChange()</c> і не
+    /// записала б нічого: дія «пройшла б» і зникла.
+    ///
+    /// ⚠ Призупинені сюди теж потрапляють — інакше відновити мапінг було б
+    /// неможливо. Фільтр за <c>IsActive</c> стоїть у
+    /// <see cref="GetFieldMapsAsync"/>, тобто на шляху ЗБОРУ, а не на шляху
+    /// керування.
+    /// </remarks>
+    public Task<EntityFieldMap?> FindFieldMapAsync(int fieldMapId, CancellationToken ct);
+
+    /// <summary>
+    /// Ставить мапінг на паузу з позначкою «джерело змінило одиницю»
+    /// (<c>ФВ-16.9</c>); час позначки — годинник сховища.
+    /// </summary>
+    /// <param name="fieldMapId">Мапінг.</param>
+    /// <param name="actualUnitCode">Одиниця, яку віддає джерело.</param>
+    /// <param name="actualUnitId">Її id у довіднику; <c>null</c> — немає.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task PauseForSourceUnitChangeAsync(
+        int fieldMapId, string actualUnitCode, int? actualUnitId, CancellationToken ct);
+
+    /// <summary>Видаляє мапінг остаточно (<c>BE-27</c>).</summary>
+    /// <remarks>
+    /// ⚠ Видалення фізичне, і це безпечно рівно тому, що викликач пропускає
+    /// сюди лише мапінг БЕЗ зібраних даних (<see cref="CountCollectedAsync"/>):
+    /// <c>ext.RawDataPoint</c> не посилається на мапінг зовнішнім ключем —
+    /// точки адресуються парою «сутність + шлях», — тож м'яке видалення дало
+    /// б третій стан («видалений, але видимий») там, де вже є пауза.
+    /// </remarks>
+    public Task RemoveFieldMapAsync(EntityFieldMap map, CancellationToken ct);
+
+    /// <summary>
+    /// Скільки точок джерело вже віддало за полем цього мапінгу і коли —
+    /// наслідок видалення (<c>BE-27</c>).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="sourceField">Поле в джерелі (воно ж <c>SourcePath</c> точки).</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Рахується за парою «сутність + шлях», а не за посиланням на мапінг:
+    /// саме цією парою (разом із міткою часу) адресується <c>ext.RawDataPoint</c>.
+    /// </remarks>
+    public Task<CollectedFieldStats> CountCollectedAsync(
+        int sourceEntityId, string sourceField, CancellationToken ct);
+
+    /// <summary>Код одиниці довідника; <c>null</c>, якщо її немає.</summary>
+    /// <remarks>
+    /// ⚠ Потрібен журналу безпеки: через рік питання буде «з якої одиниці на
+    /// яку», і числовий ідентифікатор на нього не відповідає — довідник до
+    /// того часу може вже не мати цього рядка.
+    /// </remarks>
+    public Task<string?> FindUnitCodeAsync(int unitId, CancellationToken ct);
+
     /// <summary>Колонка-ціль існує і не м'яко видалена.</summary>
     public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct);
 
@@ -115,6 +174,8 @@ public interface ICollectionStore
 /// <param name="IsActive">Чи ввімкнено збір.</param>
 /// <param name="LastRun">Останній прогін; <c>null</c> — не збирали жодного разу.</param>
 /// <param name="OldestGap">Початок найстарішої непокритої прогалини; <c>null</c> — покриття суцільне.</param>
+/// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
+/// <param name="DataSourceCode">Код цього з'єднання.</param>
 public sealed record SourceEntityStatus(
     int Id,
     string Code,
@@ -123,7 +184,15 @@ public sealed record SourceEntityStatus(
     string Transport,
     bool IsActive,
     CollectionRunStatus? LastRun,
-    DateTime? OldestGap);
+    DateTime? OldestGap,
+    int DataSourceId,
+    string DataSourceCode);
+
+/// <summary>Що джерело вже віддало за одним полем мапінгу (<c>BE-27</c>).</summary>
+/// <param name="Points">Скільки точок у <c>ext.RawDataPoint</c>.</param>
+/// <param name="FirstAt">Мітка найстарішої точки; <c>null</c> — точок немає.</param>
+/// <param name="LastAt">Мітка найсвіжішої точки; <c>null</c> — точок немає.</param>
+public sealed record CollectedFieldStats(int Points, DateTime? FirstAt, DateTime? LastAt);
 
 /// <summary>Підсумок прогону збору.</summary>
 /// <param name="FinishedAt">Коли завершився; <c>null</c> — ще виконується.</param>

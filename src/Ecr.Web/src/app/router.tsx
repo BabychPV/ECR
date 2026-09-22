@@ -3,11 +3,13 @@ import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
+import { ForbiddenPage } from './ForbiddenPage';
 import { NotFoundPage } from './NotFoundPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
 import {
   AuditPage,
+  CampaignOverviewPage,
   ChangePasswordPage,
   ConsistencyIssuesPage,
   DocumentPage,
@@ -19,6 +21,7 @@ import {
   MethodologiesPage,
   MethodologyVersionsPage,
   MyGroupsPage,
+  NotificationsPage,
   PeriodsPage,
   RegistriesPage,
   RegistryConstructorPage,
@@ -55,6 +58,19 @@ import { childPath, relativePath, routes, type RouteHandle } from './routes';
 const LoginPage = lazy(async () => ({ default: (await import('@/pages/LoginPage')).LoginPage }));
 
 /**
+ * Картка шаблону (`UI-09`) — лінива, як і решта сторінок.
+ *
+ * ⚠ Оголошена ТУТ, а не в `routePrefetch.ts`, свідомо: той реєстр існує для
+ * прогріву за наміром із НАВБАРУ (`useRoutePrefetch`), а на цю сторінку
+ * заходять із рядка переліку шаблонів. Запис у реєстрі прогріву, якого ніхто
+ * не кличе, — це третій спосіб адресувати той самий маршрут без жодного
+ * споживача.
+ */
+const TemplateCardPage = lazy(async () => ({
+  default: (await import('@/pages/admin/TemplateCardPage')).TemplateCardPage,
+}));
+
+/**
  * Межа очікування для маршрутів поза каркасом.
  *
  * ⚠ Сторінка входу рендериться поза `AppLayout`, тобто поза його `<Suspense>`.
@@ -79,17 +95,6 @@ function Chunk({ children }: { children: JSX.Element }): JSX.Element {
   );
 }
 
-/**
- * Каталог компонентів — лише в розробці (модуль 7.8).
- *
- * ⛔ У збірці для розгортання маршруту НЕМАЄ взагалі, і це не про безпеку, а
- * про розмір і чесність: сторінка тягне всі спільні компоненти одразу, тобто
- * зводить нанівець сенс лінивих маршрутів, а в переліку адрес системи
- * з'явилася б сторінка, якої в системі немає.
- *
- * ⚠ Поза AppLayout: інакше вона потребувала б входу і була б недоступна саме
- * тоді, коли потрібна, — при налаштуванні вигляду на чистій машині.
- */
 /**
  * Обгортає елемент маршруту рольовим гардом (`PR nav-arch #4`, `Q-279`).
  *
@@ -129,6 +134,17 @@ export function withRenderErrorBoundary(children: RouteObject[]): RouteObject[] 
   return [{ errorElement: <RouteErrorPage />, children }];
 }
 
+/**
+ * Каталог компонентів — лише в розробці (модуль 7.8).
+ *
+ * ⛔ У збірці для розгортання маршруту НЕМАЄ взагалі, і це не про безпеку, а
+ * про розмір і чесність: сторінка тягне всі спільні компоненти одразу, тобто
+ * зводить нанівець сенс лінивих маршрутів, а в переліку адрес системи
+ * з'явилася б сторінка, якої в системі немає.
+ *
+ * ⚠ Поза AppLayout: інакше вона потребувала б входу і була б недоступна саме
+ * тоді, коли потрібна, — при налаштуванні вигляду на чистій машині.
+ */
 const devRoutes = import.meta.env.DEV
   ? [
       {
@@ -226,6 +242,31 @@ export const router = createBrowserRouter([
             // breadcrumbs читають назву шаблону саме з цього `handle`).
             handle: routes.adminTemplateSection.handle,
             children: [
+              /**
+               * Лист самої секції (`UI-09`): картка шаблону.
+               *
+               * ⛔ `index: true`, а не окремий запис реєстру: `routes.ts`
+               * стереже УНІКАЛЬНІСТЬ шляхів (`routeConfig.test.ts`), а шлях
+               * цього листа — рівно `adminTemplateSection.path`. Другий запис
+               * із тією самою адресою завалив би сторожа, і це правильно: дві
+               * назви однієї адреси — це початок розходження.
+               *
+               * ⛔ `handle` тут НЕ ставиться — і це не пропуск. `useMatches()`
+               * віддав би індексний матч із тим самим `pathname`, що й
+               * layout-вузол вище, тож `Breadcrumbs` (`key:
+               * `match:${pathname}``) отримав би ДВІ однакові крихти поспіль і
+               * два однакові ключі React. Назву шаблону в ланцюжок уже кладе
+               * сам `adminTemplateSection`.
+               *
+               * ⚠ `lazy()` стоїть тут, а не в `routePrefetch.ts`, з тієї самої
+               * причини, що й `LoginPage` вище: прогрів за наміром гріє пункти
+               * НАВБАРУ, а на цю сторінку заходять із переліку шаблонів, тобто
+               * з рядка таблиці — реєстру прогріву вона не потребує.
+               */
+              {
+                index: true,
+                element: guarded(routes.adminTemplateSection.handle, <TemplateCardPage />),
+              },
               {
                 path: relativePath(routes.adminTemplateVersion, 'admin/templates/:id'),
                 element: guarded(routes.adminTemplateVersion.handle, <TemplateVersionPage />),
@@ -295,6 +336,11 @@ export const router = createBrowserRouter([
             handle: routes.adminSnapshots.handle,
           },
           {
+            path: relativePath(routes.adminCampaign, 'admin'),
+            element: guarded(routes.adminCampaign.handle, <CampaignOverviewPage />),
+            handle: routes.adminCampaign.handle,
+          },
+          {
             path: relativePath(routes.adminAudit, 'admin'),
             element: guarded(routes.adminAudit.handle, <AuditPage />),
             handle: routes.adminAudit.handle,
@@ -315,12 +361,34 @@ export const router = createBrowserRouter([
             handle: routes.adminUiStrings.handle,
           },
           {
+            path: relativePath(routes.adminNotifications, 'admin'),
+            element: guarded(routes.adminNotifications.handle, <NotificationsPage />),
+            handle: routes.adminNotifications.handle,
+          },
+          {
             path: relativePath(routes.adminHealth, 'admin'),
             element: guarded(routes.adminHealth.handle, <HealthPage />),
             handle: routes.adminHealth.handle,
           },
         ],
       },
+
+      /**
+       * `/403` (`UI-09`, L-правило про доступ) — маршрут-ціль
+       * `<Navigate to="/403" .../>` із `RouteGuard.tsx`.
+       *
+       * ⚠ НЕ запис `routes.ts` — той самий інваріант, що й `path: '*'`
+       * нижче: реєстр стереже показ у навбарі/breadcrumbs/гарди для сторінок
+       * ЗАСТОСУНКУ, а `/403`, як і `/404`, — стан ПОМИЛКИ, не пункт меню
+       * (`routes.test.ts` читає лише `path:` літерали `routes.ts`, тому цей
+       * рядок і не мусить туди потрапляти — навмисно, не пропуск).
+       *
+       * ⛔ Без власного `guarded()`: сторінка відмови в доступі сама не
+       * вимагає права — інакше відмова в доступі до маршруту, куди
+       * перенаправляє відмова в доступі, дала б нескінченний цикл
+       * редиректів.
+       */
+      { path: '403', element: <ForbiddenPage /> },
 
       // ⛔ ОБОВ'ЯЗКОВО останній: `react-router` сортує дітей за специфічністю
       // незалежно від порядку оголошення, тож місце в масиві тут не впливає

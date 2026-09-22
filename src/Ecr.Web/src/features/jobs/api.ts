@@ -73,6 +73,26 @@ export function cancelJob(jobId: string): Promise<AcceptedJob> {
 }
 
 /**
+ * Просить сервер прогнати перевірку узгодженості зараз.
+ *
+ * ⛔ Знахідку узгодженості НЕ МОЖНА «взяти до відома» — це пряме рішення
+ * людини (`Q15-03`): вона зникає сама, коли наступна перевірка проходить. Тому
+ * прогін на вимогу — єдиний спосіб зняти з переліку знахідку, причину якої вже
+ * усунули; доти перевірка ходила лише за нічним розкладом, і полагоджене
+ * вранці лишалося червоним до наступної ночі.
+ *
+ * ⚠ Причина обов'язкова: прогін іде під правом `System.RunJob` і пишеться в
+ * журнал безпеки. Порожня — `422`; перевірка вже йде — `409` (`ECR-JOB-0409`)
+ * з `jobId` тієї задачі в розширеннях відмови.
+ *
+ * ⚠ Відповідь — `202`: повний обхід партицій у відповідь не вкладається. Стан
+ * дочитується тим самим `GET /api/v1/jobs/{jobId}`.
+ */
+export function runConsistencyCheck(reason: string): Promise<AcceptedJob> {
+  return apiEnqueue('/api/v1/consistency/run', { reason });
+}
+
+/**
  * Скасування задачі як мутація React Query.
  *
  * ⚠ `onSuccess` НЕ інвалідує стан задачі, а лишає це викликачеві: екран уже
@@ -91,6 +111,48 @@ export function useCancelJob(
     // ⛔ Причина показується кодом, а не «щось пішло не так»: `409`
     // (`ECR-JOB-0409`) означає «задача вже завершилась» — тобто кнопку треба
     // сховати, а не повторити спробу.
+    onError: showApiError,
+  });
+}
+
+/**
+ * Просить сервер повторити провалену задачу (UX-09).
+ *
+ * ⛔ Директива №11, T10 #40. Право `System.ViewHealth` — АБО автор ВЛАСНОЇ
+ * задачі (`JobsController.Restart`, `RestartJobHandler`). Клієнт рішення не
+ * дублює — але вже НЕ тому, що не може: комітом `a08ac58b` (22.09.2026)
+ * `createdByUserId` додано і до `JobStatus`, і до `JobSummary`. Кнопку й далі
+ * ховає той, хто її показує (`JobFacts.canRestartJob`/`JobRetry`) за
+ * прапорцем `isOwnJob`, який передає ВИКЛИКАЧ зі свого контексту (докладніше
+ * — докстрінг `JobRetry` у `JobFacts.tsx`), а не автоматичним порівнянням
+ * `createdByUserId` із сеансом — це свідомий вибір, а не прогалина. Сервер
+ * перевіряє власника заново. Порядок відмов — 404 → 403
+ * (`err.ECR-AUTH-0403.jobNotYours`) → 409 (задача не `Failed`).
+ *
+ * ⚠ Той самий `jobId`, не новий ідентифікатор: викликач, що вже опитує
+ * `GET /jobs/{jobId}`, продовжує стежити за тим самим прогресом.
+ *
+ * ⚠ `encodeURIComponent` — той самий привід, що в `cancelJob`: `jobId` має
+ * вигляд `IRecalculationJob#42`, і сирий `#` в URL обриває шлях на фрагменті
+ * (саме на цьому впав крок 17 `smoke.ps1`).
+ */
+export function restartJob(jobId: string): Promise<AcceptedJob> {
+  return apiEnqueue(`/api/v1/jobs/${encodeURIComponent(jobId)}/restart`);
+}
+
+/**
+ * Повторний запуск проваленої задачі як мутація React Query.
+ *
+ * ⚠ `onSuccess` НЕ інвалідує нічого сам: різні виклики (шухляда «My tasks»,
+ * картка `#/admin/jobs`) ведуть різні переліки з різними ключами запиту —
+ * інвалідація тут навмання дублювала б чи пропускала б ключ викликача.
+ */
+export function useRestartJob(
+  onRestarted?: () => void,
+): UseMutationResult<AcceptedJob, unknown, string> {
+  return useMutation({
+    mutationFn: restartJob,
+    onSuccess: () => onRestarted?.(),
     onError: showApiError,
   });
 }

@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, apiFetchResponse } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { CellChangePage } from '@/api/types';
 
@@ -136,6 +136,77 @@ export function structureChangesQuery(filter: StructureChangeFilter): string {
   }
 
   return params.toString();
+}
+
+/**
+ * Рядок запиту CSV-експорту: ті самі фільтри, що в переліку, але БЕЗ `limit` і
+ * `cursor` — експорт віддає всю видачу фільтра, а не сторінку.
+ */
+export function structureExportQuery(filter: StructureChangeFilter): string {
+  const params = new URLSearchParams(structureChangesQuery({ ...filter, cursor: null }));
+  params.delete('limit');
+
+  return params.toString();
+}
+
+/** Завантажений CSV: тіло й ім'я, яке запропонував сервер (або `null`). */
+export interface StructureExportFile {
+  readonly blob: Blob;
+  readonly fileName: string | null;
+}
+
+/**
+ * CSV журналу структурних змін (`BE-16`).
+ *
+ * ⛔ `fetch` → blob, а не посилання: за посиланням браузер показав би відмову
+ * (`422`, `403`) сирим JSON на порожній сторінці. Тут вона стає `EcrApiError`
+ * і показується `ErrorAlert`-ом із текстом сервера.
+ *
+ * ⚠ `method: 'GET'` названо явно: сторож `EndpointCoverageTests` виводить
+ * метод із назви функції, а `apiFetchResponse` у його переліку немає.
+ */
+export async function fetchStructureExport(filter: StructureChangeFilter): Promise<StructureExportFile> {
+  const query = structureExportQuery(filter);
+  const response = await apiFetchResponse(`/api/v1/audit/structure/export.csv?${query}`, {
+    method: 'GET',
+  });
+
+  return {
+    blob: await response.blob(),
+    fileName: fileNameOf(response.headers.get('Content-Disposition')),
+  };
+}
+
+/**
+ * Ім'я файлу з `Content-Disposition`; `filename*` (RFC 5987) має перевагу.
+ *
+ * ⚠ Шлях і керівні символи відкидаються: ім'я прийшло ззовні, а `download`
+ * зі слешем браузери трактують по-різному.
+ */
+export function fileNameOf(disposition: string | null): string | null {
+  if (disposition === null) return null;
+
+  const extended = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(disposition);
+  let name: string | null = null;
+
+  if (extended?.[1] !== undefined) {
+    try {
+      name = decodeURIComponent(extended[1].trim());
+    } catch {
+      name = null;
+    }
+  }
+
+  if (name === null) {
+    const plain = /filename\s*=\s*("([^"]*)"|[^;]+)/i.exec(disposition);
+    name = (plain?.[2] ?? plain?.[1])?.trim() ?? null;
+  }
+
+  if (name === null) return null;
+
+  const safe = name.replace(/[\\/\p{Cc}]/gu, '_').trim();
+
+  return safe.length > 0 ? safe : null;
 }
 
 /** Сторінка загального журналу структурних змін (`BE-16`). */

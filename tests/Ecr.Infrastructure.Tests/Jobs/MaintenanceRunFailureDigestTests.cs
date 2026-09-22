@@ -1,7 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/MaintenanceRunFailureDigestTests.cs
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
 using Ecr.Infrastructure.Integration;
 using Ecr.Infrastructure.Jobs;
+using Ecr.Infrastructure.Notifications;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -142,7 +144,7 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
             sender.IsConfigured.Returns(false);
 
             var notification = new NotificationJob(
-                digestDb, clock, new OutboxDispatcher(digestDb, clock, sender));
+                digestDb, clock, new OutboxDispatcher(digestDb, clock, sender), Channels(clock));
 
             await notification.ExecuteAsync(
                 null, Substitute.For<IJobProgress>(), CancellationToken.None);
@@ -198,5 +200,24 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
         await db.MaintenanceRuns
             .Where(r => r.StartedAt >= CleanupFrom)
             .ExecuteDeleteAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Диспетчер каналів (<c>BE-34</c>) із ПОРОЖНЬОЮ конфігурацією.
+    /// </summary>
+    /// <param name="clock">Той самий керований годинник.</param>
+    /// <remarks>
+    /// ⛔ Саме підміна, а не справжнє сховище. Тут перевіряється черга ПРОЦЕСУ,
+    /// а база в колекції <c>SqlServer</c> спільна: справжній знімок підхопив би
+    /// канали, заведені сусідніми класами, і дописав би їм рядки доставок —
+    /// тобто цей тест ламав би чужі твердження про власний журнал.
+    /// </remarks>
+    private static NotificationDispatcher Channels(IClock clock)
+    {
+        var store = Substitute.For<INotificationDispatchStore>();
+        store.GetPlanAsync(Arg.Any<CancellationToken>())
+            .Returns(new NotificationDispatchPlan("none", [], []));
+
+        return new NotificationDispatcher(store, [], clock);
     }
 }

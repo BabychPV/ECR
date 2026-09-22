@@ -4,6 +4,7 @@ using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Entities.Notifications;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -27,9 +28,19 @@ namespace Ecr.Infrastructure.Jobs;
 /// гіршою за її відсутність: події зникали б, а система рапортувала б про
 /// надіслані листи.
 /// </para>
+/// <para>
+/// ⚠ `BE-34`: поруч із чергою процесу стоїть розсилка КАНАЛАМИ з бази
+/// (<see cref="Notifications.NotificationDispatcher"/>). Це не другий транспорт
+/// «про всяк випадок»: конфігурація процесу (`Smtp:*`) — запасний шлях першого
+/// запуску, а канали заводить адміністратор в інтерфейсі, не чіпаючи
+/// розгортання. Тому обидва шляхи отримують ОДИН і той самий перелік збоїв.
+/// </para>
 /// </remarks>
 public sealed class NotificationJob(
-    EcrDbContext db, IClock clock, Integration.OutboxDispatcher outbox) : IBackgroundJob
+    EcrDbContext db,
+    IClock clock,
+    Integration.OutboxDispatcher outbox,
+    Notifications.NotificationDispatcher channels) : IBackgroundJob
 {
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "notification";
@@ -207,6 +218,29 @@ public sealed class NotificationJob(
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ `BE-34`. Одне повідомлення на ГРУПУ збоїв, а не на кожен збій — та
+        // сама причина, що й у черзі вище (`D-119`): лист на подію є шум, а шум
+        // вимикають разом із корисним. Груп рівно стільки, скільки різних подій
+        // матриці правил, бо адміністратор має змогу надіслати «збій збору» в
+        // один канал, а «збій задачі» — в інший.
+        foreach (var group in failures.GroupBy(f => EventKindOf(f.Kind)))
+        {
+            var lines = group
+                .Select(f => $"[{f.Kind}] {f.Subject}: {f.Status}. {f.Details}")
+                .ToList();
+
+            await channels
+                .DispatchAsync(
+                    new NotificationEvent(
+                        group.Key,
+                        NotificationSeverity.Error,
+                        EventKeyOf(group.Key, group.Select(f => f.Subject)),
+                        $"ECR: збоїв за період — {lines.Count}",
+                        string.Join(Environment.NewLine, lines)),
+                    ct)
+                .ConfigureAwait(false);
+        }
+
         await progress.ReportKeyAsync(80, "jobs.notificationSendingQueue", ct).ConfigureAwait(false);
 
         var (sent, pending) = await outbox.FlushAsync(ct).ConfigureAwait(false);
@@ -275,6 +309,51 @@ public sealed class NotificationJob(
         => CollectionFailure.IsAuthenticationRefusal(errorMessage)
             ? AuthenticationKind
             : CollectionKind;
+
+    /// <summary>
+    /// Подія матриці правил за видом рядка зведення (<c>BE-34</c>).
+    /// </summary>
+    /// <param name="digestKind">Вид рядка: <see cref="CollectionKind"/> та сусіди.</param>
+    /// <remarks>
+    /// ⚠ Збій ЗБОРУ і збій ЗАДАЧІ — різні події матриці, бо їх лікують різні
+    /// люди: перше — той, хто відповідає за джерело, друге — той, хто за
+    /// сервер. Відмова джерела в автентифікації (<see cref="AuthenticationKind"/>)
+    /// лишається збоєм збору: адресат той самий, хоч дія і термінова.
+    /// </remarks>
+    public static NotificationEventKind EventKindOf(string digestKind)
+        => digestKind is CollectionKind or AuthenticationKind
+            ? NotificationEventKind.CollectionFailed
+            : NotificationEventKind.JobFailed;
+
+    /// <summary>
+    /// Ключ дедуплікації: той самий НАБІР збоїв дає той самий ключ.
+    /// </summary>
+    /// <param name="kind">Подія матриці правил.</param>
+    /// <param name="subjects">Що саме збоїло — джерела, коди задач.</param>
+    /// <remarks>
+    /// ⛔ Довгий набір згортається у відбиток, а НЕ обрізається. Обрізання дало
+    /// б один ключ різним наборам збоїв: новий збій, що не вліз у двісті
+    /// символів, придушувався б як «та сама подія» — тиха втрата рівно того
+    /// сповіщення, заради якого все це й існує.
+    /// </remarks>
+    public static string EventKeyOf(NotificationEventKind kind, IEnumerable<string> subjects)
+    {
+        ArgumentNullException.ThrowIfNull(subjects);
+
+        var joined = string.Join(
+            "|", subjects.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+        var key = $"{kind}:{joined}";
+
+        if (key.Length <= NotificationDelivery.EventKeyMaxLength)
+        {
+            return key;
+        }
+
+        var digest = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(joined));
+
+        return $"{kind}:{Convert.ToHexString(digest)[..32]}";
+    }
 
     /// <summary>Налаштування серіалізації зведення; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);

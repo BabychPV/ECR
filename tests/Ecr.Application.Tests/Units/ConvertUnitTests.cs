@@ -44,6 +44,7 @@ public sealed class ConvertUnitTests
             () => Handler().HandleAsync(1m, "kg", "m3", default));
 
         Assert.Equal("ECR-UOM-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-UOM-0422.incompatibleDimensions", error.Details?["messageKey"]);
     }
 
     [Fact]
@@ -64,6 +65,8 @@ public sealed class ConvertUnitTests
 
         Assert.Equal("ECR-UOM-0422", error.ErrorCode);
         Assert.Contains("broken", error.Message, StringComparison.Ordinal);
+        Assert.Equal("err.ECR-UOM-0422.zeroFactor", error.Details?["messageKey"]);
+        Assert.Equal("broken", error.Details?["code"]);
 
         await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(1_000_000m, "broken", "kg", default));
@@ -81,6 +84,8 @@ public sealed class ConvertUnitTests
             () => Handler().HandleAsync(2m, "kg", "broken", default));
 
         Assert.Equal("ECR-UOM-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-UOM-0422.zeroFactor", error.Details?["messageKey"]);
+        Assert.Equal("broken", error.Details?["code"]);
     }
 
     private ConvertUnitHandler Handler() => new(_catalog);

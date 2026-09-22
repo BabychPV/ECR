@@ -42,7 +42,7 @@ public sealed partial class SeedErrorTitleReachesClientTests
     /// </summary>
     private const string Code = ErrorCodes.PeriodClosed;
 
-    private const string ExpectedTitle = "The period is closed";
+    private const string ExpectedTitle = "Period state conflict";
 
     /// <summary>Сире (серверне) речення обробника — воно має лишитися подробицею.</summary>
     private const string Detail = "Період 202601 закрито 2026-02-10.";
