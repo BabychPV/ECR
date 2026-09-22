@@ -358,7 +358,8 @@ UPDATE t
     (N'err.ECR-CFG-0422',                N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.',
                                                 N'Invalid code'),
     (N'err.ECR-UOM-4091',                N'en', N'A unit with code "{code}" already exists (Id {id}).', N'Unit code already in use'),
-    (N'err.ECR-REG-0409',                N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', N'Registry entry code already in use'),
+    (N'err.ECR-REG-0409',                N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', N'Registry entry conflict'),
+    (N'err.ECR-REG-0409',                N'en', N'Registry entry code already in use', N'Registry entry conflict'),
     (N'err.ECR-USR-0409',                N'en', N'A user named "{userName}" already exists.', N'User name already in use'),
     (N'err.ECR-REG-4091',                N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.',
                                                 N'Registry code already in use'),
@@ -369,7 +370,8 @@ UPDATE t
     (N'security.roleCodeHint',           N'en', N'Used in grants and audit; it cannot be changed later.', N'Used in grants and audit. Built-in role codes cannot be changed.'),
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
     (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state'),
-    (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion')
+    (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion'),
+    (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -529,7 +531,8 @@ USING (VALUES
     (N'err.ECR-REQ-0422.validityOrder', N'en', N'The start of the validity window is later than its end.', 1),
     (N'err.ECR-PRJ-0409',  N'en', N'Project code already in use', 1),
     (N'err.ECR-PRJ-0409.projectCodeTaken', N'en', N'A project with code "{code}" already exists.', 1),
-    (N'err.ECR-REG-0409',  N'en', N'Registry entry code already in use', 1),
+    -- Покриває і зайнятий код, і видалення запису, на який посилаються.
+    (N'err.ECR-REG-0409',  N'en', N'Registry entry conflict', 1),
     (N'err.ECR-REG-0409.entryCodeTaken', N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', 1),
     (N'err.ECR-USR-0409',  N'en', N'User name already in use', 1),
     (N'err.ECR-USR-0409.userNameTaken', N'en', N'A user named "{userName}" already exists.', 1),
@@ -771,6 +774,26 @@ USING (VALUES
     -- довідника — і найчастіша причина друга: друкарська помилка в коді.
     (N'err.ECR-REG-0404.registry',           N'en', N'Registry "{registryCode}" was not found.', 1),
 
+    -- Конструктор довідника й перемикання master: заголовок `ECR-REG-0422`
+    -- нейтральний, причину каже подробиця.
+    (N'err.ECR-REG-0404.field',              N'en', N'Field {fieldId} was not found in registry "{registryCode}".', 1),
+    (N'err.ECR-REG-0404.rule',               N'en', N'Rule {ruleId} was not found in registry "{registryCode}".', 1),
+    (N'err.ECR-REG-0422.definitionReasonRequired', N'en', N'Give a reason for the change: the definition changes how entries already saved are read.', 1),
+    (N'err.ECR-REG-0422.noKeyField',         N'en', N'Registry "{registryCode}" would be left without a key field, so an entry business key could not be built.', 1),
+    (N'err.ECR-REG-0422.fieldRemoved',       N'en', N'Registry fields cannot be removed: entries reference their values. Make the field optional instead. Fields missing from the request: {missingCount}.', 1),
+    (N'err.ECR-REG-0422.fieldCodeImmutable', N'en', N'The code of field "{fieldCode}" cannot be changed: expressions and mappings reference it.', 1),
+    (N'err.ECR-REG-0422.fieldTypeImmutable', N'en', N'The type of field "{fieldCode}" cannot be changed: it defines how saved values are read.', 1),
+    (N'err.ECR-REG-0422.unknownFieldType',   N'en', N'Field type "{dataType}" does not exist.', 1),
+    (N'err.ECR-REG-0422.newFieldRequired',   N'en', N'New field "{fieldCode}" cannot be required: existing entries have no value for it. Add it as optional, fill it in, then make it required.', 1),
+    (N'err.ECR-REG-0422.unknownSeverity',    N'en', N'Severity "{severity}" does not exist.', 1),
+    (N'err.ECR-REG-0422.ruleKindImmutable',  N'en', N'The kind of rule "{ruleCode}" cannot be changed: add a new rule of the kind you need.', 1),
+    (N'err.ECR-REG-0422.unknownRuleKind',    N'en', N'Rule kind "{ruleKind}" does not exist: registry rules are RequiredWhen, UniqueWithin, Expression or CrossRegistry.', 1),
+    (N'err.ECR-REG-0422.emptySwitchSet',     N'en', N'The set of registries is empty: there is nothing to switch.', 1),
+    (N'err.ECR-REG-0422.duplicateCodes',     N'en', N'Codes repeat in the set: {codes}.', 1),
+    (N'err.ECR-REG-0422.switchReasonRequired', N'en', N'Give a reason for switching the master source.', 1),
+    (N'err.ECR-REG-0422.openPeriod',         N'en', N'The registry source cannot be switched while periods are open: some documents would be filled from one list of entries and some from another.', 1),
+    (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
+
     -- ⛔ Головні шляхи користувача: вхід і зміна пароля, подання / погодження /
     -- відхилення / повернення аркуша, створення документа й рядка, періоди,
     -- обмін книгами. Доти подробицею цих відмов їхало українське речення —
@@ -912,7 +935,9 @@ USING (VALUES
 
     -- Реєстри і одиниці.
     (N'err.ECR-REG-0404',   N'en', N'Registry entry not found', 1),
-    (N'err.ECR-REG-0422',   N'en', N'The registry source cannot be switched in an open period', 1),
+    -- Фраза `ECR-REG-0422` покриває всі його випадки (опис довідника, набір
+    -- перемикання, відкритий період). Який саме — каже подробиця.
+    (N'err.ECR-REG-0422',   N'en', N'Invalid registry change', 1),
     (N'err.ECR-UOM-0404',   N'en', N'Unit not found', 1),
     -- Фраза `ECR-UOM-0422` покриває всі його випадки: різні розмірності,
     -- множник ≤ 0 на заведенні й зміні одиниці. Який саме — каже подробиця.

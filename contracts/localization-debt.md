@@ -109,6 +109,11 @@
 ⚠ 500-та (`ECR-SYS-0500`) у перелік не входила й не входить, але її стале
 речення теж тепер їде з каталогу (`err.ECR-SYS-0500.contactAdmin`).
 
+✎ **2026-09-22: конструктор довідника й перемикання master** —
+`RegistryDefinitionHandlers` (16) і `RegistryAdminHandlers` (9) закрито
+повністю, 25 кидків. Заголовки `ECR-REG-0422` і `ECR-REG-0409` стали
+нейтральними: у обох кодів кілька причин, яку саме — каже подробиця.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -138,8 +143,6 @@
 | `src/Ecr.Application/Projects/ProjectQueryHandlers.cs` | 15 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
 | `src/Ecr.Application/Registries/GetRegistryEntriesHandler.cs` | 2 |
-| `src/Ecr.Application/Registries/RegistryAdminHandlers.cs` | 9 |
-| `src/Ecr.Application/Registries/RegistryDefinitionHandlers.cs` | 16 |
 | `src/Ecr.Application/Registries/SetEntryValidityHandler.cs` | 2 |
 | `src/Ecr.Application/Registries/UpsertRegistryEntryHandler.cs` | 6 |
 | `src/Ecr.Application/Reporting/ReportDefHandlers.cs` | 10 |

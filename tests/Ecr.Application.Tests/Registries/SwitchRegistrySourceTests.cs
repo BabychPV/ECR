@@ -158,6 +158,7 @@ public sealed class SwitchRegistrySourceTests
             ["PERMIT", "WATER_BODY", "OUTFALL"], RegistrySourceKind.External, "перехід", default));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.openPeriod", error.Details?["messageKey"]);
         Assert.All(All(), d => Assert.Equal(RegistrySourceKind.Local, d.SourceKind));
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
 
@@ -242,16 +243,20 @@ public sealed class SwitchRegistrySourceTests
         var empty = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
             [], RegistrySourceKind.External, "перехід", default));
         Assert.Equal("ECR-REG-0422", empty.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.emptySwitchSet", empty.Details?["messageKey"]);
 
         // ⚠ Дубль означає, що набір зліпили з двох переліків, і другий міг
         // містити зайве. Мовчазне злиття сховало б саме це.
         var duplicate = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
             ["PERMIT", "PERMIT"], RegistrySourceKind.External, "перехід", default));
         Assert.Equal("ECR-REG-0422", duplicate.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.duplicateCodes", duplicate.Details?["messageKey"]);
+        Assert.Equal("PERMIT", duplicate.Details?["codes"]);
 
         var noReason = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
             ["PERMIT"], RegistrySourceKind.External, "   ", default));
         Assert.Equal("ECR-REG-0422", noReason.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.switchReasonRequired", noReason.Details?["messageKey"]);
 
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
