@@ -128,6 +128,32 @@ function hasRowLabels(slice: TableSliceDto): boolean {
 }
 
 /**
+ * Переводить індекс колонки СІТКИ (те, що несуть події RevoGrid і читає
+ * `selection.ts` — `GridSelection.anchor.columnIndex`, `SelectionRange.from/
+ * toColumn`) в індекс колонки ДАНИХ (`data.columns`, тобто `slice.columns`).
+ *
+ * ⛔ Коли є підписи рядків, `gridColumns` (нижче) вставляє колонку
+ * `RowLabelProp` ПЕРШОЮ — і зсуває решту колонок на одну позицію праворуч.
+ * `selection.ts` про це не знає навмисно (модуль розбирає сиру подію, без
+ * контексту зрізу — див. коментар над `FocusedCell`): `columnIndex`/`x`/`x1`
+ * там — координати у ВІДРЕНДЕРЕНИХ колонках. Без цього перетворення
+ * `onPaste`/`onCopy` на будь-якій таблиці з підписами рядків (практично всі
+ * форми з фіксованими рядками) працюють зі зсувом на одну колонку праворуч:
+ * та сама категорія дефекту, що аудит §10.1 уже закривав для якоря рядка.
+ *
+ * @returns Індекс у `data.columns`, кламплений до 0. Колонка підпису сама —
+ * `readonly`, тож для неї немає відповідного індексу в `data.columns`; кут
+ * `gridColumnIndex === 0` (сама колонка підпису, коли підписи є) зводиться до
+ * першої колонки ДАНИХ, а не до від'ємного індексу — так вставка в підпис
+ * мовчки нічого туди не пише (`planPaste` однаково працює лише з кодами
+ * `data.columns`), а копіювання з діапазону, що зачіпає підпис, не тягне за
+ * собою зайву колонку даних за межею вибраного.
+ */
+function dataColumnIndexOf(gridColumnIndex: number, data: TableSliceDto): number {
+  return hasRowLabels(data) ? Math.max(0, gridColumnIndex - 1) : gridColumnIndex;
+}
+
+/**
  * Ширина колонки підпису за замовчуванням.
  *
  * ⚠ Ширша за колонку даних (`DefaultColumnWidth`), бо несе не число, а назву
@@ -709,11 +735,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // обрано»: Ctrl+V одразу після завантаження не має падати в нікуди.
       const anchor = selection.current?.anchor ?? TableCornerAnchor;
 
+      // ⛔ `anchor.columnIndex` — індекс у сітці (див. `dataColumnIndexOf`):
+      // на таблиці з підписами рядків без цієї поправки вставка лягала на
+      // одну колонку правіше від тієї, куди справді клацнув оператор.
+      const dataAnchor = {
+        rowIndex: anchor.rowIndex,
+        columnIndex: dataColumnIndexOf(anchor.columnIndex, data),
+      };
+
       const plan = planPaste(
         parseClipboard(text),
         data.rows.map((row) => row.rowKey),
         data.columns.map((column) => column.code),
-        anchor,
+        dataAnchor,
         guardOf(data),
       );
 
@@ -945,10 +979,22 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       if (data === undefined) return;
 
+      // ⛔ `selection.current.range.from/toColumn` — індекси в сітці (див.
+      // `dataColumnIndexOf`): без поправки Ctrl+C на таблиці з підписами
+      // рядків копіював вікно, зсунуте на одну колонку, і за межею вибраного
+      // діапазону міг прихопити зайву колонку.
       const range =
         selection.current === null
           ? null
-          : clampSelection(selection.current.range, data.rows.length, data.columns.length);
+          : clampSelection(
+              {
+                ...selection.current.range,
+                fromColumn: dataColumnIndexOf(selection.current.range.fromColumn, data),
+                toColumn: dataColumnIndexOf(selection.current.range.toColumn, data),
+              },
+              data.rows.length,
+              data.columns.length,
+            );
 
       const rows = range === null ? data.rows : data.rows.slice(range.fromRow, range.toRow + 1);
       const columns =
