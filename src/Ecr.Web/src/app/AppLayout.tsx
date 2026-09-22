@@ -28,6 +28,7 @@ import { navRoutes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
+import { MyTasksLauncher } from '@/features/jobs/MyTasksLauncher';
 import { SearchLauncher } from '@/features/search/SearchLauncher';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { useSession } from '@/shared/session/useSession';
@@ -329,6 +330,15 @@ export function AppLayout(): JSX.Element {
               )}
               {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}
               <SearchLauncher />
+
+              {/* ⛔ «My tasks» (UI-07, UX-09) — БЕЗ перевірки права, навмисно:
+                  директива №15, бекенд §BE-08 — «шухляда «My tasks» у шапці
+                  (усі ролі)». Чужого тут не видно за побудовою: запит іде з
+                  `mine=true`, і власника бере сервер із сеансу, не клієнт із
+                  параметра (`Q-156`). Умова права сховала б перелік саме від
+                  тих, заради кого він існує. У статичному бандлі — лише кнопка
+                  й лічильник; шухляда — динамічним `import()`, як палітра. */}
+              <MyTasksLauncher />
               <UserMenu key={preferencesGeneration} userName={me.userName ?? '—'} />
             </Group>
           </Group>
