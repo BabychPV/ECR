@@ -1408,6 +1408,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources/{id}/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * «Перевірити конфігурацію» до першого збору (ФВ-13.17). Право `Integration.Manage`.
+         * @description ⚠ Читає ОДНЕ значення тим самим адаптером, яким потім збиратимуть, і
+         *     нічого не зберігає — на відміну від `POST …/collect`. Шляху немає
+         *     в каталозі джерела — `404 ECR-INT-0404` з переліком найближчих
+         *     імен (`suggestions`, до 5) серед елементів каталогу того самого
+         *     рівня; джерело не відповіло в межу `Integration:CatalogTimeoutSeconds`
+         *     або лежить — `503 ECR-INT-0503`; відмова в автентифікації —
+         *     `502 ECR-INT-0502`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ProbeDataSourceRequest"];
+                    "application/json": components["schemas"]["ProbeDataSourceRequest"];
+                    "text/json": components["schemas"]["ProbeDataSourceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourcePathProbeResult"];
+                        "text/json": components["schemas"]["SourcePathProbeResult"];
+                        "text/plain": components["schemas"]["SourcePathProbeResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/data-sources/{id}/test": {
         parameters: {
             query?: never;
@@ -16165,6 +16267,11 @@ export interface components {
              */
             presentationRevision: number;
         };
+        /** @description Тіло проби конфігурації мапінгу (ФВ-13.17). */
+        ProbeDataSourceRequest: {
+            /** @description Шлях мапінгу в джерелі, від 1 до 500 символів. */
+            path: null | string;
+        };
         ProblemDetails: {
             detail?: null | string;
             instance?: null | string;
@@ -17837,6 +17944,30 @@ export interface components {
             oldestGap: null | string;
             /** @description Транспорт джерела (ФВ-11.2). */
             transport: string;
+        };
+        /** @description Наслідок пробного читання одного значення мапінгу (ФВ-13.17). */
+        SourcePathProbeResult: {
+            /** @description `false` — шлях є в каталозі джерела, але в пробному вікні
+             *             (int ProbeSourcePathHandler.ProbeWindowDays) для нього немає жодної точки. */
+            hasValue: boolean;
+            /** @description Шлях, який пробували. */
+            path: string;
+            /** @description Якість у термінах джерела. */
+            quality: null | string;
+            /**
+             * Format: date-time
+             * @description Мітка часу прочитаної точки; `null` — bool SourcePathProbeResult.HasValue хибне.
+             */
+            timestamp: null | string;
+            /** @description UOM джерела; `null` — джерело одиниці не назвало. */
+            unitSymbol: null | string;
+            /**
+             * Format: decimal
+             * @description Числове значення в одиниці джерела.
+             */
+            valueNumeric: null | string;
+            /** @description Текстове значення для нечислових атрибутів. */
+            valueString: null | string;
         };
         /** @description Запит на початок симуляції. */
         StartSimulationRequest: {
