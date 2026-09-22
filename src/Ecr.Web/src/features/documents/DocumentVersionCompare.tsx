@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Badge, Button, Group, Select, Stack, Table, Text, Title } from '@mantine/core';
+import { Badge, Button, Group, NativeSelect, Stack, Table, Text, Title } from '@mantine/core';
 import {
   compareCellText,
   groupCompareByTable,
@@ -38,8 +38,8 @@ export interface DocumentVersionCompareProps {
 interface ComparePick {
   readonly periodKey: number;
 
-  /** Версія-джерело; `null` — ще не обрано. */
-  readonly from: string | null;
+  /** Версія-джерело; порожній рядок — ще не обрано. */
+  readonly from: string;
 
   /** Версія-ціль або {@link CurrentState}. */
   readonly to: string;
@@ -86,9 +86,9 @@ export function DocumentVersionCompare({
    * що й там: `periodKey` на момент ВІДПОВІДІ вже може бути іншим, ніж на
    * момент запиту.
    */
-  const [pick, setPick] = useState<ComparePick>({ periodKey, from: null, to: CurrentState });
+  const [pick, setPick] = useState<ComparePick>({ periodKey, from: '', to: CurrentState });
   const picked: ComparePick =
-    pick.periodKey === periodKey ? pick : { periodKey, from: null, to: CurrentState };
+    pick.periodKey === periodKey ? pick : { periodKey, from: '', to: CurrentState };
 
   const [asked, setAsked] = useState<CompareRequest | null>(null);
   const request = asked !== null && asked.periodKey === periodKey ? asked : null;
@@ -139,26 +139,34 @@ export function DocumentVersionCompare({
 
       {opened && available.length > 0 && (
         <Group gap="xs" align="flex-end">
-          <Select
+          {/* ⚠ `NativeSelect`, а не `Select`, — з тієї ж причини, що й у
+              `DocumentListFilterBar`: пошук по списку тут не потрібен, рідний
+              список однаково працює з клавіатурою й читалкою, а випадний
+              `Select` тягне в чанк маршруту ядро `Combobox` (+7.1 КБ gzip —
+              зміряно; `DocumentPage` і так за кілька кілобайт від стелі
+              `D-132`). */}
+          <NativeSelect
             size="xs"
             miw={220}
             label={t('document.compareFrom')}
-            data={options}
+            data={[{ value: '', label: t('document.comparePick') }, ...options]}
             value={picked.from}
-            onChange={(value) => setPick({ periodKey, from: value, to: picked.to })}
+            onChange={(event) =>
+              setPick({ periodKey, from: event.currentTarget.value, to: picked.to })
+            }
           />
 
           {/* ⚠ «Поточний стан» — окрема ПЕРША опція, а не порожнє значення:
               порівняння з тим, що в документі зараз, — найчастіше з питань, і
               воно не є версією. Сервер приймає його рядком `current`. */}
-          <Select
+          <NativeSelect
             size="xs"
             miw={220}
             label={t('document.compareTo')}
             data={[{ value: CurrentState, label: t('document.compareCurrent') }, ...options]}
             value={picked.to}
-            onChange={(value) =>
-              setPick({ periodKey, from: picked.from, to: value ?? CurrentState })
+            onChange={(event) =>
+              setPick({ periodKey, from: picked.from, to: event.currentTarget.value })
             }
           />
 
@@ -166,9 +174,9 @@ export function DocumentVersionCompare({
             size="xs"
             variant="default"
             loading={compare.isFetching}
-            disabled={picked.from === null}
+            disabled={picked.from === ''}
             onClick={() => {
-              if (picked.from === null) return;
+              if (picked.from === '') return;
 
               setAsked({
                 periodKey,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentVersionCompare } from '@/features/documents/DocumentVersionCompare';
@@ -34,6 +34,7 @@ const Strings: Record<string, string> = {
   'document.compareFrom': 'From version',
   'document.compareTo': 'To version',
   'document.compareCurrent': 'Current state',
+  'document.comparePick': 'Pick a version',
   'document.compareRun': 'Compare',
   'document.compareNoVersions': 'This document has never been submitted for this period.',
   'document.compareIdentical': 'The two versions are identical: nothing changed.',
@@ -150,8 +151,19 @@ async function show(): Promise<void> {
 async function runCompare(): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: 'Compare versions' }));
 
-  fireEvent.click(await screen.findByLabelText('From version'));
-  fireEvent.click(await screen.findByRole('option', { name: /Ivanov/ }));
+  /*
+   * ⚠ Рідний список (`NativeSelect`): опція обирається зміною значення поля, а
+   * не кліком по випадному блоку. Перед цим перевіряємо, що підпис опції —
+   * «коли подано + хто подав», а не голий ідентифікатор версії: інакше вибір
+   * між двома поданнями того самого дня робиться навмання.
+   */
+  const source = await screen.findByLabelText('From version');
+
+  // ⚠ `within`: обидва списки несуть ті самі версії, і пошук по всьому екрану
+  // знайшов би дві однакові опції.
+  expect(within(source).getByRole('option', { name: /Ivanov/ })).toBeTruthy();
+
+  fireEvent.change(source, { target: { value: '11' } });
 
   fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
 }
