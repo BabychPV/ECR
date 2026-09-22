@@ -43,9 +43,15 @@ export function DocumentsPage(): JSX.Element {
   const filters = useDocumentListFilters(periodKey);
 
   const query = useQuery({
-    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine],
+    queryKey: ['documents', periodKey, cursor, filters.state, filters.mine, filters.hasLateEdits],
     queryFn: () =>
-      listDocuments({ periodKey, cursor, state: filters.state, mine: filters.mine }),
+      listDocuments({
+        periodKey,
+        cursor,
+        state: filters.state,
+        mine: filters.mine,
+        hasLateEdits: filters.hasLateEdits,
+      }),
   });
 
   // ⛔ Аудит-пас 5: колонка «Project» показувала голий числовий `projectId`

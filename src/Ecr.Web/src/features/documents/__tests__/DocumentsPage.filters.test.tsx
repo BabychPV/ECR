@@ -108,6 +108,9 @@ const stateField = (): Promise<HTMLElement> =>
 const mineSwitch = (): Promise<HTMLElement> =>
   screen.findByRole('switch', { name: '⟦documents.filterMine⟧' }, { timeout: Find });
 
+const lateEditsSwitch = (): Promise<HTMLElement> =>
+  screen.findByRole('switch', { name: '⟦documents.filterLateEdits⟧' }, { timeout: Find });
+
 describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
   it(
     'дзеркало: фільтри не вибрано — запит без state і без mine',
@@ -121,6 +124,7 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
       expect(lastListed().get('periodKey')).toBe('202601');
       expect(lastListed().has('state')).toBe(false);
       expect(lastListed().has('mine')).toBe(false);
+      expect(lastListed().has('hasLateEdits')).toBe(false);
     },
     Slow,
   );
@@ -204,6 +208,48 @@ describe('DocumentsPage: фільтри переліку (BE-09b)', () => {
 
       await waitFor(() => expect(new URLSearchParams(search).has('mine')).toBe(false), { timeout: Find });
       await waitFor(() => expect(lastListed().has('mine')).toBe(false), { timeout: Find });
+    },
+    Slow,
+  );
+
+  it(
+    '«пізні правки» — перемикач: hasLateEdits=true в адресі й у запиті, працює БЕЗ періоду, і знімається назад',
+    async () => {
+      mockFetch('rows');
+      // ⚠ Навмисно без `periodKey`: на відміну від фільтра стану, цей
+      // перемикач діє за будь-який період і не має бути вимкненим.
+      show('/');
+
+      const toggle = await lateEditsSwitch();
+      expect((toggle as HTMLInputElement).disabled).toBe(false);
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => expect(lastListed().get('hasLateEdits')).toBe('true'), { timeout: Find });
+      expect(new URLSearchParams(search).get('hasLateEdits')).toBe('true');
+      expect((toggle as HTMLInputElement).checked).toBe(true);
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => expect(new URLSearchParams(search).has('hasLateEdits')).toBe(false), { timeout: Find });
+      await waitFor(() => expect(lastListed().has('hasLateEdits')).toBe(false), { timeout: Find });
+    },
+    Slow,
+  );
+
+  it(
+    '«пізні правки» нічого не знайшли — «фільтр нічого не знайшов», кнопка скидання знімає й цей фільтр',
+    async () => {
+      mockFetch('empty');
+      show('/?hasLateEdits=true');
+
+      await screen.findByText('⟦documents.noMatch⟧', {}, { timeout: Find });
+      expect(screen.queryByText('⟦documents.empty⟧')).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: '⟦documents.resetFilters⟧' }));
+
+      await waitFor(() => expect(new URLSearchParams(search).has('hasLateEdits')).toBe(false), { timeout: Find });
+      await waitFor(() => expect(lastListed().has('hasLateEdits')).toBe(false), { timeout: Find });
     },
     Slow,
   );

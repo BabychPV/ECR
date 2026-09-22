@@ -27,11 +27,20 @@ export interface DocumentListFilters {
   /** Лише «мої» — створені або подані мною. */
   readonly mine: boolean;
 
+  /**
+   * Лише документи з пізніми правками (`IsLateEdit`, `D-70`).
+   *
+   * ⚠ На відміну від `state`, діє БЕЗ періоду — за будь-який період, так
+   * само, як позначка `hasLateEdits` у самому рядку переліку (`BE-09b`).
+   */
+  readonly hasLateEdits: boolean;
+
   /** Чи звужує перелік хоч один фільтр — те, що відрізняє «нічого не знайшлося» від «немає». */
   readonly active: boolean;
 
   readonly setState: (state: DocumentStateFilter | null) => void;
   readonly setMine: (mine: boolean) => void;
+  readonly setHasLateEdits: (hasLateEdits: boolean) => void;
 
   /** Знімає всі фільтри; період лишається — він належить екрану. */
   readonly reset: () => void;
@@ -47,10 +56,12 @@ export interface DocumentListFilters {
 export function useDocumentListFilters(periodKey: number | null): DocumentListFilters {
   const [rawState] = useUrlState('state');
   const [rawMine] = useUrlState('mine');
+  const [rawHasLateEdits] = useUrlState('hasLateEdits');
   const setParams = useUrlParamsSetter();
 
   const state = periodKey === null ? null : parseStateFilter(rawState);
   const mine = rawMine === 'true';
+  const hasLateEdits = rawHasLateEdits === 'true';
 
   const setState = useCallback(
     (next: DocumentStateFilter | null) => {
@@ -66,9 +77,25 @@ export function useDocumentListFilters(periodKey: number | null): DocumentListFi
     [setParams],
   );
 
+  const setHasLateEdits = useCallback(
+    (next: boolean) => {
+      setParams({ hasLateEdits: next ? 'true' : null, cursor: null });
+    },
+    [setParams],
+  );
+
   const reset = useCallback(() => {
-    setParams({ state: null, mine: null, cursor: null });
+    setParams({ state: null, mine: null, hasLateEdits: null, cursor: null });
   }, [setParams]);
 
-  return { state, mine, active: state !== null || mine, setState, setMine, reset };
+  return {
+    state,
+    mine,
+    hasLateEdits,
+    active: state !== null || mine || hasLateEdits,
+    setState,
+    setMine,
+    setHasLateEdits,
+    reset,
+  };
 }

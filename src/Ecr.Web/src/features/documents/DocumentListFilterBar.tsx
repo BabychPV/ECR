@@ -75,6 +75,21 @@ export function DocumentListFilterBar({ periodKey, filters }: DocumentListFilter
           filters.setMine(event.currentTarget.checked);
         }}
       />
+
+      {/*
+       * ⚠ На відміну від фільтра стану — НЕ вимкнений без періоду
+       * (`noPeriod` тут не читається): сервер приймає `hasLateEdits` за
+       * будь-який період, так само, як позначку в самому рядку (`BE-09b`).
+       */}
+      <Switch
+        mt="lg"
+        size="sm"
+        label={t('documents.filterLateEdits')}
+        checked={filters.hasLateEdits}
+        onChange={(event) => {
+          filters.setHasLateEdits(event.currentTarget.checked);
+        }}
+      />
     </Group>
   );
 }

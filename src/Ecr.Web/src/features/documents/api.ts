@@ -107,13 +107,21 @@ export interface DocumentListParams {
   state?: DocumentStateFilter | null;
   /** Лише документи, де я автор або подавав аркуш. */
   mine?: boolean;
+  /**
+   * Лише документи з пізніми правками (`IsLateEdit`, `D-70`).
+   *
+   * ⚠ На відміну від `state`, діє БЕЗ `periodKey` — за будь-який період
+   * (`BE-09b`): не робити його залежним від обраного періоду.
+   */
+  hasLateEdits?: boolean;
 }
 
 /**
  * Сторінка переліку документів із фільтрами.
  *
  * ⚠ Порожні параметри НЕ йдуть у запит: `state=` без значення сервер читає як
- * «без фільтра», але `mine=false` у адресі — лише шум у посиланні.
+ * «без фільтра», але `mine=false` у адресі — лише шум у посиланні. Так само
+ * `hasLateEdits` іде в запит лише коли `true`.
  */
 export function listDocuments(params: DocumentListParams): Promise<DocumentListPage> {
   const query = new URLSearchParams({ limit: '50' });
@@ -121,6 +129,7 @@ export function listDocuments(params: DocumentListParams): Promise<DocumentListP
   if (params.cursor) query.set('cursor', params.cursor);
   if (params.state) query.set('state', params.state);
   if (params.mine) query.set('mine', 'true');
+  if (params.hasLateEdits) query.set('hasLateEdits', 'true');
 
   return apiFetch<DocumentListPage>(`/api/v1/documents?${query.toString()}`);
 }

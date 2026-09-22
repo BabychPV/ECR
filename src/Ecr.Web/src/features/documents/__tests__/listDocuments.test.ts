@@ -58,4 +58,20 @@ describe('listDocuments', () => {
 
     expect(sent).toEqual(['/api/v1/documents?limit=50']);
   });
+
+  it('hasLateEdits=true іде в адресу БЕЗ periodKey (на відміну від state)', async () => {
+    mockServer([row]);
+
+    await listDocuments({ periodKey: null, hasLateEdits: true });
+
+    expect(sent).toEqual(['/api/v1/documents?limit=50&hasLateEdits=true']);
+  });
+
+  it('hasLateEdits вимкнений — параметр не передається (не hasLateEdits=false)', async () => {
+    mockServer([]);
+
+    await listDocuments({ periodKey: 202601, hasLateEdits: false });
+
+    expect(sent).toEqual(['/api/v1/documents?limit=50&periodKey=202601']);
+  });
 });
