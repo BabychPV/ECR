@@ -1886,6 +1886,21 @@ USING (VALUES
     -- взагалі: у формі з фіксованими рядками оператор бачив стовпчики чисел
     -- без жодної ознаки, котрий рядок що означає.
     (N'grid.rowLabelHeader',             N'en', N'Row', 1),
+    -- Рядок формули й рядок підсумків сітки (UI-08). ⛔ Вираз обчислюваної
+    -- колонки сервер із таблицею НЕ надсилає (`ColumnDto` його не несе), тож
+    -- рядок формули каже про це словами, а не вигадує вміст.
+    -- ⚠ Підсумок рахує лише ВИДИМІ заповнені комірки, і `totalsCellHint`
+    -- називає їхню кількість: інакше сума мовчки видавала б себе за суму по
+    -- всьому стовпцю.
+    (N'grid.formulaBarLabel',            N'en', N'Formula bar', 1),
+    (N'grid.formulaBarEmpty',            N'en', N'Select a cell to see what is in it', 1),
+    (N'grid.formulaBarAddress',          N'en', N'{row} · {column}', 1),
+    (N'grid.formulaBarCalculated',       N'en', N'Calculated', 1),
+    (N'grid.formulaBarNoExpression',     N'en', N'The expression is not sent with the table: open the template version to read it', 1),
+    (N'grid.formulaBarValue',            N'en', N'Value: {value}', 1),
+    (N'grid.formulaBarNoValue',          N'en', N'(empty)', 1),
+    (N'grid.totalsRowLabel',             N'en', N'Total', 1),
+    (N'grid.totalsCellHint',             N'en', N'Sum of {count} filled cells in this column', 1),
     (N'health.noChecks',                 N'en', N'No health checks are registered', 1),
     (N'health.noChecksHint',             N'en', N'The server returned an empty report. That is a server configuration problem, not an empty system.', 1),
     (N'health.noDbDetails',              N'en', N'The database check returned no details', 1),
