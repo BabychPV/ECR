@@ -137,6 +137,17 @@ public interface ICalculationBindingStore
     public Task<IReadOnlyDictionary<string, byte?>> ListOutputScalesAsync(
         int methodologyId, CancellationToken ct);
 
+    /// <summary>
+    /// Код і назва кожної з названих таблиць — щоб перелік прив'язок показував
+    /// таблицю людською назвою, а не сирим <c>TableDefId</c>.
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці прив'язок.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>TableDefId</c> → код і назва; невідомої таблиці немає в результаті.</returns>
+    /// <remarks>Один запит на весь перелік, не по запиту на прив'язку.</remarks>
+    public Task<IReadOnlyDictionary<int, BoundTableName>> ListTableNamesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
     /// <summary>Ставить прив'язку в чергу на вставку; зберігає <c>IUnitOfWork</c>.</summary>
     /// <param name="binding">Нова прив'язка.</param>
     public void Add(CalculationBinding binding);
@@ -150,3 +161,8 @@ public interface ICalculationBindingStore
 /// (<c>ColumnDef.IsComputed</c>) — інакше <c>ECR-TMPL-4227</c>.
 /// </param>
 public sealed record BoundColumnRef(int TableDefId, string Code, Ecr.Domain.Enums.CellDataType DataType);
+
+/// <summary>Таблиця прив'язки так, як її називає конфігуратор.</summary>
+/// <param name="Code">Код таблиці.</param>
+/// <param name="NameL10n">Назва таблиці мовами каталогу.</param>
+public sealed record BoundTableName(string Code, Ecr.Domain.ValueObjects.LocalizedText NameL10n);
