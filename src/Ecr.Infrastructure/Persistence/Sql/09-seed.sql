@@ -662,6 +662,9 @@ USING (VALUES
     -- запускали. Підставити сюди «does not exist or is empty» означало б
     -- повідомити неправду про дані (`DocumentsController.LastValidation`).
     (N'err.ECR-DOC-0404.notValidated',        N'en', N'Document {documentId} has not been validated for period {periodKey} yet.', 1),
+    (N'err.ECR-DOC-0404.version',             N'en', N'Version {versionId} of document {documentId} was not found.', 1),
+    (N'err.ECR-DOC-0422.compareVersion',      N'en', N'A version must be a number or "current".', 1),
+    (N'err.ECR-DOC-0422.comparePeriods',      N'en', N'Versions from different periods cannot be compared.', 1),
 
     -- ⛔ `BE-02`, скасування фонової задачі. Три подробиці однієї дії, і всі
     -- три людина бачить у момент, коли ТІЛЬКИ ЩО натиснула кнопку: задачі

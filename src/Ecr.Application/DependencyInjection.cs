@@ -186,6 +186,8 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ReopenDocumentHandler>();
         services.AddScoped<Documents.DeleteDocumentHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
+        services.AddScoped<Documents.ListDocumentVersionsHandler>();
+        services.AddScoped<Documents.CompareDocumentVersionsHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
 
         // Локалізація (модуль 3.7)

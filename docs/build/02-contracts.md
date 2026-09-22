@@ -2839,6 +2839,10 @@ public interface IValidationResultStore
 }
 ```
 
+#### `IDocumentVersionStore`
+
+Версії документа для порівняння (ФВ-5.22): зрізи подання `calc.SubmissionSnapshot`, поточні комірки в тій самій формі, підписи рядків (зокрема видалених) і коди колонок. Сигнатури — у `src/Ecr.Application/Ports/IDocumentVersionStore.cs`.
+
 #### `IWorkflowStore`
 
 Доступ до стану робочого процесу і періоду для операцій подання, затвердження і повернення в роботу.
@@ -3152,6 +3156,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents/{id}/approve` | — | 3 |
 | `POST` | `/api/v1/documents/{id}/reopen` | `Document.Reopen` | 3 |
 | `GET` | `/api/v1/documents/{id}/workflow/history` | `Document.View` | 3 |
+| `GET` | `/api/v1/documents/{id}/versions` | `Document.View` | 3 |
+| `GET` | `/api/v1/documents/{id}/compare` | `Document.View` | 3 |
 | `POST` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/recall` | — | 3 |
 | `GET` | `/api/v1/documents/{id}/tables` | `Document.View` | 6 |
