@@ -94,15 +94,20 @@ public sealed class RestartJobHandlerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "T10-40")]
-    public async Task Без_ViewHealth_перезапуск_відхиляється()
+    public async Task Без_ViewHealth_чужу_задачу_перезапустити_не_можна()
     {
+        // UX-09: власну задачу автор повторює без права (JobRestartOwnerTests);
+        // чужу — ні. Існування перевіряється ДО права, як у CancelJobHandler.
         _user.UserId.Returns(Viewer);
         _access.BuildProfileAsync(Viewer, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = Viewer }.Build());
+        _jobs.GetStatusAsync(JobId, Arg.Any<CancellationToken>())
+            .Returns(new JobStatus(JobId, "Failed", 0, null, "boom"));
+        _jobs.GetCreatedByUserIdAsync(JobId, Arg.Any<CancellationToken>()).Returns(Viewer + 1);
 
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Handler().HandleAsync(JobId, CancellationToken.None));
 
-        await _jobs.DidNotReceiveWithAnyArgs().GetStatusAsync(default!, default);
+        await _jobs.DidNotReceiveWithAnyArgs().RestartAsync(default!, default);
     }
 }

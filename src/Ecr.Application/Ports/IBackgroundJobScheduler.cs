@@ -191,6 +191,7 @@ public sealed record JobListFilter(
 /// Спроб загалом, як у <see cref="JobStatus.MaxAttempts"/>; рядок переліку завжди
 /// з журналу, тож від сховища — завжди число, <c>null</c> лише від інших реалізацій.
 /// </param>
+/// <param name="ResultUrl">Як <see cref="JobStatus.ResultUrl"/> (UX-09).</param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -205,7 +206,8 @@ public sealed record JobSummary(
     DateTime? CreatedAt = null,
     string? ErrorCode = null,
     long? DocumentId = null,
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    string? ResultUrl = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
@@ -235,6 +237,10 @@ public interface IJobProgress
 /// <param name="CreatedAt">Перша постановка в чергу, UTC; <c>null</c> — розклад (BE-08).</param>
 /// <param name="ErrorCode">Код каталогу помилок провалу (BE-08).</param>
 /// <param name="DocumentId">Документ задачі; <c>null</c> — не документна (BE-08).</param>
+/// <param name="ResultUrl">
+/// Відносний шлях API до файлу результату (книга експорту) — лише для
+/// <c>Succeeded</c> з файлом і читача з <c>Document.Export</c>; інакше <c>null</c> (UX-09).
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -246,7 +252,8 @@ public sealed record JobStatus(
     int? MaxAttempts = null,
     DateTime? CreatedAt = null,
     string? ErrorCode = null,
-    long? DocumentId = null);
+    long? DocumentId = null,
+    string? ResultUrl = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.
