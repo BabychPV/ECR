@@ -690,6 +690,9 @@ USING (VALUES
     (N'err.ECR-JOB-0404.job',                 N'en', N'Background job {jobId} does not exist.', 1),
     (N'err.ECR-JOB-0409.notActive',           N'en', N'Job {jobId} is in state {state}: there is nothing to cancel.', 1),
     (N'err.ECR-AUTH-0403.jobNotYours',        N'en', N'This background job was started by someone else: permission {permission} is required to act on it.', 1),
+    -- T10 #40, UX-09: ручний перезапуск проваленої задачі (`RestartJobHandler`).
+    (N'err.ECR-JOB-0409.notFailed',           N'en', N'Job {jobId} is in state {state}: only a failed job can be restarted.', 1),
+    (N'err.ECR-JOB-0404.restartUnavailable',  N'en', N'Job {jobId} cannot be restarted: its details did not survive a server restart.', 1),
 
     -- ⛔ `BE-08`, перелік задач із фільтрами. Дві подробиці — про ФІЛЬТР, а не
     -- про задачу: невідомий стан і розмір поза межами відхиляються, бо мовчазна
@@ -783,6 +786,19 @@ USING (VALUES
     (N'err.ECR-INT-0503.probeTimeout',                    N'en', N'Data source "{code}" did not answer the probe within {timeoutSeconds} s. Try again later.', 1),
     (N'err.ECR-INT-0503.probeUnavailable',                N'en', N'Data source "{code}" is unavailable, so the probe could not run. Try again later.', 1),
     (N'err.ECR-INT-0404.sourcePathNotFound',              N'en', N'The path "{path}" was not found in data source "{code}". Check the suggested names.', 1),
+    -- Заведення мапінгу поля джерела (`CreateEntityFieldMapHandler`, директива
+    -- №15, «Прогалина 1» — доти EntityFieldMap заводився лише двома
+    -- статичними фабриками домену, і жодного шляху АПІ до створення не було).
+    (N'err.ECR-REQ-0422.entityFieldMapSourceField',            N'en', N'The source field (sourceField) cannot be empty.', 1),
+    (N'err.ECR-REQ-0422.entityFieldMapColumnExtraField',       N'en', N'A mapping to a column (targetKind=Column) does not accept targetRegistryFieldDefId.', 1),
+    (N'err.ECR-REQ-0422.entityFieldMapColumnRequired',         N'en', N'A mapping to a column (targetKind=Column) requires targetColumnDefId.', 1),
+    (N'err.ECR-INT-0405.column',                               N'en', N'Column {columnDefId} does not exist, or it was deleted.', 1),
+    (N'err.ECR-REQ-0422.entityFieldMapRegistryFieldExtraColumn', N'en', N'A mapping to a registry field (targetKind=RegistryField) does not accept targetColumnDefId.', 1),
+    (N'err.ECR-REQ-0422.entityFieldMapRegistryFieldRequired',  N'en', N'A mapping to a registry field (targetKind=RegistryField) requires targetRegistryFieldDefId.', 1),
+    (N'err.ECR-INT-0405.registryField',                        N'en', N'Registry field {registryFieldDefId} does not exist.', 1),
+    (N'err.ECR-REQ-0422.entityFieldMapTargetKindUnknown',      N'en', N'Unknown mapping target kind: {targetKind}.', 1),
+    -- Перегляд мапінгу на реальних рядках джерела (`PreviewMappingHandler`, ФВ-13.14).
+    (N'err.ECR-REQ-0422.mappingPreviewWindow',                 N'en', N'The preview window is empty: start {fromUtc} is not before end {toUtc}.', 1),
     -- ⛔ `BE-27`: дії над мапінгом. Пауза існує, щоб мапінг можна було спинити,
     -- НЕ стираючи пояснення вже зібраних точок, — тому речення про видалення
     -- мусить назвати її прямо, інакше відмова виглядає глухим кутом.

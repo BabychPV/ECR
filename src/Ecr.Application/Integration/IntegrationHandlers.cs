@@ -1,4 +1,5 @@
 // src/Ecr.Application/Integration/IntegrationHandlers.cs
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -49,7 +50,12 @@ public sealed class CollectFromSourceHandler(
         _ = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.SourceEntityNotFound,
-                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.");
+                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0404.sourceEntity",
+                    ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+                });
 
         return await jobs
             .EnqueueAsync<ICollectionJob>(new CollectionTask(sourceEntityId, fromUtc, toUtc), ct)
@@ -144,7 +150,9 @@ public sealed class GetJobStatusHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymous" });
 
         var status = await jobs.GetStatusAsync(jobId, ct).ConfigureAwait(false);
 
@@ -163,7 +171,11 @@ public sealed class GetJobStatusHandler(
             {
                 throw new AccessDeniedException(
                     "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                    new Dictionary<string, object?> { ["permission"] = Permission });
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
+                        ["permission"] = Permission,
+                    });
             }
         }
 
@@ -419,7 +431,13 @@ public sealed class RestartJobHandler(
 
         if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
         {
-            throw new NotFoundException(ErrorCodes.JobNotFound, $"Задачі {jobId} не існує.");
+            throw new NotFoundException(
+                ErrorCodes.JobNotFound, $"Задачі {jobId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0404.job",
+                    ["jobId"] = jobId,
+                });
         }
 
         // Автор повторює СВОЮ задачу без `System.ViewHealth` (UX-09, «Мої
@@ -446,7 +464,13 @@ public sealed class RestartJobHandler(
         {
             throw new BusinessRuleException(
                 NotFailedErrorCode,
-                $"Задача {jobId} у стані «{status.State}», перезапустити можна лише провалену.");
+                $"Задача {jobId} у стані «{status.State}», перезапустити можна лише провалену.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0409.notFailed",
+                    ["jobId"] = jobId,
+                    ["state"] = status.State,
+                });
         }
 
         var restarted = await jobs.RestartAsync(jobId, ct).ConfigureAwait(false);
@@ -458,7 +482,12 @@ public sealed class RestartJobHandler(
             // між провалом і спробою перезапуску.
             throw new NotFoundException(
                 ErrorCodes.JobNotFound,
-                $"Задачу {jobId} не можна перезапустити: деталі задачі не пережили перезапуск сервера.");
+                $"Задачу {jobId} не можна перезапустити: деталі задачі не пережили перезапуск сервера.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-JOB-0404.restartUnavailable",
+                    ["jobId"] = jobId,
+                });
         }
     }
 }

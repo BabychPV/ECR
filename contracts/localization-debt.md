@@ -242,6 +242,42 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 - Заголовки кодів не змінювались: `ECR-TMPL-0422`/`ECR-TMPL-0404`/
   `ECR-SCHM-0409`/`ECR-CFG-0422` уже були нейтральними.
 
+✎ **2026-09-22: заведення мапінгу джерела, перегляд і фонові задачі
+інтеграції** — `EntityFieldMapHandlers.cs` (11), `MappingPreviewHandlers.cs`
+(2) і `IntegrationHandlers.cs` (6) закрито повністю, 19 кидків; 204 у 69
+файлах → 185 у 66 файлах.
+- `err.ECR-INT-0404.sourceEntity` — наявний ключ (заведений `BE-21b`),
+  перевикористаний для трьох однакових кидків «сутності джерела не існує»
+  (`CreateEntityFieldMapHandler`, `PreviewMappingHandler`,
+  `CollectFromSourceHandler`): той самий факт незалежно від того, яка дія до
+  нього дійшла.
+- `err.ECR-UOM-0404.unitId` — наявний ключ (`Repository`/`Unit` заміри),
+  перевикористаний для одиниці джерела й одиниці цілі мапінгу (ФВ-16.9): те
+  саме «одиниці з таким id немає в довіднику» незалежно від межі.
+- `err.ECR-AUTH-0401.anonymous` і `err.ECR-AUTH-0403.jobNotYours` — наявні
+  ключі (`BE-08`, `BE-02`/T10-40), перевикористані в `GetJobStatusHandler`:
+  ті самі два факти («увійдіть» / «задача не ваша»), що вже несуть
+  `ListJobsHandler`, `RestartJobHandler` і `CancelJobHandler`.
+- `err.ECR-JOB-0404.job` — наявний ключ (`BE-02`, скасування задачі),
+  перевикористаний у `RestartJobHandler` для того самого факту «задачі не
+  існує».
+- Нові ключі: `err.ECR-REQ-0422.entityFieldMapSourceField`,
+  `.entityFieldMapColumnExtraField`, `.entityFieldMapColumnRequired`,
+  `.entityFieldMapRegistryFieldExtraColumn`,
+  `.entityFieldMapRegistryFieldRequired`, `.entityFieldMapTargetKindUnknown` —
+  валідація команди заведення мапінгу, кожна причина власним реченням;
+  `err.ECR-INT-0405.column` {columnDefId} і `.registryField`
+  {registryFieldDefId} — дві цілі мапінгу, яких немає, під спільним кодом
+  `ECR-INT-0405`; `err.ECR-REQ-0422.mappingPreviewWindow` {fromUtc, toUtc} —
+  перевернуте вікно перегляду; `err.ECR-JOB-0409.notFailed` {jobId, state} і
+  `err.ECR-JOB-0404.restartUnavailable` {jobId} — ручний перезапуск задачі
+  (T10 #40, UX-09): стан не `Failed`, і деталь не пережила перезапуск
+  сервера — два різні факти під тим самим типом винятку в першому випадку і
+  тим самим кодом `ECR-JOB-0404` у другому, що й «задачі не існує».
+- Заголовки кодів не змінювались — `ECR-INT-0404`, `ECR-INT-0405`,
+  `ECR-UOM-0404`, `ECR-AUTH-0401`, `ECR-AUTH-0403`, `ECR-JOB-0404`,
+  `ECR-JOB-0409`, `ECR-REQ-0422` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -258,7 +294,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
-| `src/Ecr.Application/Integration/IntegrationHandlers.cs` | 6 |
 | `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
@@ -271,8 +306,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
-| `src/Ecr.Application/Sources/EntityFieldMapHandlers.cs` | 11 |
-| `src/Ecr.Application/Sources/MappingPreviewHandlers.cs` | 2 |
 | `src/Ecr.Application/Templates/ColumnDefHandlers.cs` | 6 |
 | `src/Ecr.Application/Templates/CreateTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |

@@ -1,4 +1,5 @@
 // src/Ecr.Application/Sources/MappingPreviewHandlers.cs
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Security;
@@ -92,7 +93,12 @@ public sealed class PreviewMappingHandler(
             throw new BusinessRuleException(
                 ErrorCodes.RequestInvalid,
                 $"Вікно перегляду порожнє: початок {from:O} не раніший за кінець {to:O}.",
-                new Dictionary<string, object?> { ["fromUtc"] = from, ["toUtc"] = to });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.mappingPreviewWindow",
+                    ["fromUtc"] = from.ToString("O", CultureInfo.InvariantCulture),
+                    ["toUtc"] = to.ToString("O", CultureInfo.InvariantCulture),
+                });
         }
 
         var data = await preview
@@ -100,7 +106,12 @@ public sealed class PreviewMappingHandler(
             .ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.SourceEntityNotFound,
-                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.");
+                $"Сутності джерела {sourceEntityId} немає або вона вимкнена.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0404.sourceEntity",
+                    ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
+                });
 
         return Compose(data, from, to);
     }
