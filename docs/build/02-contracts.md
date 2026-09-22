@@ -2784,6 +2784,20 @@ public interface IUnitStore
 }
 ```
 
+#### `IWhereUsedStore`
+
+«Де використовується» константа методики і колонка шаблону (ФВ-8.14).
+
+```csharp
+public interface IWhereUsedStore
+{
+    public Task<int?> FindConstantMethodologyAsync(int methodologyVersionId, string code, CancellationToken ct);
+    public Task<IReadOnlyList<VersionFormulaText>> ListVersionFormulasAsync(int methodologyVersionId, CancellationToken ct);
+    public Task<bool> ColumnExistsAsync(int columnDefId, CancellationToken ct);
+    public Task<UsageResponse> FindColumnUsageAsync(int columnDefId, int take, CancellationToken ct);
+}
+```
+
 #### `IUserPreferenceStore`
 
 Налаштування інтерфейсу користувача `sec.UserPreference` (BE-20). Кожен метод
@@ -3101,6 +3115,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PATCH` | `/api/v1/template-versions/{id}/presentation` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/template-versions/{id}/structure` | `Template.View` | 1 |
 | `GET` | `/api/v1/column-defs/search` | `Template.View` | 7 |
+| `GET` | `/api/v1/column-defs/{id}/usage` | `Template.View` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/access-matrix` | `Template.View` | 3 |
 | `GET` | `/api/v1/template-versions/{id}/relations` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/relations/{code}` | `Template.Edit` | 7 |
@@ -3186,6 +3201,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}/formulas/{code}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}` | `Calculation.EditConstant` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/constants/{code}/usage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rules` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/rules/{code}` | `Calculation.EditRule` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/required-inputs` | `Calculation.View` | 7 |

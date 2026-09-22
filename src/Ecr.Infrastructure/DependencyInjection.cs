@@ -89,6 +89,7 @@ public static class DependencyInjection
         services.AddScoped<IRegistryStore, RegistryStore>();
         services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IUnitStore, UnitStore>();
+        services.AddScoped<IWhereUsedStore, WhereUsedStore>();
         services.AddScoped<IUserPreferenceStore, UserPreferenceStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
         services.AddScoped<IRuleCoverageReader, RuleCoverageReader>();
