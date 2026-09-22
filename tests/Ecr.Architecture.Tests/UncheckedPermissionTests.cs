@@ -39,7 +39,7 @@ public sealed partial class UncheckedPermissionTests
     /// </remarks>
     private static readonly Dictionary<string, string> NotYetChecked = new(StringComparer.Ordinal)
     {
-        ["Registry.Publish"] = "BE-24 крок 2: викликача ще немає; рішення людини 2026-09-21 — право лишити.",    };
+    };
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]

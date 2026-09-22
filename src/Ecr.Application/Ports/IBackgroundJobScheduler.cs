@@ -192,6 +192,10 @@ public sealed record JobListFilter(
 /// з журналу, тож від сховища — завжди число, <c>null</c> лише від інших реалізацій.
 /// </param>
 /// <param name="ResultUrl">Як <see cref="JobStatus.ResultUrl"/> (UX-09).</param>
+/// <param name="CreatedByUserId">
+/// Id автора; <c>null</c> — системна задача. Видимість та сама, що й
+/// <paramref name="CreatedByDisplayName"/> — клієнт вирішує показ «Повторити».
+/// </param>
 public sealed record JobSummary(
     string JobId,
     string JobCode,
@@ -207,7 +211,8 @@ public sealed record JobSummary(
     string? ErrorCode = null,
     long? DocumentId = null,
     int? MaxAttempts = null,
-    string? ResultUrl = null);
+    string? ResultUrl = null,
+    int? CreatedByUserId = null);
 
 /// <summary>Фонова задача.</summary>
 public interface IBackgroundJob
@@ -241,6 +246,10 @@ public interface IJobProgress
 /// Відносний шлях API до файлу результату (книга експорту) — лише для
 /// <c>Succeeded</c> з файлом і читача з <c>Document.Export</c>; інакше <c>null</c> (UX-09).
 /// </param>
+/// <param name="CreatedByUserId">
+/// Id автора; <c>null</c> — системна задача. Заповнює <c>GetJobStatusHandler</c>:
+/// тіло бачить лише автор або власник <c>System.ViewHealth</c>.
+/// </param>
 public sealed record JobStatus(
     string JobId,
     string State,
@@ -253,7 +262,8 @@ public sealed record JobStatus(
     DateTime? CreatedAt = null,
     string? ErrorCode = null,
     long? DocumentId = null,
-    string? ResultUrl = null);
+    string? ResultUrl = null,
+    int? CreatedByUserId = null);
 
 /// <summary>
 /// Маркер задачі перерахунку.

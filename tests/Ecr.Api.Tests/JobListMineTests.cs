@@ -310,6 +310,26 @@ public sealed class JobListMineTests(SqlServerFixture sql)
             .ConfigureAwait(true);
 
         Assert.Equal(4, status.GetProperty("maxAttempts").GetInt32());
+
+        // Id автора — і в переліку, і в стані: з нього клієнт вирішує «Повторити».
+        Assert.Equal(author.UserId, item.GetProperty("createdByUserId").GetInt32());
+        Assert.Equal(author.UserId, status.GetProperty("createdByUserId").GetInt32());
+
+        // Системна задача (автор null) — null в обох місцях; бачить її лише ViewHealth.
+        var systemId = Assert.Single(await QueueAsync(createdByUserId: null, count: 1).ConfigureAwait(true));
+        var admin = await SignedInAsync(app, ViewHealth).ConfigureAwait(true);
+        using var adminClient = admin.Client;
+
+        var all = await adminClient
+            .GetFromJsonAsync<JsonElement>(new Uri("/api/v1/jobs?limit=50", UriKind.Relative))
+            .ConfigureAwait(true);
+        var systemItem = all.EnumerateArray().Single(i => i.GetProperty("jobId").GetString() == systemId);
+        Assert.Equal(JsonValueKind.Null, systemItem.GetProperty("createdByUserId").ValueKind);
+
+        var systemStatus = await adminClient
+            .GetFromJsonAsync<JsonElement>(new Uri($"/api/v1/jobs/{Uri.EscapeDataString(systemId)}", UriKind.Relative))
+            .ConfigureAwait(true);
+        Assert.Equal(JsonValueKind.Null, systemStatus.GetProperty("createdByUserId").ValueKind);
     }
 
     /// <summary>Ідентифікатори задач із відповіді; падає з текстом сервера на не-200.</summary>

@@ -61,7 +61,9 @@ public static class AuthenticationSetup
 
         AddEcrDataProtection(services, configuration);
 
-        var cookieName = configuration["Auth:CookieName"] ?? "ecr.session";
+        // Дефолт = значення з appsettings.json: у продукт завжди їхало `ecr.auth`,
+        // зміна імені розлогінила б усіх при оновленні.
+        var cookieName = configuration["Auth:CookieName"] ?? "ecr.auth";
         var requireHttps = configuration.GetValue("Auth:RequireHttps", defaultValue: true);
         var slidingHours = configuration.GetValue("Auth:SlidingHours", defaultValue: 8);
 

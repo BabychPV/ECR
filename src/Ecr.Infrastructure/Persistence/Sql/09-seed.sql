@@ -376,7 +376,8 @@ UPDATE t
     (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion'),
     (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request'),
     (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change'),
-    (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found')
+    (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found'),
+    (N'err.ECR-AUTH-0403.jobNotYours',   N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', N'This background job was started by someone else: permission {permission} is required to act on it.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -403,7 +404,11 @@ DELETE t
     -- екран документа; ключі замінено на `login.restoreEdits.*`.
     (N'login.lostEdits.title',                     N'en', N'Unsaved changes were lost'),
     (N'login.lostEdits.text',                      N'en', N'{count} unsaved change(s) in document #{documentId} were lost — your session ended. Please re-enter them.'),
-    (N'login.lostEdits.continue',                  N'en', N'Continue')
+    (N'login.lostEdits.continue',                  N'en', N'Continue'),
+    -- BE-24 крок 2: збереження опису довідника завжди йде в чернетку, а опис
+    -- змінює лише публікація — обидва ключі втратили місце на екрані.
+    (N'registries.saveDefinition',                 N'en', N'Save definition'),
+    (N'registries.definitionSaved',                N'en', N'Saved. Definition version: {version}.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -676,7 +681,7 @@ USING (VALUES
     -- Приватна область: задачі видно лише після входу.
     (N'err.ECR-JOB-0404.job',                 N'en', N'Background job {jobId} does not exist.', 1),
     (N'err.ECR-JOB-0409.notActive',           N'en', N'Job {jobId} is in state {state}: there is nothing to cancel.', 1),
-    (N'err.ECR-AUTH-0403.jobNotYours',        N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', 1),
+    (N'err.ECR-AUTH-0403.jobNotYours',        N'en', N'This background job was started by someone else: permission {permission} is required to act on it.', 1),
 
     -- ⛔ `BE-08`, перелік задач із фільтрами. Дві подробиці — про ФІЛЬТР, а не
     -- про задачу: невідомий стан і розмір поза межами відхиляються, бо мовчазна
@@ -699,6 +704,14 @@ USING (VALUES
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
     -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.
     (N'err.ECR-REQ-0422.placeholderMismatch', N'en', N'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].', 1),
+    -- BE-13 ч.2: імпорт перекладу з CSV. Відмови рядків приходять у звіті без підстановок.
+    (N'err.ECR-REQ-0422.uiStringCsvLanguage',  N'en', N'"{lang}" cannot be imported or exported: the default language is the reference, and any other language must be in the language registry.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvHeader',    N'en', N'The first row of the file must name a "key" column and a "{lang}" column.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvTooLarge',  N'en', N'The file takes {size} bytes; the limit is {max}.', 1),
+    (N'err.ECR-REQ-0422.uiStringUnknownKey',   N'en', N'This key does not exist in the default language.', 1),
+    (N'err.ECR-REQ-0422.uiStringEmptyValue',   N'en', N'The translation is empty.', 1),
+    (N'err.ECR-REQ-0422.uiStringTooLong',      N'en', N'The translation is longer than 1000 characters.', 1),
+    (N'err.ECR-REQ-0422.uiStringDuplicateKey', N'en', N'This key already appears earlier in the file.', 1),
     -- BE-33: канали сповіщень. У відмові вебхука немає ні URL, ні хоста — URL є секретом.
     (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs at least one recipient.', 1),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
@@ -817,6 +830,10 @@ USING (VALUES
     (N'err.ECR-REG-0422.switchReasonRequired', N'en', N'Give a reason for switching the master source.', 1),
     (N'err.ECR-REG-0422.openPeriod',         N'en', N'The registry source cannot be switched while periods are open: some documents would be filled from one list of entries and some from another.', 1),
     (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
+    -- BE-24 крок 2: чернетка опису довідника і її публікація.
+    (N'err.ECR-REG-0404.definitionDraft',    N'en', N'Registry "{registryCode}" has no draft definition.', 1),
+    (N'err.ECR-REG-0409.definitionDraftChanged', N'en', N'The draft definition of registry "{registryCode}" was changed or published after you opened it. Reload it and repeat your changes.', 1),
+    (N'err.ECR-REG-0409.definitionDraftStale', N'en', N'The definition of registry "{registryCode}" changed (version {baseVersion} to {currentVersion}) after the draft was last saved. Reload the draft and save it again before publishing.', 1),
 
     -- Запис довідника (збереження, вікно дії, перелік) і доменні відмови
     -- значень, зв'язків, правил і полів.
@@ -1475,6 +1492,16 @@ USING (VALUES
     (N'methodologies.ordinal', N'en', N'Order', 1),
     (N'methodologies.noOutputs', N'en', N'This version declares no outputs', 1),
     (N'methodologies.noOutputsHint', N'en', N'Without an output the module computes every formula and writes nothing: the write loop goes over outputs.', 1),
+    -- Покриття «виходи → колонки» (BE-25): куди пише кожен оголошений вихід і
+    -- які прив'язки чекають на вихід, якого ця версія не оголошує.
+    (N'methodologies.outputCoverage', N'en', N'Output coverage', 1),
+    (N'methodologies.outputCoverageHint', N'en', N'Where each declared output of this version writes, and which columns wait for an output this version does not declare.', 1),
+    (N'methodologies.outputCoverageBindings', N'en', N'Bindings', 1),
+    (N'methodologies.outputCoverageNowhere', N'en', N'Writes nowhere', 1),
+    (N'methodologies.noOutputCoverage', N'en', N'No coverage to show', 1),
+    (N'methodologies.noOutputCoverageHint', N'en', N'This version has no declared outputs and no bindings are waiting on it.', 1),
+    (N'methodologies.outputCoverageWaiting', N'en', N'Waiting bindings', 1),
+    (N'methodologies.outputCoverageWaitingHint', N'en', N'These bindings are active but point at an output this version does not declare; they will stay empty.', 1),
     (N'methodologies.tests', N'en', N'Golden set', 1),
     (N'methodologies.addTest', N'en', N'Add test', 1),
     (N'methodologies.testSaved', N'en', N'The test has been saved.', 1),
@@ -2116,9 +2143,27 @@ USING (VALUES
     -- вид, і є той дефект, від якого стереже H-10.
     (N'registries.rulesHint',            N'en', N'Four kinds, and exactly four. A validity window is not a rule: it is the entry''s own valid-from and valid-to.', 1),
     (N'registries.addRule',              N'en', N'Add rule', 1),
-    (N'registries.saveDefinition',       N'en', N'Save definition', 1),
-    (N'registries.definitionSaved',      N'en', N'Saved. Definition version: {version}.', 1),
     (N'registries.definitionVersion',    N'en', N'Definition v{version}', 1),
+    -- Чернетка опису довідника і публікація (BE-24 крок 2). ⚠ Форма показує
+    -- ЧЕРНЕТКУ, а не опублікований опис, доки чернетка є — банер каже це прямо.
+    -- Колишні `saveDefinition`/`definitionSaved` прибрані: збереження тепер
+    -- завжди йде в чернетку, а опис змінюється лише публікацією.
+    (N'registries.draftPresent',         N'en', N'Unsaved draft', 1),
+    (N'registries.draftPresentHint',     N'en', N'Last changed {when} by user {user}. The form below shows the draft, not the published definition.', 1),
+    (N'registries.saveDraft',            N'en', N'Save draft', 1),
+    (N'registries.draftSaved',           N'en', N'The draft has been saved.', 1),
+    (N'registries.publish',              N'en', N'Publish', 1),
+    (N'registries.publishTitle',         N'en', N'Publish the definition of registry "{code}"?', 1),
+    (N'registries.publishConsequence',   N'en', N'The draft replaces the published definition and the definition version grows.', 1),
+    (N'registries.definitionPublished',  N'en', N'Published. Definition version: {version}.', 1),
+    (N'registries.discardDraft',         N'en', N'Discard draft', 1),
+    (N'registries.discardTitle',         N'en', N'Discard the draft definition of registry "{code}"?', 1),
+    (N'registries.discardConsequence',   N'en', N'Unsaved changes will be lost; the form returns to the published definition.', 1),
+    (N'registries.draftDiscarded',       N'en', N'The draft has been discarded.', 1),
+    (N'registries.reloadDraft',          N'en', N'Take the current version', 1),
+    (N'registries.saveAndPublish',       N'en', N'Save and publish', 1),
+    (N'registries.saveAndPublishTitle',  N'en', N'Save and publish the definition of registry "{code}"?', 1),
+    (N'registries.saveAndPublishConsequence', N'en', N'The form is saved and published in one step, without a draft: the definition version grows immediately.', 1),
     (N'registries.reason',               N'en', N'Reason', 1),
     (N'registries.reasonHint',           N'en', N'The definition changes how already stored entries are read; a year from now this is the answer to "why is this field here".', 1),
     (N'registries.noRules',              N'en', N'This registry has no rules', 1),
@@ -2536,6 +2581,14 @@ USING (VALUES
     (N'uiStrings.emptyHint',             N'en', N'The catalogue is filled from the default language; clear the filter to see everything.', 1),
     (N'uiStrings.coverage',              N'en', N'{language}: {translated} of {total} translated, {missing} missing', 1),
     (N'uiStrings.missingOnly',           N'en', N'Missing only', 1),
+    -- Обмін перекладом через CSV (BE-13 ч.2). ⚠ Імпорт або застосовується
+    -- цілком, або не пише нічого: підказка каже це прямо, щоб людина не шукала
+    -- «частково імпортовані» рядки.
+    (N'uiStrings.exportCsv',             N'en', N'Export CSV', 1),
+    (N'uiStrings.importCsv',             N'en', N'Import CSV…', 1),
+    (N'uiStrings.importCounts',          N'en', N'added {added}, updated {updated}, unchanged {unchanged}', 1),
+    (N'uiStrings.importBlockedHint',     N'en', N'Nothing has been written: fix the rows listed below and pick the file again.', 1),
+    (N'uiStrings.importReady',           N'en', N'The file is valid: nothing to fix.', 1),
 
     -- Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
     --

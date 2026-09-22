@@ -293,6 +293,7 @@ public sealed class RegistryConstructorChainTests(SqlServerFixture sql)
               .Returns(new AccessBuilder { UserId = 9 }
                   .Permission("Registry.View")
                   .Permission("Registry.EditDefinition")
+                  .Permission("Registry.Publish") // BE-24: пряме збереження = публікація
                   .Build());
         return access;
     }

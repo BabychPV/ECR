@@ -43,6 +43,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryDef> RegistryDefs => Set<RegistryDef>();
     public DbSet<RegistryFieldDef> RegistryFieldDefs => Set<RegistryFieldDef>();
     public DbSet<RegistryRuleDef> RegistryRuleDefs => Set<RegistryRuleDef>();
+    public DbSet<RegistryDefinitionDraft> RegistryDefinitionDrafts => Set<RegistryDefinitionDraft>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom
