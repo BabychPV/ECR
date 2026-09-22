@@ -248,6 +248,22 @@ public sealed class EntityFieldMap : Entity<int>
                 });
         }
 
+        // Пауза через зміну одиниці знімається лише рішенням про одиницю
+        // (AcceptSourceUnitChange): інакше позначка лишилась би, і наступний
+        // прогін знову поставив би мапінг на паузу.
+        if (HasPendingSourceUnitChange)
+        {
+            throw new DomainException(
+                "ECR-INT-0409",
+                $"Мапінг поля «{SourceField}» чекає рішення про нову одиницю «{PendingSourceUnitCode}»: спершу вирішіть зміну одиниці.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0409.mappingUnitChangePending",
+                    ["sourceField"] = SourceField,
+                    ["actualUnitCode"] = PendingSourceUnitCode,
+                });
+        }
+
         IsActive = true;
     }
 
