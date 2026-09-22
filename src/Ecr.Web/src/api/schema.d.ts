@@ -14890,7 +14890,9 @@ export interface components {
         ExportRequest: {
             /** @description `xlsx` (типово), `csv` (zip, файл на таблицю) або `json` — ФВ-4.2. */
             format?: null | string;
-            /** @description Транслювати вирази в Excel-синтаксис (ФВ-4.2). */
+            /** @description Додати формули у вивантаження (ФВ-4.2): `xlsx` — транслювати вирази в
+             *     Excel-синтаксис; `csv`/`json` — сирий вираз мовою редактора
+             *     виразів проєкту (без трансляції, бо там немає сітки клітинок). */
             includeFormulas: boolean;
             /** @description Переносити стилі шаблону. */
             includeStyles: boolean;

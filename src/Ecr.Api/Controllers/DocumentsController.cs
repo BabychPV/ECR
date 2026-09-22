@@ -567,7 +567,11 @@ public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string
 public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? ExpectedBusinessKey, string? Reason);
 
 /// <summary>Запит на експорт.</summary>
-/// <param name="IncludeFormulas">Транслювати вирази в Excel-синтаксис (ФВ-4.2).</param>
+/// <param name="IncludeFormulas">
+/// Додати формули у вивантаження (ФВ-4.2): <c>xlsx</c> — транслювати вирази в
+/// Excel-синтаксис; <c>csv</c>/<c>json</c> — сирий вираз мовою редактора
+/// виразів проєкту (без трансляції, бо там немає сітки клітинок).
+/// </param>
 /// <param name="IncludeStyles">Переносити стилі шаблону.</param>
 /// <param name="Language">Мова заголовків.</param>
 /// <param name="PeriodKey">Період вивантаження (R-A6).</param>

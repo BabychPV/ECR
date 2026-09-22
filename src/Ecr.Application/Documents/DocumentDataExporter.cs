@@ -77,8 +77,23 @@ public sealed class DocumentDataExporter(
 {
     private const string RowKeyHeader = "rowKey";
 
+    /// <summary>Порожня карта формул — для таблиці без формульних колонок або коли їх не просили.</summary>
+    private static readonly IReadOnlyDictionary<string, string> NoFormulas =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Будує файл вивантаження.</summary>
-    public async Task<byte[]> ExportAsync(long documentId, int periodKey, string format, CancellationToken ct)
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період вивантаження.</param>
+    /// <param name="format"><c>csv</c> чи <c>json</c> (ФВ-4.2).</param>
+    /// <param name="includeFormulas">
+    /// Додати формули (ФВ-4.2). На відміну від <c>ExcelExportOptions.IncludeFormulas</c>
+    /// у <c>ExcelExporter</c> тут вираз НЕ транслюється в Excel-синтаксис: сітки
+    /// клітинок нема, тож координати транслювати нема куди. Вивантажується сирий
+    /// текст <c>FormulaDef.Expression</c> мовою редактора виразів проєкту.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<byte[]> ExportAsync(
+        long documentId, int periodKey, string format, bool includeFormulas, CancellationToken ct)
     {
         var key = new PeriodKey(periodKey);
         var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
@@ -111,7 +126,8 @@ public sealed class DocumentDataExporter(
                 tables.Add(Build(
                     sheet, table, snapshot, lookups,
                     rowIds.GetValueOrDefault(instanceId) ?? new Dictionary<string, long>(),
-                    slices.GetValueOrDefault(instanceId) ?? []));
+                    slices.GetValueOrDefault(instanceId) ?? [],
+                    includeFormulas));
             }
         }
 
@@ -162,7 +178,8 @@ public sealed class DocumentDataExporter(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<int, IReadOnlyDictionary<long, string>> lookups,
         IReadOnlyDictionary<string, long> rowIds,
-        IReadOnlyList<CellRecord> cells)
+        IReadOnlyList<CellRecord> cells,
+        bool includeFormulas)
     {
         var columns = table.Columns.Where(c => !c.IsDeleted && !c.IsHidden).OrderBy(c => c.Ordinal).ToList();
         var byColumn = columns.ToDictionary(c => c.Id);
@@ -183,7 +200,42 @@ public sealed class DocumentDataExporter(
             }
         }
 
-        return new ExportTable(sheet.Code, table.Code, columns, keys.Select(k => (k, values[k])).ToList());
+        var formulas = includeFormulas ? ColumnFormulas(table, byColumn) : NoFormulas;
+
+        return new ExportTable(sheet.Code, table.Code, columns, keys.Select(k => (k, values[k])).ToList(), formulas);
+    }
+
+    /// <summary>
+    /// Сирий вираз (без трансляції) для кожної формульної колонки: код колонки →
+    /// <see cref="FormulaDef.Expression"/>.
+    /// </summary>
+    /// <remarks>
+    /// Та сама ідентифікація формульної колонки, що й у
+    /// <c>ExcelExporter.WriteFormulas</c>: прив'язка через <c>ColumnDefId</c>, а не
+    /// <c>ColumnDef.DataType</c>. ⚠ Ідентичність формули — колонка, не текст
+    /// (<c>FormulaDef.SetExpression</c>), тому на <c>Column</c>-область стабільно
+    /// припадає щонайбільше один запис; коли на ту саму колонку ще накладається
+    /// рідкісний <c>Row</c>/<c>Cell</c>-запис, беремо <c>Column</c>-область як
+    /// пріоритетну, інакше — найменший <c>Id</c>. Це те саме спрощення «одна
+    /// формула на колонку», яке вже мовчки робить <c>ExcelExporter</c>, записуючи
+    /// формулу лише в перший рядок для не-<c>Row</c> області.
+    /// </remarks>
+    private static Dictionary<string, string> ColumnFormulas(
+        TableDef table, Dictionary<int, ColumnDef> byColumn)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var group in table.Formulas
+                     .Where(f => !f.IsDeleted && f.ColumnDefId is { } id && byColumn.ContainsKey(id))
+                     .GroupBy(f => f.ColumnDefId!.Value))
+        {
+            var chosen = group
+                .OrderBy(f => f.Scope == FormulaScope.Column ? 0 : 1)
+                .ThenBy(f => f.Id)
+                .First();
+            result[byColumn[group.Key].Code] = chosen.Expression;
+        }
+
+        return result;
     }
 
     private static byte[] Zip(List<ExportTable> tables)
@@ -204,6 +256,14 @@ public sealed class DocumentDataExporter(
     }
 
     /// <summary>Одна таблиця як CSV: заголовок — коди колонок, перша колонка — ключ рядка.</summary>
+    /// <remarks>
+    /// ⚠ Формули (коли просили) — ОКРЕМОЮ секцією після рядків даних, не
+    /// додатковою колонкою: вираз — властивість колонки в цілому (метадані), а
+    /// не значення рядка, і повторювати той самий текст у кожному рядку означало
+    /// б і роздутий файл, і оманливий натяк, що вираз відрізняється по рядках.
+    /// Той самий вибір форми, що й для <c>expression</c> у JSON нижче —
+    /// властивість опису колонки, не значення рядка.
+    /// </remarks>
     internal static string Csv(ExportTable table)
     {
         var text = new StringBuilder();
@@ -222,6 +282,23 @@ public sealed class DocumentDataExporter(
             }
 
             text.Append(CsvFormat.NewLine);
+        }
+
+        if (table.ColumnFormulas.Count > 0)
+        {
+            text.Append(CsvFormat.NewLine);
+            text.Append(CsvFormat.Row("formulas"));
+            text.Append(CsvFormat.Row("column", "expression"));
+            foreach (var column in table.Columns)
+            {
+                if (table.ColumnFormulas.TryGetValue(column.Code, out var expression))
+                {
+                    // ⚠ CsvFormat.Field і тут знешкоджує вираз від CSV-injection:
+                    // вираз редактора може легально починатися з символів,
+                    // з яких Excel будує іменем формулу (наприклад `-`, `+`).
+                    text.Append(CsvFormat.Row(column.Code, expression));
+                }
+            }
         }
 
         return text.ToString();
@@ -250,6 +327,17 @@ public sealed class DocumentDataExporter(
                     w.WriteString("dataType", c.DataType.ToString());
                     WriteNullable(w, "scale", c.Scale);
                     WriteNullable(w, "unitId", c.UnitId);
+
+                    // ⚠ Поле лише для формульних колонок: коли просили формули,
+                    // але в колонки їх нема, чи не просили зовсім — ключа
+                    // "expression" в об'єкті немає взагалі (не null), щоб
+                    // includeFormulas=false лишався побайтно тим самим виводом,
+                    // що й до ФВ-4.2.
+                    if (t.ColumnFormulas.TryGetValue(c.Code, out var expression))
+                    {
+                        w.WriteString("expression", expression);
+                    }
+
                     w.WriteEndObject();
                 }
 
@@ -315,6 +403,15 @@ public sealed class DocumentDataExporter(
 }
 
 /// <summary>Одна таблиця вивантаження.</summary>
+/// <param name="Sheet">Код аркуша.</param>
+/// <param name="Table">Код таблиці.</param>
+/// <param name="Columns">Видимі колонки за порядком.</param>
+/// <param name="Rows">Рядки: ключ і значення за кодом колонки.</param>
+/// <param name="ColumnFormulas">
+/// Код колонки → сирий вираз (ФВ-4.2); порожньо, коли формул не просили чи їх
+/// нема.
+/// </param>
 internal sealed record ExportTable(
     string Sheet, string Table, IReadOnlyList<ColumnDef> Columns,
-    IReadOnlyList<(string Key, Dictionary<string, string> Values)> Rows);
+    IReadOnlyList<(string Key, Dictionary<string, string> Values)> Rows,
+    IReadOnlyDictionary<string, string> ColumnFormulas);

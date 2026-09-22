@@ -59,7 +59,7 @@ public sealed class ExcelExportJob(
         else
         {
             content = await data
-                .ExportAsync(task.DocumentId, task.Options.PeriodKey, task.Format, ct)
+                .ExportAsync(task.DocumentId, task.Options.PeriodKey, task.Format, task.Options.IncludeFormulas, ct)
                 .ConfigureAwait(false);
         }
 

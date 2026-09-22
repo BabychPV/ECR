@@ -42,6 +42,14 @@ public sealed class DocumentDataExportTests
         table.AddColumn(volume);
         table.AddColumn(note);
         table.AddColumn(delta);
+
+        // ⚠ Формула прив'язана до Delta НАВІТЬ у тестах на includeFormulas=false:
+        // саме так тест нижче (`Csv_і_Json_includeFormulas_false_...`) доводить,
+        // що вимкнений прапорець ігнорує формулу, а не просто «її нема в даних».
+        var deltaFormula = new FormulaDef(3, FormulaScope.Column, "[Volume] - [PreviousVolume]", ExpressionDialect.Template);
+        deltaFormula.AssignColumn(13);
+        table.AddFormula(deltaFormula);
+
         sheet.AddTable(table);
 
         _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -74,7 +82,11 @@ public sealed class DocumentDataExportTests
     [Trait("Requirement", "ФВ-4.2")]
     public async Task Csv_таблиця_з_кодами_колонок_BOM_CRLF_і_16_знаками()
     {
-        var zip = await Exporter().ExportAsync(DocumentId, Period, DocumentExportFormat.Csv, CancellationToken.None);
+        // ⚠ includeFormulas: false, ХОЧА Delta має формулу (див. конструктор) —
+        // числовий доказ, що вимкнений прапорець лишає вивід побайтно тим самим,
+        // що й до ФВ-4.2: жодного символу секції "formulas" нижче нема.
+        var zip = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Csv, includeFormulas: false, CancellationToken.None);
 
         using var archive = new ZipArchive(new MemoryStream(zip));
         var entry = Assert.Single(archive.Entries);
@@ -102,7 +114,10 @@ public sealed class DocumentDataExportTests
     [Trait("Requirement", "ФВ-4.2")]
     public async Task Json_документ_таблиці_рядки_значення_за_кодом_і_десяткові_рядком()
     {
-        var json = await Exporter().ExportAsync(DocumentId, Period, DocumentExportFormat.Json, CancellationToken.None);
+        // ⚠ includeFormulas: false — доказ той самий, що й для CSV вище: жодного
+        // поля "expression" в описі колонки Delta нижче нема, попри формулу.
+        var json = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Json, includeFormulas: false, CancellationToken.None);
 
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -120,6 +135,68 @@ public sealed class DocumentDataExportTests
         Assert.Equal(JsonValueKind.String, volume.ValueKind);
         Assert.Equal("12345678.1234567890123456", volume.GetString());
         Assert.Equal("-5.50", row.GetProperty("values").GetProperty("Delta").GetString());
+
+        // ⚠ Числовий доказ нульового diff: колонка Delta МАЄ формулу (конструктор),
+        // але описана рівно 4 полями (code/dataType/scale/unitId) — так само, як
+        // до ФВ-4.2, без "expression".
+        var deltaColumn = table.GetProperty("columns")[2];
+        Assert.Equal("Delta", deltaColumn.GetProperty("code").GetString());
+        Assert.Equal(4, deltaColumn.EnumerateObject().Count());
+        Assert.False(deltaColumn.TryGetProperty("expression", out _));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-4.2")]
+    public async Task Csv_includeFormulas_true_додає_секцію_formulas_із_сирим_виразом()
+    {
+        var zip = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Csv, includeFormulas: true, CancellationToken.None);
+
+        using var archive = new ZipArchive(new MemoryStream(zip));
+        var entry = Assert.Single(archive.Entries);
+
+        using var raw = new MemoryStream();
+        using (var s = entry.Open())
+        {
+            await s.CopyToAsync(raw);
+        }
+
+        var bytes = raw.ToArray();
+        var text = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+
+        // ⚠ Секція formulas — ОКРЕМО після рядків даних (порожній рядок-межа),
+        // сирий вираз БЕЗ трансляції в Excel-нотацію: жодних A1-посилань.
+        Assert.Equal(
+            "rowKey,Volume,Note,Delta\r\n"
+            + "r1,12345678.1234567890123456,\"'=HYPERLINK(\"\"x\"\"),a\",-5.50\r\n"
+            + "\r\n"
+            + "formulas\r\n"
+            + "column,expression\r\n"
+            + "Delta,[Volume] - [PreviousVolume]\r\n",
+            text);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-4.2")]
+    public async Task Json_includeFormulas_true_додає_поле_expression_в_опис_колонки()
+    {
+        var json = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Json, includeFormulas: true, CancellationToken.None);
+
+        using var doc = JsonDocument.Parse(json);
+        var table = Assert.Single(doc.RootElement.GetProperty("tables").EnumerateArray().ToList());
+        var columns = table.GetProperty("columns");
+
+        var deltaColumn = columns[2];
+        Assert.Equal("Delta", deltaColumn.GetProperty("code").GetString());
+        Assert.Equal("[Volume] - [PreviousVolume]", deltaColumn.GetProperty("expression").GetString());
+
+        // ⚠ Колонки без формули (Volume, Note) поля "expression" не отримують
+        // навіть коли includeFormulas: true — не кожна колонка формульна.
+        Assert.False(columns[0].TryGetProperty("expression", out _));
+        Assert.False(columns[1].TryGetProperty("expression", out _));
     }
 
     [Fact]
@@ -166,8 +243,10 @@ public sealed class DocumentDataExportTests
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Тип_вмісту_завантаження_визначається_за_вмістом()
     {
-        var csv = await Exporter().ExportAsync(DocumentId, Period, DocumentExportFormat.Csv, CancellationToken.None);
-        var json = await Exporter().ExportAsync(DocumentId, Period, DocumentExportFormat.Json, CancellationToken.None);
+        var csv = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Csv, includeFormulas: false, CancellationToken.None);
+        var json = await Exporter().ExportAsync(
+            DocumentId, Period, DocumentExportFormat.Json, includeFormulas: false, CancellationToken.None);
 
         using var book = new MemoryStream();
         using (var zip = new ZipArchive(book, ZipArchiveMode.Create, leaveOpen: true))
