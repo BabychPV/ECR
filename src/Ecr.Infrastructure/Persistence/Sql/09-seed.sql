@@ -1147,6 +1147,11 @@ USING (VALUES
     (N'documents.key',                   N'en', N'Key', 1),
     (N'documents.project',               N'en', N'Project', 1),
     (N'documents.period',                N'en', N'Period', 1),
+    -- Кроки вибору періоду (UI-06). ⚠ Підписи лише для читалки: на кнопках
+    -- стрілки ‹ ›, і без aria-label вони були б безіменними. Крок — сусідній
+    -- КАЛЕНДАРНИЙ місяць, а не periodKey ± 1 (R-A6): після 202512 йде 202601.
+    (N'period.previous',                 N'en', N'Previous period', 1),
+    (N'period.next',                     N'en', N'Next period', 1),
     (N'documents.sheets',                N'en', N'Sheets', 1),
     (N'documents.state',                 N'en', N'State', 1),
     (N'documents.empty',                 N'en', N'No documents for this period.', 1),
