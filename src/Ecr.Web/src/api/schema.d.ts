@@ -1670,6 +1670,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/business-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.
+         * @description Причина обов'язкова (`422`); ключ зайнятий, застарілий `expectedBusinessKey`
+         *     або аркуш поданий/погоджений — `409` `ECR-DOC-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "application/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "text/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/calculation-results": {
         parameters: {
             query?: never;
@@ -7105,7 +7184,9 @@ export interface paths {
             };
         };
         /**
-         * Зберігає опис довідника: поля і правила. Право `Registry.EditDefinition`.
+         * Зберігає і одразу публікує опис довідника: поля і правила. Права
+         *     `Registry.EditDefinition` і `Registry.Publish` (`BE-24`: без
+         *     другого маршрут обходив би публікацію чернетки).
          * @description ⛔ Приймається ПОВНИЙ стан, а не набір правок. Опис довідника — це
          *     кілька десятків полів і одиниці правил; часткова правка вимагала б від
          *     клієнта тримати список того, що він змінив, і перша ж помилка в цьому
@@ -7166,6 +7247,252 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/definition/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Чернетка опису довідника, якщо є. Право `Registry.View` (`BE-24`). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                        "text/json": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                        "text/plain": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Зберігає чернетку опису; опублікований опис не змінюється. Право
+         *     `Registry.EditDefinition` (`BE-24`). */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                    "application/json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                    "text/json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionDraftDto"];
+                        "text/json": components["schemas"]["RegistryDefinitionDraftDto"];
+                        "text/plain": components["schemas"]["RegistryDefinitionDraftDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Скасовує чернетку опису без публікації. Право `Registry.EditDefinition` (`BE-24`). */
+        delete: {
+            parameters: {
+                query?: {
+                    /** @description Версія чернетки. У query, а не в тілі: тіло DELETE частина клієнтів і
+                     *     проксі відкидає, а більше нічого запит не несе. */
+                    rowVersion?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/definition/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Публікує чернетку опису. Право `Registry.Publish` (`BE-24`). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                    "application/json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                    "text/json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/plain": components["schemas"]["RegistryDefinitionVersionResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -11265,6 +11592,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ui-strings/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт перекладу в CSV: `key, scope, en, &lt;lang&gt;, updatedAt`. Право `System.ManageLocalization`.
+         * @description UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу (не мова за замовчуванням). */
+                    lang?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui-strings/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Імпорт перекладу з CSV. Право `System.ManageLocalization`.
+         * @description Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна
+         *     помилка або `dryRun` — не записано нічого. Стеля файлу —
+         *     `Localization:ImportMaxBytes`.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу. */
+                    lang?: string;
+                    /** @description Лише перевірка. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UiStringImportReport"];
+                        "text/json": components["schemas"]["UiStringImportReport"];
+                        "text/plain": components["schemas"]["UiStringImportReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ui-strings/{lang}": {
         parameters: {
             query?: never;
@@ -12916,6 +13380,15 @@ export interface components {
          * @enum {unknown}
          */
         ChangeClass: "Presentation" | "Safe" | "Guarded" | "Breaking";
+        /** @description Запит на зміну бізнес-ключа документа (ФВ-3.9). */
+        ChangeDocumentKeyRequest: {
+            /** @description Новий ключ. */
+            businessKey: null | string;
+            /** @description Чинний ключ, який бачила людина; розбіжність — 409. */
+            expectedBusinessKey: null | string;
+            /** @description Причина; обов'язкова, лягає в аудит. */
+            reason: null | string;
+        };
         /** @description Запит на зміну пароля. */
         ChangePasswordRequest: {
             /** @description Поточний пароль. */
@@ -14050,6 +14523,12 @@ export interface components {
              */
             createdAt?: null | string;
             /**
+             * Format: int32
+             * @description Id автора; `null` — системна задача. Заповнює `GetJobStatusHandler`:
+             *     тіло бачить лише автор або власник `System.ViewHealth`.
+             */
+            createdByUserId?: null | number;
+            /**
              * Format: int64
              * @description Документ задачі; `null` — не документна (BE-08).
              */
@@ -14095,6 +14574,12 @@ export interface components {
             createdAt?: null | string;
             /** @description Ім'я автора; `null` — системна задача (BE-08). */
             createdByDisplayName?: null | string;
+            /**
+             * Format: int32
+             * @description Id автора; `null` — системна задача. Видимість та сама, що й
+             *     CreatedByDisplayName — клієнт вирішує показ «Повторити».
+             */
+            createdByUserId?: null | number;
             /**
              * Format: int64
              * @description Документ задачі; `null` — не документна (BE-08).
@@ -15299,6 +15784,11 @@ export interface components {
              */
             effectiveFrom: null | string;
         };
+        /** @description Запит на публікацію чернетки опису. */
+        PublishRegistryDefinitionRequest: {
+            /** @description Версія чернетки, яку публікують. */
+            rowVersion: string;
+        };
         /** @description Запит на публікацію версії. */
         PublishVersionRequest: {
             /** @description Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —
@@ -15380,6 +15870,41 @@ export interface components {
              *     перемикання: без нього довідник, який уже в цільовому режимі, і той, який
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+        };
+        /** @description Чернетка опису довідника. */
+        RegistryDefinitionDraftDto: {
+            /**
+             * Format: int32
+             * @description Версія опублікованого опису, від якої відштовхується чернетка.
+             */
+            baseDefinitionVersion: number;
+            /** @description Поля чернетки. */
+            fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Причина зміни. */
+            reason: string;
+            /** @description Версія для наступного збереження чи публікації. */
+            rowVersion: string;
+            /** @description Правила чернетки. */
+            rules: components["schemas"]["RegistryRuleSaveDto"][];
+            /**
+             * Format: date-time
+             * @description Момент останнього збереження, UTC.
+             */
+            updatedAt: string;
+            /**
+             * Format: int32
+             * @description Хто зберіг востаннє.
+             */
+            updatedByUserId: number;
+        };
+        /** @description Стан чернетки опису довідника. */
+        RegistryDefinitionDraftStateResponse: {
+            /**
+             * Format: int32
+             * @description Поточна версія ОПУБЛІКОВАНОГО опису.
+             */
+            definitionVersion: number;
+            draft: null | components["schemas"]["RegistryDefinitionDraftDto"];
         };
         /** @description Повний опис довідника для конструктора (`ФВ-8.12`): поля, зв'язки,
          *     правила, мапінг. */
@@ -16368,6 +16893,17 @@ export interface components {
              */
             toSequence: null | number;
         };
+        /** @description Запит на збереження чернетки опису (`BE-24` крок 2). */
+        SaveRegistryDefinitionDraftRequest: {
+            /** @description Повний перелік полів після правки. */
+            fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Причина зміни; при публікації йде в журнал. */
+            reason: string;
+            /** @description Версія чернетки, від якої відштовхується правка; `null` — чернетки ще немає. */
+            rowVersion: null | string;
+            /** @description Повний перелік правил після правки. */
+            rules: components["schemas"]["RegistryRuleSaveDto"][];
+        };
         /** @description Запит на збереження опису довідника. */
         SaveRegistryDefinitionDto: {
             /** @description Повний перелік полів після правки. */
@@ -17337,6 +17873,45 @@ export interface components {
         UiStringCoverageResponse: {
             /** @description Увімкнені мови в порядку показу. */
             languages: components["schemas"]["UiStringCoverageDto"][];
+        };
+        /** @description Помилка одного рядка імпорту. */
+        UiStringImportError: {
+            /** @description Ключ, як його записано у файлі. */
+            key: string;
+            /** @description Ключ тексту відмови в каталозі. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Номер запису у файлі; заголовок — 1.
+             */
+            row: number;
+        };
+        /** @description Звіт імпорту перекладу. */
+        UiStringImportReport: {
+            /**
+             * Format: int32
+             * @description Нових перекладів.
+             */
+            added: number;
+            /** @description Чи записано зміни. */
+            applied: boolean;
+            /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
+            errors: components["schemas"]["UiStringImportError"][];
+            /**
+             * Format: int32
+             * @description Версія каталогу після імпорту.
+             */
+            revision: number;
+            /**
+             * Format: int32
+             * @description Тих самих, що вже в базі.
+             */
+            unchanged: number;
+            /**
+             * Format: int32
+             * @description Змінених.
+             */
+            updated: number;
         };
         /** @description Адміністративний перелік рядків мови — без fallback. */
         UiStringListResponse: {

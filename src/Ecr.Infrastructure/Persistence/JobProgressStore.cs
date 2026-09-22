@@ -166,7 +166,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             .Select(p => new JobSummary(
                 p.JobId, p.JobCode, p.State, p.Percent, p.UpdatedAt, p.StartedAt, p.Attempt, p.CorrelationId,
                 db.Users.Where(u => u.Id == p.CreatedByUserId).Select(u => u.DisplayName).FirstOrDefault(),
-                p.Message, p.CreatedAt, p.ErrorCode, p.DocumentId, MaxAttempts))
+                p.Message, p.CreatedAt, p.ErrorCode, p.DocumentId, MaxAttempts, null, p.CreatedByUserId))
             .ToListAsync(ct)
             .ConfigureAwait(false);
     }

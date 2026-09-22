@@ -185,6 +185,7 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
         services.AddScoped<Documents.DeleteDocumentHandler>();
+        services.AddScoped<Documents.ChangeDocumentKeyHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
         services.AddScoped<Documents.ListDocumentVersionsHandler>();
         services.AddScoped<Documents.CompareDocumentVersionsHandler>();
@@ -216,6 +217,10 @@ public static class DependencyInjection
         // мапінг і історія опису.
         services.AddScoped<Registries.GetRegistryDefinitionHandler>();
         services.AddScoped<Registries.SaveRegistryDefinitionHandler>();
+        services.AddScoped<Registries.GetRegistryDefinitionDraftHandler>();
+        services.AddScoped<Registries.SaveRegistryDefinitionDraftHandler>();
+        services.AddScoped<Registries.PublishRegistryDefinitionHandler>();
+        services.AddScoped<Registries.DiscardRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
 
@@ -258,6 +263,8 @@ public static class DependencyInjection
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();
         services.AddScoped<Localization.ListUiStringsHandler>();
+        services.AddScoped<Localization.ExportUiStringsCsvHandler>();
+        services.AddScoped<Localization.UiStringImportHandler>();
 
         // ⚠ PatchCellsHandler і RecalculateDocumentHandler зареєстровані з
         // Етапу 3. Раніше їх не було через IBackgroundJobScheduler без

@@ -507,6 +507,43 @@ export const SnapshotListFixture = (['legacy', 'current', 'unknown'] as const).m
 export const RegistryDefinitionName = 'Fuel types';
 
 /**
+ * Чернетка опису довідника (`BE-24` крок 2) — НЕ `draft: null`.
+ *
+ * ⛔ Порожня відповідь сховала б від сканера рівно те, що крок 2 додав на цей
+ * екран: смугу «є незбережена чернетка» (жива область `role="alert"`), кнопки
+ * публікації й скасування та поле причини. Гейт `a11y` сканував би сторінку в
+ * стані, у якому ці вузли не малюються взагалі, — і мовчав би про них назавжди
+ * (той самий відмовний режим, що вже описаний тут для `TemplateStructureFixture`).
+ *
+ * ⚠ Одне НОВЕ поле (`id: null`) і порожні правила: цього досить, щоб форма
+ * вважалася повною (`isFieldComplete`), а кнопка збереження — доступною.
+ */
+export const RegistryDefinitionDraftFixture = {
+  definitionVersion: 1,
+  draft: {
+    baseDefinitionVersion: 1,
+    fields: [
+      {
+        id: null,
+        code: 'GRADE',
+        nameL10n: { values: { en: 'Grade' } },
+        dataType: 'String',
+        ordinal: 1,
+        isRequired: false,
+        isKey: false,
+        lookupRegistryDefId: null,
+        unitId: null,
+      },
+    ],
+    rules: [],
+    reason: 'grade added for the 2026 reporting form',
+    updatedAt: '2026-09-21T08:30:00Z',
+    updatedByUserId: 0,
+    rowVersion: 'AQID+f/9Ng==',
+  },
+};
+
+/**
  * Структура версії шаблону: один аркуш з однією таблицею (`/admin/templates/:id/versions/:versionId`).
  *
  * ⛔ Не порожня — див. коментар біля відповіді в {@link emptyBodyFor}. Таблиця
@@ -651,6 +688,36 @@ export const RuleCoverageFixture = {
   truncated: false,
 };
 
+/**
+ * Покриття «виходи → колонки» версії методології (`BE-25`).
+ *
+ * ⛔ Той самий привід, що в `RuleCoverageFixture` вище: ОБ'ЄКТ, а не `[]` за
+ * замовчуванням — `MethodologyCoveragePanel` читає `outputs`/`waitingBindings`,
+ * і на масиві маршрут упав би в екран помилки замість того, щоб намалювати
+ * панель (та сама пастка, що з `/tables/status`).
+ *
+ * ⚠ Один вихід БЕЗ прив'язки (ґап-бейдж) і одна прив'язка, що чекає на вихід,
+ * якого версія не оголошує (`waitingBindings`), — навмисно НЕПОРОЖНІ: інакше
+ * гейт сканував би екран, де ані бейдж «нікуди не пише», ані блок «Waiting
+ * bindings» жодного разу не з'явилися б, і контраст обох лишився б поза
+ * перевіркою.
+ */
+export const MethodologyCoverageFixture = {
+  methodologyVersionId: 1,
+  outputs: [{ code: 'CO2', bindings: [] }],
+  waitingBindings: [
+    {
+      id: 9,
+      methodologyId: 1,
+      tableDefId: 3,
+      columnDefId: 55,
+      outputCode: 'RETIRED',
+      matchJson: '{}',
+      isActive: true,
+    },
+  ],
+};
+
 export function emptyBodyFor(url: string): unknown {
   if (url.includes('/campaign/summary')) return CampaignSummaryFixture;
 
@@ -710,6 +777,12 @@ export function emptyBodyFor(url: string): unknown {
   if (/\/template-versions\/\d+\/relations$/.test(url)) return TableRelationsFixture;
 
   if (url.includes('/relations')) return { isEditable: true, relations: [] };
+
+  // ⛔ ПЕРЕД `/definition`: чернетка опису живе під тим самим префіксом
+  // (`BE-24` крок 2), і зворотний порядок віддав би їй опублікований опис —
+  // тобто відповідь іншої форми, у якій немає ані `draft`, ані
+  // `definitionVersion` поруч із ним.
+  if (url.includes('/definition/draft')) return RegistryDefinitionDraftFixture;
 
   if (url.includes('/definition')) {
     // ⚠ Код береться з адреси: сторінка шле `/registries/<code>/definition`, і
@@ -886,6 +959,12 @@ export function emptyBodyFor(url: string): unknown {
   // помилки (та сама пастка, що з `/tables/status` вище).
   if (url.includes('/rule-coverage')) return RuleCoverageFixture;
 
+  // ⚠ `/coverage`, ПІСЛЯ перевірки `/rule-coverage` вище: та адреса теж
+  // закінчується на «coverage», але не містить `/coverage` (там
+  // `rule-coverage` одним словом через дефіс) — порядок тут не рятує від
+  // цього, а лише документує, що колізії немає (перевірено `git grep`).
+  if (/\/versions\/\d+\/coverage$/.test(url)) return MethodologyCoverageFixture;
+
   if (/\/templates\/\d+$/.test(url)) {
     return {
       code: 'TPL-A11Y',
@@ -960,6 +1039,26 @@ export function emptyBodyFor(url: string): unknown {
       ],
       nextCursor: null,
     };
+  }
+
+  /*
+   * ⛔ Реєстр мов — НЕ порожній, і це не «щоб було». Порожній перелік означав,
+   * що на `/admin/ui-strings` не малювався ані вибір мови, ані панель обміну
+   * CSV (`BE-13` ч.2): обидві не мають чого показати без мови-цілі
+   * (`D15-06`). Тобто гейт доступності сканував би екран перекладу без
+   * ЄДИНОГО елемента, який задає мову перекладу.
+   *
+   * ⚠ Склад — як у сіді (`09-seed.sql`, `MERGE sys_ecr.Language`): еталон
+   * `en` і дві мови перекладу. Саме `isDefault` відрізняє їх, і рівно на цю
+   * ознаку спирається `translationLanguages` — перелік з однією мовою не
+   * показав би різниці між «усі мови» і «мови, крім еталона».
+   */
+  if (/\/api\/v1\/languages(\?|$)/.test(url)) {
+    return [
+      { code: 'en', nameNative: 'English', isDefault: true },
+      { code: 'ru', nameNative: 'Русский', isDefault: false },
+      { code: 'kz', nameNative: 'Қазақша', isDefault: false },
+    ];
   }
 
   const paged = ['/documents', '/templates', '/users', '/projects'];

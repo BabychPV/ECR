@@ -66,6 +66,13 @@ public sealed class Document : Entity<long>
         ModifiedByUserId = userId;
     }
 
+    /// <summary>Змінює бізнес-ключ (ФВ-3.9); правила й аудит — у <c>ChangeDocumentKeyHandler</c>.</summary>
+    public void ChangeBusinessKey(string businessKey, int userId, DateTime utcNow)
+    {
+        BusinessKey = businessKey;
+        Touch(userId, utcNow);
+    }
+
     /// <summary>
     /// Задає людське ім'я документа — підпис ПОРУЧ із <see cref="BusinessKey"/>,
     /// а не замість нього (директива "людське ім'я документа").

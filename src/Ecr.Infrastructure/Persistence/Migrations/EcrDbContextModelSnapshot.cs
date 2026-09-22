@@ -1050,6 +1050,41 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.ToTable("RegistryDef", "cfg");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryDefinitionDraft", b =>
+                {
+                    b.Property<int>("RegistryDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("BaseDefinitionVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContentJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int>("UpdatedByUserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("RegistryDefId")
+                        .HasName("PK_RegistryDefinitionDraft");
+
+                    b.ToTable("RegistryDefinitionDraft", "cfg");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryFieldDef", b =>
                 {
                     b.Property<int>("Id")
@@ -4468,6 +4503,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_PAR_TV");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryDefinitionDraft", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("RegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_RegDraft_Registry");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.RegistryFieldDef", b =>

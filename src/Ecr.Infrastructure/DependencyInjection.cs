@@ -83,11 +83,13 @@ public static class DependencyInjection
         services.AddScoped<IConsistencyIssueReader, ConsistencyIssueReader>();
         services.AddScoped<IDocumentStore, DocumentStore>();
         services.AddScoped<IDocumentDeletionStore, DocumentDeletionStore>();
+        services.AddScoped<IDocumentKeyStore, DocumentKeyStore>();
         services.AddScoped<IColumnDefSearchStore, ColumnDefSearchStore>();
         services.AddScoped<ISearchStore, SearchStore>();
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
         services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IUnitStore, UnitStore>();
         services.AddScoped<IUserPreferenceStore, UserPreferenceStore>();
@@ -107,9 +109,11 @@ public static class DependencyInjection
         // ⛔ `Database:BulkBatchSize`, не `Sql:BulkBatchSize` (`S-11`). Тут
         // розбіжність коштувала найдорожче: файл оголошує 50 000, читач із
         // чужим префіксом брав СВІЙ дефолт 5 000, і масове завантаження йшло
-        // вдесятеро дрібнішими пакетами — без жодної ознаки ззовні.
+        // вдесятеро дрібнішими пакетами — без жодної ознаки ззовні. Дефолт
+        // читача тепер дорівнює файлу (50 000): SqlBulkCopy стрімить рядки з
+        // IDataReader, тож розмір пакета — межа транзакції, а не буфер у пам'яті.
         services.AddScoped(_ => new BulkCellLoader(
-            connectionString, ReadInt(configuration, "Database:BulkBatchSize", 5_000)));
+            connectionString, ReadInt(configuration, "Database:BulkBatchSize", 50_000)));
 
         // ⚠ Кеш метаданих — Scoped, а не Singleton, попри те що сам
         // IMemoryCache спільний: MetadataCache тримає EcrDbContext, а той
@@ -129,7 +133,7 @@ public static class DependencyInjection
         // ціною падіння автентифікації не є покращенням.
         //
         // ⚠ Пам'ять натомість тримає СТРОК: кожен запис у `Caching/**` має
-        // абсолютну стелю життя (30 хв метадані й профілі, 15 хв довідники,
+        // абсолютну стелю життя (`Cache:*SlidingMinutes`, 15 хв довідники,
         // 5 с ревізія), тож безмежного зростання немає й без `SizeLimit`.
         // Увімкнення ліміту з `Size` в УСІХ записувачів процесу — окремий
         // крок, і він має починатися з тих двох файлів.

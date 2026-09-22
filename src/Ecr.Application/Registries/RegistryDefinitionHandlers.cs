@@ -271,26 +271,58 @@ public sealed class SaveRegistryDefinitionHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(
-                "ECR-AUTH-0401",
-                "Анонімний запит не змінює довідники.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+        // ⛔ BE-24 крок 2: пряме збереження — це збереження І публікація одним
+        // кроком, тож вимагає і права публікації. Інакше `Registry.Publish`
+        // обходився б цим самим маршрутом.
+        await Security.PermissionCheck
+            .RequireAsync(access, currentUser, PublishRegistryDefinitionHandler.Permission, ct)
+            .ConfigureAwait(false);
 
-        if (string.IsNullOrWhiteSpace(dto.Reason))
+        var userId = RequireUser(currentUser);
+        RequireReason(dto.Reason);
+
+        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+            ?? throw RegistryNotFound(code);
+
+        return await ApplyAsync(definition, dto, "SaveDefinition", userId, ct).ConfigureAwait(false);
+    }
+
+    internal static int RequireUser(ICurrentUser user)
+        => user.UserId
+           ?? throw new AccessDeniedException(
+               "ECR-AUTH-0401",
+               "Анонімний запит не змінює довідники.",
+               new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
+    internal static void RequireReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
         {
             throw new BusinessRuleException(
                 "ECR-REG-0422",
                 "Причина зміни опису обов'язкова: опис змінює те, як читаються вже збережені записи.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.definitionReasonRequired" });
         }
+    }
 
-        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                "ECR-REG-0404",
-                $"Довідника «{code}» не існує.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code });
+    internal static NotFoundException RegistryNotFound(string code)
+        => new(
+            "ECR-REG-0404",
+            $"Довідника «{code}» не існує.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = code });
 
+    /// <summary>
+    /// Застосовує повний стан опису, пише журнал і зберігає — однією транзакцією.
+    /// Спільне для прямого збереження і публікації чернетки.
+    /// </summary>
+    /// <param name="definition">Відстежуваний довідник.</param>
+    /// <param name="dto">Поля, правила, причина.</param>
+    /// <param name="operation">Дія в журналі: <c>SaveDefinition</c> або <c>PublishDefinition</c>.</param>
+    /// <param name="userId">Автор.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<int> ApplyAsync(
+        RegistryDef definition, SaveRegistryDefinitionDto dto, string operation, int userId, CancellationToken ct)
+    {
         var rules = await registries.ListRulesAsync(definition.Id, ct).ConfigureAwait(false);
 
         var before = Snapshot(definition, rules);
@@ -338,7 +370,7 @@ public sealed class SaveRegistryDefinitionHandler(
                     EntityType: "cfg.RegistryDef",
                     EntityId: definition.Id,
                     ChangeClass: ChangeClass.Guarded,
-                    Operation: "SaveDefinition",
+                    Operation: operation,
                     OldJson: before,
                     NewJson: after,
                     ChangeReason: dto.Reason,

@@ -2218,6 +2218,23 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IDocumentKeyStore`
+
+Зміна бізнес-ключа документа (ФВ-3.9, `POST /api/v1/documents/{id}/business-key`,
+право `Document.ChangeKey`). В одній транзакції: документ під `UPDLOCK`, стани
+аркушів — через `IDocumentDeletionStore.LockWorkflowFactsAsync`, зайнятість ключа —
+під `UPDLOCK, HOLDLOCK`. Поданий/погоджений аркуш, зайнятий ключ чи застарілий
+`expectedBusinessKey` — `409 ECR-DOC-0409`; без причини — `422 ECR-DOC-0422`.
+Старий і новий ключ із причиною — в `aud.SecurityEvent` (`DocumentKeyChanged`).
+
+```csharp
+public interface IDocumentKeyStore
+{
+    public Task<Document?> FindForUpdateAsync(long documentId, CancellationToken ct);
+    public Task<bool> IsKeyTakenAsync(int projectId, string businessKey, long exceptDocumentId, CancellationToken ct);
+}
+```
+
 #### `IMethodologyVersionDeletionStore`
 
 Видалення версії-чернетки методології (`DELETE /api/v1/methodologies/{id}/versions/{vid}`,
@@ -2525,6 +2542,20 @@ public interface IRegistryStore
     public Task<IReadOnlyList<RegistryValue>> ListValuesAsync(long registryEntryId, CancellationToken ct);
     public void Add(RegistryEntry entry);
     public void AddValue(RegistryValue value);
+}
+```
+
+#### `IRegistryDraftStore`
+
+Чернетки опису довідників `cfg.RegistryDefinitionDraft` (BE-24 крок 2): одна
+на довідник, публікація застосовує її і видаляє.
+
+```csharp
+public interface IRegistryDraftStore
+{
+    public Task<RegistryDefinitionDraft?> FindAsync(int registryDefId, CancellationToken ct);
+    public void Add(RegistryDefinitionDraft draft);
+    public void Remove(RegistryDefinitionDraft draft);
 }
 ```
 
@@ -3146,6 +3177,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
+| `POST` | `/api/v1/documents/{id}/business-key` | `Document.ChangeKey` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
@@ -3265,6 +3297,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/ui-strings/{lang}/{key}` | `System.ManageLocalization` | 3 |
 | `GET` | `/api/v1/ui-strings/coverage` | `System.ManageLocalization` | 7 |
 | `GET` | `/api/v1/ui-strings?lang=&missingOnly=` | `System.ManageLocalization` | 7 |
+| `GET` | `/api/v1/ui-strings/export.csv?lang=` | `System.ManageLocalization` | 7 |
+| `POST` | `/api/v1/ui-strings/import?lang=&dryRun=` | `System.ManageLocalization` | 7 |
 | `POST` | `/api/v1/security/simulation` | `Security.Simulate` | 3 |
 | `DELETE` | `/api/v1/security/simulation` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/my-groups` | — (власний сеанс) | 3 |
@@ -3285,7 +3319,11 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |
-| `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` | 8 |
+| `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` + `Registry.Publish` | 8 |
+| `GET` | `/api/v1/registries/{code}/definition/draft` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/registries/{code}/definition/draft` | `Registry.EditDefinition` | 8 |
+| `DELETE` | `/api/v1/registries/{code}/definition/draft` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
