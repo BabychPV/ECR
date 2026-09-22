@@ -754,6 +754,11 @@ USING (VALUES
     (N'err.ECR-REQ-0422.preferenceValueInvalid',          N'en', N'The value of preference "{key}" is not valid JSON.', 1),
     (N'err.ECR-REQ-0422.preferenceValueTooLarge',         N'en', N'The value of preference "{key}" takes {size} bytes; the limit is {max}.', 1),
     (N'err.ECR-REQ-0422.preferenceLimitReached',          N'en', N'You already keep {max} preferences: delete one before adding "{key}".', 1),
+    -- FV-5.23: журнал прогонів збору. Невідомий стан — відмова, а не порожній
+    -- перелік, що читався б як «збоїв не було».
+    (N'err.ECR-INT-0404.collectionRun',                   N'en', N'Collection run {id} does not exist.', 1),
+    (N'err.ECR-REQ-0422.collectionRunState',              N'en', N'There is no collection run state "{state}".', 1),
+    (N'err.ECR-REQ-0422.collectionRunRange',              N'en', N'The start of the period must be earlier than its end.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
