@@ -2741,6 +2741,25 @@ USING (VALUES
     (N'mapping.unitChangeDecline',       N'en', N'No, this is a source error', 1),
     (N'mapping.unitChangeAccepted',      N'en', N'Collection resumed', 1),
     (N'mapping.unitChangeGoToUnits',     N'en', N'Add the unit in the catalog first', 1),
+    -- Вибір імені з каталогу джерела PI AF (ФВ-13.13). ⚠ Каталог — допомога, а
+    -- не умова: коли джерело мовчить, шлях можна ввести руками, і підказка
+    -- відмови каже саме це.
+    (N'mapping.catalogOpen',             N'en', N'Pick from catalog', 1),
+    (N'mapping.catalogTitle',            N'en', N'Source catalog', 1),
+    (N'mapping.catalogHint',             N'en', N'Elements expand; an attribute is what a mapping points at.', 1),
+    (N'mapping.catalogSearch',           N'en', N'Search by name or description', 1),
+    (N'mapping.catalogSearchApply',      N'en', N'Search', 1),
+    (N'mapping.catalogSearchClear',      N'en', N'Clear search', 1),
+    (N'mapping.catalogExpand',           N'en', N'Expand', 1),
+    (N'mapping.catalogCollapse',         N'en', N'Collapse', 1),
+    (N'mapping.catalogMore',             N'en', N'Show more', 1),
+    (N'mapping.catalogElement',          N'en', N'Element', 1),
+    (N'mapping.catalogAttribute',        N'en', N'Attribute', 1),
+    (N'mapping.catalogEmpty',            N'en', N'The data source returned no items for this level.', 1),
+    (N'mapping.catalogEmptyHint',        N'en', N'Check that the connection points at the right AF database, or search by name.', 1),
+    (N'mapping.catalogSearchEmpty',      N'en', N'Nothing in this level matches the search.', 1),
+    (N'mapping.catalogUnavailable',      N'en', N'The data source is not responding', 1),
+    (N'mapping.catalogUnavailableHint',  N'en', N'The catalog could not be read. The rest of the form still works: type the source path by hand, or try again.', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),
