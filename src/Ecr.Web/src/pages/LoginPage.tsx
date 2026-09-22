@@ -19,7 +19,13 @@ import { BrandMark } from '@/shared/ui/BrandMark';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, EcrApiError, LOGIN_REASON_PARAM } from '@/api/client';
 import type { CurrentUserDto, LocalLoginRequest } from '@/api/types';
-import { anyLostEdits, takeLostEdits, type LostEdits } from '@/features/grid/lostEdits';
+import {
+  anyLostEdits,
+  clearLostEdits,
+  peekLostEdits,
+  restorableCount,
+  type LostEdits,
+} from '@/features/grid/lostEdits';
 import { safeReturnPath } from '@/shared/safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import {
@@ -87,18 +93,29 @@ const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabInd
 const LANGUAGE_LABEL = 'Interface language';
 
 /*
- * Повідомлення про втрачені правки (`features/grid/lostEdits.ts`).
+ * Пропозиція повернути незбережені правки (`features/grid/lostEdits.ts`).
  *
- * ⚠ Ключі `login.lostEdits.title`, `login.lostEdits.text` ({count},
- * {documentId}), `login.lostEdits.continue` — область public; рядки сіду
- * заводить інтегратор.
+ * ⚠ Ключі `login.restoreEdits.title`, `login.restoreEdits.text` ({count},
+ * {documentId}), `login.restoreEdits.continue`, `login.restoreEdits.discard` —
+ * область public; рядки сіду заводить інтегратор.
+ *
+ * ✎ Попередні ключі `login.lostEdits.*` більше не використовуються: вони
+ * повідомляли «правки втрачено, введіть їх заново», а слід тепер несе самі
+ * правки й пропонує їх ПОВЕРНУТИ. Лишити старий текст над новою кнопкою
+ * означало б збрехати про те, що станеться після натискання.
  */
 
 /** Слід саме цього користувача — `userId` з профілю щойно відкритої сесії. */
-async function ownLostEdits(): Promise<LostEdits | null> {
+async function ownLostEdits(): Promise<{ userId: number; edits: LostEdits } | null> {
   try {
     const me = await apiFetch<CurrentUserDto>('/api/v1/me');
-    return takeLostEdits(me.userId);
+    const edits = peekLostEdits(me.userId);
+
+    // ⛔ Слід із нульовим відновлюваним вмістом не показується: банер
+    // «Відновити 0 змін» обіцяє дію, якої не буде.
+    return edits === null || restorableCount(edits) === 0
+      ? null
+      : { userId: me.userId, edits };
   } catch {
     return null;
   }
@@ -129,7 +146,7 @@ export function LoginPage(): JSX.Element {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const [lost, setLost] = useState<LostEdits | null>(null);
+  const [lost, setLost] = useState<{ userId: number; edits: LostEdits } | null>(null);
 
   // Перемальовує сторінку, коли каталог доїхав (інакше видно самі ключі).
   useCatalog();
@@ -206,16 +223,41 @@ export function LoginPage(): JSX.Element {
     );
   }
 
+  /*
+   * ⛔ Пропозиція, а не некролог (макет `screen-document.js:342`: «Discard» +
+   * «Restore N unsaved changes»). Самі правки лежать у сліді й чекають на
+   * документі — тут лише вибір: піти по них або стерти слід.
+   *
+   * ⚠ «Відхилити» стирає слід ОДРАЗУ й лишає людину на вході з формою: це
+   * єдина точка, де можна сказати «мені це не потрібно», не відкриваючи
+   * документа. Без неї відмовитися від правок можна було б лише пройшовши
+   * туди, куди йти не хотілося.
+   */
   if (lost !== null) {
+    const count = restorableCount(lost.edits);
+
     return (
       <Center h="100vh">
         <Card withBorder w={380} p="lg">
           <Stack gap="sm">
-            <Alert color="statusError" role="alert" title={t('login.lostEdits.title')}>
-              {t('login.lostEdits.text', { count: lost.count, documentId: lost.documentId })}
+            <Alert color="statusWarning" role="alert" title={t('login.restoreEdits.title')}>
+              {t('login.restoreEdits.text', {
+                count,
+                documentId: lost.edits.documentId,
+              })}
             </Alert>
-            <Button onClick={() => navigate(safeReturnPath(lost.from), { replace: true })}>
-              {t('login.lostEdits.continue')}
+            <Button onClick={() => navigate(safeReturnPath(lost.edits.from), { replace: true })}>
+              {t('login.restoreEdits.continue')}
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => {
+                clearLostEdits(lost.userId);
+                setLost(null);
+                navigate(safeReturnPath(searchParams.get('from')), { replace: true });
+              }}
+            >
+              {t('login.restoreEdits.discard')}
             </Button>
           </Stack>
         </Card>

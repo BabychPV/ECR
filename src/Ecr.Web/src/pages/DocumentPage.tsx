@@ -17,6 +17,7 @@ import {
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
+import { RestoreEditsBanner } from '@/features/grid/RestoreEditsBanner';
 import { ExportButton } from '@/features/export/ExportButton';
 import { CalculationResultsPanel } from '@/features/methodologies/CalculationResultsPanel';
 import { ImportPanel } from '@/features/import/ImportPanel';
@@ -398,6 +399,16 @@ export function DocumentPage(): JSX.Element {
       />
 
       {deletion.refusal}
+
+      {/* ⛔ `ФВ-3.6`, `D14-12` крок 3: правки, що загинули з сесією, лежать у
+          вкладці (`features/grid/lostEdits.ts`) і чекають ТУТ — раніше їх
+          нікуди було покласти. Банер над сітками, а не під ними: пропозиція,
+          яку видно лише після прокрутки до дев'яносто першої таблиці, — це
+          пропозиція, якої немає.
+
+          ⚠ Статичний імпорт бюджету чанка не чіпає (`D-132`): компонент
+          працює зі сховищем правок і зрізом, ядра `RevoGrid` не торкаючись. */}
+      <RestoreEditsBanner documentId={documentId} userId={session.data?.userId} />
 
       {/* ⛔ `BE-10`. Компонент сам вирішує, чи малюватися: доки сервер не
           відповів, він повертає `null`, а не «0 з 0» — заповненість, якої ще

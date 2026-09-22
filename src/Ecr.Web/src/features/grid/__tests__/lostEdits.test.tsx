@@ -10,13 +10,18 @@ import { putPendingEdit, resetPending } from '@/features/grid/pendingStore';
 import { LoginPage } from '@/pages/LoginPage';
 
 /**
- * Сесія обірвалась (`401`) з незбереженими правками → після входу людина БАЧИТЬ,
- * що їх втрачено.
+ * Сесія обірвалась (`401`) з незбереженими правками → після входу людина бачить
+ * ПРОПОЗИЦІЮ повернути їх.
  *
  * ⚠ Тест навмисно ходить лише публічними шляхами продукту: `useDocumentPending`
  * (як `DocumentPage`), `apiFetch` (справжній `401`), `LoginPage` (справжній
  * сабміт). Жодного прямого читання сховища — інакше мутація «пиши в
  * `localStorage`» пройшла б повз.
+ *
+ * ⚠ Тут лишається рівно поведінка СТОРІНКИ ВХОДУ. Повний шлях «401 → вхід →
+ * документ → правка знову в сховищі незбереженого» доводить
+ * `restoreEdits.test.tsx`: він монтує справжній `DocumentPage` і коштує
+ * відповідно.
  */
 
 const Owner = 42;
@@ -132,7 +137,7 @@ afterEach(() => {
 });
 
 describe('незбережені правки при обриві сесії', () => {
-  it('401 з незбереженими правками → після входу видно, що втрачено 3 зміни', async () => {
+  it('401 з незбереженими правками → після входу пропонують повернути 3 зміни', async () => {
     stubServer(Owner);
     await loseThreeEdits();
 
@@ -145,28 +150,51 @@ describe('незбережені правки при обриві сесії', (
     await signIn();
 
     const alert = await screen.findByRole('alert');
-    // ⚠ Рядків `login.lostEdits.*` у тестовому каталозі навмисно немає (сід
+    // ⚠ Рядків `login.restoreEdits.*` у тестовому каталозі навмисно немає (сід
     // заводить інтегратор): `t()` показує ключ `⟦…⟧` разом із параметрами, і
-    // саме вони доводять, що втрачено ТРИ зміни в ЦЬОМУ документі.
+    // саме вони доводять, що пропонують ТРИ зміни в ЦЬОМУ документі.
     expect(alert.textContent).toContain(
-      `⟦login.lostEdits.text (count=3, documentId=${String(DocumentId)})⟧`,
+      `⟦login.restoreEdits.text (count=3, documentId=${String(DocumentId)})⟧`,
     );
 
     // Повертає до документа, звідки перенаправили.
-    fireEvent.click(screen.getByRole('button', { name: '⟦login.lostEdits.continue⟧' }));
+    fireEvent.click(screen.getByRole('button', { name: '⟦login.restoreEdits.continue⟧' }));
     expect(await screen.findByText('document page')).toBeDefined();
   });
 
-  it('показується рівно раз', async () => {
+  /*
+   * ⛔ Слід НЕ витрачається показом. Доки він ніс лише факт, показати його раз
+   * було правильно — більше з ним не робили нічого. Тепер у ньому самі правки,
+   * і стирання на вході знищило б їх рівно в мить, коли людина погодилася їх
+   * повернути: `DocumentPage` не знайшов би вже нічого.
+   */
+  it('перехід на документ сліду не витрачає', async () => {
     stubServer(Owner);
     await loseThreeEdits();
     await signIn();
     await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '⟦login.restoreEdits.continue⟧' }));
+    await screen.findByText('document page');
+    document.body.innerHTML = '';
+
+    stubServer(Owner);
+    await signIn();
+    expect(await screen.findByRole('alert')).toBeDefined();
+  });
+
+  it('«Відхилити» стирає слід — удруге не пропонують', async () => {
+    stubServer(Owner);
+    await loseThreeEdits();
+    await signIn();
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '⟦login.restoreEdits.discard⟧' }));
+    await screen.findByText('home');
     document.body.innerHTML = '';
 
     stubServer(Owner);
     await signIn();
     expect(await screen.findByText('home')).toBeDefined();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('інший користувач на тому ж комп’ютері не бачить чужої втрати', async () => {
@@ -178,7 +206,7 @@ describe('незбережені правки при обриві сесії', (
 
     expect(await screen.findByText('home')).toBeDefined();
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(document.body.textContent).not.toContain('login.lostEdits');
+    expect(document.body.textContent).not.toContain('login.restoreEdits');
   });
 
   it('без незбережених правок 401 нічого не лишає', async () => {
