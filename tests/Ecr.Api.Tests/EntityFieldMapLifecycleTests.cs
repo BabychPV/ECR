@@ -123,6 +123,69 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public async Task Прийняття_поміченої_збором_одиниці_без_id_відновлює_збір_а_повторне_дає_409()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
+
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
+
+        // Тіло без id: одиницю сервер бере з позначки збору.
+        var accepted = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { });
+
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        var dto = await JsonAsync(accepted).ConfigureAwait(true);
+        Assert.Equal(stand.NewUnitId, dto.GetProperty("sourceUnitId").GetInt32());
+        Assert.Equal(JsonValueKind.Null, dto.GetProperty("pendingSourceUnitChange").ValueKind);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `IsActive = true` в
+        // `EntityFieldMap.AcceptSourceUnitChange` — макет обіцяє «Collection
+        // resumed», а мапінг лишається на паузі.
+        Assert.True(dto.GetProperty("isActive").GetBoolean());
+        Assert.True(await IsActiveAsync(stand.FieldMapId).ConfigureAwait(true));
+
+        var again = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { });
+
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal(
+            "err.ECR-INT-0409.mappingUnitChangeNotPending",
+            (await JsonAsync(again).ConfigureAwait(true)).GetProperty("messageKey").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public async Task Одиницю_якої_немає_в_довіднику_не_приймають_422_і_мапінг_лишається_на_паузі()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
+
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        await MarkPendingAsync(stand.FieldMapId, "m3-unknown", unitId: null).ConfigureAwait(true);
+
+        var refused = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/entity-field-maps/{stand.FieldMapId}/accept-unit-change", UriKind.Relative),
+            new { });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        var problem = await JsonAsync(refused).ConfigureAwait(true);
+        Assert.Equal("ECR-INT-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-INT-0422.pendingUnitNotInCatalog", problem.GetProperty("messageKey").GetString());
+
+        Assert.False(await IsActiveAsync(stand.FieldMapId).ConfigureAwait(true));
+        Assert.Equal(stand.OldUnitId, await SourceUnitIdAsync(stand.FieldMapId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "BE-27")]
     public async Task Мапінг_зі_зібраними_даними_не_видаляється_а_порожній_видаляється()
     {
@@ -229,6 +292,16 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
 
         return await db.EntityFieldMaps.AsNoTracking()
             .Where(m => m.Id == fieldMapId).Select(m => m.IsActive).SingleAsync()
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Позначка «джерело змінило одиницю» — тим самим шляхом, що й збір.</summary>
+    private async Task MarkPendingAsync(int fieldMapId, string unitCode, int? unitId)
+    {
+        await using var db = new EcrDbContext(Options());
+
+        await new CollectionStore(db, new TestClock(Now))
+            .PauseForSourceUnitChangeAsync(fieldMapId, unitCode, unitId, CancellationToken.None)
             .ConfigureAwait(false);
     }
 

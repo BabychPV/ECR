@@ -128,6 +128,9 @@ public sealed class CollectionRunner(
         // відмовляє стало.
         var reacquired = false;
 
+        // Атрибути, чиї мапінги цей прогін поставив на паузу (ФВ-16.9).
+        var pausedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         // ⚠ Годинник прогону (Q-250): рахує ЛИШЕ звідси, а не з початку
         // методу — підготовка вище (пошук сутності, мапінгів, планування)
         // у джерело не ходить і в цей ліміт не входить. Пов'язаний із
@@ -146,6 +149,15 @@ public sealed class CollectionRunner(
 
                 foreach (var path in paths)
                 {
+                    // Мапінг, поставлений на паузу через зміну одиниці, у
+                    // цьому прогоні більше не читається; інтервал лишається
+                    // непокритим — після рішення людини його забере наздоганяння.
+                    if (pausedPaths.Contains(path))
+                    {
+                        complete = false;
+                        continue;
+                    }
+
                     var outcome = await ReadAsync(
                         adapter, dataSource.Id, sourceEntityId, path, interval, runToken).ConfigureAwait(false);
 
@@ -185,10 +197,16 @@ public sealed class CollectionRunner(
                         // відмові батча: викинути прочитане через те, що хвіст
                         // діапазону не дався, означало б читати його вдруге —
                         // і так до наступної відмови.
-                        retrieved += await SaveAsync(
-                            runId, sourceEntityId, result.Points, maps, units, ct).ConfigureAwait(false);
+                        var saved = await SaveAsync(
+                            runId, sourceEntityId, result.Points, maps, units, pausedPaths, ct).ConfigureAwait(false);
+                        retrieved += saved.Written;
 
-                        if (result.ErrorCode is null && result.FailedIntervals.Count == 0)
+                        if (saved.UnitChange is { } change)
+                        {
+                            failureCode ??= SourceUnitConverter.UnitChangedCode;
+                            failureMessage ??= change;
+                        }
+                        else if (result.ErrorCode is null && result.FailedIntervals.Count == 0)
                         {
                             continue;
                         }
@@ -218,8 +236,10 @@ public sealed class CollectionRunner(
         }
         catch (BusinessRuleException ex)
         {
-            // Зміна одиниці джерела зупиняє збір (ФВ-16.9): те, що вже
-            // прочитано, лишається, покриття за незавершені інтервали — ні.
+            // Правило, що зупиняє весь прогін: те, що вже прочитано,
+            // лишається, покриття за незавершені інтервали — ні. (Зміна
+            // одиниці сюди більше не доходить — вона ставить на паузу лише
+            // свій мапінг, див. SaveAsync.)
             await store
                 .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
                 .ConfigureAwait(false);
@@ -416,33 +436,71 @@ public sealed class CollectionRunner(
         }
     }
 
-    /// <summary>Перевіряє одиниці й зберігає точки.</summary>
-    private async Task<int> SaveAsync(
+    /// <summary>
+    /// Перевіряє одиниці й зберігає точки. Мапінг, чия одиниця змінилася,
+    /// стає на паузу з позначкою, а його точки не пишуться (ФВ-16.9).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Зупиняється МАПІНГ, а не прогін: раніше `ECR-INT-0422` валив увесь
+    /// збір сутності, і атрибути з правильною одиницею теж лишалися без даних.
+    /// Мовчазної конверсії як не було, так і немає — жодна точка зміненого
+    /// атрибута не пишеться, доки людина не вирішить.
+    /// </remarks>
+    private async Task<SaveOutcome> SaveAsync(
         long runId,
         int sourceEntityId,
         IReadOnlyList<SourceDataPoint> points,
         IReadOnlyList<EntityFieldMap> maps,
         UnitCatalogSnapshot units,
+        HashSet<string> pausedPaths,
         CancellationToken ct)
     {
         if (points.Count == 0)
         {
-            return 0;
+            return new SaveOutcome(0, null);
         }
+
+        string? unitChange = null;
 
         foreach (var point in points)
         {
             var map = maps.FirstOrDefault(
                 m => string.Equals(m.SourceField, point.SourcePath, StringComparison.OrdinalIgnoreCase));
 
-            SourceUnitConverter.EnsureDeclaredUnit(
-                map?.SourceUnitId, point.SourceUnitSymbol, units, point.SourcePath);
+            if (map is null
+                || pausedPaths.Contains(map.SourceField)
+                || SourceUnitConverter.IsDeclaredUnit(map.SourceUnitId, point.SourceUnitSymbol, units))
+            {
+                continue;
+            }
+
+            var actualCode = point.SourceUnitSymbol!;
+            int? actualId = units.Units.TryGetValue(actualCode, out var actual) ? actual.Id : null;
+
+            await store
+                .PauseForSourceUnitChangeAsync(map.Id, actualCode, actualId, ct)
+                .ConfigureAwait(false);
+
+            pausedPaths.Add(map.SourceField);
+            unitChange ??= $"Атрибут «{map.SourceField}» повертає одиницю «{actualCode}», "
+                           + $"а в мапінгу оголошено одиницю {map.SourceUnitId}. Мапінг призупинено.";
         }
 
-        return await store
-            .UpsertRawPointsAsync(runId, sourceEntityId, points, ct)
-            .ConfigureAwait(false);
+        var accepted = pausedPaths.Count == 0
+            ? points
+            : points.Where(p => !pausedPaths.Contains(p.SourcePath)).ToList();
+
+        var written = accepted.Count == 0
+            ? 0
+            : await store.UpsertRawPointsAsync(runId, sourceEntityId, accepted, ct).ConfigureAwait(false);
+
+        return new SaveOutcome(written, unitChange);
     }
+
+    /// <summary>Підсумок збереження батча.</summary>
+    /// <param name="Written">Скільки точок записано.</param>
+    /// <param name="UnitChange">Текст про зміну одиниці; <c>null</c> — не було.</param>
+    private sealed record SaveOutcome(int Written, string? UnitChange);
 
     /// <summary>Атрибути, які читаємо для сутності.</summary>
     /// <remarks>

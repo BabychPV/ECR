@@ -259,6 +259,21 @@ public sealed class MappingPreviewTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-16.9")]
+    public void Позначка_зміни_одиниці_доходить_до_перегляду()
+    {
+        var pending = new PendingSourceUnitChange("t", 42, From);
+        var data = Data(
+            maps: [Map(1, "Flare_01_CO", rowKey: "Flare_01", aggregation: "Sum", isActive: false) with { PendingSourceUnitChange = pending }],
+            points: [Point("Flare_01_CO", From.AddHours(1), 10m)]);
+
+        var field = Assert.Single(PreviewMappingHandler.Compose(data, From, To).Fields);
+
+        Assert.Equal(pending, field.PendingSourceUnitChange);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Урізана_вибірка_позначається_прапорцем()
     {
         // ⛔ Урізана серія дає правильне НА ВИГЛЯД число: `Sum` просто менша,

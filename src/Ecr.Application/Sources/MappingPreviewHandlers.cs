@@ -188,7 +188,8 @@ public sealed class PreviewMappingHandler(
                 map.TargetUnitCode,
                 series.Count,
                 folded,
-                map.IsActive));
+                map.IsActive,
+                map.PendingSourceUnitChange));
         }
 
         return result;
@@ -390,6 +391,7 @@ public sealed record MappingPreview(
 /// <param name="PointCount">Скільки реальних точок вікна під цей мапінг.</param>
 /// <param name="FoldedValue">Число, яке лягло б у комірку; <c>null</c> — нічого згортати.</param>
 /// <param name="IsActive">Мапінг діє; <c>false</c> — призупинений (<c>BE-27</c>), значень не пише.</param>
+/// <param name="PendingSourceUnitChange">Пауза через зміну одиниці джерела; <c>null</c> — її немає (ФВ-16.9).</param>
 public sealed record MappedFieldPreview(
     int FieldMapId,
     string SourceField,
@@ -402,7 +404,8 @@ public sealed record MappedFieldPreview(
     string? TargetUnitCode,
     int PointCount,
     decimal? FoldedValue,
-    bool IsActive);
+    bool IsActive,
+    PendingSourceUnitChange? PendingSourceUnitChange);
 
 /// <summary>Реальний рядок джерела разом із адресою, куди він лягає.</summary>
 /// <param name="SourcePath">Шлях атрибута в джерелі.</param>

@@ -209,6 +209,25 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         => db.EntityFieldMaps.FirstOrDefaultAsync(m => m.Id == fieldMapId, ct);
 
     /// <inheritdoc />
+    public async Task PauseForSourceUnitChangeAsync(
+        int fieldMapId, string actualUnitCode, int? actualUnitId, CancellationToken ct)
+    {
+        // Мапінги збору читаються без відстеження, тож пауза — окремим
+        // відстежуваним читанням і власним збереженням.
+        var map = await db.EntityFieldMaps
+            .FirstOrDefaultAsync(m => m.Id == fieldMapId, ct)
+            .ConfigureAwait(false);
+
+        if (map is null)
+        {
+            return;
+        }
+
+        map.PauseForSourceUnitChange(actualUnitCode, actualUnitId, clock.UtcNow);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public async Task RemoveFieldMapAsync(EntityFieldMap map, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(map);

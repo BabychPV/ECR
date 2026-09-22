@@ -167,18 +167,7 @@ public sealed class CreateEntityFieldMapHandler(
     }
 
     /// <summary>Складає DTO мапінгу для відповіді.</summary>
-    private static EntityFieldMapDto Map(EntityFieldMap map) => new(
-        map.Id,
-        map.SourceEntityId,
-        map.SourceField,
-        map.TargetKind,
-        map.TargetColumnDefId,
-        map.TargetRegistryFieldDefId,
-        map.SourceUnitId,
-        map.TargetUnitId,
-        map.TargetRowKey,
-        map.Aggregation,
-        map.IsActive);
+    private static EntityFieldMapDto Map(EntityFieldMap map) => EntityFieldMapLifecycle.Map(map);
 }
 
 /// <summary>Налаштування нового мапінгу, що приходять із форми конфігуратора.</summary>
@@ -217,6 +206,9 @@ public sealed record CreateEntityFieldMapCommand(
 /// <param name="TargetRowKey">Рядок-адресат; <c>null</c> — не матеріалізується.</param>
 /// <param name="Aggregation">Спосіб згортання точок періоду.</param>
 /// <param name="IsActive">Чи діє мапінг.</param>
+/// <param name="PendingSourceUnitChange">
+/// Збір помітив іншу одиницю джерела і поставив мапінг на паузу; <c>null</c> — ні (ФВ-16.9).
+/// </param>
 public sealed record EntityFieldMapDto(
     int Id,
     int SourceEntityId,
@@ -228,4 +220,19 @@ public sealed record EntityFieldMapDto(
     int? TargetUnitId,
     string? TargetRowKey,
     AggregationKind? Aggregation,
-    bool IsActive);
+    bool IsActive,
+    PendingSourceUnitChange? PendingSourceUnitChange);
+
+/// <summary>Зміна одиниці джерела, що чекає рішення людини (ФВ-16.9).</summary>
+/// <param name="ActualUnitCode">Одиниця, яку віддає джерело.</param>
+/// <param name="ActualUnitId">Її id у довіднику; <c>null</c> — її спершу треба завести.</param>
+/// <param name="DetectedAt">Коли збір це помітив.</param>
+public sealed record PendingSourceUnitChange(string ActualUnitCode, int? ActualUnitId, DateTime DetectedAt)
+{
+    /// <summary>Позначка мапінгу; <c>null</c> — рішення не чекається.</summary>
+    /// <param name="code">Код одиниці з позначки.</param>
+    /// <param name="unitId">Id одиниці з позначки.</param>
+    /// <param name="detectedAt">Час позначки.</param>
+    public static PendingSourceUnitChange? From(string? code, int? unitId, DateTime? detectedAt)
+        => code is null || detectedAt is not { } at ? null : new(code, unitId, at);
+}

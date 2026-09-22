@@ -142,16 +142,23 @@ public sealed class AcceptSourceUnitChangeHandler(
 
     /// <summary>Записує рішення людини про нову одиницю джерела.</summary>
     /// <param name="fieldMapId">Мапінг.</param>
-    /// <param name="newSourceUnitId">Одиниця, яку джерело віддає тепер.</param>
+    /// <param name="requestedSourceUnitId">
+    /// Одиниця, яку джерело віддає тепер; <c>null</c> — та, що помітив збір.
+    /// </param>
     /// <param name="ct">Скасування.</param>
     /// <exception cref="NotFoundException">
     /// <c>ECR-INT-0404</c> — мапінгу немає; <c>ECR-UOM-0404</c> — одиниці немає в довіднику.
     /// </exception>
     /// <exception cref="DomainException">
-    /// <c>ECR-INT-0409</c> — одиниця не оголошена або вже та сама.
+    /// <c>ECR-INT-0409</c> — одиниця не оголошена, вже та сама або рішення не чекається;
+    /// <c>ECR-INT-0422</c> — помічену одиницю спершу треба завести в довідник.
     /// </exception>
+    /// <remarks>
+    /// Прийняття зміни, яку помітив збір, ще й знімає паузу — макет обіцяє
+    /// «Collection resumed» одразу після рішення.
+    /// </remarks>
     public async Task<EntityFieldMapDto> HandleAsync(
-        int fieldMapId, int newSourceUnitId, CancellationToken ct)
+        int fieldMapId, int? requestedSourceUnitId, CancellationToken ct)
     {
         await ListTemplatesHandler
             .RequireAsync(access, currentUser, Permission, ct)
@@ -164,19 +171,38 @@ public sealed class AcceptSourceUnitChangeHandler(
         // в `CreateEntityFieldMapHandler.ApplyUnitsAsync`: мапінг, який
         // оголошує неіснуючу одиницю, зупинив би збір знову, тепер уже на
         // конверсії.
-        if (!await sources.UnitExistsAsync(newSourceUnitId, ct).ConfigureAwait(false))
+        if (requestedSourceUnitId is { } requested
+            && !await sources.UnitExistsAsync(requested, ct).ConfigureAwait(false))
         {
             throw new NotFoundException(
                 ErrorCodes.UnitNotFound,
-                $"Одиниці {newSourceUnitId} немає в довіднику.",
+                $"Одиниці {requested} немає в довіднику.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-UOM-0404.unitId",
-                    ["id"] = newSourceUnitId.ToString(CultureInfo.InvariantCulture),
+                    ["id"] = requested.ToString(CultureInfo.InvariantCulture),
                 });
         }
 
-        var previousUnitId = map.AcceptSourceUnitChange(newSourceUnitId);
+        // Одиницю з позначки могли прибрати з довідника до рішення — це той
+        // самий випадок «її спершу треба завести», що й відсутній id.
+        if (requestedSourceUnitId is null
+            && map.PendingSourceUnitId is { } pending
+            && !await sources.UnitExistsAsync(pending, ct).ConfigureAwait(false))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.SourceUnitChanged,
+                $"Одиниці «{map.PendingSourceUnitCode}» немає в довіднику: спершу заведіть її.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.pendingUnitNotInCatalog",
+                    ["sourceField"] = map.SourceField,
+                    ["unitCode"] = map.PendingSourceUnitCode,
+                });
+        }
+
+        var previousUnitId = map.AcceptSourceUnitChange(requestedSourceUnitId);
+        var newSourceUnitId = map.SourceUnitId!.Value;
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -341,5 +367,7 @@ internal static class EntityFieldMapLifecycle
         map.TargetUnitId,
         map.TargetRowKey,
         map.Aggregation,
-        map.IsActive);
+        map.IsActive,
+        PendingSourceUnitChange.From(
+            map.PendingSourceUnitCode, map.PendingSourceUnitId, map.PendingSourceUnitDetectedAt));
 }

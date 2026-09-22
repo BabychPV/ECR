@@ -97,15 +97,12 @@ public sealed class EntityFieldMapsController(
     [ProducesResponseType<EntityFieldMapDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> AcceptUnitChange(
-        int id, [FromBody] AcceptSourceUnitChangeRequest request, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        return Ok(await acceptUnit
-            .HandleAsync(id, request.SourceUnitId, ct)
+        int id, [FromBody] AcceptSourceUnitChangeRequest? request, CancellationToken ct)
+        => Ok(await acceptUnit
+            .HandleAsync(id, request?.SourceUnitId, ct)
             .ConfigureAwait(false));
-    }
 
     /// <summary>
     /// Видаляє мапінг. Право <c>Integration.Manage</c> (<c>BE-27</c>).
@@ -133,8 +130,11 @@ public sealed class EntityFieldMapsController(
 }
 
 /// <summary>Запит на приймання зміни одиниці джерела (<c>ФВ-16.9</c>).</summary>
-/// <param name="SourceUnitId">Одиниця довідника, яку джерело віддає тепер.</param>
-public sealed record AcceptSourceUnitChangeRequest(int SourceUnitId);
+/// <param name="SourceUnitId">
+/// Одиниця довідника, яку джерело віддає тепер; <c>null</c> — та, що помітив збір
+/// (<c>pendingSourceUnitChange.actualUnitId</c>).
+/// </param>
+public sealed record AcceptSourceUnitChangeRequest(int? SourceUnitId);
 
 /// <summary>Запит на створення мапінгу.</summary>
 /// <param name="SourceEntityId">Сутність джерела.</param>

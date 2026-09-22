@@ -768,6 +768,9 @@ USING (VALUES
     (N'err.ECR-REQ-0422.preferenceValueInvalid',          N'en', N'The value of preference "{key}" is not valid JSON.', 1),
     (N'err.ECR-REQ-0422.preferenceValueTooLarge',         N'en', N'The value of preference "{key}" takes {size} bytes; the limit is {max}.', 1),
     (N'err.ECR-REQ-0422.preferenceLimitReached',          N'en', N'You already keep {max} preferences: delete one before adding "{key}".', 1),
+    -- ФВ-16.9: зміна одиниці ставить на паузу лише свій мапінг і чекає рішення.
+    (N'err.ECR-INT-0409.mappingUnitChangeNotPending',     N'en', N'The mapping of field "{sourceField}" is not waiting for a decision about its unit.', 1),
+    (N'err.ECR-INT-0422.pendingUnitNotInCatalog',         N'en', N'The source of field "{sourceField}" now reports unit "{unitCode}", which is not in the unit catalog. Add the unit first, then accept the change.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
