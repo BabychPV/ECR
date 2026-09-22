@@ -2772,6 +2772,21 @@ public interface ISourceCatalogReader
 }
 ```
 
+> ⚠ **«Перевірити конфігурацію» (ФВ-13.17), `POST /api/v1/data-sources/{id}/probe`,
+> тіло `{ path }` (1–500 символів).** До першого збору: пробне читання ОДНОГО
+> значення тим самим адаптером, яким потім збиратимуть
+> (`IExternalDataSource.ReadAsync`, вікно 30 днів назад, без запису в постійну
+> таблицю). Успіх — `{ path, hasValue, valueNumeric, valueString, unitSymbol,
+> timestamp, quality }`; `hasValue = false` — шлях є в каталозі, але точки у
+> вікні немає. Існування шляху перевіряє КАТАЛОГ (`ISourceCatalogReader`, той
+> самий обхід, що для ФВ-13.13, не дубльований) — шлях, якого каталог того
+> самого рівня не бачить, дає `404 ECR-INT-0404`
+> (`err.ECR-INT-0404.sourcePathNotFound`) з `suggestions`: до 5 найближчих імен
+> за відстанню Левенштейна серед елементів і атрибутів того ж рівня; рівень без
+> жодного елемента — той самий `404`, `suggestions: []`. Таймаут і недоступність
+> — та сама конвенція, що в каталозі: `503 ECR-INT-0503`
+> (`probeTimeout`/`probeUnavailable`), відмова автентифікації — `502 ECR-INT-0502`.
+
 > ⛔ **Джерела даних — без сховища секретів** (`BE-21`, пряме рішення людини на
 > `Q15-06`): «Windows-автентифікація службового облікового запису; секретів у
 > застосунку немає». Тому в `SaveDataSourceRequest` поля секрету НЕМАЄ і
@@ -3331,6 +3346,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/data-sources/{id}/test` | `Integration.Manage` | 7 |
 | `GET` | `/api/v1/data-sources/{id}/catalog` | `Integration.Manage` | 7 |
+| `POST` | `/api/v1/data-sources/{id}/probe` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/entity-field-maps` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/entity-field-maps/{id}/pause` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/entity-field-maps/{id}/resume` | `Integration.Manage` | 5 |

@@ -777,6 +777,12 @@ USING (VALUES
     (N'err.ECR-REQ-0422.catalogQueryInvalid',             N'en', N'A catalog page holds 1 to 200 items, a search is up to 200 characters, and the cursor must come from the previous page.', 1),
     (N'err.ECR-INT-0503.catalogTimeout',                  N'en', N'Data source "{code}" did not return its catalog within {timeoutSeconds} s. Try again later.', 1),
     (N'err.ECR-INT-0503.catalogUnavailable',              N'en', N'Data source "{code}" is unavailable, so its catalog could not be read. Try again later.', 1),
+    -- ФВ-13.17: «Перевірити конфігурацію» до першого збору — пробне читання
+    -- одного значення; шлях, якого немає в каталозі, дає підказку схожих імен.
+    (N'err.ECR-REQ-0422.probePathInvalid',                N'en', N'A probe path is required, from 1 to 500 characters.', 1),
+    (N'err.ECR-INT-0503.probeTimeout',                    N'en', N'Data source "{code}" did not answer the probe within {timeoutSeconds} s. Try again later.', 1),
+    (N'err.ECR-INT-0503.probeUnavailable',                N'en', N'Data source "{code}" is unavailable, so the probe could not run. Try again later.', 1),
+    (N'err.ECR-INT-0404.sourcePathNotFound',              N'en', N'The path "{path}" was not found in data source "{code}". Check the suggested names.', 1),
     -- ⛔ `BE-27`: дії над мапінгом. Пауза існує, щоб мапінг можна було спинити,
     -- НЕ стираючи пояснення вже зібраних точок, — тому речення про видалення
     -- мусить назвати її прямо, інакше відмова виглядає глухим кутом.
