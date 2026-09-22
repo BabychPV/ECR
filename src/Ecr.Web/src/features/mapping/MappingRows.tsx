@@ -1,13 +1,27 @@
 import type { JSX } from 'react';
+import { useState } from 'react';
 import { Badge, Stack, Table, Text, Title } from '@mantine/core';
 import type { MappingPreview } from '@/api/types';
 import { target } from './MappingGaps';
 import { outcomeColor, outcomeLabel } from './outcome';
 import { PauseResumeAction } from './PauseResumeAction';
 import { PausedBadge, mappingCounts } from './paused';
+import { UnitChangeAction } from './UnitChangeAction';
 import { toneFills } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+
+/**
+ * Ключ «банер зміни одиниці для цього мапінгу закрито в цьому сеансі».
+ *
+ * ⚠ `detectedAt`, а не лише `fieldMapId`: якщо збір ще раз помітить зміну
+ * одиниці ПІСЛЯ того, як людина закрила попередній банер («Ні, це помилка
+ * джерела»), це вже НОВА подія з новим часом виявлення — і вона має право на
+ * власний банер, а не мовчазне приховання через збіг id.
+ */
+function pendingBannerKey(fieldMapId: number, detectedAtUtc: string): string {
+  return `${String(fieldMapId)}:${detectedAtUtc}`;
+}
 
 /**
  * Мапінги і реальні рядки джерела (`ФВ-13.14`).
@@ -37,6 +51,11 @@ export function MappingRows({
   readonly allowed?: boolean;
 }): JSX.Element {
   const counts = mappingCounts(preview.fields);
+
+  // ⚠ Стан живе ТУТ, а не в `UnitChangeAction`: закритий банер визначає, який
+  // З ДВОХ рядків малювати для поля (банер чи звичайний paused), а не як
+  // виглядає сам банер.
+  const [dismissedPending, setDismissedPending] = useState<ReadonlySet<string>>(new Set());
 
   return (
     <Stack gap="lg">
@@ -70,8 +89,32 @@ export function MappingRows({
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {preview.fields.map((field) =>
-              field.isActive ? (
+            {preview.fields.map((field) => {
+              const pending = field.pendingSourceUnitChange;
+              const bannerKey = pending === null ? null : pendingBannerKey(field.fieldMapId, pending.detectedAt);
+
+              if (bannerKey !== null && !dismissedPending.has(bannerKey)) {
+                return (
+                  <Table.Tr key={field.fieldMapId} data-mapping-state="pending-unit-change">
+                    <Table.Td>{field.sourceField}</Table.Td>
+                    {/* ⚠ `colSpan={7}`: `1` (поле) + `7` = усі вісім колонок
+                        заголовка. Одна клітинка, а не окремі порожні, — банер
+                        показує СВОЄ, а не імітує решту рядка даними, яких
+                        для призупиненого поля щойно немає. */}
+                    <Table.Td colSpan={7}>
+                      <UnitChangeAction
+                        field={field}
+                        allowed={allowed}
+                        onDismiss={() =>
+                          setDismissedPending((prev) => new Set(prev).add(bannerKey))
+                        }
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              }
+
+              return field.isActive ? (
                 <Table.Tr key={field.fieldMapId}>
                   <Table.Td>{field.sourceField}</Table.Td>
                   <Table.Td>{target(field.targetRowKey, field.targetColumnCode)}</Table.Td>
@@ -112,8 +155,8 @@ export function MappingRows({
                   </Table.Td>
                   <Table.Td>{allowed && <PauseResumeAction field={field} />}</Table.Td>
                 </Table.Tr>
-              ),
-            )}
+              );
+            })}
           </Table.Tbody>
         </Table>
       </Stack>
