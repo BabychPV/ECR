@@ -1,7 +1,8 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
-import { Badge, Stack, Table, Text, Title } from '@mantine/core';
+import { Badge, Group, Stack, Table, Text, Title } from '@mantine/core';
 import type { MappingPreview } from '@/api/types';
+import { DeleteMappingAction } from './DeleteMappingAction';
 import { target } from './MappingGaps';
 import { outcomeColor, outcomeLabel } from './outcome';
 import { PauseResumeAction } from './PauseResumeAction';
@@ -129,7 +130,14 @@ export function MappingRows({
                       {outcomeLabel(field.outcome)}
                     </Badge>
                   </Table.Td>
-                  <Table.Td>{allowed && <PauseResumeAction field={field} />}</Table.Td>
+                  <Table.Td>
+                    {allowed && (
+                      <Group gap="xs" wrap="nowrap" align="flex-start">
+                        <PauseResumeAction field={field} />
+                        <DeleteMappingAction field={field} />
+                      </Group>
+                    )}
+                  </Table.Td>
                 </Table.Tr>
               ) : (
                 /* ⛔ Призупинений (`BE-27`) нікуди не пише: ні адреси, ні
@@ -153,7 +161,14 @@ export function MappingRows({
                   <Table.Td>
                     <PausedBadge />
                   </Table.Td>
-                  <Table.Td>{allowed && <PauseResumeAction field={field} />}</Table.Td>
+                  <Table.Td>
+                    {allowed && (
+                      <Group gap="xs" wrap="nowrap" align="flex-start">
+                        <PauseResumeAction field={field} />
+                        <DeleteMappingAction field={field} />
+                      </Group>
+                    )}
+                  </Table.Td>
                 </Table.Tr>
               );
             })}
