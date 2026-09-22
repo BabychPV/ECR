@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Box, Group, Text, UnstyledButton } from '@mantine/core';
 import { formatNumber } from '@/shared/format';
+import { Hint } from '@/shared/ui/Hint';
 import { toneFills, type StatusTone } from '@/shared/ui/StatusBadge';
 
 /**
@@ -83,7 +84,10 @@ export interface StatItem {
    */
   readonly tone?: StatTone | undefined;
 
-  /** Підказка при наведенні. */
+  /**
+   * Підказка. Малюється спільним `Hint` (`shared/ui/Hint.tsx`) — наведення,
+   * фокус, `Escape`, `aria-describedby` — а не голим атрибутом `title`.
+   */
   readonly hint?: string | undefined;
 
   /** `false` — показник не фільтрує (просто цифра). За замовчуванням фільтрує. */
@@ -248,7 +252,7 @@ function Stat({ item, active, onSelect }: StatProps): JSX.Element {
     'data-stat-active': String(isActive),
   } as const;
 
-  const hint = item.hint !== undefined && item.hint !== '' ? { title: item.hint } : {};
+  const hintLabel = item.hint !== undefined && item.hint !== '' ? item.hint : null;
 
   const content = (
     <Group gap="xs" align="baseline" wrap="nowrap">
@@ -282,14 +286,23 @@ function Stat({ item, active, onSelect }: StatProps): JSX.Element {
   const select = item.filter === false ? undefined : onSelect;
 
   if (select === undefined) {
-    return (
-      <Box {...marks} {...hint}>
+    const box = (
+      <Box {...marks}>
         {content}
       </Box>
     );
+
+    // `Box` — не в порядку табуляції сама по собі: `Hint focusable` дає їй
+    // `tabIndex=0`, інакше підказку показника без обробника не можна було б
+    // відкрити з клавіатури взагалі (`SnapshotFormatBadge` — той самий випадок).
+    return hintLabel === null ? box : (
+      <Hint label={hintLabel} focusable>
+        {box}
+      </Hint>
+    );
   }
 
-  return (
+  const button = (
     <UnstyledButton
       type="button"
       aria-pressed={isActive}
@@ -299,9 +312,12 @@ function Stat({ item, active, onSelect }: StatProps): JSX.Element {
         select(isActive ? null : item.id);
       }}
       {...marks}
-      {...hint}
     >
       {content}
     </UnstyledButton>
   );
+
+  // Кнопка вже в порядку табуляції — `focusable` тут не потрібен, інакше
+  // Escape/фокус подвоїв би зупинку (див. `HintProps.focusable`).
+  return hintLabel === null ? button : <Hint label={hintLabel}>{button}</Hint>;
 }
