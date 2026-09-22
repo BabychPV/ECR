@@ -73,7 +73,11 @@ export function evaluate(packages, policy) {
     if (exc) continue;
 
     if (!p.license) { violations.push({ ...p, reason: 'ліцензію не визначено' }); continue; }
-    if (!allowedBy(parseSpdx(p.license), policy)) {
+    // dev-залежності не постачаються з продуктом — їм дозволено ширше
+    // (`devAllowed`); `denied` однаково сильніший.
+    const pol = p.dev && policy.devAllowed
+      ? { ...policy, allowed: [...policy.allowed, ...policy.devAllowed] } : policy;
+    if (!allowedBy(parseSpdx(p.license), pol)) {
       violations.push({ ...p, reason: 'ліцензія не в переліку дозволених' });
     }
   }
@@ -202,8 +206,17 @@ function selfTest() {
     const v3 = evaluate(collectNpm(web), policy).map((x) => x.name);
     const ok3 = JSON.stringify(v3) === JSON.stringify(['gpl-pkg']);
 
-    if (ok1 && ok2 && ok3) { console.log('self-test: ок'); return 0; }
-    console.error('self-test: ПРОВАЛ', { v, v2, v3 });
+    // devAllowed діє лише на dev-пакети; GPL не рятує навіть у devAllowed.
+    const devPol = { ...policy, devAllowed: ['MPL-2.0', 'GPL-3.0-only'] };
+    const v4 = evaluate([
+      { ecosystem: 'npm', name: 'mpl-dev', version: '1.0.0', license: 'MPL-2.0', dev: true },
+      { ecosystem: 'npm', name: 'mpl-prod', version: '1.0.0', license: 'MPL-2.0', dev: false },
+      { ecosystem: 'npm', name: 'gpl-dev', version: '1.0.0', license: 'GPL-3.0-only', dev: true },
+    ], devPol).map((x) => x.name).sort();
+    const ok4 = JSON.stringify(v4) === JSON.stringify(['gpl-dev', 'mpl-prod']);
+
+    if (ok1 && ok2 && ok3 && ok4) { console.log('self-test: ок'); return 0; }
+    console.error('self-test: ПРОВАЛ', { v, v2, v3, v4 });
     return 1;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
