@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compareCellDisplay,
   compareCellText,
   groupCompareByTable,
   isCompareEmpty,
@@ -8,8 +9,14 @@ import {
   CurrentState,
   documentCompareUrl,
   documentVersionsUrl,
+  type CellChange,
   type DocumentCompare,
 } from '@/features/documents/documentVersionsApi';
+
+/** Комірка зі значенням і типом — коротко, з дефолтом `null` для обох. */
+function cell(patch: Partial<CellChange> & Pick<CellChange, 'tableCode' | 'rowKey' | 'columnCode'>): CellChange {
+  return { oldValue: null, newValue: null, oldType: null, newType: null, ...patch };
+}
 
 /**
  * Розкладка різниці версій по таблицях і показ значень (`ФВ-5.22`).
@@ -37,9 +44,7 @@ describe('groupCompareByTable: різниця по таблицях', () => {
   it('зміни, додані й видалені рядки лягають у РІЗНІ переліки тієї самої таблиці', () => {
     const groups = groupCompareByTable(
       compare({
-        changes: [
-          { tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' },
-        ],
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],
         addedRows: [{ rowId: 5, tableCode: 'T1', rowKey: 'r9' }],
         removedRows: [{ rowId: 6, tableCode: 'T1', rowKey: 'r0' }],
       }),
@@ -61,9 +66,7 @@ describe('groupCompareByTable: різниця по таблицях', () => {
   it('таблиця, у якій є лише додані рядки, у переліку залишається', () => {
     const groups = groupCompareByTable(
       compare({
-        changes: [
-          { tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' },
-        ],
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],
         addedRows: [{ rowId: 5, tableCode: 'T2', rowKey: 'r9' }],
       }),
     );
@@ -79,8 +82,8 @@ describe('groupCompareByTable: різниця по таблицях', () => {
     const groups = groupCompareByTable(
       compare({
         changes: [
-          { tableCode: 'T1', rowKey: 'rZ', columnCode: 'C1', oldValue: null, newValue: '2' },
-          { tableCode: 'T1', rowKey: 'rA', columnCode: 'C1', oldValue: null, newValue: '3' },
+          cell({ tableCode: 'T1', rowKey: 'rZ', columnCode: 'C1', oldValue: null, newValue: '2' }),
+          cell({ tableCode: 'T1', rowKey: 'rA', columnCode: 'C1', oldValue: null, newValue: '3' }),
         ],
       }),
     );
@@ -103,9 +106,7 @@ describe('isCompareEmpty: «версії однакові» — це всі ТР
     [
       'змінена комірка',
       compare({
-        changes: [
-          { tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' },
-        ],
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],
       }),
     ],
     ['доданий рядок', compare({ addedRows: [{ rowId: 5, tableCode: 'T1', rowKey: 'r9' }] })],
@@ -136,6 +137,51 @@ describe('compareCellText: значення показується як прий
   it('відсутнє й порожнє значення — одне й те саме тире', () => {
     expect(compareCellText(null)).toBe('—');
     expect(compareCellText('')).toBe('—');
+  });
+});
+
+describe('compareCellDisplay: форматування залежить від типу', () => {
+  /*
+   * ⛔ Червоний до змін: до введення `oldType`/`newType` булеве значення
+   * показувалось сирим рядком `'true'`/`'false'` — саме те, чого тепер бути
+   * не має. Тест доводить, що `bool` розпізнається ОКРЕМО від тексту.
+   */
+  it('bool: розпізнається як булеве, а не текст', () => {
+    expect(compareCellDisplay('true', 'bool')).toEqual({ kind: 'bool', value: true });
+    expect(compareCellDisplay('false', 'bool')).toEqual({ kind: 'bool', value: false });
+  });
+
+  /*
+   * ⛔ Мутація «тип ігнорується, значення завжди текстом» валить це: без
+   * розпізнавання типу `date` результат був би `{ kind: 'text', text: raw }`.
+   */
+  it('date: розпізнається як дата, сирий рядок ISO лишається для форматування на екрані', () => {
+    expect(compareCellDisplay('2026-01-02T00:00:00.0000000', 'date')).toEqual({
+      kind: 'date',
+      raw: '2026-01-02T00:00:00.0000000',
+    });
+  });
+
+  /*
+   * ⚠ `ref`/`unit` — сирий ідентифікатор запису довідника чи одиниці
+   * (`SubmissionPayload.Encode`), не код: без довідникового пошуку за
+   * ідентифікатором, якого в контракті порівняння версій немає, показати
+   * можна лише те, що прийшло. Тому обидва типи йдуть як звичайний текст.
+   */
+  it.each(['ref', 'unit'])('%s: без коду в контракті йде як текст, значення не змінюється', (type) => {
+    expect(compareCellDisplay('42', type)).toEqual({ kind: 'text', text: '42' });
+  });
+
+  // ⚠ Дзеркало: `type: null` (число або текст, як і до появи `oldType`/`newType`)
+  // — поведінка НЕ змінюється.
+  it('null (число/текст): як і раніше, без форматування типу', () => {
+    expect(compareCellDisplay('1.50', null)).toEqual({ kind: 'text', text: '1.50' });
+    expect(compareCellDisplay('true', null)).toEqual({ kind: 'text', text: 'true' });
+  });
+
+  it('відсутнє й порожнє значення — тире незалежно від типу', () => {
+    expect(compareCellDisplay(null, 'bool')).toEqual({ kind: 'text', text: '—' });
+    expect(compareCellDisplay('', 'date')).toEqual({ kind: 'text', text: '—' });
   });
 });
 

@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Badge, Button, Group, NativeSelect, Stack, Table, Text, Title } from '@mantine/core';
 import {
-  compareCellText,
+  compareCellDisplay,
   groupCompareByTable,
   isCompareEmpty,
   type TableDiff,
@@ -14,7 +14,7 @@ import {
   type DocumentVersion,
   type RowChange,
 } from '@/features/documents/documentVersionsApi';
-import { formatDateTime } from '@/shared/format';
+import { formatDate, formatDateTime } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -253,9 +253,14 @@ function TableDiffBlock({ diff }: { readonly diff: TableDiff }): JSX.Element {
               <Table.Tr key={`${change.rowKey}:${change.columnCode}`}>
                 <Table.Td>{change.rowKey}</Table.Td>
                 <Table.Td>{change.columnCode}</Table.Td>
-                {/* ⛔ Значення йдуть ЯК ПРИЙШЛИ — див. `compareCellText`. */}
-                <Table.Td>{compareCellText(change.oldValue)}</Table.Td>
-                <Table.Td>{compareCellText(change.newValue)}</Table.Td>
+                {/* ⛔ Значення йдуть ЯК ПРИЙШЛИ, форматування залежить лише від
+                    ТИПУ (`oldType`/`newType`) — див. `compareCellDisplay`. */}
+                <Table.Td>
+                  <CompareValue value={change.oldValue} type={change.oldType} />
+                </Table.Td>
+                <Table.Td>
+                  <CompareValue value={change.newValue} type={change.newType} />
+                </Table.Td>
               </Table.Tr>
             ))}
           </Table.Tbody>
@@ -287,6 +292,39 @@ function TableDiffBlock({ diff }: { readonly diff: TableDiff }): JSX.Element {
       )}
     </Stack>
   );
+}
+
+/**
+ * Значення комірки на екрані: `oldType`/`newType` вибирає форматування.
+ *
+ * ⚠ Дату й булеве форматує ЕКРАН, не `documentCompareGroups.ts`: обидва
+ * потребують контексту застосунку (`t()`, локаль `formatDate`), якого чистий
+ * модуль розкладки навмисно не має. `ref`/`unit` і текст без типу йдуть як є
+ * — `compareCellDisplay` уже пояснює чому (сирий ідентифікатор, не код).
+ */
+function CompareValue({
+  value,
+  type,
+}: {
+  readonly value: string | null;
+  readonly type: string | null;
+}): JSX.Element {
+  const display = compareCellDisplay(value, type);
+
+  if (display.kind === 'bool') {
+    return <>{display.value ? t('document.compareBoolYes') : t('document.compareBoolNo')}</>;
+  }
+
+  if (display.kind === 'date') {
+    const formatted = formatDate(display.raw);
+
+    // ⚠ Нерозбірливу дату показуємо ЯК Є — той самий прийом, що `versionLabel`
+    // нижче: `formatDate` повертає на такій порожній рядок, і порожня комірка
+    // виглядала б як зникле значення, а не як непридатний формат сервера.
+    return <>{formatted === '' ? display.raw : formatted}</>;
+  }
+
+  return <>{display.text}</>;
 }
 
 /**

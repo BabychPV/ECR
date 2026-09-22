@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentVersionCompare } from '@/features/documents/DocumentVersionCompare';
-import type { DocumentCompare } from '@/features/documents/documentVersionsApi';
+import type { CellChange, DocumentCompare } from '@/features/documents/documentVersionsApi';
 import { loadCatalog, resetMissingReports } from '@/shared/i18n';
 import { testTheme } from '@/test/render';
 
@@ -49,6 +49,8 @@ const Strings: Record<string, string> = {
   'document.compareTruncatedTitle': 'Not everything is shown',
   'document.compareTruncatedHint':
     'The server stopped at {changes} changed cell(s), {added} added and {removed} removed row(s); more may exist.',
+  'document.compareBoolYes': 'Yes',
+  'document.compareBoolNo': 'No',
   'state.errorTitle': 'The request failed',
   'state.errorUnknown': 'An unexpected error occurred.',
   'common.retry': 'Retry',
@@ -71,6 +73,11 @@ function compareBody(patch: Partial<DocumentCompare>): DocumentCompare {
     truncated: false,
     ...patch,
   };
+}
+
+/** Змінена комірка — коротко, з дефолтом `null` для обох типів (`oldType`/`newType`). */
+function cell(patch: Partial<CellChange> & Pick<CellChange, 'tableCode' | 'rowKey' | 'columnCode'>): CellChange {
+  return { oldValue: null, newValue: null, oldType: null, newType: null, ...patch };
 }
 
 /** Відмова сервера у форматі `EcrProblemDetails`. */
@@ -219,9 +226,7 @@ describe('Порівняння версій: що показано', () => {
     mockApi(
       compareBody({
         truncated: true,
-        changes: [
-          { tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' },
-        ],
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],
       }),
     );
     await show();
@@ -235,9 +240,7 @@ describe('Порівняння версій: що показано', () => {
   it('дзеркало: без усічення банера немає ЗОВСІМ', async () => {
     mockApi(
       compareBody({
-        changes: [
-          { tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' },
-        ],
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],
       }),
     );
     await show();
@@ -255,9 +258,7 @@ describe('Порівняння версій: що показано', () => {
   it('додані й видалені рядки — окремі блоки з позначкою, а не рядки таблиці змін', async () => {
     mockApi(
       compareBody({
-        changes: [
-          { tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' },
-        ],
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],
         addedRows: [{ rowId: 5, tableCode: 'T1', rowKey: 'rNew' }],
         removedRows: [{ rowId: 6, tableCode: 'T1', rowKey: 'rGone' }],
       }),
@@ -286,8 +287,8 @@ describe('Порівняння версій: що показано', () => {
     mockApi(
       compareBody({
         changes: [
-          { tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1.50', newValue: '2.500' },
-          { tableCode: 'T1', rowKey: 'r2', columnCode: 'C1', oldValue: null, newValue: '3' },
+          cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1.50', newValue: '2.500' }),
+          cell({ tableCode: 'T1', rowKey: 'r2', columnCode: 'C1', oldValue: null, newValue: '3' }),
         ],
       }),
     );
@@ -302,6 +303,82 @@ describe('Порівняння версій: що показано', () => {
      * екран показав би масштаб, якого в документі немає.
      */
     expect(changeRows()).toEqual(['r1|C1|1.50|2.500', 'r2|C1|—|3']);
+  }, 60_000);
+
+  it('bool: показано «Yes»/«No» через каталог, а не сире «true»/«false»', async () => {
+    mockApi(
+      compareBody({
+        changes: [
+          cell({
+            tableCode: 'T1',
+            rowKey: 'r1',
+            columnCode: 'C1',
+            oldValue: 'true',
+            newValue: 'false',
+            oldType: 'bool',
+            newType: 'bool',
+          }),
+        ],
+      }),
+    );
+    await show();
+    await runCompare();
+
+    await screen.findByTestId('document-compare-changes');
+
+    // ⛔ Червоний до змін: без розбору `oldType`/`newType` рядок показував би
+    // сирі `true`/`false` — саме те, проти чого цей тест і поставлений.
+    expect(changeRows()).toEqual(['r1|C1|Yes|No']);
+  }, 60_000);
+
+  it('date: значення відформатовано як дата, а не сирий рядок ISO', async () => {
+    mockApi(
+      compareBody({
+        changes: [
+          cell({
+            tableCode: 'T1',
+            rowKey: 'r1',
+            columnCode: 'C1',
+            oldValue: '2026-01-02T00:00:00.0000000',
+            newValue: '2026-01-03T00:00:00.0000000',
+            oldType: 'date',
+            newType: 'date',
+          }),
+        ],
+      }),
+    );
+    await show();
+    await runCompare();
+
+    const rows = await screen.findByTestId('document-compare-changes');
+
+    // ⛔ Мутація «тип ігнорується, значення завжди сирим» валить це: без
+    // форматування рядок ніс би `2026-01-02T00:00:00.0000000` буквально.
+    expect(rows.textContent ?? '').not.toContain('2026-01-02T00:00:00');
+    expect(rows.textContent ?? '').not.toContain('2026-01-03T00:00:00');
+
+    // ⚠ Точний вигляд залежить від локалі форматувальника (`formatDate`,
+    // `D15-09`); перевіряється лише те, що рік і день впізнавані на екрані —
+    // так само, як інші тести цього файлу не прив'язуються до `Intl`.
+    expect(rows.textContent ?? '').toContain('2026');
+  }, 60_000);
+
+  /*
+   * ⚠ Дзеркало типів: `oldType: null` (число/текст, як до появи `oldType`)
+   * лишається як було — жодного форматування.
+   */
+  it('дзеркало: oldType/newType — null лишається без форматування типу', async () => {
+    mockApi(
+      compareBody({
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: 'true', newValue: 'false' })],
+      }),
+    );
+    await show();
+    await runCompare();
+
+    await screen.findByTestId('document-compare-changes');
+
+    expect(changeRows()).toEqual(['r1|C1|true|false']);
   }, 60_000);
 });
 

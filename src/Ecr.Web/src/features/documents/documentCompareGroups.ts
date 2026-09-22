@@ -117,3 +117,43 @@ const NoValue = '—';
 export function compareCellText(value: string | null): string {
   return value === null || value === '' ? NoValue : value;
 }
+
+/**
+ * Як показати значення комірки: тип із зрізу подання (`oldType`/`newType`,
+ * `CellChangeDto`) визначає форматування, а не сам факт наявності тексту.
+ *
+ * ⚠ Рішення про ФОРМАТУВАННЯ (дата, булеве) винесено з цього чистого модуля —
+ * `formatDate` і переклад «так»/«ні» потребують контексту застосунку (мову,
+ * локаль), якого тут немає й бути не повинно (той самий принцип, що вже
+ * тримає `compareCellText` без `Intl`). Ця функція лише КЛАСИФІКУЄ значення;
+ * саме форматування — на виклику, в екрані.
+ */
+export type CompareCellDisplay =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'date'; readonly raw: string }
+  | { readonly kind: 'bool'; readonly value: boolean };
+
+/**
+ * Класифікує значення комірки за типом.
+ *
+ * ⛔ `ref` і `unit` НЕ несуть коду запису довідника чи символу одиниці — у
+ * зрізі подання лежить сирий ідентифікатор (`SubmissionPayload.Encode`:
+ * `ValueRegistryEntryId`/`ValueUnitId` рядком, перевірено
+ * `DocumentCompareTests.Між_версіями_тип_входить_у_порівняння…`, де запис
+ * рахується змінами `"5"` → `"6"`). Показ КОДУ вимагав би окремого
+ * довідникового пошуку за ідентифікатором, якого в контракті порівняння
+ * версій немає, — тому обидва типи йдуть як звичайний текст, тим самим
+ * шляхом, що й число/текст без типу (`null`).
+ *
+ * ⚠ Зрізи, подані до `9e494c44`, мають `oldType`/`newType` = null для ВСІХ
+ * типів: старі дати/bool/ref/unit пройдуть тут як звичайний текст. Маркера
+ * покоління в зрізі немає — це відомий і прийнятний факт, не дефект цієї
+ * функції.
+ */
+export function compareCellDisplay(value: string | null, type: string | null): CompareCellDisplay {
+  if (value === null || value === '') return { kind: 'text', text: compareCellText(value) };
+  if (type === 'date') return { kind: 'date', raw: value };
+  if (type === 'bool') return { kind: 'bool', value: value === 'true' };
+
+  return { kind: 'text', text: compareCellText(value) };
+}
