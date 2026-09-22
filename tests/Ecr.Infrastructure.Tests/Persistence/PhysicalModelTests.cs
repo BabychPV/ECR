@@ -149,6 +149,37 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         Assert.Equal("PeriodKey,TableRowId,ColumnDefId|([IsCalculated]=(0))|ps_ByPeriodKey", shape);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [InlineData("itg.CollectionRun", "IX_CollectionRun_SourceEntityId_Id",
+        "SourceEntityId,Id-|FinishedAt,PointsRetrieved,StartedAt,Status")]
+    [InlineData("itg.CollectionCoverage", "IX_CollectionCoverage_CollectionRunId",
+        "CollectionRunId,CoveredFrom|CoveredTo")]
+    public async Task Індекси_журналу_прогонів_збору_мають_ключ_під_запит_читання(
+        string table, string index, string expected)
+    {
+        // Під CollectionRunReader (ФВ-5.23): перелік — seek за сутністю в порядку
+        // Id DESC; деталь — seek покриття прогону в порядку CoveredFrom.
+        // ErrorMessage (до 2000 символів) навмисно НЕ включено.
+        var shape = await ScalarAsync<string>($"""
+            SELECT STUFF((SELECT N',' + c.name + CASE WHEN ic.is_descending_key = 1 THEN N'-' ELSE N'' END
+                          FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 0
+                          ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 1, N'')
+                   + N'|' + ISNULL(STUFF((SELECT N',' + c.name
+                          FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 1
+                          ORDER BY c.name FOR XML PATH('')), 1, 1, N''), N'-')
+            FROM sys.indexes i
+            WHERE i.object_id = OBJECT_ID(N'{table}') AND i.name = N'{index}'
+            """);
+
+        Assert.Equal(expected, shape);
+    }
+
     // ⚠ Тест доданий після Q-060: сім сутностей без конфігурації EF лягали
     // конвенцією в `dbo` з множинним іменем, і міграція створювала таблиці,
     // яких у `02a-db-schema.md` немає. `SchemaValidator` цього не бачить —

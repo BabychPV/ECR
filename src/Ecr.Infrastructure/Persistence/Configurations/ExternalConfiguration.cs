@@ -295,6 +295,12 @@ public sealed class CollectionRunConfiguration : IEntityTypeConfiguration<Collec
 
         builder.HasOne<SourceEntity>().WithMany().HasForeignKey(x => x.SourceEntityId)
                .HasConstraintName("FK_CRun_Entity");
+
+        // Журнал прогонів (CollectionRunReader): фільтр за сутністю + «новіші першими»
+        // за Id. Без індексу — зворотний скан PK з фільтром після seek.
+        builder.HasIndex(x => new { x.SourceEntityId, x.Id }, "IX_CollectionRun_SourceEntityId_Id")
+               .IsDescending(false, true)
+               .IncludeProperties(x => new { x.StartedAt, x.Status, x.PointsRetrieved, x.FinishedAt });
     }
 }
 
@@ -317,6 +323,10 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
                .HasConstraintName("FK_CCov_Entity");
         builder.HasOne<CollectionRun>().WithMany().HasForeignKey(x => x.CollectionRunId)
                .HasConstraintName("FK_CCov_Run");
+
+        // Деталь прогону: покриття одного прогону в порядку CoveredFrom — seek без сортування.
+        builder.HasIndex(x => new { x.CollectionRunId, x.CoveredFrom }, "IX_CollectionCoverage_CollectionRunId")
+               .IncludeProperties(x => x.CoveredTo);
     }
 }
 
