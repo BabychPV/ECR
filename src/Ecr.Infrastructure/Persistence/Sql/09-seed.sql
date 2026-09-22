@@ -98,7 +98,10 @@ USING (VALUES
   -- повідомлення про збої (адресати SMTP, URL вебхука), і замінює секрети
   -- каналів. Тому шаблон `%` системного адміністратора його не роздає —
   -- видається свідомо, зі слідом у журналі безпеки (`BE-32`).
-  (N'System.ManageNotifications', N'System',    1)
+  (N'System.ManageNotifications', N'System',    1),
+  -- НЕБЕЗПЕЧНЕ (1): зміна бізнес-ключа документа (ФВ-3.9) міняє те, під чим
+  -- документ знають експорти й зовнішні системи; видається свідомо.
+  (N'Document.ChangeKey',       N'Document',    1)
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -870,6 +873,12 @@ USING (VALUES
     -- Document.Delete: only a draft document can be deleted (decision 2026-09-21).
     (N'err.ECR-DOC-0409.deleteNotDraft',        N'en', N'Only a draft document can be deleted; sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
     (N'err.ECR-DOC-0409.deleteHasHistory',      N'en', N'Only a draft document can be deleted; this document has already been through approval.', 1),
+    -- Document.ChangeKey: controlled business key change (FV-3.9).
+    (N'err.ECR-DOC-0409.rekeyLocked',           N'en', N'The document key cannot be changed: sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
+    (N'err.ECR-DOC-0409.rekeyDuplicate',        N'en', N'Another document of this project already has the key "{businessKey}".', 1),
+    (N'err.ECR-DOC-0409.rekeyStale',            N'en', N'The document key has changed since it was read; it is now "{businessKey}".', 1),
+    (N'err.ECR-DOC-0422.rekeyReasonRequired',   N'en', N'A reason is required to change the document key.', 1),
+    (N'err.ECR-DOC-0422.rekeyKeyInvalid',       N'en', N'The new key must be 1 to {maxLength} characters and differ from the current key.', 1),
     (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),

@@ -33,7 +33,8 @@ public sealed class DocumentsController(
     DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
     ApplyImportHandler applyImport,
-    DeleteDocumentHandler delete) : ControllerBase
+    DeleteDocumentHandler delete,
+    ChangeDocumentKeyHandler changeKey) : ControllerBase
 {
     /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
     /// <remarks>
@@ -148,6 +149,27 @@ public sealed class DocumentsController(
     public async Task<IActionResult> Delete(long id, CancellationToken ct)
     {
         await delete.HandleAsync(id, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
+    /// <summary>Змінює бізнес-ключ документа (ФВ-3.9). Право <c>Document.ChangeKey</c>.</summary>
+    /// <remarks>
+    /// Причина обов'язкова (<c>422</c>); ключ зайнятий, застарілий <c>expectedBusinessKey</c>
+    /// або аркуш поданий/погоджений — <c>409</c> <c>ECR-DOC-0409</c>.
+    /// </remarks>
+    [HttpPost("{id:long}/business-key")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ChangeKey(long id, [FromBody] ChangeDocumentKeyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await changeKey
+            .HandleAsync(id, request.BusinessKey, request.ExpectedBusinessKey, request.Reason, ct)
+            .ConfigureAwait(false);
+
         return NoContent();
     }
 
@@ -534,6 +556,12 @@ public sealed record ApproveSheetRequest(int SheetDefId, int PeriodKey, bool App
 /// <param name="PeriodKey">Період.</param>
 /// <param name="Reason">Причина; обов'язкова.</param>
 public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string Reason);
+
+/// <summary>Запит на зміну бізнес-ключа документа (ФВ-3.9).</summary>
+/// <param name="BusinessKey">Новий ключ.</param>
+/// <param name="ExpectedBusinessKey">Чинний ключ, який бачила людина; розбіжність — 409.</param>
+/// <param name="Reason">Причина; обов'язкова, лягає в аудит.</param>
+public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? ExpectedBusinessKey, string? Reason);
 
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">Транслювати вирази в Excel-синтаксис (ФВ-4.2).</param>

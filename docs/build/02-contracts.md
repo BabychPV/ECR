@@ -2218,6 +2218,23 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IDocumentKeyStore`
+
+Зміна бізнес-ключа документа (ФВ-3.9, `POST /api/v1/documents/{id}/business-key`,
+право `Document.ChangeKey`). В одній транзакції: документ під `UPDLOCK`, стани
+аркушів — через `IDocumentDeletionStore.LockWorkflowFactsAsync`, зайнятість ключа —
+під `UPDLOCK, HOLDLOCK`. Поданий/погоджений аркуш, зайнятий ключ чи застарілий
+`expectedBusinessKey` — `409 ECR-DOC-0409`; без причини — `422 ECR-DOC-0422`.
+Старий і новий ключ із причиною — в `aud.SecurityEvent` (`DocumentKeyChanged`).
+
+```csharp
+public interface IDocumentKeyStore
+{
+    public Task<Document?> FindForUpdateAsync(long documentId, CancellationToken ct);
+    public Task<bool> IsKeyTakenAsync(int projectId, string businessKey, long exceptDocumentId, CancellationToken ct);
+}
+```
+
 #### `IMethodologyVersionDeletionStore`
 
 Видалення версії-чернетки методології (`DELETE /api/v1/methodologies/{id}/versions/{vid}`,
@@ -3126,6 +3143,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
+| `POST` | `/api/v1/documents/{id}/business-key` | `Document.ChangeKey` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |

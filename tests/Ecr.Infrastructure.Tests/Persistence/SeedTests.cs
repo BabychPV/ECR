@@ -17,9 +17,9 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 40;
+    private const int ExpectedPermissions = 41;
 
-    private const int ExpectedDangerous = 10;
+    private const int ExpectedDangerous = 11;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -182,7 +182,7 @@ public sealed class SeedTests(SqlServerFixture sql)
                 $"SELECT COUNT(*) FROM sec.Permission WHERE Code = N'{code}'"));
         }
 
-        Assert.Equal(40, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
+        Assert.Equal(41, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
     }
 
     [Fact]
