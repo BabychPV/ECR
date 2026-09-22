@@ -324,6 +324,10 @@ public static class DependencyInjection
         services.AddScoped<Integration.TestDataSourceConnectionHandler>();
         services.AddScoped<Integration.BrowseSourceCatalogHandler>();
 
+        // Журнал прогонів збору (ФВ-5.23).
+        services.AddScoped<Integration.ListCollectionRunsHandler>();
+        services.AddScoped<Integration.GetCollectionRunHandler>();
+
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();
 

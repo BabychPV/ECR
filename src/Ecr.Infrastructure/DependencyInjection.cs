@@ -328,6 +328,7 @@ public static class DependencyInjection
         services.AddScoped<ICollectionStore, CollectionStore>();
         services.AddScoped<ICollectionScheduleStore, CollectionScheduleStore>();
         services.AddScoped<IDataSourceStore, DataSourceStore>();
+        services.AddScoped<ICollectionRunReader, CollectionRunReader>();
         services.AddScoped<Ecr.Application.Sources.IMappingPreviewStore, MappingPreviewStore>();
         services.AddScoped<IStyleCatalog, StyleCatalog>();
         services.AddScoped<IReportDefinitionStore, ReportDefinitionStore>();

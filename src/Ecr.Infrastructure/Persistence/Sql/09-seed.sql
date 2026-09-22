@@ -797,6 +797,11 @@ USING (VALUES
     (N'err.ECR-INT-0409.mappingUnitChangeNotPending',     N'en', N'The mapping of field "{sourceField}" is not waiting for a decision about its unit.', 1),
     (N'err.ECR-INT-0409.mappingUnitChangePending',        N'en', N'The mapping of field "{sourceField}" is paused because its source now reports unit "{actualUnitCode}". Resolve the unit change first: accepting it resumes collection.', 1),
     (N'err.ECR-INT-0422.pendingUnitNotInCatalog',         N'en', N'The source of field "{sourceField}" now reports unit "{unitCode}", which is not in the unit catalog. Add the unit first, then accept the change.', 1),
+    -- FV-5.23: журнал прогонів збору. Невідомий стан — відмова, а не порожній
+    -- перелік, що читався б як «збоїв не було».
+    (N'err.ECR-INT-0404.collectionRun',                   N'en', N'Collection run {id} does not exist.', 1),
+    (N'err.ECR-REQ-0422.collectionRunState',              N'en', N'There is no collection run state "{state}".', 1),
+    (N'err.ECR-REQ-0422.collectionRunRange',              N'en', N'The start of the period must be earlier than its end.', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5

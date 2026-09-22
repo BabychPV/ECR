@@ -2717,6 +2717,21 @@ public interface ICampaignSummaryStore
 }
 ```
 
+#### `ICollectionRunReader`
+
+Журнал прогонів збору (`itg.CollectionRun`, ФВ-5.23) — лише читання: сторінка
+новіші першими (курсор за `Id` униз) з фільтрами з'єднання, сутності, стану й
+проміжку початку, і деталь із текстом помилки та покритими інтервалами.
+
+```csharp
+public interface ICollectionRunReader
+{
+    public Task<PagedResult<CollectionRunView>> ListAsync(
+        CollectionRunFilter filter, CursorRequest page, CancellationToken ct);
+    public Task<CollectionRunDetail?> FindAsync(long id, CancellationToken ct);
+}
+```
+
 #### `IDataSourceStore`
 
 Конфігурація підключень (`ext.DataSource`) для екрана джерел (`BE-21`,
@@ -3308,6 +3323,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
 | `PUT` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
 | `DELETE` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
+| `GET` | `/api/v1/collection-runs` | `Integration.View` | 7 |
+| `GET` | `/api/v1/collection-runs/{id}` | `Integration.View` | 7 |
 | `GET` | `/api/v1/data-sources` | `Integration.View` | 7 |
 | `POST` | `/api/v1/data-sources` | `Integration.Manage` | 7 |
 | `PUT` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |
