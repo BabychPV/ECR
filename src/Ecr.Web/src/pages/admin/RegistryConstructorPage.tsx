@@ -1,14 +1,14 @@
 ﻿import { useEffect, useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Group, Skeleton, Tabs, Text, TextInput } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Badge, Group, Skeleton, Tabs, Text } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   RegistryDefDto,
   RegistryDefinitionDto,
-  RegistryDefinitionVersionResponse,
   RegistryHistoryEntryDto,
+  SaveRegistryDefinitionDto,
   UserPage,
 } from '@/api/types';
 import {
@@ -18,6 +18,7 @@ import {
   RegistryRelations,
   RegistryRules,
 } from '@/features/registries/RegistryConstructor';
+import { RegistryDraftPanel } from '@/features/registries/RegistryDraftPanel';
 import { RegistryUsagePanel } from '@/features/registries/RegistryUsage';
 import {
   buildSaveRequest,
@@ -29,13 +30,18 @@ import {
   type FieldDraft,
   type RuleDraft,
 } from '@/features/registries/definition';
+import {
+  draftNewFields,
+  draftRules,
+  getRegistryDraft,
+  registryDraftKey,
+} from '@/features/registries/registryDraft';
 import { language, t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { showApiError, showDone } from '@/shared/ui/notify';
 
 /**
  * Конструктор довідника (`ФВ-8.12`): поля, зв'язки, правила, мапінг, історія.
@@ -57,7 +63,6 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 export function RegistryConstructorPage(): JSX.Element {
   const { code = '' } = useParams();
   const session = useSession();
-  const queryClient = useQueryClient();
 
   const [rules, setRules] = useState<RuleDraft[]>([]);
   const [newFields, setNewFields] = useState<FieldDraft[]>([]);
@@ -76,6 +81,21 @@ export function RegistryConstructorPage(): JSX.Element {
     // сусіднє вікно подивитися шлях тега. Опис довідника міняють одиниці разів
     // на рік, тож ціна «застарілих» даних тут нульова, а ціна втраченої
     // правки — уся робота за сеанс.
+    refetchOnWindowFocus: false,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+  /**
+   * Чернетка опису (`BE-24` крок 2).
+   *
+   * ⛔ Той самий ключ, що й у `RegistryDraftPanel`: обидва в межах одного
+   * `QueryClient` діляться кешем, тож запит іде ОДИН, а панель і форма ніколи
+   * не показують чернетки різного віку. Панель зберігає й публікує; сторінка
+   * лише засіває нею форму.
+   */
+  const draft = useQuery({
+    queryKey: registryDraftKey(code),
+    queryFn: () => getRegistryDraft(code),
     refetchOnWindowFocus: false,
     staleTime: Number.POSITIVE_INFINITY,
   });
@@ -140,46 +160,59 @@ export function RegistryConstructorPage(): JSX.Element {
     [registries.data],
   );
 
-  // ⚠ Чернетка правил і нових полів синхронізується з відповіддю сервера, а
-  // не будується в рендері: інакше кожен натиск клавіші відкочував би поле до
-  // значення з кешу запиту. Нові поля скидаються тут само: після успішного
-  // збереження вони вже стали НАЯВНИМИ полями у свіжому `definition.data`, і
-  // лишити їх чернеткою означало б надіслати їх іще раз при наступному
-  // збереженні — під новим `id === null`, тобто як дублікат.
+  /*
+   * ⚠ Чернетка правил і нових полів синхронізується з відповіддю сервера, а
+   * не будується в рендері: інакше кожен натиск клавіші відкочував би поле до
+   * значення з кешу запиту.
+   *
+   * ⛔ Джерело — ЧЕРНЕТКА, якщо вона є, і лише інакше опублікований опис. Це і
+   * є крок 2 `BE-24`: людина, яка повернулася на екран, має побачити те, що
+   * зберегла вона (або сусід), а не версію, яка діє. Показати опубліковану
+   * поверх наявної чернетки означало б тихо запропонувати перезаписати чужу
+   * незакінчену роботу — і при цьому назвати це «поточним станом».
+   *
+   * ⚠ Чекаємо ОБИДВІ відповіді: доки чернетка ще їде, засівати форму
+   * опублікованим описом не можна — інакше вміст чернетки на мить з'являвся б
+   * і зникав, а введене за цю мить губилося б.
+   */
   useEffect(() => {
-    if (definition.data !== undefined) {
+    if (definition.data === undefined || draft.isPending) return;
+
+    const saved = draft.data?.draft ?? null;
+
+    if (saved === null) {
+      // Нові поля скидаються тут само: після публікації вони вже стали
+      // НАЯВНИМИ полями у свіжому `definition.data`, і лишити їх чернеткою
+      // означало б надіслати їх іще раз під `id === null`, тобто як дублікат.
       setRules(definition.data.rules.map((rule) => toDraft(rule, language())));
       setNewFields([]);
+      setReason('');
+      return;
     }
-  }, [definition.data]);
+
+    setRules(draftRules(saved, language()));
+    setNewFields(draftNewFields(saved, language()));
+    setReason(saved.reason);
+  }, [definition.data, draft.data, draft.isPending]);
 
   const mayEdit = can(session.data, 'Registry.EditDefinition');
   const ready =
     rules.every(isComplete) && newFields.every(isFieldComplete) && reason.trim().length > 0;
 
-  const save = useMutation({
-    mutationFn: () =>
-      apiFetch<RegistryDefinitionVersionResponse>(
-        `/api/v1/registries/${encodeURIComponent(code)}/definition`,
-        {
-          method: 'PUT',
-          body: JSON.stringify(
-            buildSaveRequest(definition.data!, rules, newFields, reason, language()),
-          ),
-        },
-      ),
-    onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.definition(code) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.history(code) });
-      setReason('');
-      showDone(t('registries.definitionSaved', { version: result.definitionVersion }));
-    },
-
-    // ⚠ Сервер відхиляє п'ятий вид правила, зміну виду наявного і брак
-    // ключового поля окремими повідомленнями (`ECR-REG-0422`). Показуємо їх, а
-    // не «не вдалося зберегти»: кожне з них називає, що саме виправити.
-    onError: showApiError,
-  });
+  /**
+   * Повний стан форми для збереження чернетки; `null` — ще не готовий.
+   *
+   * ⚠ Та сама форма, що й у прямого `PUT …/definition` (`buildSaveRequest`):
+   * чернетка зберігає РІВНО те, що буде застосовано при публікації, і друга
+   * збірка того самого тіла розійшлася б із першою мовчки.
+   */
+  const request = useMemo<SaveRegistryDefinitionDto | null>(
+    () =>
+      ready && definition.data !== undefined
+        ? buildSaveRequest(definition.data, rules, newFields, reason, language())
+        : null,
+    [ready, definition.data, rules, newFields, reason],
+  );
 
   return (
     <>
@@ -193,30 +226,6 @@ export function RegistryConstructorPage(): JSX.Element {
                   version: definition.data.definitionVersion,
                 })}
               </Badge>
-            )}
-
-            {mayEdit && (
-              <>
-                {/* ⛔ Причина обов'язкова: опис довідника змінює те, як
-                    читаються ВЖЕ збережені записи, і питання «чому тут
-                    з'явилося це поле» ставлять через рік. */}
-                <TextInput
-                  size="xs"
-                  miw={260}
-                  label={t('registries.reason')}
-                  description={t('registries.reasonHint')}
-                  value={reason}
-                  onChange={(event) => setReason(event.currentTarget.value)}
-                />
-
-                <Button
-                  size="xs"
-                  disabled={!ready || definition.data === undefined || save.isPending}
-                  onClick={() => save.mutate()}
-                >
-                  {t('registries.saveDefinition')}
-                </Button>
-              </>
             )}
           </Group>
         }
@@ -238,6 +247,17 @@ export function RegistryConstructorPage(): JSX.Element {
               <Badge variant="light">{loaded.sourceKind}</Badge>
               {loaded.isTemporal && <Badge variant="light">{t('registries.temporal')}</Badge>}
             </Group>
+
+            {/* ⛔ Чернетка і публікація стоять ПЕРЕД вкладками, а не в шапці
+                сторінки: вони стосуються всього, що нижче, а шапка ділиться
+                між усіма адміністративними екранами і місця під смугу стану
+                там немає. */}
+            <RegistryDraftPanel
+              code={loaded.code}
+              request={request}
+              reason={reason}
+              onReasonChange={setReason}
+            />
 
             <Tabs defaultValue="fields" keepMounted={false}>
               <Tabs.List>

@@ -507,6 +507,43 @@ export const SnapshotListFixture = (['legacy', 'current', 'unknown'] as const).m
 export const RegistryDefinitionName = 'Fuel types';
 
 /**
+ * Чернетка опису довідника (`BE-24` крок 2) — НЕ `draft: null`.
+ *
+ * ⛔ Порожня відповідь сховала б від сканера рівно те, що крок 2 додав на цей
+ * екран: смугу «є незбережена чернетка» (жива область `role="alert"`), кнопки
+ * публікації й скасування та поле причини. Гейт `a11y` сканував би сторінку в
+ * стані, у якому ці вузли не малюються взагалі, — і мовчав би про них назавжди
+ * (той самий відмовний режим, що вже описаний тут для `TemplateStructureFixture`).
+ *
+ * ⚠ Одне НОВЕ поле (`id: null`) і порожні правила: цього досить, щоб форма
+ * вважалася повною (`isFieldComplete`), а кнопка збереження — доступною.
+ */
+export const RegistryDefinitionDraftFixture = {
+  definitionVersion: 1,
+  draft: {
+    baseDefinitionVersion: 1,
+    fields: [
+      {
+        id: null,
+        code: 'GRADE',
+        nameL10n: { values: { en: 'Grade' } },
+        dataType: 'String',
+        ordinal: 1,
+        isRequired: false,
+        isKey: false,
+        lookupRegistryDefId: null,
+        unitId: null,
+      },
+    ],
+    rules: [],
+    reason: 'grade added for the 2026 reporting form',
+    updatedAt: '2026-09-21T08:30:00Z',
+    updatedByUserId: 0,
+    rowVersion: 'AQID+f/9Ng==',
+  },
+};
+
+/**
  * Структура версії шаблону: один аркуш з однією таблицею (`/admin/templates/:id/versions/:versionId`).
  *
  * ⛔ Не порожня — див. коментар біля відповіді в {@link emptyBodyFor}. Таблиця
@@ -658,6 +695,12 @@ export function emptyBodyFor(url: string): unknown {
   if (/\/template-versions\/\d+\/relations$/.test(url)) return TableRelationsFixture;
 
   if (url.includes('/relations')) return { isEditable: true, relations: [] };
+
+  // ⛔ ПЕРЕД `/definition`: чернетка опису живе під тим самим префіксом
+  // (`BE-24` крок 2), і зворотний порядок віддав би їй опублікований опис —
+  // тобто відповідь іншої форми, у якій немає ані `draft`, ані
+  // `definitionVersion` поруч із ним.
+  if (url.includes('/definition/draft')) return RegistryDefinitionDraftFixture;
 
   if (url.includes('/definition')) {
     // ⚠ Код береться з адреси: сторінка шле `/registries/<code>/definition`, і
