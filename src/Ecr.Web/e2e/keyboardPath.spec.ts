@@ -98,7 +98,28 @@ test.describe('Прохід оператора без миші (ФВ-14.16)', ()
       .not.toBe('body');
 
     // ── 3. Період ────────────────────────────────────────────────────────
-    await expectFocusRing(page, page.getByLabel(/Period|Період/i).first(), 'поле періоду');
+    // ⛔ UI-06 (`PeriodPicker.tsx`) додав до поля періоду ДВІ сусідні кнопки
+    // ‹ › зі своїми aria-label (`period.previous`/`period.next`,
+    // `Sql/09-seed.sql:1214-1215` — «Previous period»/«Next period»), і обидва
+    // підрядки теж збігаються з `/Period|Період/i`. `getByLabel(...).first()`
+    // у DOM-порядку `<Group>` (‹, поле, ›) резолвився в кнопку «‹», а щойно
+    // після входу період ще не обрано — `value === null` — тож ОБИДВІ стрілки
+    // вимкнені (`PeriodPicker.tsx`: `disabled={disabled || prevValue === null}`).
+    // Вимкнений елемент не приймає programmatic-фокус (HTML: не «focusable
+    // area»), тож `target.focus()` у `expectFocusRing` не зрушував фокуса
+    // взагалі, і перевірка падала «фокус на <body>» — не тому, що поле
+    // недоступне з клавіатури, а тому що локатор резолвився не в поле.
+    // Той самий клас дефекту вже описаний нижче для `Password` (рядок
+    // ~256-261: кнопка-тумблер видимості пароля теж мала aria-label із
+    // підрядком «password») — і виправлення те саме: роль звужує пошук до
+    // самого поля. `NumberInput` усередині `PeriodPicker` рендерить
+    // `<input type="text">` (роль `textbox`), `ActionIcon` — `<button>`
+    // (роль `button`), тож роль однозначно відкидає обидві стрілки.
+    await expectFocusRing(
+      page,
+      page.getByRole('textbox', { name: /Period|Період/i }).first(),
+      'поле періоду',
+    );
     await page.keyboard.press('Control+a');
     await page.keyboard.type(PeriodKey);
 
