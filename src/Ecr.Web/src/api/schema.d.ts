@@ -402,6 +402,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collection-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Прогони збору, новіші першими. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише прогони сутностей цього з'єднання. */
+                    dataSource?: number;
+                    /** @description Лише прогони цієї сутності збору. */
+                    entity?: number;
+                    /** @description `Running`, `Succeeded`, `Degraded`, `Failed`; інше — `422`. */
+                    state?: string;
+                    /** @description Початок прогону не раніше (UTC, включно). */
+                    from?: string;
+                    /** @description Початок прогону раніше (UTC, виключно). */
+                    to?: string;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..200; `0` — типове 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfCollectionRunView"];
+                        "text/json": components["schemas"]["PagedResultOfCollectionRunView"];
+                        "text/plain": components["schemas"]["PagedResultOfCollectionRunView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collection-runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Прогін із текстом помилки й покритими інтервалами. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ідентифікатор прогону. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollectionRunDetail"];
+                        "text/json": components["schemas"]["CollectionRunDetail"];
+                        "text/plain": components["schemas"]["CollectionRunDetail"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collection-schedules": {
         parameters: {
             query?: never;
@@ -12744,6 +12882,30 @@ export interface components {
              */
             toUtc: string;
         };
+        /** @description Покритий прогоном інтервал (UTC). */
+        CollectionRunCoverage: {
+            /**
+             * Format: date-time
+             * @description Початок.
+             */
+            coveredFrom: string;
+            /**
+             * Format: date-time
+             * @description Кінець.
+             */
+            coveredTo: string;
+        };
+        /** @description Деталь прогону. */
+        CollectionRunDetail: {
+            /** @description Інтервали, які цей прогін покрив, за зростанням. */
+            coverage: components["schemas"]["CollectionRunCoverage"][];
+            /** @description Інтервалів більше за стелю — показано перші. */
+            coverageTruncated: boolean;
+            /** @description Текст помилки (до 2000 символів); `null` — без помилки. */
+            errorMessage: null | string;
+            /** @description Той самий рядок, що в переліку. */
+            run: components["schemas"]["CollectionRunView"];
+        };
         /** @description Підсумок прогону збору. */
         CollectionRunStatus: {
             /**
@@ -12758,6 +12920,71 @@ export interface components {
             pointsRetrieved: number;
             /** @description Статус: `Succeeded`, `Degraded`, `Failed`. */
             status: string;
+        };
+        /** @description Рядок журналу прогонів. */
+        CollectionRunView: {
+            /** @description Код з'єднання. */
+            dataSourceCode: string;
+            /**
+             * Format: int32
+             * @description З'єднання сутності.
+             */
+            dataSourceId: number;
+            /**
+             * Format: int64
+             * @description Тривалість; `null` — прогін ще триває.
+             */
+            durationMs: null | number;
+            /**
+             * Format: date-time
+             * @description Завершення; `null` — ще триває.
+             */
+            finishedAt: null | string;
+            /** @description Чи є текст помилки — сам текст лише в деталі. */
+            hasError: boolean;
+            /**
+             * Format: int64
+             * @description Ідентифікатор прогону.
+             */
+            id: number;
+            /** @description Наздоганяння пропущеного вікна. */
+            isCatchUp: boolean;
+            /**
+             * Format: int32
+             * @description Скільки значень отримано.
+             */
+            pointsRetrieved: number;
+            /**
+             * Format: date-time
+             * @description Початок зібраного інтервалу (UTC).
+             */
+            rangeFrom: string;
+            /**
+             * Format: date-time
+             * @description Кінець зібраного інтервалу (UTC).
+             */
+            rangeTo: string;
+            /** @description Код сутності. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність збору.
+             */
+            sourceEntityId: number;
+            /** @description Назва сутності; `null` — не задана. */
+            sourceEntityName: null | string;
+            /**
+             * Format: date-time
+             * @description Початок прогону (UTC).
+             */
+            startedAt: string;
+            /** @description `Running`, `Succeeded`, `Degraded` або `Failed`. */
+            status: string;
+            /**
+             * Format: int32
+             * @description Хто запустив; `null` — за розкладом.
+             */
+            triggeredByUserId: null | number;
         };
         /** @description Розклад збору — рядок екрана конфігуратора (ФВ-14.3, `BE-21b`). */
         CollectionScheduleView: {
@@ -14590,6 +14817,19 @@ export interface components {
         PagedResultOfCellChangeView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["CellChangeView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfCollectionRunView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["CollectionRunView"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**
