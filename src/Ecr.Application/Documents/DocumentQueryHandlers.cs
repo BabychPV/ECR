@@ -19,15 +19,20 @@ public sealed class ListDocumentsHandler(
     /// <param name="periodKey">Період для зведеного стану; <c>null</c> — без стану.</param>
     /// <param name="state">Зведений стан (<c>Draft|Submitted|Approved|Rejected</c>); порожньо — будь-який.</param>
     /// <param name="mine">Лише документи, де користувач — автор або подавав аркуш.</param>
+    /// <param name="hasLateEdits">
+    /// Лише документи з (<c>true</c>) або без (<c>false</c>) пізньої правки (<c>BE-09b</c>);
+    /// <c>null</c> — без фільтра.
+    /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<PagedResult<DocumentSummary>> HandleAsync(
-        int? projectId, int? periodKey, string? state, bool mine, CursorRequest page, CancellationToken ct)
+        int? projectId, int? periodKey, string? state, bool mine, bool? hasLateEdits,
+        CursorRequest page, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(page);
 
         var profile = await ProfileAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
-        var filter = new DocumentListFilter(ParseState(state, periodKey), mine ? profile.UserId : null);
+        var filter = new DocumentListFilter(ParseState(state, periodKey), mine ? profile.UserId : null, hasLateEdits);
 
         // ⛔ Родина REQ, а не CELL (`P-25`, рядок 1): хибний `limit` — це
         // помилка параметра запиту, і показувати її в обробнику помилок

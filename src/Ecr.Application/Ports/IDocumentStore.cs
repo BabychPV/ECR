@@ -57,7 +57,13 @@ public sealed record DocumentSummary(
 /// Лише документи, де цей користувач — автор (<c>CreatedByUserId</c>) або подавав
 /// хоч один аркуш (<c>ApprovalState.SubmittedByUserId</c>); <c>null</c> — усі.
 /// </param>
-public readonly record struct DocumentListFilter(DocumentStatus? State, int? MineUserId);
+/// <param name="HasLateEdits">
+/// Лише документи з (<c>true</c>) або без (<c>false</c>) позначки <see cref="DocumentSummary.HasLateEdits"/>
+/// за той самий період; <c>null</c> — без фільтра. Той самий предикат
+/// (<c>aud.CellChange.IsLateEdit = 1</c>, <c>D-70</c>), що обчислює позначку в
+/// рядку (<c>BE-09b</c>) — не друге визначення «пізньої правки».
+/// </param>
+public readonly record struct DocumentListFilter(DocumentStatus? State, int? MineUserId, bool? HasLateEdits = null);
 
 /// <summary>Порушення правила складу документа.</summary>
 /// <param name="SheetGroup">Група аркушів.</param>
@@ -97,9 +103,11 @@ public interface IDocumentStore
     /// <param name="projectId">Фільтр за проєктом; <c>null</c> — усі.</param>
     /// <param name="period">Період для зведеного стану аркушів.</param>
     /// <param name="filter">
-    /// Фільтри стану й «мої». ⛔ Застосовуються ЗАПИТОМ до стелі сторінки: постфільтр
-    /// віддав би неповну сторінку при живому <c>NextCursor</c>. Фільтр <c>State</c>
-    /// без періоду ігнорується — стан поза періодом не визначений (<c>D-93</c>).
+    /// Фільтри стану, «мої» й пізніх правок. ⛔ Застосовуються ЗАПИТОМ до стелі
+    /// сторінки: постфільтр віддав би неповну сторінку при живому <c>NextCursor</c>.
+    /// Фільтр <c>State</c> без періоду ігнорується — стан поза періодом не визначений
+    /// (<c>D-93</c>); <c>HasLateEdits</c> без періоду діє за БУДЬ-ЯКИЙ період, як і
+    /// сама позначка в рядку.
     /// </param>
     /// <param name="page">Курсорна пагінація.</param>
     /// <param name="visibleProjectIds">

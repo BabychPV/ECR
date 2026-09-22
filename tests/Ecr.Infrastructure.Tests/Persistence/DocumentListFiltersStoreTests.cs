@@ -128,6 +128,74 @@ public sealed class DocumentListFiltersStoreTests(SqlServerFixture sql)
         Assert.True(counter.Tally.Snapshot().Total == 4, counter.Tally.Snapshot().Format());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Фільтр_hasLateEdits_показує_лише_документи_з_позначкою()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var period = chain.PeriodKey.Value;
+
+        long late, onTime;
+        await using (var db = builder.CreateContext())
+        {
+            late = await DocumentAsync(db, chain, "HLE-LATE", author: 1, DocumentStatus.Draft);
+            onTime = await DocumentAsync(db, chain, "HLE-ONTIME", author: 1, DocumentStatus.Draft);
+        }
+
+        await WriteChangeAsync(late, period, isLate: true);
+
+        await using var readDb = builder.CreateContext();
+
+        var onlyLate = await IdsAsync(
+            readDb, chain.ProjectId, period, new DocumentListFilter(null, null, true), null);
+        Assert.Equal([late], onlyLate);
+
+        var onlyNotLate = await IdsAsync(
+            readDb, chain.ProjectId, period, new DocumentListFilter(null, null, false), null);
+        Assert.Equal(new[] { chain.DocumentId, onTime }.Order(), onlyNotLate.Order());
+
+        // Немає параметра — фільтра немає взагалі: обидва в переліку (як зараз).
+        var unfiltered = await IdsAsync(
+            readDb, chain.ProjectId, period, new DocumentListFilter(null, null, null), null);
+        Assert.Equal(new[] { chain.DocumentId, late, onTime }.Order(), unfiltered.Order());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Фільтр_hasLateEdits_комбінується_з_state_і_mine()
+    {
+        var me = Interlocked.Increment(ref _user);
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(ct: CancellationToken.None);
+        var period = chain.PeriodKey.Value;
+
+        long mineLate, mineOnTime, otherLate;
+        await using (var db = builder.CreateContext())
+        {
+            mineLate = await DocumentAsync(db, chain, "HLE-MINE-LATE", author: me, DocumentStatus.Submitted, submitter: me);
+            mineOnTime = await DocumentAsync(db, chain, "HLE-MINE-ONTIME", author: me, DocumentStatus.Submitted, submitter: me);
+            otherLate = await DocumentAsync(db, chain, "HLE-OTHER-LATE", author: 1, DocumentStatus.Submitted);
+        }
+
+        await WriteChangeAsync(mineLate, period, isLate: true);
+        await WriteChangeAsync(otherLate, period, isLate: true);
+
+        await using var readDb = builder.CreateContext();
+
+        // state=Submitted + mine=me + hasLateEdits=true — рівно один документ,
+        // хоч під кожен окремий фільтр підходить більше: mineOnTime випадає
+        // через hasLateEdits, otherLate — через mine.
+        var ids = await IdsAsync(
+            readDb, chain.ProjectId, period,
+            new DocumentListFilter(DocumentStatus.Submitted, me, true), null);
+
+        Assert.Equal([mineLate], ids);
+        Assert.DoesNotContain(mineOnTime, ids);
+    }
+
     private static async Task<long[]> IdsAsync(
         EcrDbContext db, int? projectId, int periodKey, DocumentListFilter filter, int[]? visibleProjects)
     {

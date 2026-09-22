@@ -48,7 +48,7 @@ public sealed class ListDocumentsGrantScopeTests
         // нефільтрованій послідовності.
         Page(new PagedResult<DocumentSummary>([Doc(1, Mine)], NextCursor: null, TotalCount: null));
 
-        await Handler().HandleAsync(projectId: null, periodKey: null, state: null, mine: false, new CursorRequest(Limit: 50), default);
+        await Handler().HandleAsync(projectId: null, periodKey: null, state: null, mine: false, hasLateEdits: null, new CursorRequest(Limit: 50), default);
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(),
@@ -68,7 +68,7 @@ public sealed class ListDocumentsGrantScopeTests
         // до сховища й далі трималися лише на постфільтрі.
         Page(new PagedResult<DocumentSummary>([], NextCursor: null, TotalCount: null));
 
-        await Handler().HandleAsync(projectId: null, periodKey: null, state: null, mine: false, new CursorRequest(Limit: 50), default);
+        await Handler().HandleAsync(projectId: null, periodKey: null, state: null, mine: false, hasLateEdits: null, new CursorRequest(Limit: 50), default);
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(),
@@ -90,7 +90,7 @@ public sealed class ListDocumentsGrantScopeTests
             [Doc(1, Mine), Doc(2, Foreign)], NextCursor: null, TotalCount: 5000));
 
         var result = await Handler()
-            .HandleAsync(projectId: null, periodKey: null, state: null, mine: false, new CursorRequest(Limit: 50), default);
+            .HandleAsync(projectId: null, periodKey: null, state: null, mine: false, hasLateEdits: null, new CursorRequest(Limit: 50), default);
 
         var visible = Assert.Single(result.Items);
         Assert.Equal(Mine, visible.ProjectId);
@@ -108,7 +108,7 @@ public sealed class ListDocumentsGrantScopeTests
         Page(new PagedResult<DocumentSummary>([Doc(1, Mine)], NextCursor: "c1", TotalCount: null));
 
         var result = await Handler()
-            .HandleAsync(projectId: null, periodKey: null, state: null, mine: false, new CursorRequest(Limit: 1), default);
+            .HandleAsync(projectId: null, periodKey: null, state: null, mine: false, hasLateEdits: null, new CursorRequest(Limit: 1), default);
 
         Assert.Null(result.TotalCount);
         Assert.Equal("c1", result.NextCursor);

@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Linq.Expressions;
-using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
@@ -118,6 +117,17 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         if (filter.State is { } state && period.Value is { } periodKey)
         {
             documents = WhereState(documents, state, periodKey);
+        }
+
+        // BE-09b: та сама умова, що дає позначку в рядку (`LateEditDocumentIds`),
+        // застосована ЗАПИТОМ до стелі сторінки — не друге визначення «пізньої
+        // правки». Без періоду діє за БУДЬ-ЯКИЙ, як і сама позначка.
+        if (filter.HasLateEdits is { } wantLate)
+        {
+            var lateIds = LateEditDocumentIds(period);
+            documents = wantLate
+                ? documents.Where(d => lateIds.Contains(d.Id))
+                : documents.Where(d => !lateIds.Contains(d.Id));
         }
 
         var rows = await documents
@@ -531,12 +541,35 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     private static Expression<Func<T, bool>> Not<T>(Expression<Func<T, bool>> predicate)
         => Expression.Lambda<Func<T, bool>>(Expression.Not(predicate.Body), predicate.Parameters);
 
-    /// <summary>Документи сторінки з хоч однією пізньою правкою (<c>D-70</c>) — одним запитом.</summary>
+    /// <summary>Документи з хоч однією пізньою правкою (<c>D-70</c>) — не обмежено сторінкою.</summary>
     /// <remarks>
     /// ⚠ Сирий SQL: <c>aud.CellChange</c> навмисно поза моделлю EF (незмінний журнал).
     /// Пошук іде індексом <c>IX_CellChange_Cell</c> (провідна колонка — <c>DocumentId</c>).
     /// Без періоду — пізня правка за будь-який період.
+    ///
+    /// ⛔ ЄДИНЕ місце, де живе предикат «пізня правка» (<c>BE-09b</c>): і
+    /// позначка в рядку (<see cref="LateEditsBatchAsync"/>), і фільтр
+    /// <c>hasLateEdits</c> у <see cref="ListAsync"/> компонують САМЕ цей
+    /// запит — другого визначення немає. Результат лишається
+    /// <c>IQueryable</c>, а не матеріалізується тут: виклик з фільтра
+    /// компонується в один запит із <c>documents</c> (підзапит <c>IN</c>),
+    /// виклик з позначки — звужується до сторінки нижче.
     /// </remarks>
+    private IQueryable<long> LateEditDocumentIds(PeriodKeyFilter period)
+    {
+        var anyPeriod = period.Value is null ? 1 : 0;
+        var periodKey = period.Value ?? 0;
+
+        return db.Database
+            .SqlQuery<long>($"""
+                SELECT DISTINCT c.DocumentId AS Value
+                  FROM aud.CellChange AS c
+                 WHERE c.IsLateEdit = 1
+                   AND ({anyPeriod} = 1 OR c.PeriodKey = {periodKey})
+                """);
+    }
+
+    /// <summary>Документи сторінки з хоч однією пізньою правкою — одним запитом.</summary>
     private async Task<HashSet<long>> LateEditsBatchAsync(
         IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
     {
@@ -545,18 +578,12 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             return [];
         }
 
-        var ids = JsonSerializer.Serialize(documentIds);
-        var anyPeriod = period.Value is null ? 1 : 0;
-        var periodKey = period.Value ?? 0;
+        // Масив, а не `IReadOnlyList`: та сама причина, що й `allowedProjects`
+        // вище — `Contains` над масивом EF перекладає в параметризований `IN`.
+        var ids = documentIds.ToArray();
 
-        var late = await db.Database
-            .SqlQuery<long>($"""
-                SELECT DISTINCT c.DocumentId AS Value
-                  FROM aud.CellChange AS c
-                 WHERE c.IsLateEdit = 1
-                   AND c.DocumentId IN (SELECT CAST(j.value AS bigint) FROM OPENJSON({ids}) AS j)
-                   AND ({anyPeriod} = 1 OR c.PeriodKey = {periodKey})
-                """)
+        var late = await LateEditDocumentIds(period)
+            .Where(id => ids.Contains(id))
             .Take(documentIds.Count)
             .ToListAsync(ct)
             .ConfigureAwait(false);
