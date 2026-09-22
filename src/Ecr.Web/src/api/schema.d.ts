@@ -2747,11 +2747,11 @@ export interface paths {
                 cookie?: never;
             };
             /** @description Скасування. */
-            requestBody: {
+            requestBody?: {
                 content: {
-                    "application/*+json": components["schemas"]["AcceptSourceUnitChangeRequest"];
-                    "application/json": components["schemas"]["AcceptSourceUnitChangeRequest"];
-                    "text/json": components["schemas"]["AcceptSourceUnitChangeRequest"];
+                    "application/*+json": null | components["schemas"]["AcceptSourceUnitChangeRequest"];
+                    "application/json": null | components["schemas"]["AcceptSourceUnitChangeRequest"];
+                    "text/json": null | components["schemas"]["AcceptSourceUnitChangeRequest"];
                 };
             };
             responses: {
@@ -2779,6 +2779,17 @@ export interface paths {
                 };
                 /** @description Conflict */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12347,9 +12358,10 @@ export interface components {
         AcceptSourceUnitChangeRequest: {
             /**
              * Format: int32
-             * @description Одиниця довідника, яку джерело віддає тепер.
+             * @description Одиниця довідника, яку джерело віддає тепер; `null` — та, що помітив збір
+             *     (`pendingSourceUnitChange.actualUnitId`).
              */
-            sourceUnitId: number;
+            sourceUnitId: null | number;
         };
         /** @description Відповідь на питання «чому в мене немає доступу» (`H-21`). */
         AccessDiagnosticsView: {
@@ -13666,6 +13678,7 @@ export interface components {
             id: number;
             /** @description Чи діє мапінг. */
             isActive: boolean;
+            pendingSourceUnitChange: null | components["schemas"]["PendingSourceUnitChange"];
             /**
              * Format: int32
              * @description Сутність джерела.
@@ -14111,6 +14124,7 @@ export interface components {
             isActive: boolean;
             /** @description Стан мапінгу. */
             outcome: components["schemas"]["MappingOutcome"];
+            pendingSourceUnitChange: null | components["schemas"]["PendingSourceUnitChange"];
             /**
              * Format: int32
              * @description Скільки реальних точок вікна під цей мапінг.
@@ -14935,6 +14949,21 @@ export interface components {
             cells: components["schemas"]["PatchCell"][];
             /** @description Ідентичність рядка. */
             rowKey: string;
+        };
+        /** @description Зміна одиниці джерела, що чекає рішення людини (ФВ-16.9). */
+        PendingSourceUnitChange: {
+            /** @description Одиниця, яку віддає джерело. */
+            actualUnitCode: string;
+            /**
+             * Format: int32
+             * @description Її id у довіднику; `null` — її спершу треба завести.
+             */
+            actualUnitId: null | number;
+            /**
+             * Format: date-time
+             * @description Коли збір це помітив.
+             */
+            detectedAt: string;
         };
         /** @description Правило доступу до періоду для відповіді API. */
         PeriodAccessRuleDto: {

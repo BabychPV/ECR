@@ -44,6 +44,7 @@ const Preview: MappingPreview = {
       // б форму, якої сервер уже не надсилає.
       foldedValue: '42.5',
       isActive: true,
+      pendingSourceUnitChange: null,
     },
     {
       fieldMapId: 2,
@@ -58,6 +59,7 @@ const Preview: MappingPreview = {
       pointCount: 0,
       foldedValue: null,
       isActive: true,
+      pendingSourceUnitChange: null,
     },
   ],
   rows: [
@@ -111,6 +113,7 @@ const WithPaused: MappingPreview = {
       pointCount: 7,
       foldedValue: '9.5',
       isActive: false,
+      pendingSourceUnitChange: null,
     },
   ],
 };

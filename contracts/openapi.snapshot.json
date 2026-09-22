@@ -5,9 +5,12 @@
         "description": "Запит на приймання зміни одиниці джерела (`ФВ-16.9`).",
         "properties": {
           "sourceUnitId": {
-            "description": "Одиниця довідника, яку джерело віддає тепер.",
+            "description": "Одиниця довідника, яку джерело віддає тепер; `null` — та, що помітив збір\n(`pendingSourceUnitChange.actualUnitId`).",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -2700,6 +2703,17 @@
             "description": "Чи діє мапінг.",
             "type": "boolean"
           },
+          "pendingSourceUnitChange": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingSourceUnitChange",
+                "description": "Збір помітив іншу одиницю джерела і поставив мапінг на паузу; `null` — ні (ФВ-16.9)."
+              }
+            ]
+          },
           "sourceEntityId": {
             "description": "Сутність джерела.",
             "format": "int32",
@@ -2764,7 +2778,8 @@
           "targetUnitId",
           "targetRowKey",
           "aggregation",
-          "isActive"
+          "isActive",
+          "pendingSourceUnitChange"
         ],
         "type": "object"
       },
@@ -3707,6 +3722,17 @@
             "$ref": "#/components/schemas/MappingOutcome",
             "description": "Стан мапінгу."
           },
+          "pendingSourceUnitChange": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingSourceUnitChange",
+                "description": "Пауза через зміну одиниці джерела; `null` — її немає (ФВ-16.9)."
+              }
+            ]
+          },
           "pointCount": {
             "description": "Скільки реальних точок вікна під цей мапінг.",
             "format": "int32",
@@ -3765,7 +3791,8 @@
           "targetUnitCode",
           "pointCount",
           "foldedValue",
-          "isActive"
+          "isActive",
+          "pendingSourceUnitChange"
         ],
         "type": "object"
       },
@@ -5503,6 +5530,34 @@
           "rowKey",
           "baseVersion",
           "cells"
+        ],
+        "type": "object"
+      },
+      "PendingSourceUnitChange": {
+        "description": "Зміна одиниці джерела, що чекає рішення людини (ФВ-16.9).",
+        "properties": {
+          "actualUnitCode": {
+            "description": "Одиниця, яку віддає джерело.",
+            "type": "string"
+          },
+          "actualUnitId": {
+            "description": "Її id у довіднику; `null` — її спершу треба завести.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "detectedAt": {
+            "description": "Коли збір це помітив.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actualUnitCode",
+          "actualUnitId",
+          "detectedAt"
         ],
         "type": "object"
       },
@@ -14929,22 +14984,42 @@
           "content": {
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                  }
+                ]
               }
             },
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                  }
+                ]
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AcceptSourceUnitChangeRequest"
+                  }
+                ]
               }
             }
           },
-          "description": "Скасування.",
-          "required": true
+          "description": "Скасування."
         },
         "responses": {
           "200": {
@@ -15006,6 +15081,26 @@
               }
             },
             "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Приймає нову одиницю джерела (`ФВ-16.9`). Право `Integration.Manage`.",
