@@ -2550,6 +2550,11 @@ USING (VALUES
     -- лічиться діючим.
     (N'mapping.paused',                  N'en', N'paused', 1),
     (N'mapping.mapsSummary',             N'en', N'{active} active, {paused} paused. A paused mapping keeps its settings and writes nothing.', 1),
+    -- Призупинення й відновлення мапінгу з перегляду (BE-27).
+    (N'mapping.pause',                   N'en', N'Pause', 1),
+    (N'mapping.resume',                  N'en', N'Resume', 1),
+    (N'mapping.pauseDone',               N'en', N'Mapping paused.', 1),
+    (N'mapping.resumeDone',              N'en', N'Mapping resumed.', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),
