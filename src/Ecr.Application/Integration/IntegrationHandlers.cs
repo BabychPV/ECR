@@ -155,9 +155,10 @@ public sealed class GetJobStatusHandler(
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
+        var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+
         if (!profile.Has(Permission))
         {
-            var createdByUserId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
             if (createdByUserId != userId)
             {
                 throw new AccessDeniedException(
@@ -175,6 +176,7 @@ public sealed class GetJobStatusHandler(
             Message = resolvedMessage,
             ResultUrl = JobResultUrl.For(
                 profile, jobId, null, status.State, status.Message, status.DocumentId),
+            CreatedByUserId = createdByUserId,
         };
     }
 }

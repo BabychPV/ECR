@@ -64,6 +64,8 @@ public sealed class JobRestartOwnerTests
             () => Controller().Restart(JobId, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        // Текст ключа нейтральний (і cancel, і restart) — 09-seed.sql.
+        Assert.Equal("err.ECR-AUTH-0403.jobNotYours", denied.Details?["messageKey"]);
         await _jobs.DidNotReceive().RestartAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
