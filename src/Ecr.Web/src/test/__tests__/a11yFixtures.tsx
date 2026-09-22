@@ -688,6 +688,36 @@ export const RuleCoverageFixture = {
   truncated: false,
 };
 
+/**
+ * Покриття «виходи → колонки» версії методології (`BE-25`).
+ *
+ * ⛔ Той самий привід, що в `RuleCoverageFixture` вище: ОБ'ЄКТ, а не `[]` за
+ * замовчуванням — `MethodologyCoveragePanel` читає `outputs`/`waitingBindings`,
+ * і на масиві маршрут упав би в екран помилки замість того, щоб намалювати
+ * панель (та сама пастка, що з `/tables/status`).
+ *
+ * ⚠ Один вихід БЕЗ прив'язки (ґап-бейдж) і одна прив'язка, що чекає на вихід,
+ * якого версія не оголошує (`waitingBindings`), — навмисно НЕПОРОЖНІ: інакше
+ * гейт сканував би екран, де ані бейдж «нікуди не пише», ані блок «Waiting
+ * bindings» жодного разу не з'явилися б, і контраст обох лишився б поза
+ * перевіркою.
+ */
+export const MethodologyCoverageFixture = {
+  methodologyVersionId: 1,
+  outputs: [{ code: 'CO2', bindings: [] }],
+  waitingBindings: [
+    {
+      id: 9,
+      methodologyId: 1,
+      tableDefId: 3,
+      columnDefId: 55,
+      outputCode: 'RETIRED',
+      matchJson: '{}',
+      isActive: true,
+    },
+  ],
+};
+
 export function emptyBodyFor(url: string): unknown {
   if (url.includes('/campaign/summary')) return CampaignSummaryFixture;
 
@@ -928,6 +958,12 @@ export function emptyBodyFor(url: string): unknown {
   // читає `combinations.length`, і на масиві маршрут замінювався б екраном
   // помилки (та сама пастка, що з `/tables/status` вище).
   if (url.includes('/rule-coverage')) return RuleCoverageFixture;
+
+  // ⚠ `/coverage`, ПІСЛЯ перевірки `/rule-coverage` вище: та адреса теж
+  // закінчується на «coverage», але не містить `/coverage` (там
+  // `rule-coverage` одним словом через дефіс) — порядок тут не рятує від
+  // цього, а лише документує, що колізії немає (перевірено `git grep`).
+  if (/\/versions\/\d+\/coverage$/.test(url)) return MethodologyCoverageFixture;
 
   if (/\/templates\/\d+$/.test(url)) {
     return {
