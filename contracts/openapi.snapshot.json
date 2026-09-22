@@ -744,6 +744,40 @@
         ],
         "type": "object"
       },
+      "CellChangeDto": {
+        "description": "Змінена комірка; значення — рядком (decimal без втрати знаків).",
+        "properties": {
+          "columnCode": {
+            "type": "string"
+          },
+          "newValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rowKey": {
+            "type": "string"
+          },
+          "tableCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tableCode",
+          "rowKey",
+          "columnCode",
+          "oldValue",
+          "newValue"
+        ],
+        "type": "object"
+      },
       "CellChangeView": {
         "description": "Зміна комірки в журналі, як її бачить читач аудиту.",
         "properties": {
@@ -2395,6 +2429,62 @@
         ],
         "type": "object"
       },
+      "DocumentCompareDto": {
+        "description": "Різниця двох версій документа. `ToVersionId = null` — порівняння з поточним станом;\n`Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems.",
+        "properties": {
+          "addedRows": {
+            "items": {
+              "$ref": "#/components/schemas/RowChangeDto"
+            },
+            "type": "array"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/CellChangeDto"
+            },
+            "type": "array"
+          },
+          "documentId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fromVersionId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "removedRows": {
+            "items": {
+              "$ref": "#/components/schemas/RowChangeDto"
+            },
+            "type": "array"
+          },
+          "toVersionId": {
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "documentId",
+          "periodKey",
+          "fromVersionId",
+          "toVersionId",
+          "changes",
+          "addedRows",
+          "removedRows",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "DocumentIdResponse": {
         "description": "Створений документ.",
         "properties": {
@@ -2622,6 +2712,38 @@
           "tableOrdinal",
           "allowsDynamicRows",
           "maxDynamicRows"
+        ],
+        "type": "object"
+      },
+      "DocumentVersionDto": {
+        "description": "Версія документа — зріз подання аркуша (ФВ-5.22).",
+        "properties": {
+          "periodKey": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "sheetDefId": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "submittedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "submittedBy": {
+            "type": "string"
+          },
+          "versionId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versionId",
+          "sheetDefId",
+          "periodKey",
+          "submittedAt",
+          "submittedBy"
         ],
         "type": "object"
       },
@@ -7524,6 +7646,27 @@
           "isActive",
           "permissions",
           "dangerousPermissions"
+        ],
+        "type": "object"
+      },
+      "RowChangeDto": {
+        "description": "Доданий або видалений рядок.",
+        "properties": {
+          "rowId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rowKey": {
+            "type": "string"
+          },
+          "tableCode": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowId",
+          "tableCode",
+          "rowKey"
         ],
         "type": "object"
       },
@@ -13624,6 +13767,103 @@
         ]
       }
     },
+    "/api/v1/documents/{id}/compare": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentCompareDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentCompareDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentCompareDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Різниця версії `from` і версії `to` (або поточного стану, `to=current`):\nзмінені комірки, додані й видалені рядки; кожен перелік — не більше 1000, решта — `truncated`.",
+        "tags": [
+          "DocumentVersions"
+        ]
+      }
+    },
     "/api/v1/documents/{id}/export": {
       "post": {
         "parameters": [
@@ -14569,6 +14809,85 @@
         "summary": "Останній результат перевірки. Право `Document.View`.",
         "tags": [
           "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/versions": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "periodKey",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentVersionDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentVersionDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DocumentVersionDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Зрізи подання документа за період, найновіші перші, не більше 200. Право `Document.View`.",
+        "tags": [
+          "DocumentVersions"
         ]
       }
     },
@@ -27286,6 +27605,9 @@
     },
     {
       "name": "Documents"
+    },
+    {
+      "name": "DocumentVersions"
     },
     {
       "name": "DocumentWorkflowHistory"

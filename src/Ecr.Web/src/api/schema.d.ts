@@ -1729,6 +1729,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Різниця версії `from` і версії `to` (або поточного стану, `to=current`):
+         *     змінені комірки, додані й видалені рядки; кожен перелік — не більше 1000, решта — `truncated`. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: number;
+                    to?: string;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentCompareDto"];
+                        "text/json": components["schemas"]["DocumentCompareDto"];
+                        "text/plain": components["schemas"]["DocumentCompareDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/export": {
         parameters: {
             query?: never;
@@ -2449,6 +2515,59 @@ export interface paths {
                         "application/json": components["schemas"]["ValidationResultResponse"];
                         "text/json": components["schemas"]["ValidationResultResponse"];
                         "text/plain": components["schemas"]["ValidationResultResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Зрізи подання документа за період, найновіші перші, не більше 200. Право `Document.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    periodKey?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentVersionDto"][];
+                        "text/json": components["schemas"]["DocumentVersionDto"][];
+                        "text/plain": components["schemas"]["DocumentVersionDto"][];
                     };
                 };
                 /** @description Not Found */
@@ -12690,6 +12809,14 @@ export interface components {
              */
             submitted: number;
         };
+        /** @description Змінена комірка; значення — рядком (decimal без втрати знаків). */
+        CellChangeDto: {
+            columnCode: string;
+            newValue: null | string;
+            oldValue: null | string;
+            rowKey: string;
+            tableCode: string;
+        };
         /** @description Зміна комірки в журналі, як її бачить читач аудиту. */
         CellChangeView: {
             /**
@@ -13419,6 +13546,22 @@ export interface components {
              */
             position: number;
         };
+        /** @description Різниця двох версій документа. `ToVersionId = null` — порівняння з поточним станом;
+         *     `Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems. */
+        DocumentCompareDto: {
+            addedRows: components["schemas"]["RowChangeDto"][];
+            changes: components["schemas"]["CellChangeDto"][];
+            /** Format: int64 */
+            documentId: number;
+            /** Format: int64 */
+            fromVersionId: number;
+            /** Format: int32 */
+            periodKey: number;
+            removedRows: components["schemas"]["RowChangeDto"][];
+            /** Format: int64 */
+            toVersionId: null | number;
+            truncated: boolean;
+        };
         /** @description Створений документ. */
         DocumentIdResponse: {
             /**
@@ -13562,6 +13705,18 @@ export interface components {
              * @description Порядок таблиці в аркуші.
              */
             tableOrdinal: number;
+        };
+        /** @description Версія документа — зріз подання аркуша (ФВ-5.22). */
+        DocumentVersionDto: {
+            /** Format: int32 */
+            periodKey: number;
+            /** Format: int32 */
+            sheetDefId: number;
+            /** Format: date-time */
+            submittedAt: string;
+            submittedBy: string;
+            /** Format: int64 */
+            versionId: number;
         };
         /**
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
@@ -15832,6 +15987,13 @@ export interface components {
             isBuiltIn: boolean;
             /** @description Права ролі. */
             permissions: string[];
+        };
+        /** @description Доданий або видалений рядок. */
+        RowChangeDto: {
+            /** Format: int64 */
+            rowId: number;
+            rowKey: string;
+            tableCode: string;
         };
         /** @description Рядок у відповіді на запис/читання через цей обробник. */
         RowDefDto: {
