@@ -2022,6 +2022,17 @@ USING (VALUES
     (N'documents.deleteText',            N'en', N'The draft document and all data entered in it will be deleted. This cannot be undone.', 1),
     (N'documents.deleteNote',            N'en', N'Only a draft can be deleted: a document that has already been through approval will be refused.', 1),
     (N'documents.deleted',               N'en', N'Document {name} has been deleted.', 1),
+    -- Зміна бізнес-ключа документа (ФВ-3.9). ⚠ Ключ змінюється лише доки
+    -- жоден аркуш не поданий і не затверджений; `changeKeyStaleHint` — про
+    -- 409, коли ключ на сервері вже інший, тож повторювати ту саму форму нема
+    -- чим, доки людина не побачить новий.
+    (N'documents.changeKey',             N'en', N'Change document key', 1),
+    (N'documents.changeKeyTitle',        N'en', N'Change document key', 1),
+    (N'documents.changeKeyLockedHint',   N'en', N'The key cannot be changed: a sheet has already been submitted or approved.', 1),
+    (N'documents.changeKeyStaleHint',    N'en', N'The key was changed by someone else. The document has been reloaded; check the current key before trying again.', 1),
+    (N'documents.keyChanged',            N'en', N'The document key has been changed.', 1),
+    (N'documents.newBusinessKey',        N'en', N'New key', 1),
+    (N'documents.newBusinessKeyHint',    N'en', N'Up to {max} characters; it must differ from the current key. The change and its reason go to the audit trail.', 1),
     (N'documents.version',               N'en', N'Template version', 1),
     (N'documents.versionHint',           N'en', N'Only published versions: a draft has no frozen structure.', 1),
     (N'documents.pickVersion',           N'en', N'Pick a version', 1),
