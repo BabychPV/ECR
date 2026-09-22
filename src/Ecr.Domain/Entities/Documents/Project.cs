@@ -211,12 +211,20 @@ public sealed class Project : Entity<int>
         if (_periods.All(p => p.Id != periodId))
         {
             throw new DomainException(
-                "ECR-PRD-0422", $"Період {periodId} не належить проєкту {Code}.");
+                "ECR-PRD-0422", $"Період {periodId} не належить проєкту {Code}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0422.periodNotInProject",
+                    ["periodId"] = periodId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["projectCode"] = Code,
+                });
         }
 
         if (string.IsNullOrWhiteSpace(reason))
         {
-            throw new DomainException("ECR-PRD-0422", "Причина фіксації поточного періоду обов'язкова.");
+            throw new DomainException(
+                "ECR-PRD-0422", "Причина фіксації поточного періоду обов'язкова.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRD-0422.pinReasonRequired" });
         }
 
         CurrentPeriodMode = CurrentPeriodMode.Pinned;
@@ -282,7 +290,8 @@ public sealed class Project : Entity<int>
         {
             throw new DomainException(
                 "ECR-PRD-0409",
-                "Пояс майданчика не змінюється після відкриття першого періоду (ФВ-1.1a).");
+                "Пояс майданчика не змінюється після відкриття першого періоду (ФВ-1.1a).",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRD-0409.timeZoneLocked" });
         }
 
         // ⛔ Перевірка та сама, що й у конструкторі, і зроблена тим самим

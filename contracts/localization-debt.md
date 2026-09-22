@@ -121,6 +121,14 @@
 нейтральним («Registry item not found»): ним відмовляють і для довідника,
 запису, поля, правила.
 
+✎ **2026-09-22: документи й проєкти (домен)** — `Project` (3) і `PeriodPolicy`
+(2) закрито повністю, 5 кидків. Заголовки `ECR-PRD-0409` («Period state
+conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтральними. У
+області Documents лишились `ECR-TMPL-0404` про зламаний інваріант метаданих
+(`CreateRowHandler`, `GetTableSliceHandler`, `PatchCellsHandler`) і
+`RecalculateDocumentHandler` — його ключ має вибиратися за причиною разом із
+`RunCalculationHandler` і `RecalculationJob` (спільний `Explain`).
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -188,8 +196,6 @@
 | `src/Ecr.Domain/Entities/Configuration/TableRelationDef.cs` | 5 |
 | `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
-| `src/Ecr.Domain/Entities/Documents/PeriodPolicy.cs` | 2 |
-| `src/Ecr.Domain/Entities/Documents/Project.cs` | 3 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |
 | `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |
 | `src/Ecr.Domain/Entities/Security/User.cs` | 1 |
