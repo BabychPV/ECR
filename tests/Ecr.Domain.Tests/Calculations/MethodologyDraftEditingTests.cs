@@ -109,6 +109,8 @@ public sealed class MethodologyDraftEditingTests
             () => version.EditFormula(foreign, "@Flow * 2", FormulaResultType.Number, null));
 
         Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.formulaWrongVersion", error.Details!["messageKey"]);
+        Assert.Equal("gsec", error.Details!["formulaCode"]);
         Assert.Equal("@Flow", foreign.Expression);
     }
 

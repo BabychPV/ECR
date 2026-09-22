@@ -1,4 +1,5 @@
 // src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs
+using System.Globalization;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
@@ -603,7 +604,14 @@ public sealed class MethodologyVersion : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"Формула «{formula.Code}» належить версії {formula.MethodologyVersionId}, "
-                + $"а не {Id}: правити її через цю версію не можна.");
+                + $"а не {Id}: правити її через цю версію не можна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.formulaWrongVersion",
+                    ["formulaCode"] = formula.Code,
+                    ["ownerVersionId"] = formula.MethodologyVersionId.ToString(CultureInfo.InvariantCulture),
+                    ["versionId"] = Id.ToString(CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -624,7 +632,15 @@ public sealed class MethodologyVersion : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"{what} «{code}» належить версії {ownerVersionId}, а не {Id}: "
-                + "правити його через цю версію не можна.");
+                + "правити його через цю версію не можна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.childWrongVersion",
+                    ["what"] = what,
+                    ["code"] = code,
+                    ["ownerVersionId"] = ownerVersionId.ToString(CultureInfo.InvariantCulture),
+                    ["versionId"] = Id.ToString(CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -636,7 +652,14 @@ public sealed class MethodologyVersion : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0409",
                 $"Версія {Version} у стані {Status}: змінювати {what} не можна. "
-                + "Опублікована версія незмінна — зміна це клон і нове вікно дії (ФВ-13.2).");
+                + "Опублікована версія незмінна — зміна це клон і нове вікно дії (ФВ-13.2).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0409.draftRequired",
+                    ["what"] = what,
+                    ["version"] = Version,
+                    ["status"] = Status.ToString(),
+                });
         }
     }
 }

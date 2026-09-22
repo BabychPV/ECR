@@ -104,6 +104,8 @@ public sealed class MethodologyVersionTests
             second, Reviewer, "Уточнення", From, testsPassed: true, Now));
 
         Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.effectiveDateTaken", error.Details!["messageKey"]);
+        Assert.Equal(first.Version, error.Details!["version"]);
         Assert.False(second.IsPublished);
 
         // Від іншої дати — проходить, і вибір лишається однозначним.
@@ -133,6 +135,8 @@ public sealed class MethodologyVersionTests
         var modes = Assert.Throws<DomainException>(
             () => version.SetModes(NumericMode.Strict, CalendarMode.Fixed360, TraceLevel.Full));
         Assert.Equal("ECR-CALC-0409", modes.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.draftRequired", modes.Details!["messageKey"]);
+        Assert.Equal("Published", modes.Details!["status"]);
 
         var hash = Assert.Throws<DomainException>(() => version.SetContentHash([1, 2, 3]));
         Assert.Equal("ECR-CALC-0409", hash.ErrorCode);

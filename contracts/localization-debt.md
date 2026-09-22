@@ -137,6 +137,45 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 і `RecalculationJob` закрито повністю, `RunCalculationHandler` 5 → 3; 4 кидки.
 Заголовок `ECR-CALC-4221` став нейтральним («Recalculation is not allowed»).
 
+✎ **2026-09-22: методологія — авторинг, чернетки, публікація** —
+`MethodologyAuthoringHandlers` (12), `MethodologyDraftHandlers` (8),
+`MethodologyPublishChecks` (2), `MethodologyQueryHandlers` (1),
+`PublishMethodologyHandler` (4), доменні `Methodology` (2) і
+`MethodologyVersion` (3) закрито повністю, 32 кидки; 286 у 81 файлі → 254 у
+74 файлах. `RunCalculationHandler`, `CalculationPlan`, `CalculationOrchestrator`,
+`GenericCalculationModule` і `RecalculationService` в цей зріз свідомо не
+входили — інша частина «Calculations» (рушій, а не конфігуратор методолога).
+- `ECR-CALC-0404`: наявний `.version` {methodologyVersionId} перевикористано у
+  всіх 7 однакових кидках «версії методології не існує»; новий `.methodology`
+  {methodologyId} — методологія-контейнер (3 кидки); новий `.formula`
+  {formulaCode, methodologyVersionId} — видалення неіснуючої формули.
+- `ECR-CALC-0409`: новий `.codeTaken` {code, existingId} — код методології вже
+  зайнято; `.constantVariantsAmbiguous` {constantCode, methodologyVersionId,
+  variantCount} — кілька звужених варіантів константи за тим самим кодом;
+  `.versionWrongMethodology` {versionId, sourceMethodologyId,
+  targetMethodologyId} — джерело клону з чужої методології;
+  `.versionNumberTaken` {version, code} і `.effectiveDateTaken` {version,
+  effectiveFrom} — доменні конфлікти `Methodology`; `.draftRequired` {what,
+  version, status} і два варіанти чужого володіння —
+  `.formulaWrongVersion` {formulaCode, ownerVersionId, versionId} та
+  `.childWrongVersion` {what, code, ownerVersionId, versionId} — спільні
+  перевірки `MethodologyVersion`, використані з десятка місць кожна.
+- `ECR-TMPL-0404.column` {columnDefId} — наявний ключ, перевикористаний для
+  обох кидків «колонки не існує» (обов'язковий вхід, прив'язка виходу).
+- `ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для двох
+  анонімних відмов (створення версії, публікація).
+- Нові одноразові ключі за лічильником, а не повним переліком (перелік їде
+  структурою `Details`, а не English-текстом): `ECR-CALC-0432.undeclaredArguments`
+  {undeclaredCount}, `ECR-CALC-0438.missingColumns` {tableCount},
+  `ECR-CALC-0433.legacyExtensionFunction` {functionCount},
+  `ECR-TMPL-4221.formulaCycle` {cycleLength} — самі переліки (токенів, таблиць,
+  функцій) лишаються в `Details` окремими полями для клієнта, а Detail-речення
+  каже лише «скільки», не «що саме»: показати конкретні формули чи колонки
+  англійською без перекладу самих ідентифікаторів (кодів формул, таблиць)
+  сенсу не мало б.
+- Заголовки кодів не змінювались — усі п'ять уже були нейтральними з
+  попередніх раундів.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -149,11 +188,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Api/Controllers/TemplateVersionsController.cs` | 2 |
 | `src/Ecr.Application/Audit/GetCellChangesHandler.cs` | 4 |
 | `src/Ecr.Application/Calculations/CalculationPlan.cs` | 1 |
-| `src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs` | 12 |
-| `src/Ecr.Application/Calculations/MethodologyDraftHandlers.cs` | 8 |
-| `src/Ecr.Application/Calculations/MethodologyPublishChecks.cs` | 2 |
-| `src/Ecr.Application/Calculations/MethodologyQueryHandlers.cs` | 1 |
-| `src/Ecr.Application/Calculations/PublishMethodologyHandler.cs` | 4 |
 | `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 3 |
 | `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
@@ -192,8 +226,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
 | `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
 | `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
-| `src/Ecr.Domain/Entities/Calculations/Methodology.cs` | 2 |
-| `src/Ecr.Domain/Entities/Calculations/MethodologyVersion.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/ColumnDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |

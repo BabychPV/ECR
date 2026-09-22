@@ -90,6 +90,8 @@ public sealed class MethodologyAuthoringTests
             () => version.EditRule(foreign, """{"kind":"stack"}""", 1, isActive: true));
 
         Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.childWrongVersion", error.Details!["messageKey"]);
+        Assert.Equal("offshore", error.Details!["code"]);
         Assert.Equal("{}", foreign.MatchJson);
     }
 

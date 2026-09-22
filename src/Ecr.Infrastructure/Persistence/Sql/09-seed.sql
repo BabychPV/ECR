@@ -965,12 +965,25 @@ USING (VALUES
     -- BE-25: only a never-published, never-used methodology version can be deleted.
     (N'err.ECR-CALC-0404.version',              N'en', N'Methodology version {methodologyVersionId} does not exist in this methodology.', 1),
     (N'err.ECR-CALC-0404.constant',             N'en', N'Methodology version {methodologyVersionId} has no constant {code}.', 1),
+    (N'err.ECR-CALC-0404.methodology',          N'en', N'Methodology {methodologyId} does not exist.', 1),
+    (N'err.ECR-CALC-0404.formula',              N'en', N'Methodology version {methodologyVersionId} has no formula "{formulaCode}".', 1),
     (N'err.ECR-TMPL-0404.column',               N'en', N'Column {columnDefId} does not exist or has been deleted.', 1),
     (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'en', N'Methodology version {version} has already been used in calculations and cannot be deleted.', 1),
     -- D-40: with a neutral code title, the four-eyes refusals carry their own detail.
     (N'err.ECR-CALC-0409.authorCannotPublish',  N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.', 1),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.', 1),
+    -- Round 3 of the localization debt (Methodology authoring): container code
+    -- clash, ambiguous constant narrowing, clone source mismatch, version
+    -- number/effective-date clashes, draft-only edits, and child ownership.
+    (N'err.ECR-CALC-0409.codeTaken',            N'en', N'Methodology code "{code}" is already used by methodology {existingId}.', 1),
+    (N'err.ECR-CALC-0409.constantVariantsAmbiguous', N'en', N'Constant "{constantCode}" has {variantCount} narrowed variants in version {methodologyVersionId}: the code alone does not say which one to edit.', 1),
+    (N'err.ECR-CALC-0409.versionWrongMethodology', N'en', N'Version {versionId} belongs to methodology {sourceMethodologyId}, not {targetMethodologyId}: it cannot be cloned here.', 1),
+    (N'err.ECR-CALC-0409.versionNumberTaken',   N'en', N'Version "{version}" already exists in methodology "{code}".', 1),
+    (N'err.ECR-CALC-0409.effectiveDateTaken',   N'en', N'Version "{version}" is already in effect from {effectiveFrom}: two published versions with the same start date make the methodology choice ambiguous.', 1),
+    (N'err.ECR-CALC-0409.draftRequired',        N'en', N'Version "{version}" is {status}: {what} cannot be changed. A published version is immutable — changing it means a clone with a new effective window.', 1),
+    (N'err.ECR-CALC-0409.formulaWrongVersion',  N'en', N'Formula "{formulaCode}" belongs to version {ownerVersionId}, not {versionId}: it cannot be edited through this version.', 1),
+    (N'err.ECR-CALC-0409.childWrongVersion',    N'en', N'{what} "{code}" belongs to version {ownerVersionId}, not {versionId}: it cannot be edited through this version.', 1),
     -- ECR-CALC-4221 has a neutral title: closed period, submitted sheets, approval without a reason.
     (N'err.ECR-CALC-4221.periodClosed',         N'en', N'Period {period} is closed: closed periods are not recalculated automatically, a separate approval is required.', 1),
     (N'err.ECR-CALC-4221.sheetsSubmitted',      N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Reopen the period first.', 1),
@@ -1001,6 +1014,10 @@ USING (VALUES
     (N'err.ECR-CALC-0422.ruleNoPredicate',      N'en', N'Rule "{code}" needs a predicate; to match the whole table, use an empty JSON object.', 1),
     (N'err.ECR-CALC-0422.selfDependency',       N'en', N'A methodology cannot depend on itself.', 1),
     (N'err.ECR-CALC-0422.selfImport',           N'en', N'A methodology cannot import itself: its own formulas are already visible.', 1),
+    (N'err.ECR-CALC-0432.undeclaredArguments',  N'en', N'The formula expression uses {undeclaredCount} token(s) missing from its declared argument list.', 1),
+    (N'err.ECR-CALC-0433.legacyExtensionFunction', N'en', N'The version uses {functionCount} function(s) not available in Legacy mode: switch it to Strict mode from a new effective date.', 1),
+    (N'err.ECR-CALC-0438.missingColumns',       N'en', N'A formula argument has no matching column in {tableCount} bound table(s).', 1),
+    (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle ({cycleLength} formula(s) involved).', 1),
 
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
     --

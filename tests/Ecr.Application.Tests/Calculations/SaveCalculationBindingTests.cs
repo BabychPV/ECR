@@ -122,5 +122,7 @@ public sealed class SaveCalculationBindingTests
         var error = await Assert.ThrowsAsync<NotFoundException>(Save);
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.column", error.Details!["messageKey"]);
+        Assert.Equal(ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Details!["columnDefId"]);
     }
 }
