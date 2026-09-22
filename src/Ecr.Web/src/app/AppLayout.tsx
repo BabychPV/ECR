@@ -183,8 +183,14 @@ export function AppLayout(): JSX.Element {
   const me = session.data;
 
   // Налаштування користувача з сервера (`BE-20`) — лише після входу.
-  // Покоління перемонтовує `UserMenu`, щоб перемикач щільності перечитав стан.
-  const preferencesGeneration = usePreferenceSync(me !== undefined);
+  // ⚠ Повернене число раніше йшло в `key={preferencesGeneration}` на
+  // `UserMenu` нижче: форсований ремонт, щоб перемикач щільності перечитав
+  // значення, яке приїхало з сервера ПІСЛЯ першого рендера. Хак губив
+  // відкритий стан `Menu` щоразу, коли синхронізація приходила, поки меню
+  // було відкрите. `UserMenu` тепер підписаний на щільність сам
+  // (`useDensity()`, `shared/theme/preferences.ts`) — виклик лишається
+  // лише заради побічного ефекту синхронізації з сервером.
+  usePreferenceSync(me !== undefined);
 
   // Приватний каталог рядків тягнеться після входу і мовою профілю (D-114).
   useEffect(() => {
@@ -339,7 +345,7 @@ export function AppLayout(): JSX.Element {
                   тих, заради кого він існує. У статичному бандлі — лише кнопка
                   й лічильник; шухляда — динамічним `import()`, як палітра. */}
               <MyTasksLauncher />
-              <UserMenu key={preferencesGeneration} userName={me.userName ?? '—'} />
+              <UserMenu userName={me.userName ?? '—'} />
             </Group>
           </Group>
         </AppShell.Header>

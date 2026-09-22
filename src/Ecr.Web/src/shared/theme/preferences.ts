@@ -168,3 +168,19 @@ function rowHeightSnapshot(): number {
 export function useRowHeight(): number {
   return useSyncExternalStore(subscribeDensity, rowHeightSnapshot, rowHeightSnapshot);
 }
+
+/**
+ * Обрана щільність — підписка, що сама перемальовує компонент.
+ *
+ * ⚠ Той самий реєстр (`subscribeDensity`), що й у `useRowHeight()`: обидва
+ * читають ту саму подію `applyDensity()`, лише знімок різний (значення проти
+ * пікселів). Компонент, якому потрібне САМЕ значення (`Density`) —
+ * перемикач у `UserMenu` — раніше не мав способу підписатися і замість
+ * цього перечитував стан через форсований ремонт (`key={generation}`) від
+ * батька: той хак розмонтовував усе піддерево `UserMenu` щоразу, коли
+ * щільність приходила ззовні (сервер, `BE-20`), і губив відкритий стан
+ * `Menu`. Ця підписка читає значення напряму, без ремонту.
+ */
+export function useDensity(): Density {
+  return useSyncExternalStore(subscribeDensity, density, density);
+}
