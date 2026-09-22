@@ -344,6 +344,8 @@ UPDATE t
   FROM sys_ecr.UiString AS t
   JOIN (VALUES
     (N'common.loading',                  N'en', N'Loading…', N'Loading...'),
+    -- ФВ-4.2: кнопка більше не завжди Excel — формат обирається поруч.
+    (N'document.export',                 N'en', N'Export to Excel', N'Export'),
     (N'periods.timeZone',                N'en', N'Site time zone', N'Site time zone (IANA)'),
     (N'periods.timeZoneHint',            N'en', N'Period boundaries and late-edit marks are calculated in this zone. It cannot be changed once the first period is open.',
                                                 N'IANA identifier of the site, for example Asia/Aqtau. Period boundaries and late-edit marks are calculated in this zone, and it cannot be changed once the first period is open.'),
@@ -1158,7 +1160,13 @@ USING (VALUES
     (N'document.restoreEdits.more',      N'en', N'and {count} more', 1),
     (N'document.submit',                 N'en', N'Submit', 1),
     (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
-    (N'document.export',                 N'en', N'Export to Excel', 1),
+    -- ⚠ Текст без «to Excel»: кнопка експортує у формат, обраний поруч
+    -- (ФВ-4.2). Стара фраза оновлюється в секції «Змінені тексти» вище.
+    (N'document.export',                 N'en', N'Export', 1),
+    (N'document.exportFormat',           N'en', N'Export format', 1),
+    (N'document.exportFormatXlsx',       N'en', N'Excel', 1),
+    (N'document.exportFormatCsv',        N'en', N'CSV', 1),
+    (N'document.exportFormatJson',       N'en', N'JSON', 1),
     (N'document.exportBuilding',         N'en', N'Building...', 1),
     (N'document.exportReady',            N'en', N'Download the workbook', 1),
     (N'document.exportFailed',           N'en', N'Export failed.', 1),
