@@ -69,7 +69,9 @@ export function evaluate(packages, policy) {
 
     const exc = policy.exceptions.find((e) =>
       e.ecosystem === p.ecosystem && e.name.toLowerCase() === p.name.toLowerCase() &&
-      (!e.version || e.version === p.version));
+      (!e.version || e.version === p.version) &&
+      // `projects` — виняток діє, лише якщо пакет тягнуть ВИКЛЮЧНО ці проєкти.
+      (!e.projects || (p.projects?.length > 0 && p.projects.every((x) => e.projects.includes(x)))));
     if (exc) continue;
 
     if (!p.license) { violations.push({ ...p, reason: 'ліцензію не визначено' }); continue; }
@@ -105,13 +107,14 @@ export function collectNuget(repoRoot, policy, packagesDir) {
       } else if (e.name === 'project.assets.json' && path.basename(dir) === 'obj') {
         const assets = JSON.parse(fs.readFileSync(path.join(dir, e.name), 'utf8'));
         const cache = packagesDir ?? assets.project?.restore?.packagesPath;
+        const project = path.basename(path.dirname(dir));
         for (const [key, lib] of Object.entries(assets.libraries ?? {})) {
           if (lib.type !== 'package') continue;
           const [name, version] = key.split('/');
           const k = `${name}@${version}`;
-          if (found.has(k)) continue;
+          if (found.has(k)) { found.get(k).projects.push(project); continue; }
           const nuspec = path.join(cache, lib.path, `${name.toLowerCase()}.nuspec`);
-          found.set(k, { ecosystem: 'nuget', name, version, license: nugetLicense(nuspec, policy) });
+          found.set(k, { ecosystem: 'nuget', name, version, license: nugetLicense(nuspec, policy), projects: [project] });
         }
       }
     }
@@ -215,8 +218,26 @@ function selfTest() {
     ], devPol).map((x) => x.name).sort();
     const ok4 = JSON.stringify(v4) === JSON.stringify(['gpl-dev', 'mpl-prod']);
 
-    if (ok1 && ok2 && ok3 && ok4) { console.log('self-test: ок'); return 0; }
-    console.error('self-test: ПРОВАЛ', { v, v2, v3, v4 });
+    // Виняток із `projects`: у тестовому проєкті — ок, якщо той самий пакет
+    // тягне ще й продуктовий — відмова.
+    const excPol = { ...policy, exceptions: [{ ecosystem: 'nuget', name: 'No.License', projects: ['Probe'], reason: 'тест' }] };
+    const assetsIn = (base, projects) => {
+      for (const d of projects) {
+        const o = path.join(base, d, 'obj');
+        fs.mkdirSync(o, { recursive: true });
+        fs.writeFileSync(path.join(o, 'project.assets.json'), JSON.stringify({
+          libraries: Object.fromEntries([lib('No.License', '1.0.0')]) }));
+      }
+      return base;
+    };
+    const probeOnly = assetsIn(path.join(tmp, 'p1'), ['tests/Probe']);
+    const both = assetsIn(path.join(tmp, 'p2'), ['tests/Probe', 'src/Product']);
+    const v5a = evaluate(collectNuget(probeOnly, excPol, cache), excPol).map((x) => x.name);
+    const v5b = evaluate(collectNuget(both, excPol, cache), excPol).map((x) => x.name);
+    const ok5 = v5a.length === 0 && JSON.stringify(v5b) === JSON.stringify(['No.License']);
+
+    if (ok1 && ok2 && ok3 && ok4 && ok5) { console.log('self-test: ок'); return 0; }
+    console.error('self-test: ПРОВАЛ', { v, v2, v3, v4, v5a, v5b });
     return 1;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
