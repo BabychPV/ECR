@@ -176,6 +176,37 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 - Заголовки кодів не змінювались — усі п'ять уже були нейтральними з
   попередніх раундів.
 
+✎ **2026-09-22: `RoleAndUserHandlers.cs` — найбільший файл боргу** закрито
+повністю, 23 кидки; 254 у 74 файлах → 231 у 73 файлах. Ролі (перелік,
+створення), користувачі (перелік, створення, ролі, адреса для сповіщень,
+прапорець алертів), межі чинності призначення (ФВ-6.16 — підміна ролі на час
+відпустки).
+- `err.ECR-AUTH-0401.signInRequired` і `err.ECR-AUTH-0403.permission` —
+  наявні ключі, перевикористані на всіх семи парах перевірки автентифікації й
+  права: той самий факт («увійдіть» / «бракує права X»), що вже несуть
+  `PermissionCheck` і половина обробників документів.
+- `err.ECR-REQ-0422.validityOrder` — наявний ключ (`AssignGroupRoleHandler`),
+  перевикористаний для другого з двох кидків `ValidateValidity`: «початок дії
+  пізніше за кінець» — одна причина незалежно від шляху (групове чи особисте
+  призначення).
+- `err.ECR-PWD-0422.tooShort` {minLength} — наявний ключ
+  (`ChangePasswordHandler`), перевикористаний для разового пароля при
+  створенні користувача: «пароль коротший за N символів» не залежить від
+  того, свій він чи виданий адміністратором.
+- `err.ECR-SEC-0404.userNotFound` {userId} — наявний ключ (`BE-12`,
+  адміністрування облікових записів), перевикористаний у `SetUserEmailHandler`
+  і `SetReceivesAlertsHandler` попри різне українське дієслово («не знайдено» /
+  «не існує») — той самий факт.
+- Нові ключі: `err.ECR-SEC-0404.permissionsUnknown` {permissions} і
+  `err.ECR-SEC-0404.rolesUnknown` {roles} — невідомі коди лишаються рядком
+  через кому (самі коди, а не переклад), як і `dangerousRoleNeedsConfirmation`
+  вище; `err.ECR-REQ-0422.validityRoleNotAssigned` {code} — перший із двох
+  кидків `ValidateValidity`; `err.ECR-USR-0422.windowsSidRequired` і
+  `err.ECR-USR-0422.initialPasswordRequired` — без підстановок.
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`, `ECR-AUTH-0403`,
+  `ECR-SEC-0404`, `ECR-USR-0422`, `ECR-REQ-0422` уже були нейтральними
+  (кілька причин під одним кодом) з попередніх раундів.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -204,7 +235,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
-| `src/Ecr.Application/Security/RoleAndUserHandlers.cs` | 23 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
 | `src/Ecr.Application/Sources/EntityFieldMapHandlers.cs` | 11 |
 | `src/Ecr.Application/Sources/MappingPreviewHandlers.cs` | 2 |

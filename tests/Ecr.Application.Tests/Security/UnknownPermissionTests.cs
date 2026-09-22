@@ -71,6 +71,13 @@ public sealed class UnknownPermissionTests
         // саме виправити, і питання приходить до розробника.
         Assert.Contains("Template.Publsh", error.Message, StringComparison.Ordinal);
 
+        // ⚠ Q-341: подробиця несе ключ каталогу з тим самим кодом рядком
+        // через кому — сирим, не перекладеним, бо це коди, а не текст.
+        Assert.NotNull(error.Details);
+        Assert.Equal(
+            "err.ECR-SEC-0404.permissionsUnknown", Assert.Contains("messageKey", error.Details!));
+        Assert.Equal("Template.Publsh", Assert.Contains("permissions", error.Details!));
+
         // Роль не заведена: часткове створення лишило б назву зайнятою, а
         // повторити спробу було б уже нічим.
         Assert.Empty(_users.Roles);

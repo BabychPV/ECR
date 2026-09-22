@@ -263,6 +263,11 @@ public sealed class UserAccessTests
 
         Assert.Equal(Domain.Errors.ErrorCodes.RequestInvalid, error.ErrorCode);
         Assert.Empty(await _users.ListUserRolesAsync(user.Id, CancellationToken.None));
+
+        // ⚠ Q-341: той самий ключ, що й у `AssignGroupRoleHandler` — «початок
+        // дії пізніше за кінець» читається однаково незалежно від шляху.
+        Assert.NotNull(error.Details);
+        Assert.Equal("err.ECR-REQ-0422.validityOrder", Assert.Contains("messageKey", error.Details!));
     }
 
     private string StampBefore { get; set; } = string.Empty;

@@ -1019,6 +1019,18 @@ USING (VALUES
     (N'err.ECR-CALC-0438.missingColumns',       N'en', N'A formula argument has no matching column in {tableCount} bound table(s).', 1),
     (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle ({cycleLength} formula(s) involved).', 1),
 
+    -- ⛔ `RoleAndUserHandlers.cs` (23 кидки, найбільший файл боргу локалізації
+    -- на замір 254/74): ролі, користувачі, межі чинності призначення
+    -- (ФВ-6.16). Невідомі права/ролі лишаються рядком через кому — самі коди,
+    -- а не переклад, як і в `dangerousRoleNeedsConfirmation` вище.
+    -- ⚠ `err.ECR-SEC-0404.userNotFound` уже заведений вище (`BE-12`) —
+    -- перевикористаний, новий рядок не додається.
+    (N'err.ECR-SEC-0404.permissionsUnknown',      N'en', N'Some permissions do not exist in the catalog: {permissions}.', 1),
+    (N'err.ECR-SEC-0404.rolesUnknown',            N'en', N'Some roles do not exist: {roles}.', 1),
+    (N'err.ECR-REQ-0422.validityRoleNotAssigned', N'en', N'A validity window was given for role "{code}", which is not part of the roles being assigned.', 1),
+    (N'err.ECR-USR-0422.windowsSidRequired',      N'en', N'A domain account requires a SID.', 1),
+    (N'err.ECR-USR-0422.initialPasswordRequired', N'en', N'A local account requires a one-time password.', 1),
+
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
     --
     -- ⛔ Це рівно та форма ключа, яку читає

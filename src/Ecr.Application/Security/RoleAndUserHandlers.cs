@@ -75,14 +75,20 @@ public sealed class ListRolesHandler(IUserStore users, IAccessDecisionService ac
     public async Task<IReadOnlyList<RoleView>> HandleAsync(CancellationToken ct)
     {
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         return await users.ListRolesAsync(ct).ConfigureAwait(false);
@@ -113,14 +119,20 @@ public sealed class CreateRoleHandler(
         ArgumentNullException.ThrowIfNull(permissionCodes);
 
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(ListRolesHandler.Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {ListRolesHandler.Permission}.",
-                new Dictionary<string, object?> { ["permission"] = ListRolesHandler.Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = ListRolesHandler.Permission,
+                });
         }
 
         // ⛔ Правила «видати можна лише те, що маєш» більше НЕМАЄ (`D-121`,
@@ -158,7 +170,12 @@ public sealed class CreateRoleHandler(
         if (unknown.Count > 0)
         {
             throw new NotFoundException(
-                "ECR-SEC-0404", $"Прав не існує в каталозі: {string.Join(", ", unknown)}.");
+                "ECR-SEC-0404", $"Прав не існує в каталозі: {string.Join(", ", unknown)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.permissionsUnknown",
+                    ["permissions"] = string.Join(", ", unknown),
+                });
         }
 
         var dangerous = await users.FilterDangerousAsync(permissionCodes, ct).ConfigureAwait(false);
@@ -242,14 +259,20 @@ public sealed class ReplaceUserRolesHandler(
         ArgumentNullException.ThrowIfNull(roleCodes);
 
         var actorId = currentUser.UserId
-                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                      ?? throw new AccessDeniedException(
+                          "ECR-AUTH-0401", "Потрібна автентифікація.",
+                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         ValidateValidity(roleCodes, validity);
@@ -309,14 +332,24 @@ public sealed class ReplaceUserRolesHandler(
             {
                 throw new BusinessRuleException(
                     ErrorCodes.RequestInvalid,
-                    $"Межі чинності задано для ролі «{code}», якої немає в наборі, що призначається.");
+                    $"Межі чинності задано для ролі «{code}», якої немає в наборі, що призначається.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-REQ-0422.validityRoleNotAssigned",
+                        ["code"] = code,
+                    });
             }
 
             if (window.ValidFrom is { } from && window.ValidTo is { } to && from > to)
             {
+                // ⚠ Той самий факт, що й у `AssignGroupRoleHandler`
+                // (`GroupRoleAssignmentHandlers.cs`): ключ перевикористаний,
+                // бо межі «початок пізніше за кінець» — одна причина
+                // незалежно від того, як код до неї дійшов.
                 throw new BusinessRuleException(
                     ErrorCodes.RequestInvalid,
-                    $"Роль «{code}»: початок дії ({from}) пізніше за кінець ({to}).");
+                    $"Роль «{code}»: початок дії ({from}) пізніше за кінець ({to}).",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.validityOrder" });
             }
         }
     }
@@ -370,18 +403,30 @@ public sealed class SetUserEmailHandler(
     public async Task HandleAsync(int userId, string? email, CancellationToken ct)
     {
         var actorId = currentUser.UserId
-                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                      ?? throw new AccessDeniedException(
+                          "ECR-AUTH-0401", "Потрібна автентифікація.",
+                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
-                   ?? throw new NotFoundException("ECR-SEC-0404", $"Користувача {userId} не знайдено.");
+                   ?? throw new NotFoundException(
+                       "ECR-SEC-0404", $"Користувача {userId} не знайдено.",
+                       new Dictionary<string, object?>
+                       {
+                           ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                           ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                       });
 
         // ⚠ Прибирання адреси знімає і прапорець сповіщень: прапорець без
         // пошти беззмістовний і виглядав би як налаштований адресат, якому
@@ -429,14 +474,20 @@ public sealed class ListUsersHandler(IUserStore users, IAccessDecisionService ac
         }
 
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         return await users.ListAsync(page, utcNow, ct).ConfigureAwait(false);
@@ -476,14 +527,20 @@ public sealed class CreateUserHandler(
         ArgumentNullException.ThrowIfNull(roleCodes);
 
         var actorId = currentUser.UserId
-                      ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                      ?? throw new AccessDeniedException(
+                          "ECR-AUTH-0401", "Потрібна автентифікація.",
+                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
         if (!profile.Has(ListUsersHandler.Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {ListUsersHandler.Permission}.",
-                new Dictionary<string, object?> { ["permission"] = ListUsersHandler.Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = ListUsersHandler.Permission,
+                });
         }
 
         if (await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false) is not null)
@@ -528,7 +585,12 @@ public sealed class CreateUserHandler(
                 // документа.
                 throw new NotFoundException(
                     ErrorCodes.SecurityPrincipalNotFound,
-                    $"Ролей не існує: {string.Join(", ", unknown)}.");
+                    $"Ролей не існує: {string.Join(", ", unknown)}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SEC-0404.rolesUnknown",
+                        ["roles"] = string.Join(", ", unknown),
+                    });
             }
         }
 
@@ -545,7 +607,8 @@ public sealed class CreateUserHandler(
                 // а не комірка документа. З ECR-CELL-0422 відмова створення
                 // користувача приходила в обробник помилок сітки.
                 windowsSid ?? throw new BusinessRuleException(
-                    ErrorCodes.UserInvalid, "Для доменного запису потрібен SID."),
+                    ErrorCodes.UserInvalid, "Для доменного запису потрібен SID.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0422.windowsSidRequired" }),
                 now);
         }
         else
@@ -553,7 +616,8 @@ public sealed class CreateUserHandler(
             if (string.IsNullOrWhiteSpace(initialPassword))
             {
                 throw new BusinessRuleException(
-                    ErrorCodes.UserInvalid, "Для локального запису потрібен разовий пароль.");
+                    ErrorCodes.UserInvalid, "Для локального запису потрібен разовий пароль.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-USR-0422.initialPasswordRequired" });
             }
 
             user = new User(userName, displayName, AuthProvider.Local);
@@ -568,10 +632,17 @@ public sealed class CreateUserHandler(
             var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
             if (initialPassword.Length < policy.MinLength)
             {
+                // ⚠ Той самий факт, що й у `ChangePasswordHandler`: ключ
+                // перевикористаний, «коротший за N символів» не залежить від
+                // того, чи пароль розовий (видає адміністратор), чи свій.
                 throw new BusinessRuleException(
                     "ECR-PWD-0422",
                     $"Разовий пароль коротший за {policy.MinLength} символів.",
-                    new Dictionary<string, object?> { ["minLength"] = policy.MinLength });
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-PWD-0422.tooShort",
+                        ["minLength"] = policy.MinLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
 
             user.SetPassword(hasher.Hash(initialPassword));
@@ -643,19 +714,30 @@ public sealed class SetReceivesAlertsHandler(
     public async Task HandleAsync(int userId, bool value, CancellationToken ct)
     {
         var actorId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(actorId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                ErrorCodes.SecurityPrincipalNotFound, $"Користувача {userId} не існує.");
+                ErrorCodes.SecurityPrincipalNotFound, $"Користувача {userId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                    ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⚠ Правило «без пошти не можна» живе в домені, а не тут: інакше його
         // обійшов би будь-який інший шлях запису.
