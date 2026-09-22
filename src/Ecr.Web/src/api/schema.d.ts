@@ -1807,7 +1807,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
+                        "application/json": components["schemas"]["FileResult"];
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                        "application/zip": components["schemas"]["FileResult"];
                     };
                 };
                 /** @description Not Found */
@@ -1816,7 +1818,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "application/zip": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -13612,6 +13616,8 @@ export interface components {
         };
         /** @description Запит на експорт. */
         ExportRequest: {
+            /** @description `xlsx` (типово), `csv` (zip, файл на таблицю) або `json` — ФВ-4.2. */
+            format?: null | string;
             /** @description Транслювати вирази в Excel-синтаксис (ФВ-4.2). */
             includeFormulas: boolean;
             /** @description Переносити стилі шаблону. */

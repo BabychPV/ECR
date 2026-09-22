@@ -2750,6 +2750,13 @@
       "ExportRequest": {
         "description": "Запит на експорт.",
         "properties": {
+          "format": {
+            "description": "`xlsx` (типово), `csv` (zip, файл на таблицю) або `json` — ФВ-4.2.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "includeFormulas": {
             "description": "Транслювати вирази в Excel-синтаксис (ФВ-4.2).",
             "type": "boolean"
@@ -13705,7 +13712,17 @@
         "responses": {
           "200": {
             "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              },
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "$ref": "#/components/schemas/FileResult"
                 }
@@ -13715,7 +13732,17 @@
           },
           "404": {
             "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
