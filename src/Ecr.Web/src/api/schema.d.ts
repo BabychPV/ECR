@@ -12496,11 +12496,15 @@ export interface components {
             methodologyId: number;
             /** @description Який вихід методології лягає в колонку. */
             outputCode: string;
+            /** @description Код таблиці. Заповнює лише перелік прив'язок (`GET …/bindings`);
+             *     в інших відповідях — `null`. */
+            tableCode?: null | string;
             /**
              * Format: int32
              * @description Таблиця колонки-приймача.
              */
             tableDefId: number;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /**
          * @description Рівень драбини виразності для методології (ФВ-9.2).

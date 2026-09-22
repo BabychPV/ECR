@@ -456,10 +456,28 @@
             "description": "Який вихід методології лягає в колонку.",
             "type": "string"
           },
+          "tableCode": {
+            "description": "Код таблиці. Заповнює лише перелік прив'язок (`GET …/bindings`);\nв інших відповідях — `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "tableDefId": {
             "description": "Таблиця колонки-приймача.",
             "format": "int32",
             "type": "integer"
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу; як і код — лише в переліку."
+              }
+            ]
           }
         },
         "required": [
