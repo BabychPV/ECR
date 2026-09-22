@@ -484,6 +484,9 @@ public sealed partial class EndpointCoverageTests
         new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
         new("features/jobs/JobFacts.tsx", "errorKey(errorCode)", 1, null, [], "errorCode провалу фонової задачі — код каталогу помилок сервера."),
+        new("features/registries/RegistryImportPanel.tsx", "error.messageKey", 1, null, [],
+            "messageKey рядка звіту імпорту записів довідника (BE-24, RegistryEntryImportError) — "
+            + "реюзить відкритий набір ключів валідації UpsertRegistryEntryHandler, клієнт його не перелічує."),
     ];
 
     // ⚠ Властивості, а не поля: `DynamicKeySites` вище ініціалізується раніше

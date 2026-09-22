@@ -10,6 +10,7 @@ import {
   RegistryEntryEditor,
   ValidityEditor,
 } from '@/features/registries/RegistryEntryEditor';
+import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -310,6 +311,15 @@ export function RegistriesPage(): JSX.Element {
               <Button size="xs" onClick={() => setEditing(null)}>
                 {t('registries.newEntry')}
               </Button>
+            )}
+
+            {/* ⛔ Масове заведення/оновлення записів не мало в інтерфейсі
+                жодного споживача (`BE-24`): дію на сервері викликати можна
+                було лише напряму HTTP-клієнтом. Те саме право, що ручний
+                upsert запису (`Registry.EditData`) — імпорт лише пришвидшує
+                той самий шлях, не обходить його. */}
+            {selected !== undefined && canEditData && (
+              <RegistryImportPanel registryCode={selected.code} />
             )}
 
             {/* ⛔ Вхід у конструктор (`ФВ-8.12`). Опис довідника — поля,

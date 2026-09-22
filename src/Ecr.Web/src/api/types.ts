@@ -222,6 +222,19 @@ export type RegistrySourceKind = Schemas['RegistrySourceKind'];
 export type RegistryEntryDto = Schemas['RegistryEntryDto'];
 
 /**
+ * Звіт імпорту записів довідника з CSV (`BE-24`).
+ *
+ * ⚠ Відповідь ЗАВЖДИ 200: помилки рядків — дані для того, хто імпортує, а не
+ * HTTP-відмова. `applied` — єдине поле, що каже, чи справді щось записано
+ * (`!dryRun && errors.length === 0`); рахувати це на клієнті заново означало б
+ * тримати другу копію правила «усе-або-нічого», яку сервер уже застосував.
+ */
+export type RegistryEntryImportReport = Schemas['RegistryEntryImportReport'];
+
+/** Один відхилений рядок звіту імпорту — див. {@link RegistryEntryImportReport}. */
+export type RegistryEntryImportError = Schemas['RegistryEntryImportError'];
+
+/**
  * Повний опис довідника для конструктора (`ФВ-8.12`).
  *
  * ⛔ Не те саме, що `RegistryDefDto`. Той описує довідник у ПЕРЕЛІКУ — назва,
