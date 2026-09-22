@@ -27,6 +27,11 @@ const Kinds = [
   'derivedUnit',
   'dimensionBase',
   'data',
+  // ФВ-8.14: «де використано» константи методики й колонки шаблону.
+  'templateFormula',
+  'calculationBinding',
+  'methodologyRule',
+  'methodologyRequiredInput',
 ] as const;
 
 function label(kind: string): HTMLElement {

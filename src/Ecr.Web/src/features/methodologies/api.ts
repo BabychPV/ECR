@@ -1,5 +1,6 @@
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
+import type { UsageResponse } from '@/features/registries/api';
 import type {
   CalculationBindingDto,
   CalculationLevel,
@@ -196,6 +197,20 @@ export function saveMethodologyConstant(
   return apiFetch<MethodologyConstantDto>(
     `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/constants/${encodeURIComponent(code)}`,
     { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+  );
+}
+
+/**
+ * Де використовується константа версії (ФВ-8.14): формули, що на неї
+ * посилаються. Право `Calculation.View`.
+ */
+export function methodologyConstantUsage(
+  methodologyId: number,
+  versionId: number,
+  code: string,
+): Promise<UsageResponse> {
+  return apiFetch<UsageResponse>(
+    `/api/v1/methodologies/${String(methodologyId)}/versions/${String(versionId)}/constants/${encodeURIComponent(code)}/usage`,
   );
 }
 

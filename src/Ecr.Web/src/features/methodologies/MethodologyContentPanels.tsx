@@ -51,6 +51,7 @@ import {
   saveMethodologyRule,
   saveMethodologyTestCase,
 } from './api';
+import { MethodologyConstantUsage } from './ConstantUsage';
 
 /**
  * Список колонок для пошуку за назвою (директива "пошук колонки за назвою
@@ -225,6 +226,11 @@ export function MethodologyConstantsPanel({
 }: PanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<ConstantDraft | null>(null);
+  // ФВ-8.14: код константи, для якої зараз відкрито «де використовується».
+  // ⛔ Кнопка показується для КОЖНОГО рядка завжди, незалежно від того, чи
+  // є в константи використання (`total: 0` теж чинний, а не привід ховати
+  // афордансу — на відміну від рядків без даних деінде).
+  const [usageFor, setUsageFor] = useState<string | null>(null);
 
   const constants = useQuery({
     queryKey: queryKeys.methodologies.constants(versionId),
@@ -327,28 +333,38 @@ export function MethodologyConstantsPanel({
                     <Timestamp value={constant.validTo} dateOnly fallback={Unbounded} />
                   </Table.Td>
                   <Table.Td>
-                    {editable && (
+                    <Group gap="xs" wrap="nowrap" justify="flex-end">
                       <Button
                         size="compact-xs"
                         variant="subtle"
-                        onClick={() =>
-                          setEditing({
-                            code: constant.code,
-                            kind: constant.kind,
-                            value: constant.value === null ? '' : String(constant.value),
-                            textValue: constant.textValue ?? '',
-                            unitId: constant.unitId,
-                            validFrom: constant.validFrom ?? '',
-                            validTo: constant.validTo ?? '',
-                            category: constant.category ?? '',
-                            source: constant.source ?? '',
-                            isNew: false,
-                          })
-                        }
+                        data-constant-usage="trigger"
+                        onClick={() => setUsageFor(constant.code)}
                       >
-                        {t('methodologies.editFormula')}
+                        {t('registries.tabUsage')}
                       </Button>
-                    )}
+                      {editable && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() =>
+                            setEditing({
+                              code: constant.code,
+                              kind: constant.kind,
+                              value: constant.value === null ? '' : String(constant.value),
+                              textValue: constant.textValue ?? '',
+                              unitId: constant.unitId,
+                              validFrom: constant.validFrom ?? '',
+                              validTo: constant.validTo ?? '',
+                              category: constant.category ?? '',
+                              source: constant.source ?? '',
+                              isNew: false,
+                            })
+                          }
+                        >
+                          {t('methodologies.editFormula')}
+                        </Button>
+                      )}
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -478,6 +494,12 @@ export function MethodologyConstantsPanel({
               {t('methodologies.save')}
             </Button>
           </Stack>
+        )}
+      </Modal>
+
+      <Modal opened={usageFor !== null} onClose={() => setUsageFor(null)} title={t('registries.tabUsage')}>
+        {usageFor !== null && (
+          <MethodologyConstantUsage methodologyId={methodologyId} versionId={versionId} code={usageFor} />
         )}
       </Modal>
     </>
