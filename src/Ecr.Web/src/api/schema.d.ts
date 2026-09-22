@@ -11070,6 +11070,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ui-strings/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт перекладу в CSV: `key, scope, en, &lt;lang&gt;, updatedAt`. Право `System.ManageLocalization`.
+         * @description UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу (не мова за замовчуванням). */
+                    lang?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui-strings/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Імпорт перекладу з CSV. Право `System.ManageLocalization`.
+         * @description Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна
+         *     помилка або `dryRun` — не записано нічого. Стеля файлу —
+         *     `Localization:ImportMaxBytes`.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу. */
+                    lang?: string;
+                    /** @description Лише перевірка. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UiStringImportReport"];
+                        "text/json": components["schemas"]["UiStringImportReport"];
+                        "text/plain": components["schemas"]["UiStringImportReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ui-strings/{lang}": {
         parameters: {
             query?: never;
@@ -17024,6 +17161,45 @@ export interface components {
         UiStringCoverageResponse: {
             /** @description Увімкнені мови в порядку показу. */
             languages: components["schemas"]["UiStringCoverageDto"][];
+        };
+        /** @description Помилка одного рядка імпорту. */
+        UiStringImportError: {
+            /** @description Ключ, як його записано у файлі. */
+            key: string;
+            /** @description Ключ тексту відмови в каталозі. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Номер запису у файлі; заголовок — 1.
+             */
+            row: number;
+        };
+        /** @description Звіт імпорту перекладу. */
+        UiStringImportReport: {
+            /**
+             * Format: int32
+             * @description Нових перекладів.
+             */
+            added: number;
+            /** @description Чи записано зміни. */
+            applied: boolean;
+            /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
+            errors: components["schemas"]["UiStringImportError"][];
+            /**
+             * Format: int32
+             * @description Версія каталогу після імпорту.
+             */
+            revision: number;
+            /**
+             * Format: int32
+             * @description Тих самих, що вже в базі.
+             */
+            unchanged: number;
+            /**
+             * Format: int32
+             * @description Змінених.
+             */
+            updated: number;
         };
         /** @description Адміністративний перелік рядків мови — без fallback. */
         UiStringListResponse: {
