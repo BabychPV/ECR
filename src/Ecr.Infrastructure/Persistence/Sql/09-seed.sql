@@ -403,7 +403,11 @@ DELETE t
     -- екран документа; ключі замінено на `login.restoreEdits.*`.
     (N'login.lostEdits.title',                     N'en', N'Unsaved changes were lost'),
     (N'login.lostEdits.text',                      N'en', N'{count} unsaved change(s) in document #{documentId} were lost — your session ended. Please re-enter them.'),
-    (N'login.lostEdits.continue',                  N'en', N'Continue')
+    (N'login.lostEdits.continue',                  N'en', N'Continue'),
+    -- BE-24 крок 2: збереження опису довідника завжди йде в чернетку, а опис
+    -- змінює лише публікація — обидва ключі втратили місце на екрані.
+    (N'registries.saveDefinition',                 N'en', N'Save definition'),
+    (N'registries.definitionSaved',                N'en', N'Saved. Definition version: {version}.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2124,9 +2128,27 @@ USING (VALUES
     -- вид, і є той дефект, від якого стереже H-10.
     (N'registries.rulesHint',            N'en', N'Four kinds, and exactly four. A validity window is not a rule: it is the entry''s own valid-from and valid-to.', 1),
     (N'registries.addRule',              N'en', N'Add rule', 1),
-    (N'registries.saveDefinition',       N'en', N'Save definition', 1),
-    (N'registries.definitionSaved',      N'en', N'Saved. Definition version: {version}.', 1),
     (N'registries.definitionVersion',    N'en', N'Definition v{version}', 1),
+    -- Чернетка опису довідника і публікація (BE-24 крок 2). ⚠ Форма показує
+    -- ЧЕРНЕТКУ, а не опублікований опис, доки чернетка є — банер каже це прямо.
+    -- Колишні `saveDefinition`/`definitionSaved` прибрані: збереження тепер
+    -- завжди йде в чернетку, а опис змінюється лише публікацією.
+    (N'registries.draftPresent',         N'en', N'Unsaved draft', 1),
+    (N'registries.draftPresentHint',     N'en', N'Last changed {when} by user {user}. The form below shows the draft, not the published definition.', 1),
+    (N'registries.saveDraft',            N'en', N'Save draft', 1),
+    (N'registries.draftSaved',           N'en', N'The draft has been saved.', 1),
+    (N'registries.publish',              N'en', N'Publish', 1),
+    (N'registries.publishTitle',         N'en', N'Publish the definition of registry "{code}"?', 1),
+    (N'registries.publishConsequence',   N'en', N'The draft replaces the published definition and the definition version grows.', 1),
+    (N'registries.definitionPublished',  N'en', N'Published. Definition version: {version}.', 1),
+    (N'registries.discardDraft',         N'en', N'Discard draft', 1),
+    (N'registries.discardTitle',         N'en', N'Discard the draft definition of registry "{code}"?', 1),
+    (N'registries.discardConsequence',   N'en', N'Unsaved changes will be lost; the form returns to the published definition.', 1),
+    (N'registries.draftDiscarded',       N'en', N'The draft has been discarded.', 1),
+    (N'registries.reloadDraft',          N'en', N'Take the current version', 1),
+    (N'registries.saveAndPublish',       N'en', N'Save and publish', 1),
+    (N'registries.saveAndPublishTitle',  N'en', N'Save and publish the definition of registry "{code}"?', 1),
+    (N'registries.saveAndPublishConsequence', N'en', N'The form is saved and published in one step, without a draft: the definition version grows immediately.', 1),
     (N'registries.reason',               N'en', N'Reason', 1),
     (N'registries.reasonHint',           N'en', N'The definition changes how already stored entries are read; a year from now this is the answer to "why is this field here".', 1),
     (N'registries.noRules',              N'en', N'This registry has no rules', 1),
