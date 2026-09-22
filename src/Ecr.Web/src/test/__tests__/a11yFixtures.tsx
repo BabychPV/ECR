@@ -599,6 +599,58 @@ export const MethodologyVersionsFixture = [
  * Порожня відповідь ПОТРІБНОЇ форми для кожного маршруту (незмінно з
  * попереднього єдиного файлу).
  */
+/**
+ * Матриця покриття «рядки × правила» версії методології (`ФВ-13.9`).
+ *
+ * ⛔ Усі ТРИ стани, а не один: колір позначки бере тон із `toneFills`
+ * (`danger`/`warning`/`muted`), і фікстура з самими покритими комбінаціями
+ * лишила б два тони з трьох поза перевіркою контрасту взагалі.
+ *
+ * ⚠ `truncated: false` — звичайний випадок; смуга усічення малюється тим самим
+ * `Banner tone="warning"`, який гейт уже сканує на огляді кампанії.
+ *
+ * ⚠ `null` у `values` — комірки немає; саме на ньому перевіряється, що приглушений
+ * підпис «немає комірки» читається в обох темах.
+ */
+export const RuleCoverageFixture = {
+  methodologyVersionId: 1,
+  periodFrom: 202501,
+  periodTo: 202699,
+  tableDefIds: [1],
+  columnDefIds: [101],
+  rules: [
+    { code: 'CO2_A', priority: 10 },
+    { code: 'NOX', priority: 20 },
+  ],
+  combinations: [
+    {
+      values: ['SO2'],
+      state: 'Gap',
+      winnerRuleCode: null,
+      matchedRuleCodes: [],
+      rows: 1,
+      documents: 1,
+    },
+    {
+      values: ['CO2'],
+      state: 'Conflict',
+      winnerRuleCode: 'CO2_A',
+      matchedRuleCodes: ['CO2_A', 'CO2_B'],
+      rows: 3,
+      documents: 2,
+    },
+    {
+      values: [null],
+      state: 'Covered',
+      winnerRuleCode: 'NOX',
+      matchedRuleCodes: ['NOX'],
+      rows: 1,
+      documents: 1,
+    },
+  ],
+  truncated: false,
+};
+
 export function emptyBodyFor(url: string): unknown {
   if (url.includes('/campaign/summary')) return CampaignSummaryFixture;
 
@@ -824,6 +876,11 @@ export function emptyBodyFor(url: string): unknown {
   // ⚠ Версії методології — одна чернетка: без неї `MethodologyVersionsPage`
   // показує `EmptyState` і не монтує жодної панелі обраної версії.
   if (/\/methodologies\/\d+\/versions$/.test(url)) return MethodologyVersionsFixture;
+
+  // ⛔ Матриця покриття правил — ОБ'ЄКТ, а не `[]` за замовчуванням: панель
+  // читає `combinations.length`, і на масиві маршрут замінювався б екраном
+  // помилки (та сама пастка, що з `/tables/status` вище).
+  if (url.includes('/rule-coverage')) return RuleCoverageFixture;
 
   if (/\/templates\/\d+$/.test(url)) {
     return {

@@ -253,15 +253,18 @@ describe('А: значення з відповіді доходить до ек�
     );
   });
 
-  it('Г: хвостові нулі на екран не потрапляють', async () => {
+  it('Г: хвіст сервера (10 знаків) зрізається до формату колонки (scale)', async () => {
     mockServer();
     show();
 
-    // ⛔ Дзеркало: там, де оператор увів ціле, він і має бачити ціле. До
-    // `e470777a` це робив `JSON.parse`; тепер — показ.
-    expect((await screen.findByTestId('cell-r2-C1')).textContent).toBe('5');
+    // ✎ 2026-09-22, свідома зміна: раніше тут стояло «5» і «0» — показ
+    // зрізав УСІ хвостові нулі. Тепер кількість знаків — конфігурація комірки
+    // (як формат у Excel): колонка зі `scale = N` показує рівно N знаків
+    // (`DocumentGrid.fixedScale.test.tsx`). Серверний хвіст `.0000000000`
+    // (10 знаків) при цьому все одно не просочується: C1 має scale 16, C2 — 2.
+    expect((await screen.findByTestId('cell-r2-C1')).textContent).toBe('5.0000000000000000');
     expect((await screen.findByTestId('cell-r1-C2')).textContent).toBe('12.34');
-    expect((await screen.findByTestId('cell-r2-C2')).textContent).toBe('0');
+    expect((await screen.findByTestId('cell-r2-C2')).textContent).toBe('0.00');
   });
 });
 

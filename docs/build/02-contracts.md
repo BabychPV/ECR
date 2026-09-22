@@ -2985,7 +2985,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія одиниць неможлива. Заголовок нейтральний, випадок каже `messageKey`-подробиця: різні розмірності (ФВ-16.3, `incompatibleDimensions`), нульовий множник одиниці на конверсії (`zeroFactor`), явна конверсія не для цієї пари (`explicitConversionMismatch`), множник ≤ 0 на заведенні чи зміні одиниці (`factorMustBePositive`, BE-15) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
-| `ECR-UOM-4091` | 422 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
+| `ECR-UOM-4091` | 409 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
 | `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15), **або** не змінюються її множник і зсув (`unitFactorInUse`), **або** одиницю змінили між читанням і записом — `If-Match` не збігся з `rowVersion` (`unitChanged`, `UpdateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |

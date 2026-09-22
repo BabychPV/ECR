@@ -246,7 +246,7 @@ public sealed class MethodologyVersion : Entity<int>
         if (Status != TemplateVersionStatus.Draft)
         {
             throw new DomainException(
-                ErrorCodes.MethodologyFourEyes,
+                ErrorCodes.MethodologyConflict,
                 $"Версія {Version} у стані {Status}: видалити можна лише чернетку.",
                 new Dictionary<string, object?>
                 {
@@ -259,7 +259,7 @@ public sealed class MethodologyVersion : Entity<int>
         if (usedInCalculations)
         {
             throw new DomainException(
-                ErrorCodes.MethodologyFourEyes,
+                ErrorCodes.MethodologyConflict,
                 $"Версією {Version} уже рахували: видалити її не можна.",
                 new Dictionary<string, object?>
                 {

@@ -219,6 +219,63 @@ public sealed class TableFillStoreTests(SqlServerFixture sql)
         Assert.Equal(2, table.FilledCells);
     }
 
+    /// <summary>
+    /// Повна семантика чисельника після перенесення фільтра обчислюваних
+    /// колонок із SQL у пам'ять: рахується введене (текст, нуль, явна
+    /// порожнеча), не рахується обчислене, комірка обчислюваної колонки й
+    /// комірка видаленого рядка.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Список обчислюваних колонок НЕПОРОЖНІЙ навмисно: решта тестів
+    /// передають <c>[]</c>, і фільтр, який нічого не відсікає, вони не
+    /// відрізнили б від відсутнього.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-10")]
+    public async Task Чисельник_рахує_введене_і_відкидає_обчислене_й_видалене()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await builder
+            .BuildAsync(columnCount: 4, rowCount: 2, ct: CancellationToken.None)
+            .ConfigureAwait(true);
+
+        var (live, deleted) = (document.RowIds[0], document.RowIds[1]);
+        var cols = document.ColumnDefIds;
+        var computedColumn = cols[3];
+
+        await using (var seed = builder.CreateContext())
+        {
+            CellValue Cell(long row, int column, CellValueData data)
+                => new(new CellAddress(document.PeriodKey, row, column), document.TableDefId, data);
+
+            seed.CellValues.AddRange(
+                Cell(live, cols[0], new CellValueData { ValueString = "текст" }),
+                Cell(live, cols[1], new CellValueData { ValueNumeric = 0m }),
+                Cell(live, cols[2], new CellValueData { IsEmpty = true }),
+                Cell(live, computedColumn, new CellValueData { ValueNumeric = 5m }),
+                Cell(deleted, cols[0], new CellValueData { ValueString = "у видаленому" }),
+                Cell(deleted, cols[1], new CellValueData { ValueNumeric = 9m, IsCalculated = true }));
+
+            await seed.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+
+            var row = await seed.TableRows
+                .SingleAsync(r => r.PeriodKeyValue == document.PeriodKey.Value && r.Id == deleted)
+                .ConfigureAwait(true);
+            row.SoftDelete(new DateTime(2026, 2, 1, 8, 0, 0, DateTimeKind.Utc));
+            await seed.SaveChangesAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+
+        await using var db = builder.CreateContext();
+        var table = Assert.Single(await new TableFillStore(db)
+            .GetFillCountsAsync(document.DocumentId, document.PeriodKey, [computedColumn], CancellationToken.None)
+            .ConfigureAwait(true));
+
+        Assert.Equal(1, table.RowCount);
+        Assert.Equal(3, table.FilledCells);
+    }
+
     /// <summary>Ще кілька таблиць того самого документа й періоду.</summary>
     private static async Task<List<int>> AddTablesAsync(
         TestDocumentBuilder builder, string connectionString, TestDocument document, int count)
