@@ -566,9 +566,20 @@ type SnapshotVerifyResponse = components['schemas']['SnapshotVerifyResponse'];
 /**
  * Поле одного параметра звіту (`R6`).
  *
- * ⛔ Вид поля диктує ОГОЛОШЕННЯ, а не здогад: сервер приведення не робить
- * (рядок `"5"` у параметр `Number` — відмова), тож єдине текстове поле на всі
- * типи гарантувало б `422` для кожного числа й кожної дати.
+ * ⛔ Вид поля диктує ОГОЛОШЕННЯ, а не здогад: `Boolean` — тумблер, `Date` —
+ * `DateInput` (нижче), локаль і формат яких показ одним текстовим полем на
+ * всі типи загубив би.
+ *
+ * ✎ 2026-09-22: `Number` — теж `TextInput`, а не `NumberInput` (`R6`,
+ * `b0045915`). Сервер тепер приймає значення параметра і числом JSON, і
+ * рядком (крапка, до 16 знаків дробу, пробіли навколо й експонента `1e3`
+ * допустимі) і сам перевіряє формат (`422 ECR-RPT-0422.parameterType`).
+ * `NumberInput` натомість проганяє введене через IEEE-754 ще ДО відправки —
+ * той самий аргумент, що вже для `factor`/`offset` одиниці виміру
+ * (`UnitEditModal.tsx`, `shared/format/decimal.ts`): 16-й знак дробу
+ * `NumberInput` губить, а `1e3` або округлить, або не прийме. Клієнт формату
+ * не перевіряє — лише порожнє обов'язкове поле, як і для `Text`; значення йде
+ * в тіло запиту рядком, без `Number()`.
  *
  * ⛔ Дата — `DateInput`, а не `<TextInput type="date">`: нативне поле бере
  * формат з ОС, а не з локалі продукту (`D15-09`), і той самий запис читався б
@@ -598,12 +609,13 @@ function ParameterField(props: {
 
   if (declaration.type === 'Number') {
     return (
-      <NumberInput
+      <TextInput
         label={declaration.code}
         description={description}
         withAsterisk={declaration.required}
-        value={typeof value === 'number' ? value : ''}
-        onChange={(next) => props.onChange(typeof next === 'number' ? next : '')}
+        inputMode="decimal"
+        value={typeof value === 'string' ? value : ''}
+        onChange={(event) => props.onChange(event.currentTarget.value)}
       />
     );
   }

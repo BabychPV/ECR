@@ -27,6 +27,7 @@ import { canAccessRoute } from './routeAccess';
 import { navRoutes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
+import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
 import { SearchLauncher } from '@/features/search/SearchLauncher';
 import { EndSimulationButton } from '@/features/security/SimulationPanel';
 import { useSession } from '@/shared/session/useSession';
@@ -180,6 +181,10 @@ export function AppLayout(): JSX.Element {
 
   const me = session.data;
 
+  // Налаштування користувача з сервера (`BE-20`) — лише після входу.
+  // Покоління перемонтовує `UserMenu`, щоб перемикач щільності перечитав стан.
+  const preferencesGeneration = usePreferenceSync(me !== undefined);
+
   // Приватний каталог рядків тягнеться після входу і мовою профілю (D-114).
   useEffect(() => {
     if (me === undefined) return;
@@ -324,7 +329,7 @@ export function AppLayout(): JSX.Element {
               )}
               {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}
               <SearchLauncher />
-              <UserMenu userName={me.userName ?? '—'} />
+              <UserMenu key={preferencesGeneration} userName={me.userName ?? '—'} />
             </Group>
           </Group>
         </AppShell.Header>

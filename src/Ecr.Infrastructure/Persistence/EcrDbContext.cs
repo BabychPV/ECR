@@ -75,6 +75,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<PasswordPolicy> PasswordPolicies => Set<PasswordPolicy>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<LoginAttempt> LoginAttempts => Set<LoginAttempt>();
+    public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
 
     // wf
     public DbSet<ApprovalRoute> ApprovalRoutes => Set<ApprovalRoute>();

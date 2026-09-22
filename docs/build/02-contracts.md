@@ -2784,6 +2784,22 @@ public interface IUnitStore
 }
 ```
 
+#### `IUserPreferenceStore`
+
+Налаштування інтерфейсу користувача `sec.UserPreference` (BE-20). Кожен метод
+бере `userId` явно: чужих налаштувань порт не бачить.
+
+```csharp
+public interface IUserPreferenceStore
+{
+    public Task<IReadOnlyList<UserPreference>> ListAsync(int userId, CancellationToken ct);
+    public Task<UserPreference?> FindAsync(int userId, string key, CancellationToken ct);
+    public Task<int> CountAsync(int userId, CancellationToken ct);
+    public void Add(UserPreference preference);
+    public void Remove(UserPreference preference);
+}
+```
+
 #### `IUserStore`
 
 Доступ до облікових записів для use-cases безпеки.
@@ -3067,6 +3083,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/login/local` | — | 3 |
 | `POST` | `/api/v1/logout` | — | 1 |
 | `GET` | `/api/v1/me` | — | 1 |
+| `GET` | `/api/v1/me/preferences` | — | 4 |
+| `PUT` | `/api/v1/me/preferences/{key}` | — | 4 |
+| `DELETE` | `/api/v1/me/preferences/{key}` | — | 4 |
 | `GET` | `/api/v1/templates` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/{id}` | `Template.View` | 1 |

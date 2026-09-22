@@ -668,7 +668,10 @@ delete, convert). ~~«вирази» (`ex-delete-blocked`)~~ — доменно�
 ### BE-19 · Пошук для командної палітри ◐
 
 `GET /search?q=&limit=10` → `SearchHitDto(string Kind, string Id, string Title, string? Subtitle, string Route)`.
-Документи — через наявний `DocumentIndexValue` ◐; шаблони/довідники — по назві.
+~~Документи — через наявний `DocumentIndexValue` ◐~~; шаблони/довідники — по назві.
+✎ **2026-09-22:** BE-19 реалізовано без цієї таблиці — документи шукаються за
+`BusinessKey`/`NameL10n` (`SearchStore.cs`); `doc.DocumentIndexValue` відкладено
+рішенням людини 2026-09-22 (`docs/tz/10-decisions.md`).
 Усе — крізь фільтр доступу. Мінімум 2 символи; обмежувач частоти. Навігаційні
 пункти палітри (екрани, дії) — **клієнтські**, сервер шукає лише дані.
 

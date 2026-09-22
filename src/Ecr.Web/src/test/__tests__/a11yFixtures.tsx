@@ -745,6 +745,10 @@ export function emptyBodyFor(url: string): unknown {
     };
   }
 
+  // Налаштування користувача (`BE-20`): порожньо — оболонка лишається на
+  // локальних значеннях, і гейт сканує той самий вигляд, що й раніше.
+  if (url.includes('/api/v1/me/preferences')) return [];
+
   if (url.includes('/audit/cells')) return { items: [], nextCursor: null };
 
   // ⚠ Форми відповідей, а не `[]` за замовчуванням: матриця правил — об'єкт,

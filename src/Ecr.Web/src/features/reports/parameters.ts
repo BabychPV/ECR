@@ -42,8 +42,15 @@ export interface ReportParameterDeclaration {
   readonly defaultValue: unknown;
 }
 
-/** Значення параметра у чернетці форми. */
-export type ParameterValue = string | number | boolean | Date | null;
+/**
+ * Значення параметра у чернетці форми.
+ *
+ * ⚠ `number` тут навмисно немає (`R6`, `b0045915`, 2026-09-22): `Number`
+ * тепер теж рядок, той самий аргумент, що й для `factor`/`offset` одиниці
+ * виміру (`shared/format/decimal.ts`) — round-trip через IEEE-754 губить
+ * знаки дробу, яких у параметра може бути до 16.
+ */
+export type ParameterValue = string | boolean | Date | null;
 
 /** Чернетка значень за іменем параметра. */
 export type ParameterDraft = Readonly<Record<string, ParameterValue>>;
@@ -169,8 +176,15 @@ function initialValue(declaration: ReportParameterDeclaration): ParameterValue {
     // блокує побудову — ми завжди надсилаємо те, що людина бачить на екрані.
     case 'Boolean':
       return typeof fallback === 'boolean' ? fallback : false;
+    // ✎ 2026-09-22 (`R6`, `b0045915`): поле — `TextInput`, тож і чернетка —
+    // рядок. Замовчування в `rulesJson` лишається числом JSON (`default: 5`),
+    // і його переводимо в рядок текстом, а не round-trip через `NumberInput`.
     case 'Number':
-      return typeof fallback === 'number' ? fallback : '';
+      return typeof fallback === 'number'
+        ? String(fallback)
+        : typeof fallback === 'string'
+          ? fallback
+          : '';
     case 'Date':
       return parseDay(fallback);
     default:
@@ -183,10 +197,11 @@ export function isFilled(declaration: ReportParameterDeclaration, value: Paramet
   switch (declaration.type) {
     case 'Boolean':
       return typeof value === 'boolean';
-    case 'Number':
-      return typeof value === 'number' && Number.isFinite(value);
     case 'Date':
       return value instanceof Date;
+    // ⚠ `Number` — теж рядок (`R6`, 2026-09-22): поле тепер `TextInput`, а
+    // формат перевіряє сервер (`422 ECR-RPT-0422.parameterType`), не клієнт.
+    // «Заповнено» тут означає лише «не порожньо», так само як для `Text`.
     default:
       return typeof value === 'string' && value.trim().length > 0;
   }
@@ -219,8 +234,13 @@ export function missingRequired(
  * ⚠ `undefined` — коли параметрів немає зовсім: поля `parameters` у тілі тоді
  * не з'являється, і запит лишається побайтно таким, яким був до `R6`.
  *
- * ⚠ Приведення робить КЛІЄНТ, бо сервер його не робить навмисно: рядок `"5"`
- * у параметр `Number` — відмова, а не число.
+ * ✎ 2026-09-22 (`b0045915`): приведення на клієнті лишилося лише для `Date`
+ * (місцева дата → рядок `YYYY-MM-DD`). `Number` іде рядком, як увів
+ * користувач, БЕЗ `Number()`: сервер тепер приймає значення параметра і
+ * числом JSON, і рядком (крапка, до 16 знаків дробу, пробіли навколо й
+ * експонента `1e3`), і сам перевіряє формат (`422
+ * ECR-RPT-0422.parameterType`) — округлювати чи вгадувати тут нема чого, і
+ * `Number()` зіпсував би саме той хвіст, заради якого рядок і прийшов.
  */
 export function toParametersBody(
   items: readonly ReportParameterDeclaration[],

@@ -342,8 +342,9 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             render: (job) => (
               <Stack gap="xs">
                 <StatusBadge kind="job" state={job.state} />
-                {/* ⚠ У переліку `maxAttempts` немає — лише «спроба N». */}
-                <JobAttempt attempt={job.attempt} />
+                {/* ⚠ BE-08+: `JobSummary` тепер несе те саме `maxAttempts`, що й
+                    `JobStatus` картки — «спроба N з M», коли обидва відомі. */}
+                <JobAttempt attempt={job.attempt} maxAttempts={job.maxAttempts} />
                 <JobFailure
                   state={job.state}
                   errorCode={job.errorCode}
