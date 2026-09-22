@@ -170,7 +170,52 @@ public sealed class GetJobStatusHandler(
             .ResolveAsync(catalog, currentUser.Language, status.Message, ct)
             .ConfigureAwait(false);
 
-        return status with { Message = resolvedMessage };
+        return status with
+        {
+            Message = resolvedMessage,
+            ResultUrl = JobResultUrl.For(
+                profile, jobId, null, status.State, status.Message, status.DocumentId),
+        };
+    }
+}
+
+/// <summary>
+/// Посилання на файл результату завершеної задачі (UX-09, «Мої задачі»):
+/// зараз — лише книга експорту, <c>GET /api/v1/documents/{id}/export/{exportId}</c>.
+/// </summary>
+/// <remarks>
+/// ⚠ Ключ файлу задача експорту кладе в повідомлення прогресу
+/// (<c>ExcelExportJob</c>, 32 hex-символи); тому посилання рахується з СИРОГО
+/// повідомлення, до резолвера каталогу. Видимість — функціональне право
+/// маршруту завантаження (<c>Document.Export</c>); грант на документ той
+/// маршрут перевіряє сам при завантаженні.
+/// </remarks>
+public static class JobResultUrl
+{
+    private static readonly string ExportCode = typeof(IExcelExportJob).FullName!;
+    private static readonly string ExportIdPrefix = nameof(IExcelExportJob) + "-";
+
+    /// <summary>Відносний шлях API до файлу або <c>null</c>.</summary>
+    public static string? For(
+        AccessProfile profile, string jobId, string? jobCode, string state, string? rawMessage, long? documentId)
+    {
+        var isExport = jobCode is null
+            ? jobId.StartsWith(ExportIdPrefix, StringComparison.Ordinal)
+            : string.Equals(jobCode, ExportCode, StringComparison.Ordinal);
+
+        if (!isExport
+            || !string.Equals(state, "Succeeded", StringComparison.Ordinal)
+            || documentId is not { } doc
+            || rawMessage is not { Length: 32 } exportId
+            || !exportId.All(Uri.IsHexDigit)
+            || !profile.Has(Documents.DownloadExportHandler.Permission))
+        {
+            return null;
+        }
+
+        return string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"/api/v1/documents/{doc}/export/{exportId}");
     }
 }
 
@@ -310,13 +355,23 @@ public sealed class ListJobsHandler(
             .ResolveManyAsync(catalog, currentUser.Language, [.. items.Select(i => i.Message)], ct)
             .ConfigureAwait(false);
 
-        return [.. items.Select((item, i) => item with { Message = messages[i] })];
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        return
+        [
+            .. items.Select((item, i) => item with
+            {
+                Message = messages[i],
+                ResultUrl = JobResultUrl.For(
+                    profile, item.JobId, item.JobCode, item.State, item.Message, item.DocumentId),
+            }),
+        ];
     }
 }
 
 /// <summary>
 /// Ручний перезапуск проваленої фонової задачі. Право <c>System.ViewHealth</c>
-/// (директива №11, T10 #40).
+/// — або автор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).
 /// </summary>
 /// <remarks>
 /// ⛔ До цього обробника провалену задачу МІГ повторити лише автоматичний
@@ -326,11 +381,10 @@ public sealed class ListJobsHandler(
 /// з'єднання), не мала способу сказати системі «спробуй знову» — лишалося
 /// ставити нову задачу вручну й губити її історію прогресу.
 /// <para>
-/// ⚠ Право — <c>System.ViewHealth</c>, те саме, що й перегляд і перелік, а не
-/// право автора власної задачі (як у <see cref="GetJobStatusHandler"/>):
-/// перезапуск — мутація стану системи, а не читання власного результату, і
-/// призначений для того, хто відповідає за чергу, а не для будь-кого, хто її
-/// поставив.
+/// ⚠ Межа права — та сама, що в <see cref="CancelJobHandler"/> (Q-156):
+/// до UX-09 тут вимагався лише <c>System.ViewHealth</c>, і автор проваленого
+/// експорту бачив у шухляді «Мої задачі» кнопку «Повторити», яка давала 403.
+/// Чужі й системні задачі (автор <c>null</c>) — як і раніше, лише з правом.
 /// </para>
 /// </remarks>
 public sealed class RestartJobHandler(
@@ -350,15 +404,40 @@ public sealed class RestartJobHandler(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jobId);
 
-        await ListTemplatesHandler
-            .RequireAsync(access, currentUser, GetJobStatusHandler.Permission, ct)
-            .ConfigureAwait(false);
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?>
+                         {
+                             ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite",
+                         });
 
+        // Існування ПЕРЕД правом — той самий порядок, що в `CancelJobHandler`.
         var status = await jobs.GetStatusAsync(jobId, ct).ConfigureAwait(false);
 
         if (string.Equals(status.State, "Unknown", StringComparison.Ordinal))
         {
             throw new NotFoundException(ErrorCodes.JobNotFound, $"Задачі {jobId} не існує.");
+        }
+
+        // Автор повторює СВОЮ задачу без `System.ViewHealth` (UX-09, «Мої
+        // задачі»); чужу чи системну (автор `null`) — лише з правом.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        if (!profile.Has(GetJobStatusHandler.Permission))
+        {
+            var ownerId = await jobs.GetCreatedByUserIdAsync(jobId, ct).ConfigureAwait(false);
+
+            if (ownerId is null || ownerId.Value != userId)
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Потрібне право {GetJobStatusHandler.Permission}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.jobNotYours",
+                        ["permission"] = GetJobStatusHandler.Permission,
+                    });
+            }
         }
 
         if (!string.Equals(status.State, "Failed", StringComparison.Ordinal))

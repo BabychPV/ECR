@@ -636,6 +636,58 @@ export const MethodologyVersionsFixture = [
  * Порожня відповідь ПОТРІБНОЇ форми для кожного маршруту (незмінно з
  * попереднього єдиного файлу).
  */
+/**
+ * Матриця покриття «рядки × правила» версії методології (`ФВ-13.9`).
+ *
+ * ⛔ Усі ТРИ стани, а не один: колір позначки бере тон із `toneFills`
+ * (`danger`/`warning`/`muted`), і фікстура з самими покритими комбінаціями
+ * лишила б два тони з трьох поза перевіркою контрасту взагалі.
+ *
+ * ⚠ `truncated: false` — звичайний випадок; смуга усічення малюється тим самим
+ * `Banner tone="warning"`, який гейт уже сканує на огляді кампанії.
+ *
+ * ⚠ `null` у `values` — комірки немає; саме на ньому перевіряється, що приглушений
+ * підпис «немає комірки» читається в обох темах.
+ */
+export const RuleCoverageFixture = {
+  methodologyVersionId: 1,
+  periodFrom: 202501,
+  periodTo: 202699,
+  tableDefIds: [1],
+  columnDefIds: [101],
+  rules: [
+    { code: 'CO2_A', priority: 10 },
+    { code: 'NOX', priority: 20 },
+  ],
+  combinations: [
+    {
+      values: ['SO2'],
+      state: 'Gap',
+      winnerRuleCode: null,
+      matchedRuleCodes: [],
+      rows: 1,
+      documents: 1,
+    },
+    {
+      values: ['CO2'],
+      state: 'Conflict',
+      winnerRuleCode: 'CO2_A',
+      matchedRuleCodes: ['CO2_A', 'CO2_B'],
+      rows: 3,
+      documents: 2,
+    },
+    {
+      values: [null],
+      state: 'Covered',
+      winnerRuleCode: 'NOX',
+      matchedRuleCodes: ['NOX'],
+      rows: 1,
+      documents: 1,
+    },
+  ],
+  truncated: false,
+};
+
 export function emptyBodyFor(url: string): unknown {
   if (url.includes('/campaign/summary')) return CampaignSummaryFixture;
 
@@ -872,6 +924,11 @@ export function emptyBodyFor(url: string): unknown {
   // показує `EmptyState` і не монтує жодної панелі обраної версії.
   if (/\/methodologies\/\d+\/versions$/.test(url)) return MethodologyVersionsFixture;
 
+  // ⛔ Матриця покриття правил — ОБ'ЄКТ, а не `[]` за замовчуванням: панель
+  // читає `combinations.length`, і на масиві маршрут замінювався б екраном
+  // помилки (та сама пастка, що з `/tables/status` вище).
+  if (url.includes('/rule-coverage')) return RuleCoverageFixture;
+
   if (/\/templates\/\d+$/.test(url)) {
     return {
       code: 'TPL-A11Y',
@@ -946,6 +1003,26 @@ export function emptyBodyFor(url: string): unknown {
       ],
       nextCursor: null,
     };
+  }
+
+  /*
+   * ⛔ Реєстр мов — НЕ порожній, і це не «щоб було». Порожній перелік означав,
+   * що на `/admin/ui-strings` не малювався ані вибір мови, ані панель обміну
+   * CSV (`BE-13` ч.2): обидві не мають чого показати без мови-цілі
+   * (`D15-06`). Тобто гейт доступності сканував би екран перекладу без
+   * ЄДИНОГО елемента, який задає мову перекладу.
+   *
+   * ⚠ Склад — як у сіді (`09-seed.sql`, `MERGE sys_ecr.Language`): еталон
+   * `en` і дві мови перекладу. Саме `isDefault` відрізняє їх, і рівно на цю
+   * ознаку спирається `translationLanguages` — перелік з однією мовою не
+   * показав би різниці між «усі мови» і «мови, крім еталона».
+   */
+  if (/\/api\/v1\/languages(\?|$)/.test(url)) {
+    return [
+      { code: 'en', nameNative: 'English', isDefault: true },
+      { code: 'ru', nameNative: 'Русский', isDefault: false },
+      { code: 'kz', nameNative: 'Қазақша', isDefault: false },
+    ];
   }
 
   const paged = ['/documents', '/templates', '/users', '/projects'];

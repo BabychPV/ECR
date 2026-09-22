@@ -456,10 +456,28 @@
             "description": "Який вихід методології лягає в колонку.",
             "type": "string"
           },
+          "tableCode": {
+            "description": "Код таблиці. Заповнює лише перелік прив'язок (`GET …/bindings`);\nв інших відповідях — `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "tableDefId": {
             "description": "Таблиця колонки-приймача.",
             "format": "int32",
             "type": "integer"
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу; як і код — лише в переліку."
+              }
+            ]
           }
         },
         "required": [
@@ -925,6 +943,38 @@
           "Guarded",
           "Breaking"
         ]
+      },
+      "ChangeDocumentKeyRequest": {
+        "description": "Запит на зміну бізнес-ключа документа (ФВ-3.9).",
+        "properties": {
+          "businessKey": {
+            "description": "Новий ключ.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expectedBusinessKey": {
+            "description": "Чинний ключ, який бачила людина; розбіжність — 409.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, лягає в аудит.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "businessKey",
+          "expectedBusinessKey",
+          "reason"
+        ],
+        "type": "object"
       },
       "ChangePasswordRequest": {
         "description": "Запит на зміну пароля.",
@@ -2732,6 +2782,13 @@
       "ExportRequest": {
         "description": "Запит на експорт.",
         "properties": {
+          "format": {
+            "description": "`xlsx` (типово), `csv` (zip, файл на таблицю) або `json` — ФВ-4.2.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "includeFormulas": {
             "description": "Транслювати вирази в Excel-синтаксис (ФВ-4.2).",
             "type": "boolean"
@@ -3435,6 +3492,13 @@
             "format": "int32",
             "type": "integer"
           },
+          "resultUrl": {
+            "description": "Відносний шлях API до файлу результату (книга експорту) — лише для\n`Succeeded` з файлом і читача з `Document.Export`; інакше `null` (UX-09).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "state": {
             "description": "Стан.",
             "type": "string"
@@ -3524,6 +3588,13 @@
             "description": "Прогрес у відсотках.",
             "format": "int32",
             "type": "integer"
+          },
+          "resultUrl": {
+            "description": "Як string? JobStatus.ResultUrl (UX-09).",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "startedAt": {
             "description": "Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC\n(`JobProgress.Begin` перезаписує його). Момент постановки — CreatedAt.",
@@ -7691,6 +7762,147 @@
           "Header"
         ]
       },
+      "RuleCoverageCombinationDto": {
+        "description": "Одна комбінація значень (коди, не числа звітності) і що з нею роблять правила.",
+        "properties": {
+          "documents": {
+            "description": "Кількість документів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "matchedRuleCodes": {
+            "description": "Усі збіжні правила; після переможця — нічия або затінені.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "description": "Кількість рядків.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RuleCoverageState",
+            "description": "Стан."
+          },
+          "values": {
+            "description": "Значення в порядку `ColumnDefIds`; `null` — порожньо.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "winnerRuleCode": {
+            "description": "Правило-переможець; `null` для розриву.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "values",
+          "state",
+          "winnerRuleCode",
+          "matchedRuleCodes",
+          "rows",
+          "documents"
+        ],
+        "type": "object"
+      },
+      "RuleCoverageDto": {
+        "description": "Матриця покриття «рядки реальних даних × правила» версії методології.",
+        "properties": {
+          "columnDefIds": {
+            "description": "Колонки осі — ті, що згадують правила; порядок значень у комбінації.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "combinations": {
+            "description": "Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків.",
+            "items": {
+              "$ref": "#/components/schemas/RuleCoverageCombinationDto"
+            },
+            "type": "array"
+          },
+          "methodologyVersionId": {
+            "description": "Версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodFrom": {
+            "description": "Нижня межа вікна періодів (включно), фактично застосована.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "periodTo": {
+            "description": "Верхня межа (включно).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rules": {
+            "description": "Активні правила в порядку пріоритету.",
+            "items": {
+              "$ref": "#/components/schemas/RuleCoverageRuleDto"
+            },
+            "type": "array"
+          },
+          "tableDefIds": {
+            "description": "Таблиці, рядки яких бралися.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "description": "Комбінацій більше за стелю; показано найчисленніші.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "methodologyVersionId",
+          "periodFrom",
+          "periodTo",
+          "tableDefIds",
+          "columnDefIds",
+          "rules",
+          "combinations",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "RuleCoverageRuleDto": {
+        "description": "Правило осі матриці.",
+        "properties": {
+          "code": {
+            "description": "Код правила.",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Пріоритет; менше — вищий.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "priority"
+        ],
+        "type": "object"
+      },
+      "RuleCoverageState": {
+        "description": "Стан комбінації значень у матриці покриття (ФВ-13.9).",
+        "enum": [
+          "Gap",
+          "Conflict",
+          "Covered"
+        ]
+      },
       "RunConsistencyCheckRequest": {
         "description": "Запит на прогін перевірки узгодженості.",
         "properties": {
@@ -10303,6 +10515,75 @@
         },
         "required": [
           "languages"
+        ],
+        "type": "object"
+      },
+      "UiStringImportError": {
+        "description": "Помилка одного рядка імпорту.",
+        "properties": {
+          "key": {
+            "description": "Ключ, як його записано у файлі.",
+            "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ тексту відмови в каталозі.",
+            "type": "string"
+          },
+          "row": {
+            "description": "Номер запису у файлі; заголовок — 1.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "key",
+          "messageKey"
+        ],
+        "type": "object"
+      },
+      "UiStringImportReport": {
+        "description": "Звіт імпорту перекладу.",
+        "properties": {
+          "added": {
+            "description": "Нових перекладів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "applied": {
+            "description": "Чи записано зміни.",
+            "type": "boolean"
+          },
+          "errors": {
+            "description": "Відхилені рядки; є хоч один — не застосовано нічого.",
+            "items": {
+              "$ref": "#/components/schemas/UiStringImportError"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Версія каталогу після імпорту.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "Тих самих, що вже в базі.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Змінених.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "updated",
+          "unchanged",
+          "errors",
+          "applied",
+          "revision"
         ],
         "type": "object"
       },
@@ -13510,6 +13791,112 @@
         ]
       }
     },
+    "/api/v1/documents/{id}/business-key": {
+      "post": {
+        "description": "Причина обов'язкова (`422`); ключ зайнятий, застарілий `expectedBusinessKey`\nабо аркуш поданий/погоджений — `409` `ECR-DOC-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
     "/api/v1/documents/{id}/calculation-results": {
       "get": {
         "description": "⛔ Окремий маршрут, а не поле зрізу таблиці, і це `D-69`: результат\nметодології НЕ потрапляє в `doc.CellValue` — інакше нічний\nперерахунок писав би десятки мільйонів рядків у партиції документів. У\nдокумент він приходить посиланням через `cfg.CalculationBinding`.\n\n⛔ Доти побачити це число було НІДЕ: перерахунок завершувався успіхом,\nзначення лягало в `calc.CalculationResult`, і жоден маршрут його не\nвіддавав. Тобто питання «чи порахувала методологія правильно» мало рівно\nодну відповідь — `SELECT` у базі.\n\n⚠ Віддаються числа АКТУАЛЬНОГО прогону, не останнього за часом: прогін,\nякий упав, лишає по собі частину рядків, і суміш двох версій методології\nна екрані виглядала б цілком правдоподібно.",
@@ -13660,7 +14047,17 @@
         "responses": {
           "200": {
             "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              },
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "$ref": "#/components/schemas/FileResult"
                 }
@@ -13670,7 +14067,17 @@
           },
           "404": {
             "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/zip": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -15534,7 +15941,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "Ручний перезапуск проваленої задачі. Право `System.ViewHealth`\n(директива №11, T10 #40).",
+        "summary": "Ручний перезапуск проваленої задачі. Право `System.ViewHealth` — або\nавтор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).",
         "tags": [
           "Jobs"
         ]
@@ -17760,6 +18167,127 @@
         "summary": "Заводить або змінює обов'язкову вхідну колонку. Право\n`Calculation.ManageRequiredInputs` (директива «обов'язкові вхідні\nколонки методології»).",
         "tags": [
           "Methodologies"
+        ]
+      }
+    },
+    "/api/v1/methodologies/{id}/versions/{vid}/rule-coverage": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Версія.",
+            "in": "path",
+            "name": "vid",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише одна з таблиць прив'язок.",
+            "in": "query",
+            "name": "tableDefId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Нижня межа вікна періодів; типово — початок минулого року.",
+            "in": "query",
+            "name": "periodFrom",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Верхня межа; типово — кінець поточного року.",
+            "in": "query",
+            "name": "periodTo",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleCoverageDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleCoverageDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleCoverageDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Матриця покриття «рядки реальних даних × правила» (ФВ-13.9). Право `Calculation.View`.",
+        "tags": [
+          "MethodologyVersions"
         ]
       }
     },
@@ -26070,6 +26598,162 @@
           }
         },
         "summary": "Покриття перекладу по мовах. Право `System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
+        ]
+      }
+    },
+    "/api/v1/ui-strings/export.csv": {
+      "get": {
+        "description": "UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.",
+        "parameters": [
+          {
+            "description": "Мова перекладу (не мова за замовчуванням).",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Експорт перекладу в CSV: `key, scope, en, &lt;lang&gt;, updatedAt`. Право `System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
+        ]
+      }
+    },
+    "/api/v1/ui-strings/import": {
+      "post": {
+        "description": "Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна\nпомилка або `dryRun` — не записано нічого. Стеля файлу —\n`Localization:ImportMaxBytes`.",
+        "parameters": [
+          {
+            "description": "Мова перекладу.",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише перевірка.",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "$ref": "#/components/schemas/IFormFile"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Імпорт перекладу з CSV. Право `System.ManageLocalization`.",
         "tags": [
           "UiStrings"
         ]

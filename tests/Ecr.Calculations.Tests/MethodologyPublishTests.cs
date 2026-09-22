@@ -128,6 +128,7 @@ public sealed class MethodologyPublishTests
         // рахувати нею, а які — попередньою, і VersionOn не має відповіді.
         // У схемі це CK_MV_Published.
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.publishNoEffectiveDate", error.Details!["messageKey"]);
         Assert.Null(_version.EffectiveFrom);
     }
 
@@ -412,6 +413,7 @@ public sealed class MethodologyPublishTests
             () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.goldenSetDiverged", error.Details!["messageKey"]);
 
         // ⚠ Відмова називає РЕЧОВИНУ, вихід і обидва числа. Сама лічба
         // («знайдено проблем — 1») відправила б методолога перебирати всі

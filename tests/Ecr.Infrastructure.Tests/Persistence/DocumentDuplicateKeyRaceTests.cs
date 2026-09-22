@@ -74,6 +74,38 @@ public sealed class DocumentDuplicateKeyRaceTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// Зміна ключа (ФВ-3.9) в обхід попередньої перевірки на вже зайнятий ключ —
+    /// <c>409 rekeyDuplicate</c>, а не сирий виняток бази.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: прибрати арм <c>Document when Modified</c> з
+    /// <c>UnitOfWork.TryMapDuplicateKey</c> — messageKey зникне.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зміна_ключа_на_зайнятий_в_обхід_перевірки_дає_rekeyDuplicate()
+    {
+        var projectId = await ArrangeProjectAsync();
+        var taken = $"RK-{_tag}-0001";
+
+        await using var db = Context();
+        var other = new Document(projectId, $"RK-{_tag}-0002", 9, DateTime.UtcNow);
+        db.Documents.Add(new Document(projectId, taken, 9, DateTime.UtcNow));
+        db.Documents.Add(other);
+        await new UnitOfWork(db).SaveChangesAsync(CancellationToken.None);
+
+        other.ChangeBusinessKey(taken, 9, DateTime.UtcNow);
+
+        var thrown = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => new UnitOfWork(db).SaveChangesAsync(CancellationToken.None));
+
+        Assert.Equal("ECR-DOC-0409", thrown.ErrorCode);
+        Assert.Equal("err.ECR-DOC-0409.rekeyDuplicate", thrown.Details!["messageKey"]);
+        Assert.Equal(taken, thrown.Details["businessKey"]);
+    }
+
+    /// <summary>
     /// Повторна спроба після програшу проходить: програшна сутність не лишається
     /// в трекері й не повторює той самий <c>INSERT</c>.
     /// </summary>

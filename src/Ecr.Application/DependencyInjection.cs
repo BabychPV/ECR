@@ -185,6 +185,7 @@ public static class DependencyInjection
         services.AddScoped<Workflow.ApproveSheetHandler>();
         services.AddScoped<Workflow.ReopenDocumentHandler>();
         services.AddScoped<Documents.DeleteDocumentHandler>();
+        services.AddScoped<Documents.ChangeDocumentKeyHandler>();
         services.AddScoped<Workflow.GetWorkflowHistoryHandler>();
         services.AddScoped<Workflow.RecallSheetHandler>();
 
@@ -253,12 +254,15 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SaveCalculationBindingHandler>();
         services.AddScoped<Calculations.DeleteMethodologyVersionHandler>();
         services.AddScoped<Calculations.MethodologyCoverageHandler>();
+        services.AddScoped<Calculations.RuleCoverageHandler>();
         services.AddScoped<Calculations.CompareMethodologyVersionsHandler>();
         services.AddScoped<Documents.GetCalculationResultsHandler>();
         services.AddScoped<Calculations.RunCalculationHandler>();
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();
         services.AddScoped<Localization.ListUiStringsHandler>();
+        services.AddScoped<Localization.ExportUiStringsCsvHandler>();
+        services.AddScoped<Localization.UiStringImportHandler>();
 
         // ⚠ PatchCellsHandler і RecalculateDocumentHandler зареєстровані з
         // Етапу 3. Раніше їх не було через IBackgroundJobScheduler без
@@ -275,6 +279,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.GetTableStatusHandler>();
         services.AddScoped<Documents.ExportDocumentHandler>();
         services.AddScoped<Documents.DownloadExportHandler>();
+        services.AddScoped<Documents.DocumentDataExporter>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();

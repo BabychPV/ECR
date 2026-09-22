@@ -30,14 +30,25 @@ public sealed class ExportDocumentHandler(
     /// <param name="options">Режим експорту.</param>
     /// <param name="ct">Скасування.</param>
     /// <returns>Ідентифікатор задачі для опитування стану.</returns>
+    /// <param name="format"><c>xlsx</c> (типово), <c>csv</c> або <c>json</c> — ФВ-4.2.</param>
     public async Task<string> HandleAsync(
-        long documentId, ExcelExportOptions options, CancellationToken ct)
+        long documentId, ExcelExportOptions options, CancellationToken ct, string? format = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         var profile = await Security.PermissionCheck
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        var normalized = DocumentExportFormat.Normalize(format)
+            ?? throw new Errors.BusinessRuleException(
+                Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
+                $"Невідомий формат експорту «{format}»: xlsx, csv або json.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.exportFormatUnknown",
+                    ["format"] = format,
+                });
 
         // ⛔ І ГРАНТ на проєкт (`A7-55`). Експорт віддає документ ЦІЛКОМ —
         // усі числа, підписи й одиниці. Функціональне право каже «цей
@@ -63,10 +74,11 @@ public sealed class ExportDocumentHandler(
         var exportId = Guid.NewGuid().ToString("N");
 
         // ⚠ `createdByUserId` — щоб автор прочитав стан ВЛАСНОЇ задачі без
-        // System.ViewHealth (Q-156).
+        // System.ViewHealth (Q-156). CSV/JSON ідуть ТІЄЮ САМОЮ задачею, що й
+        // xlsx: той самий прогрес, `exportId` і завантаження.
         return await jobs
             .EnqueueAsync<IExcelExportJob>(
-                new ExcelExportTask(documentId, options, exportId), ct, currentUser.UserId)
+                new ExcelExportTask(documentId, options, exportId, normalized), ct, currentUser.UserId)
             .ConfigureAwait(false);
     }
 }
@@ -75,7 +87,9 @@ public sealed class ExportDocumentHandler(
 /// <param name="DocumentId">Документ.</param>
 /// <param name="Options">Режим експорту разом із періодом.</param>
 /// <param name="ExportId">Ключ, під яким задача покладе готову книгу.</param>
-public sealed record ExcelExportTask(long DocumentId, ExcelExportOptions Options, string ExportId);
+/// <param name="Format">Формат; <c>null</c> у завданнях, поставлених до ФВ-4.2, — це xlsx.</param>
+public sealed record ExcelExportTask(
+    long DocumentId, ExcelExportOptions Options, string ExportId, string? Format = DocumentExportFormat.Xlsx);
 
 /// <summary>
 /// Попередній перегляд імпорту. Право <c>Document.Import</c>.

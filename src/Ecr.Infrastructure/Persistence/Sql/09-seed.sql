@@ -98,7 +98,10 @@ USING (VALUES
   -- повідомлення про збої (адресати SMTP, URL вебхука), і замінює секрети
   -- каналів. Тому шаблон `%` системного адміністратора його не роздає —
   -- видається свідомо, зі слідом у журналі безпеки (`BE-32`).
-  (N'System.ManageNotifications', N'System',    1)
+  (N'System.ManageNotifications', N'System',    1),
+  -- НЕБЕЗПЕЧНЕ (1): зміна бізнес-ключа документа (ФВ-3.9) міняє те, під чим
+  -- документ знають експорти й зовнішні системи; видається свідомо.
+  (N'Document.ChangeKey',       N'Document',    1)
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)
@@ -371,6 +374,7 @@ UPDATE t
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
     (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state'),
     (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion'),
+    (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request'),
     (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change'),
     (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found')
   ) AS s ([Key], Lang, OldVal, NewVal)
@@ -394,7 +398,12 @@ DELETE t
     (N'registries.usageKind.registryField',        N'en', N'Registry field'),
     (N'registries.usageKind.methodologySubstance', N'en', N'Methodology substance'),
     (N'registries.usageKind.sourceEntity',         N'en', N'Source entity'),
-    (N'registries.usageKind.data',                 N'en', N'Values in documents')
+    (N'registries.usageKind.data',                 N'en', N'Values in documents'),
+    -- ФВ-3.6: правки більше не «втрачені» — їх зберігає браузер і відновлює
+    -- екран документа; ключі замінено на `login.restoreEdits.*`.
+    (N'login.lostEdits.title',                     N'en', N'Unsaved changes were lost'),
+    (N'login.lostEdits.text',                      N'en', N'{count} unsaved change(s) in document #{documentId} were lost — your session ended. Please re-enter them.'),
+    (N'login.lostEdits.continue',                  N'en', N'Continue')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -449,10 +458,14 @@ USING (VALUES
     -- ⚠ Публічна область (0): банер показано ДО входу, коли приватний зріз
     -- каталогу ще недоступний.
     (N'login.sessionInvalidated', N'en', N'Your session has ended because your permissions or password changed. Sign in again.', 0),
-    -- Втрачені незбережені правки після обриву сесії — теж до входу, тож 0.
-    (N'login.lostEdits.title',    N'en', N'Unsaved changes were lost', 0),
-    (N'login.lostEdits.text',     N'en', N'{count} unsaved change(s) in document #{documentId} were lost — your session ended. Please re-enter them.', 0),
-    (N'login.lostEdits.continue', N'en', N'Continue', 0),
+    -- Незбережені правки, що пережили обрив сесії (ФВ-3.6) — банер показано до
+    -- входу, тож область 0. ⚠ Правки тепер не просто названі втраченими: вони
+    -- лежать у цьому браузері й відновлюються на екрані документа, тому
+    -- колишні `login.lostEdits.*` прибрані (нижче в «Прибраних ключах»).
+    (N'login.restoreEdits.title',    N'en', N'You are signed in again', 0),
+    (N'login.restoreEdits.text',     N'en', N'{count} unsaved change(s) in document #{documentId} were kept in this browser. They never reached the server; open the document to restore them.', 0),
+    (N'login.restoreEdits.continue', N'en', N'Open the document', 0),
+    (N'login.restoreEdits.discard',  N'en', N'Discard them', 0),
     (N'err.ECR-AUTH-0401', N'en', N'Sign in to continue.', 0),
     (N'err.ECR-AUTH-0403', N'en', N'You do not have permission for this action.', 0),
     (N'err.ECR-AUTH-0403.requiresPermission', N'en', N'Requires permission', 1),
@@ -681,10 +694,19 @@ USING (VALUES
     -- дія у відповідь — тикати кнопку доти, доки не спрацює.
     (N'err.ECR-REQ-0422.consistencyRunReasonRequired', N'en', N'A reason is required to run the consistency check on demand: the run is recorded in the security journal.', 1),
     (N'err.ECR-REQ-0422.consistencyRunReasonTooLong',  N'en', N'The reason must be no longer than {max} characters.', 1),
+    (N'err.ECR-REQ-0422.exportFormatUnknown',          N'en', N'There is no export format "{format}": use xlsx, csv or json.', 1),
     (N'err.ECR-JOB-0409.consistencyCheckRunning',      N'en', N'A consistency check is already in progress as job {jobId} ({state}): watch that job instead of starting a second full scan.', 1),
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
     -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.
     (N'err.ECR-REQ-0422.placeholderMismatch', N'en', N'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].', 1),
+    -- BE-13 ч.2: імпорт перекладу з CSV. Відмови рядків приходять у звіті без підстановок.
+    (N'err.ECR-REQ-0422.uiStringCsvLanguage',  N'en', N'"{lang}" cannot be imported or exported: the default language is the reference, and any other language must be in the language registry.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvHeader',    N'en', N'The first row of the file must name a "key" column and a "{lang}" column.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvTooLarge',  N'en', N'The file takes {size} bytes; the limit is {max}.', 1),
+    (N'err.ECR-REQ-0422.uiStringUnknownKey',   N'en', N'This key does not exist in the default language.', 1),
+    (N'err.ECR-REQ-0422.uiStringEmptyValue',   N'en', N'The translation is empty.', 1),
+    (N'err.ECR-REQ-0422.uiStringTooLong',      N'en', N'The translation is longer than 1000 characters.', 1),
+    (N'err.ECR-REQ-0422.uiStringDuplicateKey', N'en', N'This key already appears earlier in the file.', 1),
     -- BE-33: канали сповіщень. У відмові вебхука немає ні URL, ні хоста — URL є секретом.
     (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs at least one recipient.', 1),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
@@ -874,6 +896,12 @@ USING (VALUES
     -- Document.Delete: only a draft document can be deleted (decision 2026-09-21).
     (N'err.ECR-DOC-0409.deleteNotDraft',        N'en', N'Only a draft document can be deleted; sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
     (N'err.ECR-DOC-0409.deleteHasHistory',      N'en', N'Only a draft document can be deleted; this document has already been through approval.', 1),
+    -- Document.ChangeKey: controlled business key change (FV-3.9).
+    (N'err.ECR-DOC-0409.rekeyLocked',           N'en', N'The document key cannot be changed: sheet {sheetDefId} for period {periodKey} is {reason}.', 1),
+    (N'err.ECR-DOC-0409.rekeyDuplicate',        N'en', N'Another document of this project already has the key "{businessKey}".', 1),
+    (N'err.ECR-DOC-0409.rekeyStale',            N'en', N'The document key has changed since it was read; it is now "{businessKey}".', 1),
+    (N'err.ECR-DOC-0422.rekeyReasonRequired',   N'en', N'A reason is required to change the document key.', 1),
+    (N'err.ECR-DOC-0422.rekeyKeyInvalid',       N'en', N'The new key must be 1 to {maxLength} characters and differ from the current key.', 1),
     (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),
@@ -895,6 +923,31 @@ USING (VALUES
     (N'err.ECR-CALC-0409.authorCannotPublish',  N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.', 1),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.', 1),
     (N'err.ECR-SYS-0500.contactAdmin',          N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
+    -- FR-13.9: rule coverage matrix over real rows.
+    (N'err.ECR-CALC-0422.coverageWindow',       N'en', N'The period window is empty: periodFrom {periodFrom} is after periodTo {periodTo}.', 1),
+    -- ECR-CALC-0422 has a neutral title: every reason carries its own detail.
+    (N'err.ECR-CALC-0422.publishNoEffectiveDate', N'en', N'Version {version} cannot be published without an effective date: it is unclear which periods it should calculate.', 1),
+    (N'err.ECR-CALC-0422.publishNoReason',      N'en', N'Version {version} cannot be published without a reason for the change.', 1),
+    (N'err.ECR-CALC-0422.publishNoGreenTest',   N'en', N'Version {version} cannot be published without a passing test.', 1),
+    (N'err.ECR-CALC-0422.publishChecksFailed',  N'en', N'The version failed pre-publication checks ({count} problems).', 1),
+    (N'err.ECR-CALC-0422.formulasNotSaved',     N'en', N'Save the formulas of the version before publishing it.', 1),
+    (N'err.ECR-CALC-0422.goldenSetEmpty',       N'en', N'Version {version} cannot be published: its golden set has no cases, so nothing was checked.', 1),
+    (N'err.ECR-CALC-0422.goldenSetDiverged',    N'en', N'Version {version} cannot be published: {count} values diverged on the golden set.', 1),
+    (N'err.ECR-CALC-0422.deprecateNotPublished', N'en', N'Version {version} is not published, so there is nothing to withdraw.', 1),
+    (N'err.ECR-CALC-0422.versionNotInMethodology', N'en', N'Version {version} does not belong to methodology {code}.', 1),
+    (N'err.ECR-CALC-0422.noEffectiveVersion',   N'en', N'The methodology has no version in effect on {date}.', 1),
+    (N'err.ECR-CALC-0422.noModule',             N'en', N'No calculation module is available for methodology {code} at level {level}.', 1),
+    (N'err.ECR-CALC-0422.runNotFinished',       N'en', N'The calculation run has not finished yet, so it cannot be made current.', 1),
+    (N'err.ECR-CALC-0422.constantAmbiguous',    N'en', N'Constant "{code}" has {count} candidates on {date}: the choice is ambiguous.', 1),
+    (N'err.ECR-CALC-0422.constantNotNumeric',   N'en', N'Constant "{code}" is declared numeric, but its value is not a number.', 1),
+    (N'err.ECR-CALC-0422.constantIsCategoryLabel', N'en', N'Constant "{code}" is a category label and cannot be used in expressions.', 1),
+    (N'err.ECR-CALC-0422.constantKindNeedsNumber', N'en', N'Constant "{code}" is numeric and must be given a number, not text.', 1),
+    (N'err.ECR-CALC-0422.constantNoText',       N'en', N'Constant "{code}" needs text: an empty string is neither a category label nor a value.', 1),
+    (N'err.ECR-CALC-0422.formulaNoExpression',  N'en', N'Formula "{code}" needs an expression: an empty one would silently yield zero.', 1),
+    (N'err.ECR-CALC-0422.textFormulaUnit',      N'en', N'Formula "{code}" returns text, so it cannot have a result unit.', 1),
+    (N'err.ECR-CALC-0422.ruleNoPredicate',      N'en', N'Rule "{code}" needs a predicate; to match the whole table, use an empty JSON object.', 1),
+    (N'err.ECR-CALC-0422.selfDependency',       N'en', N'A methodology cannot depend on itself.', 1),
+    (N'err.ECR-CALC-0422.selfImport',           N'en', N'A methodology cannot import itself: its own formulas are already visible.', 1),
 
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
     --
@@ -985,7 +1038,7 @@ USING (VALUES
     -- Фраза `ECR-CALC-0409` покриває всі його стани: чотири очі, видалення
     -- версії, зміна не-чернетки, зайнята дата. Який саме — каже подробиця.
     (N'err.ECR-CALC-0409',  N'en', N'Conflicting methodology state', 1),
-    (N'err.ECR-CALC-0422',  N'en', N'The methodology version cannot be published', 1),
+    (N'err.ECR-CALC-0422',  N'en', N'Invalid methodology request', 1),
     (N'err.ECR-CALC-0431',  N'en', N'Unsupported operator in a formula', 1),
     (N'err.ECR-CALC-0432',  N'en', N'Undeclared formula argument', 1),
     (N'err.ECR-CALC-0433',  N'en', N'Extension function in Legacy mode', 1),
@@ -1067,6 +1120,22 @@ USING (VALUES
     (N'document.validationColumn',       N'en', N'Column', 1),
     (N'document.validationRule',         N'en', N'Rule', 1),
     (N'document.validationMessage',      N'en', N'What is wrong', 1),
+    -- Відновлення незбережених правок на екрані документа (ФВ-3.6, D14-12).
+    -- ⚠ `partial` називає різницю вголос: у слід вміщається не все, і мовчазне
+    -- «відновити N» там, де правок було більше, — та сама тиха втрата.
+    -- ⚠ `conflictRow`/`unavailableRow` — поіменно, бо «2 з 3» без переліку не
+    -- веде до дії: людина не знає, яку комірку вводити заново.
+    (N'document.restoreEdits.title',     N'en', N'Unsaved changes were kept in this browser', 1),
+    (N'document.restoreEdits.text',      N'en', N'{count} change(s) never reached the server. Restore them into the sheet, or discard them.', 1),
+    (N'document.restoreEdits.partial',   N'en', N'Only {count} of {total} changes were kept; the rest have to be entered again.', 1),
+    (N'document.restoreEdits.apply',     N'en', N'Restore changes', 1),
+    (N'document.restoreEdits.discard',   N'en', N'Discard', 1),
+    (N'document.restoreEdits.applied',   N'en', N'{count} change(s) restored', 1),
+    (N'document.restoreEdits.close',     N'en', N'Close', 1),
+    (N'document.restoreEdits.conflicts', N'en', N'{count} change(s) were not restored — enter them again:', 1),
+    (N'document.restoreEdits.conflictRow', N'en', N'Row {rowKey}, column {columnCode}: the cell changed after your session ended.', 1),
+    (N'document.restoreEdits.unavailableRow', N'en', N'Row {rowKey}, column {columnCode}: the cell is no longer in the sheet.', 1),
+    (N'document.restoreEdits.more',      N'en', N'and {count} more', 1),
     (N'document.submit',                 N'en', N'Submit', 1),
     (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
     (N'document.export',                 N'en', N'Export to Excel', 1),
@@ -1364,6 +1433,31 @@ USING (VALUES
     (N'methodologies.active', N'en', N'Active', 1),
     (N'methodologies.noRules', N'en', N'This version has no selection rules', 1),
     (N'methodologies.noRulesHint', N'en', N'Without a rule the methodology touches no document row, and recalculation succeeds having computed nothing.', 1),
+    -- Панель покриття правил (ФВ-13.9): які рядки реальних даних бере на себе
+    -- кожне правило. ⚠ Перелік обрізає сервер, тож банер каже це прямо:
+    -- прогалина може лежати поза показаними сполученнями.
+    (N'methodologies.ruleCoverage', N'en', N'Rule coverage', 1),
+    (N'methodologies.ruleCoverageHint', N'en', N'Which rows of real data each rule claims.', 1),
+    (N'methodologies.ruleCoverageTable', N'en', N'Table', 1),
+    (N'methodologies.ruleCoverageAllTables', N'en', N'All tables', 1),
+    (N'methodologies.ruleCoverageTableOption', N'en', N'Table {id}', 1),
+    (N'methodologies.ruleCoveragePeriodFrom', N'en', N'Period from', 1),
+    (N'methodologies.ruleCoveragePeriodTo', N'en', N'Period to', 1),
+    (N'methodologies.ruleCoveragePeriodHint', N'en', N'Period key as YYYYMM, for example 202601.', 1),
+    (N'methodologies.ruleCoverageValues', N'en', N'Values', 1),
+    (N'methodologies.ruleCoverageState', N'en', N'State', 1),
+    (N'methodologies.ruleCoverageRules', N'en', N'Rules', 1),
+    (N'methodologies.ruleCoverageRows', N'en', N'Rows', 1),
+    (N'methodologies.ruleCoverageDocuments', N'en', N'Documents', 1),
+    (N'methodologies.ruleCoverageCovered', N'en', N'Covered', 1),
+    (N'methodologies.ruleCoverageGap', N'en', N'No rule', 1),
+    (N'methodologies.ruleCoverageConflict', N'en', N'Two rules, same priority', 1),
+    (N'methodologies.ruleCoverageShadowed', N'en', N'shadowed by priority', 1),
+    (N'methodologies.ruleCoverageNoCell', N'en', N'no cell', 1),
+    (N'methodologies.ruleCoverageTruncatedTitle', N'en', N'Not everything is shown', 1),
+    (N'methodologies.ruleCoverageTruncatedHint', N'en', N'The server stopped at {shown} combinations; a gap may be outside them.', 1),
+    (N'methodologies.noRuleCoverage', N'en', N'No rows match this window', 1),
+    (N'methodologies.noRuleCoverageHint', N'en', N'Widen the period window or pick another table.', 1),
     (N'methodologies.requiredInputs', N'en', N'Required input columns', 1),
     (N'methodologies.addRequiredInput', N'en', N'Add required input', 1),
     (N'methodologies.requiredInputSaved', N'en', N'The required input has been saved.', 1),
@@ -1502,6 +1596,11 @@ USING (VALUES
     (N'jobs.id',                         N'en', N'Job id', 1),
     (N'jobs.watch',                      N'en', N'Watch', 1),
     (N'jobs.recentEmpty',                N'en', N'No jobs yet.', 1),
+    -- Шухляда «My tasks» у шапці (BE-08): власні фонові задачі, усім ролям.
+    (N'jobs.myTasks',                    N'en', N'My tasks', 1),
+    (N'jobs.myTasksClose',               N'en', N'Close my tasks', 1),
+    (N'jobs.myTasksActive',              N'en', N'{n} running or queued', 1),
+    (N'jobs.myTasksHint',                N'en', N'Long operations you start appear here. They keep running on the server, so you can close this tab and come back for the result.', 1),
     -- Факти фонової задачі (BE-08): спроба, причина провалу, кореляція,
     -- документ, автор. Причину провалу дає `err.<errorCode>` із каталогу помилок.
     (N'jobs.attempt',                    N'en', N'Attempt {n}', 1),
@@ -1935,6 +2034,17 @@ USING (VALUES
     (N'documents.deleteText',            N'en', N'The draft document and all data entered in it will be deleted. This cannot be undone.', 1),
     (N'documents.deleteNote',            N'en', N'Only a draft can be deleted: a document that has already been through approval will be refused.', 1),
     (N'documents.deleted',               N'en', N'Document {name} has been deleted.', 1),
+    -- Зміна бізнес-ключа документа (ФВ-3.9). ⚠ Ключ змінюється лише доки
+    -- жоден аркуш не поданий і не затверджений; `changeKeyStaleHint` — про
+    -- 409, коли ключ на сервері вже інший, тож повторювати ту саму форму нема
+    -- чим, доки людина не побачить новий.
+    (N'documents.changeKey',             N'en', N'Change document key', 1),
+    (N'documents.changeKeyTitle',        N'en', N'Change document key', 1),
+    (N'documents.changeKeyLockedHint',   N'en', N'The key cannot be changed: a sheet has already been submitted or approved.', 1),
+    (N'documents.changeKeyStaleHint',    N'en', N'The key was changed by someone else. The document has been reloaded; check the current key before trying again.', 1),
+    (N'documents.keyChanged',            N'en', N'The document key has been changed.', 1),
+    (N'documents.newBusinessKey',        N'en', N'New key', 1),
+    (N'documents.newBusinessKeyHint',    N'en', N'Up to {max} characters; it must differ from the current key. The change and its reason go to the audit trail.', 1),
     (N'documents.version',               N'en', N'Template version', 1),
     (N'documents.versionHint',           N'en', N'Only published versions: a draft has no frozen structure.', 1),
     (N'documents.pickVersion',           N'en', N'Pick a version', 1),
@@ -2434,6 +2544,14 @@ USING (VALUES
     (N'uiStrings.emptyHint',             N'en', N'The catalogue is filled from the default language; clear the filter to see everything.', 1),
     (N'uiStrings.coverage',              N'en', N'{language}: {translated} of {total} translated, {missing} missing', 1),
     (N'uiStrings.missingOnly',           N'en', N'Missing only', 1),
+    -- Обмін перекладом через CSV (BE-13 ч.2). ⚠ Імпорт або застосовується
+    -- цілком, або не пише нічого: підказка каже це прямо, щоб людина не шукала
+    -- «частково імпортовані» рядки.
+    (N'uiStrings.exportCsv',             N'en', N'Export CSV', 1),
+    (N'uiStrings.importCsv',             N'en', N'Import CSV…', 1),
+    (N'uiStrings.importCounts',          N'en', N'added {added}, updated {updated}, unchanged {unchanged}', 1),
+    (N'uiStrings.importBlockedHint',     N'en', N'Nothing has been written: fix the rows listed below and pick the file again.', 1),
+    (N'uiStrings.importReady',           N'en', N'The file is valid: nothing to fix.', 1),
 
     -- Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
     --
@@ -2503,6 +2621,11 @@ USING (VALUES
     -- лічиться діючим.
     (N'mapping.paused',                  N'en', N'paused', 1),
     (N'mapping.mapsSummary',             N'en', N'{active} active, {paused} paused. A paused mapping keeps its settings and writes nothing.', 1),
+    -- Призупинення й відновлення мапінгу з перегляду (BE-27).
+    (N'mapping.pause',                   N'en', N'Pause', 1),
+    (N'mapping.resume',                  N'en', N'Resume', 1),
+    (N'mapping.pauseDone',               N'en', N'Mapping paused.', 1),
+    (N'mapping.resumeDone',              N'en', N'Mapping resumed.', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),

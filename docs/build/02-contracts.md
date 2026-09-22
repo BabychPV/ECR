@@ -2218,6 +2218,23 @@ public interface IDocumentDeletionStore
 }
 ```
 
+#### `IDocumentKeyStore`
+
+Зміна бізнес-ключа документа (ФВ-3.9, `POST /api/v1/documents/{id}/business-key`,
+право `Document.ChangeKey`). В одній транзакції: документ під `UPDLOCK`, стани
+аркушів — через `IDocumentDeletionStore.LockWorkflowFactsAsync`, зайнятість ключа —
+під `UPDLOCK, HOLDLOCK`. Поданий/погоджений аркуш, зайнятий ключ чи застарілий
+`expectedBusinessKey` — `409 ECR-DOC-0409`; без причини — `422 ECR-DOC-0422`.
+Старий і новий ключ із причиною — в `aud.SecurityEvent` (`DocumentKeyChanged`).
+
+```csharp
+public interface IDocumentKeyStore
+{
+    public Task<Document?> FindForUpdateAsync(long documentId, CancellationToken ct);
+    public Task<bool> IsKeyTakenAsync(int projectId, string businessKey, long exceptDocumentId, CancellationToken ct);
+}
+```
+
 #### `IMethodologyVersionDeletionStore`
 
 Видалення версії-чернетки методології (`DELETE /api/v1/methodologies/{id}/versions/{vid}`,
@@ -2582,6 +2599,22 @@ public interface IResourceNameResolver
 {
     public Task<IReadOnlyDictionary<(ResourceKind Kind, int Id), string>> ResolveAsync(
         IReadOnlyCollection<(ResourceKind Kind, int Id)> resources, CancellationToken ct);
+}
+```
+
+#### `IRuleCoverageReader`
+
+Матриця покриття «рядки × правила» (ФВ-13.9): живі рядки примірників таблиць
+прив'язок методології за вікно періодів, згруповані в SQL за значеннями колонок,
+які згадують правила, з лічильниками рядків і різних документів. Класифікацію
+робить застосунок (`MethodologyRuleMatcher.Classify`), не порт.
+
+```csharp
+public interface IRuleCoverageReader
+{
+    public Task<IReadOnlyList<RuleCoverageCombination>> ReadAsync(
+        IReadOnlyList<int> tableDefIds, IReadOnlyList<int> columnDefIds,
+        int periodFrom, int periodTo, int limit, CancellationToken ct);
 }
 ```
 
@@ -3004,7 +3037,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15), **або** не змінюються її множник і зсув (`unitFactorInUse`), **або** одиницю змінили між читанням і записом — `If-Match` не збігся з `rowVersion` (`unitChanged`, `UpdateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
 | `ECR-CALC-0409` | 409 | стан методології чи версії не дозволяє дію. Заголовок нейтральний, випадок каже `messageKey`-подробиця (як у `ECR-JOB-0409`): публікація автором версії (D-40, `authorCannotPublish`), погодження власного перерахунку закритого періоду (D-40, `ownRecalculationApproval`), видалення не-чернетки (`versionNotDraft`) або версії, якою вже рахували (`versionUsedInCalculations`, BE-25); також зміна не-чернетки, чужий дочірній запис, зайнятий номер версії чи дата чинності |
-| `ECR-CALC-0422` | 422 | публікація без зеленого тесту (ФВ-9.12) |
+| `ECR-CALC-0422` | 422 | запит до методології невалідний. Заголовок нейтральний («Invalid methodology request»), випадок каже `messageKey`-подробиця: публікація без зеленого тесту (ФВ-9.12, `publishNoGreenTest`), без причини (`publishNoReason`), без дати чинності (`publishNoEffectiveDate`), з проблемами перевірок (`publishChecksFailed`) чи золотого набору (`goldenSetEmpty`, `goldenSetDiverged`); невалідні константа, формула, правило, імпорт чи залежність; порожнє вікно періодів матриці покриття (`coverageWindow`, ФВ-13.9) |
 | `ECR-CALC-0431` | 422 | `^` у діалекті методологій — це XOR, а не степінь |
 | `ECR-CALC-0432` | 422 | токен `@Arg` у виразі, якого немає в оголошеному списку аргументів формули: збірка його не підставить (директива ПК-1 №05 §7, пастка 2) |
 | `ECR-CALC-0433` | 422 | функція ярусу `Extension` у версії з `NumericMode = Legacy`: відтворювати їй нічого (`02b` §8) |
@@ -3140,6 +3173,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/documents` | `Document.Create` | 1 |
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
+| `POST` | `/api/v1/documents/{id}/business-key` | `Document.ChangeKey` | 6 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |
@@ -3194,6 +3228,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/tests/{code}` | `Calculation.EditFormula` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/versions/{vid}/modes` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/coverage` | `Calculation.View` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/versions/{vid}/rule-coverage` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/versions/{vid}/diff` | `Calculation.View` | 7 |
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
@@ -3256,6 +3291,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/ui-strings/{lang}/{key}` | `System.ManageLocalization` | 3 |
 | `GET` | `/api/v1/ui-strings/coverage` | `System.ManageLocalization` | 7 |
 | `GET` | `/api/v1/ui-strings?lang=&missingOnly=` | `System.ManageLocalization` | 7 |
+| `GET` | `/api/v1/ui-strings/export.csv?lang=` | `System.ManageLocalization` | 7 |
+| `POST` | `/api/v1/ui-strings/import?lang=&dryRun=` | `System.ManageLocalization` | 7 |
 | `POST` | `/api/v1/security/simulation` | `Security.Simulate` | 3 |
 | `DELETE` | `/api/v1/security/simulation` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/my-groups` | — (власний сеанс) | 3 |

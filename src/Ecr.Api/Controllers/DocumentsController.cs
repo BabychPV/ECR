@@ -33,7 +33,8 @@ public sealed class DocumentsController(
     DownloadExportHandler downloadExport,
     PreviewImportHandler previewImport,
     ApplyImportHandler applyImport,
-    DeleteDocumentHandler delete) : ControllerBase
+    DeleteDocumentHandler delete,
+    ChangeDocumentKeyHandler changeKey) : ControllerBase
 {
     /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
     /// <remarks>
@@ -148,6 +149,27 @@ public sealed class DocumentsController(
     public async Task<IActionResult> Delete(long id, CancellationToken ct)
     {
         await delete.HandleAsync(id, ct).ConfigureAwait(false);
+        return NoContent();
+    }
+
+    /// <summary>Змінює бізнес-ключ документа (ФВ-3.9). Право <c>Document.ChangeKey</c>.</summary>
+    /// <remarks>
+    /// Причина обов'язкова (<c>422</c>); ключ зайнятий, застарілий <c>expectedBusinessKey</c>
+    /// або аркуш поданий/погоджений — <c>409</c> <c>ECR-DOC-0409</c>.
+    /// </remarks>
+    [HttpPost("{id:long}/business-key")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> ChangeKey(long id, [FromBody] ChangeDocumentKeyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        await changeKey
+            .HandleAsync(id, request.BusinessKey, request.ExpectedBusinessKey, request.Reason, ct)
+            .ConfigureAwait(false);
+
         return NoContent();
     }
 
@@ -409,7 +431,8 @@ public sealed class DocumentsController(
                 id,
                 new Ecr.Application.Ports.ExcelExportOptions(
                     request.IncludeFormulas, request.IncludeStyles, request.Language, request.PeriodKey),
-                ct)
+                ct,
+                request.Format)
             .ConfigureAwait(false);
 
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
@@ -429,16 +452,17 @@ public sealed class DocumentsController(
     // може. Форма `Type = typeof(FileResult)` каже це прямо; узагальнена
     // `ProducesResponseType<T>` описувала б неіснуючий об'єкт.
     [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(FileResult))]
-    [Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+    [Produces(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/zip",
+        "application/json")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadExport(long id, string exportId, CancellationToken ct)
     {
         var content = await downloadExport.HandleAsync(exportId, ct).ConfigureAwait(false);
+        var (contentType, extension) = Ecr.Application.Documents.DocumentExportFormat.OfContent(content);
 
-        return File(
-            content,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"document-{id}-{exportId}.xlsx");
+        return File(content, contentType, $"document-{id}-{exportId}.{extension}");
     }
 
     /// <summary>Попередній перегляд імпорту. Право <c>Document.Import</c>.</summary>
@@ -535,18 +559,25 @@ public sealed record ApproveSheetRequest(int SheetDefId, int PeriodKey, bool App
 /// <param name="Reason">Причина; обов'язкова.</param>
 public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string Reason);
 
+/// <summary>Запит на зміну бізнес-ключа документа (ФВ-3.9).</summary>
+/// <param name="BusinessKey">Новий ключ.</param>
+/// <param name="ExpectedBusinessKey">Чинний ключ, який бачила людина; розбіжність — 409.</param>
+/// <param name="Reason">Причина; обов'язкова, лягає в аудит.</param>
+public sealed record ChangeDocumentKeyRequest(string? BusinessKey, string? ExpectedBusinessKey, string? Reason);
+
 /// <summary>Запит на експорт.</summary>
 /// <param name="IncludeFormulas">Транслювати вирази в Excel-синтаксис (ФВ-4.2).</param>
 /// <param name="IncludeStyles">Переносити стилі шаблону.</param>
 /// <param name="Language">Мова заголовків.</param>
 /// <param name="PeriodKey">Період вивантаження (R-A6).</param>
+/// <param name="Format"><c>xlsx</c> (типово), <c>csv</c> (zip, файл на таблицю) або <c>json</c> — ФВ-4.2.</param>
 /// <remarks>
 /// ⚠ Період обовʼязковий: подання, затвердження і перерахунок працюють за
 /// період, і «експорт усього документа» означав би книгу, у якій неможливо
 /// сказати, який стовпчик за який місяць.
 /// </remarks>
 public sealed record ExportRequest(
-    bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey);
+    bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey, string? Format = null);
 
 /// <summary>Запит на застосування імпорту.</summary>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>

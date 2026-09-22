@@ -90,7 +90,14 @@ public sealed class ConstantResolver(IConstantStore constants)
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Константа «{code}» версії {methodologyVersionId} має {byCategory.Count} кандидатів "
-                + $"на {onDate:yyyy-MM-dd}: вибір неоднозначний.");
+                + $"на {onDate:yyyy-MM-dd}: вибір неоднозначний.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantAmbiguous",
+                    ["code"] = code,
+                    ["count"] = byCategory.Count,
+                    ["date"] = onDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var chosen = byCategory[0];
@@ -104,7 +111,12 @@ public sealed class ConstantResolver(IConstantStore constants)
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Константа «{code}» версії {methodologyVersionId} оголошена числовою, "
-                + $"але містить «{chosen.TextValue ?? "—"}»: значення не є числом.");
+                + $"але містить «{chosen.TextValue ?? "—"}»: значення не є числом.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantNotNumeric",
+                    ["code"] = code,
+                });
         }
 
         // ⛔ Мітка категорії у виразі — помилка публікації, а не значення. Тут
@@ -114,7 +126,12 @@ public sealed class ConstantResolver(IConstantStore constants)
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Константа «{code}» версії {methodologyVersionId} — мітка категорії "
-                + "і у виразах не бере участі.");
+                + "і у виразах не бере участі.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantIsCategoryLabel",
+                    ["code"] = code,
+                });
         }
 
         return chosen.Kind == ConstantKind.Numeric

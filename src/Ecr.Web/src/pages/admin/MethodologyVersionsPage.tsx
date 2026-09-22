@@ -87,6 +87,19 @@ const MethodologyRulesPanel = lazyPanel('MethodologyRulesPanel');
 const MethodologyTestsPanel = lazyPanel('MethodologyTestsPanel');
 
 /**
+ * ⚠ Матриця покриття правил — ВЛАСНИЙ чанк, а не восьмий експорт
+ * `MethodologyContentPanels.tsx`: нова функціональність іде в нові файли, і
+ * власний `import()` тримає її поза чанком маршруту рівно так само, як
+ * `lazyPanel` тримає сім попередніх. Спільного модуля вона не потребує —
+ * ні станів, ні чернеток панелей змісту вона не читає.
+ */
+const MethodologyRuleCoveragePanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/RuleCoveragePanel');
+
+  return { default: loaded.MethodologyRuleCoveragePanel };
+});
+
+/**
  * Конфігуратор версії методології: формули чернетки (`ФВ-9.15`).
  *
  * ⛔ Екран існує заради одного правила, і воно ж робить його небезпечним:
@@ -596,6 +609,19 @@ export function MethodologyVersionsPage(): JSX.Element {
           <MethodologyBindingsPanel
             methodologyId={methodologyId}
             editable={can(session.data, 'Calculation.EditRule')}
+          />
+
+          {/* ⚠ Стоїть ОСТАННЬОЮ і навмисно: матриця покриття — не ще один
+              шматок змісту версії, а перевірка того, що складене вище справді
+              зачіпає рядки. Правило без жодного рядка й рядок без жодного
+              правила обидва дають перерахунок, що завершується успіхом і не
+              рахує нічого, — і побачити це можна лише коли решта вже задана.
+
+              ⚠ Права на редагування панель не питає: вона нічого не змінює,
+              а `Calculation.View` уже є в кожного, хто відкрив цей екран. */}
+          <MethodologyRuleCoveragePanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
           />
           </Suspense>
         </>

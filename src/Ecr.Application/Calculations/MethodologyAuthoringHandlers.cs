@@ -771,7 +771,14 @@ public sealed class ListCalculationBindingsHandler(
 
         var found = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
 
-        return [.. found.Select(MethodologyAuthoringMap.Binding)];
+        // Назви таблиць — одним запитом на весь перелік, не по запиту на прив'язку.
+        var tables = await bindings
+            .ListTableNamesAsync([.. found.Select(b => b.TableDefId).Distinct()], ct)
+            .ConfigureAwait(false);
+
+        return [.. found.Select(b => tables.TryGetValue(b.TableDefId, out var table)
+            ? MethodologyAuthoringMap.Binding(b) with { TableCode = table.Code, TableNameL10n = table.NameL10n }
+            :MethodologyAuthoringMap.Binding(b))];
     }
 }
 

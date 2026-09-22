@@ -115,7 +115,13 @@ public sealed class Methodology : Entity<int>
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Версія {version.Version} не належить методології {Code}.");
+                $"Версія {version.Version} не належить методології {Code}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.versionNotInMethodology",
+                    ["version"] = version.Version,
+                    ["code"] = Code,
+                });
         }
 
         var clash = _versions.FirstOrDefault(

@@ -369,6 +369,12 @@ public static class ErrorCodes
     /// тим самим кодом відмовляє й видалення версії (BE-25); випадок — у <c>messageKey</c>.
     /// </summary>
     public const string MethodologyConflict = "ECR-CALC-0409";
+
+    /// <summary>
+    /// Невалідний запит до методології (<c>ECR-CALC-0422</c>). Кодом відмовляє
+    /// не лише публікація без зеленого тесту, тож заголовок нейтральний, а
+    /// випадок — у <c>messageKey</c>.
+    /// </summary>
     public const string MethodologyInvalid = "ECR-CALC-0422";
     public const string RecalculateClosedPeriod = "ECR-CALC-4221";
 

@@ -1670,6 +1670,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/business-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.
+         * @description Причина обов'язкова (`422`); ключ зайнятий, застарілий `expectedBusinessKey`
+         *     або аркуш поданий/погоджений — `409` `ECR-DOC-0409`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "application/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                    "text/json": components["schemas"]["ChangeDocumentKeyRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/calculation-results": {
         parameters: {
             query?: never;
@@ -1807,7 +1886,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
+                        "application/json": components["schemas"]["FileResult"];
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["FileResult"];
+                        "application/zip": components["schemas"]["FileResult"];
                     };
                 };
                 /** @description Not Found */
@@ -1816,7 +1897,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": components["schemas"]["ProblemDetails"];
+                        "application/zip": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -3287,8 +3370,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth`
-         *     (директива №11, T10 #40).
+         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth` — або
+         *     автор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).
          * @description ⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:
          *     клієнт, що вже показує цю задачу, продовжує опитувати той самий
          *     `GET /jobs/{jobId}`.
@@ -5001,6 +5084,78 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/methodologies/{id}/versions/{vid}/rule-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Матриця покриття «рядки реальних даних × правила» (ФВ-13.9). Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише одна з таблиць прив'язок. */
+                    tableDefId?: number;
+                    /** @description Нижня межа вікна періодів; типово — початок минулого року. */
+                    periodFrom?: number;
+                    /** @description Верхня межа; типово — кінець поточного року. */
+                    periodTo?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                    /** @description Версія. */
+                    vid: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RuleCoverageDto"];
+                        "text/json": components["schemas"]["RuleCoverageDto"];
+                        "text/plain": components["schemas"]["RuleCoverageDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -11318,6 +11473,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ui-strings/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Експорт перекладу в CSV: `key, scope, en, &lt;lang&gt;, updatedAt`. Право `System.ManageLocalization`.
+         * @description UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу (не мова за замовчуванням). */
+                    lang?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["FileResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui-strings/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Імпорт перекладу з CSV. Право `System.ManageLocalization`.
+         * @description Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна
+         *     помилка або `dryRun` — не записано нічого. Стеля файлу —
+         *     `Localization:ImportMaxBytes`.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Мова перекладу. */
+                    lang?: string;
+                    /** @description Лише перевірка. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "multipart/form-data": {
+                        file?: components["schemas"]["IFormFile"];
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UiStringImportReport"];
+                        "text/json": components["schemas"]["UiStringImportReport"];
+                        "text/plain": components["schemas"]["UiStringImportReport"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ui-strings/{lang}": {
         parameters: {
             query?: never;
@@ -12672,11 +12964,15 @@ export interface components {
             methodologyId: number;
             /** @description Який вихід методології лягає в колонку. */
             outputCode: string;
+            /** @description Код таблиці. Заповнює лише перелік прив'язок (`GET …/bindings`);
+             *     в інших відповідях — `null`. */
+            tableCode?: null | string;
             /**
              * Format: int32
              * @description Таблиця колонки-приймача.
              */
             tableDefId: number;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /**
          * @description Рівень драбини виразності для методології (ФВ-9.2).
@@ -12957,6 +13253,15 @@ export interface components {
          * @enum {unknown}
          */
         ChangeClass: "Presentation" | "Safe" | "Guarded" | "Breaking";
+        /** @description Запит на зміну бізнес-ключа документа (ФВ-3.9). */
+        ChangeDocumentKeyRequest: {
+            /** @description Новий ключ. */
+            businessKey: null | string;
+            /** @description Чинний ключ, який бачила людина; розбіжність — 409. */
+            expectedBusinessKey: null | string;
+            /** @description Причина; обов'язкова, лягає в аудит. */
+            reason: null | string;
+        };
         /** @description Запит на зміну пароля. */
         ChangePasswordRequest: {
             /** @description Поточний пароль. */
@@ -13784,6 +14089,8 @@ export interface components {
         };
         /** @description Запит на експорт. */
         ExportRequest: {
+            /** @description `xlsx` (типово), `csv` (zip, файл на таблицю) або `json` — ФВ-4.2. */
+            format?: null | string;
             /** @description Транслювати вирази в Excel-синтаксис (ФВ-4.2). */
             includeFormulas: boolean;
             /** @description Переносити стилі шаблону. */
@@ -14084,6 +14391,9 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /** @description Відносний шлях API до файлу результату (книга експорту) — лише для
+             *     `Succeeded` з файлом і читача з `Document.Export`; інакше `null` (UX-09). */
+            resultUrl?: null | string;
             /** @description Стан. */
             state: string;
         };
@@ -14129,6 +14439,8 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /** @description Як string? JobStatus.ResultUrl (UX-09). */
+            resultUrl?: null | string;
             /**
              * Format: date-time
              * @description Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC
@@ -16085,6 +16397,70 @@ export interface components {
          * @enum {unknown}
          */
         RowKind: "Group" | "Item" | "Balance" | "Note" | "Header";
+        /** @description Одна комбінація значень (коди, не числа звітності) і що з нею роблять правила. */
+        RuleCoverageCombinationDto: {
+            /**
+             * Format: int32
+             * @description Кількість документів.
+             */
+            documents: number;
+            /** @description Усі збіжні правила; після переможця — нічия або затінені. */
+            matchedRuleCodes: string[];
+            /**
+             * Format: int64
+             * @description Кількість рядків.
+             */
+            rows: number;
+            /** @description Стан. */
+            state: components["schemas"]["RuleCoverageState"];
+            /** @description Значення в порядку `ColumnDefIds`; `null` — порожньо. */
+            values: string[];
+            /** @description Правило-переможець; `null` для розриву. */
+            winnerRuleCode: null | string;
+        };
+        /** @description Матриця покриття «рядки реальних даних × правила» версії методології. */
+        RuleCoverageDto: {
+            /** @description Колонки осі — ті, що згадують правила; порядок значень у комбінації. */
+            columnDefIds: number[];
+            /** @description Комбінації: розриви → конфлікти → покриті, далі за кількістю рядків. */
+            combinations: components["schemas"]["RuleCoverageCombinationDto"][];
+            /**
+             * Format: int32
+             * @description Версія.
+             */
+            methodologyVersionId: number;
+            /**
+             * Format: int32
+             * @description Нижня межа вікна періодів (включно), фактично застосована.
+             */
+            periodFrom: number;
+            /**
+             * Format: int32
+             * @description Верхня межа (включно).
+             */
+            periodTo: number;
+            /** @description Активні правила в порядку пріоритету. */
+            rules: components["schemas"]["RuleCoverageRuleDto"][];
+            /** @description Таблиці, рядки яких бралися. */
+            tableDefIds: number[];
+            /** @description Комбінацій більше за стелю; показано найчисленніші. */
+            truncated: boolean;
+        };
+        /** @description Правило осі матриці. */
+        RuleCoverageRuleDto: {
+            /** @description Код правила. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Пріоритет; менше — вищий.
+             */
+            priority: number;
+        };
+        /**
+         * @description Стан комбінації значень у матриці покриття (ФВ-13.9).
+         * @enum {unknown}
+         */
+        RuleCoverageState: "Gap" | "Conflict" | "Covered";
         /** @description Запит на прогін перевірки узгодженості. */
         RunConsistencyCheckRequest: {
             /** @description Причина; обов'язкова, потрапляє в журнал безпеки (`aud.SecurityEvent`). */
@@ -17323,6 +17699,45 @@ export interface components {
         UiStringCoverageResponse: {
             /** @description Увімкнені мови в порядку показу. */
             languages: components["schemas"]["UiStringCoverageDto"][];
+        };
+        /** @description Помилка одного рядка імпорту. */
+        UiStringImportError: {
+            /** @description Ключ, як його записано у файлі. */
+            key: string;
+            /** @description Ключ тексту відмови в каталозі. */
+            messageKey: string;
+            /**
+             * Format: int32
+             * @description Номер запису у файлі; заголовок — 1.
+             */
+            row: number;
+        };
+        /** @description Звіт імпорту перекладу. */
+        UiStringImportReport: {
+            /**
+             * Format: int32
+             * @description Нових перекладів.
+             */
+            added: number;
+            /** @description Чи записано зміни. */
+            applied: boolean;
+            /** @description Відхилені рядки; є хоч один — не застосовано нічого. */
+            errors: components["schemas"]["UiStringImportError"][];
+            /**
+             * Format: int32
+             * @description Версія каталогу після імпорту.
+             */
+            revision: number;
+            /**
+             * Format: int32
+             * @description Тих самих, що вже в базі.
+             */
+            unchanged: number;
+            /**
+             * Format: int32
+             * @description Змінених.
+             */
+            updated: number;
         };
         /** @description Адміністративний перелік рядків мови — без fallback. */
         UiStringListResponse: {

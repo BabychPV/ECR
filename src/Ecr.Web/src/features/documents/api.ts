@@ -151,3 +151,44 @@ export function useDocumentListSummary(
     enabled: periodKey !== null,
   });
 }
+
+/** Право, під яким сервер приймає зміну бізнес-ключа документа (ФВ-3.9). */
+export const ChangeDocumentKeyPermission = 'Document.ChangeKey';
+
+/**
+ * Найдовший бізнес-ключ документа — дзеркало
+ * `ChangeDocumentKeyHandler.MaxKeyLength` (колонка `doc.Document.BusinessKey`).
+ */
+export const BusinessKeyMaxLength = 200;
+
+/** Параметри зміни бізнес-ключа документа. */
+export interface ChangeDocumentKeyParams {
+  readonly documentId: number;
+  /** Новий ключ. */
+  readonly businessKey: string;
+  /** Ключ, який людина БАЧИТЬ на екрані зараз; розбіжність із чинним — `409 rekeyStale`. */
+  readonly expectedBusinessKey: string;
+  /** Причина; обов'язкова, лягає в аудит. */
+  readonly reason: string;
+}
+
+/**
+ * Змінює бізнес-ключ документа (ФВ-3.9): право `Document.ChangeKey` + грант
+ * Write на проєкт.
+ *
+ * ⚠ Ключ зайнятий — `409` `err.ECR-DOC-0409.rekeyDuplicate`; поданий чи
+ * погоджений аркуш — `409` `err.ECR-DOC-0409.rekeyLocked`; `expectedBusinessKey`
+ * розійшовся з чинним (хтось уже змінив ключ) — `409` `err.ECR-DOC-0409.rekeyStale`;
+ * причина порожня чи ключ поза 1–200 символів або збігається з чинним — `422`
+ * `err.ECR-DOC-0422.rekeyReasonRequired`/`rekeyKeyInvalid`.
+ */
+export function changeDocumentBusinessKey(params: ChangeDocumentKeyParams): Promise<void> {
+  return apiFetch<void>(`/api/v1/documents/${String(params.documentId)}/business-key`, {
+    method: 'POST',
+    body: JSON.stringify({
+      businessKey: params.businessKey,
+      expectedBusinessKey: params.expectedBusinessKey,
+      reason: params.reason,
+    } satisfies components['schemas']['ChangeDocumentKeyRequest']),
+  });
+}

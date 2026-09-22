@@ -2936,7 +2936,8 @@ USING (VALUES
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
   (N'System.ManageLocalization', N'System',     0),
-  (N'System.ManageNotifications', N'System',    1)   -- BE-32: небезпечне, як Integration.Manage
+  (N'System.ManageNotifications', N'System',    1),  -- BE-32: небезпечне, як Integration.Manage
+  (N'Document.ChangeKey',       N'Document',    1)   -- ФВ-3.9: зміна бізнес-ключа, небезпечне
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)

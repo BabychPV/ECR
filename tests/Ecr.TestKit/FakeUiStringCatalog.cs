@@ -112,6 +112,59 @@ public sealed class FakeUiStringCatalog : IUiStringCatalog
         }
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<UiStringExportRow>> ListForExportAsync(string languageCode, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<UiStringExportRow> rows =
+            [
+                .. _rows
+                    .Where(r => r.Key.Language == UiStringResolver.DefaultLanguage)
+                    .OrderBy(r => r.Key.Key, StringComparer.Ordinal)
+                    .Select(r =>
+                    {
+                        var value = _rows.TryGetValue((languageCode, r.Key.Key), out var own)
+                                    && own.Value.Length > 0 ? own : null;
+                        return new UiStringExportRow(
+                            r.Key.Key, r.Value.Scope, r.Value.Value, value?.Value, value?.ModifiedAt);
+                    }),
+            ];
+
+            return Task.FromResult(rows);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<int> SetManyAsync(IReadOnlyList<UiStringWrite> writes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(writes);
+
+        lock (_gate)
+        {
+            foreach (var write in writes)
+            {
+                _rows[(write.LanguageCode, write.Key)] = new Row(write.Value, write.Scope, write.ModifiedAt);
+            }
+
+            if (writes.Count > 0)
+            {
+                _revision++;
+            }
+
+            return Task.FromResult(_revision);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<bool> LanguageExistsAsync(string languageCode, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_rows.Keys.Any(k => string.Equals(k.Language, languageCode, StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
     private UiStringCatalog Build(string languageCode, UiStringScope? scope)
     {
         lock (_gate)
@@ -133,5 +186,5 @@ public sealed class FakeUiStringCatalog : IUiStringCatalog
                         && (scope is null || r.Value.Scope == scope))
             .ToDictionary(r => r.Key.Key, r => r.Value.Value, StringComparer.Ordinal);
 
-    private sealed record Row(string Value, UiStringScope Scope);
+    private sealed record Row(string Value, UiStringScope Scope, DateTime? ModifiedAt = null);
 }

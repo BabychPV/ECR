@@ -43,7 +43,8 @@ public sealed class MethodologyDependency : Entity<int>
             throw new DomainException(
                 "ECR-CALC-0422",
                 $"Методологія {fromMethodologyId} не може залежати від самої себе: "
-                + "ребро-петля зупиняє топологічний порядок усього перерахунку.");
+                + "ребро-петля зупиняє топологічний порядок усього перерахунку.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-0422.selfDependency" });
         }
 
         FromMethodologyId = fromMethodologyId;
