@@ -7091,7 +7091,54 @@ export interface paths {
             };
         };
         post?: never;
-        delete?: never;
+        /** Скасовує чернетку опису без публікації. Право `Registry.EditDefinition` (`BE-24`). */
+        delete: {
+            parameters: {
+                query?: {
+                    /** @description Версія чернетки. У query, а не в тілі: тіло DELETE частина клієнтів і
+                     *     проксі відкидає, а більше нічого запит не несе. */
+                    rowVersion?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
