@@ -87,6 +87,7 @@ public static class DependencyInjection
         services.AddScoped<IValidationResultStore, ValidationResultStore>();
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
+        services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
         services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IUnitStore, UnitStore>();
         services.AddScoped<IUserPreferenceStore, UserPreferenceStore>();

@@ -214,6 +214,9 @@ public static class DependencyInjection
         // мапінг і історія опису.
         services.AddScoped<Registries.GetRegistryDefinitionHandler>();
         services.AddScoped<Registries.SaveRegistryDefinitionHandler>();
+        services.AddScoped<Registries.GetRegistryDefinitionDraftHandler>();
+        services.AddScoped<Registries.SaveRegistryDefinitionDraftHandler>();
+        services.AddScoped<Registries.PublishRegistryDefinitionHandler>();
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
 

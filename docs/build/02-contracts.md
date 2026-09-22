@@ -2528,6 +2528,20 @@ public interface IRegistryStore
 }
 ```
 
+#### `IRegistryDraftStore`
+
+Чернетки опису довідників `cfg.RegistryDefinitionDraft` (BE-24 крок 2): одна
+на довідник, публікація застосовує її і видаляє.
+
+```csharp
+public interface IRegistryDraftStore
+{
+    public Task<RegistryDefinitionDraft?> FindAsync(int registryDefId, CancellationToken ct);
+    public void Add(RegistryDefinitionDraft draft);
+    public void Remove(RegistryDefinitionDraft draft);
+}
+```
+
 #### `IReportDefinitionStore`
 
 Описи звітів (rpt.ReportDef) та їхні версії.
@@ -3262,7 +3276,10 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |
-| `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` | 8 |
+| `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` + `Registry.Publish` | 8 |
+| `GET` | `/api/v1/registries/{code}/definition/draft` | `Registry.View` | 8 |
+| `PUT` | `/api/v1/registries/{code}/definition/draft` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |

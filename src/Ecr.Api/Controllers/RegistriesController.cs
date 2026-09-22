@@ -21,7 +21,10 @@ public sealed class RegistriesController(
     SaveRegistryDefinitionHandler saveDefinition,
     DeleteRegistryEntryHandler deleteEntry,
     GetRegistryHistoryHandler getHistory,
-    GetRegistryUsageHandler getUsage) : ControllerBase
+    GetRegistryUsageHandler getUsage,
+    GetRegistryDefinitionDraftHandler getDraft,
+    SaveRegistryDefinitionDraftHandler saveDraft,
+    PublishRegistryDefinitionHandler publish) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -93,7 +96,9 @@ public sealed class RegistriesController(
         => Ok(await getDefinition.HandleAsync(code, ct).ConfigureAwait(false));
 
     /// <summary>
-    /// Зберігає опис довідника: поля і правила. Право <c>Registry.EditDefinition</c>.
+    /// Зберігає і одразу публікує опис довідника: поля і правила. Права
+    /// <c>Registry.EditDefinition</c> і <c>Registry.Publish</c> (`BE-24`: без
+    /// другого маршрут обходив би публікацію чернетки).
     /// </summary>
     /// <param name="code">Код довідника.</param>
     /// <param name="dto">Повний стан опису після правки.</param>
@@ -119,6 +124,47 @@ public sealed class RegistriesController(
         // «збережено і нічого не змінилося» для того, хто відкрив екран удруге.
         return Ok(new RegistryDefinitionVersionResponse(version));
     }
+
+    /// <summary>Чернетка опису довідника, якщо є. Право <c>Registry.View</c> (`BE-24`).</summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("{code}/definition/draft")]
+    [ProducesResponseType<RegistryDefinitionDraftStateResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RegistryDefinitionDraftStateResponse>> Draft(string code, CancellationToken ct)
+        => Ok(await getDraft.HandleAsync(code, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Зберігає чернетку опису; опублікований опис не змінюється. Право
+    /// <c>Registry.EditDefinition</c> (`BE-24`).
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="request">Повний стан полів і правил, причина, версія чернетки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPut("{code}/definition/draft")]
+    [ProducesResponseType<RegistryDefinitionDraftDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RegistryDefinitionDraftDto>> SaveDraft(
+        string code, [FromBody] SaveRegistryDefinitionDraftRequest request, CancellationToken ct)
+        => Ok(await saveDraft.HandleAsync(code, request, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Публікує чернетку опису. Право <c>Registry.Publish</c> (`BE-24`).
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="request">Версія чернетки, яку публікують.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("{code}/definition/publish")]
+    [ProducesResponseType<RegistryDefinitionVersionResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Publish(
+        string code, [FromBody] PublishRegistryDefinitionRequest request, CancellationToken ct)
+        => Ok(new RegistryDefinitionVersionResponse(
+            await publish.HandleAsync(code, request, ct).ConfigureAwait(false)));
 
     /// <summary>
     /// Історія змін опису довідника. Право <c>Registry.View</c>.

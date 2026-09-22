@@ -783,6 +783,23 @@ CREATE TABLE cfg.RegistryRuleDef
 );
 GO
 
+-- Чернетка опису довідника (BE-24 крок 2, міграція BE24RegistryDefinitionDraft):
+-- поля й правила, ще не застосовані до cfg.RegistryDef. Одна на довідник;
+-- публікація (право Registry.Publish) застосовує її і видаляє рядок.
+CREATE TABLE cfg.RegistryDefinitionDraft
+(
+    RegistryDefId         int            NOT NULL,
+    BaseDefinitionVersion int            NOT NULL,
+    ContentJson           nvarchar(max)  NOT NULL,
+    Reason                nvarchar(1000) NOT NULL,
+    UpdatedByUserId       int            NOT NULL,
+    UpdatedAt             datetime2(3)   NOT NULL,
+    RowVersion            rowversion     NOT NULL,
+    CONSTRAINT PK_RegistryDefinitionDraft PRIMARY KEY (RegistryDefId),
+    CONSTRAINT FK_RegDraft_Registry FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding

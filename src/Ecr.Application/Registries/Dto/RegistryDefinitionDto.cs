@@ -168,3 +168,44 @@ public sealed record SaveRegistryDefinitionDto(
     IReadOnlyList<RegistryFieldSaveDto> Fields,
     IReadOnlyList<RegistryRuleSaveDto> Rules,
     string Reason);
+
+/// <summary>Запит на збереження чернетки опису (<c>BE-24</c> крок 2).</summary>
+/// <param name="Fields">Повний перелік полів після правки.</param>
+/// <param name="Rules">Повний перелік правил після правки.</param>
+/// <param name="Reason">Причина зміни; при публікації йде в журнал.</param>
+/// <param name="RowVersion">
+/// Версія чернетки, від якої відштовхується правка; <c>null</c> — чернетки ще немає.
+/// </param>
+public sealed record SaveRegistryDefinitionDraftRequest(
+    IReadOnlyList<RegistryFieldSaveDto> Fields,
+    IReadOnlyList<RegistryRuleSaveDto> Rules,
+    string Reason,
+    string? RowVersion);
+
+/// <summary>Запит на публікацію чернетки опису.</summary>
+/// <param name="RowVersion">Версія чернетки, яку публікують.</param>
+public sealed record PublishRegistryDefinitionRequest(string RowVersion);
+
+/// <summary>Чернетка опису довідника.</summary>
+/// <param name="BaseDefinitionVersion">Версія опублікованого опису, від якої відштовхується чернетка.</param>
+/// <param name="Fields">Поля чернетки.</param>
+/// <param name="Rules">Правила чернетки.</param>
+/// <param name="Reason">Причина зміни.</param>
+/// <param name="UpdatedAt">Момент останнього збереження, UTC.</param>
+/// <param name="UpdatedByUserId">Хто зберіг востаннє.</param>
+/// <param name="RowVersion">Версія для наступного збереження чи публікації.</param>
+public sealed record RegistryDefinitionDraftDto(
+    int BaseDefinitionVersion,
+    IReadOnlyList<RegistryFieldSaveDto> Fields,
+    IReadOnlyList<RegistryRuleSaveDto> Rules,
+    string Reason,
+    DateTime UpdatedAt,
+    int UpdatedByUserId,
+    string RowVersion);
+
+/// <summary>Стан чернетки опису довідника.</summary>
+/// <param name="DefinitionVersion">Поточна версія ОПУБЛІКОВАНОГО опису.</param>
+/// <param name="Draft">Чернетка; <c>null</c> — чернетки немає.</param>
+public sealed record RegistryDefinitionDraftStateResponse(
+    int DefinitionVersion,
+    RegistryDefinitionDraftDto? Draft);
