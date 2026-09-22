@@ -2540,6 +2540,14 @@ USING (VALUES
     (N'uiStrings.emptyHint',             N'en', N'The catalogue is filled from the default language; clear the filter to see everything.', 1),
     (N'uiStrings.coverage',              N'en', N'{language}: {translated} of {total} translated, {missing} missing', 1),
     (N'uiStrings.missingOnly',           N'en', N'Missing only', 1),
+    -- Обмін перекладом через CSV (BE-13 ч.2). ⚠ Імпорт або застосовується
+    -- цілком, або не пише нічого: підказка каже це прямо, щоб людина не шукала
+    -- «частково імпортовані» рядки.
+    (N'uiStrings.exportCsv',             N'en', N'Export CSV', 1),
+    (N'uiStrings.importCsv',             N'en', N'Import CSV…', 1),
+    (N'uiStrings.importCounts',          N'en', N'added {added}, updated {updated}, unchanged {unchanged}', 1),
+    (N'uiStrings.importBlockedHint',     N'en', N'Nothing has been written: fix the rows listed below and pick the file again.', 1),
+    (N'uiStrings.importReady',           N'en', N'The file is valid: nothing to fix.', 1),
 
     -- Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
     --
