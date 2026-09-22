@@ -114,6 +114,13 @@
 повністю, 25 кидків. Заголовки `ECR-REG-0422` і `ECR-REG-0409` стали
 нейтральними: у обох кодів кілька причин, яку саме — каже подробиця.
 
+✎ **2026-09-22: запис довідника й доменні відмови** — `UpsertRegistryEntryHandler`
+(6), `GetRegistryEntriesHandler` (2), `SetEntryValidityHandler` (2),
+`RegistryValue` (8), `RegistryEntryLink` (3), `RegistryRuleDef` (3),
+`RegistryDef` (2) закрито повністю, 26 кидків. Заголовок `ECR-REG-0404` став
+нейтральним («Registry item not found»): ним відмовляють і для довідника,
+запису, поля, правила.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -142,9 +149,6 @@
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
 | `src/Ecr.Application/Projects/ProjectQueryHandlers.cs` | 15 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
-| `src/Ecr.Application/Registries/GetRegistryEntriesHandler.cs` | 2 |
-| `src/Ecr.Application/Registries/SetEntryValidityHandler.cs` | 2 |
-| `src/Ecr.Application/Registries/UpsertRegistryEntryHandler.cs` | 6 |
 | `src/Ecr.Application/Reporting/ReportDefHandlers.cs` | 10 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 2 |
 | `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
@@ -179,15 +183,11 @@
 | `src/Ecr.Domain/Entities/Configuration/ColumnDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
 | `src/Ecr.Domain/Entities/Configuration/PeriodAccessRuleDef.cs` | 4 |
-| `src/Ecr.Domain/Entities/Configuration/RegistryDef.cs` | 2 |
-| `src/Ecr.Domain/Entities/Configuration/RegistryRuleDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/SheetDef.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/TableDef.cs` | 5 |
 | `src/Ecr.Domain/Entities/Configuration/TableRelationDef.cs` | 5 |
 | `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
-| `src/Ecr.Domain/Entities/Dictionaries/RegistryEntryLink.cs` | 3 |
-| `src/Ecr.Domain/Entities/Dictionaries/RegistryValue.cs` | 8 |
 | `src/Ecr.Domain/Entities/Documents/PeriodPolicy.cs` | 2 |
 | `src/Ecr.Domain/Entities/Documents/Project.cs` | 3 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |

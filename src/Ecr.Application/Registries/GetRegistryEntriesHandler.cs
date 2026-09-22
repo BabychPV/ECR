@@ -51,11 +51,18 @@ public sealed class GetRegistryEntriesHandler(
                 Domain.Errors.ErrorCodes.RequestInvalid,
                 "Параметр asOf обов'язковий: довідники темпоральні, і перелік записів "
                 + "залежить від дати періоду, а не від «сьогодні».",
-                new Dictionary<string, object?> { ["parameter"] = "asOf" });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.asOfRequired",
+                    ["parameter"] = "asOf",
+                });
         }
 
         var definition = await registries.FindDefinitionAsync(registryCode, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Довідника «{registryCode}» не існує.");
+            ?? throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Довідника «{registryCode}» не існує.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = registryCode });
 
         // ⚠ DataRevision у ключі, а не час життя: та сама схема, що з
         // метаданими (D-16). Запис довідника змінили — ключ інший, старе
