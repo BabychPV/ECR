@@ -6871,6 +6871,77 @@
         ],
         "type": "object"
       },
+      "RegistryEntryImportError": {
+        "description": "Помилка одного рядка імпорту записів довідника.",
+        "properties": {
+          "field": {
+            "description": "Поле, якого стосується помилка; `null` — помилка самого рядка (код,\nдублікат), а не конкретного поля.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "key": {
+            "description": "Код запису, як його записано у файлі.",
+            "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ тексту відмови в каталозі.",
+            "type": "string"
+          },
+          "row": {
+            "description": "Номер рядка у файлі; заголовок — 1.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "key",
+          "field",
+          "messageKey"
+        ],
+        "type": "object"
+      },
+      "RegistryEntryImportReport": {
+        "description": "Звіт імпорту записів довідника (`BE-24`, крок 3).",
+        "properties": {
+          "added": {
+            "description": "Нових записів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "applied": {
+            "description": "Чи записано зміни.",
+            "type": "boolean"
+          },
+          "errors": {
+            "description": "Відхилені рядки; є хоч один — не застосовано нічого.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryEntryImportError"
+            },
+            "type": "array"
+          },
+          "unchanged": {
+            "description": "Наявних записів, для яких файл не передав жодного значення поля.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Записів, у яких змінилося хоча б одне поле.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "updated",
+          "unchanged",
+          "errors",
+          "applied"
+        ],
+        "type": "object"
+      },
       "RegistryEntryUpsertDto": {
         "description": "Створення або оновлення запису довідника.",
         "properties": {
@@ -22759,6 +22830,132 @@
           }
         },
         "summary": "Створює або оновлює запис. Право `Registry.EditData`.",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/entries/import": {
+      "post": {
+        "description": "Звіт — завжди 200: помилки рядків є даними для того, хто імпортує.\nХоч одна помилка або `dryRun` — не записано нічого. Стеля файлу —\n`Registries:ImportMaxBytes`. Колонки — коди полів ОПУБЛІКОВАНОГО\nопису плюс `code`; валідація значень — та сама, що при ручному\nредагуванні запису (UpsertRegistryEntryHandler).",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише перевірка.",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "$ref": "#/components/schemas/IFormFile"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryImportReport"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryImportReport"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryImportReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Імпорт записів довідника з CSV. Право `Registry.EditData` (`BE-24`).",
         "tags": [
           "Registries"
         ]
