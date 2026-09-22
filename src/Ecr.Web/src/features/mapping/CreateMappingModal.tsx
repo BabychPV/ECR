@@ -6,6 +6,7 @@ import { EcrApiError } from '@/api/client';
 import type { AggregationKind, FieldTargetKind } from '@/api/types';
 import { createEntityFieldMap } from './api';
 import { PiAfCatalogButton } from './PiAfCatalogPicker';
+import { PiAfProbeAction } from './PiAfProbeAction';
 import { t } from '@/shared/i18n';
 
 /** Способи згортання точок періоду (`D-118`), у порядку показу форми. */
@@ -102,6 +103,14 @@ export function CreateMappingModal({
             перевіряє вона сама — форма про них не знає. */}
         {dataSourceId !== undefined && (
           <PiAfCatalogButton dataSourceId={dataSourceId} onPick={setSourceField} />
+        )}
+
+        {/* ⛔ «Перевірити» (`ФВ-13.17`) — ДО першого збору: пробує РЕАЛЬНЕ
+            джерело тим самим шляхом, що вписаний чи підставлений вище, і
+            показує, чи він справді щось читає. Права перевіряє сама, як і
+            кнопка каталогу. */}
+        {dataSourceId !== undefined && (
+          <PiAfProbeAction dataSourceId={dataSourceId} path={sourceField} onPickSuggestion={setSourceField} />
         )}
 
         <Select
