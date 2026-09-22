@@ -881,6 +881,16 @@ USING (VALUES
     (N'err.ECR-REG-0422.fieldWrongRegistry', N'en', N'Field "{fieldCode}" belongs to registry {ownerRegistryDefId}, not {registryDefId}.', 1),
     (N'err.ECR-REG-0422.fieldCodeTaken',     N'en', N'Registry "{registryCode}" already has a field with code "{fieldCode}".', 1),
 
+    -- BE-24 крок 3: імпорт записів довідника з CSV (той самий патерн, що
+    -- err.ECR-REQ-0422.uiStringCsv* для перекладів, BE-13 ч.2).
+    (N'err.ECR-REQ-0422.registryEntriesCsvTooLarge', N'en', N'The file takes {size} bytes; the limit is {max}.', 1),
+    (N'err.ECR-REG-0422.entriesCsvHeaderCode', N'en', N'The first row of the file must name a "code" column.', 1),
+    (N'err.ECR-REG-0422.entriesCsvUnknownColumn', N'en', N'Registry "{registryCode}" has no field "{column}": the column is unknown.', 1),
+    (N'err.ECR-REG-0422.entryCodeRequired',  N'en', N'The code column is empty.', 1),
+    (N'err.ECR-REG-0422.entryCodeDuplicateInFile', N'en', N'This code already appears earlier in the file.', 1),
+    (N'err.ECR-REG-0422.entryRefNotFound',   N'en', N'No entry with this code exists in the referenced registry.', 1),
+    (N'err.ECR-REG-0422.entryImportRowFailed', N'en', N'The row was rejected: see the detail of the underlying rule.', 1),
+
     -- ⛔ Головні шляхи користувача: вхід і зміна пароля, подання / погодження /
     -- відхилення / повернення аркуша, створення документа й рядка, періоди,
     -- обмін книгами. Доти подробицею цих відмов їхало українське речення —
