@@ -27,8 +27,34 @@ public sealed class DataSourcesController(
     ListDataSourcesHandler list,
     SaveDataSourceHandler save,
     DeleteDataSourceHandler delete,
-    TestDataSourceConnectionHandler test) : ControllerBase
+    TestDataSourceConnectionHandler test,
+    BrowseSourceCatalogHandler catalog) : ControllerBase
 {
+    /// <summary>
+    /// Каталог імен джерела для мапінгу (ФВ-13.13). Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// Без <c>path</c> — кореневі елементи; зі шляхом — дочірні елементи й
+    /// атрибути елемента. Джерело не відповіло в межу
+    /// <c>Integration:CatalogTimeoutSeconds</c> або лежить — <c>503 ECR-INT-0503</c>;
+    /// відмовило в автентифікації — <c>502 ECR-INT-0502</c>.
+    /// </remarks>
+    [HttpGet("{id:int}/catalog")]
+    [ProducesResponseType<SourceCatalogPage>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Catalog(
+        int id,
+        [FromQuery] string? path,
+        [FromQuery] string? search,
+        [FromQuery] string? cursor,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+        => Ok(await catalog.HandleAsync(id, path, search, cursor, limit, ct).ConfigureAwait(false));
+
     /// <summary>Перелік джерел. Право <c>Integration.View</c> або <c>Integration.Manage</c>.</summary>
     /// <remarks>
     /// ⚠ Віддаються і вимкнені джерела: екран, з якого джерело вмикають назад,

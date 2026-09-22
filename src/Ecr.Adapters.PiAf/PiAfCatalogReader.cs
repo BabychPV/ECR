@@ -15,6 +15,7 @@ namespace Ecr.Adapters.PiAf;
 /// не буде (<c>D-44</c>, ФВ-11.2: «адаптер не створює артефактів у базі джерела»).
 /// </remarks>
 public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, ICollectionStore store)
+    : ISourceCatalogReader
 {
     /// <summary>Скільки вузлів одного рівня має сенс показати.</summary>
     /// <remarks>

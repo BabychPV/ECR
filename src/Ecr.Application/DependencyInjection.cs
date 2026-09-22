@@ -322,6 +322,7 @@ public static class DependencyInjection
         services.AddScoped<Integration.SaveDataSourceHandler>();
         services.AddScoped<Integration.DeleteDataSourceHandler>();
         services.AddScoped<Integration.TestDataSourceConnectionHandler>();
+        services.AddScoped<Integration.BrowseSourceCatalogHandler>();
 
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();

@@ -773,6 +773,10 @@ USING (VALUES
     -- ⚠ Версія рядка з'єднання: той самий контракт If-Match, що в розкладах.
     (N'err.ECR-REQ-0422.dataSourceIfMatch',               N'en', N'This request needs an If-Match header carrying the rowVersion of the data source you read.', 1),
     (N'err.ECR-JOB-0409.dataSourceChanged',               N'en', N'Someone else changed this data source after you read it: reload it and repeat the change.', 1),
+    -- ФВ-13.13: каталог імен джерела для мапінгу; межа очікування коротка.
+    (N'err.ECR-REQ-0422.catalogQueryInvalid',             N'en', N'A catalog page holds 1 to 200 items, a search is up to 200 characters, and the cursor must come from the previous page.', 1),
+    (N'err.ECR-INT-0503.catalogTimeout',                  N'en', N'Data source "{code}" did not return its catalog within {timeoutSeconds} s. Try again later.', 1),
+    (N'err.ECR-INT-0503.catalogUnavailable',              N'en', N'Data source "{code}" is unavailable, so its catalog could not be read. Try again later.', 1),
     -- ⛔ `BE-27`: дії над мапінгом. Пауза існує, щоб мапінг можна було спинити,
     -- НЕ стираючи пояснення вже зібраних точок, — тому речення про видалення
     -- мусить назвати її прямо, інакше відмова виглядає глухим кутом.
