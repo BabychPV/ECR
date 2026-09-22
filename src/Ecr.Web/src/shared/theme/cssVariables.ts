@@ -1,6 +1,6 @@
 import type { CSSVariablesResolver, MantineTheme } from '@mantine/core';
 import { flatten, parseColor } from './contrast';
-import { surfaces } from './theme';
+import { brandTextOnDark, surfaces } from './theme';
 
 /**
  * Токени макета → CSS-змінні (`UI-01`, директива №15 §1).
@@ -29,8 +29,12 @@ import { surfaces } from './theme';
 /** Індекс відтінку `brand`, з якого береться акцент у кожній схемі. */
 const AccentShade = { light: 6, dark: 5 } as const;
 
-/** Відтінок `brand` для акцентного ТЕКСТУ (на темному потрібен блідіший). */
-const AccentTextShade = { light: 6, dark: 3 } as const;
+/**
+ * Відтінок `brand` для акцентного ТЕКСТУ у світлій схемі. У темній — не індекс
+ * кортежу, а `brandTextOnDark` (`theme.ts`): одне значення на текст, межу й
+ * посилання, замінюване одним рядком.
+ */
+const AccentTextShade = { light: 6 } as const;
 
 /** Відтінок `brand` для кільця фокуса — той самий, що бере `motion.css`. */
 const FocusShade = { light: 6, dark: 4 } as const;
@@ -142,6 +146,28 @@ function statusLightBackground(theme: MantineTheme, scheme: Scheme): Record<stri
   return out;
 }
 
+/**
+ * `brand` як текст, межа й посилання — темна схема.
+ *
+ * ⛔ Дефолт Mantine за `primaryShade.dark = 5`: текст `light`/`subtle` —
+ * `brand[0]` (`#f4f4fc`), `outline` — `brand[1]` (`#e7e8f8`), тобто майже білий
+ * без фірмового відтінку; посилання й `c="brand"` — `brand[4]` (4.34 на
+ * `raised`, нижче AA). Усі п'ять змінних вирівняно на ОДНЕ значення
+ * `brandTextOnDark`. Заливка `filled` (`brand[5]`, білий 5.81) і кільце
+ * фокуса (`brand[4]`, `motion.css`) не змінюються.
+ */
+function brandOnDark(scheme: Scheme): Record<string, string> {
+  if (scheme !== 'dark') return {};
+
+  return {
+    '--mantine-color-brand-light-color': brandTextOnDark,
+    '--mantine-color-brand-outline': brandTextOnDark,
+    '--mantine-color-brand-outline-hover': withAlpha(brandTextOnDark, 0.05),
+    '--mantine-color-brand-text': brandTextOnDark,
+    '--mantine-color-anchor': brandTextOnDark,
+  };
+}
+
 /** Змінні однієї схеми. */
 function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, string> {
   const s = surfaces[scheme];
@@ -152,7 +178,7 @@ function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, st
   const danger = theme.colors['statusError'] ?? [];
 
   const accent = brand[AccentShade[scheme]] ?? s.text;
-  const accentText = brand[AccentTextShade[scheme]] ?? s.text;
+  const accentText = scheme === 'dark' ? brandTextOnDark : (brand[AccentTextShade.light] ?? s.text);
   const focus = brand[FocusShade[scheme]] ?? s.text;
 
   return {
@@ -178,6 +204,8 @@ function schemeVariables(theme: MantineTheme, scheme: Scheme): Record<string, st
     // Текст/межа `outline` (темна) і тло `light` (світла) — причини там само.
     ...statusOutline(theme, scheme),
     ...statusLightBackground(theme, scheme),
+    // `brand` як текст/межа/посилання в темній — причина в `brandOnDark`.
+    ...brandOnDark(scheme),
 
     // Поверхні: чотири рівні глибини.
     '--ecr-ground': s.ground,

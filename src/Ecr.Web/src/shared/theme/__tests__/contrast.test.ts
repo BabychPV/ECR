@@ -6,6 +6,7 @@ import { AA, contrast, flatten, parseColor } from '../contrast';
 import { cssVariablesResolver } from '../cssVariables';
 import {
   brand,
+  brandTextOnDark,
   cellState,
   statusError,
   statusSuccess,
@@ -609,6 +610,99 @@ describe('статусні кольори: текст «subtle»/«light» — �
         AA.text,
       );
     }
+  });
+
+  /*
+   * `brand` (2026-09-22, «на розсуд команди»): текст/посилання ≥ 4.5, межа й
+   * кільце фокуса ≥ 3, білий на заливці ≥ 4.5 — обидві схеми. Текст — не
+   * `[0]`/`[1]` і того самого відтінку, що `brand[6]` (±5° HSL).
+   */
+  const allSurfaces = (scheme: Scheme): string[] => [
+    ...pages.map((p) => surfaces[scheme][p]),
+    surfaces[scheme].accentSoft,
+    surfaces[scheme].select,
+    surfaces[scheme].hover,
+    surfaces[scheme].calcBg,
+    surfaces[scheme].hatch,
+  ];
+
+  function hue(hex: string): number {
+    const { r, g, b } = parseColor(hex);
+    const [R, G, B] = [r / 255, g / 255, b / 255];
+    const max = Math.max(R, G, B);
+    const d = max - Math.min(R, G, B);
+    if (d === 0) return NaN;
+    const h = max === R ? ((G - B) / d) % 6 : max === G ? (B - R) / d + 2 : (R - G) / d + 4;
+
+    return (h * 60 + 360) % 360;
+  }
+
+  it.each(['light', 'dark'] as const)('brand, схема «%s»: текст, посилання, межа — фірмовий відтінок, AA', (scheme) => {
+    const vars = mergedVars(scheme);
+    const textVars = [
+      '--mantine-color-brand-light-color',
+      '--mantine-color-brand-text',
+      '--mantine-color-anchor',
+      '--ecr-accent-text',
+    ];
+
+    for (const v of [...textVars, '--mantine-color-brand-outline']) {
+      const color = deref(vars, v);
+
+      expect(color, `${scheme}: ${v}`).not.toBe(brand[0]);
+      expect(color, `${scheme}: ${v}`).not.toBe(brand[1]);
+      expect(Math.abs(hue(color) - hue(brand[6])), `${scheme}: ${v} — відтінок brand[6]`).toBeLessThanOrEqual(5);
+
+      const threshold = textVars.includes(v) ? AA.text : AA.nonText;
+      for (const bg of allSurfaces(scheme)) {
+        expect(contrast(color, bg), `${scheme}: ${v} на ${bg}`).toBeGreaterThanOrEqual(threshold);
+      }
+    }
+
+    // Текст `light`/`subtle` на власному тлі й тлі наведення поверх кожної поверхні;
+    // `outline` (текст ТЕЖ) — на своєму тлі наведення.
+    const text = deref(vars, '--mantine-color-brand-light-color');
+    const outline = deref(vars, '--mantine-color-brand-outline');
+
+    // Темна: ОДНЕ значення на все — інакше заміна `brandTextOnDark` за
+    // брендбуком зрушила б лише частину змінних. Тло наведення `outline` —
+    // того самого відтінку, що межа.
+    if (scheme === 'dark') {
+      for (const v of [...textVars, '--mantine-color-brand-outline']) {
+        expect(deref(vars, v), `dark: ${v} = brandTextOnDark`).toBe(brandTextOnDark);
+      }
+      const hoverRgb = parseColor(deref(vars, '--mantine-color-brand-outline-hover'));
+      const baseRgb = parseColor(brandTextOnDark);
+      expect([hoverRgb.r, hoverRgb.g, hoverRgb.b], 'dark: brand outline-hover').toEqual([
+        baseRgb.r,
+        baseRgb.g,
+        baseRgb.b,
+      ]);
+    }
+    for (const page of pages) {
+      const bg = surfaces[scheme][page];
+      for (const layer of ['light', 'light-hover'] as const) {
+        const tint = flatten(deref(vars, `--mantine-color-brand-${layer}`), bg);
+        expect(contrast(text, tint), `${scheme}: brand на ${layer} поверх ${page}`).toBeGreaterThanOrEqual(AA.text);
+      }
+      const hovered = flatten(deref(vars, '--mantine-color-brand-outline-hover'), bg);
+      expect(contrast(outline, bg), `${scheme}: brand outline на ${page}`).toBeGreaterThanOrEqual(AA.text);
+      expect(contrast(outline, hovered), `${scheme}: brand outline hover ${page}`).toBeGreaterThanOrEqual(AA.text);
+    }
+  });
+
+  it.each(['light', 'dark'] as const)('brand, схема «%s»: кільце фокуса ≥ 3 і білий на заливці ≥ 4.5', (scheme) => {
+    const vars = mergedVars(scheme);
+    // Кільце — `motion.css`: `brand-6` у світлій, `brand-4` у темній.
+    const focus = deref(vars, scheme === 'light' ? '--mantine-color-brand-6' : '--mantine-color-brand-4');
+    const filled = deref(vars, '--mantine-color-brand-filled');
+    const hover = deref(vars, '--mantine-color-brand-filled-hover');
+
+    for (const bg of allSurfaces(scheme)) {
+      expect(contrast(focus, bg), `${scheme}: фокус на ${bg}`).toBeGreaterThanOrEqual(AA.nonText);
+    }
+    expect(contrast('#ffffff', filled), `${scheme}: білий на filled`).toBeGreaterThanOrEqual(AA.text);
+    expect(contrast('#ffffff', hover), `${scheme}: білий на filled-hover`).toBeGreaterThanOrEqual(AA.text);
   });
 
   it('лінійка: `deref` падає на відсутній змінній, а не повертає `undefined`', () => {
