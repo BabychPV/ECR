@@ -1574,6 +1574,11 @@ USING (VALUES
     (N'jobs.id',                         N'en', N'Job id', 1),
     (N'jobs.watch',                      N'en', N'Watch', 1),
     (N'jobs.recentEmpty',                N'en', N'No jobs yet.', 1),
+    -- Шухляда «My tasks» у шапці (BE-08): власні фонові задачі, усім ролям.
+    (N'jobs.myTasks',                    N'en', N'My tasks', 1),
+    (N'jobs.myTasksClose',               N'en', N'Close my tasks', 1),
+    (N'jobs.myTasksActive',              N'en', N'{n} running or queued', 1),
+    (N'jobs.myTasksHint',                N'en', N'Long operations you start appear here. They keep running on the server, so you can close this tab and come back for the result.', 1),
     -- Факти фонової задачі (BE-08): спроба, причина провалу, кореляція,
     -- документ, автор. Причину провалу дає `err.<errorCode>` із каталогу помилок.
     (N'jobs.attempt',                    N'en', N'Attempt {n}', 1),
