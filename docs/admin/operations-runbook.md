@@ -46,8 +46,11 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 
 ### 2.1. Ключі
 
-Колонка «Дефолт» — значення з `appsettings.json`. Якщо код має інший запасний
-дефолт, він указаний у дужках.
+Колонка «Дефолт» — значення з `appsettings.json`. Запасний дефолт у коді
+(коли ключа у файлі немає) з ним збігається — це стереже
+`ConfigurationKeysTests`. Єдиний свідомий виняток —
+`Notifications:WebhookAllowedHostSuffixes`: без ключа код не дозволяє жодного
+хоста. Значення в дужках — дефолт коду для ключів, яких у файлі немає.
 
 | Ключ | Дефолт | Значення |
 |---|---|---|
@@ -55,11 +58,11 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 | `Schema:StartupMode` | `Validate` | `Validate` — не стартувати, якщо є незастосовані міграції EF. `Migrate` — застосувати їх на старті |
 | `Database:EditionMode` | `Auto` | режим редакції SQL Server (Express / повна). `Auto` — визначити самостійно |
 | `Database:CommandTimeoutSeconds` | 60 | таймаут команди SQL, с |
-| `Database:BulkBatchSize` | 50000 (код: 5000) | розмір пачки масового запису |
+| `Database:BulkBatchSize` | 50000 | розмір пачки масового запису |
 | `Cache:SchemaName` / `Cache:TableName` | `dbo` / `Cache` | таблиця розподіленого кешу |
 | `Cache:MetadataSlidingMinutes` | 240 | кеш метаданих, хв |
 | `Cache:AccessProfileSlidingMinutes` | 60 | кеш профілю доступу, хв |
-| `Auth:CookieName` | `ecr.auth` (код: `ecr.session`) | ім'я cookie сесії |
+| `Auth:CookieName` | `ecr.auth` | ім'я cookie сесії. Зміна розлогінює всіх відкритих користувачів |
 | `Auth:SlidingHours` | 8 | ковзний строк сесії, год |
 | `Auth:RequireHttps` | `true` | cookie лише через HTTPS |
 | `Auth:EnableNegotiate` | `true` | вхід Windows (Negotiate) |
