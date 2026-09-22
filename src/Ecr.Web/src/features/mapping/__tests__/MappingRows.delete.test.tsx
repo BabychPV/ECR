@@ -26,6 +26,9 @@ const Field: MappedFieldPreview = {
   pointCount: 2,
   foldedValue: '42.5',
   isActive: true,
+  // ⚠ Поле обов'язкове з ФВ-16.9: `null` — мапінг рішення про одиницю не
+  // чекає, тобто рядок поводиться так само, як до появи цієї ознаки.
+  pendingSourceUnitChange: null,
 };
 
 const Preview: MappingPreview = {
