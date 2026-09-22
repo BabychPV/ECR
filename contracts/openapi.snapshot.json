@@ -944,6 +944,38 @@
           "Breaking"
         ]
       },
+      "ChangeDocumentKeyRequest": {
+        "description": "Запит на зміну бізнес-ключа документа (ФВ-3.9).",
+        "properties": {
+          "businessKey": {
+            "description": "Новий ключ.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expectedBusinessKey": {
+            "description": "Чинний ключ, який бачила людина; розбіжність — 409.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, лягає в аудит.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "businessKey",
+          "expectedBusinessKey",
+          "reason"
+        ],
+        "type": "object"
+      },
       "ChangePasswordRequest": {
         "description": "Запит на зміну пароля.",
         "properties": {
@@ -13557,6 +13589,112 @@
           }
         },
         "summary": "Погодження або відхилення аркуша.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/business-key": {
+      "post": {
+        "description": "Причина обов'язкова (`422`); ключ зайнятий, застарілий `expectedBusinessKey`\nабо аркуш поданий/погоджений — `409` `ECR-DOC-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.",
         "tags": [
           "Documents"
         ]
