@@ -1488,6 +1488,16 @@ USING (VALUES
     (N'methodologies.ordinal', N'en', N'Order', 1),
     (N'methodologies.noOutputs', N'en', N'This version declares no outputs', 1),
     (N'methodologies.noOutputsHint', N'en', N'Without an output the module computes every formula and writes nothing: the write loop goes over outputs.', 1),
+    -- Покриття «виходи → колонки» (BE-25): куди пише кожен оголошений вихід і
+    -- які прив'язки чекають на вихід, якого ця версія не оголошує.
+    (N'methodologies.outputCoverage', N'en', N'Output coverage', 1),
+    (N'methodologies.outputCoverageHint', N'en', N'Where each declared output of this version writes, and which columns wait for an output this version does not declare.', 1),
+    (N'methodologies.outputCoverageBindings', N'en', N'Bindings', 1),
+    (N'methodologies.outputCoverageNowhere', N'en', N'Writes nowhere', 1),
+    (N'methodologies.noOutputCoverage', N'en', N'No coverage to show', 1),
+    (N'methodologies.noOutputCoverageHint', N'en', N'This version has no declared outputs and no bindings are waiting on it.', 1),
+    (N'methodologies.outputCoverageWaiting', N'en', N'Waiting bindings', 1),
+    (N'methodologies.outputCoverageWaitingHint', N'en', N'These bindings are active but point at an output this version does not declare; they will stay empty.', 1),
     (N'methodologies.tests', N'en', N'Golden set', 1),
     (N'methodologies.addTest', N'en', N'Add test', 1),
     (N'methodologies.testSaved', N'en', N'The test has been saved.', 1),
