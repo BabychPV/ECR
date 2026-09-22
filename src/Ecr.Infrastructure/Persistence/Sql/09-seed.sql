@@ -395,7 +395,12 @@ DELETE t
     (N'registries.usageKind.registryField',        N'en', N'Registry field'),
     (N'registries.usageKind.methodologySubstance', N'en', N'Methodology substance'),
     (N'registries.usageKind.sourceEntity',         N'en', N'Source entity'),
-    (N'registries.usageKind.data',                 N'en', N'Values in documents')
+    (N'registries.usageKind.data',                 N'en', N'Values in documents'),
+    -- ФВ-3.6: правки більше не «втрачені» — їх зберігає браузер і відновлює
+    -- екран документа; ключі замінено на `login.restoreEdits.*`.
+    (N'login.lostEdits.title',                     N'en', N'Unsaved changes were lost'),
+    (N'login.lostEdits.text',                      N'en', N'{count} unsaved change(s) in document #{documentId} were lost — your session ended. Please re-enter them.'),
+    (N'login.lostEdits.continue',                  N'en', N'Continue')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -450,10 +455,14 @@ USING (VALUES
     -- ⚠ Публічна область (0): банер показано ДО входу, коли приватний зріз
     -- каталогу ще недоступний.
     (N'login.sessionInvalidated', N'en', N'Your session has ended because your permissions or password changed. Sign in again.', 0),
-    -- Втрачені незбережені правки після обриву сесії — теж до входу, тож 0.
-    (N'login.lostEdits.title',    N'en', N'Unsaved changes were lost', 0),
-    (N'login.lostEdits.text',     N'en', N'{count} unsaved change(s) in document #{documentId} were lost — your session ended. Please re-enter them.', 0),
-    (N'login.lostEdits.continue', N'en', N'Continue', 0),
+    -- Незбережені правки, що пережили обрив сесії (ФВ-3.6) — банер показано до
+    -- входу, тож область 0. ⚠ Правки тепер не просто названі втраченими: вони
+    -- лежать у цьому браузері й відновлюються на екрані документа, тому
+    -- колишні `login.lostEdits.*` прибрані (нижче в «Прибраних ключах»).
+    (N'login.restoreEdits.title',    N'en', N'You are signed in again', 0),
+    (N'login.restoreEdits.text',     N'en', N'{count} unsaved change(s) in document #{documentId} were kept in this browser. They never reached the server; open the document to restore them.', 0),
+    (N'login.restoreEdits.continue', N'en', N'Open the document', 0),
+    (N'login.restoreEdits.discard',  N'en', N'Discard them', 0),
     (N'err.ECR-AUTH-0401', N'en', N'Sign in to continue.', 0),
     (N'err.ECR-AUTH-0403', N'en', N'You do not have permission for this action.', 0),
     (N'err.ECR-AUTH-0403.requiresPermission', N'en', N'Requires permission', 1),
@@ -1089,6 +1098,22 @@ USING (VALUES
     (N'document.validationColumn',       N'en', N'Column', 1),
     (N'document.validationRule',         N'en', N'Rule', 1),
     (N'document.validationMessage',      N'en', N'What is wrong', 1),
+    -- Відновлення незбережених правок на екрані документа (ФВ-3.6, D14-12).
+    -- ⚠ `partial` називає різницю вголос: у слід вміщається не все, і мовчазне
+    -- «відновити N» там, де правок було більше, — та сама тиха втрата.
+    -- ⚠ `conflictRow`/`unavailableRow` — поіменно, бо «2 з 3» без переліку не
+    -- веде до дії: людина не знає, яку комірку вводити заново.
+    (N'document.restoreEdits.title',     N'en', N'Unsaved changes were kept in this browser', 1),
+    (N'document.restoreEdits.text',      N'en', N'{count} change(s) never reached the server. Restore them into the sheet, or discard them.', 1),
+    (N'document.restoreEdits.partial',   N'en', N'Only {count} of {total} changes were kept; the rest have to be entered again.', 1),
+    (N'document.restoreEdits.apply',     N'en', N'Restore changes', 1),
+    (N'document.restoreEdits.discard',   N'en', N'Discard', 1),
+    (N'document.restoreEdits.applied',   N'en', N'{count} change(s) restored', 1),
+    (N'document.restoreEdits.close',     N'en', N'Close', 1),
+    (N'document.restoreEdits.conflicts', N'en', N'{count} change(s) were not restored — enter them again:', 1),
+    (N'document.restoreEdits.conflictRow', N'en', N'Row {rowKey}, column {columnCode}: the cell changed after your session ended.', 1),
+    (N'document.restoreEdits.unavailableRow', N'en', N'Row {rowKey}, column {columnCode}: the cell is no longer in the sheet.', 1),
+    (N'document.restoreEdits.more',      N'en', N'and {count} more', 1),
     (N'document.submit',                 N'en', N'Submit', 1),
     (N'document.submitted',              N'en', N'The sheet has been submitted.', 1),
     (N'document.export',                 N'en', N'Export to Excel', 1),
