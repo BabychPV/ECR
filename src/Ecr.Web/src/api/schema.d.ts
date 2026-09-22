@@ -1530,6 +1530,7 @@ export interface paths {
                     periodKey?: number;
                     state?: string;
                     mine?: boolean;
+                    hasLateEdits?: boolean;
                 };
                 header?: never;
                 path?: never;

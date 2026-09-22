@@ -518,30 +518,55 @@ public sealed record PublicBootstrapResponse(
 
 **UI:** шухляда «My tasks» у шапці (усі ролі) і `#/admin/jobs`.
 
-### BE-09 · Перелік документів: те, що показує StatStrip і рядок ◐
+### ~~BE-09 · Перелік документів: те, що показує StatStrip і рядок ◐~~
 
 Макет на `#/` показує смугу з ≤ 4 цифр (Draft · Submitted · Approved · With
 issues) і в рядку — к-сть зауважень, «змінено ким/коли», позначку пізньої правки,
 фільтри `state` і `mine`.
 
-✎ **2026-09-21: зроблено частково.** Смуга — `DocumentsController.cs:84`
-`GET /documents/summary`; `DocumentSummary` уже має
-`ModifiedAt/ModifiedByDisplayName/ErrorCount/WarningCount`
-(`Ports/IDocumentStore.cs:43-46`). **Лишилось («BE-09b»):** `HasLateEdits`
-(0 збігів у `src`) і фільтри `state`/`mine` у `GET /documents`
-(`DocumentsController.cs:48-51` — лише `limit, cursor, projectId, periodKey`).
+✎ **2026-09-21:** смуга — `DocumentsController.cs:84` `GET /documents/summary`;
+`DocumentSummary` уже мала `ModifiedAt/ModifiedByDisplayName/ErrorCount/WarningCount`
+(`Ports/IDocumentStore.cs:43-46`).
+
+⚠ **Абзац тут раніше (станом на 2026-09-21) помилково називав `state`/`mine`
+невиконаними** одночасно з тим, що вони вже були в коді того самого дня
+(коміт `97421da1`, `DocumentsController.cs:48-54`) — перевірено пошуком по
+коду, а не за текстом директиви; тримати цей запис даті, коли він уже був
+неправдою, довше не варто.
+
+✎ **2026-09-22: BE-09b закрито.** `GET /documents` прийняв `hasLateEdits`
+(`bool?`; `null`/відсутній параметр — без фільтрації, як і решта фільтрів
+переліку) — `DocumentsController.cs:54`, `DocumentListFilter.HasLateEdits`
+(`Ports/IDocumentStore.cs`). Реалізація в `DocumentStore.ListAsync`
+перевикористовує ОДИН запит-предикат (`DocumentStore.LateEditDocumentIds`,
+`aud.CellChange.IsLateEdit = 1`, `D-70`), що й рахує саму позначку
+`HasLateEdits` у рядку — друге визначення «пізньої правки» не заведено.
+Тести: `Ecr.Infrastructure.Tests/Persistence/DocumentListFiltersStoreTests.cs`
+(реальна БД: лише з позначкою / лише без / без параметра — обидва;
+комбінація зі `state`+`mine`), `Ecr.Application.Tests/Documents/ListDocumentsFilterTests.cs`
+(параметр доходить до сховища без змін). Мутація: фільтр `hasLateEdits`
+вимкнено в `ListAsync` → падають рівно два нові тести (обидва тести
+пізніх правок), решта — зелені.
 
 - ~~`DocumentSummary` (`IDocumentStore.cs:26-33` ✔) розширити:
   `DateTime? ModifiedAt, string? ModifiedByDisplayName, int ErrorCount, int WarningCount, bool HasLateEdits`.~~
-  ✎ зроблено, крім `HasLateEdits`.
+  ✎ зроблено повністю, включно з `HasLateEdits` (коміт `97421da1`,
+  `2026-09-21`) — попередній запис тут помилково лишав `HasLateEdits`
+  невиконаним.
   `ErrorCount/WarningCount` — з ОСТАННЬОГО збереженого підсумку валідації
   (`IValidationResultStore.GetLatestAsync` ✔ існує), **не** повторний прогін.
   Немає підсумку → `null`, і UI показує «—», не «0». ⛔ «0 зауважень» для
   документа, який ніколи не перевіряли, — це та сама брехня, що `A7-28`.
-- `GET /documents?periodKey&projectId&state=&mine=true&cursor&limit` — `state`
+- ~~`GET /documents?periodKey&projectId&state=&mine=true&cursor&limit` — `state`
   фільтрує за агрегованим станом аркушів; `mine` — документи, де користувач має
   право редагувати хоч один аркуш (◐ дорогий шлях: зроби через наявний
-  `IAccessDecisionService` пакетно, заміряй ⏱ на 500 документах).
+  `IAccessDecisionService` пакетно, заміряй ⏱ на 500 документах).~~
+  ✎ зроблено (коміт `97421da1`, `2026-09-21`): `mine` — автор
+  (`CreatedByUserId`) або той, хто подавав хоч один аркуш
+  (`ApprovalState.SubmittedByUserId`), не «право редагувати аркуш» — рішення
+  директиви свідомо замінене на дешевший і точніший критерій (поля
+  «відповідальний» у моделі немає). ✎ `hasLateEdits` додано `2026-09-22` —
+  див. вище.
 - ~~`GET /documents/summary?periodKey&projectId` → `DocumentListSummaryResponse(int Draft, int Submitted, int Approved, int Rejected, int WithIssues)` —
   ОДИН `GROUP BY`, не завантаження переліку. ⚠ Лічить лише документи, які
   користувач бачить (той самий предикат доступу, що й перелік) — інакше смуга

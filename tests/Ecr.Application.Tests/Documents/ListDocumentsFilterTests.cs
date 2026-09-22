@@ -43,11 +43,26 @@ public sealed class ListDocumentsFilterTests
     public async Task Фільтр_доходить_до_сховища_іменем_стану_і_поточним_користувачем(
         string? state, bool mine, DocumentStatus? expectedState, int? expectedUser)
     {
-        await Handler().HandleAsync(null, Period, state, mine, new CursorRequest(50), default);
+        await Handler().HandleAsync(null, Period, state, mine, hasLateEdits: null, new CursorRequest(50), default);
 
         await _documents.Received(1).ListAsync(
             Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
             new DocumentListFilter(expectedState, expectedUser),
+            Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [InlineData(true)]
+    [InlineData(false)]
+    [InlineData(null)]
+    public async Task Фільтр_пізніх_правок_доходить_до_сховища_без_змін(bool? hasLateEdits)
+    {
+        await Handler().HandleAsync(null, Period, state: null, mine: false, hasLateEdits, new CursorRequest(50), default);
+
+        await _documents.Received(1).ListAsync(
+            Arg.Any<int?>(), Arg.Any<PeriodKeyFilter>(),
+            new DocumentListFilter(null, null, hasLateEdits),
             Arg.Any<CursorRequest>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
     }
 
@@ -59,7 +74,7 @@ public sealed class ListDocumentsFilterTests
     public async Task Невідомий_стан_422_а_не_мовчазне_усі(string state)
     {
         var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Handler().HandleAsync(null, Period, state, false, new CursorRequest(50), default));
+            () => Handler().HandleAsync(null, Period, state, false, hasLateEdits: null, new CursorRequest(50), default));
 
         Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
         Assert.Equal("err.ECR-REQ-0422.documentState", refused.Details!["messageKey"]);
@@ -72,7 +87,7 @@ public sealed class ListDocumentsFilterTests
     public async Task Стан_без_періоду_422_бо_поза_періодом_він_не_визначений()
     {
         var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Handler().HandleAsync(null, periodKey: null, "Draft", false, new CursorRequest(50), default));
+            () => Handler().HandleAsync(null, periodKey: null, "Draft", false, hasLateEdits: null, new CursorRequest(50), default));
 
         Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
         Assert.Equal("err.ECR-REQ-0422.documentStateNeedsPeriod", refused.Details!["messageKey"]);
