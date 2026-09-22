@@ -933,6 +933,8 @@ USING (VALUES
     (N'err.ECR-PRD-4225.negativeYearGrace',     N'en', N'The year-end grace period ({yearGraceOffsetDays} days) cannot be negative.', 1),
     -- BE-25: only a never-published, never-used methodology version can be deleted.
     (N'err.ECR-CALC-0404.version',              N'en', N'Methodology version {methodologyVersionId} does not exist in this methodology.', 1),
+    (N'err.ECR-CALC-0404.constant',             N'en', N'Methodology version {methodologyVersionId} has no constant {code}.', 1),
+    (N'err.ECR-TMPL-0404.column',               N'en', N'Column {columnDefId} does not exist or has been deleted.', 1),
     (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
     (N'err.ECR-CALC-0409.versionUsedInCalculations', N'en', N'Methodology version {version} has already been used in calculations and cannot be deleted.', 1),
     -- D-40: with a neutral code title, the four-eyes refusals carry their own detail.
@@ -2222,6 +2224,11 @@ USING (VALUES
     -- `ext.RawData`. Один рядок на таблицю, без числа (підпис — ім'я таблиці).
     -- Колишнє «Values in documents» для одиниці було б неправдою.
     (N'usageKind.data',                 N'en', N'Stored data', 1),
+    -- ФВ-8.14: «де використано» колонки шаблону.
+    (N'usageKind.templateFormula',      N'en', N'Template formula', 1),
+    (N'usageKind.calculationBinding',   N'en', N'Methodology binding', 1),
+    (N'usageKind.methodologyRule',      N'en', N'Methodology rule', 1),
+    (N'usageKind.methodologyRequiredInput', N'en', N'Methodology required input', 1),
     (N'registries.newRegistry',          N'en', N'New registry', 1),
     (N'registries.newRegistryTitle',     N'en', N'New registry', 1),
     (N'registries.registryCodeHint',     N'en', N'Latin letters, digits and underscore; cannot be changed later.', 1),

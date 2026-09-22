@@ -207,6 +207,8 @@ public static class DependencyInjection
         services.AddScoped<Units.ConvertUnitHandler>();
         services.AddScoped<Units.CreateUnitHandler>();
         services.AddScoped<Units.UnitUsageHandler>();
+        services.AddScoped<Calculations.ConstantUsageHandler>();
+        services.AddScoped<Templates.ColumnUsageHandler>();
         services.AddScoped<Units.DeleteUnitHandler>();
         services.AddScoped<Units.GetUnitHandler>();
         services.AddScoped<Units.UpdateUnitHandler>();
