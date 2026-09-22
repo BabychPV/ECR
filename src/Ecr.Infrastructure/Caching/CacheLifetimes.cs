@@ -45,9 +45,19 @@ public sealed class CacheLifetimes
     /// </remarks>
     public static readonly TimeSpan DefaultRevision = TimeSpan.FromSeconds(5);
 
-    /// <summary>Значення за замовчуванням — ті самі 30 хвилин, що були жорстко в коді.</summary>
+    /// <summary>Стеля метаданих за замовчуванням, хв — те саме число, що в <c>appsettings.json</c>.</summary>
+    /// <remarks>
+    /// ⚠ До вирівнювання тут стояло 30 проти 240 у файлі; одне джерело правди
+    /// стереже <c>ConfigurationKeysTests</c>.
+    /// </remarks>
+    public const int DefaultMetadataMinutes = 240;
+
+    /// <summary>Стеля профілю доступу за замовчуванням, хв (у файлі — 60).</summary>
+    public const int DefaultAccessProfileMinutes = 60;
+
+    /// <summary>Значення за замовчуванням — ті самі, що в <c>appsettings.json</c>.</summary>
     public static CacheLifetimes Default { get; } = new(
-        TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30));
+        TimeSpan.FromMinutes(DefaultMetadataMinutes), TimeSpan.FromMinutes(DefaultAccessProfileMinutes));
 
     /// <summary>Створює набір строків.</summary>
     /// <param name="metadata">Стеля для знімка метаданих шаблону.</param>
@@ -95,12 +105,13 @@ public sealed class CacheLifetimes
         ArgumentNullException.ThrowIfNull(configuration);
 
         return new CacheLifetimes(
-            Minutes(configuration, "Cache:MetadataSlidingMinutes", Default.Metadata),
-            Minutes(configuration, "Cache:AccessProfileSlidingMinutes", Default.AccessProfile));
+            Minutes(configuration, "Cache:MetadataSlidingMinutes", DefaultMetadataMinutes),
+            Minutes(configuration, "Cache:AccessProfileSlidingMinutes", DefaultAccessProfileMinutes));
     }
 
-    private static TimeSpan Minutes(IConfiguration configuration, string key, TimeSpan fallback)
-        => int.TryParse(configuration[key], CultureInfo.InvariantCulture, out var minutes) && minutes > 0
-            ? TimeSpan.FromMinutes(minutes)
-            : fallback;
+    private static TimeSpan Minutes(IConfiguration configuration, string key, int fallbackMinutes)
+        => TimeSpan.FromMinutes(
+            int.TryParse(configuration[key], CultureInfo.InvariantCulture, out var minutes) && minutes > 0
+                ? minutes
+                : fallbackMinutes);
 }

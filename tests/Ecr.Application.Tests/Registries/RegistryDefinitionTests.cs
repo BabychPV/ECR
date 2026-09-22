@@ -58,7 +58,8 @@ public sealed class RegistryDefinitionTests
         _user.UserId.Returns(9);
         _user.CorrelationId.Returns("test");
 
-        Allow("Registry.View", "Registry.EditDefinition");
+        // BE-24 крок 2: пряме збереження публікує одразу — тому і `Registry.Publish`.
+        Allow("Registry.View", "Registry.EditDefinition", "Registry.Publish");
 
         _permits = Definition("PERMIT", PermitsId);
         _substances = Definition("SUBSTANCE", SubstancesId);

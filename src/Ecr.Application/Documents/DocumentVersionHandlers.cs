@@ -1,7 +1,7 @@
 using System.Globalization;
-using System.Text.Json;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Workflow;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
@@ -10,8 +10,14 @@ namespace Ecr.Application.Documents;
 public sealed record DocumentVersionDto(
     long VersionId, int SheetDefId, int PeriodKey, DateTime SubmittedAt, string SubmittedBy);
 
-/// <summary>Змінена комірка; значення — рядком (decimal без втрати знаків).</summary>
-public sealed record CellChangeDto(string TableCode, string RowKey, string ColumnCode, string? OldValue, string? NewValue);
+/// <summary>
+/// Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання
+/// (<see cref="SubmissionPayloadCell.Type"/>): <c>null</c> — число або текст, інакше
+/// <c>date|bool|ref|unit</c>.
+/// </summary>
+public sealed record CellChangeDto(
+    string TableCode, string RowKey, string ColumnCode,
+    string? OldValue, string? NewValue, string? OldType, string? NewType);
 
 /// <summary>Доданий або видалений рядок.</summary>
 public sealed record RowChangeDto(long RowId, string TableCode, string RowKey);
@@ -83,7 +89,7 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
         var older = await LoadAsync(documentId, from, ct).ConfigureAwait(false);
         var key = new PeriodKey(older.PeriodKey);
 
-        IReadOnlyList<VersionCell> newerCells;
+        IReadOnlyList<SubmissionPayloadCell> newerCells;
         if (toId is { } id)
         {
             var newer = await LoadAsync(documentId, id, ct).ConfigureAwait(false);
@@ -93,24 +99,24 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
                 throw Invalid("err.ECR-DOC-0422.comparePeriods", "Версії належать різним періодам.");
             }
 
-            newerCells = Parse(newer.PayloadJson);
+            newerCells = SubmissionPayload.Read(newer.PayloadJson);
         }
         else
         {
             newerCells = await versions.ReadCurrentAsync(documentId, key, ct).ConfigureAwait(false);
         }
 
-        return await DiffAsync(documentId, key, from, toId, Parse(older.PayloadJson), newerCells, ct).ConfigureAwait(false);
+        return await DiffAsync(documentId, key, from, toId, SubmissionPayload.Read(older.PayloadJson), newerCells, ct).ConfigureAwait(false);
     }
 
     private async Task<DocumentCompareDto> DiffAsync(
         long documentId, PeriodKey key, long from, long? to,
-        IReadOnlyList<VersionCell> oldCells, IReadOnlyList<VersionCell> newCells, CancellationToken ct)
+        IReadOnlyList<SubmissionPayloadCell> oldCells, IReadOnlyList<SubmissionPayloadCell> newCells, CancellationToken ct)
     {
-        var oldMap = oldCells.ToDictionary(c => (c.RowId, c.ColumnDefId), c => c.Value);
-        var newMap = newCells.ToDictionary(c => (c.RowId, c.ColumnDefId), c => c.Value);
-        var oldRows = oldCells.Select(c => c.RowId).ToHashSet();
-        var newRows = newCells.Select(c => c.RowId).ToHashSet();
+        var oldMap = oldCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
+        var newMap = newCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
+        var oldRows = oldCells.Select(c => c.Row).ToHashSet();
+        var newRows = newCells.Select(c => c.Row).ToHashSet();
 
         var added = newRows.Except(oldRows).Order().ToList();
         var removed = oldRows.Except(newRows).Order().ToList();
@@ -145,24 +151,58 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
                 Label(k.RowId).TableCode,
                 Label(k.RowId).RowKey,
                 columns.GetValueOrDefault(k.ColumnDefId) ?? "#" + k.ColumnDefId.ToString(CultureInfo.InvariantCulture),
-                oldMap.GetValueOrDefault(k),
-                newMap.GetValueOrDefault(k))).ToList(),
+                oldMap.GetValueOrDefault(k)?.Value,
+                newMap.GetValueOrDefault(k)?.Value,
+                oldMap.GetValueOrDefault(k)?.Type,
+                newMap.GetValueOrDefault(k)?.Type)).ToList(),
             added.Select(r => new RowChangeDto(r, Label(r).TableCode, Label(r).RowKey)).ToList(),
             removed.Select(r => new RowChangeDto(r, Label(r).TableCode, Label(r).RowKey)).ToList(),
             truncated);
     }
 
     /// <summary>
-    /// Числа — як decimal (<c>1.50</c> = <c>1.5</c>, шістнадцятий знак розрізняється);
-    /// відсутня комірка й порожня — одне й те саме; решта — порядкове порівняння тексту.
+    /// Порівняння за парою (значення, тип): різний тип — зміна (текст <c>"true"</c> ≠ булеве <c>true</c>);
+    /// відсутня комірка й порожня — одне й те саме незалежно від типу; дата — як дата;
+    /// без типу числа — як decimal (<c>1.50</c> = <c>1.5</c>, шістнадцятий знак розрізняється),
+    /// решта — порядкове порівняння тексту.
     /// </summary>
-    internal static bool SameValue(string? a, string? b)
+    /// <remarks>
+    /// ⚠ Зріз до виправлення формату писав дату, булеве, довідник і одиницю як <c>null</c> без типу.
+    /// Маркера покоління в зрізі немає, а порожня клітинка нового формату виглядає так само,
+    /// тож такий зріз надійно не розпізнати: ці значення показуються як зміна від порожнього.
+    /// </remarks>
+    internal static bool SameValue(SubmissionPayloadCell? a, SubmissionPayloadCell? b)
     {
-        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        var av = a?.Value;
+        var bv = b?.Value;
+        if (string.IsNullOrEmpty(av) || string.IsNullOrEmpty(bv))
         {
-            return string.IsNullOrEmpty(a) && string.IsNullOrEmpty(b);
+            return string.IsNullOrEmpty(av) && string.IsNullOrEmpty(bv);
         }
 
+        if (!string.Equals(a!.Type, b!.Type, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (a.Type == SubmissionPayload.Date)
+        {
+            return DateTime.TryParse(av, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var p)
+                   && DateTime.TryParse(bv, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var q)
+                ? p == q
+                : string.Equals(av, bv, StringComparison.Ordinal);
+        }
+
+        if (a.Type is not null)
+        {
+            return string.Equals(av, bv, StringComparison.Ordinal);
+        }
+
+        return SameUntyped(av, bv);
+    }
+
+    private static bool SameUntyped(string a, string b)
+    {
         return decimal.TryParse(a, NumberStyles.Number, CultureInfo.InvariantCulture, out var x)
                && decimal.TryParse(b, NumberStyles.Number, CultureInfo.InvariantCulture, out var y)
             ? x == y
@@ -180,17 +220,6 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
                    ["versionId"] = versionId.ToString(CultureInfo.InvariantCulture),
                    ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
                });
-
-    private static List<VersionCell> Parse(string payloadJson)
-    {
-        using var json = JsonDocument.Parse(payloadJson);
-        return json.RootElement.EnumerateArray()
-            .Select(e => new VersionCell(
-                e.GetProperty("row").GetInt64(),
-                e.GetProperty("column").GetInt32(),
-                e.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null))
-            .ToList();
-    }
 
     private static BusinessRuleException Invalid(string messageKey, string message)
         => new("ECR-DOC-0422", message, new Dictionary<string, object?>(StringComparer.Ordinal) { ["messageKey"] = messageKey });

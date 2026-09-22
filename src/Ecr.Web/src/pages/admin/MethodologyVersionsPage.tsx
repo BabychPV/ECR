@@ -100,6 +100,18 @@ const MethodologyRuleCoveragePanel = lazy(async () => {
 });
 
 /**
+ * ⚠ Покриття «виходи → колонки» (`BE-25`) — теж ВЛАСНИЙ чанк, тим самим
+ * прийомом і з тієї самої причини, що й матриця покриття правил вище: нова
+ * функціональність, власний `import()`, жодних спільних станів чи чернеток
+ * панелей змісту не читає.
+ */
+const MethodologyCoveragePanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/MethodologyCoveragePanel');
+
+  return { default: loaded.MethodologyCoveragePanel };
+});
+
+/**
  * Конфігуратор версії методології: формули чернетки (`ФВ-9.15`).
  *
  * ⛔ Екран існує заради одного правила, і воно ж робить його небезпечним:
@@ -620,6 +632,21 @@ export function MethodologyVersionsPage(): JSX.Element {
               ⚠ Права на редагування панель не питає: вона нічого не змінює,
               а `Calculation.View` уже є в кожного, хто відкрив цей екран. */}
           <MethodologyRuleCoveragePanel
+            methodologyId={methodologyId}
+            versionId={selected.id}
+          />
+
+          {/* ⚠ Покриття «виходи → колонки» — ПІСЛЯ матриці покриття правил, а
+              не перед нею: обидві лише ПОКАЗУЮТЬ наслідки того, що складено
+              вище (рядок без правила й вихід без активної прив'язки — різні
+              питання, `BE-25` проти `ФВ-13.9`), тож порядок між ними не
+              змінює сенсу жодної з двох. Разом вони й лишаються межею стека:
+              спершу редагування (панелі вище), далі — дві незалежні
+              перевірки того, що з ним стане.
+
+              ⚠ Права не питає, як і сусідня панель: `Calculation.View` уже є
+              в кожного, хто відкрив цей екран. */}
+          <MethodologyCoveragePanel
             methodologyId={methodologyId}
             versionId={selected.id}
           />

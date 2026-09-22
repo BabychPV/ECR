@@ -1,0 +1,32 @@
+{
+  "$comment": "Політика ліцензій залежностей (D-12, D-82). Заборони — з docs/tz/03-architecture.md «Заборонені залежності». Перелік `allowed` — ДЕФОЛТ ДО ПІДТВЕРДЖЕННЯ ЗАМОВНИКОМ: D-12/D-82 називають лише заборонене. LGPL заборонено до рішення ІБ (L-1). Невідома ліцензія — відмова; виняток лише з причиною.",
+  "allowedStatus": "default-pending-customer-confirmation",
+  "allowed": [
+    "MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD",
+    "MS-PL", "Unlicense", "CC0-1.0", "BlueOak-1.0.0"
+  ],
+  "devAllowed": ["MPL-2.0", "Python-2.0", "CC-BY-4.0"],
+  "devAllowedReason": "Лише для dev-залежностей npm (dev=true у package-lock.json; не постачаються з продуктом): axe-core (MPL-2.0), argparse (Python-2.0), caniuse-lite (CC-BY-4.0). Рішення людини 2026-09-22, до підтвердження юристом замовника.",
+  "denied": ["^A?GPL", "^LGPL", "^SSPL", "^Polyform", "^CC-BY-NC", "noncommercial"],
+  "licenseUrls": {
+    "http://opensource.org/licenses/mit-license.php": "MIT",
+    "https://raw.githubusercontent.com/xunit/xunit/master/license.txt": "Apache-2.0"
+  },
+  "forbiddenPackages": [
+    { "ecosystem": "nuget", "name": "FluentAssertions", "fromVersion": "8", "reason": "комерційна Xceed з v8 (D-12)" },
+    { "ecosystem": "nuget", "name": "EFCore.BulkExtensions", "reason": "платна для комерційного використання (D-12)" },
+    { "ecosystem": "nuget", "name": "EPPlus", "fromVersion": "5", "reason": "noncommercial з v5 (D-12)" },
+    { "ecosystem": "nuget", "name": "NBomber", "fromVersion": "5", "reason": "комерційна з v5 (D-12)" },
+    { "ecosystem": "npm", "name": "hyperformula", "reason": "GPLv3 (D-12)" },
+    { "ecosystem": "npm", "name": "handsontable", "reason": "несумісна ліцензія (D-12)" },
+    { "ecosystem": "npm", "name": "ag-grid-enterprise", "reason": "комерційна (D-12)" }
+  ],
+  "exceptions": [
+    { "ecosystem": "nuget", "name": "NetArchTest.Rules", "version": "1.3.2", "reason": "nuspec без поля ліцензії; MIT за реєстром стека docs/build/04-environment.md §3.2 (перевірено за першоджерелом під D-12)" },
+    { "ecosystem": "nuget", "name": "ncalc", "version": "1.3.8", "projects": ["Ecr.Legacy.Probe"], "reason": "Лише тестовий стенд tests/Ecr.Legacy.Probe, з продуктом не постачається; ліцензія не підтверджена, бо codeplex закрито (licenseUrl http://ncalc.codeplex.com/license; у github.com/sheetsync/NCalc файла ліцензії немає). Рішення людини 2026-09-22, до підтвердження юристом замовника." },
+    { "ecosystem": "nuget", "name": "Microsoft.Data.SqlClient.SNI.runtime", "version": "6.0.2", "reason": "Пропрієтарні умови Microsoft (nuspec без SPDX); транзитивна залежність офіційного MIT-пакета Microsoft.Data.SqlClient, розповсюджується разом із ним. Рішення людини 2026-09-22, до підтвердження юристом замовника." },
+    { "ecosystem": "nuget", "name": "Microsoft.Identity.Client.NativeInterop", "version": "0.20.6", "reason": "Пропрієтарні умови Microsoft (nuspec без SPDX); транзитивна залежність офіційного MIT-пакета Microsoft.Data.SqlClient, розповсюджується разом із ним. Рішення людини 2026-09-22, до підтвердження юристом замовника." },
+    { "ecosystem": "npm", "name": "@fontsource/ibm-plex-mono", "reason": "OFL-1.1 — стандартна ліцензія шрифтів, дозволяє вбудовування й розповсюдження; виняток на пакет, OFL у allowed не додано. Рішення людини 2026-09-22, до підтвердження юристом замовника." },
+    { "ecosystem": "npm", "name": "@fontsource/ibm-plex-sans", "reason": "OFL-1.1 — стандартна ліцензія шрифтів, дозволяє вбудовування й розповсюдження; виняток на пакет, OFL у allowed не додано. Рішення людини 2026-09-22, до підтвердження юристом замовника." }
+  ]
+}

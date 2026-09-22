@@ -10,6 +10,7 @@ import type {
   DocumentTableDto,
   ValidationResultResponse,
 } from '@/api/types';
+import { useBusinessKeyChangeAction } from '@/features/documents/BusinessKeyChangeAction';
 import {
   DeleteDocumentPermission,
   useDeleteDocumentAction,
@@ -315,6 +316,15 @@ export function DocumentPage(): JSX.Element {
     allowed: can(session.data, DeleteDocumentPermission),
   });
 
+  // Зміна номера справи (бізнес-ключа, ФВ-3.9): кнопка — у шапці, `rekeyStale`
+  // — банером під нею; решта відмов лишається в самому діалозі (форма, яку
+  // можна виправити).
+  const businessKeyChange = useBusinessKeyChangeAction({
+    documentId,
+    document: summary.data,
+    periodKey,
+  });
+
   return (
     /*
      * ⛔ Обгортка навколо ВСЬОГО екрана: заголовок — це бізнес-ключ документа,
@@ -394,10 +404,14 @@ export function DocumentPage(): JSX.Element {
               />
             )}
 
+            {businessKeyChange.trigger}
+
             {deletion.trigger}
           </Group>
         }
       />
+
+      {businessKeyChange.refusal}
 
       {deletion.refusal}
 

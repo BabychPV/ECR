@@ -4,6 +4,8 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Ecr.Application.Documents;
+using Ecr.Application.Ports;
+using Ecr.Application.Workflow;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
@@ -165,6 +167,91 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
         }
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Змінені_дата_й_булеве_видно_проти_поточного_стану_з_типом()
+    {
+        var s = await ArrangeAsync(GrantLevel.Read).ConfigureAwait(true);
+        var d = s.Document;
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await SetAsync(db, d, d.RowIds[0], 0, date: new DateTime(2026, 1, 2)).ConfigureAwait(true);
+            await SetAsync(db, d, d.RowIds[0], 1, flag: false).ConfigureAwait(true);
+            await SetAsync(db, d, d.RowIds[1], 0, date: new DateTime(2026, 5, 5)).ConfigureAwait(true); // не змінюється
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        var v1 = await SnapshotCurrentAsync(s).ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await SetAsync(db, d, d.RowIds[0], 0, date: new DateTime(2026, 1, 3)).ConfigureAwait(true);
+            await SetAsync(db, d, d.RowIds[0], 1, flag: true).ConfigureAwait(true);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var changes = (await CompareAsync(client, app, d.DocumentId, v1, "current").ConfigureAwait(true))
+            .GetProperty("changes").EnumerateArray().ToList();
+
+        Assert.Equal(2, changes.Count);
+        var date = changes.Single(c => c.GetProperty("newType").GetString() == SubmissionPayload.Date);
+        Assert.Equal(SubmissionPayload.Date, date.GetProperty("oldType").GetString());
+        Assert.StartsWith("2026-01-02", date.GetProperty("oldValue").GetString(), StringComparison.Ordinal);
+        Assert.StartsWith("2026-01-03", date.GetProperty("newValue").GetString(), StringComparison.Ordinal);
+
+        var flag = changes.Single(c => c.GetProperty("newType").GetString() == SubmissionPayload.Bool);
+        Assert.Equal("false", flag.GetProperty("oldValue").GetString());
+        Assert.Equal("true", flag.GetProperty("newValue").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Між_версіями_тип_входить_у_порівняння_а_число_як_decimal()
+    {
+        var s = await ArrangeAsync(GrantLevel.Read).ConfigureAwait(true);
+        var row = s.Document.RowIds[0];
+
+        var v1 = await SnapshotAsync(s, Payload(
+            new(row, 1, "true", null),                                  // текст
+            new(row, 2, "1.5", null),
+            new(row, 3, "5", SubmissionPayload.RegistryEntry),
+            new(row, 4, "2026-01-02T00:00:00", SubmissionPayload.Date),
+            new(row, 5, "7", SubmissionPayload.Unit))).ConfigureAwait(true);
+        var v2 = await SnapshotAsync(s, Payload(
+            new(row, 1, "true", SubmissionPayload.Bool),                // те саме значення, інший тип
+            new(row, 2, "1.50", null),                                  // та сама величина
+            new(row, 3, "6", SubmissionPayload.RegistryEntry),          // інший запис довідника
+            new(row, 4, "2026-01-02T00:00:00.0000000", SubmissionPayload.Date), // та сама дата
+            new(row, 5, "7", SubmissionPayload.Unit))).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var changes = (await CompareAsync(client, app, s.Document.DocumentId, v1, v2.ToString(CultureInfo.InvariantCulture))
+                .ConfigureAwait(true))
+            .GetProperty("changes").EnumerateArray().ToList();
+
+        // Упорядковано за колонкою: 1 (текст → bool) і 3 (інший запис довідника); 2, 4, 5 — без змін.
+        Assert.Equal(2, changes.Count);
+
+        var typed = changes[0];
+        Assert.Equal("true", typed.GetProperty("oldValue").GetString());
+        Assert.Equal(JsonValueKind.Null, typed.GetProperty("oldType").ValueKind);
+        Assert.Equal(SubmissionPayload.Bool, typed.GetProperty("newType").GetString());
+
+        Assert.Equal("5", changes[1].GetProperty("oldValue").GetString());
+        Assert.Equal("6", changes[1].GetProperty("newValue").GetString());
+        Assert.Equal(SubmissionPayload.RegistryEntry, changes[1].GetProperty("newType").GetString());
+
+        static string Payload(params SubmissionPayloadCell[] cells) => JsonSerializer.Serialize(cells);
+    }
+
     // ────────────────────────────── збірка ────────────────────────────
 
     private static async Task<JsonElement> CompareAsync(HttpClient client, EcrApiFactory app, long documentId, long from, string to)
@@ -178,13 +265,15 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
 
     private static async Task SetAsync(
         Ecr.Infrastructure.Persistence.EcrDbContext db, TestDocument d, long rowId, int column,
-        string? numeric = null, string? text = null)
+        string? numeric = null, string? text = null, DateTime? date = null, bool? flag = null)
     {
         var columnId = d.ColumnDefIds[column];
         var data = new CellValueData
         {
             ValueNumeric = numeric is null ? null : decimal.Parse(numeric, CultureInfo.InvariantCulture),
             ValueString = text,
+            ValueDate = date,
+            ValueBool = flag,
         };
 
         var cell = await db.CellValues
@@ -208,14 +297,18 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
             .Select(r => r.Id).ToListAsync().ConfigureAwait(false);
         var cells = await db.CellValues.Where(c => rows.Contains(c.TableRowId)).ToListAsync().ConfigureAwait(false);
 
-        return await SnapshotAsync(s, JsonSerializer.Serialize(cells
-            .OrderBy(c => c.TableRowId).ThenBy(c => c.ColumnDefId)
-            .Select(c => new
+        return await SnapshotAsync(s, SubmissionPayload.Write(cells.Select(c => new CellRecord(
+            new CellAddress(s.Document.PeriodKey, c.TableRowId, c.ColumnDefId),
+            c.TableDefId,
+            new CellValueData
             {
-                row = c.TableRowId,
-                column = c.ColumnDefId,
-                value = c.ValueNumeric?.ToString(CultureInfo.InvariantCulture) ?? c.ValueString,
-            }))).ConfigureAwait(false);
+                ValueNumeric = c.ValueNumeric,
+                ValueString = c.ValueString,
+                ValueDate = c.ValueDate,
+                ValueBool = c.ValueBool,
+                ValueRegistryEntryId = c.ValueRegistryEntryId,
+                ValueUnitId = c.ValueUnitId,
+            })))).ConfigureAwait(false);
     }
 
     private async Task<long> SnapshotAsync(Scenario s, string payload)

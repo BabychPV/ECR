@@ -1,7 +1,5 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -384,18 +382,7 @@ public sealed class SubmitSheetHandler(
                 .ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false));
         }
 
-        var ordered = cells
-            .Where(c => c.Address.PeriodKey.Value == periodKey.Value)
-            .OrderBy(c => c.Address.TableRowId)
-            .ThenBy(c => c.Address.ColumnDefId)
-            .Select(c => new
-            {
-                row = c.Address.TableRowId,
-                column = c.Address.ColumnDefId,
-                value = c.Value.ValueNumeric?.ToString(CultureInfo.InvariantCulture) ?? c.Value.ValueString,
-            });
-
-        return JsonSerializer.Serialize(ordered);
+        return SubmissionPayload.Write(cells.Where(c => c.Address.PeriodKey.Value == periodKey.Value));
     }
 
     private static string Hash(string payload)

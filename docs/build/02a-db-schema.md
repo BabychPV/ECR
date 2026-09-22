@@ -783,6 +783,23 @@ CREATE TABLE cfg.RegistryRuleDef
 );
 GO
 
+-- Чернетка опису довідника (BE-24 крок 2, міграція BE24RegistryDefinitionDraft):
+-- поля й правила, ще не застосовані до cfg.RegistryDef. Одна на довідник;
+-- публікація (право Registry.Publish) застосовує її і видаляє рядок.
+CREATE TABLE cfg.RegistryDefinitionDraft
+(
+    RegistryDefId         int            NOT NULL,
+    BaseDefinitionVersion int            NOT NULL,
+    ContentJson           nvarchar(max)  NOT NULL,
+    Reason                nvarchar(1000) NOT NULL,
+    UpdatedByUserId       int            NOT NULL,
+    UpdatedAt             datetime2(3)   NOT NULL,
+    RowVersion            rowversion     NOT NULL,
+    CONSTRAINT PK_RegistryDefinitionDraft PRIMARY KEY (RegistryDefId),
+    CONSTRAINT FK_RegDraft_Registry FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding
@@ -2919,7 +2936,8 @@ USING (VALUES
   (N'Security.ViewAudit',       N'Security',    0), (N'Security.Simulate',    N'Security',    1),
   (N'System.ViewHealth',        N'System',      0), (N'System.RunJob',        N'System',      1),
   (N'System.ManageLocalization', N'System',     0),
-  (N'System.ManageNotifications', N'System',    1)   -- BE-32: небезпечне, як Integration.Manage
+  (N'System.ManageNotifications', N'System',    1),  -- BE-32: небезпечне, як Integration.Manage
+  (N'Document.ChangeKey',       N'Document',    1)   -- ФВ-3.9: зміна бізнес-ключа, небезпечне
 ) AS s (Code, [Group], IsDangerous)
 ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code, [Group], NameL10n, IsDangerous)

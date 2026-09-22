@@ -745,12 +745,24 @@
         "type": "object"
       },
       "CellChangeDto": {
-        "description": "Змінена комірка; значення — рядком (decimal без втрати знаків).",
+        "description": "Змінена комірка; значення — рядком (decimal без втрати знаків). Тип — як у зрізі подання\n(string? SubmissionPayloadCell.Type): `null` — число або текст, інакше\n`date|bool|ref|unit`.",
         "properties": {
           "columnCode": {
             "type": "string"
           },
+          "newType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "newValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldType": {
             "type": [
               "null",
               "string"
@@ -774,7 +786,9 @@
           "rowKey",
           "columnCode",
           "oldValue",
-          "newValue"
+          "newValue",
+          "oldType",
+          "newType"
         ],
         "type": "object"
       },
@@ -977,6 +991,38 @@
           "Guarded",
           "Breaking"
         ]
+      },
+      "ChangeDocumentKeyRequest": {
+        "description": "Запит на зміну бізнес-ключа документа (ФВ-3.9).",
+        "properties": {
+          "businessKey": {
+            "description": "Новий ключ.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expectedBusinessKey": {
+            "description": "Чинний ключ, який бачила людина; розбіжність — 409.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, лягає в аудит.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "businessKey",
+          "expectedBusinessKey",
+          "reason"
+        ],
+        "type": "object"
       },
       "ChangePasswordRequest": {
         "description": "Запит на зміну пароля.",
@@ -3536,6 +3582,14 @@
               "string"
             ]
           },
+          "createdByUserId": {
+            "description": "Id автора; `null` — системна задача. Заповнює `GetJobStatusHandler`:\nтіло бачить лише автор або власник `System.ViewHealth`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "documentId": {
             "description": "Документ задачі; `null` — не документна (BE-08).",
             "format": "int64",
@@ -3634,6 +3688,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "createdByUserId": {
+            "description": "Id автора; `null` — системна задача. Видимість та сама, що й\nCreatedByDisplayName — клієнт вирішує показ «Повторити».",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "documentId": {
@@ -6154,6 +6216,19 @@
         ],
         "type": "object"
       },
+      "PublishRegistryDefinitionRequest": {
+        "description": "Запит на публікацію чернетки опису.",
+        "properties": {
+          "rowVersion": {
+            "description": "Версія чернетки, яку публікують.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowVersion"
+        ],
+        "type": "object"
+      },
       "PublishVersionRequest": {
         "description": "Запит на публікацію версії.",
         "properties": {
@@ -6296,6 +6371,84 @@
           "isTemporal",
           "sourceKind",
           "fields"
+        ],
+        "type": "object"
+      },
+      "RegistryDefinitionDraftDto": {
+        "description": "Чернетка опису довідника.",
+        "properties": {
+          "baseDefinitionVersion": {
+            "description": "Версія опублікованого опису, від якої відштовхується чернетка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fields": {
+            "description": "Поля чернетки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryFieldSaveDto"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "description": "Причина зміни.",
+            "type": "string"
+          },
+          "rowVersion": {
+            "description": "Версія для наступного збереження чи публікації.",
+            "type": "string"
+          },
+          "rules": {
+            "description": "Правила чернетки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleSaveDto"
+            },
+            "type": "array"
+          },
+          "updatedAt": {
+            "description": "Момент останнього збереження, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedByUserId": {
+            "description": "Хто зберіг востаннє.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "baseDefinitionVersion",
+          "fields",
+          "rules",
+          "reason",
+          "updatedAt",
+          "updatedByUserId",
+          "rowVersion"
+        ],
+        "type": "object"
+      },
+      "RegistryDefinitionDraftStateResponse": {
+        "description": "Стан чернетки опису довідника.",
+        "properties": {
+          "definitionVersion": {
+            "description": "Поточна версія ОПУБЛІКОВАНОГО опису.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "draft": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryDefinitionDraftDto",
+                "description": "Чернетка; `null` — чернетки немає."
+              }
+            ]
+          }
+        },
+        "required": [
+          "definitionVersion",
+          "draft"
         ],
         "type": "object"
       },
@@ -8463,6 +8616,43 @@
         ],
         "type": "object"
       },
+      "SaveRegistryDefinitionDraftRequest": {
+        "description": "Запит на збереження чернетки опису (`BE-24` крок 2).",
+        "properties": {
+          "fields": {
+            "description": "Повний перелік полів після правки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryFieldSaveDto"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "description": "Причина зміни; при публікації йде в журнал.",
+            "type": "string"
+          },
+          "rowVersion": {
+            "description": "Версія чернетки, від якої відштовхується правка; `null` — чернетки ще немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rules": {
+            "description": "Повний перелік правил після правки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleSaveDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields",
+          "rules",
+          "reason",
+          "rowVersion"
+        ],
+        "type": "object"
+      },
       "SaveRegistryDefinitionDto": {
         "description": "Запит на збереження опису довідника.",
         "properties": {
@@ -10498,6 +10688,75 @@
         },
         "required": [
           "languages"
+        ],
+        "type": "object"
+      },
+      "UiStringImportError": {
+        "description": "Помилка одного рядка імпорту.",
+        "properties": {
+          "key": {
+            "description": "Ключ, як його записано у файлі.",
+            "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ тексту відмови в каталозі.",
+            "type": "string"
+          },
+          "row": {
+            "description": "Номер запису у файлі; заголовок — 1.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "key",
+          "messageKey"
+        ],
+        "type": "object"
+      },
+      "UiStringImportReport": {
+        "description": "Звіт імпорту перекладу.",
+        "properties": {
+          "added": {
+            "description": "Нових перекладів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "applied": {
+            "description": "Чи записано зміни.",
+            "type": "boolean"
+          },
+          "errors": {
+            "description": "Відхилені рядки; є хоч один — не застосовано нічого.",
+            "items": {
+              "$ref": "#/components/schemas/UiStringImportError"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Версія каталогу після імпорту.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "Тих самих, що вже в базі.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Змінених.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "updated",
+          "unchanged",
+          "errors",
+          "applied",
+          "revision"
         ],
         "type": "object"
       },
@@ -13700,6 +13959,112 @@
           }
         },
         "summary": "Погодження або відхилення аркуша.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/business-key": {
+      "post": {
+        "description": "Причина обов'язкова (`422`); ключ зайнятий, застарілий `expectedBusinessKey`\nабо аркуш поданий/погоджений — `409` `ECR-DOC-0409`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeDocumentKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Змінює бізнес-ключ документа (ФВ-3.9). Право `Document.ChangeKey`.",
         "tags": [
           "Documents"
         ]
@@ -20794,7 +21159,380 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Зберігає опис довідника: поля і правила. Право `Registry.EditDefinition`.",
+        "summary": "Зберігає і одразу публікує опис довідника: поля і правила. Права\n`Registry.EditDefinition` і `Registry.Publish` (`BE-24`: без\nдругого маршрут обходив би публікацію чернетки).",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/definition/draft": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Версія чернетки. У query, а не в тілі: тіло DELETE частина клієнтів і\nпроксі відкидає, а більше нічого запит не несе.",
+            "in": "query",
+            "name": "rowVersion",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Скасовує чернетку опису без публікації. Право `Registry.EditDefinition` (`BE-24`).",
+        "tags": [
+          "Registries"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftStateResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftStateResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftStateResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Чернетка опису довідника, якщо є. Право `Registry.View` (`BE-24`).",
+        "tags": [
+          "Registries"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDraftRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDraftRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDraftRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зберігає чернетку опису; опублікований опис не змінюється. Право\n`Registry.EditDefinition` (`BE-24`).",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/definition/publish": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRegistryDefinitionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRegistryDefinitionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRegistryDefinitionRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Публікує чернетку опису. Право `Registry.Publish` (`BE-24`).",
         "tags": [
           "Registries"
         ]
@@ -26209,6 +26947,162 @@
           }
         },
         "summary": "Покриття перекладу по мовах. Право `System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
+        ]
+      }
+    },
+    "/api/v1/ui-strings/export.csv": {
+      "get": {
+        "description": "UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.",
+        "parameters": [
+          {
+            "description": "Мова перекладу (не мова за замовчуванням).",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Експорт перекладу в CSV: `key, scope, en, &lt;lang&gt;, updatedAt`. Право `System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
+        ]
+      }
+    },
+    "/api/v1/ui-strings/import": {
+      "post": {
+        "description": "Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна\nпомилка або `dryRun` — не записано нічого. Стеля файлу —\n`Localization:ImportMaxBytes`.",
+        "parameters": [
+          {
+            "description": "Мова перекладу.",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише перевірка.",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "$ref": "#/components/schemas/IFormFile"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Імпорт перекладу з CSV. Право `System.ManageLocalization`.",
         "tags": [
           "UiStrings"
         ]
