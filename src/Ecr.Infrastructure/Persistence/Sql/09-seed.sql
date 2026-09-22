@@ -2663,6 +2663,25 @@ USING (VALUES
     (N'mapping.resume',                  N'en', N'Resume', 1),
     (N'mapping.pauseDone',               N'en', N'Mapping paused.', 1),
     (N'mapping.resumeDone',              N'en', N'Mapping resumed.', 1),
+    -- Видалення мапінгу з рядка перегляду (BE-27). ⚠ `deleteBlocked` — відмова
+    -- сервера, коли мапінг уже пояснює зібрані точки: видалити означало б
+    -- лишити їх без пояснення, тож пропонується пауза.
+    (N'mapping.delete',                  N'en', N'Remove mapping', 1),
+    (N'mapping.deleteTitle',             N'en', N'Remove the mapping of {field}?', 1),
+    (N'mapping.deleteText',              N'en', N'The mapping is gone for good: its target row, fold and units are not kept anywhere else.', 1),
+    (N'mapping.deleteConsequence',       N'en', N'{target} stops being filled from the source; people type it by hand again.', 1),
+    (N'mapping.deleteNote',              N'en', N'The value already in the cell stays. The source field returns to the list of fields that land nowhere.', 1),
+    (N'mapping.deleteDone',              N'en', N'Mapping removed.', 1),
+    (N'mapping.deleteBlocked',           N'en', N'{points} collected rows are explained by this mapping, so it is not removed: deleting it would leave them without an explanation. Pause it instead — a paused mapping keeps its settings and writes nothing.', 1),
+    -- Зміна одиниці джерела (ФВ-16.9): збір цього мапінгу на паузі, доки
+    -- людина не вирішить, чи нова одиниця правильна.
+    (N'mapping.unitChangeTitle',         N'en', N'Source unit changed', 1),
+    (N'mapping.unitChangeBanner',        N'en', N'The source now returns {actualUnitCode} instead of {expectedUnitCode}.', 1),
+    (N'mapping.unitChangeDetected',      N'en', N'Detected', 1),
+    (N'mapping.unitChangeAccept',        N'en', N'Yes, accept {actualUnitCode}', 1),
+    (N'mapping.unitChangeDecline',       N'en', N'No, this is a source error', 1),
+    (N'mapping.unitChangeAccepted',      N'en', N'Collection resumed', 1),
+    (N'mapping.unitChangeGoToUnits',     N'en', N'Add the unit in the catalog first', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),
