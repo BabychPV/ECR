@@ -32,7 +32,13 @@ public sealed class RegistryEntryLink : Entity<long>
         if (leftEntryId == rightEntryId)
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Запис {leftEntryId} не можна зв'язати сам із собою.");
+                "ECR-REG-0422",
+                $"Запис {leftEntryId} не можна зв'язати сам із собою.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.selfLink",
+                    ["entryId"] = leftEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         LeftEntryId = leftEntryId;
@@ -75,13 +81,17 @@ public sealed class RegistryEntryLink : Entity<long>
             if (parsed.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
             {
                 throw new DomainException(
-                    "ECR-REG-0422", "Атрибути зв'язку мають бути JSON-об'єктом.");
+                    "ECR-REG-0422",
+                    "Атрибути зв'язку мають бути JSON-об'єктом.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.linkPayloadNotObject" });
             }
         }
         catch (System.Text.Json.JsonException ex)
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Атрибути зв'язку не є валідним JSON: {ex.Message}");
+                "ECR-REG-0422",
+                $"Атрибути зв'язку не є валідним JSON: {ex.Message}",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.linkPayloadInvalidJson", ["reason"] = ex.Message });
         }
 
         PayloadJson = json;

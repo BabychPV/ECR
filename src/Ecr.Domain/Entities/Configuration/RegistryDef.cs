@@ -73,7 +73,14 @@ public sealed class RegistryDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-REG-0422",
-                $"Поле «{field.Code}» належить довіднику {field.RegistryDefId}, а не {Id}.");
+                $"Поле «{field.Code}» належить довіднику {field.RegistryDefId}, а не {Id}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.fieldWrongRegistry",
+                    ["fieldCode"] = field.Code,
+                    ["ownerRegistryDefId"] = field.RegistryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["registryDefId"] = Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⚠ Дубль коду ловиться тут, а не лише унікальним індексом. Індекс
@@ -82,7 +89,14 @@ public sealed class RegistryDef : Entity<int>
         if (_fields.Exists(f => string.Equals(f.Code, field.Code, StringComparison.OrdinalIgnoreCase)))
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Поле з кодом «{field.Code}» у довіднику «{Code}» вже є.");
+                "ECR-REG-0422",
+                $"Поле з кодом «{field.Code}» у довіднику «{Code}» вже є.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.fieldCodeTaken",
+                    ["fieldCode"] = field.Code,
+                    ["registryCode"] = Code,
+                });
         }
 
         _fields.Add(field);

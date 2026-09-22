@@ -42,10 +42,20 @@ public sealed class SetEntryValidityHandler(
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не змінює довідники.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401",
+                "Анонімний запит не змінює довідники.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-REG-0404", $"Запису довідника {registryEntryId} не існує.");
+            ?? throw new NotFoundException(
+                "ECR-REG-0404",
+                $"Запису довідника {registryEntryId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0404.registryEntry",
+                    ["entryId"] = registryEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var previousFrom = entry.ValidFrom;
         var previousTo = entry.ValidTo;

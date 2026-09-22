@@ -371,7 +371,8 @@ UPDATE t
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
     (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state'),
     (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion'),
-    (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change')
+    (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change'),
+    (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -799,6 +800,29 @@ USING (VALUES
     (N'err.ECR-REG-0422.openPeriod',         N'en', N'The registry source cannot be switched while periods are open: some documents would be filled from one list of entries and some from another.', 1),
     (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
 
+    -- Запис довідника (збереження, вікно дії, перелік) і доменні відмови
+    -- значень, зв'язків, правил і полів.
+    (N'err.ECR-REG-0404.registryId',         N'en', N'Registry {registryDefId} was not found.', 1),
+    (N'err.ECR-REQ-0422.asOfRequired',       N'en', N'The asOf parameter is required: registries are temporal, and the list of entries depends on the period date, not on today.', 1),
+    (N'err.ECR-REG-0422.unknownFields',      N'en', N'Registry "{registryCode}" has no fields: {fields}.', 1),
+    (N'err.ECR-REG-0422.requiredFieldsMissing', N'en', N'Required fields of registry "{registryCode}" are not filled in: {fields}.', 1),
+    (N'err.ECR-REG-0422.entryWrongRegistry', N'en', N'Entry {entryId} belongs to registry {ownerRegistryDefId}, not {registryDefId}.', 1),
+    (N'err.ECR-REG-0422.unitOnNonNumeric',   N'en', N'A unit of measure was given to a field of type {dataType}: only numeric fields have units.', 1),
+    (N'err.ECR-REG-0422.fieldTypeNotAllowed', N'en', N'A registry field cannot have type {dataType}.', 1),
+    (N'err.ECR-REG-0422.valueNotString',     N'en', N'The value cannot be converted to text.', 1),
+    (N'err.ECR-REG-0422.valueNotDecimal',    N'en', N'The value of a {dataType} field was passed as {valueType}: numbers are stored only as decimal.', 1),
+    (N'err.ECR-REG-0422.valueNotNumber',     N'en', N'The value "{value}" is not a number for a field of type {dataType}.', 1),
+    (N'err.ECR-REG-0422.valueNotBoolean',    N'en', N'The value "{value}" is not a boolean.', 1),
+    (N'err.ECR-REG-0422.valueNotDate',       N'en', N'The value "{value}" is not a date.', 1),
+    (N'err.ECR-REG-0422.valueNotEntryId',    N'en', N'The value "{value}" is not a registry entry identifier.', 1),
+    (N'err.ECR-REG-0422.selfLink',           N'en', N'Entry {entryId} cannot be linked to itself.', 1),
+    (N'err.ECR-REG-0422.linkPayloadNotObject', N'en', N'Link attributes must be a JSON object.', 1),
+    (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'en', N'Link attributes are not valid JSON: {reason}', 1),
+    (N'err.ECR-REG-0422.ruleParametersNotObject', N'en', N'Rule parameters must be a JSON object.', 1),
+    (N'err.ECR-REG-0422.ruleParametersInvalidJson', N'en', N'Rule parameters are not valid JSON: {reason}', 1),
+    (N'err.ECR-REG-0422.fieldWrongRegistry', N'en', N'Field "{fieldCode}" belongs to registry {ownerRegistryDefId}, not {registryDefId}.', 1),
+    (N'err.ECR-REG-0422.fieldCodeTaken',     N'en', N'Registry "{registryCode}" already has a field with code "{fieldCode}".', 1),
+
     -- ⛔ Головні шляхи користувача: вхід і зміна пароля, подання / погодження /
     -- відхилення / повернення аркуша, створення документа й рядка, періоди,
     -- обмін книгами. Доти подробицею цих відмов їхало українське речення —
@@ -939,7 +963,9 @@ USING (VALUES
     (N'err.ECR-CFG-4221',   N'en', N'Invalid project time zone', 1),
 
     -- Реєстри і одиниці.
-    (N'err.ECR-REG-0404',   N'en', N'Registry entry not found', 1),
+    -- Фраза `ECR-REG-0404` нейтральна: ним відмовляють і для довідника, запису,
+    -- поля, правила. Що саме не знайдено — каже подробиця.
+    (N'err.ECR-REG-0404',   N'en', N'Registry item not found', 1),
     -- Фраза `ECR-REG-0422` покриває всі його випадки (опис довідника, набір
     -- перемикання, відкритий період). Який саме — каже подробиця.
     (N'err.ECR-REG-0422',   N'en', N'Invalid registry change', 1),
