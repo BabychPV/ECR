@@ -6246,6 +6246,22 @@
         ],
         "type": "object"
       },
+      "ProbeDataSourceRequest": {
+        "description": "Тіло проби конфігурації мапінгу (ФВ-13.17).",
+        "properties": {
+          "path": {
+            "description": "Шлях мапінгу в джерелі, від 1 до 500 символів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "ProblemDetails": {
         "properties": {
           "detail": {
@@ -9926,6 +9942,66 @@
           "oldestGap",
           "dataSourceId",
           "dataSourceCode"
+        ],
+        "type": "object"
+      },
+      "SourcePathProbeResult": {
+        "description": "Наслідок пробного читання одного значення мапінгу (ФВ-13.17).",
+        "properties": {
+          "hasValue": {
+            "description": "`false` — шлях є в каталозі джерела, але в пробному вікні\n        (int ProbeSourcePathHandler.ProbeWindowDays) для нього немає жодної точки.",
+            "type": "boolean"
+          },
+          "path": {
+            "description": "Шлях, який пробували.",
+            "type": "string"
+          },
+          "quality": {
+            "description": "Якість у термінах джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "timestamp": {
+            "description": "Мітка часу прочитаної точки; `null` — bool SourcePathProbeResult.HasValue хибне.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unitSymbol": {
+            "description": "UOM джерела; `null` — джерело одиниці не назвало.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "valueNumeric": {
+            "description": "Числове значення в одиниці джерела.",
+            "format": "decimal",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "valueString": {
+            "description": "Текстове значення для нечислових атрибутів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "hasValue",
+          "valueNumeric",
+          "valueString",
+          "unitSymbol",
+          "timestamp",
+          "quality"
         ],
         "type": "object"
       },
@@ -13945,6 +14021,135 @@
           }
         },
         "summary": "Каталог імен джерела для мапінгу (ФВ-13.13). Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
+        ]
+      }
+    },
+    "/api/v1/data-sources/{id}/probe": {
+      "post": {
+        "description": "⚠ Читає ОДНЕ значення тим самим адаптером, яким потім збиратимуть, і\nнічого не зберігає — на відміну від `POST …/collect`. Шляху немає\nв каталозі джерела — `404 ECR-INT-0404` з переліком найближчих\nімен (`suggestions`, до 5) серед елементів каталогу того самого\nрівня; джерело не відповіло в межу `Integration:CatalogTimeoutSeconds`\nабо лежить — `503 ECR-INT-0503`; відмова в автентифікації —\n`502 ECR-INT-0502`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeDataSourceRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeDataSourceRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeDataSourceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePathProbeResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePathProbeResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePathProbeResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "502": {
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "«Перевірити конфігурацію» до першого збору (ФВ-13.17). Право `Integration.Manage`.",
         "tags": [
           "DataSources"
         ]
