@@ -2210,6 +2210,25 @@ USING (VALUES
     (N'registries.entryCreated',         N'en', N'The entry has been created.', 1),
     (N'registries.entrySaved',           N'en', N'The entry has been saved.', 1),
     (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.', 1),
+    -- Імпорт записів довідника з CSV (BE-24 крок 3). ⚠ Перший перегляд іде
+    -- сухим прогоном (dryRun): файл не застосовується, доки людина не
+    -- натисне «Apply». Файл із помилковими рядками не застосовується взагалі —
+    -- або всі рядки, або жоден. Причини рядків приходять messageKey сервера
+    -- (позиція в DynamicKeySites), тому власних ключів під них тут немає.
+    (N'registry.import.pick',            N'en', N'Import from CSV', 1),
+    (N'registry.import.title',           N'en', N'Review the import', 1),
+    (N'registry.import.added',           N'en', N'{count} added', 1),
+    (N'registry.import.updated',         N'en', N'{count} updated', 1),
+    (N'registry.import.unchanged',       N'en', N'{count} unchanged', 1),
+    (N'registry.import.errorsCount',     N'en', N'{count} error(s)', 1),
+    (N'registry.import.blockedTitle',    N'en', N'This file cannot be applied as it is', 1),
+    (N'registry.import.blockedHint',     N'en', N'Fix the rows listed below and import the file again.', 1),
+    (N'registry.import.row',             N'en', N'Row', 1),
+    (N'registry.import.entryKey',        N'en', N'Code', 1),
+    (N'registry.import.field',           N'en', N'Field', 1),
+    (N'registry.import.reason',          N'en', N'Reason', 1),
+    (N'registry.import.apply',           N'en', N'Apply', 1),
+    (N'registry.import.applied',         N'en', N'{added} added, {updated} updated, {unchanged} unchanged.', 1),
     (N'registries.validFrom',            N'en', N'Valid from', 1),
     (N'registries.validTo',              N'en', N'Valid to', 1),
     (N'registries.validityHint',         N'en', N'This replaces deletion. Rows referring to the entry outside the window become orphaned and block submission.', 1),
