@@ -36,30 +36,50 @@ interface JobBody {
   error: string | null;
 }
 
-/** Маршрутизує фейковий `fetch` за адресою: постановка в чергу і опитування. */
-function mockFetch(job: JobBody): void {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
+/**
+ * Маршрутизує фейковий `fetch` за адресою: постановка в чергу і опитування.
+ *
+ * ⚠ Повертає сам мок — тести формату (ФВ-4.2) читають з нього `init.body`
+ * запиту на постановку в чергу, а не лише статус відповіді: саме тіло несе
+ * обраний `format`, і без цього тест перевіряв би тільки те, що кнопка
+ * взагалі кудись сходила, а не ЩО вона надіслала.
+ */
+function mockFetch(job: JobBody): ReturnType<typeof vi.fn> {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
 
-      if (url.includes('/export') && !url.includes('/jobs/')) {
-        return new Response(JSON.stringify({ jobId: job.jobId }), {
-          status: 202,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+    if (url.includes('/export') && !url.includes('/jobs/')) {
+      return new Response(JSON.stringify({ jobId: job.jobId }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-      if (url.includes(`/jobs/${job.jobId}`)) {
-        return new Response(JSON.stringify(job), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+    if (url.includes(`/jobs/${job.jobId}`)) {
+      return new Response(JSON.stringify(job), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-      throw new Error(`неочікуваний запит у тесті: ${url}`);
-    }),
-  );
+    throw new Error(`неочікуваний запит у тесті: ${url}`);
+  });
+
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+/** Тіло запиту на постановку експорту в чергу з виклику фейкового `fetch`. */
+function exportRequestBodyOf(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
+  const call = (fetchMock.mock.calls as unknown[][]).find((args) => {
+    const url = String(args[0]);
+    return url.includes('/export') && !url.includes('/jobs/');
+  });
+
+  if (call === undefined) throw new Error('запиту на постановку в чергу не було');
+
+  const init = call[1] as RequestInit;
+  return JSON.parse(String(init.body)) as Record<string, unknown>;
 }
 
 /** Той самий маршрут, але опитування задачі відмовляє (немає права, `Q-156`). */
@@ -185,5 +205,88 @@ describe('ExportButton: стеження за задачею побудови к
     // правила для «Перерахувати»). Показ помилки тут звинуватив би експорт
     // у тому, чого він не робив.
     expect(notifications.show).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Перемикач формату експорту (ФВ-4.2).
+ *
+ * ⛔ До цієї правки `ExportButton` не приймав формат ВЗАГАЛІ: запит завжди
+ * ішов без `format` (сервер підставляв `xlsx` типово), а перемикача в UI не
+ * було. Тест нижче — червоний до правки саме тому: `format` у тілі запиту
+ * не з'являвся ні за яких дій користувача.
+ *
+ * ⚠ Клієнт НЕ перевіряє обране значення сам — дозволені три значення
+ * контракту (`xlsx`/`csv`/`json`), і саме їх показує перемикач; за
+ * невідомий формат відповідає сервер (`422 err.ECR-REQ-0422.exportFormatUnknown`).
+ * Тому тут немає тесту «невалідний формат» — контроль обмежений трьома
+ * пунктами перемикача, четвертого пункту в розмітці просто не існує.
+ */
+describe('ExportButton: перемикач формату (ФВ-4.2)', () => {
+  it('без вибору перемикача — запит іде з форматом за замовчуванням (`xlsx`)', async () => {
+    const fetchMock = mockFetch({
+      jobId: 'job-1',
+      state: 'Succeeded',
+      percent: 100,
+      message: 'export-key-abc',
+      error: null,
+    });
+
+    const user = userEvent.setup();
+    show();
+
+    await user.click(screen.getByRole('button', { name: /export/i }));
+
+    await waitFor(() => {
+      expect(exportRequestBodyOf(fetchMock).format).toBe('xlsx');
+    });
+  });
+
+  it('вибір «CSV» у перемикачі — запит іде з `format: \'csv\'`', async () => {
+    const fetchMock = mockFetch({
+      jobId: 'job-1',
+      state: 'Succeeded',
+      percent: 100,
+      message: 'export-key-abc',
+      error: null,
+    });
+
+    const user = userEvent.setup();
+    show();
+
+    await user.click(screen.getByRole('radio', { name: '⟦document.exportFormatCsv⟧' }));
+    await user.click(screen.getByRole('button', { name: /export/i }));
+
+    await waitFor(() => {
+      expect(exportRequestBodyOf(fetchMock).format).toBe('csv');
+    });
+  });
+
+  it('вибір «JSON» у перемикачі — запит іде з `format: \'json\'`', async () => {
+    const fetchMock = mockFetch({
+      jobId: 'job-1',
+      state: 'Succeeded',
+      percent: 100,
+      message: 'export-key-abc',
+      error: null,
+    });
+
+    const user = userEvent.setup();
+    show();
+
+    await user.click(screen.getByRole('radio', { name: '⟦document.exportFormatJson⟧' }));
+    await user.click(screen.getByRole('button', { name: /export/i }));
+
+    await waitFor(() => {
+      expect(exportRequestBodyOf(fetchMock).format).toBe('json');
+    });
+  });
+
+  it('перемикач показує рівно три пункти — xlsx/csv/json, не більше й не менше', () => {
+    mockFetch({ jobId: 'job-1', state: 'Queued', percent: 0, message: null, error: null });
+
+    show();
+
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
   });
 });
