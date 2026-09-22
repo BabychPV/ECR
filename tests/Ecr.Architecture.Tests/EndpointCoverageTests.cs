@@ -571,8 +571,7 @@ public sealed partial class EndpointCoverageTests
 
                 // Тести клієнта підставляють власні рядки — вимагати їх у
                 // каталозі означало б забороняти перевіряти обробку промаху.
-                .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}__tests__{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                .Where(f => !f.Contains(".test.", StringComparison.Ordinal) && !f.Contains(".spec.", StringComparison.Ordinal));
+                .Where(f => !IsClientTestFile(f));
 
             foreach (var file in files)
             {
@@ -957,14 +956,28 @@ public sealed partial class EndpointCoverageTests
         var files = Directory
             .EnumerateFiles(web, "*.ts", SearchOption.AllDirectories)
             .Concat(Directory.EnumerateFiles(web, "*.tsx", SearchOption.AllDirectories))
-            .Where(f => !f.Contains("schema.d.ts", StringComparison.Ordinal));
+            .Where(f => !f.Contains("schema.d.ts", StringComparison.Ordinal))
+
+            // ⛔ Виклик із тесту — не споживач: мок чи прямий виклик обгортки
+            // не дає кнопки. Раніше `resumeEntityFieldMap` зараховувався саме так.
+            .Where(f => !IsClientTestFile(f))
+            .ToList();
+
+        var sources = files.ToDictionary(f => f, f => WithoutComments(File.ReadAllText(f)), StringComparer.Ordinal);
 
         foreach (var file in files)
         {
-            var text = WithoutComments(File.ReadAllText(file));
+            var text = sources[file];
 
             foreach (Match match in ApiPathRegex.Matches(text))
             {
+                // ⛔ Адреса в обгортці — ще не споживач: рахується, лише якщо
+                // експортовану функцію, що її містить, хтось у продуктовому коді кличе.
+                if (!WrapperIsCalled(text, match.Index, sources.Values))
+                {
+                    continue;
+                }
+
                 var path = Placeholders(match.Groups[1].Value);
                 var method = MethodOf(text, match);
 
@@ -981,6 +994,35 @@ public sealed partial class EndpointCoverageTests
 
         return new ClientCallSet(typed, unknown);
     }
+
+    private static readonly Regex ExportedName = new(
+        @"export\s+(?:async\s+)?(?:function\s+|const\s+)([A-Za-z_$][\w$]*)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Чи кличе хтось експортовану функцію, в тілі якої стоїть адреса. Без
+    /// експорту перед адресою (виклик прямо в компоненті) — так.
+    /// Один рівень: обгортку, яку кличе лише невикликаний хук, не видно.
+    /// </summary>
+    private static bool WrapperIsCalled(string text, int index, IEnumerable<string> sources)
+    {
+        var owner = ExportedName.Matches(text[..index]).LastOrDefault();
+        if (owner is null)
+        {
+            return true;
+        }
+
+        var name = new Regex($@"(?<![\w$]){Regex.Escape(owner.Groups[1].Value)}(?![\w$])");
+        return sources.Sum(s => name.Count(s)) > 1;
+    }
+
+    /// <summary>
+    /// Файл тестів клієнта (<c>__tests__/</c>, <c>*.test.*</c>, <c>*.spec.*</c>) —
+    /// одне правило для всіх сторожів, що читають клієнт, щоб вони не розійшлися.
+    /// </summary>
+    private static bool IsClientTestFile(string file) =>
+        file.Contains($"{Path.DirectorySeparatorChar}__tests__{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+        || file.Contains(".test.", StringComparison.Ordinal)
+        || file.Contains(".spec.", StringComparison.Ordinal);
 
     /// <summary>Виклики клієнта: з відомим методом і без нього.</summary>
     /// <param name="Typed">Пари «метод + шлях», у яких метод видно з коду.</param>
