@@ -371,10 +371,15 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
         var clock = new ManualClock();
         var memory = new MemoryCache(new MemoryCacheOptions { Clock = clock });
 
+        // Явна стеля, а не `CacheLifetimes.Default`: тест стереже факт
+        // витіснення, а не число з конфігурації (дефолт 30→240 хв його вже ламав).
+        var lifetimes = new CacheLifetimes(TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(10));
+
         TemplateVersionSnapshot snapshot;
         await using (var db = CreateContext([]))
         {
-            snapshot = await new MetadataCache(memory, db).GetAsync(doc.TemplateVersionId, CancellationToken.None);
+            snapshot = await new MetadataCache(memory, db, lifetimes)
+                .GetAsync(doc.TemplateVersionId, CancellationToken.None);
         }
 
         // Санітарна перевірка: запис справді ліг у кеш під власним ключем.
@@ -383,8 +388,8 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
         // ⛔ Q-252: без AbsoluteExpirationRelativeToNow знімок ревізії, що
         // випала з вузького вікна InvalidateAsync (кілька презентаційних
         // правок без Publish/міграції), лишався б тут НАЗАВЖДИ — ні TTL, ні
-        // SizeLimit його не витіснять. 31 хв > 30-хвилинної стелі Lifetime.
-        clock.Advance(TimeSpan.FromMinutes(31));
+        // SizeLimit його не витіснять.
+        clock.Advance(lifetimes.Metadata + TimeSpan.FromMinutes(1));
 
         Assert.False(memory.TryGetValue(snapshot.CacheKey, out _));
     }
