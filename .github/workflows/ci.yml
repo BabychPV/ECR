@@ -172,7 +172,7 @@ jobs:
         env:
           ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
           ECR_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=${{ env.ECR_SQL_PASSWORD }};TrustServerCertificate=true'
-        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Тести .NET','Сценарії директиви №09 (довідково)','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa
+        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Ліцензії NuGet','Тести .NET','Сценарії директиви №09 (довідково)','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa
 
   client:
     runs-on: ubuntu-latest
@@ -197,7 +197,7 @@ jobs:
       # дав би те саме, але сторож і людина читали б різне, а помилку в
       # такому рядку видно лише за наслідком.
       - name: Гейти клієнта
-        run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Безпека залежностей','Аудит інструментів (довідково)','Типи клієнта зі знімка','Типи клієнта','Стиль клієнта','Тести клієнта','Збірка клієнта','Бюджет клієнта'
+        run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Безпека залежностей','Ліцензії npm','Аудит інструментів (довідково)','Типи клієнта зі знімка','Типи клієнта','Стиль клієнта','Тести клієнта','Збірка клієнта','Бюджет клієнта'
 
   # ⛔ Доступність — окремим завданням, і не для краси. `axe` у jsdom дає
   # близько 35 с на маршрут, і одна тема іде 16-23 хвилини. У складі

@@ -3446,6 +3446,14 @@
               "string"
             ]
           },
+          "createdByUserId": {
+            "description": "Id автора; `null` — системна задача. Заповнює `GetJobStatusHandler`:\nтіло бачить лише автор або власник `System.ViewHealth`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "documentId": {
             "description": "Документ задачі; `null` — не документна (BE-08).",
             "format": "int64",
@@ -3544,6 +3552,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "createdByUserId": {
+            "description": "Id автора; `null` — системна задача. Видимість та сама, що й\nCreatedByDisplayName — клієнт вирішує показ «Повторити».",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "documentId": {
