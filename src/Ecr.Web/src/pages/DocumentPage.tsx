@@ -14,6 +14,7 @@ import {
   DeleteDocumentPermission,
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
+import { DocumentVersionCompare } from '@/features/documents/DocumentVersionCompare';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
@@ -453,6 +454,14 @@ export function DocumentPage(): JSX.Element {
           про всі аркуші документа за період. Згорнутий, і до розгортання
           запиту не робить; порожній — не малюється зовсім. */}
       <WorkflowHistory documentId={documentId} periodKey={periodKey} />
+
+      {/* ⛔ `ФВ-5.22`. Поруч із журналом переходів, а не у вкладці аркуша, і з
+          тієї самої причини: версія — це зріз ПОДАННЯ документа за період, і
+          різниця охоплює всі його таблиці одразу. Під вкладкою активного аркуша
+          її бачив би лише той, хто вгадав, куди дивитися.
+
+          ⚠ Згорнутий, як і журнал: до розгортання не робить жодного запиту. */}
+      <DocumentVersionCompare documentId={documentId} periodKey={periodKey} />
 
       <Tabs value={active?.code ?? null} onChange={setSheet}>
         <Tabs.List>
