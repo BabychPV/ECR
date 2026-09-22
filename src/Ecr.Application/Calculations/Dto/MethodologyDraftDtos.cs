@@ -204,6 +204,11 @@ public sealed record MethodologyTestCaseDto(
 /// <param name="OutputCode">Який вихід методології лягає в колонку.</param>
 /// <param name="MatchJson">Як звузити рядки таблиці; <c>{}</c> — усі.</param>
 /// <param name="IsActive">Вимкнена прив'язка не бере участі в прогоні.</param>
+/// <param name="TableCode">
+/// Код таблиці. Заповнює лише перелік прив'язок (<c>GET …/bindings</c>);
+/// в інших відповідях — <c>null</c>.
+/// </param>
+/// <param name="TableNameL10n">Назва таблиці мовами каталогу; як і код — лише в переліку.</param>
 public sealed record CalculationBindingDto(
     int Id,
     int TableDefId,
@@ -211,7 +216,9 @@ public sealed record CalculationBindingDto(
     int MethodologyId,
     string OutputCode,
     string MatchJson,
-    bool IsActive);
+    bool IsActive,
+    string? TableCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null);
 
 /// <summary>
 /// Число, яке дав актуальний прогін розрахунку на документі.

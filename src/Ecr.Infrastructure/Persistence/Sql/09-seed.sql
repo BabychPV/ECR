@@ -371,9 +371,9 @@ UPDATE t
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
     (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state'),
     (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion'),
+    (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request'),
     (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change'),
-    (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found'),
-    (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request')
+    (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
