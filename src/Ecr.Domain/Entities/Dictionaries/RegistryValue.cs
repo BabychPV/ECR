@@ -81,7 +81,8 @@ public sealed class RegistryValue : Entity<long>
         {
             throw new DomainException(
                 "ECR-REG-0422",
-                $"Одиницю вимірювання задано полю типу {dataType}: одиницю мають лише числові поля (ФВ-16.1).");
+                $"Одиницю вимірювання задано полю типу {dataType}: одиницю мають лише числові поля (ФВ-16.1).",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.unitOnNonNumeric", ["dataType"] = dataType.ToString() });
         }
 
         if (value is null)
@@ -124,7 +125,9 @@ public sealed class RegistryValue : Entity<long>
             case CellDataType.Calculated:
             default:
                 throw new DomainException(
-                    "ECR-REG-0422", $"Поле довідника не може мати тип {dataType}.");
+                    "ECR-REG-0422",
+                    $"Поле довідника не може мати тип {dataType}.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.fieldTypeNotAllowed", ["dataType"] = dataType.ToString() });
         }
     }
 
@@ -141,7 +144,10 @@ public sealed class RegistryValue : Entity<long>
 
     private static string AsString(object value)
         => value as string ?? Convert.ToString(value, CultureInfo.InvariantCulture)
-           ?? throw new DomainException("ECR-REG-0422", "Значення не приводиться до рядка.");
+           ?? throw new DomainException(
+               "ECR-REG-0422",
+               "Значення не приводиться до рядка.",
+               new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.valueNotString" });
 
     private static decimal AsDecimal(object value, CellDataType dataType)
     {
@@ -152,7 +158,13 @@ public sealed class RegistryValue : Entity<long>
             throw new DomainException(
                 "ECR-REG-0422",
                 $"Значення поля типу {dataType} передано як {value.GetType().Name}: "
-                + "числа зберігаються лише як decimal (D-30).");
+                + "числа зберігаються лише як decimal (D-30).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.valueNotDecimal",
+                    ["dataType"] = dataType.ToString(),
+                    ["valueType"] = value.GetType().Name,
+                });
         }
 
         try
@@ -162,7 +174,14 @@ public sealed class RegistryValue : Entity<long>
         catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Значення «{value}» не є числом для поля типу {dataType}.");
+                "ECR-REG-0422",
+                $"Значення «{value}» не є числом для поля типу {dataType}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.valueNotNumber",
+                    ["value"] = Convert.ToString(value, CultureInfo.InvariantCulture),
+                    ["dataType"] = dataType.ToString(),
+                });
         }
     }
 
@@ -174,7 +193,14 @@ public sealed class RegistryValue : Entity<long>
         }
         catch (Exception ex) when (ex is FormatException or InvalidCastException)
         {
-            throw new DomainException("ECR-REG-0422", $"Значення «{value}» не є логічним.");
+            throw new DomainException(
+                "ECR-REG-0422",
+                $"Значення «{value}» не є логічним.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.valueNotBoolean",
+                    ["value"] = Convert.ToString(value, CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -185,7 +211,14 @@ public sealed class RegistryValue : Entity<long>
             DateOnly d => d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
             string s when DateTime.TryParse(
                 s, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var parsed) => parsed,
-            _ => throw new DomainException("ECR-REG-0422", $"Значення «{value}» не є датою."),
+            _ => throw new DomainException(
+                "ECR-REG-0422",
+                $"Значення «{value}» не є датою.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.valueNotDate",
+                    ["value"] = Convert.ToString(value, CultureInfo.InvariantCulture),
+                }),
         };
 
     private static long AsRef(object value)
@@ -197,7 +230,13 @@ public sealed class RegistryValue : Entity<long>
         catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Значення «{value}» не є ідентифікатором запису довідника.");
+                "ECR-REG-0422",
+                $"Значення «{value}» не є ідентифікатором запису довідника.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.valueNotEntryId",
+                    ["value"] = Convert.ToString(value, CultureInfo.InvariantCulture),
+                });
         }
     }
 }

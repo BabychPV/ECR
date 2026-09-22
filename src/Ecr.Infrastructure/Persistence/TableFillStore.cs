@@ -45,10 +45,6 @@ public sealed class TableFillStore(EcrDbContext db) : ITableFillStore
 
         var key = periodKey.Value;
 
-        // Масив, а не колекція інтерфейсом: EF розгортає його в параметри
-        // `IN (…)`, і робити це він мусить один раз, а не на кожен елемент.
-        var computed = computedColumnDefIds as int[] ?? [.. computedColumnDefIds];
-
         // ── 1. Рядки: знаменник ──────────────────────────────────────────
         // Рахуються ВСІ нерозмічені видаленими рядки екземпляра, навіть
         // повністю порожні: саме вони і є те, що людина має заповнити.
@@ -67,23 +63,31 @@ public sealed class TableFillStore(EcrDbContext db) : ITableFillStore
         // ⚠ `IsEmpty` НЕ фільтрується: явна порожнеча (`R-B4`) — це
         // відповідь людини, а не її відсутність. `IsCalculated` фільтрується
         // — це відповідь перерахунку.
-        var filledCounts = await (
+        //
+        // ⛔ Обчислювані колонки відсікаються ТУТ, у пам'яті, а не в SQL.
+        // `NOT IN (@p1…@pN)` перевіряється на КОЖНІЙ із ~170 тис. комірок
+        // документа-періоду: на стенді 2 млн рядків це 340–470 мс CPU проти
+        // 190–250 мс із групуванням за колонкою (ключовий стовпець, сотні
+        // груп) — і ще окремий план на кожну довжину списку.
+        var filledByColumn = await (
             from instance in db.TableInstances.AsNoTracking()
             where instance.DocumentId == documentId && instance.PeriodKeyValue == key
             join row in db.TableRows.AsNoTracking()
                     .Where(r => r.PeriodKeyValue == key && !r.IsDeleted)
                 on instance.Id equals row.TableInstanceId
             join cell in db.CellValues.AsNoTracking()
-                    .Where(c => c.PeriodKeyValue == key
-                                && !c.IsCalculated
-                                && !computed.Contains(c.ColumnDefId))
+                    .Where(c => c.PeriodKeyValue == key && !c.IsCalculated)
                 on row.Id equals cell.TableRowId
-            group cell by instance.TableDefId into g
-            select new { TableDefId = g.Key, FilledCells = g.Count() })
+            group cell by new { instance.TableDefId, cell.ColumnDefId } into g
+            select new { g.Key.TableDefId, g.Key.ColumnDefId, FilledCells = g.Count() })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var filledByTable = filledCounts.ToDictionary(x => x.TableDefId, x => x.FilledCells);
+        var excluded = computedColumnDefIds.ToHashSet();
+        var filledByTable = filledByColumn
+            .Where(x => !excluded.Contains(x.ColumnDefId))
+            .GroupBy(x => x.TableDefId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.FilledCells));
 
         return
         [

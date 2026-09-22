@@ -43,7 +43,7 @@ internal static class RoleLifecycle
         if (role.IsBuiltIn)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate, $"Роль «{role.Code}» вбудована: її не перейменовують і не видаляють.",
+                ErrorCodes.SecurityConflict, $"Роль «{role.Code}» вбудована: її не перейменовують і не видаляють.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-SEC-0409.roleBuiltIn",
@@ -65,7 +65,7 @@ internal static class RoleLifecycle
         if (roles.Any(r => r.Id != exceptRoleId && string.Equals(r.Code, code, StringComparison.OrdinalIgnoreCase)))
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate, $"Роль із кодом «{code}» уже існує.",
+                ErrorCodes.SecurityConflict, $"Роль із кодом «{code}» уже існує.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SEC-0409.roleCodeTaken", ["code"] = code });
         }
     }
@@ -145,7 +145,7 @@ public sealed class DeleteRoleHandler(
         if (usage.Assignments > 0 || usage.Grants > 0)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate,
+                ErrorCodes.SecurityConflict,
                 $"Роль «{role.Code}» використовується: призначень {usage.Assignments}, грантів {usage.Grants}.",
                 new Dictionary<string, object?>
                 {

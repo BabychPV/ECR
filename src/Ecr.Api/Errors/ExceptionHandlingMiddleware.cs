@@ -451,13 +451,19 @@ public sealed partial class ExceptionHandlingMiddleware(
         // fallback нижче голим `500`. Цифри коду — наш HTTP-статус, і
         // «дублікат» — конфлікт, а не помилка введення (integration-pending
         // фікс findings 1-3).
-        BusinessRuleException e when e.ErrorCode is ErrorCodes.RoleDuplicate or ErrorCodes.ProjectDuplicate =>
+        BusinessRuleException e when e.ErrorCode is ErrorCodes.SecurityConflict or ErrorCodes.ProjectDuplicate =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         // ⚠ Той самий клас, що й `ECR-ROW-0409`/`ECR-RPT-0409` вище: стан черги
         // чи джерела не дозволяє дію — конфлікт стану, а не невірні дані запиту
         // (директива №11, T10 #40; далі BE-02, BE-30, джерела даних).
         BusinessRuleException e when e.ErrorCode == ErrorCodes.JobStateConflict =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
+        // ⛔ Те саме правило суфікса, що й для `DomainException` нижче: без нього
+        // `ECR-UOM-4091`, `ECR-USR-0409`, `ECR-CALC-0409`, `ECR-TMPL-0409` і
+        // `ECR-PRD-0409` з обробників їхали як 422, хоча §7 каже 409.
+        BusinessRuleException e when IsConflictCode(e.ErrorCode) =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         BusinessRuleException e =>
@@ -469,8 +475,8 @@ public sealed partial class ExceptionHandlingMiddleware(
         // нічого. §7 контракту для всіх них каже 409. Справжнім HTTP це було
         // видно на `PUT /projects/{id}/timezone` після активації.
         // ⚠ Це не розбір числа з коду, від якого застерігає коментар вище: збіг
-        // із РІВНО одним суфіксом; `-4091` чи `-0422` сюди не потрапляють.
-        DomainException e when e.ErrorCode.EndsWith(ConflictCodeSuffix, StringComparison.Ordinal) =>
+        // лише з `-0409` і `-409<цифра>`; `-0422` чи `-4223` сюди не потрапляють.
+        DomainException e when IsConflictCode(e.ErrorCode) =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
         DomainException e =>
@@ -484,6 +490,16 @@ public sealed partial class ExceptionHandlingMiddleware(
 
     /// <summary>Суфікс доменних кодів «конфлікт стану» (<c>ECR-&lt;ДОМЕН&gt;-0409</c>).</summary>
     private const string ConflictCodeSuffix = "-0409";
+
+    /// <summary>
+    /// Код конфлікту стану: <c>…-0409</c> або порядковий <c>…-409N</c>
+    /// (<c>ECR-UOM-4091</c>, <c>ECR-REG-4091</c>).
+    /// </summary>
+    private static bool IsConflictCode(string code) =>
+        code.EndsWith(ConflictCodeSuffix, StringComparison.Ordinal)
+        || (code.Length >= 5
+            && string.CompareOrdinal(code, code.Length - 5, "-409", 0, 4) == 0
+            && char.IsAsciiDigit(code[^1]));
 
     /// <summary>Подробиця 500-ї: лише ключ каталогу, жодних даних винятку.</summary>
     private static readonly IReadOnlyDictionary<string, object?> InternalDetails =

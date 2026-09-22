@@ -127,7 +127,7 @@ react-router 7 · RevoGrid 4.11. ⛔ Прототип написаний на в
 | `UnsavedGuard` | `shared/ui/UnsavedGuard.tsx` + `useBlocker` | це `D14-12` з №14 (pendingStore рівня документа) — **якщо ще не зроблено, робиться тут, у кроці UI-00** |
 | `tasks` («My tasks») | `features/tasks/` | на `GET /jobs?mine=true` (BE-08) + `recalculationJobId` (BE-05); до BE-08 — лише задачі, поставлені в цій вкладці (ідентифікатори з відповідей `202`) |
 | `SegmentBar`, `PeriodPicker` | `shared/ui/SegmentBar.tsx`, `PeriodPicker.tsx` | `PeriodPicker` — місяць/квартал/рік за типом періоду шаблону; значення в URL, переживає навігацію (перевірено на макеті) |
-| Командна палітра | `features/palette/` на `@mantine/spotlight` | пакет **не встановлено** ◐ → ставить foundation-PR (lock-файл — спільний ресурс). Навігація й дії — клієнтські; пошук даних — BE-19 |
+| Командна палітра | ~~`features/palette/` на `@mantine/spotlight` | пакет **не встановлено** ◐ → ставить foundation-PR (lock-файл — спільний ресурс). Навігація й дії — клієнтські; пошук даних — BE-19~~ ✎ 2026-09-22: реалізовано як `features/search/DataSearchPalette.tsx`, власна побудова на `Modal`+`TextInput` з `@mantine/core` (не на `@mantine/spotlight` — дві реалізації пошуку зайві, пакет прибрано з `package.json`); дані — `GET /api/v1/search` (BE-19) з обробкою 429. Навігація й дії — клієнтські |
 
 ---
 

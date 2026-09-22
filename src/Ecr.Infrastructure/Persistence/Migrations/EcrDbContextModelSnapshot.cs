@@ -3699,6 +3699,29 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Security.UserPreference", b =>
+                {
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("ValueJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("UserId", "Key")
+                        .HasName("PK_UserPreference");
+
+                    b.ToTable("UserPreference", "sec");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Units.Dimension", b =>
                 {
                     b.Property<byte>("Id")
@@ -5026,6 +5049,16 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PasswordPolicyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("FK_User_Policy");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Security.UserPreference", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Security.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_UserPreference_User");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Units.Dimension", b =>

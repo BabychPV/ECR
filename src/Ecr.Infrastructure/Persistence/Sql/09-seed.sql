@@ -358,7 +358,8 @@ UPDATE t
     (N'err.ECR-CFG-0422',                N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.',
                                                 N'Invalid code'),
     (N'err.ECR-UOM-4091',                N'en', N'A unit with code "{code}" already exists (Id {id}).', N'Unit code already in use'),
-    (N'err.ECR-REG-0409',                N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', N'Registry entry code already in use'),
+    (N'err.ECR-REG-0409',                N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', N'Registry entry conflict'),
+    (N'err.ECR-REG-0409',                N'en', N'Registry entry code already in use', N'Registry entry conflict'),
     (N'err.ECR-USR-0409',                N'en', N'A user named "{userName}" already exists.', N'User name already in use'),
     (N'err.ECR-REG-4091',                N'en', N'A registry with code "{code}" already exists (Id {id}): the code is what registry-lookup fields and template columns reference it by.',
                                                 N'Registry code already in use'),
@@ -370,7 +371,9 @@ UPDATE t
     (N'err.ECR-INT-0404',                N'en', N'Source entity not found', N'Source entity or field mapping not found'),
     (N'err.ECR-CALC-0409',               N'en', N'A second pair of eyes is required', N'Conflicting methodology state'),
     (N'err.ECR-UOM-0422',                N'en', N'Incompatible unit dimensions', N'Invalid unit conversion'),
-    (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request')
+    (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request'),
+    (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change'),
+    (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -530,7 +533,8 @@ USING (VALUES
     (N'err.ECR-REQ-0422.validityOrder', N'en', N'The start of the validity window is later than its end.', 1),
     (N'err.ECR-PRJ-0409',  N'en', N'Project code already in use', 1),
     (N'err.ECR-PRJ-0409.projectCodeTaken', N'en', N'A project with code "{code}" already exists.', 1),
-    (N'err.ECR-REG-0409',  N'en', N'Registry entry code already in use', 1),
+    -- Покриває і зайнятий код, і видалення запису, на який посилаються.
+    (N'err.ECR-REG-0409',  N'en', N'Registry entry conflict', 1),
     (N'err.ECR-REG-0409.entryCodeTaken', N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', 1),
     (N'err.ECR-USR-0409',  N'en', N'User name already in use', 1),
     (N'err.ECR-USR-0409.userNameTaken', N'en', N'A user named "{userName}" already exists.', 1),
@@ -746,6 +750,11 @@ USING (VALUES
     (N'err.ECR-INT-0409.mappingUnitNotDeclared',          N'en', N'The mapping of field "{sourceField}" declares no source unit, so there is no change to accept. Set the unit by editing the mapping instead.', 1),
     (N'err.ECR-INT-0409.mappingUnitUnchanged',            N'en', N'The mapping of field "{sourceField}" already declares that unit.', 1),
     (N'err.ECR-INT-0409.mappingHasCollectedData',         N'en', N'{collectedPoints} points have already been collected through the mapping of field "{sourceField}". Deleting it would leave those points without the unit and the target that explain them: pause the mapping instead.', 1),
+    -- BE-20: власні налаштування інтерфейсу (`/me/preferences`).
+    (N'err.ECR-REQ-0422.preferenceKeyInvalid',            N'en', N'"{key}" is not a known preference key, or it is longer than {max} characters.', 1),
+    (N'err.ECR-REQ-0422.preferenceValueInvalid',          N'en', N'The value of preference "{key}" is not valid JSON.', 1),
+    (N'err.ECR-REQ-0422.preferenceValueTooLarge',         N'en', N'The value of preference "{key}" takes {size} bytes; the limit is {max}.', 1),
+    (N'err.ECR-REQ-0422.preferenceLimitReached',          N'en', N'You already keep {max} preferences: delete one before adding "{key}".', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -771,6 +780,49 @@ USING (VALUES
     -- ⚠ `BE-24`: НЕ те саме, що рядок вище. Там немає ЗАПИСУ, тут немає самого
     -- довідника — і найчастіша причина друга: друкарська помилка в коді.
     (N'err.ECR-REG-0404.registry',           N'en', N'Registry "{registryCode}" was not found.', 1),
+
+    -- Конструктор довідника й перемикання master: заголовок `ECR-REG-0422`
+    -- нейтральний, причину каже подробиця.
+    (N'err.ECR-REG-0404.field',              N'en', N'Field {fieldId} was not found in registry "{registryCode}".', 1),
+    (N'err.ECR-REG-0404.rule',               N'en', N'Rule {ruleId} was not found in registry "{registryCode}".', 1),
+    (N'err.ECR-REG-0422.definitionReasonRequired', N'en', N'Give a reason for the change: the definition changes how entries already saved are read.', 1),
+    (N'err.ECR-REG-0422.noKeyField',         N'en', N'Registry "{registryCode}" would be left without a key field, so an entry business key could not be built.', 1),
+    (N'err.ECR-REG-0422.fieldRemoved',       N'en', N'Registry fields cannot be removed: entries reference their values. Make the field optional instead. Fields missing from the request: {missingCount}.', 1),
+    (N'err.ECR-REG-0422.fieldCodeImmutable', N'en', N'The code of field "{fieldCode}" cannot be changed: expressions and mappings reference it.', 1),
+    (N'err.ECR-REG-0422.fieldTypeImmutable', N'en', N'The type of field "{fieldCode}" cannot be changed: it defines how saved values are read.', 1),
+    (N'err.ECR-REG-0422.unknownFieldType',   N'en', N'Field type "{dataType}" does not exist.', 1),
+    (N'err.ECR-REG-0422.newFieldRequired',   N'en', N'New field "{fieldCode}" cannot be required: existing entries have no value for it. Add it as optional, fill it in, then make it required.', 1),
+    (N'err.ECR-REG-0422.unknownSeverity',    N'en', N'Severity "{severity}" does not exist.', 1),
+    (N'err.ECR-REG-0422.ruleKindImmutable',  N'en', N'The kind of rule "{ruleCode}" cannot be changed: add a new rule of the kind you need.', 1),
+    (N'err.ECR-REG-0422.unknownRuleKind',    N'en', N'Rule kind "{ruleKind}" does not exist: registry rules are RequiredWhen, UniqueWithin, Expression or CrossRegistry.', 1),
+    (N'err.ECR-REG-0422.emptySwitchSet',     N'en', N'The set of registries is empty: there is nothing to switch.', 1),
+    (N'err.ECR-REG-0422.duplicateCodes',     N'en', N'Codes repeat in the set: {codes}.', 1),
+    (N'err.ECR-REG-0422.switchReasonRequired', N'en', N'Give a reason for switching the master source.', 1),
+    (N'err.ECR-REG-0422.openPeriod',         N'en', N'The registry source cannot be switched while periods are open: some documents would be filled from one list of entries and some from another.', 1),
+    (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
+
+    -- Запис довідника (збереження, вікно дії, перелік) і доменні відмови
+    -- значень, зв'язків, правил і полів.
+    (N'err.ECR-REG-0404.registryId',         N'en', N'Registry {registryDefId} was not found.', 1),
+    (N'err.ECR-REQ-0422.asOfRequired',       N'en', N'The asOf parameter is required: registries are temporal, and the list of entries depends on the period date, not on today.', 1),
+    (N'err.ECR-REG-0422.unknownFields',      N'en', N'Registry "{registryCode}" has no fields: {fields}.', 1),
+    (N'err.ECR-REG-0422.requiredFieldsMissing', N'en', N'Required fields of registry "{registryCode}" are not filled in: {fields}.', 1),
+    (N'err.ECR-REG-0422.entryWrongRegistry', N'en', N'Entry {entryId} belongs to registry {ownerRegistryDefId}, not {registryDefId}.', 1),
+    (N'err.ECR-REG-0422.unitOnNonNumeric',   N'en', N'A unit of measure was given to a field of type {dataType}: only numeric fields have units.', 1),
+    (N'err.ECR-REG-0422.fieldTypeNotAllowed', N'en', N'A registry field cannot have type {dataType}.', 1),
+    (N'err.ECR-REG-0422.valueNotString',     N'en', N'The value cannot be converted to text.', 1),
+    (N'err.ECR-REG-0422.valueNotDecimal',    N'en', N'The value of a {dataType} field was passed as {valueType}: numbers are stored only as decimal.', 1),
+    (N'err.ECR-REG-0422.valueNotNumber',     N'en', N'The value "{value}" is not a number for a field of type {dataType}.', 1),
+    (N'err.ECR-REG-0422.valueNotBoolean',    N'en', N'The value "{value}" is not a boolean.', 1),
+    (N'err.ECR-REG-0422.valueNotDate',       N'en', N'The value "{value}" is not a date.', 1),
+    (N'err.ECR-REG-0422.valueNotEntryId',    N'en', N'The value "{value}" is not a registry entry identifier.', 1),
+    (N'err.ECR-REG-0422.selfLink',           N'en', N'Entry {entryId} cannot be linked to itself.', 1),
+    (N'err.ECR-REG-0422.linkPayloadNotObject', N'en', N'Link attributes must be a JSON object.', 1),
+    (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'en', N'Link attributes are not valid JSON: {reason}', 1),
+    (N'err.ECR-REG-0422.ruleParametersNotObject', N'en', N'Rule parameters must be a JSON object.', 1),
+    (N'err.ECR-REG-0422.ruleParametersInvalidJson', N'en', N'Rule parameters are not valid JSON: {reason}', 1),
+    (N'err.ECR-REG-0422.fieldWrongRegistry', N'en', N'Field "{fieldCode}" belongs to registry {ownerRegistryDefId}, not {registryDefId}.', 1),
+    (N'err.ECR-REG-0422.fieldCodeTaken',     N'en', N'Registry "{registryCode}" already has a field with code "{fieldCode}".', 1),
 
     -- ⛔ Головні шляхи користувача: вхід і зміна пароля, подання / погодження /
     -- відхилення / повернення аркуша, створення документа й рядка, періоди,
@@ -937,8 +989,12 @@ USING (VALUES
     (N'err.ECR-CFG-4221',   N'en', N'Invalid project time zone', 1),
 
     -- Реєстри і одиниці.
-    (N'err.ECR-REG-0404',   N'en', N'Registry entry not found', 1),
-    (N'err.ECR-REG-0422',   N'en', N'The registry source cannot be switched in an open period', 1),
+    -- Фраза `ECR-REG-0404` нейтральна: ним відмовляють і для довідника, запису,
+    -- поля, правила. Що саме не знайдено — каже подробиця.
+    (N'err.ECR-REG-0404',   N'en', N'Registry item not found', 1),
+    -- Фраза `ECR-REG-0422` покриває всі його випадки (опис довідника, набір
+    -- перемикання, відкритий період). Який саме — каже подробиця.
+    (N'err.ECR-REG-0422',   N'en', N'Invalid registry change', 1),
     (N'err.ECR-UOM-0404',   N'en', N'Unit not found', 1),
     -- Фраза `ECR-UOM-0422` покриває всі його випадки: різні розмірності,
     -- множник ≤ 0 на заведенні й зміні одиниці. Який саме — каже подробиця.

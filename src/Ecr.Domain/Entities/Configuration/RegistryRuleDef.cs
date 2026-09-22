@@ -61,7 +61,12 @@ public sealed class RegistryRuleDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-REG-0422",
-                $"Вид правила довідника {(byte)ruleKind} не входить у перелік із чотирьох.");
+                $"Вид правила довідника {(byte)ruleKind} не входить у перелік із чотирьох.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.unknownRuleKind",
+                    ["ruleKind"] = ((byte)ruleKind).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         RegistryDefId = registryDefId;
@@ -121,13 +126,17 @@ public sealed class RegistryRuleDef : Entity<int>
             if (parsed.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
             {
                 throw new DomainException(
-                    "ECR-REG-0422", "Параметри правила мають бути JSON-об'єктом.");
+                    "ECR-REG-0422",
+                    "Параметри правила мають бути JSON-об'єктом.",
+                    new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.ruleParametersNotObject" });
             }
         }
         catch (System.Text.Json.JsonException ex)
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Параметри правила не є валідним JSON: {ex.Message}");
+                "ECR-REG-0422",
+                $"Параметри правила не є валідним JSON: {ex.Message}",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0422.ruleParametersInvalidJson", ["reason"] = ex.Message });
         }
 
         ParametersJson = json;

@@ -2784,6 +2784,22 @@ public interface IUnitStore
 }
 ```
 
+#### `IUserPreferenceStore`
+
+Налаштування інтерфейсу користувача `sec.UserPreference` (BE-20). Кожен метод
+бере `userId` явно: чужих налаштувань порт не бачить.
+
+```csharp
+public interface IUserPreferenceStore
+{
+    public Task<IReadOnlyList<UserPreference>> ListAsync(int userId, CancellationToken ct);
+    public Task<UserPreference?> FindAsync(int userId, string key, CancellationToken ct);
+    public Task<int> CountAsync(int userId, CancellationToken ct);
+    public void Add(UserPreference preference);
+    public void Remove(UserPreference preference);
+}
+```
+
 #### `IUserStore`
 
 Доступ до облікових записів для use-cases безпеки.
@@ -2985,7 +3001,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія одиниць неможлива. Заголовок нейтральний, випадок каже `messageKey`-подробиця: різні розмірності (ФВ-16.3, `incompatibleDimensions`), нульовий множник одиниці на конверсії (`zeroFactor`), явна конверсія не для цієї пари (`explicitConversionMismatch`), множник ≤ 0 на заведенні чи зміні одиниці (`factorMustBePositive`, BE-15) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
-| `ECR-UOM-4091` | 422 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
+| `ECR-UOM-4091` | 409 | одиниця з таким кодом уже є (`CreateUnitHandler`, UI-аудит lane 4) |
 | `ECR-UOM-4041` | 404 | розмірності з таким ідентифікатором немає (`CreateUnitHandler`) |
 | `ECR-UOM-0409` | 409 | на одиницю посилаються — не видаляється; перелік у `details.references` (`DeleteUnitHandler`, директива №15 BE-15), **або** не змінюються її множник і зсув (`unitFactorInUse`), **або** одиницю змінили між читанням і записом — `If-Match` не збігся з `rowVersion` (`unitChanged`, `UpdateUnitHandler`) |
 | `ECR-CALC-0404` | 404 | версії методології не існує |
@@ -3067,6 +3083,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/login/local` | — | 3 |
 | `POST` | `/api/v1/logout` | — | 1 |
 | `GET` | `/api/v1/me` | — | 1 |
+| `GET` | `/api/v1/me/preferences` | — | 4 |
+| `PUT` | `/api/v1/me/preferences/{key}` | — | 4 |
+| `DELETE` | `/api/v1/me/preferences/{key}` | — | 4 |
 | `GET` | `/api/v1/templates` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/{id}` | `Template.View` | 1 |

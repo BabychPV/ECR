@@ -116,26 +116,42 @@ describe('чернетка значень і те, що з неї виходит
     expect(missingRequired(items, defaultDraft(items))).toEqual(['Year']);
 
     // Обов'язковий із замовчуванням — законна пара: сервер підставить сам.
-    expect(missingRequired(items, { ...defaultDraft(items), Year: 2026 })).toEqual([]);
+    // ⚠ `Year` — рядок (`R6`, `b0045915`, 2026-09-22): `Number` — теж `TextInput`.
+    expect(missingRequired(items, { ...defaultDraft(items), Year: '2026' })).toEqual([]);
   });
 
   it('очищене поле з замовчуванням не блокує, а очищене без нього — блокує', () => {
-    const draft: ParameterDraft = { ...defaultDraft(items), Year: 2026, Since: null };
+    const draft: ParameterDraft = { ...defaultDraft(items), Year: '2026', Since: null };
 
     expect(missingRequired(items, draft)).toEqual([]);
     expect(missingRequired(items, { ...draft, Year: '' })).toEqual(['Year']);
   });
 
   it('тіло запиту несе значення ПОТРІБНИХ типів, а дату — рядком того ж дня', () => {
-    const body = toParametersBody(items, { ...defaultDraft(items), Year: 2026, Draft: true });
+    const body = toParametersBody(items, { ...defaultDraft(items), Year: '2026', Draft: true });
 
-    expect(body).toEqual({ Year: 2026, Site: 'ALL', Draft: true, Since: '2026-03-01' });
-    expect(typeof body?.['Year']).toBe('number');
+    expect(body).toEqual({ Year: '2026', Site: 'ALL', Draft: true, Since: '2026-03-01' });
+    // ⚠ `Number` іде рядком, як увів користувач, БЕЗ `Number()` (`b0045915`).
+    expect(typeof body?.['Year']).toBe('string');
     expect(typeof body?.['Draft']).toBe('boolean');
   });
 
+  it(
+    'Number: 16 знаків дробу йдуть у тіло рядком, як є, без округлення чи Number()',
+    () => {
+      // ⛔ Доказ проти регресу на `NumberInput`: `Number(precise)` губить 16-й
+      // знак дробу через IEEE-754 (~15–17 значущих цифр), а `String(Number(x))`
+      // повернув би округлене число — обидва провалили б рівність нижче.
+      const precise = '1234.1234567890123456';
+      const body = toParametersBody(items, { ...defaultDraft(items), Year: precise, Draft: true });
+
+      expect(body?.['Year']).toBe(precise);
+      expect(typeof body?.['Year']).toBe('string');
+    },
+  );
+
   it('незаповнене не надсилається зовсім — інакше стерло б замовчування сервера', () => {
-    const body = toParametersBody(items, { ...defaultDraft(items), Year: 2026, Site: '  ' });
+    const body = toParametersBody(items, { ...defaultDraft(items), Year: '2026', Site: '  ' });
 
     expect(body).toBeDefined();
     expect(body !== undefined && 'Site' in body).toBe(false);

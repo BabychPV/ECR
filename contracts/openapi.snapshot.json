@@ -3505,6 +3505,14 @@
             "description": "Ідентифікатор.",
             "type": "string"
           },
+          "maxAttempts": {
+            "description": "Спроб загалом, як у int? JobStatus.MaxAttempts; рядок переліку завжди\nз журналу, тож від сховища — завжди число, `null` лише від інших реалізацій.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "message": {
             "description": "Повідомлення прогресу мовою читача (BE-08). Каталог рядків вантажиться\nОДИН раз на весь перелік (`JobProgressMessageResolver.ResolveManyAsync`),\nа не на кожен рядок.",
             "type": [
@@ -10799,6 +10807,30 @@
         ],
         "type": "object"
       },
+      "UserPreferenceDto": {
+        "description": "Одне налаштування у відповіді API.",
+        "properties": {
+          "key": {
+            "description": "Ключ.",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Коли змінено востаннє, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonElement",
+            "description": "Значення — довільний JSON, який поклав клієнт."
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
       "UserView": {
         "description": "Обліковий запис у переліку.",
         "properties": {
@@ -15650,6 +15682,169 @@
         "summary": "Поточний користувач і його права для UI.",
         "tags": [
           "Auth"
+        ]
+      }
+    },
+    "/api/v1/me/preferences": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserPreferenceDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserPreferenceDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserPreferenceDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Усі налаштування поточного користувача, за ключем.",
+        "tags": [
+          "Preferences"
+        ]
+      }
+    },
+    "/api/v1/me/preferences/{key}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Ключ налаштування.",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Видаляє налаштування; відсутнє — теж `204`.",
+        "tags": [
+          "Preferences"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Ключ налаштування.",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonElement"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonElement"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonElement"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferenceDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferenceDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPreferenceDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює або замінює налаштування; тіло — саме JSON-значення.",
+        "tags": [
+          "Preferences"
         ]
       }
     },
@@ -27065,6 +27260,9 @@
     },
     {
       "name": "Periods"
+    },
+    {
+      "name": "Preferences"
     },
     {
       "name": "Projects"

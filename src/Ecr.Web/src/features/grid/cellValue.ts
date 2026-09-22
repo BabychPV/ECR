@@ -7,6 +7,7 @@ import { normalizeDecimal } from '@/shared/format';
 // Правило теки дотримано по суті: `Intl` лишився всередині `shared/format`,
 // сюди приходить готова функція. Рядок у бар'єл — перший пункт «далі».
 import { formatDecimal } from '@/shared/format/number';
+import { roundDecimalText } from './rounding';
 
 /**
  * Значення комірки, коли `decimal` приходить РЯДКОМ (коміт `e470777a`).
@@ -132,5 +133,32 @@ export function cellDisplay(value: unknown, column: ColumnDto): string {
   if (value === null || value === undefined) return '';
   if (!isNumericColumn(column)) return String(value);
 
-  return formatDecimal(value) ?? String(value);
+  const scale = displayScaleOf(column);
+
+  // ⚠ «Рівно N знаків» — це й округлення показу (типово `Formula`/`Calculated`
+  // із довшим дробом), тим самим правилом, що й на вводі. Модель, редактор,
+  // PATCH і буфер лишають повне значення: округлюється лише текст шаблону.
+  const shown =
+    scale !== null && (typeof value === 'string' || typeof value === 'number')
+      ? (roundDecimalText(String(value), scale) ?? value)
+      : value;
+
+  return formatDecimal(shown, undefined, undefined, scale ?? 0) ?? String(value);
+}
+
+/**
+ * Скільки знаків після коми ПОКАЗУВАТИ щонайменше — формат комірки, як у Excel:
+ * `1.5` при `scale = 4` → `1.5000`.
+ *
+ * ⛔ Лише показ. Значення в рядку, редактор, `pendingStore`, тіло PATCH і буфер
+ * (`cellText`) нулів не отримують — вони йдуть від сирого значення, не від
+ * цього шаблону.
+ *
+ * ⚠ Колонка без масштабу — `null`: ні доповнення, ні округлення, як до цієї
+ * зміни. Довший дріб округлюється до `scale` (AwayFromZero) — лише в показі.
+ */
+function displayScaleOf(column: ColumnDto): number | null {
+  const scale = column.scale;
+
+  return typeof scale === 'number' && Number.isInteger(scale) && scale >= 0 ? scale : null;
 }

@@ -45,6 +45,39 @@ export function density(): Density {
   }
 }
 
+/**
+ * Щільність, яку користувач колись обирав сам; `null` — вибору не було.
+ *
+ * ⚠ Окремо від `density()`: та повертає дефолт, і «обрав compact» від «нічого
+ * не обирав» за нею не відрізнити — а від цього залежить, чи переносити
+ * значення на сервер (`BE-20`).
+ */
+export function storedDensity(): Density | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(DensityKey);
+    return raw === 'compact' || raw === 'comfortable' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ті, кому треба знати про ВИБІР щільності (`BE-20`: синхронізація з сервером).
+ *
+ * ⚠ Реєстр, а не імпорт фічі: `shared` не знає, хто слухає (той самий прийом,
+ * що й `shared/ui/unsavedSources`).
+ */
+const chosenListeners = new Set<(value: Density) => void>();
+
+/** Підписує на вибір щільності; повертає відписку. */
+export function onDensityChosen(listener: (value: Density) => void): () => void {
+  chosenListeners.add(listener);
+
+  return () => {
+    chosenListeners.delete(listener);
+  };
+}
+
 /** Запам'ятовує вибір щільності. */
 export function setDensity(value: Density): void {
   try {
@@ -52,6 +85,8 @@ export function setDensity(value: Density): void {
   } catch {
     // Налаштування вигляду — не привід ламати роботу.
   }
+
+  for (const notify of [...chosenListeners]) notify(value);
 }
 
 /** Ті, кому треба перемалюватися, коли щільність змінилася. */

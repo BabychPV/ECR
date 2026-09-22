@@ -37,6 +37,24 @@ export const brand: MantineColorsTuple = [
 ];
 
 /**
+ * `brand` як ТЕКСТ, межа й посилання в темній темі — ОДНЕ значення.
+ *
+ * ✎ 2026-09-22, рішення людини «на розсуд команди» (`docs/tz/10-decisions.md`).
+ * Mantine у темній схемі брав текст `light`/`subtle` з `brand[0]` (`#f4f4fc`),
+ * `outline` — з `brand[1]` (`#e7e8f8`): майже білий, фірмового відтінку немає.
+ *
+ * ⚠ Значення — той самий відтінок і насиченість, що `brand[6]` (HSL 238°, 48 %),
+ * освітлений до L = 78 %: найменший крок, що дає ≥ 4.5 на КОЖНІЙ темній
+ * поверхні (`surfaces.dark.*`) і на композитах `light`/hover поверх
+ * `ground`/`surface`/`sunken`/`raised`. Виміряно: `ground` 8.67, `surface`
+ * 8.01, `sunken` 8.36, `raised` 7.08, `accentSoft` 6.34; найгірше — текст на
+ * `light-hover` поверх `raised`, 4.72 (L = 73 %, `#999cdb`, падає: 4.40 на
+ * `light-hover` поверх `surface`).
+ * З брендбуком замінюється цей рядок; `contrast.test.ts` перевірить новий.
+ */
+export const brandTextOnDark = '#acaee2';
+
+/**
  * Статусні кольори — `error` і `warning` (`W4.2`).
  *
  * ⛔ Це не перефарбовування. `primaryShade: { light: 6, dark: 5 }` (нижче)

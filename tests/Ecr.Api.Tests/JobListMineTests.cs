@@ -302,6 +302,8 @@ public sealed class JobListMineTests(SqlServerFixture sql)
 
         Assert.Equal(author.Name, item.GetProperty("createdByDisplayName").GetString());
         Assert.Equal("step-2", item.GetProperty("message").GetString());
+        // Рядок переліку завжди з журналу — стеля та сама, що в стані: 1 + 3 ретраї.
+        Assert.Equal(4, item.GetProperty("maxAttempts").GetInt32());
 
         var status = await client
             .GetFromJsonAsync<JsonElement>(new Uri($"/api/v1/jobs/{Uri.EscapeDataString(jobId)}", UriKind.Relative))

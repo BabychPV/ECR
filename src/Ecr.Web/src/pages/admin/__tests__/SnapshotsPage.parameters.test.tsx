@@ -14,9 +14,10 @@ import { testTheme } from '@/test/render';
  *   А — обов'язковий параметр без значення: побудова недоступна, причина
  *       названа. Сервер однаково відмовить `422`, але дізнатися про це з
  *       екрана ДО кліку дешевше, ніж із невдалої задачі;
- *   Б — заповнили: побудова доступна, і в ТІЛІ запиту саме ці значення саме
- *       тих типів (сервер приведення не робить: рядок `"5"` у `Number` —
- *       відмова);
+ *   Б — заповнили: побудова доступна, і в ТІЛІ запиту саме ці значення. `Year`
+ *       (`Number`) іде РЯДКОМ, як увів користувач (`R6`, `b0045915`,
+ *       2026-09-22): сервер приймає значення параметра і числом JSON, і
+ *       рядком, і сам перевіряє формат — клієнт `Number()` не робить;
  *   В — оголошення прочитати не вдалося: побудова недоступна, і причина ІНША,
  *       ніж у А. Побудова наосліп або впаде `422`, або — гірше — пройде без
  *       параметра й дасть зріз, який виглядає нормальним;
@@ -223,18 +224,64 @@ describe('SnapshotsPage: параметри звіту при побудові �
        *
        * ⚠ `Since` — рядок `2026-03-01`, а не мить у UTC: `toISOString()` зсунув
        * би дату на добу для всіх, хто західніше за Гринвіч.
+       *
+       * ⚠ `Year` — теж рядок (`R6`, `b0045915`, 2026-09-22): поле параметра
+       * `Number` тепер `TextInput`, і значення йде як увів користувач, без
+       * `Number()`.
        */
       expect(sent.body).toEqual({
         projectId: 42,
         periodKey: expect.any(Number) as number,
-        parameters: { Year: 2026, Site: 'ALL', Draft: true, Since: '2026-03-01' },
+        parameters: { Year: '2026', Site: 'ALL', Draft: true, Since: '2026-03-01' },
       });
 
       const parameters = (sent.body as { parameters: Record<string, unknown> }).parameters;
 
-      expect(typeof parameters['Year']).toBe('number');
+      expect(typeof parameters['Year']).toBe('string');
       expect(typeof parameters['Draft']).toBe('boolean');
       expect(typeof parameters['Since']).toBe('string');
+    },
+    TestTimeout,
+  );
+
+  it(
+    'Б2: 16 знаків дробу в полі Number ідуть у тіло рядком, як є, без округлення чи Number()',
+    async () => {
+      /*
+       * ⛔ Це доказ саме проти поля, а не проти `parameters.ts`: `coerce` там
+       * і раніше просто повертав значення без змін — небезпека була в самому
+       * `NumberInput`, який ганяє введене через IEEE-754 ще ДО того, як
+       * значення взагалі доходить до `parameters.ts`. `NumberInput` на цей
+       * рядок або показав би `Infinity`/обрізане число в самому полі, або
+       * округлив би 16-й знак дробу — обидва варіанти провалили б перевірку
+       * нижче.
+       */
+      const sent = mockApi(WithParameters);
+      show();
+
+      const dialog = await openDialogWithReport();
+
+      const precise = '1234.1234567890123456';
+
+      fireEvent.change(await within(dialog).findByLabelText(/^Year/, {}, Wait), {
+        target: { value: precise },
+      });
+      fireEvent.click(within(dialog).getByLabelText(/^Draft/));
+
+      await waitFor(() => {
+        expect(buildButton(dialog).disabled).toBe(false);
+      }, Wait);
+
+      fireEvent.click(buildButton(dialog));
+
+      await waitFor(() => {
+        expect(sent.body).toBeDefined();
+      }, Wait);
+
+      const parameters = (sent.body as { parameters: Record<string, unknown> }).parameters;
+
+      expect(parameters['Year']).toBe(precise);
+      expect(typeof parameters['Year']).toBe('string');
     },
     TestTimeout,
   );

@@ -212,6 +212,40 @@ public sealed class ReportParametersTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Число_рядком_з_HTTP_приймається_без_втрати_знаків()
+    {
+        // Рядок — канонічний дротовий формат десяткового: JS-число тут уже
+        // загубило б знаки після ~15-го.
+        var http = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            """{"Threshold":"1234567890123.1234567890123456","Limit":"123.4567890123456789"}""", Web)!;
+
+        var bound = ReportParameters.Bind(
+            ReportParameters.Compile([new("Threshold", "Number"), new("Limit", "Number")]), http);
+
+        Assert.Equal(1234567890123.1234567890123456m, bound.Values["Threshold"]);
+        Assert.Equal(123.4567890123456789m, bound.Values["Limit"]); // рівно 16 знаків — межа, приймається
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData("1,5")] // культурна кома — не десятковий роздільник і не тисячі
+    [InlineData("5 т")]
+    [InlineData("abc")]
+    [InlineData("")]
+    [InlineData("123.45678901234567891")] // 17 знаків дробу > 16: відмова, не тихий обріз
+    public void Нечисловий_рядок_у_числовому_параметрі_відмовляє(string text)
+    {
+        var declared = ReportParameters.Compile([new("Threshold", "Number")]);
+        var http = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            JsonSerializer.Serialize(new Dictionary<string, string> { ["Threshold"] = text }), Web)!;
+
+        var error = Assert.Throws<BusinessRuleException>(() => ReportParameters.Bind(declared, http));
+
+        Assert.Equal("err.ECR-RPT-0422.parameterType", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Зі_зрізом_зберігаються_ВИКОРИСТАНІ_значення_разом_із_замовчуваннями()
     {
         var declared = ReportParameters.Compile(

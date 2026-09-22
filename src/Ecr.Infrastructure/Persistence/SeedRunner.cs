@@ -38,9 +38,19 @@ public sealed class SeedRunner(EcrDbContext db)
 
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
+        // Сира команда не успадковує таймаут EF і мала б дефолтні 30 с замість
+        // `Database:CommandTimeoutSeconds`. Беремо значення з того ж джерела,
+        // що й EF, — на кожен батч: це дрібні MERGE, окрема межа їм не потрібна.
+        var timeout = db.Database.GetCommandTimeout();
+
         foreach (var batch in batches)
         {
             await using var cmd = connection.CreateCommand();
+            if (timeout is int seconds)
+            {
+                cmd.CommandTimeout = seconds;
+            }
+
             cmd.Transaction = tx;
             cmd.CommandText = batch;
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);

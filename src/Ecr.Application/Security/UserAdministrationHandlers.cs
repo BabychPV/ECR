@@ -41,7 +41,7 @@ internal static class UserAdministration
         if (target.Id == actorId)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate, "Над власним обліковим записом ця дія заборонена.",
+                ErrorCodes.SecurityConflict, "Над власним обліковим записом ця дія заборонена.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SEC-0409.cannotTargetSelf" });
         }
     }
@@ -58,7 +58,7 @@ internal static class UserAdministration
         if (all > others && others == 0)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RoleDuplicate, $"«{target.UserName}» — останній активний адміністратор.",
+                ErrorCodes.SecurityConflict, $"«{target.UserName}» — останній активний адміністратор.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-SEC-0409.lastAdministrator",

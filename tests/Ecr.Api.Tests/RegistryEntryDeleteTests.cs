@@ -108,6 +108,10 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
             .RootElement;
 
         Assert.Equal("ECR-REG-0409", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REG-0409.entryReferenced", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("Registry entry conflict", problem.GetProperty("title").GetString());
+        Assert.StartsWith("Entry \"", problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Contains("cells reference it", problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
 
         // ⛔ Саме КІЛЬКІСТЬ, а не факт відмови. Клієнт пропонує закрити запис
         // датою замість повтору, і «на запис посилаються N комірок» — єдине,

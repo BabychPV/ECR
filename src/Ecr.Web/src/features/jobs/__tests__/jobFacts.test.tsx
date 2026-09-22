@@ -39,6 +39,7 @@ const list = [
     updatedAt: '2026-09-20T09:01:00Z',
     state: 'Running',
     attempt: 2,
+    maxAttempts: 4,
     correlationId: 'corr-r2',
     createdByDisplayName: null,
     message: 'Перераховано 5 комірок',
@@ -168,9 +169,10 @@ describe('JobsPage: перелік задач — поля BE-08', () => {
     mockFetch(null, list);
     show('/admin/jobs');
 
-    // Спроба 2 — показана, у переліку `maxAttempts` немає — без «з M».
-    expect(await screen.findByText('⟦jobs.attempt (n=2)⟧')).toBeTruthy();
-    expect(screen.queryByText(/jobs\.attemptOf/)).toBeNull();
+    // Спроба 2, maxAttempts=4 — `JobSummary` тепер несе те саме поле, що
+    // й `JobStatus` картки, тож рядок переліку показує «з M» так само.
+    expect(await screen.findByText('⟦jobs.attemptOf (n=2, max=4)⟧')).toBeTruthy();
+    expect(screen.queryByText(/^⟦jobs\.attempt \(/)).toBeNull();
 
     // Спроба 1 — нічого.
     expect(document.querySelectorAll('[data-job-attempt]')).toHaveLength(1);
@@ -195,5 +197,13 @@ describe('JobsPage: перелік задач — поля BE-08', () => {
 
     // L5: не більше семи колонок.
     expect(document.querySelectorAll('thead th').length).toBeLessThanOrEqual(7);
+  });
+
+  it('maxAttempts = null у рядку переліку — «спроба N» без «з M»', async () => {
+    mockFetch(null, [{ ...list[0], maxAttempts: null }]);
+    show('/admin/jobs');
+
+    expect(await screen.findByText('⟦jobs.attempt (n=2)⟧')).toBeTruthy();
+    expect(screen.queryByText(/jobs\.attemptOf/)).toBeNull();
   });
 });

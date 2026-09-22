@@ -165,6 +165,65 @@ describe('Г (дзеркало): звичайні числа показують�
   });
 });
 
+describe('Д: формат комірки — доповнення нулями до scale (лише показ)', () => {
+  it('1.5 при scale = 4 → 1.5000; без scale — 1.5 (дзеркало)', () => {
+    expect(shownValue(slice({ C1: '1.5' }, [column({ scale: 4 })]), '1.5')).toBe('1.5000');
+    expect(shownValue(slice({ C1: '1.5' }, [column({ scale: null })]), '1.5')).toBe('1.5');
+  });
+
+  it('20 значущих цифр доповнюються без втрати — не Number().toFixed()', () => {
+    // ⛔ Мутаційна межа: `Number(x).toFixed(18)` дав би інші останні цифри.
+    const data = slice({ C1: Twenty }, [column({ scale: 18 })]);
+
+    expect(norm(shownValue(data, Twenty))).toBe('1,234.123456789012345600');
+  });
+
+  it('від\'ємне, нуль, мова з комою', () => {
+    const data = slice({ C1: '-2.5' }, [column({ scale: 3 })]);
+
+    expect(shownValue(data, '-2.5')).toBe('-2.500');
+    expect(shownValue(data, '0.0000000000')).toBe('0.000');
+    setLanguage('kz');
+    expect(norm(shownValue(data, '-1234.5'))).toBe('-1 234,500');
+  });
+
+  it('порожня комірка лишається порожньою; нечислове — як є', () => {
+    const data = slice({ C1: null }, [column({ scale: 4 })]);
+
+    expect(shownValue(data, null)).toBe('');
+    expect(shownValue(data, undefined)).toBe('');
+    expect(shownValue(data, 'н/д')).toBe('н/д');
+  });
+
+  it('експонентний запис не ламається: показується як є', () => {
+    // `normalizeDecimal` експоненти не приймає (сервер її не друкує).
+    expect(shownValue(slice({ C1: '1e3' }, [column({ scale: 2 })]), '1e3')).toBe('1e3');
+  });
+
+  it('довший дріб округлюється ПОКАЗОМ до scale — AwayFromZero, як roundToScale', () => {
+    // ✎ Рішення координатора 2026-09-22: «рівно N» — це й округлення показу.
+    const formula = [column({ dataType: 'Formula', scale: 2 })];
+
+    expect(shownValue(slice({ C1: '1.005' }, formula), '1.005')).toBe('1.01');
+    expect(shownValue(slice({ C1: '-1.005' }, formula), '-1.005')).toBe('-1.01');
+    expect(shownValue(slice({ C1: '1.23456' }, [column({ scale: 2 })]), '1.23456')).toBe('1.23');
+    // Буфер обміну лишає повне значення.
+    expect(cellText('1.005')).toBe('1.005');
+  });
+
+  it('20 значущих цифр округлюються рядково, не через double', () => {
+    // ⛔ Через `Number` дріб став би ...0124 (13 знаків ≤ 15) і показ дав би
+    // `...012400`; рядкове AwayFromZero над ...0123456 дає ...012346.
+    const data = slice({ C1: Twenty }, [column({ dataType: 'Calculated', scale: 15 })]);
+
+    expect(norm(shownValue(data, Twenty))).toBe('1,234.123456789012346');
+  });
+
+  it('буфер обміну нулів показу не отримує', () => {
+    expect(cellText('1.5')).toBe('1.5');
+  });
+});
+
 describe('Б: комірка не лишається брудною', () => {
   it('ввід «5» поверх серверного «5.0000000000» не є правкою', () => {
     /*
