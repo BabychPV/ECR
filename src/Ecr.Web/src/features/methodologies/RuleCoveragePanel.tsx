@@ -1,6 +1,7 @@
 import { useMemo, useState, type JSX } from 'react';
 import { Badge, Code, Group, NumberInput, Select, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '@/api/queryKeys';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -199,7 +200,7 @@ export function MethodologyRuleCoveragePanel({
   // сервер обмежує вибірку. Інше джерело давало б у списку таблиці, за якими
   // матриця завжди порожня.
   const bindings = useQuery({
-    queryKey: ['methodologies', 'bindings', methodologyId],
+    queryKey: queryKeys.methodologies.bindings(methodologyId),
     queryFn: () => calculationBindings(methodologyId),
   });
 
@@ -228,7 +229,7 @@ export function MethodologyRuleCoveragePanel({
   }, [bindings.data]);
 
   const coverage = useQuery({
-    queryKey: ['methodologies', 'ruleCoverage', versionId, tableDefId, periodFrom, periodTo],
+    queryKey: queryKeys.methodologies.ruleCoverage(versionId, tableDefId, periodFrom, periodTo),
     queryFn: () => ruleCoverage(methodologyId, versionId, { tableDefId, periodFrom, periodTo }),
 
     // ⛔ Порожнє вікно НЕ йде мережею: сервер відповів би на нього `422`

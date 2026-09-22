@@ -133,6 +133,22 @@ const methodologies = {
 
   /** Прив'язки методології до колонок документів (`D-69`) — не версії. */
   bindings: (methodologyId: number) => ['methodologies', 'bindings', methodologyId] as const,
+
+  /**
+   * Матриця покриття «рядки реальних даних × правила» версії (`ФВ-13.4`,
+   * `ФВ-13.9`, `RuleCoveragePanel.tsx`).
+   *
+   * ⚠ `tableDefId` приймає `null` — «усі таблиці», той самий стан, що ніс
+   * старий рядковий ключ у компоненті. `periodFrom`/`periodTo` — частина
+   * ключа, а не лише параметр запиту: інше вікно періоду — інший
+   * запис кешу, так само як діяло до фабрики.
+   */
+  ruleCoverage: (
+    versionId: number,
+    tableDefId: number | null,
+    periodFrom: number,
+    periodTo: number,
+  ) => ['methodologies', 'ruleCoverage', versionId, tableDefId, periodFrom, periodTo] as const,
 };
 
 /**
