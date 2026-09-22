@@ -126,6 +126,29 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         Assert.Equal("PAGE", compression);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Індекс_заповненості_CellValue_фільтрований_і_на_схемі_розділів()
+    {
+        // Під підрахунок `tables/status` (TableFillStore): ключ з PeriodKey
+        // першим, лише введені комірки, вирівняний по ps_ByPeriodKey.
+        var shape = await ScalarAsync<string>("""
+            SELECT STUFF((SELECT N',' + c.name
+                          FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+                            AND ic.is_included_column = 0
+                          ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 1, N'')
+                   + N'|' + ISNULL(i.filter_definition, N'-') + N'|' + ds.name
+            FROM sys.indexes i
+            JOIN sys.data_spaces ds ON ds.data_space_id = i.data_space_id
+            WHERE i.object_id = OBJECT_ID(N'doc.CellValue') AND i.name = N'IX_CellValue_Fill'
+            """);
+
+        Assert.Equal("PeriodKey,TableRowId,ColumnDefId|([IsCalculated]=(0))|ps_ByPeriodKey", shape);
+    }
+
     // ⚠ Тест доданий після Q-060: сім сутностей без конфігурації EF лягали
     // конвенцією в `dbo` з множинним іменем, і міграція створювала таблиці,
     // яких у `02a-db-schema.md` немає. `SchemaValidator` цього не бачить —
