@@ -101,7 +101,8 @@ public static class PeriodAccessRuleMapper
             throw new BusinessRuleException(
                 ErrorCodes.TemplateInvalid,
                 "Правило доступу до періоду має стосуватися аркуша або таблиці: " +
-                "порожні обидва означають правило, що не діє ніде (CK_PAR_Target).");
+                "порожні обидва означають правило, що не діє ніде (CK_PAR_Target).",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.periodAccessRuleNoTarget" });
         }
     }
 
@@ -115,7 +116,13 @@ public static class PeriodAccessRuleMapper
             throw new BusinessRuleException(
                 ErrorCodes.TemplateInvalid,
                 $"Аркуша {sheet} у версії {version.Id} немає: зовнішній ключ це прийняв би, " +
-                "а версія перестала б бути замкненою одиницею.");
+                "а версія перестала б бути замкненою одиницею.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.sheetNotInVersion",
+                    ["sheetDefId"] = sheet.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = version.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (tableDefId is { } table && version.Sheets.SelectMany(s => s.Tables).All(t => t.Id != table))
@@ -123,7 +130,13 @@ public static class PeriodAccessRuleMapper
             throw new BusinessRuleException(
                 ErrorCodes.TemplateInvalid,
                 $"Таблиці {table} у версії {version.Id} немає: зовнішній ключ це прийняв би, " +
-                "а версія перестала б бути замкненою одиницею.");
+                "а версія перестала б бути замкненою одиницею.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.tableNotInVersion",
+                    ["tableDefId"] = table.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = version.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -153,7 +166,11 @@ public static class PeriodAccessRuleMapper
                     command.SourceColumnDefId ?? throw new BusinessRuleException(
                         ErrorCodes.TemplateInvalid,
                         "Вид SourceWindow потребує SourceColumnDefId: без нього правило " +
-                        "виглядає налаштованим і не блокує нічого (CK_PAR_Kind)."),
+                        "виглядає налаштованим і не блокує нічого (CK_PAR_Kind).",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-TMPL-0422.sourceWindowRequiresColumn",
+                        }),
                     command.OnOutOfWindow),
 
             PeriodAccessRuleKind.Expression =>
@@ -161,7 +178,13 @@ public static class PeriodAccessRuleMapper
                     templateVersionId, command.ConditionExpr ?? string.Empty, command.OnOutOfWindow),
 
             _ => throw new BusinessRuleException(
-                ErrorCodes.TemplateInvalid, $"Невідомий вид правила: {command.RuleKind}."),
+                ErrorCodes.TemplateInvalid,
+                $"Невідомий вид правила: {command.RuleKind}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.unknownPeriodAccessRuleKind",
+                    ["ruleKind"] = command.RuleKind.ToString(),
+                }),
         };
 
         rule.ForSheet(command.SheetDefId).ForTable(command.TableDefId)
@@ -203,7 +226,10 @@ public sealed class CreatePeriodAccessRuleHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -335,7 +361,10 @@ public sealed class SavePeriodAccessRuleHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -350,7 +379,14 @@ public sealed class SavePeriodAccessRuleHandler(
             // приходить із мережі, і без цієї умови PUT однієї версії міг би
             // змінити правило чужої.
             throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Правила {ruleId} у версії {templateVersionId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Правила {ruleId} у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.periodAccessRule",
+                    ["ruleId"] = ruleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         PeriodAccessRuleMapper.EnsureHasTarget(command.SheetDefId, command.TableDefId);
@@ -431,7 +467,10 @@ public sealed class DeletePeriodAccessRuleHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -442,7 +481,14 @@ public sealed class DeletePeriodAccessRuleHandler(
         if (rule is null || rule.TemplateVersionId != templateVersionId)
         {
             throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Правила {ruleId} у версії {templateVersionId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Правила {ruleId} у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.periodAccessRule",
+                    ["ruleId"] = ruleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);

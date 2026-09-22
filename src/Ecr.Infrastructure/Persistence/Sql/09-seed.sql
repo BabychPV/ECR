@@ -827,6 +827,28 @@ USING (VALUES
     (N'err.ECR-TMPL-0409.templateAlreadyArchived', N'en', N'Template "{code}" is already archived.', 1),
     (N'err.ECR-TMPL-0409.templateNotArchived',     N'en', N'Template "{code}" is not archived: there is nothing to bring back.', 1),
 
+    -- Борг локалізації: правила доступу до періоду й зв'язки між таблицями
+    -- (`PeriodAccessRuleHandlers`/`PeriodAccessRuleDef`,
+    -- `TableRelationHandlers`/`TableRelationDef`). `tableNotInVersion` спільний
+    -- для обох обробників — той самий факт («таблиця не в цій версії»),
+    -- незалежно від того, звідки код до нього дійшов.
+    (N'err.ECR-TMPL-0422.periodAccessRuleNoTarget',  N'en', N'A period access rule must apply to a sheet or a table: leaving both empty means a rule that blocks nothing.', 1),
+    (N'err.ECR-TMPL-0422.sheetNotInVersion',         N'en', N'Sheet {sheetDefId} does not belong to template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0422.tableNotInVersion',         N'en', N'Table {tableDefId} does not belong to template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0422.sourceWindowRequiresColumn', N'en', N'The SourceWindow kind requires a source column: without it the rule looks configured but blocks nothing.', 1),
+    (N'err.ECR-TMPL-0422.unknownPeriodAccessRuleKind', N'en', N'Period access rule kind "{ruleKind}" does not exist.', 1),
+    (N'err.ECR-TMPL-0404.periodAccessRule',          N'en', N'Rule {ruleId} was not found in template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0404.tableRelation',             N'en', N'Relation "{relationCode}" was not found in template version {versionId}.', 1),
+    (N'err.ECR-SCHM-0409.templateRelationBreaking',  N'en', N'This change to relation "{relationCode}" is breaking: documents are already attached to this template version. Values in them were computed using the relation, and removing or changing it now would silently alter what was already submitted.', 1),
+    (N'err.ECR-TMPL-0422.relationSelfLink',          N'en', N'Relation "{relationCode}" links table {tableDefId} to itself: this is not allowed (CK_Rel_NotSelf).', 1),
+    (N'err.ECR-TMPL-0422.relationMatchRequired',     N'en', N'Relation "{relationCode}" has no row match (MatchJson): without it, it connects no rows while looking configured.', 1),
+    (N'err.ECR-TMPL-0422.relationMatchNotObject',    N'en', N'The row match (MatchJson) of relation "{relationCode}" must be a JSON object.', 1),
+    (N'err.ECR-TMPL-0422.relationMatchInvalidJson',  N'en', N'The row match (MatchJson) of relation "{relationCode}" is not valid JSON.', 1),
+    (N'err.ECR-TMPL-0422.relationUnknownOnSourceChange', N'en', N'Unknown reaction to a source change: {onSourceChange}. Allowed values are 0 (Recalc), 1 (Warn), 2 (Block).', 1),
+    (N'err.ECR-TMPL-0422.relativeWindowOffsetNotPositive', N'en', N'The relative window offset must be positive; got {offset}. Zero is EditablePeriodOnly — use that kind instead.', 1),
+    (N'err.ECR-TMPL-0422.expressionRequired',        N'en', N'An Expression rule without a condition does nothing: an empty condition here is the same as no rule.', 1),
+    (N'err.ECR-CFG-0422.hideRetired',                N'en', N'The "Hide" behavior can no longer be set: hiding is not one of the three allowed reactions. Use "ReadOnly" instead — it means the same "not allowed".', 1),
+
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
 

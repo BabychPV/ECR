@@ -112,7 +112,13 @@ public sealed class TableRelationDef : Entity<int>
                 "ECR-TMPL-0422",
                 $"Зв'язок {Code} пов'язує таблицю {sourceTableDefId} саму із собою. " +
                 "Це заборонено обмеженням CK_Rel_NotSelf: зіставляти рядки таблиці з її ж рядками " +
-                "означає або тотожність, або цикл, і жодне з двох не є зв'язком.");
+                "означає або тотожність, або цикл, і жодне з двох не є зв'язком.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.relationSelfLink",
+                    ["relationCode"] = Code,
+                    ["tableDefId"] = sourceTableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (string.IsNullOrWhiteSpace(matchJson))
@@ -123,7 +129,12 @@ public sealed class TableRelationDef : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0422",
                 $"Зв'язок {Code} не має зіставлення рядків (MatchJson). " +
-                "Без нього він не з'єднує жодного рядка, лишаючись на вигляд налаштованим.");
+                "Без нього він не з'єднує жодного рядка, лишаючись на вигляд налаштованим.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.relationMatchRequired",
+                    ["relationCode"] = Code,
+                });
         }
 
         // ⛔ UI-аудит, lane 7 (`Q-337`): форма "New relation" приймала геть
@@ -154,14 +165,24 @@ public sealed class TableRelationDef : Entity<int>
                 throw new DomainException(
                     "ECR-TMPL-0422",
                     $"Зіставлення рядків (MatchJson) зв'язку {Code} має бути JSON-об'єктом " +
-                    "(`{}` — весь перелік), а не іншим значенням JSON.");
+                    "(`{}` — весь перелік), а не іншим значенням JSON.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.relationMatchNotObject",
+                        ["relationCode"] = Code,
+                    });
             }
         }
         catch (JsonException ex)
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"Зіставлення рядків (MatchJson) зв'язку {Code} не є валідним JSON: {ex.Message}");
+                $"Зіставлення рядків (MatchJson) зв'язку {Code} не є валідним JSON: {ex.Message}",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.relationMatchInvalidJson",
+                    ["relationCode"] = Code,
+                });
         }
 
         if (onSourceChange > OnSourceChangeBlock)
@@ -170,7 +191,12 @@ public sealed class TableRelationDef : Entity<int>
                 "ECR-TMPL-0422",
                 $"Невідома реакція на зміну джерела: {onSourceChange}. " +
                 $"Допустимі — {OnSourceChangeRecalc} Recalc, {OnSourceChangeWarn} Warn, " +
-                $"{OnSourceChangeBlock} Block.");
+                $"{OnSourceChangeBlock} Block.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.relationUnknownOnSourceChange",
+                    ["onSourceChange"] = onSourceChange.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         SourceTableDefId = sourceTableDefId;

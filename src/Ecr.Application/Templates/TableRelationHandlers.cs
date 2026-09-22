@@ -42,7 +42,13 @@ public sealed class ListTableRelationsHandler(
 
         var version = await versions.FindAsync(templateVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Версії шаблону {templateVersionId} не існує.");
+                ErrorCodes.TemplateNotFound,
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var codes = await store.ListTableCodesAsync(templateVersionId, ct).ConfigureAwait(false);
         var relations = await store.ListTableRelationsAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -151,11 +157,20 @@ public sealed class SaveTableRelationHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await versions.FindAsync(templateVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Версії шаблону {templateVersionId} не існує.");
+                ErrorCodes.TemplateNotFound,
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ ПЕРШИМ ділом і доменом. Усе інше нижче — перевірки самого зв'язку;
         // вони мають сенс лише там, де правка взагалі дозволена.
@@ -248,7 +263,15 @@ public sealed class SaveTableRelationHandler(
                 ErrorCodes.TemplateInvalid,
                 $"Таблиці {tableDefId} у версії {templateVersionId} немає, тож вона не може бути таблицею {role}. " +
                 "Зовнішній ключ таке прийняв би: він не знає про версії — і зв'язок перетнув би межу версії, " +
-                "після чого клон переніс би лише його половину.");
+                "після чого клон переніс би лише його половину.",
+                new Dictionary<string, object?>
+                {
+                    // ⚠ Той самий факт, що EnsureBelongs у PeriodAccessRuleHandlers —
+                    // спільний ключ, не своя копія тексту на кожен виклик.
+                    ["messageKey"] = "err.ECR-TMPL-0422.tableNotInVersion",
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -275,6 +298,9 @@ public sealed class SaveTableRelationHandler(
             "заднім числом (ФВ-7.4). Це відмова, а не попередження.",
             new Dictionary<string, object?>
             {
+                // ⚠ Без "operation" у шаблоні: текст однаковий і для зміни, і для
+                // видалення — яку саме дію відхилено, клієнт уже знає з методу запиту.
+                ["messageKey"] = "err.ECR-SCHM-0409.templateRelationBreaking",
                 ["relationCode"] = code,
                 ["hasDocuments"] = hasDocuments,
             });
@@ -349,18 +375,33 @@ public sealed class DeleteTableRelationHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await versions.FindAsync(templateVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Версії шаблону {templateVersionId} не існує.");
+                ErrorCodes.TemplateNotFound,
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         version.EnsureStructurallyMutable();
 
         var relation = await store.FindTableRelationAsync(templateVersionId, code, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.TemplateNotFound,
-                $"Зв'язку «{code}» у версії {templateVersionId} немає.");
+                $"Зв'язку «{code}» у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.tableRelation",
+                    ["relationCode"] = code,
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
         var change = classifier.ClassifyDeletion(nameof(TableRelationDef), hasDocuments);

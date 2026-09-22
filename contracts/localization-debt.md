@@ -207,6 +207,41 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
   `ECR-SEC-0404`, `ECR-USR-0422`, `ECR-REQ-0422` уже були нейтральними
   (кілька причин під одним кодом) з попередніх раундів.
 
+✎ **2026-09-22: шаблони — правила доступу до періоду й зв'язки між
+таблицями** — `PeriodAccessRuleHandlers` (10) і доменний `PeriodAccessRuleDef`
+(4), `TableRelationHandlers` (8) і доменний `TableRelationDef` (5) закрито
+повністю, 27 кидків; 231 у 73 файлах → 204 у 69 файлах (зріз узятий від
+того самого замiру 254/74, що й запис про `RoleAndUserHandlers.cs` вище, —
+паралельно і без перетину файлів). Найбільша область боргу
+(`src/Ecr.Application/Templates/*` і відповідні сутності
+`src/Ecr.Domain/Entities/Configuration/*`) — цей зріз перший у ній, решта
+файлів області лишається на наступні проходи.
+- `ECR-TMPL-0422.tableNotInVersion` {tableDefId, versionId} — спільний ключ
+  для ДВОХ обробників (`PeriodAccessRuleMapper.EnsureBelongs` і
+  `TableRelationHandler.EnsureBelongs`): той самий факт «таблиця не в цій
+  версії», незалежно від того, яка дія до нього дійшла.
+- `ECR-TMPL-0404.templateVersion` {versionId} — наявний ключ (заведений
+  `Repository<T,TId>.GetAsync`, запис 2026-09-18), перевикористаний для трьох
+  однакових кидків «версії шаблону не існує» в `TableRelationHandlers`.
+- `ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для п'яти
+  кидків «сесія не містить користувача» (Create/Save/Delete правила доступу,
+  Save/Delete зв'язку).
+- Нові ключі: `ECR-TMPL-0422.periodAccessRuleNoTarget`, `.sheetNotInVersion`
+  {sheetDefId, versionId}, `.sourceWindowRequiresColumn`,
+  `.unknownPeriodAccessRuleKind` {ruleKind}, `.relativeWindowOffsetNotPositive`
+  {offset}, `.expressionRequired`, `.relationSelfLink` {relationCode,
+  tableDefId}, `.relationMatchRequired`/`.relationMatchNotObject`/
+  `.relationMatchInvalidJson` {relationCode}, `.relationUnknownOnSourceChange`
+  {onSourceChange}; `ECR-TMPL-0404.periodAccessRule` {ruleId, versionId} і
+  `.tableRelation` {relationCode, versionId}; `ECR-SCHM-0409.
+  templateRelationBreaking` {relationCode} — без `operation` у підстановці:
+  текст однаковий і для зміни, і для видалення зв'язку, дію клієнт знає з
+  методу запиту; `ECR-CFG-0422.hideRetired` — наявний код (уже вживаний
+  `StyleDef`/`EcrCode`), новий ключ для двох кидків «Hide» (конструктор і
+  `SetOutOfWindowBehavior`).
+- Заголовки кодів не змінювались: `ECR-TMPL-0422`/`ECR-TMPL-0404`/
+  `ECR-SCHM-0409`/`ECR-CFG-0422` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -243,12 +278,10 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
 | `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/PeriodAccessRuleHandlers.cs` | 10 |
 | `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/TableDefHandlers.cs` | 6 |
-| `src/Ecr.Application/Templates/TableRelationHandlers.cs` | 8 |
 | `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |
 | `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
@@ -259,10 +292,8 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/ColumnDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
-| `src/Ecr.Domain/Entities/Configuration/PeriodAccessRuleDef.cs` | 4 |
 | `src/Ecr.Domain/Entities/Configuration/SheetDef.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/TableDef.cs` | 5 |
-| `src/Ecr.Domain/Entities/Configuration/TableRelationDef.cs` | 5 |
 | `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |

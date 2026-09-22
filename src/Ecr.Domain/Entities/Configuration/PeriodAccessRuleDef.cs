@@ -42,7 +42,8 @@ public sealed class PeriodAccessRuleDef : Entity<int>
             throw new DomainException(
                 "ECR-CFG-0422",
                 "Поведінка «Hide» більше не заводиться: ФВ-2.16 приховування "
-                + "не передбачає. Візьміть «ReadOnly» — це те саме «заборонити».");
+                + "не передбачає. Візьміть «ReadOnly» — це те саме «заборонити».",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422.hideRetired" });
         }
 #pragma warning restore CS0618
 
@@ -137,7 +138,12 @@ public sealed class PeriodAccessRuleDef : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0422",
                 $"Зсув відносного вікна має бути додатним; отримано {offset}. "
-                + "Нуль — це EditablePeriodOnly, і його треба задавати саме ним.");
+                + "Нуль — це EditablePeriodOnly, і його треба задавати саме ним.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.relativeWindowOffsetNotPositive",
+                    ["offset"] = offset.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var rule = new PeriodAccessRuleDef(
@@ -176,7 +182,8 @@ public sealed class PeriodAccessRuleDef : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0422",
                 "Правило виду Expression без виразу не робить нічого; "
-                + "порожня умова тут — те саме, що відсутнє правило.");
+                + "порожня умова тут — те саме, що відсутнє правило.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.expressionRequired" });
         }
 
         var rule = new PeriodAccessRuleDef(
@@ -249,7 +256,8 @@ public sealed class PeriodAccessRuleDef : Entity<int>
             throw new DomainException(
                 "ECR-CFG-0422",
                 "Поведінка «Hide» більше не заводиться: ФВ-2.16 приховування "
-                + "не передбачає. Візьміть «ReadOnly» — це те саме «заборонити».");
+                + "не передбачає. Візьміть «ReadOnly» — це те саме «заборонити».",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CFG-0422.hideRetired" });
         }
 #pragma warning restore CS0618
 

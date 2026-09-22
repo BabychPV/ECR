@@ -50,6 +50,8 @@ public sealed class TableRelationDefTests
             new TableRelationDef(EcrCode.Create("Self"), 5, 5, TableRelationKind.Mirror, "{}"));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.relationSelfLink", error.Details?["messageKey"]);
+        Assert.Equal("5", error.Details?["tableDefId"]);
     }
 
     [Theory]
@@ -65,6 +67,7 @@ public sealed class TableRelationDefTests
             new TableRelationDef(EcrCode.Create("Empty"), 5, 6, TableRelationKind.Rollup, matchJson));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.relationMatchRequired", error.Details?["messageKey"]);
     }
 
     /// <summary>
@@ -85,6 +88,7 @@ public sealed class TableRelationDefTests
             new TableRelationDef(EcrCode.Create("Garbage"), 5, 6, TableRelationKind.Rollup, matchJson));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.relationMatchInvalidJson", error.Details?["messageKey"]);
     }
 
     /// <summary>
@@ -107,6 +111,7 @@ public sealed class TableRelationDefTests
             new TableRelationDef(EcrCode.Create("NotObject"), 5, 6, TableRelationKind.Rollup, matchJson));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.relationMatchNotObject", error.Details?["messageKey"]);
     }
 
     [Fact]
@@ -123,6 +128,8 @@ public sealed class TableRelationDefTests
             relation.Update(5, 6, TableRelationKind.Rollup, "{}", null, onSourceChange: 7, isActive: true));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.relationUnknownOnSourceChange", error.Details?["messageKey"]);
+        Assert.Equal("7", error.Details?["onSourceChange"]);
 
         // Стан не зіпсовано: відхилена правка не лишає половини змін.
         Assert.Equal(TableRelationDef.OnSourceChangeRecalc, relation.OnSourceChange);
