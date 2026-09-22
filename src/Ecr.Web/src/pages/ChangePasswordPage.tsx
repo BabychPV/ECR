@@ -4,9 +4,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { ChangePasswordRequest } from '@/api/types';
+import { isPasswordTooShort } from '@/features/security/UserAdminActions';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 
 /**
@@ -55,6 +57,16 @@ export function ChangePasswordPage(): JSX.Element {
 
   const mismatch = next.length > 0 && repeat.length > 0 && next !== repeat;
 
+  // ⚠ Мінімальна довжина пароля нізвідки клієнту не доступна ДО спроби: не
+  // конфіг, не `GET /api/v1/public/bootstrap`, не публічна частина каталогу
+  // рядків (сід `09-seed.sql` тримає `password.policy`/`err.ECR-PWD-0422.*`
+  // приватними). Хардкодити число означало б розсинхронізацію з реальним
+  // `PasswordPolicy.MinLength` (`UserStore.GetPolicyAsync`). Тому — реактивна
+  // перевірка за тим самим патерном, що й у `UserAdminActions.tsx`: код
+  // помилки й `messageKey`, а не текст, під полем, а не в загальному банері.
+  const tooShort = isPasswordTooShort(error);
+  const tooShortText = tooShort ? (problemText(error).detail ?? problemText(error).title) : null;
+
   async function submit(): Promise<void> {
     setBusy(true);
     setError(null);
@@ -95,6 +107,7 @@ export function ChangePasswordPage(): JSX.Element {
             label={t('password.next')}
             value={next}
             onChange={(event) => setNext(event.currentTarget.value)}
+            error={tooShortText ?? undefined}
             autoComplete="new-password"
             visibilityToggleButtonProps={passwordToggleProps}
           />
@@ -111,7 +124,8 @@ export function ChangePasswordPage(): JSX.Element {
             {t('password.submit')}
           </Button>
 
-          <ErrorAlert error={error} />
+          {/* Решта відмов — банером; `tooShort` уже під полем нового пароля. */}
+          {!tooShort && <ErrorAlert error={error} />}
 
           {/* ⚠ Вимоги до пароля показуються ДО спроби: правила, видимі лише у
               відповіді про помилку, змушують вгадувати. */}
