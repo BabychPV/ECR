@@ -3242,6 +3242,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/ui-strings/{lang}/{key}` | `System.ManageLocalization` | 3 |
 | `GET` | `/api/v1/ui-strings/coverage` | `System.ManageLocalization` | 7 |
 | `GET` | `/api/v1/ui-strings?lang=&missingOnly=` | `System.ManageLocalization` | 7 |
+| `GET` | `/api/v1/ui-strings/export.csv?lang=` | `System.ManageLocalization` | 7 |
+| `POST` | `/api/v1/ui-strings/import?lang=&dryRun=` | `System.ManageLocalization` | 7 |
 | `POST` | `/api/v1/security/simulation` | `Security.Simulate` | 3 |
 | `DELETE` | `/api/v1/security/simulation` | — (власний сеанс) | 3 |
 | `GET` | `/api/v1/security/my-groups` | — (власний сеанс) | 3 |

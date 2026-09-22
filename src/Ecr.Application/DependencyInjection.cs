@@ -255,6 +255,8 @@ public static class DependencyInjection
         services.AddScoped<Localization.SetUiStringHandler>();
         services.AddScoped<Localization.GetUiStringCoverageHandler>();
         services.AddScoped<Localization.ListUiStringsHandler>();
+        services.AddScoped<Localization.ExportUiStringsCsvHandler>();
+        services.AddScoped<Localization.UiStringImportHandler>();
 
         // ⚠ PatchCellsHandler і RecalculateDocumentHandler зареєстровані з
         // Етапу 3. Раніше їх не було через IBackgroundJobScheduler без

@@ -78,7 +78,29 @@ public interface IUiStringCatalog
     /// <c>UiStringResolver.Compose</c>, і два визначення «перекладено» розійшлися б.
     /// </remarks>
     public Task<IReadOnlyList<UiStringRawRow>> ListRawAsync(string languageCode, CancellationToken ct);
+
+    /// <summary>Рядки мови для CSV (<c>BE-13</c> ч.2): ключі еталона, область, переклад без fallback і час зміни.</summary>
+    public Task<IReadOnlyList<UiStringExportRow>> ListForExportAsync(string languageCode, CancellationToken ct);
+
+    /// <summary>
+    /// Записує набір рядків в ОДНІЙ транзакції й піднімає версію один раз;
+    /// порожній набір версії не рухає.
+    /// </summary>
+    /// <returns>Версія каталогу після запису.</returns>
+    public Task<int> SetManyAsync(IReadOnlyList<UiStringWrite> writes, CancellationToken ct);
+
+    /// <summary>Чи є мова в реєстрі — зокрема вимкнена: переклад готують ДО увімкнення.</summary>
+    public Task<bool> LanguageExistsAsync(string languageCode, CancellationToken ct);
 }
+
+/// <summary>Рядок експорту перекладу.</summary>
+/// <param name="Key">Ключ.</param>
+/// <param name="Scope">Область рядка еталона.</param>
+/// <param name="Reference">Текст мовою за замовчуванням.</param>
+/// <param name="Value">Переклад; <c>null</c> — перекладу немає.</param>
+/// <param name="ModifiedAt">Час останньої зміни перекладу в UTC; <c>null</c> — перекладу немає.</param>
+public sealed record UiStringExportRow(
+    string Key, UiStringScope Scope, string Reference, string? Value, DateTime? ModifiedAt);
 
 /// <summary>Рядок адміністративного переліку: оригінал і переклад як він є в базі.</summary>
 /// <param name="Key">Ключ.</param>
