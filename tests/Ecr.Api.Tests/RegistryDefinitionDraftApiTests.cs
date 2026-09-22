@@ -77,6 +77,62 @@ public sealed class RegistryDefinitionDraftApiTests(SqlServerFixture sql)
         Assert.Equal("Key", FieldName(await GetJsonAsync(client, $"/api/v1/registries/{code}/definition")));
     }
 
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
+    public async Task Скасування_чернетки_204_чужа_версія_409_повторне_404()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Registry.EditDefinition");
+        var (code, fieldId) = await SeedAsync();
+
+        var saved = await PutDraftAsync(client, code, fieldId, "Draft name", rowVersion: null);
+        var rowVersion = (await Json(saved)).GetProperty("rowVersion").GetString()!;
+
+        var stale = await DeleteDraftAsync(client, code, "AAAAAAAAAAA=");
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal("ECR-REG-0409", (await Json(stale)).GetProperty("errorCode").GetString());
+
+        var discarded = await DeleteDraftAsync(client, code, rowVersion);
+        Assert.True(discarded.StatusCode == HttpStatusCode.NoContent, $"{discarded.StatusCode}: {app.ErrorsText}");
+
+        var state = await GetJsonAsync(client, $"/api/v1/registries/{code}/definition/draft");
+        Assert.Equal(JsonValueKind.Null, state.GetProperty("draft").ValueKind);
+        var definition = await GetJsonAsync(client, $"/api/v1/registries/{code}/definition");
+        Assert.Equal("Key", FieldName(definition));
+        Assert.Equal(1, definition.GetProperty("definitionVersion").GetInt32());
+
+        var again = await DeleteDraftAsync(client, code, rowVersion);
+        Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
+        Assert.Equal("ECR-REG-0404", (await Json(again)).GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
+    public async Task Скасування_без_Registry_EditDefinition_дає_403()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var editor = await SystemHealthControllerTests.SignedInAsync(
+            sql, app, "Registry.View", "Registry.EditDefinition");
+        var (code, fieldId) = await SeedAsync();
+        var saved = await PutDraftAsync(editor, code, fieldId, "Draft name", rowVersion: null);
+        var rowVersion = (await Json(saved)).GetProperty("rowVersion").GetString()!;
+
+        using var viewer = await SystemHealthControllerTests.SignedInAsync(sql, app, "Registry.View");
+        var denied = await DeleteDraftAsync(viewer, code, rowVersion);
+
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        var state = await GetJsonAsync(viewer, $"/api/v1/registries/{code}/definition/draft");
+        Assert.Equal(rowVersion, state.GetProperty("draft").GetProperty("rowVersion").GetString());
+    }
+
+    private static Task<HttpResponseMessage> DeleteDraftAsync(HttpClient client, string code, string rowVersion)
+        => client.DeleteAsync(new Uri(
+            $"/api/v1/registries/{code}/definition/draft?rowVersion={Uri.EscapeDataString(rowVersion)}",
+            UriKind.Relative));
+
     private static Task<HttpResponseMessage> PutDraftAsync(
         HttpClient client, string code, int fieldId, string name, string? rowVersion)
         => client.PutAsJsonAsync(

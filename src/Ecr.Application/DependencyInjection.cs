@@ -217,6 +217,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.GetRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.SaveRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.PublishRegistryDefinitionHandler>();
+        services.AddScoped<Registries.DiscardRegistryDefinitionDraftHandler>();
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
 

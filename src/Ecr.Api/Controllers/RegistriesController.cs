@@ -24,7 +24,8 @@ public sealed class RegistriesController(
     GetRegistryUsageHandler getUsage,
     GetRegistryDefinitionDraftHandler getDraft,
     SaveRegistryDefinitionDraftHandler saveDraft,
-    PublishRegistryDefinitionHandler publish) : ControllerBase
+    PublishRegistryDefinitionHandler publish,
+    DiscardRegistryDefinitionDraftHandler discardDraft) : ControllerBase
 {
     /// <summary>Перелік довідників. Право <c>Registry.View</c>.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -149,6 +150,25 @@ public sealed class RegistriesController(
     public async Task<ActionResult<RegistryDefinitionDraftDto>> SaveDraft(
         string code, [FromBody] SaveRegistryDefinitionDraftRequest request, CancellationToken ct)
         => Ok(await saveDraft.HandleAsync(code, request, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Скасовує чернетку опису без публікації. Право <c>Registry.EditDefinition</c> (`BE-24`).
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="rowVersion">
+    /// Версія чернетки. У query, а не в тілі: тіло DELETE частина клієнтів і
+    /// проксі відкидає, а більше нічого запит не несе.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpDelete("{code}/definition/draft")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> DiscardDraft(string code, [FromQuery] string? rowVersion, CancellationToken ct)
+    {
+        await discardDraft.HandleAsync(code, rowVersion, ct).ConfigureAwait(false);
+        return NoContent();
+    }
 
     /// <summary>
     /// Публікує чернетку опису. Право <c>Registry.Publish</c> (`BE-24`).

@@ -800,7 +800,7 @@ USING (VALUES
     (N'err.ECR-REG-0422.openPeriod',         N'en', N'The registry source cannot be switched while periods are open: some documents would be filled from one list of entries and some from another.', 1),
     (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
     -- BE-24 крок 2: чернетка опису довідника і її публікація.
-    (N'err.ECR-REG-0404.definitionDraft',    N'en', N'Registry "{registryCode}" has no draft definition to publish.', 1),
+    (N'err.ECR-REG-0404.definitionDraft',    N'en', N'Registry "{registryCode}" has no draft definition.', 1),
     (N'err.ECR-REG-0409.definitionDraftChanged', N'en', N'The draft definition of registry "{registryCode}" was changed or published after you opened it. Reload it and repeat your changes.', 1),
     (N'err.ECR-REG-0409.definitionDraftStale', N'en', N'The definition of registry "{registryCode}" changed (version {baseVersion} to {currentVersion}) after the draft was last saved. Reload the draft and save it again before publishing.', 1),
 

@@ -25,6 +25,16 @@ internal static class RegistryDraft
             draft.UpdatedAt, draft.UpdatedByUserId, Convert.ToBase64String(draft.RowVersion));
     }
 
+    internal static NotFoundException NotFound(string code)
+        => new(
+            "ECR-REG-0404",
+            $"У довідника «{code}» немає чернетки опису.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REG-0404.definitionDraft",
+                ["registryCode"] = code,
+            });
+
     /// <summary>
     /// ⛔ Версію перевіряємо самі, а не токеном EF: токен ловить лише збіг між
     /// читанням і записом цього запиту, а правку втрачають між двома вкладками.
@@ -151,6 +161,64 @@ public sealed class SaveRegistryDefinitionDraftHandler(
 }
 
 /// <summary>
+/// Скасовує чернетку опису без публікації. Право <c>Registry.EditDefinition</c>.
+/// Опублікований опис не змінюється.
+/// </summary>
+public sealed class DiscardRegistryDefinitionDraftHandler(
+    IRegistryStore registries,
+    IRegistryDraftStore drafts,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    Security.IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IClock clock)
+{
+    /// <summary>Право на зміну опису довідника.</summary>
+    public const string Permission = "Registry.EditDefinition";
+
+    /// <summary>Видаляє чернетку.</summary>
+    /// <exception cref="NotFoundException">Чернетки немає — <c>ECR-REG-0404</c>.</exception>
+    /// <exception cref="ConcurrencyConflictException">Версія чернетки чужа — <c>409 ECR-REG-0409</c>.</exception>
+    public async Task HandleAsync(string code, string? rowVersion, CancellationToken ct)
+    {
+        await Security.PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var userId = SaveRegistryDefinitionHandler.RequireUser(currentUser);
+
+        var definition = await registries.FindDefinitionAsync(code, ct).ConfigureAwait(false)
+            ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
+
+        var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false)
+            ?? throw RegistryDraft.NotFound(definition.Code);
+
+        // Без версії скасування мовчки знищило б правку, збережену з іншої вкладки.
+        RegistryDraft.RequireVersion(draft, rowVersion, definition.Code);
+
+        drafts.Remove(draft);
+
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
+                    TemplateVersionId: 0,
+                    EntityType: "cfg.RegistryDefinitionDraft",
+                    EntityId: definition.Id,
+                    ChangeClass: Domain.Enums.ChangeClass.Guarded,
+                    Operation: "DiscardDefinitionDraft",
+                    OldJson: draft.ContentJson,
+                    NewJson: null,
+                    ChangeReason: draft.Reason,
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
 /// Публікує чернетку опису: застосовує її до довідника тим самим кодом, що й
 /// пряме збереження, і прибирає чернетку. Право <c>Registry.Publish</c>.
 /// </summary>
@@ -182,14 +250,7 @@ public sealed class PublishRegistryDefinitionHandler(
             ?? throw SaveRegistryDefinitionHandler.RegistryNotFound(code);
 
         var draft = await drafts.FindAsync(definition.Id, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                "ECR-REG-0404",
-                $"У довідника «{definition.Code}» немає чернетки опису.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0404.definitionDraft",
-                    ["registryCode"] = definition.Code,
-                });
+            ?? throw RegistryDraft.NotFound(definition.Code);
 
         RegistryDraft.RequireVersion(draft, request.RowVersion, definition.Code);
 

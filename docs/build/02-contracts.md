@@ -3279,6 +3279,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/registries/{code}/definition` | `Registry.EditDefinition` + `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/definition/draft` | `Registry.View` | 8 |
 | `PUT` | `/api/v1/registries/{code}/definition/draft` | `Registry.EditDefinition` | 8 |
+| `DELETE` | `/api/v1/registries/{code}/definition/draft` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/definition/publish` | `Registry.Publish` | 8 |
 | `GET` | `/api/v1/registries/{code}/history` | `Registry.View` | 8 |
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |

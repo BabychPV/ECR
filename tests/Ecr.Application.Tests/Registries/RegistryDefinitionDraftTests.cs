@@ -130,6 +130,65 @@ public sealed class RegistryDefinitionDraftTests
         Assert.Equal("Number", _registry.Fields[0].NameL10n.Get("en"));
     }
 
+    [Fact]
+    [Trait("Directive", "BE-24")]
+    public async Task Скасування_видаляє_чернетку_пише_аудит_і_не_змінює_опис()
+    {
+        var draft = Draft("Renamed", baseVersion: 1);
+
+        await Discard().HandleAsync("PERMIT", Convert.ToBase64String(Version1), default);
+
+        _drafts.Received(1).Remove(draft);
+        Assert.Equal("Number", _registry.Fields[0].NameL10n.Get("en"));
+        Assert.Equal(1, _registry.DefinitionVersion);
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r => r.Operation == "DiscardDefinitionDraft"
+                && r.EntityType == "cfg.RegistryDefinitionDraft" && r.OldJson == draft.ContentJson),
+            Arg.Any<CancellationToken>());
+        await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Directive", "BE-24")]
+    public async Task Скасування_без_чернетки_дає_404()
+    {
+        var missing = await Assert.ThrowsAsync<NotFoundException>(
+            () => Discard().HandleAsync("PERMIT", null, default));
+
+        Assert.Equal("err.ECR-REG-0404.definitionDraft", missing.Details!["messageKey"]);
+    }
+
+    [Theory]
+    [Trait("Directive", "BE-24")]
+    [InlineData("AAAAAAAAAAI=")]
+    [InlineData(null)]
+    public async Task Скасування_з_чужою_версією_дає_409_і_чернетка_лишається(string? rowVersion)
+    {
+        Draft("Renamed", baseVersion: 1);
+
+        var conflict = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Discard().HandleAsync("PERMIT", rowVersion, default));
+
+        Assert.Equal("err.ECR-REG-0409.definitionDraftChanged", conflict.Details!["messageKey"]);
+        _drafts.DidNotReceive().Remove(Arg.Any<RegistryDefinitionDraft>());
+    }
+
+    [Fact]
+    [Trait("Directive", "BE-24")]
+    public async Task Скасування_без_Registry_EditDefinition_відхиляється()
+    {
+        Allow("Registry.View", "Registry.Publish");
+        Draft("Renamed", baseVersion: 1);
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Discard().HandleAsync("PERMIT", Convert.ToBase64String(Version1), default));
+
+        _drafts.DidNotReceive().Remove(Arg.Any<RegistryDefinitionDraft>());
+    }
+
+    private DiscardRegistryDefinitionDraftHandler Discard()
+        => new(_registries, _drafts, _uow, _audit, _access, _user, _clock);
+
     private RegistryDefinitionDraft Draft(string name, int baseVersion)
     {
         var request = DraftRequest(name, null);
