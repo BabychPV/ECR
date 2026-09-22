@@ -3453,6 +3453,13 @@
             "format": "int32",
             "type": "integer"
           },
+          "resultUrl": {
+            "description": "Відносний шлях API до файлу результату (книга експорту) — лише для\n`Succeeded` з файлом і читача з `Document.Export`; інакше `null` (UX-09).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "state": {
             "description": "Стан.",
             "type": "string"
@@ -3542,6 +3549,13 @@
             "description": "Прогрес у відсотках.",
             "format": "int32",
             "type": "integer"
+          },
+          "resultUrl": {
+            "description": "Як string? JobStatus.ResultUrl (UX-09).",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "startedAt": {
             "description": "Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC\n(`JobProgress.Begin` перезаписує його). Момент постановки — CreatedAt.",
@@ -15565,7 +15579,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "Ручний перезапуск проваленої задачі. Право `System.ViewHealth`\n(директива №11, T10 #40).",
+        "summary": "Ручний перезапуск проваленої задачі. Право `System.ViewHealth` — або\nавтор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).",
         "tags": [
           "Jobs"
         ]

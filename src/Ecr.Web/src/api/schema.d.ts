@@ -3287,8 +3287,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth`
-         *     (директива №11, T10 #40).
+         * Ручний перезапуск проваленої задачі. Право `System.ViewHealth` — або
+         *     автор ВЛАСНОЇ задачі (директива №11, T10 #40; UX-09).
          * @description ⚠ Той самий `jobId` знову «у черзі» — не новий ідентифікатор:
          *     клієнт, що вже показує цю задачу, продовжує опитувати той самий
          *     `GET /jobs/{jobId}`.
@@ -13912,6 +13912,9 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /** @description Відносний шлях API до файлу результату (книга експорту) — лише для
+             *     `Succeeded` з файлом і читача з `Document.Export`; інакше `null` (UX-09). */
+            resultUrl?: null | string;
             /** @description Стан. */
             state: string;
         };
@@ -13957,6 +13960,8 @@ export interface components {
              * @description Прогрес у відсотках.
              */
             percent: number;
+            /** @description Як string? JobStatus.ResultUrl (UX-09). */
+            resultUrl?: null | string;
             /**
              * Format: date-time
              * @description Момент постановки в чергу, а після старту — момент СТАРТУ задачі в UTC
