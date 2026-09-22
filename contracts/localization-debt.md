@@ -129,6 +129,14 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 `RecalculateDocumentHandler` — його ключ має вибиратися за причиною разом із
 `RunCalculationHandler` і `RecalculationJob` (спільний `Explain`).
 
+✎ **2026-09-22: відмови перерахунку (`ECR-CALC-4221`)** — ключ вибирається за
+причиною в одному місці, `RecalculationWritePolicy.Reject`, і всі три маршрути
+(проєкт, документ, фонова задача) віддають ту саму подробицю:
+`.periodClosed {period}`, `.sheetsSubmitted {period}`, плюс
+`.approvalReasonRequired` у `RunCalculationHandler`. `RecalculateDocumentHandler`
+і `RecalculationJob` закрито повністю, `RunCalculationHandler` 5 → 3; 4 кидки.
+Заголовок `ECR-CALC-4221` став нейтральним («Recalculation is not allowed»).
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -146,11 +154,10 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Calculations/MethodologyPublishChecks.cs` | 2 |
 | `src/Ecr.Application/Calculations/MethodologyQueryHandlers.cs` | 1 |
 | `src/Ecr.Application/Calculations/PublishMethodologyHandler.cs` | 4 |
-| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 5 |
+| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 3 |
 | `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/RecalculateDocumentHandler.cs` | 1 |
 | `src/Ecr.Application/Integration/IntegrationHandlers.cs` | 6 |
 | `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
@@ -204,7 +211,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Domain/ValueObjects/RowKey.cs` | 1 |
 | `src/Ecr.Domain/ValueObjects/SiteTimeZone.cs` | 1 |
 | `src/Ecr.Infrastructure/Jobs/QuartzJobScheduler.cs` | 1 |
-| `src/Ecr.Infrastructure/Jobs/RecalculationJob.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/DocumentStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/PeriodStore.cs` | 1 |

@@ -584,15 +584,7 @@ public sealed class RecalculationJob(
 
             if (request.PeriodKey == period.PeriodKeyValue)
             {
-                throw new Ecr.Application.Errors.BusinessRuleException(
-                    RecalculationWritePolicy.ErrorCode,
-                    RecalculationWritePolicy.Explain(denial, period.PeriodKeyValue),
-                    new Dictionary<string, object?>
-                    {
-                        ["documentId"] = request.DocumentId,
-                        ["periodKey"] = period.PeriodKeyValue,
-                        ["denial"] = denial.ToString(),
-                    });
+                throw RecalculationWritePolicy.Reject(denial, period.PeriodKeyValue, request.DocumentId);
             }
         }
 

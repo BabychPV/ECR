@@ -142,6 +142,8 @@ public sealed class CalculationOrchestratorTests
         // ⛔ Перерахунок закритого періоду змінює числа, які вже подані
         // регулятору, і робить це без жодного сліду в самих даних (ФВ-9.7).
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
+        Assert.Equal("202601", error.Details?["period"]);
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
             Arg.Any<object?>(), Arg.Any<CancellationToken>());
 
@@ -168,6 +170,7 @@ public sealed class CalculationOrchestratorTests
         // а не тихим перерахунком, після якого поданий зріз і поточні дані
         // розходяться без жодної позначки.
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.sheetsSubmitted", error.Details?["messageKey"]);
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
             Arg.Any<object?>(), Arg.Any<CancellationToken>());
     }

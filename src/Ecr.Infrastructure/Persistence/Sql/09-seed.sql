@@ -381,7 +381,8 @@ UPDATE t
     (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found'),
     (N'err.ECR-PRD-0409',                N'en', N'The period is closed', N'Period state conflict'),
     (N'err.ECR-PRD-0422',                N'en', N'The period is outside the project', N'Invalid period request'),
-    (N'err.ECR-AUTH-0403.jobNotYours',   N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', N'This background job was started by someone else: permission {permission} is required to act on it.')
+    (N'err.ECR-AUTH-0403.jobNotYours',   N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', N'This background job was started by someone else: permission {permission} is required to act on it.'),
+    (N'err.ECR-CALC-4221',               N'en', N'Recalculation of a closed period', N'Recalculation is not allowed')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -945,7 +946,11 @@ USING (VALUES
     -- D-40: with a neutral code title, the four-eyes refusals carry their own detail.
     (N'err.ECR-CALC-0409.authorCannotPublish',  N'en', N'You are the author of version {version}: a second pair of eyes is required, so another user has to publish it.', 1),
     (N'err.ECR-CALC-0409.ownRecalculationApproval', N'en', N'You cannot approve your own recalculation of a closed period: a second pair of eyes is required.', 1),
-    (N'err.ECR-SYS-0500.contactAdmin',          N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
+    -- ECR-CALC-4221 has a neutral title: closed period, submitted sheets, approval without a reason.
+    (N'err.ECR-CALC-4221.periodClosed',         N'en', N'Period {period} is closed: closed periods are not recalculated automatically, a separate approval is required.', 1),
+    (N'err.ECR-CALC-4221.sheetsSubmitted',      N'en', N'Period {period} has submitted sheets: recalculation would change numbers already sent for approval. Reopen the period first.', 1),
+    (N'err.ECR-CALC-4221.approvalReasonRequired', N'en', N'An approval to recalculate a closed period is not accepted without a reason.', 1),
+    (N'err.ECR-SYS-0500.contactAdmin',         N'en', N'Internal error. Contact your administrator and quote the correlation ID.', 0),
     -- FR-13.9: rule coverage matrix over real rows.
     (N'err.ECR-CALC-0422.coverageWindow',       N'en', N'The period window is empty: periodFrom {periodFrom} is after periodTo {periodTo}.', 1),
     -- ECR-CALC-0422 has a neutral title: every reason carries its own detail.
@@ -1069,7 +1074,8 @@ USING (VALUES
     (N'err.ECR-CALC-0433',  N'en', N'Extension function in Legacy mode', 1),
     (N'err.ECR-CALC-0437',  N'en', N'Required methodology inputs are empty', 1),
     (N'err.ECR-CALC-0438',  N'en', N'Formula argument has no matching column', 1),
-    (N'err.ECR-CALC-4221',  N'en', N'Recalculation of a closed period', 1),
+    -- Фраза `ECR-CALC-4221` покриває всі причини; яку саме — каже подробиця.
+    (N'err.ECR-CALC-4221',  N'en', N'Recalculation is not allowed', 1),
 
     -- Імпорт та інтеграція.
     (N'err.ECR-IMP-0422',   N'en', N'The workbook does not match the template', 1),

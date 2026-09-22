@@ -289,6 +289,7 @@ public sealed class MethodologyPublishTests
             () => handler.HandleAsync(
                 1, 202601, new ClosedPeriodApproval(Author, "  "), CancellationToken.None));
         Assert.Equal("ECR-CALC-4221", blank.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.approvalReasonRequired", blank.Details?["messageKey"]);
 
         // З погодженням від іншої людини і з причиною — проходить.
         _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())

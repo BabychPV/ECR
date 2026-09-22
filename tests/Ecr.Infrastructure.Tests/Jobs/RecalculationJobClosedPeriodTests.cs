@@ -86,6 +86,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
 
         var error = Assert.IsType<BusinessRuleException>(thrown);
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.periodClosed", error.Details?["messageKey"]);
     }
 
     [Fact]
@@ -133,6 +134,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
 
         var error = Assert.IsType<BusinessRuleException>(thrown);
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.sheetsSubmitted", error.Details?["messageKey"]);
     }
 
     [Fact]
