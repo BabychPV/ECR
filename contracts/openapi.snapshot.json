@@ -1104,6 +1104,60 @@
         ],
         "type": "object"
       },
+      "CollectionRunCoverage": {
+        "description": "Покритий прогоном інтервал (UTC).",
+        "properties": {
+          "coveredFrom": {
+            "description": "Початок.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "coveredTo": {
+            "description": "Кінець.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "coveredFrom",
+          "coveredTo"
+        ],
+        "type": "object"
+      },
+      "CollectionRunDetail": {
+        "description": "Деталь прогону.",
+        "properties": {
+          "coverage": {
+            "description": "Інтервали, які цей прогін покрив, за зростанням.",
+            "items": {
+              "$ref": "#/components/schemas/CollectionRunCoverage"
+            },
+            "type": "array"
+          },
+          "coverageTruncated": {
+            "description": "Інтервалів більше за стелю — показано перші.",
+            "type": "boolean"
+          },
+          "errorMessage": {
+            "description": "Текст помилки (до 2000 символів); `null` — без помилки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "run": {
+            "$ref": "#/components/schemas/CollectionRunView",
+            "description": "Той самий рядок, що в переліку."
+          }
+        },
+        "required": [
+          "run",
+          "errorMessage",
+          "coverage",
+          "coverageTruncated"
+        ],
+        "type": "object"
+      },
       "CollectionRunStatus": {
         "description": "Підсумок прогону збору.",
         "properties": {
@@ -1129,6 +1183,116 @@
           "finishedAt",
           "status",
           "pointsRetrieved"
+        ],
+        "type": "object"
+      },
+      "CollectionRunView": {
+        "description": "Рядок журналу прогонів.",
+        "properties": {
+          "dataSourceCode": {
+            "description": "Код з'єднання.",
+            "type": "string"
+          },
+          "dataSourceId": {
+            "description": "З'єднання сутності.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "durationMs": {
+            "description": "Тривалість; `null` — прогін ще триває.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "finishedAt": {
+            "description": "Завершення; `null` — ще триває.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "hasError": {
+            "description": "Чи є текст помилки — сам текст лише в деталі.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Ідентифікатор прогону.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "isCatchUp": {
+            "description": "Наздоганяння пропущеного вікна.",
+            "type": "boolean"
+          },
+          "pointsRetrieved": {
+            "description": "Скільки значень отримано.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rangeFrom": {
+            "description": "Початок зібраного інтервалу (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "rangeTo": {
+            "description": "Кінець зібраного інтервалу (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "sourceEntityCode": {
+            "description": "Код сутності.",
+            "type": "string"
+          },
+          "sourceEntityId": {
+            "description": "Сутність збору.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "sourceEntityName": {
+            "description": "Назва сутності; `null` — не задана.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "startedAt": {
+            "description": "Початок прогону (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "description": "`Running`, `Succeeded`, `Degraded` або `Failed`.",
+            "type": "string"
+          },
+          "triggeredByUserId": {
+            "description": "Хто запустив; `null` — за розкладом.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sourceEntityId",
+          "sourceEntityCode",
+          "sourceEntityName",
+          "dataSourceId",
+          "dataSourceCode",
+          "rangeFrom",
+          "rangeTo",
+          "startedAt",
+          "finishedAt",
+          "durationMs",
+          "status",
+          "pointsRetrieved",
+          "isCatchUp",
+          "hasError",
+          "triggeredByUserId"
         ],
         "type": "object"
       },
@@ -5274,6 +5438,39 @@
             "description": "Елементи сторінки.",
             "items": {
               "$ref": "#/components/schemas/CellChangeView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
+      "PagedResultOfCollectionRunView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/CollectionRunView"
             },
             "type": "array"
           },
@@ -12322,6 +12519,222 @@
         "summary": "Зведення кампанії за період. Право `Report.ViewCampaign`.",
         "tags": [
           "Campaign"
+        ]
+      }
+    },
+    "/api/v1/collection-runs": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Лише прогони сутностей цього з'єднання.",
+            "in": "query",
+            "name": "dataSource",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише прогони цієї сутності збору.",
+            "in": "query",
+            "name": "entity",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`Running`, `Succeeded`, `Degraded`, `Failed`; інше — `422`.",
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Початок прогону не раніше (UTC, включно).",
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Початок прогону раніше (UTC, виключно).",
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..200; `0` — типове 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfCollectionRunView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfCollectionRunView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfCollectionRunView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Прогони збору, новіші першими.",
+        "tags": [
+          "CollectionRuns"
+        ]
+      }
+    },
+    "/api/v1/collection-runs/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Ідентифікатор прогону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRunDetail"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRunDetail"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRunDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Прогін із текстом помилки й покритими інтервалами.",
+        "tags": [
+          "CollectionRuns"
         ]
       }
     },
@@ -28935,6 +29348,9 @@
     },
     {
       "name": "Cells"
+    },
+    {
+      "name": "CollectionRuns"
     },
     {
       "name": "CollectionSchedules"
