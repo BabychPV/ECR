@@ -691,6 +691,7 @@ USING (VALUES
     -- дія у відповідь — тикати кнопку доти, доки не спрацює.
     (N'err.ECR-REQ-0422.consistencyRunReasonRequired', N'en', N'A reason is required to run the consistency check on demand: the run is recorded in the security journal.', 1),
     (N'err.ECR-REQ-0422.consistencyRunReasonTooLong',  N'en', N'The reason must be no longer than {max} characters.', 1),
+    (N'err.ECR-REQ-0422.exportFormatUnknown',          N'en', N'There is no export format "{format}": use xlsx, csv or json.', 1),
     (N'err.ECR-JOB-0409.consistencyCheckRunning',      N'en', N'A consistency check is already in progress as job {jobId} ({state}): watch that job instead of starting a second full scan.', 1),
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
     -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.

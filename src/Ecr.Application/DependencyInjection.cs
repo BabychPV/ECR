@@ -272,6 +272,7 @@ public static class DependencyInjection
         services.AddScoped<Documents.GetTableStatusHandler>();
         services.AddScoped<Documents.ExportDocumentHandler>();
         services.AddScoped<Documents.DownloadExportHandler>();
+        services.AddScoped<Documents.DocumentDataExporter>();
         services.AddScoped<Documents.PreviewImportHandler>();
         services.AddScoped<Documents.ApplyImportHandler>();
         services.AddScoped<Reporting.ListReportSnapshotsHandler>();

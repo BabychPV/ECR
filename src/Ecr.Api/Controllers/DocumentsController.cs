@@ -409,7 +409,8 @@ public sealed class DocumentsController(
                 id,
                 new Ecr.Application.Ports.ExcelExportOptions(
                     request.IncludeFormulas, request.IncludeStyles, request.Language, request.PeriodKey),
-                ct)
+                ct,
+                request.Format)
             .ConfigureAwait(false);
 
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
@@ -429,16 +430,17 @@ public sealed class DocumentsController(
     // може. Форма `Type = typeof(FileResult)` каже це прямо; узагальнена
     // `ProducesResponseType<T>` описувала б неіснуючий об'єкт.
     [ProducesResponseType(StatusCodes.Status200OK, Type = typeof(FileResult))]
-    [Produces("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+    [Produces(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/zip",
+        "application/json")]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadExport(long id, string exportId, CancellationToken ct)
     {
         var content = await downloadExport.HandleAsync(exportId, ct).ConfigureAwait(false);
+        var (contentType, extension) = Ecr.Application.Documents.DocumentExportFormat.OfExportId(exportId);
 
-        return File(
-            content,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"document-{id}-{exportId}.xlsx");
+        return File(content, contentType, $"document-{id}-{exportId}.{extension}");
     }
 
     /// <summary>Попередній перегляд імпорту. Право <c>Document.Import</c>.</summary>
@@ -540,13 +542,14 @@ public sealed record ReopenDocumentRequest(int SheetDefId, int PeriodKey, string
 /// <param name="IncludeStyles">Переносити стилі шаблону.</param>
 /// <param name="Language">Мова заголовків.</param>
 /// <param name="PeriodKey">Період вивантаження (R-A6).</param>
+/// <param name="Format"><c>xlsx</c> (типово), <c>csv</c> (zip, файл на таблицю) або <c>json</c> — ФВ-4.2.</param>
 /// <remarks>
 /// ⚠ Період обовʼязковий: подання, затвердження і перерахунок працюють за
 /// період, і «експорт усього документа» означав би книгу, у якій неможливо
 /// сказати, який стовпчик за який місяць.
 /// </remarks>
 public sealed record ExportRequest(
-    bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey);
+    bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey, string? Format = null);
 
 /// <summary>Запит на застосування імпорту.</summary>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>

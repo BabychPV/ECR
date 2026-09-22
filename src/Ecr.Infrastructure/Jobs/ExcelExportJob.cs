@@ -20,7 +20,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// бачить інстанс, на який потрапить наступний запит.
 /// </para>
 /// </remarks>
-public sealed class ExcelExportJob(IExcelExporter exporter, IExportStore exports) : IExcelExportJob
+public sealed class ExcelExportJob(
+    IExcelExporter exporter, DocumentDataExporter data, IExportStore exports) : IExcelExportJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "excel-export";
@@ -44,17 +45,28 @@ public sealed class ExcelExportJob(IExcelExporter exporter, IExportStore exports
 
         await progress.ReportKeyAsync(10, "jobs.exportReadingDocument", ct).ConfigureAwait(false);
 
-        await using var book = await exporter
-            .ExportAsync(task.DocumentId, task.Options, ct)
-            .ConfigureAwait(false);
+        byte[] content;
+        if (task.Format is null or DocumentExportFormat.Xlsx)
+        {
+            await using var book = await exporter
+                .ExportAsync(task.DocumentId, task.Options, ct)
+                .ConfigureAwait(false);
+
+            using var buffer = new MemoryStream();
+            await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            content = buffer.ToArray();
+        }
+        else
+        {
+            content = await data
+                .ExportAsync(task.DocumentId, task.Options.PeriodKey, task.Format, ct)
+                .ConfigureAwait(false);
+        }
 
         await progress.ReportKeyAsync(80, "jobs.exportSavingWorkbook", ct).ConfigureAwait(false);
 
-        using var buffer = new MemoryStream();
-        await book.CopyToAsync(buffer, ct).ConfigureAwait(false);
-
         await exports
-            .SaveAsync(task.ExportId, task.DocumentId, buffer.ToArray(), Lifetime, ct)
+            .SaveAsync(task.ExportId, task.DocumentId, content, Lifetime, ct)
             .ConfigureAwait(false);
 
         // ⚠ Q-326: НЕ конвертується на структурований ключ. Ключ
