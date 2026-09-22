@@ -1,5 +1,5 @@
 ﻿import { useState, type JSX } from 'react';
-import { Button, Code, Group, NumberInput, Skeleton, Stack, Table, Text } from '@mantine/core';
+import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -16,6 +16,7 @@ import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
@@ -111,17 +112,19 @@ export function DocumentsPage(): JSX.Element {
                 (некерований DOM встигав показати введене), але жоден запит
                 ніколи не бачив `periodKey` в адресі. `useUrlParamsSetter`
                 оновлює обидва параметри ОДНИМ переходом. */}
-            <NumberInput
+            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+                Формат `periodKey` і місце в адресі — БЕЗ змін, лише
+                стрілки, що крокують календарем (не `+1`), і підпис. */}
+            <PeriodPicker
               size="xs"
               miw={120}
-              label={t('documents.period')}
-              value={periodKey ?? ''}
+              value={periodKey}
               onChange={(value) => {
                 // ⚠ Період прибрано — прибирається й фільтр стану: без періоду
                 // він однаково не діє, а повернення періоду не має мовчки
                 // відновлювати звуження, якого на екрані вже не видно.
                 setUrlParams(
-                  typeof value === 'number'
+                  value !== null
                     ? { periodKey: value, cursor: null }
                     : { periodKey: null, cursor: null, state: null },
                 );

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Group, NumberInput, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Badge, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -31,6 +31,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -360,12 +361,16 @@ export function DocumentPage(): JSX.Element {
         }
         actions={
           <Group gap="xs">
-            <NumberInput
+            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+                `value ?? periodKey` зберігає стару поведінку очищеного поля:
+                воно НЕ звужувало документ до «без періоду» (тут період
+                обов'язковий — `urlPeriod ?? currentPeriodKey()` нижче), а
+                просто лишало те, що вже було. */}
+            <PeriodPicker
               size="xs"
               miw={110}
-              label={t('documents.period')}
               value={periodKey}
-              onChange={(value) => setPeriodKey(typeof value === 'number' ? value : periodKey)}
+              onChange={(value) => setPeriodKey(value ?? periodKey)}
             />
             <Button
               size="xs"
