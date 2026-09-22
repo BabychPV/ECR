@@ -6910,7 +6910,9 @@ export interface paths {
             };
         };
         /**
-         * Зберігає опис довідника: поля і правила. Право `Registry.EditDefinition`.
+         * Зберігає і одразу публікує опис довідника: поля і правила. Права
+         *     `Registry.EditDefinition` і `Registry.Publish` (`BE-24`: без
+         *     другого маршрут обходив би публікацію чернетки).
          * @description ⛔ Приймається ПОВНИЙ стан, а не набір правок. Опис довідника — це
          *     кілька десятків полів і одиниці правил; часткова правка вимагала б від
          *     клієнта тримати список того, що він змінив, і перша ж помилка в цьому
@@ -6971,6 +6973,205 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/definition/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Чернетка опису довідника, якщо є. Право `Registry.View` (`BE-24`). */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                        "text/json": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                        "text/plain": components["schemas"]["RegistryDefinitionDraftStateResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        /** Зберігає чернетку опису; опублікований опис не змінюється. Право
+         *     `Registry.EditDefinition` (`BE-24`). */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                    "application/json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                    "text/json": components["schemas"]["SaveRegistryDefinitionDraftRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionDraftDto"];
+                        "text/json": components["schemas"]["RegistryDefinitionDraftDto"];
+                        "text/plain": components["schemas"]["RegistryDefinitionDraftDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/definition/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Публікує чернетку опису. Право `Registry.Publish` (`BE-24`). */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                    "application/json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                    "text/json": components["schemas"]["PublishRegistryDefinitionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/json": components["schemas"]["RegistryDefinitionVersionResponse"];
+                        "text/plain": components["schemas"]["RegistryDefinitionVersionResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -15057,6 +15258,11 @@ export interface components {
              */
             effectiveFrom: null | string;
         };
+        /** @description Запит на публікацію чернетки опису. */
+        PublishRegistryDefinitionRequest: {
+            /** @description Версія чернетки, яку публікують. */
+            rowVersion: string;
+        };
         /** @description Запит на публікацію версії. */
         PublishVersionRequest: {
             /** @description Причина; потрапляє в журнал публікацій. Обов'язкова і непорожня —
@@ -15138,6 +15344,41 @@ export interface components {
              *     перемикання: без нього довідник, який уже в цільовому режимі, і той, який
              *     ще ні, у переліку виглядають однаково. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+        };
+        /** @description Чернетка опису довідника. */
+        RegistryDefinitionDraftDto: {
+            /**
+             * Format: int32
+             * @description Версія опублікованого опису, від якої відштовхується чернетка.
+             */
+            baseDefinitionVersion: number;
+            /** @description Поля чернетки. */
+            fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Причина зміни. */
+            reason: string;
+            /** @description Версія для наступного збереження чи публікації. */
+            rowVersion: string;
+            /** @description Правила чернетки. */
+            rules: components["schemas"]["RegistryRuleSaveDto"][];
+            /**
+             * Format: date-time
+             * @description Момент останнього збереження, UTC.
+             */
+            updatedAt: string;
+            /**
+             * Format: int32
+             * @description Хто зберіг востаннє.
+             */
+            updatedByUserId: number;
+        };
+        /** @description Стан чернетки опису довідника. */
+        RegistryDefinitionDraftStateResponse: {
+            /**
+             * Format: int32
+             * @description Поточна версія ОПУБЛІКОВАНОГО опису.
+             */
+            definitionVersion: number;
+            draft: null | components["schemas"]["RegistryDefinitionDraftDto"];
         };
         /** @description Повний опис довідника для конструктора (`ФВ-8.12`): поля, зв'язки,
          *     правила, мапінг. */
@@ -16054,6 +16295,17 @@ export interface components {
              * @description Для `EditablePeriodOnly`: до якого номера періоду.
              */
             toSequence: null | number;
+        };
+        /** @description Запит на збереження чернетки опису (`BE-24` крок 2). */
+        SaveRegistryDefinitionDraftRequest: {
+            /** @description Повний перелік полів після правки. */
+            fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Причина зміни; при публікації йде в журнал. */
+            reason: string;
+            /** @description Версія чернетки, від якої відштовхується правка; `null` — чернетки ще немає. */
+            rowVersion: null | string;
+            /** @description Повний перелік правил після правки. */
+            rules: components["schemas"]["RegistryRuleSaveDto"][];
         };
         /** @description Запит на збереження опису довідника. */
         SaveRegistryDefinitionDto: {

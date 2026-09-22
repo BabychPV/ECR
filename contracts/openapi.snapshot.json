@@ -5993,6 +5993,19 @@
         ],
         "type": "object"
       },
+      "PublishRegistryDefinitionRequest": {
+        "description": "Запит на публікацію чернетки опису.",
+        "properties": {
+          "rowVersion": {
+            "description": "Версія чернетки, яку публікують.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rowVersion"
+        ],
+        "type": "object"
+      },
       "PublishVersionRequest": {
         "description": "Запит на публікацію версії.",
         "properties": {
@@ -6135,6 +6148,84 @@
           "isTemporal",
           "sourceKind",
           "fields"
+        ],
+        "type": "object"
+      },
+      "RegistryDefinitionDraftDto": {
+        "description": "Чернетка опису довідника.",
+        "properties": {
+          "baseDefinitionVersion": {
+            "description": "Версія опублікованого опису, від якої відштовхується чернетка.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "fields": {
+            "description": "Поля чернетки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryFieldSaveDto"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "description": "Причина зміни.",
+            "type": "string"
+          },
+          "rowVersion": {
+            "description": "Версія для наступного збереження чи публікації.",
+            "type": "string"
+          },
+          "rules": {
+            "description": "Правила чернетки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleSaveDto"
+            },
+            "type": "array"
+          },
+          "updatedAt": {
+            "description": "Момент останнього збереження, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedByUserId": {
+            "description": "Хто зберіг востаннє.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "baseDefinitionVersion",
+          "fields",
+          "rules",
+          "reason",
+          "updatedAt",
+          "updatedByUserId",
+          "rowVersion"
+        ],
+        "type": "object"
+      },
+      "RegistryDefinitionDraftStateResponse": {
+        "description": "Стан чернетки опису довідника.",
+        "properties": {
+          "definitionVersion": {
+            "description": "Поточна версія ОПУБЛІКОВАНОГО опису.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "draft": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryDefinitionDraftDto",
+                "description": "Чернетка; `null` — чернетки немає."
+              }
+            ]
+          }
+        },
+        "required": [
+          "definitionVersion",
+          "draft"
         ],
         "type": "object"
       },
@@ -8137,6 +8228,43 @@
           "sourceColumnDefId",
           "relativeOffset",
           "conditionExpr"
+        ],
+        "type": "object"
+      },
+      "SaveRegistryDefinitionDraftRequest": {
+        "description": "Запит на збереження чернетки опису (`BE-24` крок 2).",
+        "properties": {
+          "fields": {
+            "description": "Повний перелік полів після правки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryFieldSaveDto"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "description": "Причина зміни; при публікації йде в журнал.",
+            "type": "string"
+          },
+          "rowVersion": {
+            "description": "Версія чернетки, від якої відштовхується правка; `null` — чернетки ще немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "rules": {
+            "description": "Повний перелік правил після правки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleSaveDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields",
+          "rules",
+          "reason",
+          "rowVersion"
         ],
         "type": "object"
       },
@@ -20154,7 +20282,310 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Зберігає опис довідника: поля і правила. Право `Registry.EditDefinition`.",
+        "summary": "Зберігає і одразу публікує опис довідника: поля і правила. Права\n`Registry.EditDefinition` і `Registry.Publish` (`BE-24`: без\nдругого маршрут обходив би публікацію чернетки).",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/definition/draft": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftStateResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftStateResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftStateResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Чернетка опису довідника, якщо є. Право `Registry.View` (`BE-24`).",
+        "tags": [
+          "Registries"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDraftRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDraftRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRegistryDefinitionDraftRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionDraftDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зберігає чернетку опису; опублікований опис не змінюється. Право\n`Registry.EditDefinition` (`BE-24`).",
+        "tags": [
+          "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/definition/publish": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRegistryDefinitionRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRegistryDefinitionRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRegistryDefinitionRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryDefinitionVersionResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Публікує чернетку опису. Право `Registry.Publish` (`BE-24`).",
         "tags": [
           "Registries"
         ]
