@@ -699,6 +699,14 @@ USING (VALUES
     -- ⚠ `BE-13`: у цьому реченні фігурні дужки лише довкола справжніх
     -- підстановок — інакше рядок сам не пройшов би перевірку, яку описує.
     (N'err.ECR-REQ-0422.placeholderMismatch', N'en', N'The placeholders of "{key}" differ from the default language: expected [{expected}], got [{actual}].', 1),
+    -- BE-13 ч.2: імпорт перекладу з CSV. Відмови рядків приходять у звіті без підстановок.
+    (N'err.ECR-REQ-0422.uiStringCsvLanguage',  N'en', N'"{lang}" cannot be imported or exported: the default language is the reference, and any other language must be in the language registry.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvHeader',    N'en', N'The first row of the file must name a "key" column and a "{lang}" column.', 1),
+    (N'err.ECR-REQ-0422.uiStringCsvTooLarge',  N'en', N'The file takes {size} bytes; the limit is {max}.', 1),
+    (N'err.ECR-REQ-0422.uiStringUnknownKey',   N'en', N'This key does not exist in the default language.', 1),
+    (N'err.ECR-REQ-0422.uiStringEmptyValue',   N'en', N'The translation is empty.', 1),
+    (N'err.ECR-REQ-0422.uiStringTooLong',      N'en', N'The translation is longer than 1000 characters.', 1),
+    (N'err.ECR-REQ-0422.uiStringDuplicateKey', N'en', N'This key already appears earlier in the file.', 1),
     -- BE-33: канали сповіщень. У відмові вебхука немає ні URL, ні хоста — URL є секретом.
     (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs at least one recipient.', 1),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
