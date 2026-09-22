@@ -537,4 +537,24 @@ public sealed class SubmitApproveTests
         Assert.Contains("999", _snapshots[1].PayloadJson, StringComparison.Ordinal);
         Assert.NotEqual(_snapshots[0].ContentHash, _snapshots[1].ContentHash);
     }
+
+    [Fact] [Trait("Requirement", "ФВ-5.7")]
+    public async Task Зріз_подання_несе_дату_булеве_й_запис_довідника()
+    {
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>())
+              .Returns(new List<CellRecord>
+              {
+                  new(new CellAddress(new PeriodKey(Period), 1001, 11), 3, new CellValueData { ValueDate = new DateTime(2026, 1, 15) }),
+                  new(new CellAddress(new PeriodKey(Period), 1001, 12), 3, new CellValueData { ValueBool = true }),
+                  new(new CellAddress(new PeriodKey(Period), 1001, 13), 3, new CellValueData { ValueRegistryEntryId = 777 }),
+              });
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        // Доти всі три лягали в зріз як `"value":null` — нерозрізненно з порожньою клітинкою.
+        var cells = SubmissionPayload.Read(Assert.Single(_snapshots).PayloadJson);
+        Assert.Equal(
+            [("2026-01-15T00:00:00.0000000", "date"), ("true", "bool"), ("777", "ref")],
+            cells.Select(c => (c.Value, c.Type)).ToArray());
+    }
 }
