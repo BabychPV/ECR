@@ -377,6 +377,8 @@ UPDATE t
     (N'err.ECR-CALC-0422',               N'en', N'The methodology version cannot be published', N'Invalid methodology request'),
     (N'err.ECR-REG-0422',                N'en', N'The registry source cannot be switched in an open period', N'Invalid registry change'),
     (N'err.ECR-REG-0404',                N'en', N'Registry entry not found', N'Registry item not found'),
+    (N'err.ECR-PRD-0409',                N'en', N'The period is closed', N'Period state conflict'),
+    (N'err.ECR-PRD-0422',                N'en', N'The period is outside the project', N'Invalid period request'),
     (N'err.ECR-AUTH-0403.jobNotYours',   N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', N'This background job was started by someone else: permission {permission} is required to act on it.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
@@ -920,6 +922,11 @@ USING (VALUES
     (N'err.ECR-PRD-0409.transitionNotAllowed',  N'en', N'Period {periodKey} cannot go from {from} to {to}.', 1),
     (N'err.ECR-PRD-0409.reopenOnlyClosed',      N'en', N'Only a closed period can be reopened; the period is {state}.', 1),
     (N'err.ECR-PRD-0422.reopenReasonRequired',  N'en', N'A reason is required to reopen the period.', 1),
+    (N'err.ECR-PRD-0422.periodNotInProject',    N'en', N'Period {periodId} does not belong to project "{projectCode}".', 1),
+    (N'err.ECR-PRD-0422.pinReasonRequired',     N'en', N'A reason is required to pin the current period.', 1),
+    (N'err.ECR-PRD-0409.timeZoneLocked',        N'en', N'The site time zone cannot be changed once the first period has been opened.', 1),
+    (N'err.ECR-PRD-4225.graceAfterHardClose',   N'en', N'The grace period ({graceOffsetDays} days) cannot be longer than the hard close ({hardCloseOffsetDays} days): the period would close for good before its own grace period ends.', 1),
+    (N'err.ECR-PRD-4225.negativeYearGrace',     N'en', N'The year-end grace period ({yearGraceOffsetDays} days) cannot be negative.', 1),
     -- BE-25: only a never-published, never-used methodology version can be deleted.
     (N'err.ECR-CALC-0404.version',              N'en', N'Methodology version {methodologyVersionId} does not exist in this methodology.', 1),
     (N'err.ECR-CALC-0409.versionNotDraft',      N'en', N'Only a draft methodology version can be deleted; version {version} is {reason}.', 1),
@@ -1013,9 +1020,11 @@ USING (VALUES
     (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),
 
     -- Періоди і проєкти.
-    (N'err.ECR-PRD-0409',   N'en', N'The period is closed', 1),
+    -- Фрази `ECR-PRD-0409` і `ECR-PRD-0422` нейтральні: у обох кодів кілька
+    -- причин (перехід стану, архів, пояс; чужий період, порожня причина).
+    (N'err.ECR-PRD-0409',   N'en', N'Period state conflict', 1),
     (N'err.ECR-PRD-0404',   N'en', N'Period not found', 1),
-    (N'err.ECR-PRD-0422',   N'en', N'The period is outside the project', 1),
+    (N'err.ECR-PRD-0422',   N'en', N'Invalid period request', 1),
     (N'err.ECR-PRD-4223',   N'en', N'Reopen is blocked by a closed period', 1),
     (N'err.ECR-PRD-4224',   N'en', N'Invalid period sequence', 1),
     (N'err.ECR-PRD-4225',   N'en', N'Invalid period policy', 1),
