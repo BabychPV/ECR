@@ -2803,6 +2803,13 @@ USING (VALUES
     (N'mapping.catalogSearchEmpty',      N'en', N'Nothing in this level matches the search.', 1),
     (N'mapping.catalogUnavailable',      N'en', N'The data source is not responding', 1),
     (N'mapping.catalogUnavailableHint',  N'en', N'The catalog could not be read. The rest of the form still works: type the source path by hand, or try again.', 1),
+    -- Пробний запуск шляху мапінгу до першого збору (ФВ-13.17). ⚠ «Шлях є, а
+    -- даних немає» — окремий випадок, не помилка: мапінг збережеться, але
+    -- поки нічого не принесе.
+    (N'mapping.probeAction',             N'en', N'Test path', 1),
+    (N'mapping.probeNoData',             N'en', N'The path exists in the catalog, but there is no data in the last 30 days.', 1),
+    (N'mapping.probeUnavailableHint',    N'en', N'The check could not run. The rest of the form still works: type the source path by hand, or try again.', 1),
+    (N'mapping.probeSuggestionsHint',    N'en', N'Similar names in the catalog:', 1),
     -- Редактор зв'язків між таблицями (ФВ-2.12, ФВ-2.13)
     (N'version.relations',               N'en', N'Table relations', 1),
     (N'tables.relationsTitle',           N'en', N'Table relations', 1),
