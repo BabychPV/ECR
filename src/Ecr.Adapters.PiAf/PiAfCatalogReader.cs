@@ -39,10 +39,13 @@ public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, 
     public async Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(
         int dataSourceId, string? parentPath, CancellationToken ct)
     {
-        var descriptors = await DiscoverAsync(dataSourceId, ct).ConfigureAwait(false);
+        var adapter = await AdapterAsync(dataSourceId, ct).ConfigureAwait(false);
+        var descriptors = adapter is IHierarchicalCatalogSource lazy
+            ? await lazy.BrowseAsync(dataSourceId, parentPath, ct).ConfigureAwait(false)
+            : await adapter.DiscoverAsync(dataSourceId, ct).ConfigureAwait(false);
 
         return descriptors
-            .Where(d => IsChildOf(d.EntityPath, parentPath))
+            .Where(d => adapter is IHierarchicalCatalogSource || IsChildOf(d.EntityPath, parentPath))
             .OrderBy(d => d.Code, StringComparer.Ordinal)
             .Take(MaxNodesPerLevel)
             .ToList();
@@ -67,7 +70,15 @@ public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, 
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(elementPath);
 
-        var descriptors = await DiscoverAsync(dataSourceId, ct).ConfigureAwait(false);
+        var adapter = await AdapterAsync(dataSourceId, ct).ConfigureAwait(false);
+
+        if (adapter is IHierarchicalCatalogSource lazy)
+        {
+            var attributes = await lazy.AttributesAsync(dataSourceId, elementPath, ct).ConfigureAwait(false);
+            return attributes.OrderBy(d => d.Code, StringComparer.Ordinal).Take(MaxNodesPerLevel).ToList();
+        }
+
+        var descriptors = await adapter.DiscoverAsync(dataSourceId, ct).ConfigureAwait(false);
 
         return descriptors
             .Where(d => d.DataType is not "Element")
@@ -77,8 +88,8 @@ public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, 
             .ToList();
     }
 
-    /// <summary>Каталог від адаптера, обраного за транспортом джерела.</summary>
-    private async Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(
+    /// <summary>Адаптер, обраний за транспортом джерела.</summary>
+    private async Task<IExternalDataSource> AdapterAsync(
         int dataSourceId, CancellationToken ct)
     {
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
@@ -90,19 +101,17 @@ public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, 
         // Транспорт — налаштування, не гілка коду (ФВ-11.2): каталог читає той
         // самий адаптер, який потім збиратиме дані. Інакше конфігуратор
         // показував би список, з якого частина позицій не збирається.
-        var adapter = sources.FirstOrDefault(s => s.Transport == source.Transport)
-                      ?? throw new BusinessRuleException(
-                          SourceUnavailable,
-                          $"Транспорт {source.Transport} не зареєстровано.");
-
-        return await adapter.DiscoverAsync(dataSourceId, ct).ConfigureAwait(false);
+        return sources.FirstOrDefault(s => s.Transport == source.Transport)
+               ?? throw new BusinessRuleException(
+                   SourceUnavailable,
+                   $"Транспорт {source.Transport} не зареєстровано.");
     }
 
-    /// <summary>Чи є вузол прямою дитиною батька.</summary>
+    /// <summary>Чи є вузол прямою дитиною батька (не онуком).</summary>
     /// <remarks>
-    /// Корінь — це вузол без батька або з батьком у один сегмент. Порівняння
-    /// без урахування регістру: AF регістру в іменах не розрізняє, і вимога
-    /// точного збігу дала б порожній рівень там, де вузли є.
+    /// Корінь — без фільтра (плаский каталог адаптера вже кореневий). Порівняння
+    /// без урахування регістру: AF регістру в іменах не розрізняє. Дитина —
+    /// рівно один непорожній сегмент після <c>parent\</c>.
     /// </remarks>
     private static bool IsChildOf(string? path, string? parentPath)
     {
@@ -111,8 +120,11 @@ public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, 
             return true;
         }
 
+        var prefix = parentPath.TrimEnd('\\') + "\\";
+
         return path is not null
-               && path.StartsWith(parentPath, StringComparison.OrdinalIgnoreCase)
-               && path.Length > parentPath.Length;
+               && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+               && path.Length > prefix.Length
+               && path.IndexOf('\\', prefix.Length) < 0;
     }
 }

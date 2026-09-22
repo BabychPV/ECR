@@ -77,6 +77,24 @@ public sealed class PiAfCatalogReaderTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task BrowseAsync_не_повертає_онуків_і_сусідів_зі_спільним_префіксом_імені()
+    {
+        var world = new World();
+        world.Source.DiscoverAsync(DataSourceId, Arg.Any<CancellationToken>())
+            .Returns(new List<SourceEntityDescriptor>
+            {
+                Descriptor("Child", @"Root\Line1\StackA"),
+                Descriptor("Grandchild", @"Root\Line1\StackA\Fan"),
+                Descriptor("Line10", @"Root\Line10\StackB"),
+            });
+
+        var result = await world.Reader.BrowseAsync(DataSourceId, @"Root\Line1", CancellationToken.None);
+
+        Assert.Equal(["Child"], result.Select(r => r.Code));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "Q-257")]
     public async Task BrowseAsync_на_корені_не_фільтрує_за_шляхом()
     {
