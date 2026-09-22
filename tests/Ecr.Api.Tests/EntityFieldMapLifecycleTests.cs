@@ -162,6 +162,31 @@ public sealed class EntityFieldMapLifecycleTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Finding", "BE-27")]
+    public async Task Ручне_відновлення_мапінгу_що_чекає_рішення_про_одиницю_дає_409_і_пауза_лишається()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
+
+        var stand = await ArrangeAsync(collectPoints: 0).ConfigureAwait(true);
+        await MarkPendingAsync(stand.FieldMapId, stand.NewUnitCode, stand.NewUnitId).ConfigureAwait(true);
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати `if (HasPendingSourceUnitChange)` в
+        // `EntityFieldMap.Resume` — відповідь 200, а позначка лишається, і
+        // наступний прогін знову ставить мапінг на паузу.
+        var refused = await PostAsync(client, stand.FieldMapId, "resume").ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var problem = await JsonAsync(refused).ConfigureAwait(true);
+        Assert.Equal("ECR-INT-0409", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-INT-0409.mappingUnitChangePending", problem.GetProperty("messageKey").GetString());
+        Assert.False(await IsActiveAsync(stand.FieldMapId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-16.9")]
     public async Task Одиницю_якої_немає_в_довіднику_не_приймають_422_і_мапінг_лишається_на_паузі()
     {
         using var app = new EcrApiFactory(sql);
