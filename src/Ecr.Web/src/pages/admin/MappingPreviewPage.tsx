@@ -131,7 +131,7 @@ export function MappingPreviewPage(): JSX.Element {
               )}
 
               <MappingGaps preview={data} />
-              <MappingRows preview={data} />
+              <MappingRows preview={data} allowed={can(session.data, 'Integration.Manage')} />
             </>
           )}
         </AsyncBoundary>

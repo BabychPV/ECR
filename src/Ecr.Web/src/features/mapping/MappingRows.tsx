@@ -3,6 +3,7 @@ import { Badge, Stack, Table, Text, Title } from '@mantine/core';
 import type { MappingPreview } from '@/api/types';
 import { target } from './MappingGaps';
 import { outcomeColor, outcomeLabel } from './outcome';
+import { PauseResumeAction } from './PauseResumeAction';
 import { PausedBadge, mappingCounts } from './paused';
 import { toneFills } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -19,7 +20,22 @@ import { t } from '@/shared/i18n';
  * (`ФВ-16.10`, `D-79`). Тому одиниці стоять обидві: розбіжність між ними і є
  * найчастіше джерело мовчазних розходжень у числах (`ФВ-16.9`).
  */
-export function MappingRows({ preview }: { readonly preview: MappingPreview }): JSX.Element {
+export function MappingRows({
+  preview,
+  allowed = false,
+}: {
+  readonly preview: MappingPreview;
+
+  /**
+   * Чи має сесія право `Integration.Manage` — те саме право, під яким на
+   * сторінці ховається кнопка «Add mapping» (`MappingPreviewPage.tsx`).
+   *
+   * ⚠ За замовчуванням `false`, а не обов'язковий пропс: наявні тести й
+   * `MappingGaps`-сусід рендерять таблицю без сесії взагалі, і без дефолту
+   * кожен виклик довелося б чіпати заради пропса, який їм не потрібен.
+   */
+  readonly allowed?: boolean;
+}): JSX.Element {
   const counts = mappingCounts(preview.fields);
 
   return (
@@ -47,6 +63,10 @@ export function MappingRows({ preview }: { readonly preview: MappingPreview }): 
               <Table.Th>{t('mapping.points')}</Table.Th>
               <Table.Th>{t('mapping.folded')}</Table.Th>
               <Table.Th>{t('mapping.outcome')}</Table.Th>
+              {/* ⚠ Без напису, як «actions» у `SourcesPage.tsx`: колонка
+                  видима лише тим, у кого є право `Integration.Manage`, і
+                  назва їй не потрібна — кнопка сама називає свою дію. */}
+              <Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -66,6 +86,7 @@ export function MappingRows({ preview }: { readonly preview: MappingPreview }): 
                       {outcomeLabel(field.outcome)}
                     </Badge>
                   </Table.Td>
+                  <Table.Td>{allowed && <PauseResumeAction field={field} />}</Table.Td>
                 </Table.Tr>
               ) : (
                 /* ⛔ Призупинений (`BE-27`) нікуди не пише: ні адреси, ні
@@ -89,6 +110,7 @@ export function MappingRows({ preview }: { readonly preview: MappingPreview }): 
                   <Table.Td>
                     <PausedBadge />
                   </Table.Td>
+                  <Table.Td>{allowed && <PauseResumeAction field={field} />}</Table.Td>
                 </Table.Tr>
               ),
             )}
