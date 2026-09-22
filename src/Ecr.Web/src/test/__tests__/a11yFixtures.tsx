@@ -962,6 +962,26 @@ export function emptyBodyFor(url: string): unknown {
     };
   }
 
+  /*
+   * ⛔ Реєстр мов — НЕ порожній, і це не «щоб було». Порожній перелік означав,
+   * що на `/admin/ui-strings` не малювався ані вибір мови, ані панель обміну
+   * CSV (`BE-13` ч.2): обидві не мають чого показати без мови-цілі
+   * (`D15-06`). Тобто гейт доступності сканував би екран перекладу без
+   * ЄДИНОГО елемента, який задає мову перекладу.
+   *
+   * ⚠ Склад — як у сіді (`09-seed.sql`, `MERGE sys_ecr.Language`): еталон
+   * `en` і дві мови перекладу. Саме `isDefault` відрізняє їх, і рівно на цю
+   * ознаку спирається `translationLanguages` — перелік з однією мовою не
+   * показав би різниці між «усі мови» і «мови, крім еталона».
+   */
+  if (/\/api\/v1\/languages(\?|$)/.test(url)) {
+    return [
+      { code: 'en', nameNative: 'English', isDefault: true },
+      { code: 'ru', nameNative: 'Русский', isDefault: false },
+      { code: 'kz', nameNative: 'Қазақша', isDefault: false },
+    ];
+  }
+
   const paged = ['/documents', '/templates', '/users', '/projects'];
 
   return paged.some((entry) => url.includes(entry)) ? { items: [], nextCursor: null } : [];
