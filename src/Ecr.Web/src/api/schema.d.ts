@@ -14120,6 +14120,12 @@ export interface components {
              */
             createdAt?: null | string;
             /**
+             * Format: int32
+             * @description Id автора; `null` — системна задача. Заповнює `GetJobStatusHandler`:
+             *     тіло бачить лише автор або власник `System.ViewHealth`.
+             */
+            createdByUserId?: null | number;
+            /**
              * Format: int64
              * @description Документ задачі; `null` — не документна (BE-08).
              */
@@ -14165,6 +14171,12 @@ export interface components {
             createdAt?: null | string;
             /** @description Ім'я автора; `null` — системна задача (BE-08). */
             createdByDisplayName?: null | string;
+            /**
+             * Format: int32
+             * @description Id автора; `null` — системна задача. Видимість та сама, що й
+             *     CreatedByDisplayName — клієнт вирішує показ «Повторити».
+             */
+            createdByUserId?: null | number;
             /**
              * Format: int64
              * @description Документ задачі; `null` — не документна (BE-08).
