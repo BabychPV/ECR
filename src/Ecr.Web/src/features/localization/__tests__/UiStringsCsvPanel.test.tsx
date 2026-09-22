@@ -28,11 +28,27 @@ import { renderWithQuery } from '@/test/render';
 
 const SlowEnvTimeout = 400_000;
 
-/** Рядки каталогу, які потрібні саме цьому екранові. */
+/**
+ * Рядки каталогу, які потрібні саме цьому екранові.
+ *
+ * ⚠ П'ять `uiStrings.exportCsv`/`uiStrings.import*` у `09-seed.sql` з'являться
+ * НАСТУПНИМ комітом — сід заводить інтегратор. Доти
+ * `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі` і гейт
+ * `a11y` червоні, і це очікуваний стан, а не те, що цей набір має замаскувати.
+ * Тут рядки підставлені, бо набір перевіряє ІНШЕ: що напис береться з
+ * КАТАЛОГУ, а не з коду. Питання «чи є цей рядок у сіді» — робота сторожа, і
+ * відповідати на неї звідси означало б зробити його хибнозеленим.
+ */
 const Strings: Record<string, string> = {
   'uiStrings.language': 'Language',
   'uiStrings.key': 'Key',
   'uiStrings.saved': 'Saved; the catalogue is now at revision {revision}.',
+  'uiStrings.exportCsv': 'Export CSV',
+  'uiStrings.importCsv': 'Import CSV…',
+  'uiStrings.importCounts': 'added {added}, updated {updated}, unchanged {unchanged}',
+  'uiStrings.importBlockedHint':
+    'Nothing has been written: fix the rows listed below and pick the file again.',
+  'uiStrings.importReady': 'The file is valid: nothing to fix.',
   'import.title': 'Review the import',
   'import.row': 'Row',
   'import.reason': 'Reason',

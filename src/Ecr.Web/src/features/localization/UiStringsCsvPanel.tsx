@@ -37,33 +37,27 @@ import { t } from '@/shared/i18n';
  * а не там, де його змонтували вперше.
  */
 
-/**
- * Написи, яких у каталозі (`09-seed.sql`) ще немає.
+/*
+ * ⛔ П'ять нових написів цього екрана йдуть через `t()`, хоч рядків під них у
+ * `09-seed.sql` ЩЕ НЕМАЄ: сід заводить інтегратор окремим комітом одразу за
+ * цим. Отже до того коміта червоніють два сторожі, і це очікуваний стан
+ * процесу, а не дефект:
+ *   • `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі`
+ *     назве рівно ці п'ять ключів;
+ *   • `a11y` («Технічні ключі на екрані») побачить `⟦uiStrings.exportCsv⟧`
+ *     і решту.
  *
- * ⛔ Літерали, а не `t()`, і з тієї ж причини, що `notificationCloseButtonProps`
- * у `shared/ui/notify.ts` та `moreLabel` у `shared/ui/PageHeader.tsx`: рядок
- * під цей напис у сіді заводить ІНШИЙ пакет, а `t()` на незаведений ключ дає
- * читалці `⟦…⟧` і робить червоним сторожа
- * `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі`.
+ * ⛔ Англійський літерал тут був би ГІРШИМ за червоний гейт, і саме тому його
+ * тут немає. Літерал нічого не червонить — він мовчки виводить екран
+ * перекладу з-під обох сторожів і лишає напис, який НЕМОЖЛИВО перекласти:
+ * рівно той борг, що вже лежить у `shared/ui/notify.ts` і
+ * `shared/ui/PageHeader.tsx` і якого ніхто не прибрав. Наявність тих місць —
+ * борг, а не дозвіл.
  *
- * ⚠ Зібрані в ОДНЕ місце навмисно: коли рядки з'являться в сіді, заміна на
- * `t()` — це правка одного об'єкта, а не полювання по розмітці.
+ * Ключі, які має завести сід: `uiStrings.exportCsv`, `uiStrings.importCsv`,
+ * `uiStrings.importCounts` (`{added}`, `{updated}`, `{unchanged}`),
+ * `uiStrings.importBlockedHint`, `uiStrings.importReady`.
  */
-const Literal = {
-  exportCsv: 'Export CSV',
-  importCsv: 'Import CSV…',
-  counts: 'added {added}, updated {updated}, unchanged {unchanged}',
-  blockedHint: 'Nothing has been written: fix the rows listed below and pick the file again.',
-  ready: 'The file is valid: nothing to fix.',
-} as const;
-
-/** Підставляє числа звіту в літерал підсумку. */
-function countsText(report: UiStringImportReport): string {
-  return Literal.counts
-    .replace('{added}', String(report.added))
-    .replace('{updated}', String(report.updated))
-    .replace('{unchanged}', String(report.unchanged));
-}
 
 export function UiStringsCsvPanel(): JSX.Element | null {
   const session = useSession();
@@ -161,7 +155,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
           />
 
           <Button size="xs" variant="default" loading={exporting} onClick={() => void runExport()}>
-            {Literal.exportCsv}
+            {t('uiStrings.exportCsv')}
           </Button>
 
           {/* ⚠ Прихований `input[type=file]` за кнопкою: рідний елемент не
@@ -200,7 +194,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
             loading={preview.isPending}
             onClick={() => picker.current?.click()}
           >
-            {Literal.importCsv}
+            {t('uiStrings.importCsv')}
           </Button>
         </Group>
 
@@ -211,7 +205,13 @@ export function UiStringsCsvPanel(): JSX.Element | null {
         {report !== null && (
           <Stack gap="sm" data-testid="ui-strings-import-report">
             <Group gap="xs">
-              <Badge variant="light">{countsText(report)}</Badge>
+              <Badge variant="light">
+                {t('uiStrings.importCounts', {
+                  added: report.added,
+                  updated: report.updated,
+                  unchanged: report.unchanged,
+                })}
+              </Badge>
               {report.errors.length > 0 && (
                 <Badge color="statusError">
                   {t('import.rejected', { count: report.errors.length })}
@@ -226,7 +226,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
                     Зворотний порядок читається як «частину прийнято, ось
                     відхилені». */}
                 <Alert color="statusWarning" title={t('import.blockedTitle')}>
-                  {Literal.blockedHint}
+                  {t('uiStrings.importBlockedHint')}
                 </Alert>
 
                 <Table striped withTableBorder className="ecr-sticky-head">
@@ -254,7 +254,7 @@ export function UiStringsCsvPanel(): JSX.Element | null {
                 </Table>
               </>
             ) : (
-              <Text size="sm">{Literal.ready}</Text>
+              <Text size="sm">{t('uiStrings.importReady')}</Text>
             )}
 
             <Group justify="flex-end">
