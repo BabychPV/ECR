@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   clampSelection,
+  focusedCellOfEvent,
   selectionOfFocusEvent,
   selectionOfRangeEvent,
+  trackFocusedCell,
   trackSelection,
 } from '../selection';
 
@@ -163,6 +165,94 @@ describe('trackSelection: підписка на події, що виходят�
     container.dispatchEvent(new CustomEvent('focuscell', { detail: {} }));
 
     expect(report).not.toHaveBeenCalled();
+  });
+});
+
+describe('focusedCellOfEvent: АКТИВНА комірка, не кут виділення (UI-08)', () => {
+  it('віддає саме `focus`, хоч би де був другий кінець діапазону', () => {
+    /*
+     * ⛔ Це не те саме, що `GridSelection.anchor`, і різниця видима.
+     * Виділяючи Shift+↑ знизу вгору, оператор лишає фокус у комірці, з якої
+     * почав, тобто в НИЖНЬОМУ кінці; якір — верхній лівий кут. Рядок формули
+     * показує те, на чому стоїть курсор, як в Excel, — інакше він підписував
+     * би комірку, у якій курсора немає.
+     *
+     * ⚠ Мутація, яку це ловить: `focusedCellOfEvent = selectionOfFocusEvent(…)
+     * ?.anchor` — падає `expected { rowIndex: 4, … } to equal { rowIndex: 7, … }`.
+     */
+    expect(focusedCellOfEvent({ focus: { x: 3, y: 7 }, end: { x: 1, y: 4 } })).toEqual({
+      rowIndex: 7,
+      columnIndex: 3,
+    });
+  });
+
+  it('подія закріпленої секції ігнорується — індекси там від своєї секції', () => {
+    // ⛔ Рядок 0 закріпленої знизу секції — це рядок ПІДСУМКІВ (`UI-08`), а не
+    // перший рядок таблиці.
+    expect(
+      focusedCellOfEvent({ rowType: 'rowPinEnd', colType: 'rgCol', focus: { x: 1, y: 0 } }),
+    ).toBeNull();
+    expect(
+      focusedCellOfEvent({ rowType: 'rgRow', colType: 'colPinStart', focus: { x: 0, y: 0 } }),
+    ).toBeNull();
+  });
+
+  it('подія без координат — `null`, а не (0,0)', () => {
+    expect(focusedCellOfEvent(undefined)).toBeNull();
+    expect(focusedCellOfEvent({})).toBeNull();
+    expect(focusedCellOfEvent({ focus: { x: 1 } })).toBeNull();
+    expect(focusedCellOfEvent({ focus: { x: -1, y: 0 } })).toBeNull();
+  });
+});
+
+describe('trackFocusedCell: підписка лише на `focuscell`', () => {
+  it('ловить `focuscell` і НЕ реагує на `setrange`', () => {
+    /*
+     * ⛔ `setrange` координат фокуса не несе взагалі (`{x, y, x1, y1}` — це
+     * прямокутник), тож прийняти його кут за активну комірку означало б
+     * посунути рядок формули туди, куди курсор не ставав.
+     */
+    const container = document.createElement('div');
+    const grid = document.createElement('div');
+    container.appendChild(grid);
+    document.body.appendChild(container);
+
+    const report = vi.fn();
+    const stop = trackFocusedCell(container, report);
+
+    grid.dispatchEvent(
+      new CustomEvent('focuscell', {
+        bubbles: true,
+        composed: true,
+        detail: { rowType: 'rgRow', colType: 'rgCol', focus: { x: 2, y: 5 } },
+      }),
+    );
+
+    expect(report).toHaveBeenCalledWith({ rowIndex: 5, columnIndex: 2 });
+
+    grid.dispatchEvent(
+      new CustomEvent('setrange', {
+        bubbles: true,
+        composed: true,
+        detail: { type: 'rgRow', x: 0, y: 0, x1: 1, y1: 1 },
+      }),
+    );
+
+    expect(report).toHaveBeenCalledTimes(1);
+
+    stop();
+
+    grid.dispatchEvent(
+      new CustomEvent('focuscell', {
+        bubbles: true,
+        composed: true,
+        detail: { focus: { x: 9, y: 9 } },
+      }),
+    );
+
+    expect(report).toHaveBeenCalledTimes(1);
+
+    document.body.removeChild(container);
   });
 });
 

@@ -39,9 +39,19 @@ import { cellsOfSaveError } from './saveErrors';
 import {
   TableCornerAnchor,
   clampSelection,
+  trackFocusedCell,
   trackSelection,
   type GridSelection,
 } from './selection';
+import { publishFocus } from './focusStore';
+import { GridFormulaBar } from './GridFormulaBar';
+import {
+  columnTotals,
+  isTotalsRow,
+  totalsRow,
+  type ColumnTotal,
+  type GridTotalsRow,
+} from './gridTotals';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
@@ -454,6 +464,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // ⚠ Виділення теж належить ЦЬОМУ зрізу: індекси рядка 50 в іншій таблиці
     // вказують на інші дані, і вставка пішла б від чужого якоря.
     selection.current = null;
+
+    // ⚠ І фокус — з тієї самої причини (`UI-08`): рядок формули показував би
+    // вираз колонки з тим самим номером, але з іншої таблиці.
+    publishFocus(tableInstanceId, periodKey, null);
+
     setWidths(readWidths(tableInstanceId));
     touchHistory();
 
@@ -595,6 +610,24 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     lookupEntriesQueries.forEach((query) => void query.refetch());
   };
 
+  /**
+   * Підсумки колонок — `UI-08`.
+   *
+   * ⛔ Залежить і від `pending`: сума має відповідати тому, що ВИДНО, а
+   * незбережена правка видна одразу. `pending` і так змінюється на кожну
+   * правку (від нього залежить `flags` вище), тож жодного зайвого
+   * перемальовування це не додає — саме тому підсумок і не живе в окремому
+   * стані з власним оновленням.
+   *
+   * ⚠ Від `data` він теж залежить, а `data` після `CL-01…03` не
+   * перезапитується на збереження — тобто лічильник рендерів на `PATCH` цей
+   * рядок не рухає.
+   */
+  const totals = useMemo(
+    () => (data === undefined ? new Map<string, ColumnTotal>() : columnTotals(data, { pending, overrides })),
+    [data, pending, overrides],
+  );
+
   const columns = useMemo(
     () =>
       data === undefined
@@ -607,8 +640,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             requiredInputByCell,
             saveErrorByCell,
             lookupEntriesByRegistryId,
+            totals,
           ),
-    [data, readOnly, flags, widths, requiredInputByCell, saveErrorByCell, lookupEntriesByRegistryId],
+    [
+      data,
+      readOnly,
+      flags,
+      widths,
+      requiredInputByCell,
+      saveErrorByCell,
+      lookupEntriesByRegistryId,
+      totals,
+    ],
   );
 
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
@@ -617,6 +660,34 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rows = useMemo(
     () => (data === undefined ? [] : gridRows(data, overrides)),
     [data, overrides],
+  );
+
+  /**
+   * Закріплений рядок підсумків — `UI-08`.
+   *
+   * ⛔ `pinnedBottomSource` бібліотеки, а не власний `<div>` під сіткою.
+   * Сітка горизонтально прокручується (до 60 колонок), і намальований поруч
+   * рядок лишався б на місці, доки дані їдуть убік, — тобто підписував би
+   * суми не тим колонкам. RevoGrid 4.11 закріплення знизу підтримує
+   * (`pinnedBottomSource` у `@revolist/revogrid/dist/types/components.d.ts`),
+   * і рядок прокручується разом із колонками.
+   *
+   * ⚠ Порожній масив, доки зрізу немає: `undefined` бібліотека читає як
+   * «властивість не задано» і в частині шляхів падає на `.length`.
+   */
+  const pinnedTotals = useMemo<GridTotalsRow[]>(
+    () =>
+      data === undefined || totals.size === 0
+        ? []
+        : [
+            totalsRow(
+              data,
+              totals,
+              t('grid.totalsRowLabel'),
+              hasRowLabels(data) ? RowLabelProp : null,
+            ),
+          ],
+    [data, totals],
   );
 
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
@@ -995,19 +1066,30 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const rowSize = useRowHeight();
 
   const gridListenersCleanup = useRef<(() => void)[]>([]);
-  const gridContainerRef = useCallback((node: HTMLDivElement | null) => {
-    for (const cleanup of gridListenersCleanup.current) cleanup();
-    gridListenersCleanup.current = [];
+  const gridContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      for (const cleanup of gridListenersCleanup.current) cleanup();
+      gridListenersCleanup.current = [];
 
-    if (node === null) return;
+      if (node === null) return;
 
-    gridListenersCleanup.current = [
-      installEnterKeyCompat(node),
-      trackSelection(node, (next) => {
-        selection.current = next;
-      }),
-    ];
-  }, []);
+      gridListenersCleanup.current = [
+        installEnterKeyCompat(node),
+        trackSelection(node, (next) => {
+          selection.current = next;
+        }),
+
+        // ⛔ `UI-08`: фокус публікується у СХОВИЩЕ, а не в стан компонента.
+        // Стан тут коштував би перебудови всього опису колонок (`gridColumns`,
+        // до 60 замикань) на кожну стрілку клавіатури; сховище будить рівно
+        // `GridFormulaBar` (`focusStore.ts`).
+        trackFocusedCell(node, (cell) => {
+          publishFocus(tableInstanceId, periodKey, cell);
+        }),
+      ];
+    },
+    [tableInstanceId, periodKey],
+  );
 
   return (
     /*
@@ -1227,6 +1309,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
+      {/* ⛔ `UI-08`: рядок формули НАД сіткою — там, де він стоїть в Excel і
+          де око шукає «що в комірці, на якій я стою». Під сіткою його
+          закривав би закріплений рядок підсумків. */}
+      {data !== undefined && (
+        <GridFormulaBar
+          tableInstanceId={tableInstanceId}
+          periodKey={periodKey}
+          slice={data}
+          columns={columns}
+          rows={rows}
+          labelProp={RowLabelProp}
+          pending={pending}
+        />
+      )}
+
       <div ref={gridContainerRef} style={{ display: 'contents' }}>
         <RevoGrid
           theme="compact"
@@ -1235,6 +1332,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           resize
           columns={columns}
           source={rows}
+          pinnedBottomSource={pinnedTotals}
           readonly={readOnly}
           onBeforeedit={onBeforeEdit}
           onAfteredit={onAfterEdit}
@@ -1324,6 +1422,12 @@ export function gridColumns(
   // `StatesBatchAsync` (`Q-325`, коментар вище) — по одному запиту на кожну
   // з них замість одного на довідник.
   lookupEntriesByRegistryId: ReadonlyMap<number, readonly RegistryEntryDto[]> = new Map(),
+
+  // ⛔ `UI-08`: підсумки потрібні САМІЙ колонці, а не лише рядку моделі —
+  // кількість заповнених комірок їде підказкою на клітинці підсумку. Сума без
+  // «скільки значень її склало» читається як підсумок по ВСІХ рядках колонки,
+  // хоч би скільки з них були порожні.
+  totals: ReadonlyMap<string, ColumnTotal> = new Map(),
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -1415,9 +1519,33 @@ export function gridColumns(
 
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
       // «сюди не вставиться» мають відповідати одним правилом.
-      readonly: ({ model }) => readOnly || !decide(slice, rowKeyOf(model), column).editable,
+      //
+      // ⛔ `UI-08`: рядок підсумків — ЗАВЖДИ лише для читання, і перевіряється
+      // він ПЕРШИМ. Це не «про всяк випадок»: його `__rowKey` у зрізі
+      // відсутній, а `decide()` на невідомому рядку звичайної колонки чесно
+      // віддає «можна» (запис у `cellPermissions` немає — отже дозвіл). Без
+      // цієї перевірки RevoGrid відкрив би редактор на сумі, а `captureEdit`
+      // мовчки викинув би введене — правка, яка виглядає зробленою і нікуди
+      // не доїжджає.
+      readonly: ({ model }) =>
+        isTotalsRow(model) || readOnly || !decide(slice, rowKeyOf(model), column).editable,
 
       cellProperties: ({ model }) => {
+        // ⛔ `UI-08`: підсумок — не комірка документа. Ні станів
+        // (`cellStateOf` рахує їх для рядка, якого в зрізі немає), ні
+        // маркерів помилок, ні підказок про права: усе це стосувалося б
+        // рядка, якого користувач не вводив.
+        if (isTotalsRow(model)) {
+          const total = totals.get(column.code);
+
+          return {
+            'data-grid-totals': 'cell',
+            ...(total === undefined
+              ? {}
+              : { title: t('grid.totalsCellHint', { count: total.count }) }),
+          };
+        }
+
         const rowKey = rowKeyOf(model);
         const state = cellStateOf(slice, rowKey, column, flags, readOnly);
         const key = cellKey(rowKey, column.code);

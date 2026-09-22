@@ -171,6 +171,75 @@ export function trackSelection(
 }
 
 /**
+ * Комірка, у якій ЗАРАЗ фокус, — у термінах індексів того, що отримала сітка
+ * (`UI-08`, рядок формули).
+ *
+ * ⛔ Це не `GridSelection.anchor`. Якір — верхній лівий кут виділення, бо від
+ * нього розкладається вставка; рядок формули ж показує АКТИВНУ комірку, як в
+ * Excel. Виділяючи Shift+↑ знизу вгору, оператор лишає фокус у нижньому кінці
+ * діапазону — якір там указує на іншу комірку, і рядок формули показував би
+ * вираз не тієї колонки, у якій стоїть курсор.
+ *
+ * ⚠ `columnIndex` — індекс серед колонок, які ОТРИМАЛА сітка, а не серед
+ * `slice.columns`: коли є колонка підпису рядка, вона перша й зсуває решту на
+ * одиницю. Зіставлення індексу з колонкою зрізу робить `formulaBar.ts` за
+ * самим масивом `ColumnRegular[]`, а не арифметикою по зсуву.
+ */
+export interface FocusedCell {
+  readonly rowIndex: number;
+  readonly columnIndex: number;
+}
+
+/**
+ * Розбирає `detail` події `focuscell` у комірку фокуса.
+ *
+ * ⚠ Свідомо окремо від `selectionOfFocusEvent`, а не нове поле в
+ * `GridSelection`: те значення читають `onPaste`/`onCopy` із `ref`, і воно
+ * навмисно НЕ викликає перемальовування. Фокус, навпаки, має доїжджати до
+ * React — але лише до рядка формули (`focusStore.ts`), не до всієї сітки.
+ *
+ * @returns `null`, якщо подія не про тіло таблиці або не несе координат.
+ */
+export function focusedCellOfEvent(detail: unknown): FocusedCell | null {
+  if (typeof detail !== 'object' || detail === null) return null;
+
+  const event = detail as { rowType?: unknown; colType?: unknown; focus?: { x?: unknown; y?: unknown } };
+
+  if (!isMainViewport(event)) return null;
+
+  const columnIndex = indexOf(event.focus?.x);
+  const rowIndex = indexOf(event.focus?.y);
+  if (columnIndex === null || rowIndex === null) return null;
+
+  return { rowIndex, columnIndex };
+}
+
+/**
+ * Підписується на зміну комірки фокуса в межах контейнера.
+ *
+ * ⛔ Лише `focuscell`. `setrange` координат фокуса не несе взагалі
+ * (`{x, y, x1, y1}` — це прямокутник), тож прийняти його кут за активну
+ * комірку означало б посунути рядок формули туди, куди курсор не ставав.
+ *
+ * @returns Відписка.
+ */
+export function trackFocusedCell(
+  node: HTMLElement,
+  report: (cell: FocusedCell) => void,
+): () => void {
+  const onFocus = (event: Event): void => {
+    const cell = focusedCellOfEvent((event as CustomEvent<unknown>).detail);
+    if (cell !== null) report(cell);
+  };
+
+  node.addEventListener('focuscell', onFocus);
+
+  return () => {
+    node.removeEventListener('focuscell', onFocus);
+  };
+}
+
+/**
  * Обрізає виділення по справжніх межах зрізу.
  *
  * ⛔ Обов'язково: сітка могла показувати більше рядків, ніж лишилося після
