@@ -10390,6 +10390,75 @@
         ],
         "type": "object"
       },
+      "UiStringImportError": {
+        "description": "Помилка одного рядка імпорту.",
+        "properties": {
+          "key": {
+            "description": "Ключ, як його записано у файлі.",
+            "type": "string"
+          },
+          "messageKey": {
+            "description": "Ключ тексту відмови в каталозі.",
+            "type": "string"
+          },
+          "row": {
+            "description": "Номер запису у файлі; заголовок — 1.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "key",
+          "messageKey"
+        ],
+        "type": "object"
+      },
+      "UiStringImportReport": {
+        "description": "Звіт імпорту перекладу.",
+        "properties": {
+          "added": {
+            "description": "Нових перекладів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "applied": {
+            "description": "Чи записано зміни.",
+            "type": "boolean"
+          },
+          "errors": {
+            "description": "Відхилені рядки; є хоч один — не застосовано нічого.",
+            "items": {
+              "$ref": "#/components/schemas/UiStringImportError"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "description": "Версія каталогу після імпорту.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "unchanged": {
+            "description": "Тих самих, що вже в базі.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Змінених.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "updated",
+          "unchanged",
+          "errors",
+          "applied",
+          "revision"
+        ],
+        "type": "object"
+      },
       "UiStringListResponse": {
         "description": "Адміністративний перелік рядків мови — без fallback.",
         "properties": {
@@ -26028,6 +26097,162 @@
           }
         },
         "summary": "Покриття перекладу по мовах. Право `System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
+        ]
+      }
+    },
+    "/api/v1/ui-strings/export.csv": {
+      "get": {
+        "description": "UTF-8 із BOM і CRLF, щоб Excel прочитав кирилицю; формули нейтралізовані.",
+        "parameters": [
+          {
+            "description": "Мова перекладу (не мова за замовчуванням).",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Експорт перекладу в CSV: `key, scope, en, &lt;lang&gt;, updatedAt`. Право `System.ManageLocalization`.",
+        "tags": [
+          "UiStrings"
+        ]
+      }
+    },
+    "/api/v1/ui-strings/import": {
+      "post": {
+        "description": "Звіт — завжди 200: помилки рядків є даними для термінолога. Є хоч одна\nпомилка або `dryRun` — не записано нічого. Стеля файлу —\n`Localization:ImportMaxBytes`.",
+        "parameters": [
+          {
+            "description": "Мова перекладу.",
+            "in": "query",
+            "name": "lang",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише перевірка.",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "$ref": "#/components/schemas/IFormFile"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiStringImportReport"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Імпорт перекладу з CSV. Право `System.ManageLocalization`.",
         "tags": [
           "UiStrings"
         ]
