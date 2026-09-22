@@ -1172,6 +1172,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/data-sources/{id}/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Каталог імен джерела для мапінгу (ФВ-13.13). Право `Integration.Manage`.
+         * @description Без `path` — кореневі елементи; зі шляхом — дочірні елементи й
+         *     атрибути елемента. Джерело не відповіло в межу
+         *     `Integration:CatalogTimeoutSeconds` або лежить — `503 ECR-INT-0503`;
+         *     відмовило в автентифікації — `502 ECR-INT-0502`.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    path?: string;
+                    search?: string;
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceCatalogPage"];
+                        "text/json": components["schemas"]["SourceCatalogPage"];
+                        "text/plain": components["schemas"]["SourceCatalogPage"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/data-sources/{id}/test": {
         parameters: {
             query?: never;
@@ -17447,6 +17545,26 @@ export interface components {
             matches: boolean;
             /** @description Сума, записана при побудові (hex). */
             stored: string;
+        };
+        /** @description Позиція каталогу джерела: елемент або атрибут. */
+        SourceCatalogItem: {
+            /** @description Ім'я в джерелі. */
+            code: string;
+            /** @description Тип значення в термінах джерела. */
+            dataType: null | string;
+            /** @description Опис із джерела. */
+            displayName: null | string;
+            /** @description `Element` або `Attribute`. */
+            kind: string;
+            /** @description Шлях в ієрархії AF. */
+            path: null | string;
+            /** @description UOM джерела; `null` — джерело одиниці не назвало. */
+            unitSymbol: null | string;
+        };
+        /** @description Сторінка каталогу; `NextCursor``null` — сторінка остання. */
+        SourceCatalogPage: {
+            items: components["schemas"]["SourceCatalogItem"][];
+            nextCursor: null | string;
         };
         /** @description Сутність збору разом зі станом останнього прогону. */
         SourceEntityStatus: {

@@ -9583,6 +9583,78 @@
         ],
         "type": "object"
       },
+      "SourceCatalogItem": {
+        "description": "Позиція каталогу джерела: елемент або атрибут.",
+        "properties": {
+          "code": {
+            "description": "Ім'я в джерелі.",
+            "type": "string"
+          },
+          "dataType": {
+            "description": "Тип значення в термінах джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "displayName": {
+            "description": "Опис із джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "description": "`Element` або `Attribute`.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Шлях в ієрархії AF.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "unitSymbol": {
+            "description": "UOM джерела; `null` — джерело одиниці не назвало.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "displayName",
+          "path",
+          "kind",
+          "dataType",
+          "unitSymbol"
+        ],
+        "type": "object"
+      },
+      "SourceCatalogPage": {
+        "description": "Сторінка каталогу; `NextCursor``null` — сторінка остання.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceCatalogItem"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
       "SourceEntityStatus": {
         "description": "Сутність збору разом зі станом останнього прогону.",
         "properties": {
@@ -13322,6 +13394,144 @@
           }
         },
         "summary": "Змінює джерело. Право `Integration.Manage`.",
+        "tags": [
+          "DataSources"
+        ]
+      }
+    },
+    "/api/v1/data-sources/{id}/catalog": {
+      "get": {
+        "description": "Без `path` — кореневі елементи; зі шляхом — дочірні елементи й\nатрибути елемента. Джерело не відповіло в межу\n`Integration:CatalogTimeoutSeconds` або лежить — `503 ECR-INT-0503`;\nвідмовило в автентифікації — `502 ECR-INT-0502`.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceCatalogPage"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceCatalogPage"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceCatalogPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "502": {
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Каталог імен джерела для мапінгу (ФВ-13.13). Право `Integration.Manage`.",
         "tags": [
           "DataSources"
         ]
