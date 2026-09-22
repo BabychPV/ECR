@@ -28,7 +28,8 @@ public sealed class DataSourcesController(
     SaveDataSourceHandler save,
     DeleteDataSourceHandler delete,
     TestDataSourceConnectionHandler test,
-    BrowseSourceCatalogHandler catalog) : ControllerBase
+    BrowseSourceCatalogHandler catalog,
+    ProbeSourcePathHandler probe) : ControllerBase
 {
     /// <summary>
     /// Каталог імен джерела для мапінгу (ФВ-13.13). Право <c>Integration.Manage</c>.
@@ -54,6 +55,32 @@ public sealed class DataSourcesController(
         [FromQuery] int? limit,
         CancellationToken ct)
         => Ok(await catalog.HandleAsync(id, path, search, cursor, limit, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// «Перевірити конфігурацію» до першого збору (ФВ-13.17). Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Читає ОДНЕ значення тим самим адаптером, яким потім збиратимуть, і
+    /// нічого не зберігає — на відміну від <c>POST …/collect</c>. Шляху немає
+    /// в каталозі джерела — <c>404 ECR-INT-0404</c> з переліком найближчих
+    /// імен (<c>suggestions</c>, до 5) серед елементів каталогу того самого
+    /// рівня; джерело не відповіло в межу <c>Integration:CatalogTimeoutSeconds</c>
+    /// або лежить — <c>503 ECR-INT-0503</c>; відмова в автентифікації —
+    /// <c>502 ECR-INT-0502</c>.
+    /// </remarks>
+    [HttpPost("{id:int}/probe")]
+    [ProducesResponseType<SourcePathProbeResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Probe(int id, [FromBody] ProbeDataSourceRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await probe.HandleAsync(id, request.Path, ct).ConfigureAwait(false));
+    }
 
     /// <summary>Перелік джерел. Право <c>Integration.View</c> або <c>Integration.Manage</c>.</summary>
     /// <remarks>
@@ -192,3 +219,7 @@ public sealed record SaveDataSourceRequest(
 /// <summary>Тіло перевірки з'єднання.</summary>
 /// <param name="Reason">Причина; обов'язкова, потрапляє в журнал безпеки.</param>
 public sealed record TestDataSourceRequest(string Reason);
+
+/// <summary>Тіло проби конфігурації мапінгу (ФВ-13.17).</summary>
+/// <param name="Path">Шлях мапінгу в джерелі, від 1 до 500 символів.</param>
+public sealed record ProbeDataSourceRequest(string? Path);

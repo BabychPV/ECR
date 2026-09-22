@@ -51,6 +51,7 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
             await client.PutAsJsonAsync(At("1"), Body("X")).ConfigureAwait(true),
             await client.DeleteAsync(At("1")).ConfigureAwait(true),
             await client.PostAsJsonAsync(At("1/test"), new { reason = Reason }).ConfigureAwait(true),
+            await client.PostAsJsonAsync(At("1/probe"), new { path = "Unit-01" }).ConfigureAwait(true),
         ];
 
         Assert.All(responses, r => Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode));
@@ -403,6 +404,50 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
         using var viewer = await SignedInAsync(app, "Integration.View").ConfigureAwait(true);
         Assert.Equal(
             HttpStatusCode.Forbidden, (await viewer.GetAsync(At($"{id}/catalog")).ConfigureAwait(true)).StatusCode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-13.17")]
+    public async Task Проба_неіснучого_шляху_дає_404_з_підказкою_а_вимкнене_джерело_503()
+    {
+        using var app = new EcrApiFactory(sql);
+        var (id, _) = await AddInactiveAsync().ConfigureAwait(true);
+
+        using var client = await SignedInAsync(app, "Integration.Manage").ConfigureAwait(true);
+
+        // Вимкнене джерело: та сама відмова, що в каталозі, — недоступне, не 404.
+        var down = await client.PostAsJsonAsync(At($"{id}/probe"), new { path = "Unit-01" }).ConfigureAwait(true);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, down.StatusCode);
+        var downProblem = await BodyAsync(down, null).ConfigureAwait(true);
+        Assert.Equal("err.ECR-INT-0503.probeUnavailable", downProblem.GetProperty("messageKey").GetString());
+
+        await SetActiveAsync(id, true).ConfigureAwait(true);
+
+        try
+        {
+            // Кореневий каталог підмінений стендом на єдиний елемент Unit-01
+            // (EcrApiFactory.OfflineSourceHandler) — шляху "Unit-02" у ньому немає.
+            var missing = await client.PostAsJsonAsync(At($"{id}/probe"), new { path = "Unit-02" }).ConfigureAwait(true);
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+
+            var problem = await BodyAsync(missing, null).ConfigureAwait(true);
+            Assert.Equal("ECR-INT-0404", problem.GetProperty("errorCode").GetString());
+            Assert.Equal("err.ECR-INT-0404.sourcePathNotFound", problem.GetProperty("messageKey").GetString());
+            Assert.Contains(
+                problem.GetProperty("suggestions").EnumerateArray().Select(s => s.GetString()),
+                s => s == "Unit-01");
+        }
+        finally
+        {
+            await SetActiveAsync(id, false).ConfigureAwait(true);
+        }
+
+        using var viewer = await SignedInAsync(app, "Integration.View").ConfigureAwait(true);
+        Assert.Equal(
+            HttpStatusCode.Forbidden,
+            (await viewer.PostAsJsonAsync(At($"{id}/probe"), new { path = "Unit-01" }).ConfigureAwait(true)).StatusCode);
     }
 
     private async Task SetActiveAsync(int id, bool active)

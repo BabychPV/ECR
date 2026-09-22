@@ -324,6 +324,10 @@ public static class DependencyInjection
         services.AddScoped<Integration.TestDataSourceConnectionHandler>();
         services.AddScoped<Integration.BrowseSourceCatalogHandler>();
 
+        // ФВ-13.17: «Перевірити конфігурацію» до першого збору — пробне
+        // читання одного значення тим самим адаптером, що збір.
+        services.AddScoped<Integration.ProbeSourcePathHandler>();
+
         // Журнал прогонів збору (ФВ-5.23).
         services.AddScoped<Integration.ListCollectionRunsHandler>();
         services.AddScoped<Integration.GetCollectionRunHandler>();
