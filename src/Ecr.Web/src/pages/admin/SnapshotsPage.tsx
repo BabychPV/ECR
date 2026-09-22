@@ -2,10 +2,10 @@ import { lazy, Suspense, useEffect, useRef, useState, type JSX } from 'react';
 import {
   Anchor,
   Badge,
+  Box,
   Button,
   Group,
   Modal,
-  NumberInput,
   ScrollArea,
   Select,
   Stack,
@@ -45,6 +45,7 @@ import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -304,13 +305,12 @@ export function SnapshotsPage(): JSX.Element {
               onChange={(value) => setProjectId(value === null ? null : Number(value))}
             />
 
-            <NumberInput
-              size="xs"
-              miw={110}
-              label={t('documents.period')}
-              value={periodKey ?? ''}
-              onChange={(value) => setPeriodKey(typeof value === 'number' ? value : null)}
-            />
+            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+                `periodKey` тут — САМ фільтр (може лишатися `null` — «без
+                періоду», запит до `/api/v1/reports/snapshots` тоді йде без
+                параметра); `setPeriodKey` уже приймає `number | null`, тож
+                підставляється напряму, без обгортки `typeof`. */}
+            <PeriodPicker size="xs" miw={110} value={periodKey} onChange={setPeriodKey} />
 
             {/* ⛔ Вікно описів на відмові показало б «описів немає» — і запросило б
                 завести дублікат. Вимкнено, доки перелік не приїде. */}
@@ -492,12 +492,18 @@ export function SnapshotsPage(): JSX.Element {
           </Text>
         )}
 
-        <NumberInput
-          mt="sm"
-          label={t('documents.period')}
-          value={buildPeriod}
-          onChange={(value) => setBuildPeriod(typeof value === 'number' ? value : buildPeriod)}
-        />
+        {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+            `buildPeriod` — локальний стан діалогу побудови, ніколи не `null`
+            (стартує з `currentPeriodKey()`); `value ?? buildPeriod` зберігає
+            стару поведінку очищеного поля — воно НЕ скидало вибір, а
+            лишало те, що вже було. `PeriodPicker` не має власного `mt`, тож
+            відступ — на обгортці `Box`, як і раніше в цьому діалозі. */}
+        <Box mt="sm">
+          <PeriodPicker
+            value={buildPeriod}
+            onChange={(value) => setBuildPeriod(value ?? buildPeriod)}
+          />
+        </Box>
 
         {/* ⛔ Поля параметрів — лише коли їх СПРАВДІ оголошено. «Прочитати не
             вдалося» не малює порожньої секції: порожня секція читається як

@@ -1,8 +1,9 @@
 import type { JSX } from 'react';
-import { NumberInput, Stack, Text } from '@mantine/core';
+import { Stack, Text } from '@mantine/core';
 import { CampaignOverview } from '@/features/campaign/CampaignOverview';
 import { t } from '@/shared/i18n';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 
 /**
@@ -25,14 +26,12 @@ export function CampaignOverviewPage(): JSX.Element {
       <PageHeader
         title={t('campaign.title')}
         actions={
-          <NumberInput
-            size="xs"
-            miw={110}
-            label={t('documents.period')}
-            value={periodKey}
-            allowDecimal={false}
-            onChange={(value) => setPeriodKey(typeof value === 'number' ? value : null)}
-          />
+          // ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+          // Формат `periodKey` і місце в адресі — БЕЗ змін: `setPeriodKey`
+          // приймає `number | null` так само, як приймав старий обробник
+          // (`typeof value === 'number' ? value : null` — те саме, що вже дає
+          // `PeriodPicker.onChange`), тому підставляється напряму.
+          <PeriodPicker size="xs" miw={110} value={periodKey} onChange={setPeriodKey} />
         }
       />
 
