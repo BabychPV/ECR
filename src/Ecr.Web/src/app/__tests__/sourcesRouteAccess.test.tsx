@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, Outlet, RouterProvider } from 'react-router-dom';
 import type { CurrentUserDto } from '@/api/types';
 import { AppLayout } from '@/app/AppLayout';
+import { ForbiddenPage } from '@/app/ForbiddenPage';
 import { RouteGuard } from '@/app/RouteGuard';
 import { routes } from '@/app/routes';
 import { MeQueryKey } from '@/shared/session/useSession';
@@ -62,6 +63,9 @@ function visitSources(me: CurrentUserDto): void {
             ),
             handle: routes.adminSources.handle,
           },
+          // ⚠ UI-09: ціль `<Navigate to="/403" .../>` з `RouteGuard.tsx` —
+          // без цього запису відмова без права не мала б куди навігувати.
+          { path: '403', element: <ForbiddenPage /> },
         ],
       },
     ],
@@ -137,11 +141,12 @@ describe('/admin/sources — прямий перехід (RouteGuard)', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('ні того, ні того — явна відмова з назвою права, як на інших маршрутах', () => {
+  it('ні того, ні того — редирект на /403, явна відмова з назвою права, як на інших маршрутах', () => {
     visitSources(meWith(['Template.Edit']));
 
     expect(screen.queryByTestId('sources-content')).toBeNull();
-    // Відмова називає те саме право, що й серверний `403` цього переліку.
+    // Відмова (тепер на `/403`, `RouteGuard.tsx`: `<Navigate .../>`) називає
+    // те саме право, що й серверний `403` цього переліку.
     expect(screen.getByRole('alert').textContent).toContain('Integration.View');
   });
 });

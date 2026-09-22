@@ -3,6 +3,7 @@ import { Loader, Center } from '@mantine/core';
 import { createBrowserRouter, type RouteObject } from 'react-router-dom';
 import { AdminLayout } from './AdminLayout';
 import { AppLayout } from './AppLayout';
+import { ForbiddenPage } from './ForbiddenPage';
 import { NotFoundPage } from './NotFoundPage';
 import { RouteErrorPage } from './RouteErrorPage';
 import { RouteGuard } from './RouteGuard';
@@ -371,6 +372,23 @@ export const router = createBrowserRouter([
           },
         ],
       },
+
+      /**
+       * `/403` (`UI-09`, L-правило про доступ) — маршрут-ціль
+       * `<Navigate to="/403" .../>` із `RouteGuard.tsx`.
+       *
+       * ⚠ НЕ запис `routes.ts` — той самий інваріант, що й `path: '*'`
+       * нижче: реєстр стереже показ у навбарі/breadcrumbs/гарди для сторінок
+       * ЗАСТОСУНКУ, а `/403`, як і `/404`, — стан ПОМИЛКИ, не пункт меню
+       * (`routes.test.ts` читає лише `path:` літерали `routes.ts`, тому цей
+       * рядок і не мусить туди потрапляти — навмисно, не пропуск).
+       *
+       * ⛔ Без власного `guarded()`: сторінка відмови в доступі сама не
+       * вимагає права — інакше відмова в доступі до маршруту, куди
+       * перенаправляє відмова в доступі, дала б нескінченний цикл
+       * редиректів.
+       */
+      { path: '403', element: <ForbiddenPage /> },
 
       // ⛔ ОБОВ'ЯЗКОВО останній: `react-router` сортує дітей за специфічністю
       // незалежно від порядку оголошення, тож місце в масиві тут не впливає

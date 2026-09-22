@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, Outlet, RouterProvider } from 'react-router-dom';
 import type { CurrentUserDto } from '@/api/types';
+import { ForbiddenPage } from '@/app/ForbiddenPage';
 import { RouteGuard } from '@/app/RouteGuard';
 import { routes } from '@/app/routes';
 import { SourcesPage } from '@/pages/admin/SourcesPage';
@@ -75,6 +76,9 @@ function visitSources(me: CurrentUserDto): void {
             ),
             handle: routes.adminSources.handle,
           },
+          // ⚠ UI-09: ціль `<Navigate to="/403" .../>` з `RouteGuard.tsx` —
+          // без цього запису відмова без права не мала б куди навігувати.
+          { path: '403', element: <ForbiddenPage /> },
         ],
       },
     ],

@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { JSX } from 'react';
 import type { CurrentUserDto } from '@/api/types';
+import { ForbiddenPage } from '@/app/ForbiddenPage';
 import { RouteGuard } from '@/app/RouteGuard';
 import { routes } from '@/app/routes';
 import type { CampaignProgress, CampaignProject, CampaignSummary, CampaignTotals } from '@/features/campaign/api';
@@ -165,11 +166,24 @@ function clientWith(seed?: CampaignSummary): QueryClient {
   return client;
 }
 
+/**
+ * ⚠ UI-09: `<Routes>` навколо `ui`, а не голий `<MemoryRouter>{ui}</MemoryRouter>`
+ * — `showGuarded()` нижче монтує `<RouteGuard>`, і без цільового `/403`
+ * (ціль `<Navigate to="/403" .../>` з `RouteGuard.tsx`) редирект не мав би
+ * куди навігувати. Для решти тестів файлу (без гарда) поведінка та сама:
+ * `<Route path="/admin/campaign">` збігається з `initialEntries` нижче
+ * так само, як і раніше голий рендер `ui` без огортання маршрутом.
+ */
 function show(ui: JSX.Element, client = clientWith()): void {
   render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={[`/admin/campaign?periodKey=${String(Period)}`]}>{ui}</MemoryRouter>
+        <MemoryRouter initialEntries={[`/admin/campaign?periodKey=${String(Period)}`]}>
+          <Routes>
+            <Route path="/admin/campaign" element={ui} />
+            <Route path="/403" element={<ForbiddenPage />} />
+          </Routes>
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
