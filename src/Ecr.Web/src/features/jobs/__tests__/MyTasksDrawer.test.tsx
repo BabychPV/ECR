@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { JobSummary } from '@/api/types';
 import { testTheme } from '@/test/render';
 import { MyTasksDrawer } from '@/features/jobs/MyTasksDrawer';
@@ -13,6 +14,12 @@ import { MyTasksDrawer } from '@/features/jobs/MyTasksDrawer';
  * лаунчер у сусідньому файлі навмисно підмінений заглушкою (сторож бюджету
  * `D-132`), і перевіряти крізь нього справжній вміст означало б зламати саме
  * ту перевірку.
+ *
+ * ⚠ `QueryClientProvider` тут обов'язковий і для рядків, де кнопка «Повторити»
+ * НЕ показується: `JobFacts.JobRetry` кличе `useRestartJob` (тобто
+ * `useMutation`) БЕЗУМОВНО, до власної перевірки `canRestartJob` — React
+ * забороняє умовний виклик хука. Без провайдера падає навіть рендер задачі
+ * `Running`.
  */
 
 function row(over: Partial<JobSummary>): JobSummary {
@@ -28,24 +35,29 @@ function row(over: Partial<JobSummary>): JobSummary {
 }
 
 function show(jobs: readonly JobSummary[] | undefined, isPending = false): void {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter>
-        <MyTasksDrawer
-          opened
-          onClose={() => undefined}
-          jobs={jobs}
-          isPending={isPending}
-          error={null}
-          onRetry={() => undefined}
-        />
-      </MemoryRouter>
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <MyTasksDrawer
+            opened
+            onClose={() => undefined}
+            jobs={jobs}
+            isPending={isPending}
+            error={null}
+            onRetry={() => undefined}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('шухляда «My tasks»', () => {
@@ -62,18 +74,22 @@ describe('шухляда «My tasks»', () => {
   });
 
   it('закрита шухляда не малює нічого (L2)', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
     render(
       <MantineProvider theme={testTheme}>
-        <MemoryRouter>
-          <MyTasksDrawer
-            opened={false}
-            onClose={() => undefined}
-            jobs={[row({})]}
-            isPending={false}
-            error={null}
-            onRetry={() => undefined}
-          />
-        </MemoryRouter>
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <MyTasksDrawer
+              opened={false}
+              onClose={() => undefined}
+              jobs={[row({})]}
+              isPending={false}
+              error={null}
+              onRetry={() => undefined}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>
       </MantineProvider>,
     );
 
@@ -131,5 +147,82 @@ describe('шухляда «My tasks»', () => {
     );
 
     expect(ids).toEqual(['newest', 'older']);
+  });
+});
+
+/**
+ * «Повторити» й посилання на результат (`UX-09`).
+ *
+ * ⛔ Перелік шухляди — ЗАВЖДИ `mine=true` (`Q-156`, `useMyTasks`), тож кожен
+ * рядок тут ВЛАСНИЙ за побудовою: перевірка «чужа задача без ViewHealth»
+ * лишається доказом `JobFacts.canRestartJob` (чистої функції, без мережі й
+ * без дерева) — тут її повторювати нема чим підмінити «чужість», бо шухляда
+ * чужих задач не показує НІКОЛИ.
+ */
+describe('«Повторити» і посилання на результат (UX-09)', () => {
+  /** Перехоплює запит на `/restart` і повертає надіслані адресу й метод. */
+  function stubRestart(): { url: () => string; method: () => string | undefined } {
+    let url = '';
+    let method: string | undefined;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        url = String(input);
+        method = init?.method;
+
+        return new Response(JSON.stringify({ jobId: 'IExcelExportJob#9' }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch,
+    );
+
+    return { url: () => url, method: () => method };
+  }
+
+  it('провалена задача — кнопка «Повторити» є, клік шле POST на /restart', async () => {
+    const sent = stubRestart();
+
+    show([row({ jobId: 'IExcelExportJob#9', state: 'Failed' })]);
+
+    fireEvent.click(screen.getByRole('button', { name: '⟦jobs.restart⟧' }));
+
+    // ⚠ Той самий привід, що в `cancelJob.test.ts`: `#` у `jobId` починає
+    // фрагмент URL і мусить бути закодований, інакше сервер бачить інший шлях.
+    await waitFor(() => expect(sent.url()).toBe('/api/v1/jobs/IExcelExportJob%239/restart'));
+    expect(sent.method()).toBe('POST');
+  });
+
+  it('мутація: не-Failed власна задача — кнопки «Повторити» немає (дзеркало)', () => {
+    show([row({ jobId: 'x', state: 'Running' })]);
+
+    expect(screen.queryByRole('button', { name: '⟦jobs.restart⟧' })).toBeNull();
+    expect(document.querySelector('[data-job-retry]')).toBeNull();
+  });
+
+  it('resultUrl не null — посилання «Завантажити файл» веде на нього як є', () => {
+    show([
+      row({
+        jobId: 'y',
+        state: 'Succeeded',
+        resultUrl: '/api/v1/documents/42/export/abc-123',
+      }),
+    ]);
+
+    /*
+     * ⛔ Мутаційний доказ. Підставте замість `resultUrl` побудову з `message`
+     * чи з `documentId` — і `href` перестане збігатися з тим, що віддав
+     * сервер: посилання поведе на неіснуючий файл.
+     */
+    const link = screen.getByRole('link', { name: '⟦document.exportReady⟧' });
+    expect(link.getAttribute('href')).toBe('/api/v1/documents/42/export/abc-123');
+  });
+
+  it('мутація: resultUrl = null — посилання ігнорується', () => {
+    show([row({ jobId: 'z', state: 'Succeeded', resultUrl: null })]);
+
+    expect(document.querySelector('[data-job-result]')).toBeNull();
+    expect(screen.queryByRole('link', { name: '⟦document.exportReady⟧' })).toBeNull();
   });
 });

@@ -114,3 +114,42 @@ export function useCancelJob(
     onError: showApiError,
   });
 }
+
+/**
+ * Просить сервер повторити провалену задачу (UX-09).
+ *
+ * ⛔ Директива №11, T10 #40. Право `System.ViewHealth` — АБО автор ВЛАСНОЇ
+ * задачі (`JobsController.Restart`, `RestartJobHandler`). Клієнт рішення не
+ * дублює й не може: ні `JobStatus`, ні `JobSummary` не несуть ідентифікатора
+ * автора (контракт `999f889b` додав лише `resultUrl`) — кнопку ховає той, хто
+ * її показує (`JobFacts.canRestartJob`/`JobRetry`), а сервер перевіряє
+ * власника заново. Порядок відмов — 404 → 403 (`err.ECR-AUTH-0403.jobNotYours`)
+ * → 409 (задача не `Failed`).
+ *
+ * ⚠ Той самий `jobId`, не новий ідентифікатор: викликач, що вже опитує
+ * `GET /jobs/{jobId}`, продовжує стежити за тим самим прогресом.
+ *
+ * ⚠ `encodeURIComponent` — той самий привід, що в `cancelJob`: `jobId` має
+ * вигляд `IRecalculationJob#42`, і сирий `#` в URL обриває шлях на фрагменті
+ * (саме на цьому впав крок 17 `smoke.ps1`).
+ */
+export function restartJob(jobId: string): Promise<AcceptedJob> {
+  return apiEnqueue(`/api/v1/jobs/${encodeURIComponent(jobId)}/restart`);
+}
+
+/**
+ * Повторний запуск проваленої задачі як мутація React Query.
+ *
+ * ⚠ `onSuccess` НЕ інвалідує нічого сам: різні виклики (шухляда «My tasks»,
+ * картка `#/admin/jobs`) ведуть різні переліки з різними ключами запиту —
+ * інвалідація тут навмання дублювала б чи пропускала б ключ викликача.
+ */
+export function useRestartJob(
+  onRestarted?: () => void,
+): UseMutationResult<AcceptedJob, unknown, string> {
+  return useMutation({
+    mutationFn: restartJob,
+    onSuccess: () => onRestarted?.(),
+    onError: showApiError,
+  });
+}

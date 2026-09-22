@@ -1,7 +1,8 @@
 import { lazy, Suspense, type JSX } from 'react';
-import { Anchor, Group, Stack, Text } from '@mantine/core';
+import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { t } from '@/shared/i18n';
+import { useRestartJob } from './api';
 
 /*
  * Поля фонової задачі, що прийшли з `BE-08`: спроба, причина провалу,
@@ -122,4 +123,106 @@ export function JobDocumentLink({
 /** Хто поставив задачу; `null` — системна (розклад, прибирання). */
 export function jobAuthor(name: string | null | undefined): string {
   return name === null || name === undefined || name === '' ? t('jobs.system') : name;
+}
+
+/**
+ * Чи показувати «Повторити» (UX-09, директива №11, T10 #40): лише `Failed`,
+ * і лише власнику ВЛАСНОЇ задачі АБО праву `System.ViewHealth`.
+ *
+ * ⛔ Чиста функція, окремо від компонента, саме заради мутаційного доказу:
+ * «чужа задача без ViewHealth» і «не-Failed стан» перевіряються без монтування
+ * дерева й без заглушки мережі під `/restart`.
+ */
+export function canRestartJob(
+  state: string,
+  isOwnJob: boolean,
+  hasViewHealth: boolean,
+): boolean {
+  return state === 'Failed' && (isOwnJob || hasViewHealth);
+}
+
+/**
+ * Кнопка «Повторити» для проваленої задачі (UX-09, директива №11, T10 #40).
+ *
+ * ⛔ Показ не порівнює `createdByUserId` із сеансом — і не через недогляд:
+ * ні `JobStatus`, ні `JobSummary` (контракт `999f889b`) такого поля не
+ * несуть, лише `JobSummary.createdByDisplayName` — ім'я, а не стабільний
+ * ключ, звірка з яким проти `session.userName` була б непридатним доказом
+ * (могло збігтися в двох людей). Тому «це моя задача» передає ВИКЛИКАЧ
+ * прапорцем `isOwnJob`, обчисленим із того, що він і так знає про власний
+ * перелік (у шухляді «My tasks» сервер фільтрує `mine=true` — `Q-156` —
+ * тобто кожен рядок там ВЛАСНИЙ за побудовою). Сервер (`RestartJobHandler`)
+ * усе одно перевіряє власника заново під час запиту — `403`
+ * (`err.ECR-AUTH-0403.jobNotYours`), якщо виклик помилився.
+ *
+ * ⚠ Підтвердження не питається: сервер сам відхилить непровалену задачу
+ * `409`-ю (порядок 404 → 403 → 409), і друге запитання «справді повторити?»
+ * після кнопки, яка вже каже «повторити», було б зайвим кроком.
+ */
+export function JobRetry({
+  jobId,
+  state,
+  isOwnJob,
+  hasViewHealth,
+  onRestarted,
+}: {
+  readonly jobId: string;
+  readonly state: string;
+  readonly isOwnJob: boolean;
+  readonly hasViewHealth: boolean;
+  readonly onRestarted?: () => void;
+}): JSX.Element | null {
+  const restart = useRestartJob(onRestarted);
+
+  if (!canRestartJob(state, isOwnJob, hasViewHealth)) return null;
+
+  return (
+    <Button
+      size="xs"
+      variant="default"
+      loading={restart.isPending}
+      onClick={() => restart.mutate(jobId)}
+      data-job-retry=""
+    >
+      {restart.isPending ? t('jobs.restarting') : t('jobs.restart')}
+    </Button>
+  );
+}
+
+/**
+ * Посилання на файл результату задачі (UX-09).
+ *
+ * ⛔ `resultUrl` — уже ГОТОВИЙ відносний шлях API
+ * (`GET /api/v1/documents/{id}/export/{exportId}`), а НЕ значення, з якого
+ * тут щось збирається з `message` чи інших полів: сервер заповнює його лише
+ * для завершеного експорту документа читачеві з `Document.Export`
+ * (`JobStatus.ResultUrl`/`JobSummary.ResultUrl`), інакше — `null`. Складати
+ * адресу самостійно означало б повторити цю перевірку на клієнті й розійтися
+ * з нею при першій же зміні формату відповіді.
+ *
+ * ⚠ Звичайний `<a href>` (через `Anchor`), а не `Link` react-router і не
+ * `fetch`+`blob`: та сама причина, що в `ExportButton` — автентифікація на
+ * cookie, і навігація тим самим походженням несе її сама.
+ *
+ * ⚠ Текст — `document.exportReady` (наявний ключ каталогу, «Download the
+ * workbook»/`ExportButton.tsx`), а не новий: тут те саме посилання на ту саму
+ * книгу експорту документа, лише в іншому місці екрана (перелік/шухляда
+ * задач замість кнопки експорту). Новий ключ довелося б додавати в
+ * `09-seed.sql`, який ця робота свідомо не чіпає (сторож
+ * `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі` це й
+ * підтвердив — без цього застереження збірка лишається зеленою, а прогін
+ * тестів падає).
+ */
+export function JobResultLink({
+  resultUrl,
+}: {
+  readonly resultUrl?: string | null | undefined;
+}): JSX.Element | null {
+  if (resultUrl === null || resultUrl === undefined || resultUrl === '') return null;
+
+  return (
+    <Anchor href={resultUrl} size="xs" download data-job-result="">
+      {t('document.exportReady')}
+    </Anchor>
+  );
 }
