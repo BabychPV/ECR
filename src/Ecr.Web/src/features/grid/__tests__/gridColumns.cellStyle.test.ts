@@ -84,7 +84,10 @@ describe('gridColumns — стиль колонки в живій сітці (д
     // ⚠ Клас БАЗОВИЙ (`ecr-cell`), не порожній рядок: стиль сам по собі не
     // рахується "станом" (`cellStateOf` тут повернув би `null` — жодна
     // комірка не dirty/readOnly/calculated/orphaned/rounded).
-    expect(props.class).toBe('ecr-cell');
+    //
+    // ✒ `U-05`: поруч стоїть `ecr-cell-numeric` — колонка `Decimal`
+    // вирівнюється праворуч. Фону він не задає й зі станами не змагається.
+    expect(props.class).toBe('ecr-cell ecr-cell-numeric');
   });
 
   it('той самий стиль І dirty-стан — ОБИДВА видимі одночасно (клас dirty + font-weight bold)', () => {

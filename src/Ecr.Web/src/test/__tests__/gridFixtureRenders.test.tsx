@@ -102,7 +102,10 @@ describe('Прилад a11y віддає сітку з КОМІРКАМИ, а н
     // Звичайна редагована комірка — та сама, що була виміряна на 1.35 : 1:
     // жодного класу стану, отже жодного нашого фону, отже колір тексту бере
     // виключно з CSS пакета.
-    const plain = cells.filter((cell) => !cell.className.includes('ecr-cell'));
+    // ⚠ ТОЧНИЙ токен, а не підрядок: після `U-05` числова комірка
+    // несе ще й `ecr-cell-numeric` (вирівнювання, жодного фону), і
+    // `includes('ecr-cell')` вважав би таку комірку за комірку зі СТАНОМ.
+    const plain = cells.filter((cell) => !cell.classList.contains('ecr-cell'));
     expect(plain.map((cell) => cell.textContent)).toContain('182.5');
 
     // І всі стани, заради яких зріз зроблений саме таким.

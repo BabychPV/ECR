@@ -1596,6 +1596,29 @@ export function gridColumns(
     const isRequired = column.isRequired || column.isRequiredByMethodology;
     const requiredHint = isRequired ? t('grid.columnRequiredHint') : null;
 
+    /*
+     * ⛔ `U-05`: вирівнювання числа вирішує ТИП КОЛОНКИ з сервера
+     * (`ColumnDto.dataType`), а не вигляд значення. Здогад за виглядом
+     * («схоже на число — вирівняти праворуч») хитався б від рядка до рядка:
+     * порожня комірка, `'н/д'`, яке `coerce` лишає текстом до відповіді
+     * `ECR-CELL-0422`, і число в тій самій колонці поїхали б у різні боки.
+     *
+     * ⚠ Той самий предикат, що й для показу (`isNumericColumn`), а не другий
+     * перелік типів поруч: колонка, яка МАЛЮЄТЬСЯ числом, і колонка, яка
+     * вирівнюється як число, — це одна колонка, і розійтися вони не мають
+     * права.
+     */
+    const isNumeric = isNumericColumn(column);
+    const numericClass = isNumeric ? 'ecr-cell-numeric' : null;
+
+    const headerProperties =
+      requiredHint === null && !isNumeric
+        ? null
+        : {
+            ...(requiredHint === null ? {} : { title: requiredHint }),
+            ...(isNumeric ? { class: 'ecr-header-numeric' } : {}),
+          };
+
     // ⛔ Директива registry-lookup, PR A4: перелік — за `lookupRegistryDefId`
     // ЦІЄЇ колонки. `null`/відсутній у мапі (запит ще вантажиться, або
     // колонку налаштовано без довідника) — редактор і показ деградують до
@@ -1629,7 +1652,11 @@ export function gridColumns(
       // ⚠ Зірочка в заголовку — це ЗНАК, а не пояснення: читалка екрана й
       // наведення миші мають почути/побачити ПОВНИЙ текст вимоги, а не лише
       // символ (той самий принцип, що й `hint` у `cellProperties` нижче).
-      ...(requiredHint === null ? {} : { columnProperties: () => ({ title: requiredHint }) }),
+      //
+      // ⛔ `U-05`: заголовок числової колонки вирівнюється ПРАВОРУЧ разом із
+      // її даними. Над лівою кромкою чисел заголовок читається як підпис
+      // сусідньої колонки, і саме так виглядала кожна з 91 таблиці.
+      ...(headerProperties === null ? {} : { columnProperties: () => headerProperties }),
 
       // ⛔ Директива registry-lookup, PR A4: `Lookup`-колонка редагується
       // dropdown-ом записів довідника (`LookupCellEditor.ts`), не звичайним
@@ -1692,6 +1719,10 @@ export function gridColumns(
 
           return {
             'data-grid-totals': 'cell',
+            // ⚠ `U-05`: підсумок вирівнюється тим самим правилом, що й
+            // колонка. Сума під стовпцем, вирівняним інакше, ніж вона сама,
+            // читається як чужий рядок.
+            ...(numericClass === null ? {} : { class: numericClass }),
             ...(total === undefined
               ? {}
               : { title: t('grid.totalsCellHint', { count: total.count }) }),
@@ -1729,8 +1760,34 @@ export function gridColumns(
         // фарбувалась би, лише щойно комірку зроблено `dirty`.
         const appearance = cellAppearanceOf(column.style);
 
+        /*
+         * ⛔ `U-05`: повне значення має бути ДОСТУПНЕ, навіть коли воно
+         * ширше за комірку. Заміряно в браузері: `scrollWidth 176px` проти
+         * `clientWidth 140px` — і RevoGrid ховає хвіст трьома крапками, тобто
+         * оператор бачить не все число й ЗНАЄ про це лише з багатокрапки.
+         * Ширину колонки це не лікує (число буває будь-якої довжини), тому
+         * носіїв два: рядок формули над сіткою (`GridFormulaBar`, повне
+         * канонічне значення для комірки під курсором) і підказка тут — для
+         * того, хто просто веде мишею.
+         *
+         * ⛔ Підказка ОДНА на елемент, тож вона не змагається з причиною
+         * заборони чи з помилкою збереження: ті самі `title`, і два тексти на
+         * одному `title` означали б, що видно лише один із них. Тому значення
+         * йде в підказку РІВНО тоді, коли сказати більше нічого (гілка
+         * нижче рахує `hint` і перекриває цю підказку, якщо він непорожній).
+         */
+        const fullValueHint =
+          numericClass === null ? null : cellDisplay((model as GridRow)[column.code], column);
+
         if (state === null && requiredInputClass === null && saveErrorClass === null && appearance === undefined) {
-          return {};
+          return numericClass === null
+            ? {}
+            : {
+                class: numericClass,
+                ...(fullValueHint === null || fullValueHint.length === 0
+                  ? {}
+                  : { title: fullValueHint }),
+              };
         }
 
         const decision = decide(slice, rowKey, column);
@@ -1753,7 +1810,12 @@ export function gridColumns(
           // ⚠ Базовий `ecr-cell` завжди присутній, навіть коли `state === null`:
           // від нього залежить `position: relative` і резерв місця під маркер
           // (`cell-states.css`), а маркер обов'язкового входу — свій маркер.
-          class: [state === null ? 'ecr-cell' : cellStateClass(state), requiredInputClass, saveErrorClass]
+          class: [
+            state === null ? 'ecr-cell' : cellStateClass(state),
+            requiredInputClass,
+            saveErrorClass,
+            numericClass,
+          ]
             .filter((part): part is string => part !== null)
             .join(' '),
 
@@ -1761,7 +1823,15 @@ export function gridColumns(
           // розрізнення станів, не залежачи від жодного кольору (`ФВ-14.18`).
           ...(state === null ? {} : { 'data-cell-state': state }),
 
-          ...(hint.length === 0 ? {} : { title: hint }),
+          // ⚠ Підказка СТАНУ має першість над підказкою ЗНАЧЕННЯ, і це
+          // вибір, а не випадок: `title` на елементі один, а «сервер
+          // відхилив цю правку» важливіше за повтор видимого числа.
+          // Повне значення такої комірки лишається доступним у рядку формули.
+          ...(hint.length === 0
+            ? fullValueHint === null || fullValueHint.length === 0
+              ? {}
+              : { title: fullValueHint }
+            : { title: hint }),
 
           // ⚠ `backgroundColor`/`verticalAlign` НЕМАЄ серед перенесених полів
           // — див. коментар `cellAppearanceOf` (`cellAppearance.ts`): перший
