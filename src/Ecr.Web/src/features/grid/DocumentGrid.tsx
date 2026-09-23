@@ -7,7 +7,7 @@ import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { ColumnDto, CreateRowRequest, RegistryDefDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
 import { cellAppearanceOf } from './cellAppearance';
-import { cellDisplay, cellText, isNumericColumn } from './cellValue';
+import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
@@ -1898,9 +1898,15 @@ function gridRows(slice: TableSliceDto, overrides?: ReadonlyMap<string, unknown>
     for (const column of slice.columns) {
       const key = cellKey(row.rowKey, column.code);
 
-      model[column.code] = overrides?.has(key)
-        ? overrides.get(key)
-        : (row.cells[column.code] ?? column.defaultValue ?? '');
+      // ⛔ `U-24`: модель рядка — це те, що RevoGrid кладе в поле РЕДАКТОРА
+      // (подвійний клік, F2, початок друку). Тому тут десяткове вже без
+      // хвостових нулів сховища (`editorValueOf`, `cellValue.ts`).
+      model[column.code] = editorValueOf(
+        overrides?.has(key)
+          ? overrides.get(key)
+          : (row.cells[column.code] ?? column.defaultValue ?? ''),
+        column,
+      );
     }
 
     return model;

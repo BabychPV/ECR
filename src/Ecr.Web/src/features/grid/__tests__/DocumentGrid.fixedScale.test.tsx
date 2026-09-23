@@ -224,8 +224,10 @@ describe('формат комірки: scale = 4', () => {
     const cell = await screen.findByTestId('cell-r1-C3');
 
     expect(cell.textContent).toBe('1.005');
-    // Модель (редактор, буфер, PATCH) — як і доті, сире значення сервера.
-    expect(cell.getAttribute('data-model')).toBe('1.0050000000');
+    // ✎ `U-24`: модель (а з нею й поле редактора) — канонічний запис без
+    // хвостових нулів сховища, а не `1.0050000000`. Значущий третій знак
+    // лишається: канон зрізає нулі, а не цифри.
+    expect(cell.getAttribute('data-model')).toBe('1.005');
   });
 
   it('дзеркало: колонка без scale нулями не доповнюється', async () => {
