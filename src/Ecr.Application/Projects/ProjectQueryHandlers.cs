@@ -43,14 +43,20 @@ public sealed class ListProjectsHandler(
         ArgumentNullException.ThrowIfNull(page);
 
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         if (!profile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         // ⛔ Родина REQ, а не CELL. Саме цей рядок і назвав дефект (`P-25`,
@@ -60,7 +66,12 @@ public sealed class ListProjectsHandler(
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange",
+                    ["max"] = CursorRequest.MaxLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var all = await projects.ListAsync(page, ct).ConfigureAwait(false);
@@ -165,7 +176,12 @@ public sealed class CreatePeriodPolicyHandler(
         {
             throw new BusinessRuleException(
                 ErrorCodes.PeriodPolicyDuplicate,
-                $"Політика з кодом «{ecrCode.Value}» уже існує.");
+                $"Політика з кодом «{ecrCode.Value}» уже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-4091.code",
+                    ["code"] = ecrCode.Value,
+                });
         }
 
         var policy = new PeriodPolicy(
@@ -305,13 +321,15 @@ public sealed class CreateProjectHandler(
         if (templateVersionId <= 0)
         {
             throw new BusinessRuleException(
-                "ECR-TMPL-0404", "Проєкт неможливо створити без версії шаблону.");
+                "ECR-TMPL-0404", "Проєкт неможливо створити без версії шаблону.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0404.versionRequired" });
         }
 
         if (periodPolicyId <= 0)
         {
             throw new BusinessRuleException(
-                "ECR-PRD-0422", "Проєкт неможливо створити без політики періодів.");
+                "ECR-PRD-0422", "Проєкт неможливо створити без політики періодів.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRD-0422.periodPolicyRequired" });
         }
 
         // ⛔ Політика завантажується ТУТ, а не лише посилається ідентифікатором
@@ -456,7 +474,13 @@ public sealed class ActivateProjectHandler(
         // перетворив би КОЖЕН запит на неіснуючий проєкт на `403`, приховуючи
         // справжню причину (`ECR-PRJ-0404`) за помилковим кодом гранта.
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
+            ?? throw new NotFoundException(
+                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0404.project",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини. Глобальне
@@ -466,14 +490,24 @@ public sealed class ActivateProjectHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (project.Status != Domain.Enums.ProjectStatus.Draft)
         {
             throw new BusinessRuleException(
                 ErrorCodes.ProjectActivationInvalid,
-                $"Активувати можна лише чернетку; проєкт у стані {project.Status}.");
+                $"Активувати можна лише чернетку; проєкт у стані {project.Status}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0422.notDraft",
+                    ["status"] = project.Status.ToString(),
+                });
         }
 
         // ⛔ КАЛЕНДАР ДОБУДОВУЄТЬСЯ ТУТ, а не покладається на те, що хтось до
@@ -530,7 +564,12 @@ public sealed class ActivateProjectHandler(
             throw new BusinessRuleException(
                 ErrorCodes.ProjectActivationInvalid,
                 $"Календар проєкту {projectId} не дав жодного періоду: "
-                + "перевірте періодичність, звітний рік і політику зсувів.");
+                + "перевірте періодичність, звітний рік і політику зсувів.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0422.noPeriods",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var now = clock.UtcNow;
@@ -604,14 +643,25 @@ public sealed class ArchiveProjectHandler(
         // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
         // грант на неіснуючий `projectId` не буває виданий нікому.
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
+            ?? throw new NotFoundException(
+                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0404.project",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
@@ -628,7 +678,12 @@ public sealed class ArchiveProjectHandler(
             throw new ConcurrencyConflictException(
                 "ECR-PRD-0409",
                 $"Проєкт {projectId} має незакриті періоди: архівація неможлива.",
-                new Dictionary<string, object?> { ["periodKeys"] = open });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.openPeriods",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["periodKeys"] = open,
+                });
         }
 
         project.Archive(clock.UtcNow);
@@ -682,7 +737,13 @@ public sealed class ChangeProjectTimeZoneHandler(
         // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
         // грант на неіснуючий `projectId` не буває виданий нікому.
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.");
+            ?? throw new NotFoundException(
+                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0404.project",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Той самий патерн гранта на КОНКРЕТНИЙ проєкт, що й
         // Activate/Archive/Clone (Q-179): глобальне `Project.Manage` каже «ця
@@ -690,7 +751,12 @@ public sealed class ChangeProjectTimeZoneHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // Уся перевірка — в сутності: невідомий IANA-ідентифікатор і спроба

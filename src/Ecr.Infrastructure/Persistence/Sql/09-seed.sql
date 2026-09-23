@@ -640,6 +640,18 @@ USING (VALUES
     -- R7: книга зрізу будується в пам'яті цілком, тому стеля рядків — відмова,
     -- а не мовчазне обрізання: книга з «майже всіма» рядками виглядає повною.
     (N'err.ECR-RPT-0422.exportTooLarge',     N'en', N'Snapshot {snapshotId} has more than {limit} rows: a workbook that large is not built. Use the rows endpoint or the rpt.v_* view.', 1),
+    -- Борг локалізації (contracts/localization-debt.md, ReportDefHandlers.cs):
+    -- заведення й публікація опису звіту та його версій.
+    (N'err.ECR-RPT-0422.noColumns',          N'en', N'A report version needs at least one column: there would be nothing to show in the snapshot.', 1),
+    (N'err.ECR-RPT-0422.columnKind',         N'en', N'Column kind "{kind}" is unknown: the snapshot row stores only {allowedKinds}.', 1),
+    (N'err.ECR-RPT-0422.duplicateColumn',    N'en', N'Column "{code}" is described twice: the column code is part of the snapshot row''s key.', 1),
+    (N'err.ECR-RPT-0422.rowSource',          N'en', N'Row source "{rowSource}" is not supported by the snapshot builder: today there is one — "{supportedSource}" (the current run''s results).', 1),
+    (N'err.ECR-RPT-0422.nameRequired',       N'en', N'Give the report a name in at least one language: it is addressed by that name in the list.', 1),
+    (N'err.ECR-RPT-0422.version',            N'en', N'The report version number must be from 1 to {maxLength} characters.', 1),
+    (N'err.ECR-RPT-4091.code',               N'en', N'A report with code "{code}" is already described.', 1),
+    (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
+    (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
+    (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
@@ -1017,6 +1029,14 @@ USING (VALUES
     (N'err.ECR-PRD-0422.periodNotInProject',    N'en', N'Period {periodId} does not belong to project "{projectCode}".', 1),
     (N'err.ECR-PRD-0422.pinReasonRequired',     N'en', N'A reason is required to pin the current period.', 1),
     (N'err.ECR-PRD-0409.timeZoneLocked',        N'en', N'The site time zone cannot be changed once the first period has been opened.', 1),
+    -- Борг локалізації (ProjectQueryHandlers.cs): перелік, створення й
+    -- перехід стану проєкту, CRUD політик періодів.
+    (N'err.ECR-PRD-4091.code',                  N'en', N'A period policy with code "{code}" already exists.', 1),
+    (N'err.ECR-TMPL-0404.versionRequired',      N'en', N'A project cannot be created without a template version.', 1),
+    (N'err.ECR-PRD-0422.periodPolicyRequired',  N'en', N'A project cannot be created without a period policy.', 1),
+    (N'err.ECR-PRJ-0422.notDraft',              N'en', N'Only a draft can be activated; the project is in state {status}.', 1),
+    (N'err.ECR-PRJ-0422.noPeriods',             N'en', N'The calendar of project {projectId} produced no period: check the period kind, the reporting year and the offset policy.', 1),
+    (N'err.ECR-PRD-0409.openPeriods',           N'en', N'Project {projectId} has periods that are not closed: archiving is not possible.', 1),
     (N'err.ECR-PRD-4225.graceAfterHardClose',   N'en', N'The grace period ({graceOffsetDays} days) cannot be longer than the hard close ({hardCloseOffsetDays} days): the period would close for good before its own grace period ends.', 1),
     (N'err.ECR-PRD-4225.negativeYearGrace',     N'en', N'The year-end grace period ({yearGraceOffsetDays} days) cannot be negative.', 1),
     -- BE-25: only a never-published, never-used methodology version can be deleted.

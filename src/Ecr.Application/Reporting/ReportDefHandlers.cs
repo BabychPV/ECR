@@ -79,7 +79,8 @@ public static class ReportDefinitionSpec
         {
             throw new BusinessRuleException(
                 ErrorCodes.ReportInvalid,
-                "Версія звіту без жодної колонки описує зріз, у якому нема чого показати.");
+                "Версія звіту без жодної колонки описує зріз, у якому нема чого показати.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-RPT-0422.noColumns" });
         }
 
         foreach (var column in columns)
@@ -98,7 +99,13 @@ public static class ReportDefinitionSpec
                 throw new BusinessRuleException(
                     ErrorCodes.ReportInvalid,
                     $"Тип колонки «{column.Kind}» невідомий: рядок зрізу зберігає лише "
-                    + $"{string.Join(", ", ColumnKinds)}.");
+                    + $"{string.Join(", ", ColumnKinds)}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-RPT-0422.columnKind",
+                        ["kind"] = column.Kind,
+                        ["allowedKinds"] = string.Join(", ", ColumnKinds),
+                    });
             }
         }
 
@@ -113,7 +120,12 @@ public static class ReportDefinitionSpec
             // порушенням первинного ключа посеред нічної побудови.
             throw new BusinessRuleException(
                 ErrorCodes.ReportInvalid,
-                $"Колонка «{duplicate.Key}» описана двічі: код колонки входить у ключ рядка зрізу.");
+                $"Колонка «{duplicate.Key}» описана двічі: код колонки входить у ключ рядка зрізу.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0422.duplicateColumn",
+                    ["code"] = duplicate.Key,
+                });
         }
 
         // ⛔ D-52a: опис КЕРУЄ побудовою, тож колонка, якої джерело не має,
@@ -145,7 +157,13 @@ public static class ReportDefinitionSpec
             throw new BusinessRuleException(
                 ErrorCodes.ReportInvalid,
                 $"Джерело рядків «{effective.RowSource}» побудова зрізу не вміє: "
-                + $"на сьогодні є одне — «{CalculationResults}» (результати чинного прогону).");
+                + $"на сьогодні є одне — «{CalculationResults}» (результати чинного прогону).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0422.rowSource",
+                    ["rowSource"] = effective.RowSource,
+                    ["supportedSource"] = CalculationResults,
+                });
         }
 
         if (!ReportRowRules.IsSupported(schema))
@@ -188,7 +206,8 @@ public static class ReportDefinitionSpec
         {
             throw new BusinessRuleException(
                 ErrorCodes.ReportInvalid,
-                "Дайте звіту назву хоча б однією мовою: у переліку він адресується саме нею.");
+                "Дайте звіту назву хоча б однією мовою: у переліку він адресується саме нею.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-RPT-0422.nameRequired" });
         }
 
         return new LocalizedText(new Dictionary<string, string>(nameL10n, StringComparer.OrdinalIgnoreCase));
@@ -204,7 +223,12 @@ public static class ReportDefinitionSpec
             throw new BusinessRuleException(
                 ErrorCodes.ReportInvalid,
                 $"Номер версії звіту — від 1 до {MaxVersionLength} символів "
-                + "(`UQ_ReportVersion` адресує версію саме ним).");
+                + "(`UQ_ReportVersion` адресує версію саме ним).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0422.version",
+                    ["maxLength"] = MaxVersionLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         return version;
@@ -342,7 +366,12 @@ public sealed class CreateReportDefHandler(
         {
             throw new BusinessRuleException(
                 ErrorCodes.ReportDefDuplicate,
-                $"Звіт з кодом «{code.Value}» уже описаний: побудова адресує звіт саме кодом.");
+                $"Звіт з кодом «{code.Value}» уже описаний: побудова адресує звіт саме кодом.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-4091.code",
+                    ["code"] = code.Value,
+                });
         }
 
         var def = new ReportDef(code, name, command.IsRegulatory);
@@ -426,7 +455,12 @@ public sealed class CreateReportVersionHandler(
 
         _ = await defs.FindAsync(reportDefId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                ErrorCodes.ReportNotFound, $"Опису звіту {reportDefId} немає.");
+                ErrorCodes.ReportNotFound, $"Опису звіту {reportDefId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0404.def",
+                    ["reportDefId"] = reportDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // Правила першими: від джерела рядків залежить, які колонки можливі.
         var rulesJson = ReportDefinitionSpec.RulesJson(command.Rules, command.Columns);
@@ -489,7 +523,12 @@ public sealed class PublishReportVersionHandler(
 
         var version = await versions.FindAsync(reportVersionId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
-                ErrorCodes.ReportNotFound, $"Версії звіту {reportVersionId} немає.");
+                ErrorCodes.ReportNotFound, $"Версії звіту {reportVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0404.version",
+                    ["reportVersionId"] = reportVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Належність перевіряється, а не мається на увазі: `{id}` у шляху
         // інакше був би декорацією, і публікація чужої версії проходила б за
@@ -498,7 +537,14 @@ public sealed class PublishReportVersionHandler(
         {
             throw new NotFoundException(
                 ErrorCodes.ReportNotFound,
-                $"Версія {reportVersionId} належить опису {version.ReportDefId}, а не {reportDefId}.");
+                $"Версія {reportVersionId} належить опису {version.ReportDefId}, а не {reportDefId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-RPT-0404.versionWrongDef",
+                    ["reportVersionId"] = reportVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionDefId"] = version.ReportDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["reportDefId"] = reportDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         version.Publish();

@@ -313,6 +313,43 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 - Заголовки кодів не змінювались — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
   `ECR-TMPL-0409`/`ECR-AUTH-0401` уже були нейтральними.
 
+✎ **2026-09-23: звітність і перелік проєктів** — `ReportDefHandlers.cs` (10)
+і `ProjectQueryHandlers.cs` (15) закрито повністю, 25 кидків; зріз узятий від
+того самого замiру 185/66, що й запис про `ColumnDefHandlers.cs`/
+`TableDefHandlers.cs` вище, — паралельно і без перетину файлів. Разом обидва
+зрізи: 185 у 66 файлах → **140 у 60 файлах**.
+- `err.ECR-AUTH-0401.signInRequired`, `err.ECR-AUTH-0403.permission`,
+  `err.ECR-REQ-0422.pageSizeOutOfRange` — наявні ключі, перевикористані в
+  `ListProjectsHandler` (той самий патерн, що вже несе `DocumentQueryHandlers`
+  для тієї самої перевірки курсорної сторінки).
+- `err.ECR-PRJ-0404.project` {projectId} — наявний ключ, перевикористаний у
+  трьох однакових кидках «проєкту не існує» (`ActivateProjectHandler`,
+  `ArchiveProjectHandler`, `ChangeProjectTimeZoneHandler`).
+- `err.ECR-AUTH-0403.noProjectManageGrant` {projectId} — наявний ключ,
+  перевикористаний у тих самих трьох обробниках для «немає гранта Manage на
+  проєкт».
+- Нові ключі: `err.ECR-PRD-4091.code` {code} (код політики періодів зайнято,
+  `CreatePeriodPolicyHandler`); `err.ECR-TMPL-0404.versionRequired` і
+  `err.ECR-PRD-0422.periodPolicyRequired` — проєкт не можна створити без
+  версії шаблону чи без політики періодів (`CreateProjectHandler`);
+  `err.ECR-PRJ-0422.notDraft` {status} і `.noPeriods` {projectId} —
+  активація проєкту не в чернетці / календар без жодного періоду
+  (`ActivateProjectHandler`); `err.ECR-PRD-0409.openPeriods` {projectId} —
+  архівація з відкритими періодами (`ArchiveProjectHandler`); перелік ключів
+  періодів лишається структурою `Details["periodKeys"]` окремим полем для
+  клієнта, у тексті подробиці не підставляється.
+- У `ReportDefHandlers.cs`: `err.ECR-RPT-0422.noColumns`, `.columnKind`
+  {kind, allowedKinds}, `.duplicateColumn` {code}, `.rowSource` {rowSource,
+  supportedSource}, `.nameRequired`, `.version` {maxLength} — створення опису
+  й версії звіту; `err.ECR-RPT-4091.code` {code} — код звіту зайнято;
+  `err.ECR-RPT-0404.def` {reportDefId}, `.version` {reportVersionId},
+  `.versionWrongDef` {reportVersionId, versionDefId, reportDefId} —
+  публікація версії.
+- Заголовки кодів не змінювались — `ECR-RPT-0422`/`ECR-RPT-4091`/
+  `ECR-RPT-0404`, `ECR-AUTH-0401`/`ECR-AUTH-0403`, `ECR-REQ-0422`,
+  `ECR-PRJ-0404`/`ECR-PRJ-0422`, `ECR-PRD-0409`/`ECR-PRD-0422`/`ECR-PRD-4091`,
+  `ECR-TMPL-0404` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -332,9 +369,7 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
-| `src/Ecr.Application/Projects/ProjectQueryHandlers.cs` | 15 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
-| `src/Ecr.Application/Reporting/ReportDefHandlers.cs` | 10 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 2 |
 | `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
 | `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |

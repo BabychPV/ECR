@@ -40,6 +40,53 @@ public sealed class ReportDefinitionDrivesBuildTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Версія_без_жодної_колонки_відмовляє_з_ключем_каталогу()
+    {
+        var error = Assert.Throws<BusinessRuleException>(() => ReportDefinitionSpec.ColumnsJson([]));
+
+        Assert.Equal("err.ECR-RPT-0422.noColumns", error.Details!["messageKey"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Колонка_описана_двічі_відмовляє_з_ключем_каталогу()
+    {
+        var error = Assert.Throws<BusinessRuleException>(
+            () => ReportDefinitionSpec.ColumnsJson([new("Value", "number"), new("Value", "number")]));
+
+        Assert.Equal("err.ECR-RPT-0422.duplicateColumn", error.Details!["messageKey"]);
+        Assert.Equal("Value", error.Details["code"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Назва_відсутня_жодною_мовою_відмовляє_з_ключем_каталогу()
+    {
+        var error = Assert.Throws<BusinessRuleException>(
+            () => ReportDefinitionSpec.Name(new Dictionary<string, string> { ["en"] = "   " }));
+
+        Assert.Equal("err.ECR-RPT-0422.nameRequired", error.Details!["messageKey"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Задовгий_номер_версії_відмовляє_з_ключем_каталогу()
+    {
+        var error = Assert.Throws<BusinessRuleException>(
+            () => ReportDefinitionSpec.Version(new string('9', 21)));
+
+        Assert.Equal("err.ECR-RPT-0422.version", error.Details!["messageKey"]);
+        Assert.Equal("20", error.Details["maxLength"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Невідоме_джерело_рядків_відмовляє_з_ключем_каталогу()
+    {
+        var error = Assert.Throws<BusinessRuleException>(
+            () => ReportDefinitionSpec.RulesJson(new ReportRulesCommand("Other")));
+
+        Assert.Equal("err.ECR-RPT-0422.rowSource", error.Details!["messageKey"]);
+        Assert.Equal("Other", error.Details["rowSource"]);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Правила_пишуться_з_версією_схеми_а_старі_без_неї_читаються_як_перша()
     {
         Assert.Equal("""{"rowSource":"CalculationResults","schema":1}""", ReportDefinitionSpec.RulesJson(null));

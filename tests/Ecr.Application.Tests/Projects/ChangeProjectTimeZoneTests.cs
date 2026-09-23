@@ -106,6 +106,8 @@ public sealed class ChangeProjectTimeZoneTests
             () => Handler().HandleAsync(42, "Asia/Aqtau", CancellationToken.None));
 
         Assert.Equal(ErrorCodes.ProjectNotFound, error.ErrorCode);
+        Assert.Equal("err.ECR-PRJ-0404.project", error.Details!["messageKey"]);
+        Assert.Equal("42", error.Details["projectId"]);
     }
 
     [Fact]
@@ -124,6 +126,7 @@ public sealed class ChangeProjectTimeZoneTests
             () => Handler().HandleAsync(project.Id, "Asia/Aqtau", CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", denied.Details!["messageKey"]);
         Assert.Equal("Asia/Almaty", project.TimeZoneId);
     }
 }

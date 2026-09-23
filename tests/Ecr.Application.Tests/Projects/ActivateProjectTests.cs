@@ -1,10 +1,12 @@
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Projects;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.Services;
 using Ecr.TestKit;
 using NSubstitute;
@@ -103,7 +105,27 @@ public sealed class ActivateProjectTests
             () => Handler().HandleAsync(project.Id, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", denied.Details!["messageKey"]);
         Assert.Equal(ProjectStatus.Draft, project.Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Повторна_активація_вже_активного_проєкту_відхиляється()
+    {
+        // ⛔ Борг локалізації (contracts/localization-debt.md): подробиця цієї
+        // відмови ("Активувати можна лише чернетку…") була готовим українським
+        // реченням без messageKey.
+        var project = Arrange();
+        await Handler().HandleAsync(project.Id, CancellationToken.None);
+        Assert.Equal(ProjectStatus.Active, project.Status);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(project.Id, CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.ProjectActivationInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-PRJ-0422.notDraft", error.Details!["messageKey"]);
+        Assert.Equal("Active", error.Details["status"]);
     }
 
     [Fact]
