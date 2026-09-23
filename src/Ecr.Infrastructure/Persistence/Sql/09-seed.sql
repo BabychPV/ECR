@@ -413,7 +413,11 @@ DELETE t
     -- BE-24 крок 2: збереження опису довідника завжди йде в чернетку, а опис
     -- змінює лише публікація — обидва ключі втратили місце на екрані.
     (N'registries.saveDefinition',                 N'en', N'Save definition'),
-    (N'registries.definitionSaved',                N'en', N'Saved. Definition version: {version}.')
+    (N'registries.definitionSaved',                N'en', N'Saved. Definition version: {version}.'),
+    -- U-16: головна кнопка сітки суперечила моделі роботи — збереження
+    -- автоматичне, а «Save (N)» рахувала не «чекає збереження», а «збереження
+    -- не пройшло». Замінена на `grid.retrySave`, видиму лише після відмови.
+    (N'grid.save',                                 N'en', N'Save ({count})')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1401,7 +1405,12 @@ USING (VALUES
     (N'grid.loadFailed',                 N'en', N'The table could not be loaded.', 1),
     (N'grid.undo',                       N'en', N'Undo', 1),
     (N'grid.redo',                       N'en', N'Redo', 1),
-    (N'grid.save',                       N'en', N'Save ({count})', 1),
+    -- ⛔ `U-16`: кнопка називає те, що справді робить. Ключа `grid.save`
+    -- («Save ({count})») більше немає: збереження в сітці — автоматичне
+    -- (`autosave.ts`), і лічильник у кнопці набирався РІВНО тоді, коли
+    -- сервер правку відхилив. Кнопка тепер з'являється лише в цьому випадку
+    -- і пропонує саме повтор.
+    (N'grid.retrySave',                  N'en', N'Retry save ({count})', 1),
     (N'grid.edit',                       N'en', N'Edit {column}', 1),
     (N'grid.paste',                      N'en', N'Paste {count} cell(s)', 1),
     (N'grid.conflictTitle',              N'en', N'Someone changed these cells', 1),
