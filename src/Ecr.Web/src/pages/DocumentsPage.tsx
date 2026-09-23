@@ -1,11 +1,10 @@
-﻿import { useState, type JSX } from 'react';
+﻿import { lazy, Suspense, useState, type JSX } from 'react';
 import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import type { PagedProjects } from '@/api/types';
 import { listDocuments, type DocumentListPage } from '@/features/documents/api';
-import { CreateDocumentModal } from '@/features/documents/CreateDocumentModal';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
 import { useDocumentListFilters } from '@/features/documents/documentListFilters';
@@ -23,6 +22,21 @@ import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUr
 import { t } from '@/shared/i18n';
 
 /**
+ * Діалог створення документа — за `import()` (`D-132`), як і решта
+ * рідковідкриваних форм у цьому кодовому шарі (`features/integration/
+ * lazyDataSourceForm.ts`).
+ *
+ * ⚠ Кнопка «Створити» бачить не кожен (право `Document.Create`), а сам діалог
+ * відкриває ще рідше той, хто його бачить — статичний імпорт змушував КОЖЕН
+ * перелік документів нести форму, валідацію проєкту й вибір локалізованої
+ * назви, яких переважна більшість відкриттів сторінки не торкається.
+ */
+const loadCreateDocumentModal = () => import('@/features/documents/CreateDocumentModal');
+const CreateDocumentModal = lazy(async () => ({
+  default: (await loadCreateDocumentModal()).CreateDocumentModal,
+}));
+
+/**
  * Перелік документів.
  *
  * ⚠ Період обов'язковий для показу стану: без нього «стан документа» не
@@ -38,6 +52,11 @@ export function DocumentsPage(): JSX.Element {
   const [cursor] = useUrlState('cursor');
   const setUrlParams = useUrlParamsSetter();
   const [creating, setCreating] = useState(false);
+  // ⚠ Лишається `true` назавжди після першого відкриття — так само, як
+  // `requested` у `SearchLauncher.tsx`: діалог, щойно завантажений, більше не
+  // розмонтовується між закриттям і повторним відкриттям (та сама поведінка,
+  // що й до лінивого чанка, коли компонент був змонтований одразу).
+  const [creatingRequested, setCreatingRequested] = useState(false);
   const session = useSession();
 
   // `BE-09b`: стан і «мої» — теж в адресі; без періоду стан у запит не йде.
@@ -135,7 +154,13 @@ export function DocumentsPage(): JSX.Element {
                 (`A7-42`): система, уся суть якої — заповнення документів,
                 не давала створити перший. */}
             {can(session.data, 'Document.Create') && (
-              <Button size="xs" onClick={() => setCreating(true)}>
+              <Button
+                size="xs"
+                onClick={() => {
+                  setCreatingRequested(true);
+                  setCreating(true);
+                }}
+              >
                 {t('documents.create')}
               </Button>
             )}
@@ -326,7 +351,11 @@ export function DocumentsPage(): JSX.Element {
         )}
       </AsyncBoundary>
 
-      <CreateDocumentModal opened={creating} onClose={() => setCreating(false)} />
+      {creatingRequested && (
+        <Suspense fallback={null}>
+          <CreateDocumentModal opened={creating} onClose={() => setCreating(false)} />
+        </Suspense>
+      )}
     </>
   );
 }

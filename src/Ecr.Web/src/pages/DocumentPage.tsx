@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, type JSX } from 'react';
+﻿import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
 import { Badge, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -15,16 +15,12 @@ import {
   DeleteDocumentPermission,
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
-import { DocumentVersionCompare } from '@/features/documents/DocumentVersionCompare';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
 import { RestoreEditsBanner } from '@/features/grid/RestoreEditsBanner';
 import { ExportButton } from '@/features/export/ExportButton';
-import { CalculationResultsPanel } from '@/features/methodologies/CalculationResultsPanel';
-import { ImportPanel } from '@/features/import/ImportPanel';
 import { SheetActions, isEditable } from '@/features/workflow/SheetActions';
-import { WorkflowHistory } from '@/features/workflow/WorkflowHistory';
 import { can, useSession } from '@/shared/session/useSession';
 import { localized } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -34,6 +30,46 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+
+/**
+ * Чотири панелі нижче — за `import()`, а не статичним імпортом (`D-132`).
+ *
+ * ⚠ Спільне для всіх чотирьох: жодна не потрібна в момент першого малюнка
+ * сторінки. `ImportPanel` і `CalculationResultsPanel` і без цього рендерилися
+ * УМОВНО (право/стан), тож користувач без права чи на поданому аркуші сьогодні
+ * і так їх не бачить — статичний імпорт лише змушував ЙОГО бандл нести код,
+ * якого він не покаже. `WorkflowHistory` і `DocumentVersionCompare` рендеряться
+ * безумовно, але самі згорнуті — до розгортання жоден не робить запиту
+ * (коментарі біля місця виклику нижче), тобто перший кадр сторінки не втрачає
+ * нічого, крім самого згорнутого заголовка на час завантаження чанка.
+ *
+ * ⚠ Стиль — той самий, що в `features/search/SearchLauncher.tsx`
+ * (`loadX`/`lazy(async () => ...)`), а не інлайн `lazy(() => import(...).then(...))`
+ * з `lazyDataSourceForm.ts`: тут немає окремого "прогріву" на hover/focus, бо
+ * елементи не за кліком у панелі команд, а одразу в дереві сторінки.
+ *
+ * ⛔ `DocumentGrid`/`SheetTables` тут навмисно НЕ займані: той чанк має
+ * власну, вже виміряну причину не використовувати `<Suspense>` (коментар
+ * нижче й `features/grid/SheetTables.tsx`) — ця картка змінює лише сторінку
+ * навколо нього.
+ */
+const loadImportPanel = () => import('@/features/import/ImportPanel');
+const ImportPanel = lazy(async () => ({ default: (await loadImportPanel()).ImportPanel }));
+
+const loadCalculationResultsPanel = () => import('@/features/methodologies/CalculationResultsPanel');
+const CalculationResultsPanel = lazy(async () => ({
+  default: (await loadCalculationResultsPanel()).CalculationResultsPanel,
+}));
+
+const loadWorkflowHistory = () => import('@/features/workflow/WorkflowHistory');
+const WorkflowHistory = lazy(async () => ({
+  default: (await loadWorkflowHistory()).WorkflowHistory,
+}));
+
+const loadDocumentVersionCompare = () => import('@/features/documents/DocumentVersionCompare');
+const DocumentVersionCompare = lazy(async () => ({
+  default: (await loadDocumentVersionCompare()).DocumentVersionCompare,
+}));
 
 /**
  * Сітка вантажиться окремим чанком.
@@ -385,7 +421,9 @@ export function DocumentPage(): JSX.Element {
                 аркушем обіцяла б заміну чисел, яку сервер відхилить: подане
                 редагується лише після повернення в роботу (`ФВ-5.20a`). */}
             {can(session.data, 'Document.Import') && !readOnly && (
-              <ImportPanel documentId={documentId} periodKey={periodKey} />
+              <Suspense fallback={null}>
+                <ImportPanel documentId={documentId} periodKey={periodKey} />
+              </Suspense>
             )}
 
             {can(session.data, 'Document.Export') && (
@@ -472,7 +510,9 @@ export function DocumentPage(): JSX.Element {
       {/* `BE-11b`. Над вкладками з тієї ж причини, що й панель вище: журнал —
           про всі аркуші документа за період. Згорнутий, і до розгортання
           запиту не робить; порожній — не малюється зовсім. */}
-      <WorkflowHistory documentId={documentId} periodKey={periodKey} />
+      <Suspense fallback={null}>
+        <WorkflowHistory documentId={documentId} periodKey={periodKey} />
+      </Suspense>
 
       {/* ⛔ `ФВ-5.22`. Поруч із журналом переходів, а не у вкладці аркуша, і з
           тієї самої причини: версія — це зріз ПОДАННЯ документа за період, і
@@ -480,7 +520,9 @@ export function DocumentPage(): JSX.Element {
           її бачив би лише той, хто вгадав, куди дивитися.
 
           ⚠ Згорнутий, як і журнал: до розгортання не робить жодного запиту. */}
-      <DocumentVersionCompare documentId={documentId} periodKey={periodKey} />
+      <Suspense fallback={null}>
+        <DocumentVersionCompare documentId={documentId} periodKey={periodKey} />
+      </Suspense>
 
       <Tabs value={active?.code ?? null} onChange={setSheet}>
         <Tabs.List>
@@ -584,7 +626,9 @@ export function DocumentPage(): JSX.Element {
           (`docs/build/UI-WALKTHROUGH.md`, F2): жоден компонентний тест цього
           не бачив, бо кожен із них монтує панель напряму. */}
       {can(session.data, 'Calculation.View') && (
-        <CalculationResultsPanel documentId={documentId} periodKey={periodKey} />
+        <Suspense fallback={null}>
+          <CalculationResultsPanel documentId={documentId} periodKey={periodKey} />
+        </Suspense>
       )}
     </Stack>
       )}
