@@ -1012,11 +1012,17 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// (правило) → публікація. Жодного <c>SELECT</c> і жодного обходу HTTP
     /// (Правило 1, §3.2).
     /// </remarks>
+    /// <param name="headerField">
+    /// Поле шапки документа (версія, не таблиця) — заводиться ДО публікації,
+    /// тим самим шляхом чернетка→публікація, що й колонка (`PUT
+    /// …/header-fields/{code}`); <c>null</c> — шапки не заводити.
+    /// </param>
     private static async Task<TemplateStructure> BuildTemplateStructureAsync(
         HttpClient client, string prefix, string rowMode, string? validationExpression, EcrApiFactory app,
         IReadOnlyList<string>? extraNumericColumns = null,
         (string Code, string Expression)? formulaColumn = null,
-        IReadOnlyList<string>? calculatedColumns = null)
+        IReadOnlyList<string>? calculatedColumns = null,
+        (string Code, string DataType)? headerField = null)
     {
         var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(client, prefix);
 
@@ -1217,6 +1223,26 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             Assert.True(addRule.StatusCode == HttpStatusCode.OK, $"{addRule.StatusCode}: {app.ErrorsText}");
         }
 
+        // ⛔ Поле шапки — ДО публікації, тим самим шляхом чернетка→публікація,
+        // що колонка/аркуш/таблиця вище: PUT .../header-fields/{code} відмовляє
+        // ECR-TMPL-0409 на опублікованій версії (EnsureStructurallyMutable).
+        if (headerField is { } field)
+        {
+            var addHeaderField = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/header-fields/{field.Code}", UriKind.Relative),
+                new
+                {
+                    labelL10n = new Dictionary<string, string> { ["en"] = field.Code },
+                    ordinal = 0,
+                    dataType = field.DataType,
+                    isRequired = false,
+                    lookupRegistryDefId = (int?)null,
+                });
+            Assert.True(
+                addHeaderField.StatusCode == HttpStatusCode.OK,
+                $"поле шапки {field.Code}: {addHeaderField.StatusCode}: {app.ErrorsText}");
+        }
+
         var publish = await client.PostAsJsonAsync(
             new Uri($"/api/v1/template-versions/{versionId}/publish", UriKind.Relative),
             new { reason = "Побудова структури для сценарію" });
@@ -1253,6 +1279,11 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     /// <c>PUT …/formulas/column/{columnDefId}</c> (`W5.3`); <c>null</c> —
     /// формул не заводити.
     /// </param>
+    /// <param name="headerField">
+    /// Поле шапки документа (версія, не таблиця); <c>null</c> — шапки не
+    /// заводити. Значення полю ЦЕЙ метод не задає — шапка документа
+    /// порожня одразу після створення, як і таблиці без записаних комірок.
+    /// </param>
     /// <remarks>
     /// ⚠ Версія ПУБЛІКУЄТЬСЯ: проєкт у проді працює на опублікованій, і саме
     /// на ній перевіряються кеш метаданих, план перерахунку і зріз.
@@ -1262,11 +1293,12 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         string? validationExpression = null, string rowMode = "Fixed",
         IReadOnlyList<string>? extraNumericColumns = null,
         (string Code, string Expression)? formulaColumn = null,
-        IReadOnlyList<string>? calculatedColumns = null)
+        IReadOnlyList<string>? calculatedColumns = null,
+        (string Code, string DataType)? headerField = null)
     {
         var structure = await BuildTemplateStructureAsync(
             admin.Client, prefix, rowMode, validationExpression, app,
-            extraNumericColumns, formulaColumn, calculatedColumns);
+            extraNumericColumns, formulaColumn, calculatedColumns, headerField);
 
         var policiesResponse = await admin.Client.GetAsync(
             new Uri("/api/v1/projects/period-policies", UriKind.Relative));

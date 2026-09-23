@@ -30,6 +30,8 @@ public sealed class TemplateVersionsController(
     DeleteTableDefHandler deleteTable,
     SaveColumnDefHandler saveColumn,
     DeleteColumnDefHandler deleteColumn,
+    GetHeaderFieldDefsHandler headerFields,
+    SaveHeaderFieldDefHandler saveHeaderField,
     SaveStyleDefHandler saveStyle,
     ListStyleDefsHandler listStyles,
     SaveRowDefHandler saveRow,
@@ -514,6 +516,47 @@ public sealed class TemplateVersionsController(
     }
 
     /// <summary>
+    /// Поля шапки документа версії — рівень усього документа, не таблиці.
+    /// Право <c>Template.View</c>.
+    /// </summary>
+    /// <param name="id">Версія шаблону.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("header-fields")]
+    [ProducesResponseType<IReadOnlyList<HeaderFieldDefDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<HeaderFieldDefDto>>> GetHeaderFields(int id, CancellationToken ct)
+        => Ok(await headerFields.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Створює або змінює поле шапки документа версії-чернетки. Право
+    /// <c>Template.Edit</c>. Той самий draft→publish шлях, що <c>PUT …/columns/{code}</c>.
+    /// </summary>
+    /// <param name="id">Версія-чернетка.</param>
+    /// <param name="code">Код поля.</param>
+    /// <param name="request">Налаштування поля.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPut("header-fields/{code}")]
+    [ProducesResponseType<HeaderFieldDefDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<HeaderFieldDefDto>> SaveHeaderField(
+        int id, string code, [FromBody] SaveHeaderFieldDefRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await saveHeaderField
+            .HandleAsync(
+                id,
+                code,
+                new SaveHeaderFieldDefCommand(
+                    request.LabelL10n, request.Ordinal, request.DataType,
+                    request.IsRequired, request.LookupRegistryDefId),
+                ct)
+            .ConfigureAwait(false));
+    }
+
+    /// <summary>
     /// Перелік стилів версії — для вибору наявного стилю під час
     /// конструювання шаблону. Право <c>Template.View</c>.
     /// </summary>
@@ -900,6 +943,19 @@ public sealed record SaveColumnDefRequest(
     int? LookupRegistryDefId,
     string? LookupFilter,
     int? UnitId);
+
+/// <summary>Налаштування поля шапки документа версії-чернетки.</summary>
+/// <param name="LabelL10n">Підпис поля мовами каталогу.</param>
+/// <param name="Ordinal"><c>null</c> — нове поле стає останнім за порядком.</param>
+/// <param name="DataType">Тип даних; незмінний після створення.</param>
+/// <param name="IsRequired">Обов'язковість заповнення.</param>
+/// <param name="LookupRegistryDefId">Довідник; лише для поля типу <c>Lookup</c>.</param>
+public sealed record SaveHeaderFieldDefRequest(
+    IReadOnlyDictionary<string, string> LabelL10n,
+    int? Ordinal,
+    Ecr.Domain.Enums.CellDataType DataType,
+    bool IsRequired,
+    int? LookupRegistryDefId);
 
 /// <summary>Оформлення стилю чернетки (директива registry-lookup / cell-style, Частина B).</summary>
 /// <param name="FontName"><c>null</c>/порожнє — шрифт теми за замовчуванням.</param>

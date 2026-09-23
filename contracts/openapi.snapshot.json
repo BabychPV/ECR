@@ -2698,6 +2698,60 @@
         ],
         "type": "object"
       },
+      "DocumentHeaderDto": {
+        "description": "Шапка документа: усі поля версії шаблону з поточними значеннями.",
+        "properties": {
+          "fields": {
+            "description": "Поля в порядку `Ordinal`.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentHeaderFieldDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "DocumentHeaderFieldDto": {
+        "description": "Одне поле шапки документа разом із поточним значенням.",
+        "properties": {
+          "code": {
+            "description": "Код поля — адреса в `PATCH …/header`.",
+            "type": "string"
+          },
+          "dataType": {
+            "$ref": "#/components/schemas/CellDataType",
+            "description": "Тип даних поля."
+          },
+          "headerFieldDefId": {
+            "description": "Ідентифікатор поля у версії шаблону.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isRequired": {
+            "description": "Обов'язковість заповнення.",
+            "type": "boolean"
+          },
+          "label": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Підпис поля мовами каталогу."
+          },
+          "value": {
+            "description": "Поточне значення як «сире» значення CLR; `null` — поле не заповнене\n(не розрізняє «ще не заповнили» і «явно стерли» — те саме спрощення,\nщо вже діє для `GET …/tables/{id}`)."
+          }
+        },
+        "required": [
+          "headerFieldDefId",
+          "code",
+          "label",
+          "dataType",
+          "isRequired",
+          "value"
+        ],
+        "type": "object"
+      },
       "DocumentIdResponse": {
         "description": "Створений документ.",
         "properties": {
@@ -3556,6 +3610,48 @@
           "sid",
           "matched",
           "roleCodes"
+        ],
+        "type": "object"
+      },
+      "HeaderFieldDefDto": {
+        "description": "Поле шапки у відповіді на читання/запис через ці обробники.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "dataType": {
+            "$ref": "#/components/schemas/CellDataType"
+          },
+          "id": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "isRequired": {
+            "type": "boolean"
+          },
+          "labelL10n": {
+            "$ref": "#/components/schemas/LocalizedText"
+          },
+          "lookupRegistryDefId": {
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ordinal": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "labelL10n",
+          "ordinal",
+          "dataType",
+          "isRequired",
+          "lookupRegistryDefId"
         ],
         "type": "object"
       },
@@ -5850,6 +5946,44 @@
           "appliedCells",
           "rowVersions",
           "validation"
+        ],
+        "type": "object"
+      },
+      "PatchDocumentHeaderRequest": {
+        "description": "Пакетна зміна шапки документа.",
+        "properties": {
+          "fields": {
+            "description": "Зміни полів; поле, якого немає в списку, не чіпається.",
+            "items": {
+              "$ref": "#/components/schemas/PatchHeaderField"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "PatchHeaderField": {
+        "description": "Зміна одного поля шапки. Той самий контракт, що `PatchCell` (R-B4):\n`Value` заповнене — записати; `IsEmpty = true` — явна порожнеча;\nобидва відсутні — поле в запиті помилкове (одне з двох обов'язкове).",
+        "properties": {
+          "code": {
+            "description": "Код поля.",
+            "type": "string"
+          },
+          "isEmpty": {
+            "default": false,
+            "description": "Явна порожнеча.",
+            "type": "boolean"
+          },
+          "value": {
+            "description": "Значення; ігнорується, коли IsEmpty істинне."
+          }
+        },
+        "required": [
+          "code",
+          "value"
         ],
         "type": "object"
       },
@@ -8643,6 +8777,50 @@
         "required": [
           "dialect",
           "expression"
+        ],
+        "type": "object"
+      },
+      "SaveHeaderFieldDefRequest": {
+        "description": "Налаштування поля шапки документа версії-чернетки.",
+        "properties": {
+          "dataType": {
+            "$ref": "#/components/schemas/CellDataType",
+            "description": "Тип даних; незмінний після створення."
+          },
+          "isRequired": {
+            "description": "Обов'язковість заповнення.",
+            "type": "boolean"
+          },
+          "labelL10n": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Підпис поля мовами каталогу.",
+            "type": "object"
+          },
+          "lookupRegistryDefId": {
+            "description": "Довідник; лише для поля типу `Lookup`.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "ordinal": {
+            "description": "`null` — нове поле стає останнім за порядком.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "labelL10n",
+          "ordinal",
+          "dataType",
+          "isRequired",
+          "lookupRegistryDefId"
         ],
         "type": "object"
       },
@@ -15382,6 +15560,168 @@
           }
         },
         "summary": "Віддає побудовану книгу. Право `Document.Export`.",
+        "tags": [
+          "Documents"
+        ]
+      }
+    },
+    "/api/v1/documents/{id}/header": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHeaderDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHeaderDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHeaderDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Поточні значення шапки документа. Право `Document.View`.",
+        "tags": [
+          "Documents"
+        ]
+      },
+      "patch": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchDocumentHeaderRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchDocumentHeaderRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchDocumentHeaderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHeaderDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHeaderDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentHeaderDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Оновлює значення полів шапки документа. Право — грант `Write` на\nпроєкт документа (через `IAccessDecisionService`, як і `PATCH\n…/cells` — без окремого функціонального права).",
         "tags": [
           "Documents"
         ]
@@ -25197,6 +25537,211 @@
           }
         },
         "summary": "Diff двох версій. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/header-fields": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HeaderFieldDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HeaderFieldDefDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HeaderFieldDefDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Поля шапки документа версії — рівень усього документа, не таблиці.\nПраво `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/header-fields/{code}": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Версія-чернетка.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код поля.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveHeaderFieldDefRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveHeaderFieldDefRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveHeaderFieldDefRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderFieldDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderFieldDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeaderFieldDefDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює або змінює поле шапки документа версії-чернетки. Право\n`Template.Edit`. Той самий draft→publish шлях, що `PUT …/columns/{code}`.",
         "tags": [
           "TemplateVersions"
         ]

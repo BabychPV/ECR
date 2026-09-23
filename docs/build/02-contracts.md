@@ -2235,6 +2235,25 @@ public interface IDocumentKeyStore
 }
 ```
 
+#### `IDocumentHeaderStore`
+
+Значення шапки документа (`doc.DocumentHeaderValue`) — рівень усього
+документа, не рядка чи таблиці (foundation, `GET`/`PATCH
+/api/v1/documents/{id}/header`). `GetExpressionValuesAsync` — ключовані
+кодом поля значення виразів, ready для `IEvaluationContext.GetHeader`
+(`HDR.Code`) у `RecalculationService`, `ValidationEvaluationContext` і
+(навмисно НЕ) `MethodologyEvaluationContext`. `SaveValuesAsync` не пише
+аудит сам — той самий поділ відповідальності, що `ICellStore.ApplyAsync`.
+
+```csharp
+public interface IDocumentHeaderStore
+{
+    public Task<IReadOnlyDictionary<int, DocumentHeaderValueData>> GetValuesAsync(long documentId, CancellationToken ct);
+    public Task<IReadOnlyDictionary<string, ExpressionValue>> GetExpressionValuesAsync(long documentId, CancellationToken ct);
+    public Task SaveValuesAsync(long documentId, IReadOnlyDictionary<int, DocumentHeaderValueData> values, CancellationToken ct);
+}
+```
+
 #### `IMethodologyVersionDeletionStore`
 
 Видалення версії-чернетки методології (`DELETE /api/v1/methodologies/{id}/versions/{vid}`,
@@ -3079,6 +3098,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CELL-4221` | 422 | спроба записати в обчислену комірку |
 | `ECR-CELL-4222` | 422 | значення поза межами реєстру або дії дозволу |
 | `ECR-CELL-4223` | 422 | посилання `Lookup`-комірки на запис довідника, якого не існує |
+| `ECR-HDR-0404` | 404 | код у `PATCH …/documents/{id}/header` не відповідає жодному полю шапки версії шаблону документа |
+| `ECR-HDR-0422` | 422 | значення поля шапки документа не відповідає типу чи обов'язковості |
 | `ECR-PRD-0409` | 409 | період закрито; **або** спроба змінити `TimeZoneId` після відкриття першого періоду (ФВ-1.1a) |
 | `ECR-PRD-0404` | 404 | періоду з таким ключем у проєкті немає |
 | `ECR-PRD-0422` | 422 | період поза межами проєкту (ФВ-1.11) |
@@ -3209,6 +3230,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
+| `GET` | `/api/v1/template-versions/{id}/header-fields` | `Template.View` | 8 |
+| `PUT` | `/api/v1/template-versions/{id}/header-fields/{code}` | `Template.Edit` | 8 |
 | `GET` | `/api/v1/template-versions/{id}/styles` | `Template.View` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/styles/{code}` | `Template.Edit` | 8 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}` | `Template.Edit` | 7 |
@@ -3241,6 +3264,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/documents/{id}` | `Document.View` | 1 |
 | `DELETE` | `/api/v1/documents/{id}` | `Document.Delete` | 6 |
 | `POST` | `/api/v1/documents/{id}/business-key` | `Document.ChangeKey` | 6 |
+| `GET` | `/api/v1/documents/{id}/header` | `Document.View` | 8 |
+| `PATCH` | `/api/v1/documents/{id}/header` | — (через грант Write на проєкт) | 8 |
 | `GET` | `/api/v1/documents/{id}/tables/{tableInstanceId}` | `Document.View` | 1 |
 | `PATCH` | `/api/v1/documents/{id}/cells` | — (через `IAccessDecisionService`) | 1 |
 | `POST` | `/api/v1/documents/{id}/rows` | — | 1 |

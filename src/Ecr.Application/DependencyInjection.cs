@@ -78,6 +78,13 @@ public static class DependencyInjection
         services.AddScoped<SaveRowDefHandler>();
         services.AddScoped<DeleteRowDefHandler>();
 
+        // Фундамент шапки документа: поля версії (той самий draft→publish
+        // зріз, що колонка/рядок вище) і значення документа.
+        services.AddScoped<Templates.GetHeaderFieldDefsHandler>();
+        services.AddScoped<Templates.SaveHeaderFieldDefHandler>();
+        services.AddScoped<Documents.GetDocumentHeaderHandler>();
+        services.AddScoped<Documents.PatchDocumentHeaderHandler>();
+
         // Директива registry-lookup / cell-style, Частина B (PR B1): CRUD
         // стилю — той самий патерн, що колонка/рядок вище.
         services.AddScoped<SaveStyleDefHandler>();

@@ -2369,6 +2369,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/header": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Поточні значення шапки документа. Право `Document.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentHeaderDto"];
+                        "text/json": components["schemas"]["DocumentHeaderDto"];
+                        "text/plain": components["schemas"]["DocumentHeaderDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Оновлює значення полів шапки документа. Право — грант `Write` на
+         *     проєкт документа (через `IAccessDecisionService`, як і `PATCH
+         *     …/cells` — без окремого функціонального права). */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["PatchDocumentHeaderRequest"];
+                    "application/json": components["schemas"]["PatchDocumentHeaderRequest"];
+                    "text/json": components["schemas"]["PatchDocumentHeaderRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentHeaderDto"];
+                        "text/json": components["schemas"]["DocumentHeaderDto"];
+                        "text/plain": components["schemas"]["DocumentHeaderDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/v1/documents/{id}/import/apply": {
         parameters: {
             query?: never;
@@ -10027,6 +10132,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/header-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Поля шапки документа версії — рівень усього документа, не таблиці.
+         *     Право `Template.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HeaderFieldDefDto"][];
+                        "text/json": components["schemas"]["HeaderFieldDefDto"][];
+                        "text/plain": components["schemas"]["HeaderFieldDefDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/header-fields/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Створює або змінює поле шапки документа версії-чернетки. Право
+         *     `Template.Edit`. Той самий draft→publish шлях, що `PUT …/columns/{code}`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія-чернетка. */
+                    id: number;
+                    /** @description Код поля. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SaveHeaderFieldDefRequest"];
+                    "application/json": components["schemas"]["SaveHeaderFieldDefRequest"];
+                    "text/json": components["schemas"]["SaveHeaderFieldDefRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HeaderFieldDefDto"];
+                        "text/json": components["schemas"]["HeaderFieldDefDto"];
+                        "text/plain": components["schemas"]["HeaderFieldDefDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/period-access-rules": {
         parameters: {
             query?: never;
@@ -14678,6 +14920,31 @@ export interface components {
             toVersionId: null | number;
             truncated: boolean;
         };
+        /** @description Шапка документа: усі поля версії шаблону з поточними значеннями. */
+        DocumentHeaderDto: {
+            /** @description Поля в порядку `Ordinal`. */
+            fields: components["schemas"]["DocumentHeaderFieldDto"][];
+        };
+        /** @description Одне поле шапки документа разом із поточним значенням. */
+        DocumentHeaderFieldDto: {
+            /** @description Код поля — адреса в `PATCH …/header`. */
+            code: string;
+            /** @description Тип даних поля. */
+            dataType: components["schemas"]["CellDataType"];
+            /**
+             * Format: int32
+             * @description Ідентифікатор поля у версії шаблону.
+             */
+            headerFieldDefId: number;
+            /** @description Обов'язковість заповнення. */
+            isRequired: boolean;
+            /** @description Підпис поля мовами каталогу. */
+            label: components["schemas"]["LocalizedText"];
+            /** @description Поточне значення як «сире» значення CLR; `null` — поле не заповнене
+             *     (не розрізняє «ще не заповнили» і «явно стерли» — те саме спрощення,
+             *     що вже діє для `GET …/tables/{id}`). */
+            value: unknown;
+        };
         /** @description Створений документ. */
         DocumentIdResponse: {
             /**
@@ -15086,6 +15353,19 @@ export interface components {
             roleCodes: string[];
             /** @description SID групи безпеки. */
             sid: string;
+        };
+        /** @description Поле шапки у відповіді на читання/запис через ці обробники. */
+        HeaderFieldDefDto: {
+            code: string;
+            dataType: components["schemas"]["CellDataType"];
+            /** Format: int32 */
+            id: number;
+            isRequired: boolean;
+            labelL10n: components["schemas"]["LocalizedText"];
+            /** Format: int32 */
+            lookupRegistryDefId: null | number;
+            /** Format: int32 */
+            ordinal: number;
         };
         /** @description Одна перевірка у звіті. */
         HealthCheckDto: {
@@ -16137,6 +16417,25 @@ export interface components {
             };
             /** @description Результати валідації рівнів, які не блокують запис (R-B3). */
             validation: components["schemas"]["ValidationMessageDto"][];
+        };
+        /** @description Пакетна зміна шапки документа. */
+        PatchDocumentHeaderRequest: {
+            /** @description Зміни полів; поле, якого немає в списку, не чіпається. */
+            fields: components["schemas"]["PatchHeaderField"][];
+        };
+        /** @description Зміна одного поля шапки. Той самий контракт, що `PatchCell` (R-B4):
+         *     `Value` заповнене — записати; `IsEmpty = true` — явна порожнеча;
+         *     обидва відсутні — поле в запиті помилкове (одне з двох обов'язкове). */
+        PatchHeaderField: {
+            /** @description Код поля. */
+            code: string;
+            /**
+             * @description Явна порожнеча.
+             * @default false
+             */
+            isEmpty: boolean;
+            /** @description Значення; ігнорується, коли IsEmpty істинне. */
+            value: unknown;
         };
         /** @description Рядок у пакетній зміні. */
         PatchRow: {
@@ -17450,6 +17749,27 @@ export interface components {
             dialect: components["schemas"]["ExpressionDialect"];
             /** @description Текст виразу. */
             expression: string;
+        };
+        /** @description Налаштування поля шапки документа версії-чернетки. */
+        SaveHeaderFieldDefRequest: {
+            /** @description Тип даних; незмінний після створення. */
+            dataType: components["schemas"]["CellDataType"];
+            /** @description Обов'язковість заповнення. */
+            isRequired: boolean;
+            /** @description Підпис поля мовами каталогу. */
+            labelL10n: {
+                [key: string]: string;
+            };
+            /**
+             * Format: int32
+             * @description Довідник; лише для поля типу `Lookup`.
+             */
+            lookupRegistryDefId: null | number;
+            /**
+             * Format: int32
+             * @description `null` — нове поле стає останнім за порядком.
+             */
+            ordinal: null | number;
         };
         /** @description Запит на запис константи версії-чернетки. */
         SaveMethodologyConstantRequest: {

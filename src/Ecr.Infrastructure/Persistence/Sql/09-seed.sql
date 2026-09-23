@@ -895,6 +895,17 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.tableIsDynamic',            N'en', N'Table "{tableCode}" is dynamic: its rows are created at runtime, not in the template.', 1),
     (N'err.ECR-TMPL-0409.columnCodeTaken',           N'en', N'A column with code "{columnCode}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.rowKeyTaken',               N'en', N'A row with key "{rowKey}" already exists in table "{tableCode}".', 1),
+    (N'err.ECR-TMPL-0409.headerFieldCodeTaken',      N'en', N'A header field with code "{headerFieldCode}" already exists in this template version.', 1),
+
+    -- Поля шапки документа (foundation): той самий draft->publish шлях, що
+    -- колонки таблиці, тому подробиці — під ECR-TMPL-0422/0404, як у колонок.
+    (N'err.ECR-TMPL-0422.headerFieldTypeNotAllowed',            N'en', N'A document header field cannot have type {dataType}: the header stores an entered value, it does not compute one.', 1),
+    (N'err.ECR-TMPL-0422.headerFieldLookupRequiresLookupType',  N'en', N'A registry can only be attached to a Lookup header field; field "{headerFieldCode}" has type {dataType}.', 1),
+    (N'err.ECR-TMPL-0422.headerFieldCodeTakenByDeleted',        N'en', N'Header field code "{headerFieldCode}" is taken by a deleted field: document values still reference it by code, so it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.headerFieldDataTypeImmutable',         N'en', N'The data type of header field "{headerFieldCode}" cannot change after creation ({oldDataType} -> {newDataType}). Create a new field or clone the version.', 1),
+    (N'err.ECR-HDR-0404.headerField',                N'en', N'Header field "{headerFieldCode}" does not exist in this document''s template version.', 1),
+    (N'err.ECR-HDR-0422.validationBlocked',          N'en', N'The value for header field "{headerFieldCode}" does not match its type or required setting.', 1),
+    (N'err.ECR-HDR-0422.typeMismatch',               N'en', N'Header field "{headerFieldCode}" expects a {expected}.', 1),
 
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
@@ -1164,6 +1175,8 @@ USING (VALUES
     (N'err.ECR-CELL-4221',  N'en', N'The cell is computed', 1),
     (N'err.ECR-CELL-4222',  N'en', N'Value out of range', 1),
     (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry', 1),
+    (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
+    (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
     (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),
 
     -- Періоди і проєкти.
