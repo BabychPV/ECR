@@ -1361,6 +1361,10 @@ USING (VALUES
     (N'document.compareAdded',           N'en', N'new', 1),
     (N'document.compareRemovedTitle',    N'en', N'Rows removed', 1),
     (N'document.compareRemoved',         N'en', N'removed', 1),
+    -- Окремий блок змін шапки документа (ФВ-9.4): назву поля беремо з
+    -- визначення шапки, а якщо його там немає — показуємо код як є.
+    (N'document.compareHeaderTitle',     N'en', N'Header fields', 1),
+    (N'document.compareField',           N'en', N'Field', 1),
     (N'document.compareTruncatedTitle',  N'en', N'Not everything is shown', 1),
     (N'document.compareTruncatedHint',   N'en', N'The server stopped at {changes} changed cell(s), {added} added and {removed} removed row(s); more may exist.', 1),
     (N'grid.loading',                    N'en', N'Loading the table...', 1),
