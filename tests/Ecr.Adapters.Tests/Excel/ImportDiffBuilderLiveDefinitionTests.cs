@@ -194,6 +194,62 @@ public sealed class ImportDiffBuilderLiveDefinitionTests
         Assert.Equal(1, parsed.Day);
     }
 
+    /// <summary>
+    /// `U-23`, бік імпорту: двійковий хвіст Excel за межею масштабу сховища
+    /// нормалізується явно, до прев'ю, — а не валить застосування.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Сервер тепер відхиляє число з більш ніж 16 знаками після коми
+    /// (<c>CellValueReader.Storable</c>). `0.1 + 0.2` в аркуші — це double
+    /// <c>0.30000000000000004</c>: 17 знаків. Без нормалізації тут кожна книга
+    /// з такою формулою падала б на застосуванні цілком.
+    ///
+    /// ⚠ І другий бік: незмінне значення з хвостом НЕ з'являється в прев'ю як
+    /// зміна — порівняння йде вже з нормалізованим числом.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Двійковий_хвіст_Excel_нормалізується_до_масштабу_сховища()
+    {
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        var amount = builder.Column(table, "Amount", CellDataType.Decimal);
+        builder.Row(table, RowKey, 1);
+
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("S0");
+        var tail = 0.1d + 0.2d;
+        worksheet.Cell(2, 1).Value = tail;
+
+        // Передумова: хвіст справді за межею сховища — інакше тест нічого не
+        // доводив би.
+        Assert.Equal("0.30000000000000004", worksheet.Cell(2, 1).GetString());
+
+        var block = Block([new ExcelColumnRef(amount.Id, "Amount", 1, false, null)]);
+
+        var diff = new ImportDiffBuilder().Build(
+            worksheet, block, PeriodKeyValue, table,
+            NoDecisions, NoLookups, RowIds, Versions, []);
+
+        var change = Assert.Single(diff.Changes);
+        Assert.Equal(0.3m, Assert.IsType<decimal>(change.NewValue));
+
+        // Те саме значення, уже збережене, — не зміна.
+        var existing = new[]
+        {
+            new CellRecord(
+                new CellAddress(Period, RowId, amount.Id), table.Id,
+                new CellValueData { ValueNumeric = 0.3000000000000000m }),
+        };
+
+        var unchanged = new ImportDiffBuilder().Build(
+            worksheet, block, PeriodKeyValue, table,
+            NoDecisions, NoLookups, RowIds, Versions, existing);
+
+        Assert.Empty(unchanged.Changes);
+    }
+
     private static ExcelTableBlock Block(IReadOnlyList<ExcelColumnRef> columns)
         => new(
             TableInstance, TableDefId: 0, "T0", "S0", HeaderRow: 1,

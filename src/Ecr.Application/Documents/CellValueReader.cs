@@ -40,6 +40,21 @@ public static class CellValueReader
     public const string TypeMismatch = "ECR-CELL-0422";
 
     /// <summary>
+    /// Масштаб сховища числа комірки: <c>doc.CellValue.ValueNumeric decimal(34,16)</c>
+    /// (<c>D-148</c>; <c>NormalizedCellStore.NumericScale</c>,
+    /// <c>CellValueConfiguration</c>, <c>doc.CellValueTvp</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ `U-23`. Знаків після коми, більших за цю межу, сховище не тримає:
+    /// <c>SqlMetaData.Adjust</c> округлює їх на КЛІЄНТІ ще до відправки, тож
+    /// СУБД чесно зберігає вже огризок, а запит закінчується «Saved». Доти
+    /// межу перевіряв лише оголошений <c>ColumnDef.Scale</c> — колонка без
+    /// нього (більшість звітних) приймала <c>931.9250000000000000123</c> і
+    /// мовчки записувала <c>931.9250000000000000</c>.
+    /// </remarks>
+    public const int StorageScale = 16;
+
+    /// <summary>
     /// Розгортає значення до примітиву CLR.
     /// </summary>
     /// <param name="raw">Значення з запиту: <see cref="JsonElement"/> або тип CLR.</param>
@@ -95,7 +110,7 @@ public static class CellValueReader
         return column.DataType switch
         {
             CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated
-                => new CellValueData { ValueNumeric = Number(value, column) },
+                => new CellValueData { ValueNumeric = Storable(Number(value, column), column) },
 
             CellDataType.Bool => new CellValueData { ValueBool = Boolean(value, column) },
             CellDataType.Date => new CellValueData { ValueDate = Date(value, column) },
@@ -129,6 +144,44 @@ public static class CellValueReader
             => parsed,
         _ => throw Mismatch(column, value, ExpectedType.Number),
     };
+
+    /// <summary>
+    /// Число, яке сховище збереже БЕЗ втрати; інакше — відмова (`U-23`).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відмова, а не округлення: це вже прийняте правило продукту
+    /// (<c>ФВ-9.16c</c>, <c>D-116</c>, <c>features/grid/rounding.ts</c>) —
+    /// «ручне введення і API зайвого знака не отримують, сервер відхиляє»;
+    /// округлює лише ВСТАВКА, і робить це клієнт — видимо, з позначкою й
+    /// лічильником. Округлити тут означало б тихо записати інше число, ніж
+    /// бачить користувач: сітка після збереження показує ВЛАСНЕ введення
+    /// оператора (<c>sliceApply.ts</c>), а не перечитане зі сховища.
+    ///
+    /// ⚠ Межа — масштаб СХОВИЩА, а не оголошений <c>ColumnDef.Scale</c>.
+    /// Оголошений масштаб і далі перевіряє <c>ColumnDef.ValidateValue</c> (п. 7),
+    /// тут він не дублюється; але він може бути й більшим за 16 — і тоді
+    /// саме ця перевірка єдина стоїть між введенням і мовчазним огризком.
+    ///
+    /// ⚠ Нулі в хвості не рахуються: <c>1.50000000000000000000</c> —
+    /// те саме число, і сховище збереже його без втрати.
+    ///
+    /// ⚠ Імпорт із Excel сюди з двійковим хвостом не доходить: його
+    /// нормалізує <c>ImportDiffBuilder.Read</c> ДО прев'ю, бо
+    /// <c>0.1 + 0.2</c> в аркуші — це <c>0.30000000000000004</c>, і відхиляти
+    /// такі числа означало б зробити непридатним головний шлях введення.
+    /// </remarks>
+    private static decimal Storable(decimal number, ColumnDef column)
+        => decimal.Round(number, StorageScale, MidpointRounding.AwayFromZero) == number
+            ? number
+            : throw new BusinessRuleException(
+                TypeMismatch,
+                $"Колонка «{column.Code}» зберігає не більше {StorageScale} знаків після коми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0422.tooManyDecimals",
+                    ["columnCode"] = column.Code,
+                    ["maxScale"] = StorageScale.ToString(CultureInfo.InvariantCulture),
+                });
 
     private static bool Boolean(object value, ColumnDef column) => value switch
     {

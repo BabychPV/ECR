@@ -194,6 +194,24 @@ public sealed partial class MainPathLocalizedErrorTests
         Assert.Equal(expected, detail);
     }
 
+    /// <summary>`U-23`: відмова надлишкових знаків доїжджає реченням мовою інтерфейсу.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Надлишкові_знаки_після_коми_пояснюються_з_каталогу()
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("C5"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "C5" }), 1, CellDataType.Decimal);
+
+        var detail = await DetailAsync(() =>
+        {
+            CellValueReader.Read("931.9250000000000000123", column);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal("Column \"C5\" keeps at most 16 digits after the decimal point.", detail);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Необроблений_виняток_віддає_каталожне_речення_без_тексту_винятку()

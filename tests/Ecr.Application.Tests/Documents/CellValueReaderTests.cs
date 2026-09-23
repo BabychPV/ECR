@@ -147,6 +147,56 @@ public sealed class CellValueReaderTests
         Assert.DoesNotContain("н/д", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// `U-23`: знаків після коми більше, ніж тримає сховище, — відмова, а не
+    /// мовчазне округлення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Колонка БЕЗ оголошеного масштабу — саме той випадок, що проходив:
+    /// оголошений <c>ColumnDef.Scale</c> перевіряє <c>ValidateValue</c>, а межі
+    /// сховища (<c>decimal(34,16)</c>) не перевіряв ніхто, і SqlClient
+    /// округлював значення на клієнті до відправки. Обидві форми з дроту —
+    /// число JSON і рядок (сервер приймає decimal рядком, `e470777a`).
+    /// </remarks>
+    [Theory]
+    [InlineData("string")]
+    [InlineData("number")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Надлишкові_знаки_відхиляються_а_не_округлюються_мовчки(string form)
+    {
+        object wire = form == "string"
+            ? FromWire("931.9250000000000000123")!
+            : FromWire(931.9250000000000000123m)!;
+
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(wire, Column(CellDataType.Decimal)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        var details = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(error.Details);
+        Assert.Equal("err.ECR-CELL-0422.tooManyDecimals", details["messageKey"]);
+        Assert.Equal("C1", details["columnCode"]);
+        Assert.Equal("16", details["maxScale"]);
+    }
+
+    /// <summary>Межа — рівно шістнадцять знаків; нулі в хвості втратою не є.</summary>
+    /// <remarks>
+    /// ⚠ Другий бік `U-23`: сторож, який відхиляє ВСЕ довше за 16 символів
+    /// дробу, зламав би законні значення — `1.50000000000000000000` є тим
+    /// самим числом, і сховище збереже його без втрати.
+    /// </remarks>
+    [Theory]
+    [InlineData("931.9250000000000001")]
+    [InlineData("1.50000000000000000000")]
+    [InlineData("-0.0000000000000001")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Значення_що_вміщається_у_сховище_приймається_без_змін(string text)
+    {
+        var data = CellValueReader.Read(FromWire(text), Column(CellDataType.Decimal));
+
+        Assert.NotNull(data);
+        Assert.Equal(decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture), data.ValueNumeric);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-6.11")]

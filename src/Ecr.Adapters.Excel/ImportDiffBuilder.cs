@@ -1,5 +1,6 @@
 using System.Globalization;
 using ClosedXML.Excel;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
@@ -178,8 +179,19 @@ public sealed class ImportDiffBuilder
                     : text;
 
             case CellDataType.Decimal:
+                // ⛔ `U-23`: двійковий хвіст Excel нормалізується ТУТ, явно і
+                // до прев'ю, а не мовчки в сховищі. `0.1 + 0.2` в аркуші — це
+                // `0.30000000000000004` (17 знаків), а сховище тримає 16
+                // (`CellValueReader.StorageScale`). Сервер ручне введення з
+                // таким хвостом відхиляє, тож без цього кроку один такий
+                // осередок валив би застосування всієї книги. Округлюється
+                // лише до масштабу СХОВИЩА — тобто рівно те, що сховище однаково
+                // відкинуло б; оголошений масштаб колонки тут не застосовується
+                // (його порушення лишається відмовою). Округлене значення
+                // видно в прев'ю як «нове», і воно ж — те, що буде записано й
+                // потрапить у журнал.
                 return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
-                    ? number
+                    ? decimal.Round(number, CellValueReader.StorageScale, MidpointRounding.AwayFromZero)
                     : text;
 
             case CellDataType.Bool:

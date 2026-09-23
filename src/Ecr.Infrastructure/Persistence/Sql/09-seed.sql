@@ -697,6 +697,12 @@ USING (VALUES
     (N'err.ECR-CELL-0422.expectsBoolean',    N'en', N'Column "{columnCode}" expects true or false.', 1),
     (N'err.ECR-CELL-0422.expectsDate',       N'en', N'Column "{columnCode}" expects a date.', 1),
     (N'err.ECR-CELL-0422.expectsIdentifier', N'en', N'Column "{columnCode}" expects the identifier of a registry entry.', 1),
+    -- ⛔ `U-23`: число з більшою кількістю знаків після коми, ніж тримає
+    -- сховище (`decimal(34,16)`), доти приймалося й мовчки округлювалося на
+    -- клієнті SqlClient, а запит закінчувався «Saved». Тепер — відмова тим
+    -- самим механізмом, що й `expects*` вище (правило `ФВ-9.16c`/`D-116`:
+    -- округлює лише вставка, видимо, на клієнті). `{maxScale}` — число рядком.
+    (N'err.ECR-CELL-0422.tooManyDecimals',   N'en', N'Column "{columnCode}" keeps at most {maxScale} digits after the decimal point.', 1),
     (N'err.ECR-CALC-0437.requiredInputs',    N'en', N'Required methodology input columns are empty: {rowCount} row(s) with an error.', 1),
     (N'err.ECR-CELL-4223.missingEntry',      N'en', N'Reference to a registry entry that does not exist: {cellCount} cell(s).', 1),
     -- ⛔ `Q-341`, другий зріз: УСІ кидки `ECR-DOC-0404` — «документа/аркуша/
