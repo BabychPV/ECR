@@ -178,6 +178,35 @@ public sealed class CellValueReaderTests
         Assert.Equal("16", details["maxScale"]);
     }
 
+    /// <summary>
+    /// Ціла частина понад 18 розрядів (<c>decimal(34,16)</c>) — відмова з ключем,
+    /// а не <c>Arithmetic overflow</c> від СУБД.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Від'ємне значення — окремий випадок: перевірка «&lt; 10¹⁸» без модуля
+    /// пропускала б будь-яке від'ємне число, і воно так само валило б запис.
+    /// </remarks>
+    [Theory]
+    [InlineData("string", "1000000000000000000")]
+    [InlineData("string", "-1000000000000000000")]
+    [InlineData("string", "12345678901234567890.5")]
+    [InlineData("number", "1000000000000000000")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Ціла_частина_понад_межу_сховища_відхиляється(string form, string text)
+    {
+        var number = decimal.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+        object wire = form == "string" ? FromWire(text)! : FromWire(number)!;
+
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(wire, Column(CellDataType.Decimal)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        var details = Assert.IsAssignableFrom<IReadOnlyDictionary<string, object?>>(error.Details);
+        Assert.Equal("err.ECR-CELL-0422.tooManyIntegerDigits", details["messageKey"]);
+        Assert.Equal("C1", details["columnCode"]);
+        Assert.Equal("18", details["maxIntegerDigits"]);
+    }
+
     /// <summary>Межа — рівно шістнадцять знаків; нулі в хвості втратою не є.</summary>
     /// <remarks>
     /// ⚠ Другий бік `U-23`: сторож, який відхиляє ВСЕ довше за 16 символів
@@ -188,6 +217,8 @@ public sealed class CellValueReaderTests
     [InlineData("931.9250000000000001")]
     [InlineData("1.50000000000000000000")]
     [InlineData("-0.0000000000000001")]
+    [InlineData("999999999999999999.9999999999")]
+    [InlineData("-999999999999999999")]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public void Значення_що_вміщається_у_сховище_приймається_без_змін(string text)
     {

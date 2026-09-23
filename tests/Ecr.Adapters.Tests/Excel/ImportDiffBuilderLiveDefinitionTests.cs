@@ -250,6 +250,53 @@ public sealed class ImportDiffBuilderLiveDefinitionTests
         Assert.Empty(unchanged.Changes);
     }
 
+    /// <summary>
+    /// Ціла частина понад межу сховища — відмова в ПРЕВ'Ю, а не зміна, яка
+    /// потім валить застосування всієї книги.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Число з 19 розрядами до коми <c>decimal.TryParse</c> читає без
+    /// проблем (C# decimal тримає 28–29 цифр), тож доти воно ставало звичайною
+    /// «зміною». На застосуванні <c>CellValueReader</c> відхиляв увесь пакет —
+    /// тобто користувач, який уже погодився на прев'ю, дізнавався про одну
+    /// комірку ціною всієї книги. Сусідня комірка з законним значенням тут —
+    /// доказ, що відмова точкова: вона лишається зміною.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Ціла_частина_понад_межу_сховища_відхиляється_в_прев_ю()
+    {
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        var huge = builder.Column(table, "Huge", CellDataType.Decimal);
+        var fine = builder.Column(table, "Fine", CellDataType.Decimal);
+        builder.Row(table, RowKey, 1);
+
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("S0");
+        worksheet.Cell(2, 1).Value = "1000000000000000000";
+        worksheet.Cell(2, 2).Value = "999999999999999999.5";
+
+        var block = Block(
+        [
+            new ExcelColumnRef(huge.Id, "Huge", 1, false, null),
+            new ExcelColumnRef(fine.Id, "Fine", 2, false, null),
+        ]);
+
+        var diff = new ImportDiffBuilder().Build(
+            worksheet, block, PeriodKeyValue, table,
+            NoDecisions, NoLookups, RowIds, Versions, []);
+
+        var rejection = Assert.Single(diff.Rejected);
+        Assert.Equal("Huge", rejection.ColumnCode);
+        Assert.Equal("ECR-CELL-0422", rejection.ReasonCode);
+
+        var change = Assert.Single(diff.Changes);
+        Assert.Equal("Fine", change.ColumnCode);
+        Assert.Equal(999999999999999999.5m, Assert.IsType<decimal>(change.NewValue));
+    }
+
     private static ExcelTableBlock Block(IReadOnlyList<ExcelColumnRef> columns)
         => new(
             TableInstance, TableDefId: 0, "T0", "S0", HeaderRow: 1,

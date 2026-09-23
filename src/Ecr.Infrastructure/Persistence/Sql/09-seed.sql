@@ -714,6 +714,7 @@ USING (VALUES
     -- самим механізмом, що й `expects*` вище (правило `ФВ-9.16c`/`D-116`:
     -- округлює лише вставка, видимо, на клієнті). `{maxScale}` — число рядком.
     (N'err.ECR-CELL-0422.tooManyDecimals',   N'en', N'Column "{columnCode}" keeps at most {maxScale} digits after the decimal point.', 1),
+    (N'err.ECR-CELL-0422.tooManyIntegerDigits', N'en', N'Column "{columnCode}" keeps at most {maxIntegerDigits} digits before the decimal point.', 1),
     (N'err.ECR-CALC-0437.requiredInputs',    N'en', N'Required methodology input columns are empty: {rowCount} row(s) with an error.', 1),
     (N'err.ECR-CELL-4223.missingEntry',      N'en', N'Reference to a registry entry that does not exist: {cellCount} cell(s).', 1),
     -- ⛔ `Q-341`, другий зріз: УСІ кидки `ECR-DOC-0404` — «документа/аркуша/
@@ -964,6 +965,7 @@ USING (VALUES
     (N'err.ECR-HDR-0422.expectsIdentifier',          N'en', N'Header field "{headerFieldCode}" expects the identifier of a registry entry or unit.', 1),
     -- `U-23` для шапки: той самий `decimal(34,16)`, та сама відмова.
     (N'err.ECR-HDR-0422.tooManyDecimals',            N'en', N'Header field "{headerFieldCode}" keeps at most {maxScale} digits after the decimal point.', 1),
+    (N'err.ECR-HDR-0422.tooManyIntegerDigits',       N'en', N'Header field "{headerFieldCode}" keeps at most {maxIntegerDigits} digits before the decimal point.', 1),
 
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),

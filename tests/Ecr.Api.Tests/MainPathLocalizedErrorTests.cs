@@ -194,6 +194,24 @@ public sealed partial class MainPathLocalizedErrorTests
         Assert.Equal(expected, detail);
     }
 
+    /// <summary>Відмова переповнення цілої частини доїжджає реченням мовою інтерфейсу.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Переповнення_цілої_частини_пояснюється_з_каталогу()
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("C5"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "C5" }), 1, CellDataType.Decimal);
+
+        var detail = await DetailAsync(() =>
+        {
+            CellValueReader.Read("1000000000000000000", column);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal("Column \"C5\" keeps at most 18 digits before the decimal point.", detail);
+    }
+
     /// <summary>`U-23`: відмова надлишкових знаків доїжджає реченням мовою інтерфейсу.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
@@ -230,6 +248,7 @@ public sealed partial class MainPathLocalizedErrorTests
     [InlineData(CellDataType.Lookup, "abc", "Header field \"QTY\" expects the identifier of a registry entry or unit.")]
     [InlineData(CellDataType.Unit, "abc", "Header field \"QTY\" expects the identifier of a registry entry or unit.")]
     [InlineData(CellDataType.Decimal, "931.9250000000000000123", "Header field \"QTY\" keeps at most 16 digits after the decimal point.")]
+    [InlineData(CellDataType.Decimal, "1000000000000000000", "Header field \"QTY\" keeps at most 18 digits before the decimal point.")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Відмова_поля_шапки_називає_поле_мовою_інтерфейсу(
         CellDataType dataType, string typed, string expected)

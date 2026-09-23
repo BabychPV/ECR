@@ -146,6 +146,22 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
+                // ⛔ Ціла частина понад межу сховища (`decimal(34,16)`, 18
+                // розрядів) — відмова в ПРЕВ'Ю, а не зміна. Інакше вона
+                // доходила б до застосування, і там `CellValueReader` відхиляв
+                // увесь пакет — користувач дізнавався б про одну комірку ціною
+                // відмови всієї книги, вже після того, як погодився на прев'ю.
+                // На відміну від хвоста після коми (нормалізується вище), тут
+                // округлювати нема до чого: число просто не вміщується.
+                if (incoming is decimal number && !CellValueReader.IntegerPartFits(number))
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        $"Число має понад {CellValueReader.StorageIntegerDigits} розрядів до коми: сховище його не вмістить."));
+
+                    continue;
+                }
+
                 changes.Add(new ImportChange(row.RowKey, column.Code, Display(existing, definition), incoming));
             }
         }

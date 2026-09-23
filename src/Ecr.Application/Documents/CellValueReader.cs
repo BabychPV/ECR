@@ -55,6 +55,30 @@ public static class CellValueReader
     public const int StorageScale = 16;
 
     /// <summary>
+    /// Розрядів цілої частини, які тримає сховище: <c>decimal(34,16)</c> — це
+    /// <c>34 − 16 = 18</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ На відміну від зайвих знаків після коми (`U-23`), переповнення цілої
+    /// частини не губиться мовчки: SqlClient віддає його СУБД, і та падає з
+    /// <c>Arithmetic overflow</c> — тобто HTTP 500 замість пояснення. Межа
+    /// перевіряється тут, до запису, тим самим механізмом відмови.
+    /// </remarks>
+    public const int StorageIntegerDigits = 18;
+
+    /// <summary>Найменше число, ціла частина якого вже не вміщується в сховище (10¹⁸).</summary>
+    private const decimal IntegerLimit = 1_000_000_000_000_000_000m;
+
+    /// <summary>Чи вміщується ціла частина числа в сховище (не більше <see cref="StorageIntegerDigits"/> розрядів).</summary>
+    /// <remarks>
+    /// Публічна, бо ту саму межу застосовують шапка документа
+    /// (<c>HeaderValueReader</c>) і прев'ю імпорту (<c>ImportDiffBuilder</c>):
+    /// одна межа, а не три копії числа.
+    /// </remarks>
+    /// <param name="number">Число.</param>
+    public static bool IntegerPartFits(decimal number) => Math.Abs(number) < IntegerLimit;
+
+    /// <summary>
     /// Розгортає значення до примітиву CLR.
     /// </summary>
     /// <param name="raw">Значення з запиту: <see cref="JsonElement"/> або тип CLR.</param>
@@ -171,7 +195,17 @@ public static class CellValueReader
     /// такі числа означало б зробити непридатним головний шлях введення.
     /// </remarks>
     private static decimal Storable(decimal number, ColumnDef column)
-        => decimal.Round(number, StorageScale, MidpointRounding.AwayFromZero) == number
+        => !IntegerPartFits(number)
+            ? throw new BusinessRuleException(
+                TypeMismatch,
+                $"Колонка «{column.Code}» зберігає не більше {StorageIntegerDigits} розрядів до коми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-0422.tooManyIntegerDigits",
+                    ["columnCode"] = column.Code,
+                    ["maxIntegerDigits"] = StorageIntegerDigits.ToString(CultureInfo.InvariantCulture),
+                })
+            : decimal.Round(number, StorageScale, MidpointRounding.AwayFromZero) == number
             ? number
             : throw new BusinessRuleException(
                 TypeMismatch,

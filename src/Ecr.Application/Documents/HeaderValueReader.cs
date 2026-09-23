@@ -155,7 +155,17 @@ public static class HeaderValueReader
     /// ФВ-9.16c); нулі в хвості втратою не є.
     /// </remarks>
     private static decimal Storable(decimal number, HeaderFieldDef field)
-        => decimal.Round(number, CellValueReader.StorageScale, MidpointRounding.AwayFromZero) == number
+        => !CellValueReader.IntegerPartFits(number)
+            ? throw new BusinessRuleException(
+                ErrorCodes.HeaderValueInvalid,
+                $"Поле шапки «{field.Code}» зберігає не більше {CellValueReader.StorageIntegerDigits} розрядів до коми.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-HDR-0422.tooManyIntegerDigits",
+                    ["headerFieldCode"] = field.Code,
+                    ["maxIntegerDigits"] = CellValueReader.StorageIntegerDigits.ToString(CultureInfo.InvariantCulture),
+                })
+            : decimal.Round(number, CellValueReader.StorageScale, MidpointRounding.AwayFromZero) == number
             ? number
             : throw new BusinessRuleException(
                 ErrorCodes.HeaderValueInvalid,

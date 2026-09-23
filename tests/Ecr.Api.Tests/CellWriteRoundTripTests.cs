@@ -632,6 +632,97 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// Ціла частина понад межу сховища — <c>422</c> з ключем, а не <c>500</c>
+    /// від СУБД; найбільше значення, що вміщається, доживає до бази цілим.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти `1000000000000000000` (19 розрядів) проходило <c>CellValueReader</c>
+    /// і падало на записі з <c>Arithmetic overflow</c> — HTTP 500 замість
+    /// пояснення. Межа 18 розрядів — не домовленість, а <c>decimal(34,16)</c>;
+    /// тому другий бік перевіряється на СПРАВЖНІЙ базі: якби межа в коді була
+    /// ширшою за колонку, граничне значення тут дало б 500, а вужчою — 422.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-148")]
+    public async Task Ціла_частина_понад_межу_сховища_відхиляється_422_а_межа_доживає_до_бази()
+    {
+        const string AtLimit = "999999999999999999.9999999999";
+        const string Overflow = "1000000000000000000";
+
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+
+        var numberColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .ElementAt(1);
+
+        var rowKey = $"OVF{Guid.NewGuid():N}"[..12];
+
+        async Task<HttpResponseMessage> PatchAsync(string? baseVersion, string value)
+            => await client.PatchAsJsonAsync(patchUri, new
+            {
+                tableInstanceId = scenario.Document.TableInstanceId,
+                periodKey = scenario.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey,
+                        baseVersion,
+                        cells = new object[] { new { columnCode = numberColumn, value = (object)value } },
+                    },
+                },
+            }).ConfigureAwait(true);
+
+        // ── 1. Переповнення цілої частини — 422 з ключем, не 500 ─────────
+        var overflow = await PatchAsync(null, Overflow).ConfigureAwait(true);
+        var overflowText = await overflow.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(
+            overflow.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"PATCH «{Overflow}»: очікували 422, отримали {overflow.StatusCode}\n{overflowText}\n{app.ErrorsText}");
+
+        var problem = JsonDocument.Parse(overflowText).RootElement;
+        Assert.Equal("ECR-CELL-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-CELL-0422.tooManyIntegerDigits", problem.GetProperty("messageKey").GetString());
+
+        // ── 2. Найбільше значення, яке колонка вміщає, — 200 і ціле в базі ─
+        var atLimit = await PatchAsync(null, AtLimit).ConfigureAwait(true);
+        Assert.True(
+            atLimit.StatusCode == HttpStatusCode.OK,
+            $"PATCH «{AtLimit}»: {atLimit.StatusCode}\n"
+            + $"{await atLimit.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        await using var db = scenario.Builder.CreateContext();
+        var stored = await db.CellValues
+            .AsNoTracking()
+            .Where(c => c.PeriodKeyValue == scenario.PeriodKey
+                        && c.ColumnDefId == scenario.Document.ColumnDefIds[1])
+            .Select(c => c.ValueNumeric)
+            .SingleAsync()
+            .ConfigureAwait(true);
+
+        Assert.Equal(decimal.Parse(AtLimit, System.Globalization.CultureInfo.InvariantCulture), stored);
+    }
+
+    /// <summary>
     /// Відхилене значення в батчі, що СТВОРЮЄ рядок, не лишає рядка-сироти:
     /// повтор того самого ключа з правильним значенням — 200, а не 409.
     /// </summary>
