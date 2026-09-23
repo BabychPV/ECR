@@ -2,9 +2,11 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Ecr.Api.Errors;
 using Ecr.Application.Common;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
@@ -151,6 +153,45 @@ public sealed partial class MainPathLocalizedErrorTests
             () => handler.HandleAsync("ux-admin", "wrong-password", "127.0.0.1", CancellationToken.None));
 
         Assert.Equal("The user name or password is incorrect.", detail);
+    }
+
+    /// <summary>
+    /// `U-02`: відмова типу комірки називає колонку й очікуваний тип — мовою
+    /// інтерфейсу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це найчастіша інтерактивна відмова продукту: її бачить кожен, хто
+    /// набрав не той тип у комірку. Речення збиралося рядком у
+    /// <c>CellValueReader.Mismatch</c>, тож на англійському екрані під
+    /// англійським заголовком стояло «Колонка «C5» очікує число.».
+    ///
+    /// ⚠ Перевіряються ОБИДВА боки правки: і що ключ резолвиться (інакше
+    /// повернулося б запасне українське речення — його ловить перевірка на
+    /// кирилицю в <see cref="DetailAsync"/>), і що <c>{columnCode}</c> справді
+    /// підставлено (інакше <c>detail</c> ніс би фігурні дужки — це теж
+    /// перевіряє <see cref="DetailAsync"/>), і що тип узято ТОЙ САМИЙ: числова
+    /// колонка не має пояснювати себе датою.
+    /// </remarks>
+    [Theory]
+    [InlineData(CellDataType.Decimal, "abc", "Column \"C5\" expects a number.")]
+    [InlineData(CellDataType.Bool, "abc", "Column \"C5\" expects true or false.")]
+    [InlineData(CellDataType.Date, "abc", "Column \"C5\" expects a date.")]
+    [InlineData(CellDataType.Lookup, "abc", "Column \"C5\" expects the identifier of a registry entry.")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Відмова_типу_комірки_називає_колонку_мовою_інтерфейсу(
+        CellDataType dataType, string typed, string expected)
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("C5"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "C5" }), 1, dataType);
+
+        var detail = await DetailAsync(() =>
+        {
+            CellValueReader.Read(typed, column);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(expected, detail);
     }
 
     [Fact]

@@ -666,6 +666,22 @@ USING (VALUES
     (N'err.ECR-ACCS-0403.deniedCells',       N'en', N'Cells you may not edit in this batch: {deniedCount}. Reason for the first: {reason}.', 1),
     (N'err.ECR-CELL-0422.validationBlocked', N'en', N'Validation rejected the save: {cellCount} cell(s) with an error.', 1),
     (N'err.ECR-CELL-0422.unknownColumn',     N'en', N'There is no column "{columnCode}" in this template version.', 1),
+    -- ⛔ `U-02`: найчастіша інтерактивна відмова продукту — набране в комірку
+    -- не того типу. `CellValueReader.Mismatch` збирав речення рядком у коді
+    -- («Колонка «C5» очікує число.»), і воно доїжджало на екран українською
+    -- під англійським заголовком. Ключів ЧОТИРИ, а не один із підстановкою
+    -- `{expected}`: резолвер (`UiStringResolver.Format`) підставляє рядки як
+    -- є і другого рівня розв'язання ключів не має, тож слово «число» лишилося
+    -- б українським усередині англійського речення. Окремий ключ на тип дає
+    -- ще й граматично правильну фразу в кожній мові.
+    -- ⚠ Поле `expected` у `Details` тепер СТАЛЕ кодове слово (`Number`,
+    -- `Boolean`, `Date`, `Identifier`) — як `{status}` і `{reason}` у сусідніх
+    -- шаблонах; у тексті воно не підставляється.
+    -- Приватна область: сітка доступна лише після входу.
+    (N'err.ECR-CELL-0422.expectsNumber',     N'en', N'Column "{columnCode}" expects a number.', 1),
+    (N'err.ECR-CELL-0422.expectsBoolean',    N'en', N'Column "{columnCode}" expects true or false.', 1),
+    (N'err.ECR-CELL-0422.expectsDate',       N'en', N'Column "{columnCode}" expects a date.', 1),
+    (N'err.ECR-CELL-0422.expectsIdentifier', N'en', N'Column "{columnCode}" expects the identifier of a registry entry.', 1),
     (N'err.ECR-CALC-0437.requiredInputs',    N'en', N'Required methodology input columns are empty: {rowCount} row(s) with an error.', 1),
     (N'err.ECR-CELL-4223.missingEntry',      N'en', N'Reference to a registry entry that does not exist: {cellCount} cell(s).', 1),
     -- ⛔ `Q-341`, другий зріз: УСІ кидки `ECR-DOC-0404` — «документа/аркуша/

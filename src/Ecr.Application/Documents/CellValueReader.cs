@@ -127,7 +127,7 @@ public static class CellValueReader
         bool flag => flag ? 1m : 0m,
         string text when decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
-        _ => throw Mismatch(column, value, "число"),
+        _ => throw Mismatch(column, value, ExpectedType.Number),
     };
 
     private static bool Boolean(object value, ColumnDef column) => value switch
@@ -135,7 +135,7 @@ public static class CellValueReader
         bool flag => flag,
         decimal number => number != 0m,
         string text when bool.TryParse(text, out var parsed) => parsed,
-        _ => throw Mismatch(column, value, "булеве значення"),
+        _ => throw Mismatch(column, value, ExpectedType.Boolean),
     };
 
     /// <summary>Дата; через JSON вона завжди приходить рядком.</summary>
@@ -151,7 +151,7 @@ public static class CellValueReader
         DateTime date => date,
         DateTimeOffset offset => offset.UtcDateTime,
         string text when CellDateParser.TryParse(text, out var parsed) => parsed,
-        _ => throw Mismatch(column, value, "дата"),
+        _ => throw Mismatch(column, value, ExpectedType.Date),
     };
 
     /// <summary>Ідентифікатор запису довідника або одиниці.</summary>
@@ -164,7 +164,7 @@ public static class CellValueReader
             => (int)identifier,
         string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
-        _ => throw Mismatch(column, value, "ідентифікатор"),
+        _ => throw Mismatch(column, value, ExpectedType.Identifier),
     };
 
     private static string Text(object value) => value switch
@@ -177,21 +177,61 @@ public static class CellValueReader
     };
 
     /// <summary>
+    /// Очікуваний тип значення: ключ каталогу + запасне українське слово.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Очікуваний тип — частина КЛЮЧА, а не підстановка в нього. Резолвер
+    /// (<c>UiStringResolver.Format</c>) підставляє рядки як є і другого рівня
+    /// розв'язання ключів не має: передати <c>{expected}</c> значенням
+    /// означало б або лишити в англійському реченні українське «число», або
+    /// завести поруч другий механізм локалізації. Чотири суфіксовані ключі
+    /// дають ще й граматично правильне речення в кожній мові, чого підстановка
+    /// одного слова не дає в принципі.
+    ///
+    /// ⚠ <see cref="Code"/> їде клієнтові полем <c>expected</c> у
+    /// <c>problem+json</c> (<c>ExceptionHandlingMiddleware</c> копіює
+    /// <c>Details</c> у розширення), тому це стале КОДОВЕ слово — як
+    /// <c>{status}</c> і <c>{reason}</c> у сусідніх шаблонах сіду, — а не
+    /// текст для показу. Раніше там лежало українське «число».
+    /// </remarks>
+    private sealed record ExpectedType(string Code, string MessageKey, string Fallback)
+    {
+        public static readonly ExpectedType Number =
+            new("Number", "err.ECR-CELL-0422.expectsNumber", "число");
+
+        public static readonly ExpectedType Boolean =
+            new("Boolean", "err.ECR-CELL-0422.expectsBoolean", "булеве значення");
+
+        public static readonly ExpectedType Date =
+            new("Date", "err.ECR-CELL-0422.expectsDate", "дата");
+
+        public static readonly ExpectedType Identifier =
+            new("Identifier", "err.ECR-CELL-0422.expectsIdentifier", "ідентифікатор");
+    }
+
+    /// <summary>
     /// Відмова з назвою колонки і тим, що саме очікувалося.
     /// </summary>
     /// <remarks>
     /// ⚠ У повідомленні є <b>код колонки й очікуваний тип</b>, але немає
     /// самого значення: воно може бути персональними даними, а текст помилки
     /// іде і в лог, і клієнту (ФВ-6.11).
+    ///
+    /// ⛔ <c>messageKey</c> (`U-02`). Це найчастіша інтерактивна відмова
+    /// продукту — її бачить кожен, хто набрав не той тип у комірку, — і доти
+    /// вона їхала на екран готовим українським реченням під англійським
+    /// заголовком. Речення лишається запасним: резолвер повертається до нього,
+    /// коли ключа в каталозі немає.
     /// </remarks>
-    private static BusinessRuleException Mismatch(ColumnDef column, object value, string expected)
+    private static BusinessRuleException Mismatch(ColumnDef column, object value, ExpectedType expected)
         => new(
             TypeMismatch,
-            $"Колонка «{column.Code}» очікує {expected}.",
+            $"Колонка «{column.Code}» очікує {expected.Fallback}.",
             new Dictionary<string, object?>
             {
+                ["messageKey"] = expected.MessageKey,
                 ["columnCode"] = column.Code,
-                ["expected"] = expected,
+                ["expected"] = expected.Code,
                 ["actualKind"] = value.GetType().Name,
             });
 }
