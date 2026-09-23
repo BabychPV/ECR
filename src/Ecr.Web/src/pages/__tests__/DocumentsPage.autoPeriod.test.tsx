@@ -213,7 +213,11 @@ describe('DocumentsPage: автовибір поточного періоду (U
     );
 
     // Стан більше не «—»: бейдж аркуша на місці.
-    expect(stateCellOf('DOC-000001').textContent).toContain('S1');
+    // ⚠ Саме бейдж, а не код `S1`: у документа ОДИН аркуш, і код у стані
+    // більше не друкується (`DocumentsPage.stateColumn.test.tsx`).
+    expect(
+      stateCellOf('DOC-000001').querySelector('[data-status-state="Draft"]'),
+    ).not.toBeNull();
     expect(stateCellOf('DOC-000001').textContent).not.toBe('—');
   });
 

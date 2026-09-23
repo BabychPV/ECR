@@ -359,9 +359,19 @@ export function DocumentsPage(): JSX.Element {
                         <Group gap="md">
                           {Object.entries(document.sheetStates).map(([sheet, state]) => (
                             <Group key={sheet} gap="xs" wrap="nowrap">
-                              <Text size="xs" c="dimmed">
-                                {sheet}
-                              </Text>
+                              {/* ⛔ Аркуш ОДИН — код лише шум: питання «чий
+                                  це стан» не виникає, а внутрішній код
+                                  (`S99819007`) людині нічого не каже.
+                                  ⚠ Коли аркушів кілька, лишається КОД, а не
+                                  назва: `DocumentSummary.sheetStates` несе
+                                  лише коди, а назв аркушів у переліку немає
+                                  (їх віддає тільки `…/documents/{id}/tables`
+                                  по одному документу). */}
+                              {!isSingleSheet(document) && (
+                                <Text size="xs" c="dimmed">
+                                  {sheet}
+                                </Text>
+                              )}
                               <StatusBadge kind="sheet" state={state} />
                             </Group>
                           ))}
@@ -414,4 +424,16 @@ export function DocumentsPage(): JSX.Element {
       )}
     </>
   );
+}
+
+/**
+ * Чи в документа рівно один аркуш — тоді стан у переліку не потребує коду.
+ *
+ * ⚠ Обидві умови разом: `sheetCount` — скільки аркушів у документі, а
+ * `sheetStates` — скільки з них мають рядок стану за період. Якщо аркушів
+ * два, а стан є лише в одного, код ще потрібен: без нього не видно, ЧИЙ це
+ * стан.
+ */
+function isSingleSheet(document: { sheetCount: number; sheetStates: Record<string, string> }): boolean {
+  return document.sheetCount <= 1 && Object.keys(document.sheetStates).length === 1;
 }

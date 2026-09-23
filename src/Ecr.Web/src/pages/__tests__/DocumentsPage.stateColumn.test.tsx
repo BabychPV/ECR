@@ -72,6 +72,32 @@ const withUnknown = {
   sheetStates: { S1: 'Returned' },
 };
 
+/*
+ * ⚠ Один аркуш — і код у стані зайвий (знімок людини: `S99819007` перед
+ * `SUBMITTED` на документі з одним аркушем).
+ */
+const singleSheet = {
+  id: 4,
+  businessKey: 'DOC-000004',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 1,
+  sheetStates: { S99819007: 'Submitted' },
+};
+
+/*
+ * ⚠ Аркушів ДВА, а рядок стану — лише в одного: код ще потрібен, інакше не
+ * видно, чий це стан.
+ */
+const partialStates = {
+  id: 5,
+  businessKey: 'DOC-000005',
+  createdAt: '2026-01-01T00:00:00Z',
+  projectId: 1,
+  sheetCount: 2,
+  sheetStates: { S7: 'Draft' },
+};
+
 function mockFetch(): void {
   vi.stubGlobal(
     'fetch',
@@ -98,9 +124,9 @@ function mockFetch(): void {
       if (url.includes('/api/v1/documents')) {
         return new Response(
           JSON.stringify({
-            items: [withoutStates, withStates, withUnknown],
+            items: [withoutStates, withStates, withUnknown, singleSheet, partialStates],
             nextCursor: null,
-            totalCount: 3,
+            totalCount: 5,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -336,6 +362,41 @@ describe('DocumentsPage: тон стану аркуша приходить із 
       expect(unknown.getAttribute('data-status-tone')).not.toBe(
         known.getAttribute('data-status-tone'),
       );
+    },
+    SlowEnvTimeout,
+  );
+});
+
+describe('DocumentsPage: код аркуша лише там, де аркушів кілька', () => {
+  it(
+    'документ з одним аркушем — лише бейдж, без внутрішнього коду',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000004', {}, { timeout: SlowEnvTimeout });
+
+      const cell = stateCellOf('DOC-000004');
+
+      // ⛔ Мутаційний доказ: прибери умову `!isSingleSheet(document)` — код
+      // повернеться в клітинку, і цей рядок почервоніє.
+      expect(cell.textContent).not.toContain('S99819007');
+      expect(badgeIn(cell, 'Submitted').textContent).toBe('⟦status.sheet.Submitted⟧');
+    },
+    SlowEnvTimeout,
+  );
+
+  it(
+    'аркушів кілька — код лишається поруч зі станом (назв у переліку немає)',
+    async () => {
+      mockFetch();
+      show();
+
+      await screen.findByText('DOC-000005', {}, { timeout: SlowEnvTimeout });
+
+      // ⛔ Мутаційний доказ: сховай код завжди — обидва рядки почервоніють.
+      expect(pairOf(stateCellOf('DOC-000005'), 'Draft').textContent).toContain('S7');
+      expect(pairOf(stateCellOf('DOC-000002'), 'Rejected').textContent).toContain('S3');
     },
     SlowEnvTimeout,
   );
