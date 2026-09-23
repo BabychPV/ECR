@@ -1,5 +1,5 @@
 ﻿import { lazy, Suspense, useEffect, useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Group, Skeleton, Stack, Tabs, Text } from '@mantine/core';
+import { Badge, Button, Skeleton, Stack, Tabs, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -18,6 +18,7 @@ import {
   DeleteDocumentPermission,
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
+import { ActionGroup, DocumentToolbar } from '@/features/documents/DocumentToolbar';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
@@ -362,7 +363,7 @@ export function DocumentPage(): JSX.Element {
    */
   useDocumentPending(documentId, session.data?.userId);
 
-  // Видалення чернетки: кнопка — у шапці, відмова сервера — банером під нею.
+  // Видалення чернетки: пункт — у меню «More», відмова сервера — банером під рядком дій.
   const deletion = useDeleteDocumentAction({
     documentId,
     document: summary.data,
@@ -370,8 +371,8 @@ export function DocumentPage(): JSX.Element {
     allowed: can(session.data, DeleteDocumentPermission),
   });
 
-  // Зміна номера справи (бізнес-ключа, ФВ-3.9): кнопка — у шапці, `rekeyStale`
-  // — банером під нею; решта відмов лишається в самому діалозі (форма, яку
+  // Зміна номера справи (бізнес-ключа, ФВ-3.9): пункт — у меню «More», `rekeyStale`
+  // — банером під рядком дій; решта відмов лишається в самому діалозі (форма, яку
   // можна виправити).
   const businessKeyChange = useBusinessKeyChangeAction({
     documentId,
@@ -412,64 +413,77 @@ export function DocumentPage(): JSX.Element {
             ? `${localized(document.nameL10n)} · ${document.businessKey}`
             : document.businessKey
         }
+        // ⛔ У шапці — лише період: заголовок і поле періоду — один блок, а
+        // дії — окремий рядок нижче (`DocumentToolbar`). Разом в одному
+        // пласкому рядку висока колонка періоду й переноси по одній кнопці
+        // давали «Delete document» самотою під полем періоду (знімок людини).
         actions={
-          <Group gap="xs">
-            {/* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
-                `value ?? periodKey` зберігає стару поведінку очищеного поля:
-                воно НЕ звужувало документ до «без періоду» (тут період
-                обов'язковий — `urlPeriod ?? currentPeriodKey()` нижче), а
-                просто лишало те, що вже було. */}
-            <PeriodPicker
-              size="xs"
-              miw={110}
-              value={periodKey}
-              onChange={(value) => setPeriodKey(value ?? periodKey)}
-            />
-            <Button
-              size="xs"
-              variant="default"
-              loading={validate.isPending}
-              onClick={() => validate.mutate(scope)}
-            >
-              {t('document.validate')}
-            </Button>
-
-            {/* ⛔ Імпорт лише туди, куди можна писати. Кнопка над поданим
-                аркушем обіцяла б заміну чисел, яку сервер відхилить: подане
-                редагується лише після повернення в роботу (`ФВ-5.20a`). */}
-            {can(session.data, 'Document.Import') && !readOnly && (
-              <Suspense fallback={null}>
-                <ImportPanel documentId={documentId} periodKey={periodKey} />
-              </Suspense>
-            )}
-
-            {can(session.data, 'Document.Export') && (
-              <ExportButton
-                documentId={documentId}
-                periodKey={periodKey}
-                language={session.data?.language ?? 'en'}
-              />
-            )}
-
-            {/* ⛔ Увесь робочий процес аркуша — в одному компоненті. До аудиту
-                тут була сама лише кнопка «Подати», і на ній процес
-                закінчувався: затвердити документ через інтерфейс було
-                неможливо (`A7-39`). */}
-            {active !== undefined && (
-              <SheetActions
-                documentId={documentId}
-                sheetDefId={active.sheetDefId}
-                periodKey={periodKey}
-                state={state}
-              />
-            )}
-
-            {businessKeyChange.trigger}
-
-            {deletion.trigger}
-          </Group>
+          /* ⛔ UI-06: `NumberInput` → `PeriodPicker` (`DIRECTIVE-15-FRONTEND.md:129`).
+              `value ?? periodKey` зберігає стару поведінку очищеного поля:
+              воно НЕ звужувало документ до «без періоду» (тут період
+              обов'язковий — `urlPeriod ?? currentPeriodKey()` нижче), а
+              просто лишало те, що вже було. */
+          <PeriodPicker
+            size="xs"
+            miw={110}
+            value={periodKey}
+            onChange={(value) => setPeriodKey(value ?? periodKey)}
+          />
         }
       />
+
+      {/* ⚠ Щоденні дії — групами, що переносяться цілими; рідкісні й
+          небезпечні (зміна ключа, видалення) — у меню «More» праворуч.
+          Діалоги обох — поза меню: меню розмонтовує вміст, щойно
+          закривається, тобто саме тоді, коли діалог мав би відкритися. */}
+      <DocumentToolbar more={[businessKeyChange.menuItem, deletion.menuItem]}>
+        <ActionGroup name="check">
+          <Button
+            size="xs"
+            variant="default"
+            loading={validate.isPending}
+            onClick={() => validate.mutate(scope)}
+          >
+            {t('document.validate')}
+          </Button>
+
+          {/* ⛔ Імпорт лише туди, куди можна писати. Кнопка над поданим
+              аркушем обіцяла б заміну чисел, яку сервер відхилить: подане
+              редагується лише після повернення в роботу (`ФВ-5.20a`). */}
+          {can(session.data, 'Document.Import') && !readOnly && (
+            <Suspense fallback={null}>
+              <ImportPanel documentId={documentId} periodKey={periodKey} />
+            </Suspense>
+          )}
+        </ActionGroup>
+
+        {can(session.data, 'Document.Export') && (
+          <ExportButton
+            documentId={documentId}
+            periodKey={periodKey}
+            language={session.data?.language ?? 'en'}
+          />
+        )}
+
+        {/* ⛔ Увесь робочий процес аркуша — в одному компоненті. До аудиту
+            тут була сама лише кнопка «Подати», і на ній процес
+            закінчувався: затвердити документ через інтерфейс було
+            неможливо (`A7-39`). */}
+        {active !== undefined && (
+          <ActionGroup name="workflow">
+            <SheetActions
+              documentId={documentId}
+              sheetDefId={active.sheetDefId}
+              periodKey={periodKey}
+              state={state}
+            />
+          </ActionGroup>
+        )}
+      </DocumentToolbar>
+
+      {businessKeyChange.dialog}
+
+      {deletion.dialog}
 
       {businessKeyChange.refusal}
 

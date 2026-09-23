@@ -1414,6 +1414,9 @@ USING (VALUES
     (N'document.exportBuilding',         N'en', N'Building...', 1),
     (N'document.exportReady',            N'en', N'Download the workbook', 1),
     (N'document.exportFailed',           N'en', N'Export failed.', 1),
+    -- Меню рідкісних і небезпечних дій документа (зміна ключа, видалення):
+    -- поза рядком щоденних кнопок, праворуч.
+    (N'document.moreActions',            N'en', N'More', 1),
     (N'document.noSheets',               N'en', N'This document has no sheets for the selected period.', 1),
     -- Порівняння версій подання документа. ⚠ Перелік змін обрізає сервер, тож
     -- банер каже прямо: за показаним можуть бути ще зміни.

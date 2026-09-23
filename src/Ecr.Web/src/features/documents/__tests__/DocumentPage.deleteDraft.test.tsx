@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -113,6 +113,7 @@ function show(permissions: string[], sheetStates: Record<string, string>): void 
 const SlowEnvTimeout = 400_000;
 const DeleteButton = { name: '⟦documents.delete⟧' };
 const ValidateButton = { name: '⟦document.validate⟧' };
+const MoreButton = { name: '⟦document.moreActions⟧' };
 
 describe('DocumentPage: кнопка «Видалити документ-чернетку»', () => {
   afterEach(() => {
@@ -124,8 +125,10 @@ describe('DocumentPage: кнопка «Видалити документ-чер�
     async () => {
       show(['Document.View', 'Document.Delete'], { GEN: 'Draft', AIR: 'Draft' });
 
+      // ⚠ Дія — пунктом меню «More» (`DocumentToolbar`), не кнопкою в рядку.
+      fireEvent.click(await screen.findByRole('button', MoreButton, { timeout: SlowEnvTimeout }));
       expect(
-        await screen.findByRole('button', DeleteButton, { timeout: SlowEnvTimeout }),
+        await screen.findByRole('menuitem', DeleteButton, { timeout: SlowEnvTimeout }),
       ).toBeDefined();
     },
     SlowEnvTimeout,
@@ -139,7 +142,9 @@ describe('DocumentPage: кнопка «Видалити документ-чер�
       // ⛔ Спершу — що сторінка намальована, інакше «кнопки немає» було б
       // правдою просто тому, що не намальовано нічого.
       await screen.findByRole('button', ValidateButton, { timeout: SlowEnvTimeout });
-      expect(screen.queryByRole('button', DeleteButton)).toBeNull();
+      // ⚠ Інших пунктів меню в цього користувача немає, тож немає й самого меню.
+      expect(screen.queryByRole('button', MoreButton)).toBeNull();
+      expect(screen.queryByRole('menuitem', DeleteButton)).toBeNull();
     },
     SlowEnvTimeout,
   );
@@ -152,7 +157,9 @@ describe('DocumentPage: кнопка «Видалити документ-чер�
       show(['Document.View', 'Document.Delete'], { GEN: 'Draft', AIR: 'Submitted' });
 
       await screen.findByRole('button', ValidateButton, { timeout: SlowEnvTimeout });
-      expect(screen.queryByRole('button', DeleteButton)).toBeNull();
+      // ⚠ Інших пунктів меню в цього користувача немає, тож немає й самого меню.
+      expect(screen.queryByRole('button', MoreButton)).toBeNull();
+      expect(screen.queryByRole('menuitem', DeleteButton)).toBeNull();
     },
     SlowEnvTimeout,
   );
