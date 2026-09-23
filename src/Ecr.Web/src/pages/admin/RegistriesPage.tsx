@@ -46,6 +46,23 @@ import { t } from '@/shared/i18n';
 const Unbounded = '…';
 
 /**
+ * Сьогоднішня дата КЛІЄНТА як `"YYYY-MM-DD"` — `asOf` для темпорального
+ * довідника на цьому екрані (перелік без контексту періоду документа).
+ *
+ * ⛔ НЕ `toISOString().slice(0, 10)`: той читає північ як UTC і в
+ * від'ємному зсуві зсуває календарний день на добу (та сама пастка, що
+ * задокументована для `DocumentHeaderPanel.tsx`, `isoDateOf`).
+ */
+function todayIso(): string {
+  const now = new Date();
+  const year = String(now.getFullYear()).padStart(4, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Конструктор реєстрів: схема, дані, темпоральність.
  *
  * ⚠ Вікно чинності показується завжди, навіть порожнє. Запис без вікна і
@@ -115,16 +132,36 @@ export function RegistriesPage(): JSX.Element {
     onError: showApiError,
   });
 
-  const entries = useQuery({
-    queryKey: queryKeys.registries.entries(code ?? ''),
-    queryFn: () =>
-      apiFetch<RegistryEntryDto[]>(
-        `/api/v1/registries/${encodeURIComponent(code ?? '')}/entries`,
-      ),
-    enabled: code !== null,
-  });
-
   const selected = registries.data?.find((registry) => registry.code === code);
+
+  /*
+   * ⛔ Дефект живого прогону: `GET …/entries` вимагав `asOf` БЕЗУМОВНО для
+   * БУДЬ-ЯКОГО довідника (сервер фіксив у `GetRegistryEntriesHandler.cs`,
+   * той самий PR). Нетемпоральний довідник (`isTemporal === false`) не має
+   * дати, від якої залежить перелік, — і `asOf` для нього тепер не
+   * надсилається зовсім, а не підставляється «сьогодні» про людське око.
+   * Темпоральний — сьогоднішня дата КЛІЄНТА: цей екран показує «поточний»
+   * стан довідника адміністратору, без контексту періоду документа (той є
+   * лише в `DocumentGrid`/`DocumentHeaderPanel`).
+   */
+  const asOf = selected?.isTemporal === true ? todayIso() : null;
+
+  const entries = useQuery({
+    queryKey: [...queryKeys.registries.entries(code ?? ''), asOf],
+    queryFn: () => {
+      // ⚠ Базовий шлях — ОКРЕМИЙ шаблонний рядок, без `?asOf=` усередині:
+      // `EndpointCoverageTests.Кожна_адреса_яку_викликає_клієнт_існує_на_сервері`
+      // читає джерело регуляркою, що бере ВЕСЬ вміст МІЖ парою лапок як
+      // адресу, — рядок запиту в тому самому літералі виглядав би для неї
+      // окремим (і неіснуючим) серверним маршрутом.
+      const baseUrl = `/api/v1/registries/${encodeURIComponent(code ?? '')}/entries`;
+
+      return apiFetch<RegistryEntryDto[]>(
+        asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
+      );
+    },
+    enabled: code !== null && selected !== undefined,
+  });
 
   const remove = useDeleteRegistryEntry(code ?? '');
 

@@ -240,17 +240,56 @@ export function DocumentHeaderPanel({
   });
 
   const lookupRegistryCodes = useMemo(() => {
-    const byId = new Map((registriesList.data ?? []).map((registry) => [registry.id, registry.code]));
+    const byId = new Map(
+      (registriesList.data ?? []).map((registry) => [registry.id, registry] as const),
+    );
     return lookupRegistryDefIds
-      .map((id) => ({ id, code: byId.get(id) }))
-      .filter((entry): entry is { id: number; code: string } => entry.code !== undefined);
+      .map((id) => {
+        const registry = byId.get(id);
+        return { id, code: registry?.code, isTemporal: registry?.isTemporal ?? false };
+      })
+      .filter(
+        (entry): entry is { id: number; code: string; isTemporal: boolean } =>
+          entry.code !== undefined,
+      );
   }, [lookupRegistryDefIds, registriesList.data]);
 
+  /*
+   * ⛔ Дефект живого прогону: `GET …/entries` вимагав `asOf` БЕЗУМОВНО, і цей
+   * піцкер його не надсилав НІКОЛИ — сервер (фікс у `GetRegistryEntriesHandler.cs`,
+   * той самий PR) відмовляв `422` для КОЖНОГО довідника, включно з
+   * нетемпоральним. Тепер `asOf` іде лише для ТЕМПОРАЛЬНОГО довідника.
+   *
+   * ⚠ Дата — сьогоднішня КЛІЄНТА, а НЕ дата періоду документа. Різниця з
+   * `DocumentGrid.tsx` (там — кінець періоду) не смак: `DocumentHeaderPanel`
+   * отримує лише `documentId`/`canEdit` (`DocumentHeaderPanelProps` вище) —
+   * `DocumentPage.tsx` не передає `periodKey`, і сам ендпоінт шапки
+   * (`GET …/documents/{id}/header`) період не приймає: шапка належить
+   * ДОКУМЕНТУ, а не конкретному періоду (на відміну від таблиць аркушів,
+   * `ФВ-3.6`). Провести `periodKey` сюди означало б розширити
+   * `DocumentPage.tsx` — файл поза дозволеним списком цієї задачі. Якщо
+   * шапка колись отримає дату періоду — замінити тут одним рядком.
+   */
+  const lookupAsOf = isoDateOf(new Date());
+
   const lookupEntriesQueries = useQueries({
-    queries: lookupRegistryCodes.map(({ code }) => ({
-      queryKey: queryKeys.registries.entries(code),
-      queryFn: () => apiFetch<RegistryEntryDto[]>(`/api/v1/registries/${encodeURIComponent(code)}/entries`),
-    })),
+    queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
+      const asOf = isTemporal ? lookupAsOf : null;
+
+      // ⚠ Базовий шлях — ОКРЕМИЙ шаблонний рядок, без `?asOf=` усередині:
+      // `EndpointCoverageTests.Кожна_адреса_яку_викликає_клієнт_існує_на_сервері`
+      // бере ВЕСЬ вміст МІЖ парою лапок як адресу — рядок запиту в тому
+      // самому літералі виглядав би для неї окремим неіснуючим маршрутом.
+      const baseUrl = `/api/v1/registries/${encodeURIComponent(code)}/entries`;
+
+      return {
+        queryKey: [...queryKeys.registries.entries(code), asOf],
+        queryFn: () =>
+          apiFetch<RegistryEntryDto[]>(
+            asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
+          ),
+      };
+    }),
   });
 
   const lookupEntriesByRegistryId = useMemo(() => {

@@ -91,12 +91,21 @@ interface Sent {
 
 const sent: Sent[] = [];
 
+/** Кожен GET `…/entries`: код довідника і сирий рядок запиту (без `?`). */
+interface EntriesRequest {
+  code: string;
+  query: string | null;
+}
+
+const entriesRequests: EntriesRequest[] = [];
+
 function mockServer(
   fields: HeaderField[],
   patchResponse?: { status: number; body?: unknown },
   registries?: { list: readonly RegistryDef[]; entries: Readonly<Record<string, readonly RegistryEntry[]>> },
 ): void {
   sent.length = 0;
+  entriesRequests.length = 0;
 
   vi.stubGlobal(
     'fetch',
@@ -137,9 +146,18 @@ function mockServer(
         });
       }
 
-      const entriesMatch = /\/api\/v1\/registries\/([^/]+)\/entries$/.exec(url);
+      // ⚠ `?asOf=…` — лише для ТЕМПОРАЛЬНОГО довідника (`GetRegistryEntriesHandler`
+      // фікс, той самий PR): шлях звіряється БЕЗ рядка запиту, а сам URL
+      // записується в `entriesRequests` нижче — тест «Lookup з temporal-
+      // довідником» перевіряє САМЕ query-параметр. Окремий масив, а не
+      // спільний `sent`: той рахує лише `PATCH …/header`, і GET `/entries`
+      // серед Lookup-полів приходить ДО кліку «Зберегти» — потрапивши в
+      // `sent`, він зламав би `sent.length === 1` у сусідніх тестах.
+      const [entriesPath, entriesQuery] = url.split('?');
+      const entriesMatch = /\/api\/v1\/registries\/([^/]+)\/entries$/.exec(entriesPath ?? '');
       if (entriesMatch !== null && method === 'GET') {
         const code = decodeURIComponent(entriesMatch[1] ?? '');
+        entriesRequests.push({ code, query: entriesQuery ?? null });
         return new Response(JSON.stringify(registries?.entries[code] ?? []), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -484,5 +502,75 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
 
     const input = await screen.findByLabelText('Ref');
     expect((input as HTMLInputElement).value).toBe('42');
+  });
+
+  /*
+   * ⛔ Дефект живого прогону (той самий PR, `GetRegistryEntriesHandler.cs`):
+   * `GET …/entries` вимагав `asOf` БЕЗУМОВНО, і цей піцкер його не надсилав
+   * НІКОЛИ — сервер відмовляв `422` для КОЖНОГО довідника, включно з
+   * нетемпоральним (усі фікстури вище — `isTemporal: false` за замовчуванням
+   * `registryDef()`, і саме тому жоден із попередніх тестів цього не ловив).
+   * Два тести нижче — контраст: без `asOf` для нетемпорального (як і
+   * раніше), з `asOf` — лише для темпорального.
+   */
+  it('нетемпоральний довідник (за замовчуванням) — запит БЕЗ query-параметра asOf', async () => {
+    show({
+      fields: [
+        field({
+          code: 'UNIT',
+          dataType: 'Lookup',
+          value: null,
+          lookupRegistryDefId: 7,
+          label: { values: { en: 'Unit' } },
+        }),
+      ],
+      registries: {
+        list: [registryDef({ id: 7, code: 'UNITS', isTemporal: false })],
+        entries: { UNITS: [registryEntry({ id: 42, display: 'Кілограм' })] },
+      },
+    });
+
+    await screen.findByLabelText('Unit');
+
+    await waitFor(() => {
+      expect(entriesRequests.some((r) => r.code === 'UNITS')).toBe(true);
+    });
+
+    const request = entriesRequests.find((r) => r.code === 'UNITS');
+    expect(request?.query).toBeNull();
+  });
+
+  it('темпоральний довідник — запит несе asOf (сьогоднішня дата клієнта)', async () => {
+    show({
+      fields: [
+        field({
+          code: 'UNIT',
+          dataType: 'Lookup',
+          value: null,
+          lookupRegistryDefId: 7,
+          label: { values: { en: 'Unit' } },
+        }),
+      ],
+      registries: {
+        list: [registryDef({ id: 7, code: 'UNITS', isTemporal: true })],
+        entries: { UNITS: [registryEntry({ id: 42, display: 'Кілограм' })] },
+      },
+    });
+
+    await screen.findByLabelText('Unit');
+
+    await waitFor(() => {
+      expect(entriesRequests.some((r) => r.code === 'UNITS')).toBe(true);
+    });
+
+    const request = entriesRequests.find((r) => r.code === 'UNITS');
+    const today = new Date();
+    const expected = `asOf=${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    // ⛔ Мутаційний доказ: прибери гейт `isTemporal` перед `asOf` у
+    // `DocumentHeaderPanel.tsx` (лишити `null` завжди чи навпаки завжди
+    // надсилати) — цей рядок почервоніє: query-параметр зникне або
+    // з'явиться для нетемпорального тесту вище.
+    expect(request?.query).toBe(expected);
   });
 });
