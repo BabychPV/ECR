@@ -1,6 +1,7 @@
 // src/Ecr.Application/Registries/UpsertRegistryEntryHandler.cs
 using System.Text.Json;
 using Ecr.Application.Common;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
@@ -144,6 +145,25 @@ public sealed class UpsertRegistryEntryHandler(
     /// передається параметром замість поля екземпляра: метод раніше читав
     /// лише це поле, тож перетворення на static нічого не втратило.
     /// </para>
+    /// <para>
+    /// ⛔ Значення проходить через <see cref="CellValueReader.Normalize"/> ПЕРЕД
+    /// <c>RegistryValue.Set</c> — той самий крок, який `A7-01` уже додав для
+    /// комірок документа. Через HTTP <c>values</c> приходить
+    /// <c>Dictionary&lt;string, object?&gt;</c>, і <c>System.Text.Json</c> кладе
+    /// в кожне значення <see cref="JsonElement"/>, а не готовий
+    /// <c>decimal</c>/<c>bool</c>/<c>DateTime</c>. <c>RegistryValue.Set</c>
+    /// приводить значення голими <c>Convert.ToDecimal</c>/<c>ToBoolean</c>/
+    /// <c>ToInt64</c> і патерн-матчем для дати — жоден не впізнає
+    /// <see cref="JsonElement"/>, тож СПРАВЖНІЙ запит із коректним числом,
+    /// булевим чи датою відмовляв би так само, як зіпсований ввід (виміряно
+    /// тестом до фіксу: коректне число для поля <c>Int</c> давало
+    /// <c>422 err.ECR-REG-0422.valueNotNumber</c>). Для <c>String</c> це
+    /// «випадково працювало» — <c>JsonElement.ToString()</c> повертає текст.
+    /// CSV-імпорт (<see cref="Registries.ImportRegistryEntriesHandler"/>) цей
+    /// самий метод не зачіпає: він передає ГОТОВИЙ <c>string</c> (текст рядка
+    /// CSV), а <see cref="CellValueReader.Normalize"/> для не-<c>JsonElement</c>
+    /// входу — тотожність.
+    /// </para>
     /// </remarks>
     internal static async Task<IReadOnlyList<RegistryValueFieldChange>> ApplyValuesAsync(
         IRegistryStore registries,
@@ -201,7 +221,7 @@ public sealed class UpsertRegistryEntryHandler(
             // для числового поля, і порівняння з боксованим decimal завжди
             // «відрізнялося» б).
             var oldValue = isNew ? null : RawValue(value!, field.DataType);
-            value!.Set(field.DataType, raw, field.UnitId);
+            value!.Set(field.DataType, CellValueReader.Normalize(raw), field.UnitId);
             var newValue = RawValue(value, field.DataType);
 
             if (!Equals(oldValue, newValue))
