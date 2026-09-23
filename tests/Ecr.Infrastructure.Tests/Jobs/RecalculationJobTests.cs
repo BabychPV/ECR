@@ -292,6 +292,7 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
             Substitute.For<ITemplateVersionStore>(),
             Substitute.For<IFormulaEngine>(),
             units,
+            Substitute.For<Ecr.Application.Ports.IRegistryStore>(),
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             Substitute.For<Ecr.Application.Ports.IUnitOfWork>());

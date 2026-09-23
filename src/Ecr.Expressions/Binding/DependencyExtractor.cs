@@ -19,6 +19,13 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
     /// <summary>Крос-періодне посилання.</summary>
     public const byte KindCrossPeriod = 3;
 
+    /// <summary>
+    /// Поле запису довідника — друге ребро <c>REGFIELD</c>, КРІМ звичайної
+    /// Cell-залежності від самої Lookup-комірки (ту додає загальний обхід
+    /// аргументів функції, як для будь-якого іншого посилання-аргументу).
+    /// </summary>
+    public const byte KindRegistry = 2;
+
     /// <summary>Обходить AST і збирає всі залежності.</summary>
     /// <param name="root">Корінь виразу.</param>
     /// <param name="currentTableDefId">Таблиця, в якій живе формула.</param>
@@ -92,6 +99,19 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
                 return;
 
             case FunctionNode function:
+                // ⚠ REGFIELD дає ДВА ребра з одного вузла: звичайне Cell —
+                // від Lookup-комірки аргументу 0 (його додає обхід нижче,
+                // той самий шлях, яким комірка-аргумент іде для будь-якої
+                // іншої функції), і Registry — від ПОЛЯ довідника, яке ця
+                // комірка вибирає. Друге видобуває `AddRegistryDependency`
+                // ДО обходу, бо саме воно статичне лише тут: у рантаймі
+                // конкретний `EntryId` залежить від значення комірки.
+                if (function.Arguments.Count == 2
+                    && string.Equals(function.Name, "REGFIELD", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddRegistryDependency(function, found, currentTableDefId, currentRowKey, currentColumnDefId);
+                }
+
                 foreach (var argument in function.Arguments)
                 {
                     Visit(argument, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
@@ -150,6 +170,84 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
         found.Add(new ExtractedDependency(
             kind, resolved.TableDefId, resolved.RowKey, resolved.ColumnDefId,
             resolved.FilterJson, offset, found.Count));
+    }
+
+    /// <summary>
+    /// Registry-ребро <c>REGFIELD(lookup, "код")</c>: адреса Lookup-комірки —
+    /// та сама, що резолвить звичайний обхід аргументу, — і код поля з
+    /// другого аргументу, разом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Код поля лягає в <see cref="ExtractedDependency.FilterJson"/> — те
+    /// саме поле, яким Cell-залежність несе предикат `RowMode = Dynamic`.
+    /// Конфлікту немає: REGFIELD приймає лише ОДНУ комірку аргументом 0
+    /// (перевірка нижче), тому Registry-запис на предикатний рядок ніколи не
+    /// трапляється — FilterJson тут завжди означає код поля, а в Cell-записі
+    /// того самого вузла (їх додає окремий обхід) — завжди предикат або
+    /// <c>null</c>. Заводити п'яте поле під один рядок означало б повторити
+    /// вже наявну колонку заради розрізнення, якого дає сам <c>DependsOnKind</c>.
+    /// </remarks>
+    private void AddRegistryDependency(
+        FunctionNode function,
+        List<ExtractedDependency> found,
+        int currentTableDefId,
+        string? currentRowKey,
+        int? currentColumnDefId)
+    {
+        if (function.Arguments[0] is not CellReferenceNode reference)
+        {
+            // Перший аргумент — не пряме посилання (вкладений вираз, IF
+            // тощо): статичної адреси Lookup-комірки нема звідки взяти. Це не
+            // помилка публікації — REGFIELD однаково порахується в рантаймі,
+            // лише без цього другого ребра графа залежностей.
+            return;
+        }
+
+        if (function.Arguments[1] is not LiteralNode { Type: ExpressionValueType.Text, Value: string fieldCode })
+        {
+            // Код поля обчислюється в рантаймі, а не написаний літералом —
+            // статично невідомий, видобувати залежність нема на що.
+            return;
+        }
+
+        // REGFIELD адресує ОДНУ комірку: діапазон чи предикат аргументом 0
+        // синтаксично можливі (це звичайний `CellReferenceNode`), але
+        // Registry-ребро для них не має сенсу — яке з багатьох значень
+        // діапазону дає id запису, невідомо статично. `Function` теж
+        // обчислить помилку в рантаймі (`RegistryField` вимагає рівно одне
+        // значення на групу), тут лише немає чим доповнити граф залежностей.
+        if (reference.Row is RowSelector.Range or RowSelector.Predicate)
+        {
+            return;
+        }
+
+        // ⚠ Лише ПОТОЧНИЙ період: `RecalculationService` сьогодні будує
+        // знімок довідника за поточний зріз, а не за минулі періоди
+        // (симетрично тому, як Cell-залежність із `PeriodOffset != 0` не
+        // входить у зворотний індекс `RecalculationPlanBuilder`). Cell/
+        // CrossPeriod ребро для самої комірки генеричний обхід додає
+        // однаково — лише другого, Registry-ребра, для минулого періоду тут
+        // не буде.
+        if (reference.PeriodOffset != 0)
+        {
+            return;
+        }
+
+        // ⚠ `diagnostics: null` тут НАВМИСНО, а не недогляд: той самий вузол
+        // резолвиться ще раз у генеричному обході (для Cell-залежності), і
+        // ЙОГО виклик уже звітує про нерезолвлене посилання. Передати список
+        // сюди теж означало б подвоєне зауваження на одну й ту саму помилку —
+        // редактор показав би її двічі там, де публікація одну (`ФВ-9.15a`).
+        var resolved = resolver.Resolve(reference, currentTableDefId, currentRowKey, null, currentColumnDefId);
+
+        if (resolved is null)
+        {
+            return;
+        }
+
+        found.Add(new ExtractedDependency(
+            KindRegistry, resolved.TableDefId, resolved.RowKey, resolved.ColumnDefId,
+            fieldCode, null, found.Count));
     }
 }
 

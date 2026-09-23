@@ -20,6 +20,23 @@ namespace Ecr.Application.Validation;
 /// </remarks>
 public abstract class ValidationEvaluationContext : IEvaluationContext
 {
+    /// <summary>Порожній знімок довідника — конструктор без параметра.</summary>
+    private static readonly IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>
+        EmptyRegistryFields = new Dictionary<long, IReadOnlyDictionary<string, ExpressionValue>>();
+
+    private readonly IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>> _registryFields;
+
+    /// <param name="registryFields">
+    /// Знімок полів довідника для <c>REGFIELD</c> у правилах (id запису → код
+    /// поля → значення); <c>null</c> — правило без REGFIELD, рівнозначно
+    /// порожньому знімку. Той самий принцип, що в
+    /// <c>SliceEvaluationContext</c>: контекст правила синхронний, а довідник
+    /// читається заздалегідь.
+    /// </param>
+    protected ValidationEvaluationContext(
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
+        => _registryFields = registryFields ?? EmptyRegistryFields;
+
     /// <inheritdoc />
     public PeriodContext Period { get; init; } = new(
         DateOnly.FromDateTime(DateTime.UnixEpoch),
@@ -48,6 +65,20 @@ public abstract class ValidationEvaluationContext : IEvaluationContext
 
     /// <inheritdoc />
     public ExpressionValue GetHeader(string name) => ExpressionValue.Null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Реальні дані з <see cref="_registryFields"/>, не заглушка: правило
+    /// рівня рядка/таблиці/документа так само здатне прочитати поле запису,
+    /// на який показує Lookup-колонка, як і формула шаблону — той самий
+    /// сенс, що вже описаний у класовому коментарі («правило бачить лише
+    /// дані документа», а Lookup-посилання — це дані документа).
+    /// </remarks>
+    public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
+        => _registryFields.TryGetValue(registryEntryId, out var byField)
+           && byField.TryGetValue(fieldCode, out var value)
+            ? value
+            : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
     public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)

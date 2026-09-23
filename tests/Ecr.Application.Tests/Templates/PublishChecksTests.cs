@@ -3,6 +3,7 @@ using Ecr.Application.Templates;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Expressions;
+using Ecr.Expressions.Binding;
 using Ecr.Expressions.Parsing;
 using Ecr.TestKit;
 using Xunit;
@@ -282,6 +283,70 @@ public sealed class PublishChecksTests
         fixture.Formula("SUM([Total])");
 
         Assert.Contains(ExpressionErrors.Cycle, Render(Run(fixture.Version)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public void Цикл_через_REGFIELD_виявляється_так_само_як_цикл_через_Cell()
+    {
+        // ⛔ Registry-ребро (`DependsOnKind = 2`) мусить брати участь у ТІЙ
+        // САМІЙ побудові топологічного порядку, що й Cell — `PublishChecks.
+        // DependsOn` не фільтрує за видом залежності, лише за адресою
+        // (TableDefId/RowKey/ColumnDefId). Формула на "Result" читає поле
+        // довідника через Lookup-колонку "Permit" (Registry-ребро), а формула
+        // на "Permit" читає назад "Result" (звичайне Cell-ребро) — справжній
+        // цикл, зібраний з ДВОХ різних видів залежності.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        var permit = builder.Column(table, "Permit", CellDataType.Lookup);
+        var result = builder.Column(table, "Result");
+        builder.Row(table, "7001001", 1);
+
+        var toResult = builder.Formula(table, "REGFIELD([Permit], 'Limit')", column: result);
+        var toPermit = builder.Formula(table, "[Result]", column: permit);
+
+        var version = builder.Version();
+        var text = Render(Run(version));
+
+        Assert.Contains(ExpressionErrors.Cycle, text, StringComparison.Ordinal);
+        Assert.Contains(
+            toResult.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            text, StringComparison.Ordinal);
+        Assert.Contains(
+            toPermit.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-2.9")]
+    public void REGFIELD_публікується_і_потрапляє_в_граф_залежностей_як_Registry()
+    {
+        // ⚠ «Коректно проходить перевірку залежностей» — тут буквально:
+        // публікація не дає жодного зауваження, а `PublishChecks.Dependencies`
+        // (та сама функція, що наповнює `cfg.FormulaDependency`) віддає
+        // Registry-запис поряд зі звичайним Cell для тієї самої Lookup-комірки.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        var permit = builder.Column(table, "Permit", CellDataType.Lookup);
+        var result = builder.Column(table, "Result");
+        builder.Row(table, "7001001", 1);
+        builder.Formula(table, "REGFIELD([Permit], 'Limit')", column: result);
+
+        var version = builder.Version();
+
+        Assert.Empty(Run(version));
+
+        var dependencies = PublishChecks.Dependencies(version, _engine);
+
+        Assert.Contains(dependencies, d => d.DependsOnKind == DependencyExtractor.KindCell && d.ColumnDefId == permit.Id);
+        var registry = Assert.Single(
+            dependencies, d => d.DependsOnKind == DependencyExtractor.KindRegistry);
+        Assert.Equal(permit.Id, registry.ColumnDefId);
+        Assert.Equal("Limit", registry.FilterJson);
     }
 
     [Fact]

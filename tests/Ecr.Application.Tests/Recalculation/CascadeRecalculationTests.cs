@@ -558,6 +558,7 @@ public sealed class CascadeRecalculationTests
 
         return new(
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
+            Substitute.For<IRegistryStore>(),
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             _uow);

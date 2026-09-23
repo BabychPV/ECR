@@ -95,6 +95,20 @@ internal sealed class MethodologyEvaluationContext(
         => ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Поля довідника методологія теж не бачить — З ТІЄЇ САМОЇ причини, що
+    /// й комірки та шапку: <c>REGFIELD</c> бере id запису з Lookup-КОМІРКИ
+    /// документа, а методологія комірок не читає за побудовою (02b §3.4).
+    /// Парсер відхиляє посилання ще при розборі (<c>expr.
+    /// cellReferencesForbiddenInMethodology</c>), тож REGFIELD у діалекті
+    /// методологій сюди дійти не може взагалі — цей метод лишається реальним,
+    /// а не мертвим кодом, тому що <c>IEvaluationContext</c> — один контракт
+    /// на всі діалекти, і його симетрія важливіша за один недосяжний рядок.
+    /// </remarks>
+    public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
+        => ExpressionValue.Error(ExpressionErrors.BadReference);
+
+    /// <inheritdoc />
     public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)
         => units.Convert(value, fromUnitCode, toUnitCode);
 }

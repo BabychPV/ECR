@@ -47,7 +47,12 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
     private readonly IReadOnlyDictionary<string, ExpressionValue> _headers;
     private readonly UnitCatalogSnapshot _units;
     private readonly IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> _rowsByTable;
+    private readonly IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>> _registryFields;
     private static readonly UnitConverter Converter = new();
+
+    /// <summary>Порожній знімок довідника — виклик без жодного REGFIELD у цілях.</summary>
+    private static readonly IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>
+        EmptyRegistryFields = new Dictionary<long, IReadOnlyDictionary<string, ExpressionValue>>();
 
     /// <summary>
     /// Обчислювач умови предиката (<see cref="EvaluatePredicate"/>) — окремий
@@ -75,13 +80,23 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
     /// зі <paramref name="values"/>, бо рядок без жодної заповненої комірки
     /// туди не потрапив би взагалі, і предикат мовчки не побачив би його.
     /// </param>
+    /// <param name="registryFields">
+    /// Знімок полів довідника для <c>REGFIELD</c>: id запису → (код поля →
+    /// значення). Той самий принцип, що й у <paramref name="units"/> —
+    /// контекст синхронний, а довідник читається з бази заздалегідь
+    /// (<c>RecalculationService.RunAsync</c>), звужений до полів, які
+    /// справді потрібні цілям цього прогону (Registry-залежності з
+    /// <c>cfg.FormulaDependency</c>). <c>null</c> — прогін без жодної цілі,
+    /// що читає REGFIELD; рівнозначно порожньому знімку.
+    /// </param>
     public SliceEvaluationContext(
         TemplateVersionSnapshot snapshot,
         IReadOnlyDictionary<CellKey, ExpressionValue> values,
         IReadOnlyDictionary<string, ExpressionValue> headers,
         PeriodContext period,
         UnitCatalogSnapshot units,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> rowsByTable)
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> rowsByTable,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -91,6 +106,7 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
         _headers = headers ?? throw new ArgumentNullException(nameof(headers));
         _units = units ?? throw new ArgumentNullException(nameof(units));
         _rowsByTable = rowsByTable ?? throw new ArgumentNullException(nameof(rowsByTable));
+        _registryFields = registryFields ?? EmptyRegistryFields;
         Period = period;
     }
 
@@ -234,6 +250,25 @@ public sealed class SliceEvaluationContext : IBudgetedEvaluationContext
     /// <inheritdoc />
     public ExpressionValue GetHeader(string name)
         => _headers.TryGetValue(name, out var value) ? value : ExpressionValue.Null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Реальні дані, не заглушка: значення бере знімок
+    /// <see cref="_registryFields"/>, який <c>RecalculationService.RunAsync</c>
+    /// наповнює з <c>IRegistryStore</c> ДО обчислення — контекст сам у базу не
+    /// ходить (синхронний діалект виразів, той самий принцип, що в
+    /// <see cref="Convert"/> і одиницях).
+    ///
+    /// ⚠ Відсутній запис ЧИ відсутнє поле — одна й та сама відповідь, <c>#REF</c>
+    /// (02b §6.4): автору формули байдуже, яка з двох причин, — обидві
+    /// означають «звідси значення взяти нема звідки», і дія одна — полагодити
+    /// довідник або посилання.
+    /// </remarks>
+    public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
+        => _registryFields.TryGetValue(registryEntryId, out var byField)
+           && byField.TryGetValue(fieldCode, out var value)
+            ? value
+            : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
     /// <remarks>

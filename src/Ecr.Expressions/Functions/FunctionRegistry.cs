@@ -55,6 +55,16 @@ public sealed class FunctionRegistry
         new("IF", 3, 3, false, ExpressionValueType.Null),
         new("IFERROR", 2, 2, false, ExpressionValueType.Null),
         new("SUMIF", 2, 3, true, ExpressionValueType.Number),
+
+        // ⚠ Тринадцята, і набір більше не рівно дванадцять (`02b` §7,
+        // «розширення — зміна контракту, тобто questions.md і зупинка»).
+        // Рішення прийняте прямим дорученням задачі (2026-09-23): Lookup-
+        // колонка досі давала лише id запису довідника, а мова не мала чим
+        // прочитати ЙОГО ПОЛЕ в іншій формулі — `DependsOnKind = 2 (Registry)`
+        // був задекларований у моделі залежностей з початку, але видобувач
+        // його не заповнював. Тип результату — `Null` (як у `IF`/`IFERROR`):
+        // фактичний тип залежить від поля довідника, який тут невідомий.
+        new("REGFIELD", 2, 2, false, ExpressionValueType.Null),
     ];
 
     private static readonly Dictionary<string, FunctionSignature> Template =
@@ -120,6 +130,14 @@ public sealed class FunctionRegistry
         {
             return TemplateFunctions.SumIf(
                 groups[0], groups.Count > 1 ? groups[1] : [], groups.Count > 2 ? groups[2] : null);
+        }
+
+        // ⚠ Так само, як SUMIF: межа аргументу тут важить (id запису й код
+        // поля — різні позиції), тож групи НЕ фленяться в спільний список.
+        if (name.Equals("REGFIELD", StringComparison.OrdinalIgnoreCase))
+        {
+            return TemplateFunctions.RegistryField(
+                groups[0], groups.Count > 1 ? groups[1] : [], context);
         }
 
         var args = groups.Count == 1 ? groups[0] : groups.SelectMany(g => g).ToList();

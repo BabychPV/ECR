@@ -277,6 +277,65 @@ public static class TemplateFunctions
     }
 
     /// <summary>
+    /// Значення поля запису довідника — <c>REGFIELD(lookup, "код")</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Аргументи приходять НЕ пласким списком, а власними групами (як
+    /// <see cref="SumIf"/>), і це не стиль: перший аргумент — id запису,
+    /// узятий зі значення Lookup-комірки ТИМ САМИМ шляхом, яким комірка
+    /// взагалі читається у формулі (<c>FunctionRegistry.Invoke</c> флатенить
+    /// групи в один список лише для функцій, де межа аргументу не важить, —
+    /// тут вона важить рівно так само, як у <c>SUMIF</c>: діапазон замість
+    /// скаляра на позиції 0 не має мовчки зсунути позицію коду поля).
+    /// </remarks>
+    /// <param name="entry">Група першого аргументу — id запису довідника.</param>
+    /// <param name="field">Група другого аргументу — код поля, рядковий літерал.</param>
+    /// <param name="context">Контекст обчислення — джерело даних довідника.</param>
+    public static ExpressionValue RegistryField(
+        IReadOnlyList<ExpressionValue> entry, IReadOnlyList<ExpressionValue> field, IEvaluationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentNullException.ThrowIfNull(context);
+
+        // ⚠ Рівно по одному значенню на аргумент: REGFIELD не приймає
+        // діапазон (сигнатура — `AcceptsRange: false`), і публікація цього не
+        // перевіряє синтаксично (той самий пробіл, що й у ROUND/ABS). Замість
+        // мовчки взяти перший елемент — явний #VALUE, а не зсунутий код поля.
+        if (entry.Count != 1 || field.Count != 1)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        var entryValue = entry[0];
+        var fieldValue = field[0];
+
+        if (entryValue.IsError)
+        {
+            return entryValue;
+        }
+
+        if (fieldValue.IsError)
+        {
+            return fieldValue;
+        }
+
+        // Lookup-комірку ще не заповнили — це легітимна порожнеча (02b §6.3),
+        // а не помилка: запис довідника просто ще не обрали.
+        if (entryValue.IsNull)
+        {
+            return ExpressionValue.Null;
+        }
+
+        if (entryValue.AsNumber() is not { } entryId || fieldValue.Type != ExpressionValueType.Text)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        return context.GetRegistryField((long)entryId, (string)fieldValue.Value!);
+    }
+
+    /// <summary>
     /// Числа з аргументів: <c>null</c> поглинаються, помилка зупиняє агрегат.
     /// </summary>
     private static List<decimal> Numbers(IReadOnlyList<ExpressionValue> args, out ExpressionValue? failure)

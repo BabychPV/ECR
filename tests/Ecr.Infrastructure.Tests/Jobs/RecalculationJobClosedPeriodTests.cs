@@ -460,6 +460,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             _versions,
             new RealFormulaEngine(),
             units,
+            Substitute.For<IRegistryStore>(),
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             uow);
