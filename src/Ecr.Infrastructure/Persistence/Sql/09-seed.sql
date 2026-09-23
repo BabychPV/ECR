@@ -420,7 +420,10 @@ DELETE t
     -- U-16: головна кнопка сітки суперечила моделі роботи — збереження
     -- автоматичне, а «Save (N)» рахувала не «чекає збереження», а «збереження
     -- не пройшло». Замінена на `grid.retrySave`, видиму лише після відмови.
-    (N'grid.save',                                 N'en', N'Save ({count})')
+    (N'grid.save',                                 N'en', N'Save ({count})'),
+    -- U-18: рядок «Still needed» став спільним для діалогів створення —
+    -- ключ `common.stillNeeded`.
+    (N'periods.stillNeeded',                       N'en', N'Still needed: {fields}')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -462,6 +465,11 @@ USING (VALUES
     (N'common.retry',      N'en', N'Retry', 0),
     (N'common.delete',     N'en', N'Remove', 0),
     (N'common.loading',    N'en', N'Loading...', 0),
+    -- Q-298 / U-18: підказка біля недоступної кнопки підтвердження форми
+    -- створення — перелік бракуючих полів (`StillNeeded`). Спільна для всіх
+    -- діалогів створення, тому `common.*`; до U-18 жила як `periods.stillNeeded`
+    -- лише в діалозі проєкту (прибраний ключ — у секції вище).
+    (N'common.stillNeeded', N'en', N'Still needed: {fields}', 0),
     (N'state.errorTitle',                N'en', N'The request failed', 0),
     (N'state.errorUnknown',              N'en', N'An unexpected error occurred. Retry; if it repeats, contact support and describe what you were doing.', 0),
     (N'state.emptyTitle',                N'en', N'Nothing here yet', 0),
@@ -2567,11 +2575,6 @@ USING (VALUES
     -- інтерфейс, бо форма не мала звідки взяти кількість.
     (N'periods.customCount',             N'en', N'Number of periods', 1),
     (N'periods.customCountHint',         N'en', N'Must divide the year evenly (1..12): 5 would leave November and December outside any period.', 1),
-    -- Q-298: підказка біля недоступної кнопки «Зберегти» у формі створення
-    -- проєкту — перелік бракуючих полів замість мовчазної недоступності
-    -- кнопки без жодного пояснення (`CreateDocumentModal.tsx` має той самий
-    -- дефект і поки що без цього фіксу).
-    (N'periods.stillNeeded',             N'en', N'Still needed: {fields}', 1),
     -- T6/#37: CRUD політик періодів — до цього завести чи змінити політику
     -- можна було лише сідингом або рукою DBA.
     (N'periods.managePolicies',          N'en', N'Manage policies', 1),

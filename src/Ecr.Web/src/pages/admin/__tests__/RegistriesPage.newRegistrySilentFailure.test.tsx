@@ -33,6 +33,8 @@ const SeededStrings: Record<string, string> = {
   'registries.name': 'Name',
   'registries.temporalField': 'Temporal',
   'registries.temporalFieldHint': 'Records carry a validity window.',
+  'common.save': 'Save',
+  'common.cancel': 'Cancel',
 };
 
 const me = {
@@ -125,22 +127,19 @@ describe('RegistriesPage: невдале заведення довідника �
 
     show();
 
-    // ⚠ Кнопка відкриття діалогу і кнопка сабміту всередині мають ОДНАКОВИЙ
-    // accessible name («New registry») — той самий текст, що й у живому
-    // застосунку (репро: "Click 'New registry' (the submit button...)").
-    // Перед відкриттям модалки збігається рівно одна — далі шукаємо саме в
-    // діалозі.
+    // ✎ U-18: кнопка сабміту більше НЕ зветься «New registry» (як і кнопка
+    // відкриття) — вона «Save», як у «New project». Сценарій той самий.
     fireEvent.click(await screen.findByRole('button', { name: 'New registry' }));
 
     const dialog = await screen.findByRole('dialog');
 
-    const codeInput = within(dialog).getByLabelText('Code');
+    const codeInput = within(dialog).getByLabelText(/^Code/);
     fireEvent.change(codeInput, { target: { value: 'LANE4 bad code!' } });
-    fireEvent.change(within(dialog).getByLabelText('Name'), {
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), {
       target: { value: '[LANE-4] Bad Code Test' },
     });
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'New registry' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 
     // ⛔ Мутаційний доказ (RED на невиправленому коді): до фіксу цей запит
     // отримував 422 і НІЧОГО не показував — ані тост, ані інлайн-помилку.

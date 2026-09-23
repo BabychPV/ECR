@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, NumberInput, Select, Text, TextInput } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, Select, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -13,6 +13,7 @@ import type {
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError } from '@/shared/ui/notify';
+import { StillNeeded } from '@/shared/ui/StillNeeded';
 import { t } from '@/shared/i18n';
 
 /** Види періоду; значення збігаються з `PeriodKind` домену. */
@@ -281,7 +282,7 @@ export function CreateProjectModal({
   /*
    * ⛔ Обидва обов'язкові переліки — версія шаблону й політика періодів —
    * збиралися через `?? []`, тобто при відмові сервера ставали ПОРОЖНІМИ і
-   * мовчали. А підказка нижче (`periods.stillNeeded`) сумлінно перелічувала їх
+   * мовчали. А підказка нижче (`StillNeeded`) сумлінно перелічувала їх
    * як «ще не заповнено».
    *
    * ⚠ Наслідок не «людина не зрозуміла»: конфігуратор читає порожній перелік
@@ -416,14 +417,10 @@ export function CreateProjectModal({
           і мав сам здогадатися, яке поле ще заповнити. `CreateDocumentModal.tsx`
           має той самий дефект (`disabled={...}` без підказки) — цей фікс
           його поки не зачіпає, лише документує ту саму форму рішення на
-          майбутнє. */}
-      {incomplete && (
-        <Text size="xs" c="dimmed" mt="sm">
-          {t('periods.stillNeeded', {
-            fields: missingFields.map((field) => t(ProjectFieldLabelKey[field])).join(', '),
-          })}
-        </Text>
-      )}
+          майбутнє.
+          ⚠ U-18: рядок тепер спільний (`StillNeeded`) — той самий, що й у
+          «New registry». */}
+      <StillNeeded fields={missingFields.map((field) => t(ProjectFieldLabelKey[field]))} />
 
       <Group justify="flex-end" mt="md">
         <Button variant="default" onClick={onClose}>

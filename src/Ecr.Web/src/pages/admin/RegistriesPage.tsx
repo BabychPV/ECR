@@ -1,11 +1,12 @@
 ﻿import { useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Checkbox, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Badge, Button, Group, Modal, Select, Stack, Text } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
-import { createRegistry, entryReferences, useDeleteRegistryEntry } from '@/features/registries/api';
+import { entryReferences, useDeleteRegistryEntry } from '@/features/registries/api';
+import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
 import {
   RegistryEntryEditor,
   ValidityEditor,
@@ -19,7 +20,6 @@ import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -72,7 +72,6 @@ function todayIso(): string {
 export function RegistriesPage(): JSX.Element {
   const [code, setCode] = useUrlState('code');
   const session = useSession();
-  const queryClient = useQueryClient();
 
   /*
    * ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
@@ -104,32 +103,10 @@ export function RegistriesPage(): JSX.Element {
   // Заведення довідника з нуля (директива №11, T4): доти в системі не було
   // жодного способу, доступного людині, додати довідник, якого немає в seed.
   const [creating, setCreating] = useState(false);
-  const [newCode, setNewCode] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newIsTemporal, setNewIsTemporal] = useState(false);
 
   const registries = useQuery({
     queryKey: queryKeys.registries.list(),
     queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
-  });
-
-  const create = useMutation({
-    mutationFn: () =>
-      createRegistry({
-        code: newCode,
-        nameL10n: { en: newName },
-        isTemporal: newIsTemporal,
-      }),
-    onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.list() });
-      setCreating(false);
-      setNewCode('');
-      setNewName('');
-      setNewIsTemporal(false);
-      setCode(created.code);
-      showDone(t('registries.created'));
-    },
-    onError: showApiError,
   });
 
   const selected = registries.data?.find((registry) => registry.code === code);
@@ -559,44 +536,13 @@ export function RegistriesPage(): JSX.Element {
         </Stack>
       </Modal>
 
-      <Modal
+      {/* ⛔ U-18: діалог винесено в `CreateRegistryModal` — той самий
+          контракт, що й «New project» (зірочки, «Still needed», Cancel/Save). */}
+      <CreateRegistryModal
         opened={creating}
         onClose={() => setCreating(false)}
-        title={t('registries.newRegistryTitle')}
-      >
-        <Stack gap="sm">
-          <TextInput
-            label={t('registries.code')}
-            description={t('registries.registryCodeHint')}
-            value={newCode}
-            onChange={(event) => setNewCode(event.currentTarget.value)}
-            data-autofocus
-          />
-
-          <TextInput
-            label={t('registries.name')}
-            value={newName}
-            onChange={(event) => setNewName(event.currentTarget.value)}
-          />
-
-          {/* ⛔ Рішення приймається ОДИН РАЗ при заведенні: змінити його для
-              довідника з даними означало б перетлумачити вже введені записи. */}
-          <Checkbox
-            label={t('registries.temporalField')}
-            description={t('registries.temporalFieldHint')}
-            checked={newIsTemporal}
-            onChange={(event) => setNewIsTemporal(event.currentTarget.checked)}
-          />
-
-          <Button
-            disabled={newCode.trim().length === 0 || newName.trim().length === 0}
-            loading={create.isPending}
-            onClick={() => create.mutate()}
-          >
-            {t('registries.newRegistry')}
-          </Button>
-        </Stack>
-      </Modal>
+        onCreated={setCode}
+      />
     </>
   );
 }
