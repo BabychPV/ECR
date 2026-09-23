@@ -32,6 +32,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<SheetDef> SheetDefs => Set<SheetDef>();
     public DbSet<TableDef> TableDefs => Set<TableDef>();
     public DbSet<ColumnDef> ColumnDefs => Set<ColumnDef>();
+    public DbSet<HeaderFieldDef> HeaderFieldDefs => Set<HeaderFieldDef>();
     public DbSet<RowDef> RowDefs => Set<RowDef>();
     public DbSet<StyleDef> StyleDefs => Set<StyleDef>();
     public DbSet<FormulaDef> FormulaDefs => Set<FormulaDef>();
@@ -66,6 +67,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<TableInstance> TableInstances => Set<TableInstance>();
     public DbSet<TableRow> TableRows => Set<TableRow>();
     public DbSet<CellValue> CellValues => Set<CellValue>();
+    public DbSet<DocumentHeaderValue> DocumentHeaderValues => Set<DocumentHeaderValue>();
 
     // sec
     public DbSet<User> Users => Set<User>();

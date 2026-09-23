@@ -19,7 +19,15 @@ public sealed class ChangeClassifier
         nameof(Entities.Configuration.RowDef.LabelL10n),
         nameof(Entities.Configuration.SheetDef.NameL10n),
         nameof(Entities.Configuration.SheetDef.IsVisible),
-        nameof(Entities.Configuration.TableDef.NameL10n)
+        nameof(Entities.Configuration.TableDef.NameL10n),
+
+        // ⚠ HeaderFieldDef.Code/Ordinal/IsRequired/LookupRegistryDefId
+        // навмисно НЕ дублюються нижче: Classify() класифікує за самою
+        // НАЗВОЮ поля, без урахування типу сутності (як уже робить
+        // TableDef.Code/SheetDef.Code вище — один запис "Code" на трьох),
+        // і однойменні поля ColumnDef уже покривають їх. LabelL10n — інша
+        // назва (не HeaderL10n), тому потребує власного запису.
+        nameof(Entities.Configuration.HeaderFieldDef.LabelL10n)
     };
 
     /// <summary>

@@ -1,6 +1,7 @@
 ﻿using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using Xunit;
 
@@ -129,5 +130,51 @@ public sealed class TemplateVersionTests
         version.ApplyPresentationRevision(1);
         Assert.Throws<DomainException>(() => version.ApplyPresentationRevision(1));
         Assert.Equal(1, version.PresentationRevision);
+    }
+
+    private static HeaderFieldDef Field(int templateVersionId, string code)
+        => new(
+            templateVersionId, EcrCode.Create(code),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = code }), ordinal: 1, CellDataType.String);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void AddHeaderField_дублікат_коду_відхиляється()
+    {
+        var version = Draft();
+        version.AddHeaderField(Field(version.Id, "Area"));
+
+        var ex = Assert.Throws<DomainException>(() => version.AddHeaderField(Field(version.Id, "Area")));
+        Assert.Equal("ECR-TMPL-0409", ex.ErrorCode);
+        Assert.Single(version.HeaderFields);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-7.6")]
+    public void AddHeaderField_не_звільняє_код_мяко_видаленого_поля()
+    {
+        // ⚠ AddHeaderField перевіряє унікальність серед УСІХ полів, включно з
+        // м'яко видаленими, — той самий контракт, що AddSheet/TableDef.AddColumn
+        // (код лишається ідентичністю НАЗАВЖДИ, навіть для видаленого поля,
+        // бо на нього могли посилатися значення документів). Обробник
+        // (SaveHeaderFieldDefHandler) читає це ж саме і повертає користувачу
+        // пояснювальну відмову «код зайнятий видаленим полем» ДО того, як
+        // виклик дійде сюди — цей тест фіксує саму доменну межу, а не текст
+        // повідомлення обробника.
+        var version = Draft();
+        var field = Field(version.Id, "Area");
+        version.AddHeaderField(field);
+        field.SoftDelete(userId: 1, DateTime.UtcNow);
+
+        Assert.Throws<DomainException>(() => version.AddHeaderField(Field(version.Id, "Area")));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void HeaderFields_порожній_для_версії_без_визначеної_шапки()
+    {
+        var version = Draft();
+        Assert.Empty(version.HeaderFields);
     }
 }

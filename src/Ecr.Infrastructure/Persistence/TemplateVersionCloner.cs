@@ -108,6 +108,12 @@ public static class TemplateVersionCloner
             }
         }
 
+        foreach (var field in source.HeaderFields)
+        {
+            Reset(field, nameof(HeaderFieldDef.Id));
+            Reset(field, nameof(HeaderFieldDef.TemplateVersionId));
+        }
+
         return (source, links);
     }
 

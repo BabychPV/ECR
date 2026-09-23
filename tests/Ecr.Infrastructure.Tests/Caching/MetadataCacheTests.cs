@@ -67,7 +67,11 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
         // ФОРМУЛИ ШАБЛОНУ (`Q-158`/`Q-160`, той самий клас прогалини, що й
         // правила валідації). `RecalculationService` бере формули рівно
         // звідси, і без цього запиту жодна формула шаблону не рахувалася.
-        Assert.Equal(7, first.Count);
+        // ⚠ Вісім, а не сім: фундамент шапки документа додав восьмий запит —
+        // ПОЛЯ ШАПКИ (`HeaderFieldDef`), фільтровані за TemplateVersionId, а
+        // не за tableIds, як решта семи. `GetHeaderFieldDefsHandler` бере
+        // поля шапки рівно з `snapshot.HeaderFields`.
+        Assert.Equal(8, first.Count);
 
         // ⛔ НУЛЬ, а не один (`RD-05`). Абзац вище — про те, як було до
         // директиви №14: «один запит лишається, і прибрати його не можна».
@@ -253,10 +257,12 @@ public sealed class MetadataCacheTests(SqlServerFixture sql)
             var snapshots = await Task.WhenAll(tasks);
             var seen = counter.Tally.Snapshot();
 
-            // Шість — це рівно один LoadAsync. Без злиття було б 300.
+            // Сім — це рівно один LoadAsync (шість структурних запитів і
+            // сьомий — поля шапки документа, HeaderFieldDef). Без злиття
+            // було б 350.
             // ⚠ Твердження ПЕРШЕ саме тому, що воно головне: воно друкує
             // виміряне число, а не «не той екземпляр» п'ятдесят разів.
-            Assert.Equal(6, seen.Total);
+            Assert.Equal(7, seen.Total);
 
             // Один знімок на всіх — не просто «однакові числа», а той самий
             // об'єкт: побудова була одна.
