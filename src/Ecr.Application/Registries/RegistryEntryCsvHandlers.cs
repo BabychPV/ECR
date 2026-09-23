@@ -173,6 +173,16 @@ public sealed class ImportRegistryEntriesHandler(
         var seenCodes = new HashSet<string>(StringComparer.Ordinal);
         var (added, updated, unchanged) = (0, 0, 0);
 
+        // ⛔ Прогалина, яку закриває ця правка: на відміну від ручного
+        // редагування (UpsertRegistryEntryHandler.HandleAsync), імпорт CSV
+        // досі не писав жодного детального сліду зміни поля — лише сумарну
+        // aud.StructureChange на весь файл. Тут накопичуємо ЗАПИС (посилання,
+        // не Id — Id нового запису відомий лише після SaveChangesAsync, той
+        // самий порядок, що в ручному шляху) разом зі списком фактичних змін
+        // його полів; порожні (changes.Count == 0) — код без значень або
+        // повторний імпорт тим самим значенням — до акумулятора не йдуть.
+        var valueChanges = new List<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)>();
+
         for (var i = 1; i < records.Count; i++)
         {
             var record = records[i];
@@ -232,11 +242,12 @@ public sealed class ImportRegistryEntriesHandler(
                 registries.Add(entry);
             }
 
+            IReadOnlyList<RegistryValueFieldChange> changes;
             try
             {
                 // Реюз: та сама перевірка типу, обов'язковості й складу полів,
                 // що при ручному редагуванні запису — жодного дубля правила.
-                await UpsertRegistryEntryHandler
+                changes = await UpsertRegistryEntryHandler
                     .ApplyValuesAsync(registries, definition, entry, values, ct)
                     .ConfigureAwait(false);
             }
@@ -244,6 +255,11 @@ public sealed class ImportRegistryEntriesHandler(
             {
                 errors.Add(new RegistryEntryImportError(rowNumber, code, FieldOf(ex), MessageKeyOf(ex)));
                 continue;
+            }
+
+            if (changes.Count > 0)
+            {
+                valueChanges.Add((entry, changes));
             }
 
             if (isNew)
@@ -294,6 +310,26 @@ public sealed class ImportRegistryEntriesHandler(
                 innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            // Per-row слід — ПІСЛЯ SaveChangesAsync: Id щойно доданих записів
+            // EF підставляє лише тепер (той самий порядок, що
+            // UpsertRegistryEntryHandler.HandleAsync). Формат DetailsJson —
+            // буквально той самий, що там: registryDefId/entryId/changes,
+            // щоб один і той самий запис читав обидва шляхи однаково.
+            foreach (var (entry, changes) in valueChanges)
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow, UpsertRegistryEntryHandler.ValueChangedEventType, TargetUserId: null, TargetRoleId: null,
+                        JsonSerializer.Serialize(new
+                        {
+                            registryDefId = definition.Id,
+                            entryId = entry.Id,
+                            changes = changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
+                        }),
+                        userId, currentUser.CorrelationId),
+                    innerCt).ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
         return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true);
