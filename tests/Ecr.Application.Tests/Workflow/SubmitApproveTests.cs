@@ -9,6 +9,7 @@ using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -203,6 +204,9 @@ public sealed class SubmitApproveTests
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
 
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
     /// <summary>Проведення стану аркушів у зрізи звітності.</summary>
     private Ecr.Application.Reporting.ReportSnapshotSync Reports()
         => new(_reportSnapshots, _documents);
@@ -210,7 +214,16 @@ public sealed class SubmitApproveTests
     private SubmitSheetHandler Submit()
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
+               _headers,
                Reports(), _uow, _user, _clock);
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
 
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 

@@ -9,6 +9,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
@@ -60,11 +61,23 @@ public sealed class RecalculationJobIdTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
+
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly RecordingJobScheduler _jobs = new();
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
 
     public RecalculationJobIdTests()
     {
@@ -184,7 +197,7 @@ public sealed class RecalculationJobIdTests
         => await new PatchCellsHandler(
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Application.Validation.ValidationEngine(new RealFormulaEngine()),
-                _methodologies, _registries, _audit, Substitute.For<IAuditReader>(),
+                _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
                 _jobs, _uow, _user, _clock)
             .HandleAsync(
                 new PatchCellsRequest(

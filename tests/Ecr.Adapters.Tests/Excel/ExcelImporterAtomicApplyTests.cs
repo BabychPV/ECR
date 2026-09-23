@@ -11,6 +11,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -56,6 +57,10 @@ public sealed class ExcelImporterAtomicApplyTests
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
+
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
@@ -206,9 +211,17 @@ public sealed class ExcelImporterAtomicApplyTests
             new PatchCellsHandler(
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-                _methodologies, _registries, _audit, Substitute.For<IAuditReader>(),
+                _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
                 _jobs, _uow, _user, _clock),
             new ImportDiffBuilder(), _cells, _rows, _uow, _jobs);
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

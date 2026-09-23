@@ -37,11 +37,23 @@ public abstract class ValidationEvaluationContext : IEvaluationContext
         IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
         => _registryFields = registryFields ?? EmptyRegistryFields;
 
+    /// <summary>Порожня шапка — стандартний стан для правил, що її не отримали явно.</summary>
+    private static readonly IReadOnlyDictionary<string, ExpressionValue> EmptyHeaders =
+        new Dictionary<string, ExpressionValue>(StringComparer.Ordinal);
+
     /// <inheritdoc />
     public PeriodContext Period { get; init; } = new(
         DateOnly.FromDateTime(DateTime.UnixEpoch),
         DateOnly.FromDateTime(DateTime.UnixEpoch),
         CalendarMode.Actual, 1970, 1);
+
+    /// <summary>
+    /// Значення шапки документа, ключовані кодом поля. Заповнюється
+    /// викликачем (<see cref="Documents.ValidateDocumentHandler"/>,
+    /// <see cref="Documents.PatchCellsHandler"/>) перед прогоном правил —
+    /// той самий контракт, що <c>Period</c> вище.
+    /// </summary>
+    public IReadOnlyDictionary<string, ExpressionValue> Headers { get; init; } = EmptyHeaders;
 
     /// <inheritdoc />
     public abstract IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference);
@@ -64,7 +76,15 @@ public abstract class ValidationEvaluationContext : IEvaluationContext
     public ExpressionValue GetFormulaResult(string name) => ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
-    public ExpressionValue GetHeader(string name) => ExpressionValue.Null;
+    /// <remarks>
+    /// ⛔ Раніше — беззастережний <c>ExpressionValue.Null</c> (заглушка):
+    /// <c>HDR.X</c> у правилі валідації завжди читав порожнечу незалежно від
+    /// того, що записано в шапці документа. Тепер читає <see cref="Headers"/>
+    /// — той самий словник, який <c>SliceEvaluationContext</c> уже читає для
+    /// перерахунку формул шаблону.
+    /// </remarks>
+    public ExpressionValue GetHeader(string name)
+        => Headers.TryGetValue(name, out var value) ? value : ExpressionValue.Null;
 
     /// <inheritdoc />
     /// <remarks>

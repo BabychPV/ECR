@@ -22,6 +22,7 @@ public sealed class RecalculationService(
     IFormulaEngine formulaEngine,
     IUnitCatalog unitCatalog,
     IRegistryStore registryStore,
+    IDocumentHeaderStore headers,
     IAuditWriter audit,
     IClock clock,
     IUnitOfWork uow)
@@ -440,8 +441,16 @@ public sealed class RecalculationService(
         var registryFields = await LoadRegistryFieldsAsync(
             dependencies, targets, tables, rowIdsByTable, values, ct).ConfigureAwait(false);
 
+        // ⛔ Шапка документа читається РЕАЛЬНО (раніше — EmptyHeaders,
+        // статичний порожній словник, і HDR.X завжди давав Null незалежно
+        // від того, що записано в doc.DocumentHeaderValue). Один запит на
+        // документ, а не на таблицю: шапка спільна для всіх таблиць
+        // документа, і повторювати запит на кожен виклик RunAsync було б
+        // зайвим походом у базу там, де достатньо одного.
+        var headerValues = await headers.GetExpressionValuesAsync(instance.DocumentId, ct).ConfigureAwait(false);
+
         var context = new SliceEvaluationContext(
-            snapshot, values, EmptyHeaders,
+            snapshot, values, headerValues,
             await PeriodOf(instance.DocumentId, periodKey, ct).ConfigureAwait(false),
             catalogue, rowIdsByTable, registryFields);
 
@@ -926,9 +935,6 @@ public sealed class RecalculationService(
             periodKey.Year,
             (byte)periodKey.Sequence);
     }
-
-    private static readonly Dictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> EmptyHeaders =
-        new(StringComparer.Ordinal);
 
     /// <summary>Значення комірки як значення виразу.</summary>
     private static Ecr.Expressions.Evaluation.ExpressionValue FromCellValue(CellValueData value)

@@ -7,6 +7,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -159,10 +160,14 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
         registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
 
+        var headers = Substitute.For<IDocumentHeaderStore>();
+        headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+
         return new PatchCellsHandler(
             cells, rows, documents, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            methodologies, registries, audit, Substitute.For<IAuditReader>(),
+            methodologies, registries, headers, audit, Substitute.For<IAuditReader>(),
             jobs, uow, user, clock);
     }
 

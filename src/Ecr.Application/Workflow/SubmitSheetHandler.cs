@@ -32,6 +32,7 @@ public sealed class SubmitSheetHandler(
     // методу вже обіцяла `BusinessRuleException` «валідація або осиротілі
     // рядки». Тепер обіцянка виконується, і придушення прибране.
     Validation.ValidationEngine validation,
+    IDocumentHeaderStore headers,
     Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
@@ -136,6 +137,11 @@ public sealed class SubmitSheetHandler(
         var tables = sheet?.Tables.Where(t => !t.IsDeleted).ToDictionary(t => t.Id)
                      ?? new Dictionary<int, Domain.Entities.Configuration.TableDef>();
 
+        // ⛔ Шапка документа читається РЕАЛЬНО — той самий дефект, що й у
+        // ValidateDocumentHandler/PatchCellsHandler: подання зобов'язане
+        // рахувати РІВНО те саме, що показує кнопка «Перевірити» (R-B3).
+        var headerValues = await headers.GetExpressionValuesAsync(documentId, ct).ConfigureAwait(false);
+
         var blocking = new List<Validation.ValidationMessage>();
 
         foreach (var instance in instances)
@@ -166,7 +172,7 @@ public sealed class SubmitSheetHandler(
             if (table.ValidationRules.Count > 0)
             {
                 blocking.AddRange(Validation.TableValidation
-                    .Run(validation, table, cells, rowIds)
+                    .Run(validation, table, cells, rowIds, headerValues)
                     .Where(m => m.Severity == ValidationSeverity.Error));
             }
 

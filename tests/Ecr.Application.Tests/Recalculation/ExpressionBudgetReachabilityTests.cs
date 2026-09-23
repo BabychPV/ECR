@@ -64,6 +64,17 @@ public sealed class ExpressionBudgetReachabilityTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
 
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Тридцять_предикатних_агрегатів_не_дають_жодного_числа_замість_шістнадцяти_секунд()
@@ -268,6 +279,7 @@ public sealed class ExpressionBudgetReachabilityTests
         return new(
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
             Substitute.For<IRegistryStore>(),
+            _headers,
             _audit, new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)), _uow);
     }
 }

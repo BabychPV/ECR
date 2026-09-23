@@ -31,6 +31,7 @@ public sealed class PatchCellsHandler(
     Validation.ValidationEngine validation,
     IMethodologyStore methodologies,
     IRegistryStore registries,
+    IDocumentHeaderStore headers,
     IAuditWriter audit,
     IAuditReader auditReader,
     IBackgroundJobScheduler jobs,
@@ -95,7 +96,14 @@ public sealed class PatchCellsHandler(
 
         var changes = await BuildCellChangesAsync(request, context, ct).ConfigureAwait(false);
         var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, ct).ConfigureAwait(false);
-        var messages = EnsureValidationPasses(context, request, changes, requiredInputMessages);
+
+        // ⛔ Шапка документа читається РЕАЛЬНО (раніше HDR.X у правилах
+        // валідації завжди давав Null, той самий дефект, що й у
+        // ValidateDocumentHandler — і саме тому «Перевірити» й запис комірок
+        // мали дати ОДНАКОВИЙ результат, TableValidation.cs, R-B3).
+        var headerValues = await headers.GetExpressionValuesAsync(context.Instance.DocumentId, ct)
+            .ConfigureAwait(false);
+        var messages = EnsureValidationPasses(context, request, changes, requiredInputMessages, headerValues);
         await EnsureRegistryReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
@@ -1132,9 +1140,11 @@ public sealed class PatchCellsHandler(
         RequestContext context,
         PatchCellsRequest request,
         CellChangeLists changes,
-        IReadOnlyList<Validation.ValidationMessage> requiredInputMessages)
+        IReadOnlyList<Validation.ValidationMessage> requiredInputMessages,
+        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues)
     {
-        var messages = Validate(context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, context.RowIds);
+        var messages = Validate(
+            context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, context.RowIds, headerValues);
         var blocking = messages.Where(m => m.BlocksSave).ToList();
         if (blocking.Count > 0)
         {
@@ -1558,7 +1568,8 @@ public sealed class PatchCellsHandler(
         int tableDefId,
         PatchCellsRequest request,
         List<CellRecord> upserts,
-        IReadOnlyDictionary<string, long> rowIds)
+        IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues)
     {
         var table = snapshot.Sheets
             .SelectMany(s => s.Tables)
@@ -1577,7 +1588,7 @@ public sealed class PatchCellsHandler(
             }
 
             var rowKey = byRowId.GetValueOrDefault(record.Address.TableRowId);
-            foreach (var message in validation.ValidateCell(column, record.Value, rules))
+            foreach (var message in validation.ValidateCell(column, record.Value, rules, headerValues))
             {
                 messages.Add(message with { RowKey = rowKey });
             }
@@ -1588,7 +1599,7 @@ public sealed class PatchCellsHandler(
         foreach (var row in request.Rows)
         {
             messages.AddRange(validation
-                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row))
+                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row), headerValues)
                 .Select(m => m with { RowKey = row.RowKey }));
         }
 

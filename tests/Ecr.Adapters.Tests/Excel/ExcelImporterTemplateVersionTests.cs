@@ -11,6 +11,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -166,13 +167,17 @@ public sealed class ExcelImporterTemplateVersionTests
         patchRegistries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
                        .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
 
+        var patchHeaders = Substitute.For<IDocumentHeaderStore>();
+        patchHeaders.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+
         return new(
             _metadata, _registries, _access, _user, _previews,
             new PatchCellsHandler(
                 Substitute.For<ICellStore>(), Substitute.For<IRowStore>(), Substitute.For<IDocumentStore>(),
                 Substitute.For<IPeriodStore>(), Substitute.For<IMetadataCache>(), Substitute.For<IAccessDecisionService>(),
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-                methodologies, patchRegistries,
+                methodologies, patchRegistries, patchHeaders,
                 Substitute.For<IAuditWriter>(), Substitute.For<IAuditReader>(),
                 Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
                 Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),

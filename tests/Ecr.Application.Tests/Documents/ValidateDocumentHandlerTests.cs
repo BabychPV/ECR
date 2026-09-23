@@ -9,6 +9,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -36,6 +37,17 @@ public sealed class ValidateDocumentHandlerTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
 
     public ValidateDocumentHandlerTests()
     {
@@ -115,7 +127,7 @@ public sealed class ValidateDocumentHandlerTests
 
     private ValidateDocumentHandler Handler() => new(
         _cells, _rows, _metadata, _results, new ValidationEngine(Substitute.For<IFormulaEngine>()),
-        _clock, _uow, _access, _user);
+        _headers, _clock, _uow, _access, _user);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

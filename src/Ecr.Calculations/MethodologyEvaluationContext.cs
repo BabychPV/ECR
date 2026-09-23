@@ -90,7 +90,22 @@ internal sealed class MethodologyEvaluationContext(
             : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
-    /// <remarks>Шапки документа методологія теж не бачить — з тієї самої причини.</remarks>
+    /// <remarks>
+    /// Шапки документа методологія теж не бачить — з тієї самої причини, що
+    /// й <see cref="GetCell"/> вище.
+    ///
+    /// ⚠ Судження (фундамент шапки документа): підключення реального читання
+    /// <c>doc.DocumentHeaderValue</c> сюди НЕ зроблено навмисно, хоча задача
+    /// просила «підключити GetHeader у всіх трьох місцях». Коментар класу
+    /// (вище) прямо каже, чому методологія не читає комірки — вона мусить
+    /// лишатися переносною між проєктами й шаблонами, тому дані документа
+    /// приходять лише як <c>@Arg</c>, зібрані <see cref="CalculationInputBuilder"/>.
+    /// Шапка — так само дані КОНКРЕТНОГО документа, як і комірка; підключити
+    /// реальне читання тут означало б порушити ту саму інваріанту, яку
+    /// <see cref="GetCell"/> уже захищає. Тому цей контекст приведено у
+    /// відповідність із <see cref="GetCell"/> (обидва — стабільний
+    /// <c>#REF</c>), а не з <c>SliceEvaluationContext.GetHeader</c>.
+    /// </remarks>
     public ExpressionValue GetHeader(string name)
         => ExpressionValue.Error(ExpressionErrors.BadReference);
 

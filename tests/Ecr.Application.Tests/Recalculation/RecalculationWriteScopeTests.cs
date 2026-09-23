@@ -4,6 +4,7 @@ using Ecr.Application.Recalculation;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -44,6 +45,17 @@ public sealed class RecalculationWriteScopeTests
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
 
     /// <summary>Виклики, зроблені ВСЕРЕДИНІ транзакційного замикання.</summary>
     private readonly List<string> _insideTransaction = [];
@@ -244,6 +256,7 @@ public sealed class RecalculationWriteScopeTests
         return new(
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
             Substitute.For<IRegistryStore>(),
+            _headers,
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             _uow);

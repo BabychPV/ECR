@@ -27,6 +27,10 @@ internal static class TableValidation
     /// <param name="table">Опис таблиці зі знімка версії.</param>
     /// <param name="cells">Значення зрізу.</param>
     /// <param name="rowIds">Рядки екземпляра: <c>RowKey</c> → <c>TableRow.Id</c>.</param>
+    /// <param name="headers">
+    /// Значення шапки документа, ключовані кодом поля — для <c>HDR.X</c> у
+    /// правилах усіх трьох рівнів; порожній словник — прогін без шапки.
+    /// </param>
     /// <remarks>
     /// ⛔ Рівень РЯДКА виконується ПО РЯДКАХ, а кожне повідомлення отримує
     /// свій <c>RowKey</c> (директива №09 `W8` п.3, `S-19`). Доти всі три рівні
@@ -42,7 +46,8 @@ internal static class TableValidation
         ValidationEngine engine,
         TableDef table,
         IReadOnlyList<CellRecord> cells,
-        IReadOnlyDictionary<string, long> rowIds)
+        IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headers)
     {
         var messages = new List<ValidationMessage>();
 
@@ -56,7 +61,7 @@ internal static class TableValidation
         foreach (var rowKey in rowIds.Keys.Order(StringComparer.Ordinal))
         {
             messages.AddRange(engine
-                .ValidateScope(scope: 1, table.ValidationRules, slice.ForRow(rowKey))
+                .ValidateScope(scope: 1, table.ValidationRules, slice.ForRow(rowKey), headers)
                 .Select(m => m with { RowKey = rowKey }));
         }
 
@@ -64,7 +69,7 @@ internal static class TableValidation
         // означало б повторити те саме порушення N разів.
         foreach (var scope in AboveRowLevels)
         {
-            messages.AddRange(engine.ValidateScope(scope, table.ValidationRules, slice));
+            messages.AddRange(engine.ValidateScope(scope, table.ValidationRules, slice, headers));
         }
 
         return messages;
