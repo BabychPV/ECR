@@ -440,6 +440,12 @@ public sealed partial class EndpointCoverageTests
             ["periods.code", "periods.name", "periods.timeZone", "periods.templateVersion", "periods.policy", "periods.customCount"],
             "Перелік бракуючих полів форми проєкту."),
 
+        // U-18: той самий рядок «Still needed» у діалозі нового довідника.
+        new("features/registries/CreateRegistryModal.tsx", "RegistryFieldLabelKey[field]", 1,
+            "features/registries/CreateRegistryModal.tsx",
+            ["registries.code", "registries.name"],
+            "Перелік бракуючих полів форми нового довідника."),
+
         new("pages/admin/SnapshotsPage.tsx", "blockedReason", 1, "pages/admin/SnapshotsPage.tsx",
             ["snapshots.parametersUnknown", "snapshots.parametersBlocked"],
             "Причина, чому зріз не можна замовити."),
