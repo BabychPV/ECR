@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -145,7 +146,14 @@ describe('ExportButton: стеження за задачею побудови к
 
     await user.click(screen.getByRole('button'));
 
-    const link = await screen.findByRole('link');
+    // ✎ `U-25`: посилання приходить ТОСТОМ, а не елементом у рядку кнопок —
+    // тож береться з виклику `notifications.show` і рендериться окремо.
+    await waitFor(() => expect(notifications.show).toHaveBeenCalled());
+
+    const call = vi.mocked(notifications.show).mock.calls[0]?.[0] as { message: ReactNode };
+    render(<MantineProvider theme={testTheme}>{call.message}</MantineProvider>);
+
+    const link = screen.getByRole('link', { name: '⟦document.exportReady⟧' });
     expect(link.getAttribute('href')).toContain('export-key-abc');
   });
 
@@ -179,7 +187,9 @@ describe('ExportButton: стеження за задачею побудови к
     // стан ПРОЧИТАНО успішно. Дефект №1 нижче перевіряє випадок, коли стан
     // прочитати НЕ вдалося взагалі.
     await waitFor(() => {
-      expect(screen.getByRole('button').textContent).not.toBe('⟦document.exportBuilding⟧');
+      // ✎ `U-25`: обидва підписи тепер завжди в DOM (ширина не стрибає),
+      // тож стан читається з `data-export-state`, а не з `textContent`.
+      expect(screen.getByRole('button').getAttribute('data-export-state')).toBe('idle');
     });
   });
 
@@ -197,7 +207,9 @@ describe('ExportButton: стеження за задачею побудови к
     // а `building` лишався `true` — кнопка крутила «Формується…» вічно, і
     // побудований файл (якщо він і був) забрати було нічим.
     await waitFor(() => {
-      expect(screen.getByRole('button').textContent).not.toBe('⟦document.exportBuilding⟧');
+      // ✎ `U-25`: обидва підписи тепер завжди в DOM (ширина не стрибає),
+      // тож стан читається з `data-export-state`, а не з `textContent`.
+      expect(screen.getByRole('button').getAttribute('data-export-state')).toBe('idle');
     });
 
     // ⚠ І без тосту: причина — брак права на ЧИТАННЯ стану задачі, а не

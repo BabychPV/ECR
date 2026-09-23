@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { notifications } from '@mantine/notifications';
@@ -18,7 +19,7 @@ import { testTheme } from '@/test/render';
 vi.mock('@mantine/notifications', () => ({ notifications: { show: vi.fn() } }));
 
 /** Стан задачі, який віддає опитування; змінюється посеред тесту. */
-const jobState: 'Running' | 'Succeeded' = 'Running';
+let jobState: 'Running' | 'Succeeded' = 'Running';
 
 function mockServer(): void {
   vi.stubGlobal(
@@ -51,21 +52,36 @@ function mockServer(): void {
   );
 }
 
-function show(): void {
+function show(): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-  render(
+  const { container } = render(
     <MantineProvider theme={testTheme}>
       <QueryClientProvider client={client}>
         <ExportButton documentId={1} periodKey={202601} language="en" />
       </QueryClientProvider>
     </MantineProvider>,
   );
+
+  return container;
+}
+
+/**
+ * «Відбиток» того, що експорт кладе в рядок кнопок: теги прямих дітей
+ * кореня. Саме пряма дитина рядка й займає в ньому місце — новий елемент
+ * тут і є те, що переповнювало рядок у `U-25`.
+ */
+function rowFootprint(container: HTMLElement): string[] {
+  return [...container.children].flatMap((root) => [
+    root.tagName,
+    ...[...root.children].map((child) => child.tagName),
+  ]);
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.mocked(notifications.show).mockClear();
+  jobState = 'Running';
 });
 
 describe('U-15 · формат і кнопка експорту — одна одиниця', () => {
@@ -84,5 +100,55 @@ describe('U-15 · формат і кнопка експорту — одна о�
     // опинитися слово «Export», а не голий перелік форматів. Перемикач
     // ПЕРЕД кнопкою — рівно розкладка зі знімка `admin-20-document.png`.
     expect(button.compareDocumentPosition(formats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('U-25 · стан експорту не змінює рядка кнопок', () => {
+  it('ні задача в роботі, ні готовий файл не додають елемента в рядок', async () => {
+    mockServer();
+    const container = show();
+
+    const idle = rowFootprint(container);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '⟦document.export⟧' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button').getAttribute('data-export-state')).toBe('running'),
+    );
+    expect(rowFootprint(container)).toEqual(idle);
+
+    jobState = 'Succeeded';
+
+    // ⛔ Готовий файл приходить тостом (`notifications.show`), а не
+    // посиланням у рядку: посилання в рядку й було тим елементом, що
+    // виштовхував «Delete document» на другий рядок.
+    await waitFor(() => expect(notifications.show).toHaveBeenCalled(), { timeout: 10_000 });
+
+    expect(rowFootprint(container)).toEqual(idle);
+    expect(screen.queryByRole('link')).toBeNull();
+  }, 20_000);
+
+  it('кнопка в роботі — підпис ПОРУЧ зі спінером, а не сам спінер, і місце під обидва підписи зарезервоване', async () => {
+    mockServer();
+    show();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '⟦document.export⟧' }));
+
+    const button = screen.getByRole('button');
+    await waitFor(() => expect(button.getAttribute('data-export-state')).toBe('running'));
+
+    // ⛔ `loading` Mantine ховає підпис і лишає сам спінер — «Export» у
+    // роботі ставав безіменним колом. Тут `data-loading` бути не має.
+    expect(button.hasAttribute('data-loading')).toBe(false);
+
+    const running = within(button).getByTestId('export-running-label');
+    expect(running.textContent).toContain('⟦document.exportBuilding⟧');
+    expect(running.getAttribute('aria-hidden')).toBe('false');
+
+    // ⛔ Підпис спокою лишається в DOM (прихований), тобто ширина кнопки не
+    // падає до ширини одного з підписів і не стрибає між станами.
+    expect(button.textContent).toContain('⟦document.export⟧');
   });
 });

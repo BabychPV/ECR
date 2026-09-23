@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Button, Divider, Group, SegmentedControl } from '@mantine/core';
+import { Anchor, Button, Divider, Group, Loader, SegmentedControl } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -108,8 +108,6 @@ export function ExportButton({
   });
 
   const outcome = jobId === null ? null : outcomeOf(job.data?.state, job.isError);
-  const done = outcome === 'succeeded';
-  const exportId = done ? (job.data?.message ?? '') : '';
   const building = outcome === 'running';
 
   // ⚠ Повідомлення про відмову — ОДИН раз на задачу, а не на кожен рендер:
@@ -127,6 +125,42 @@ export function ExportButton({
     // ⛔ `unknown` (стан прочитати не вдалося, `Q-156`) навмисно без тосту:
     // причина — брак права на читання задачі, а не збій експорту, і показ
     // помилки тут звинуватив би експорт у тому, чого він не робив.
+    /*
+     * ⛔ `U-25`: результат — ТОСТОМ із посиланням, а не елементом у рядку
+     * кнопок. Посилання «Download the workbook», вставлене в рядок поруч із
+     * кнопкою, мало інший розмір і вигляд і переповнювало рядок: «Delete
+     * document» переїжджав на другий рядок під поле періоду — найнебезпечніша
+     * дія документа опинялася там, де її ніхто не чекає. Тост не займає
+     * місця в рядку взагалі, тож стан експорту на розкладку не впливає.
+     *
+     * ⚠ `autoClose: false`: файл забирають тоді, коли людина повернулась до
+     * вкладки, а не протягом чотирьох секунд. Закритий тост файл не губить —
+     * те саме посилання лишається в «Мої задачі» (`JobFacts.JobResultLink`).
+     *
+     * ⚠ Адреса та сама, що й була (`a[href^="/api/v1/documents/{id}/export/"]`),
+     * — на неї спирається `e2e/zz-walkthrough.spec.ts`; тост рендериться в
+     * тому самому документі.
+     */
+    if (outcome === 'succeeded') {
+      const exportKey = job.data?.message ?? '';
+      if (exportKey.length > 0) {
+        notifications.show({
+          id: `export-ready-${jobId}`,
+          color: 'statusSuccess',
+          autoClose: false,
+          message: (
+            <Anchor
+              size="sm"
+              href={`/api/v1/documents/${documentId}/export/${encodeURIComponent(exportKey)}`}
+              download
+            >
+              {t('document.exportReady')}
+            </Anchor>
+          ),
+        });
+      }
+    }
+
     if (outcome === 'failed') {
       // ⛔ `error`, а не `message`: перше несе причину відмови
       // (`FinishAsync(..., errorMessage: ex.Message, ...)`), друге — останній
@@ -137,7 +171,7 @@ export function ExportButton({
         message: job.data?.error ?? t('document.exportFailed'),
       });
     }
-  }, [jobId, outcome, job.data?.error]);
+  }, [jobId, outcome, job.data?.error, job.data?.message, documentId]);
 
   return (
     /*
@@ -157,13 +191,45 @@ export function ExportButton({
           відокремлює експорт від того, що йде перед ним. */}
       <Divider orientation="vertical" />
 
+      {/*
+       * ⛔ `U-25`: кнопка в роботі зберігає ПІДПИС поруч зі спінером і НЕ
+       * змінює ширини. `loading` Mantine ховав підпис, лишаючи сам спінер, а
+       * зміна тексту «Export» → «Building...» міняла ширину — і заголовок
+       * документа перестрибував на окремий рядок. Обидва варіанти підпису
+       * лежать в ОДНІЙ комірці сітки (`gridArea: 1 / 1`), неактивний —
+       * `visibility: hidden`: ширина кнопки = ширина довшого з двох у будь-
+       * якій мові, і між станами вона не змінюється.
+       */}
       <Button
         size="xs"
         variant="default"
-        loading={start.isPending || building}
+        disabled={start.isPending || building}
+        aria-busy={start.isPending || building}
+        data-export-state={start.isPending || building ? 'running' : 'idle'}
         onClick={() => start.mutate()}
       >
-        {building ? t('document.exportBuilding') : t('document.export')}
+        <span style={{ display: 'inline-grid' }}>
+          <span
+            aria-hidden={start.isPending || building}
+            style={{ gridArea: '1 / 1', visibility: start.isPending || building ? 'hidden' : 'visible' }}
+          >
+            {t('document.export')}
+          </span>
+          <span
+            aria-hidden={!(start.isPending || building)}
+            data-testid="export-running-label"
+            style={{
+              gridArea: '1 / 1',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              visibility: start.isPending || building ? 'visible' : 'hidden',
+            }}
+          >
+            <Loader size={12} />
+            {t('document.exportBuilding')}
+          </span>
+        </span>
       </Button>
 
       <SegmentedControl
@@ -174,19 +240,6 @@ export function ExportButton({
         disabled={start.isPending || building}
         data={exportFormatOptions()}
       />
-
-      {/* ⚠ Посилання з'являється лише тоді, коли файл справді є. Показане
-          заздалегідь, воно вело б на 404 рівно доти, доки книга будується, —
-          тобто саме тоді, коли на нього тиснуть. */}
-      {done && exportId.length > 0 && (
-        <Anchor
-          size="sm"
-          href={`/api/v1/documents/${documentId}/export/${encodeURIComponent(exportId)}`}
-          download
-        >
-          {t('document.exportReady')}
-        </Anchor>
-      )}
     </Group>
   );
 }
