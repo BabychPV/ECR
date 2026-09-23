@@ -330,16 +330,15 @@ public sealed class DeleteRegistryEntryHandler(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(registryCode);
 
-        await Templates.ListTemplatesHandler
-            .RequireAsync(access, currentUser, Permission, ct)
-            .ConfigureAwait(false);
-
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException(
                 "ECR-AUTH-0401",
                 "Анонімний запит не змінює довідники.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
+        // ⚠ Запис читається ДО перевірки права: грант (A7-58) видається на
+        // RegistryDefId, а його знає лише запис (той самий порядок, що
+        // SetEntryValidityHandler і DeleteDocumentHandler).
         var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-REG-0404",
@@ -349,6 +348,11 @@ public sealed class DeleteRegistryEntryHandler(
                     ["messageKey"] = "err.ECR-REG-0404.registryEntry",
                     ["entryId"] = registryEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
+
+        // Глобальне право АБО ресурсний грант рівня Write на довідник запису.
+        await RegistryAccess
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, entry.RegistryDefId, ct)
+            .ConfigureAwait(false);
 
         // ⚠ Опис читається ДО перевірки посилань і до видалення — він потрібен
         // двічі: спершу щоб звірити належність довіднику, потім щоб підняти

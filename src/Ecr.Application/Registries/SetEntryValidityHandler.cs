@@ -3,6 +3,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Registries;
 
@@ -37,16 +38,16 @@ public sealed class SetEntryValidityHandler(
     public async Task<int> HandleAsync(
         long registryEntryId, DateOnly? from, DateOnly? to, CancellationToken ct)
     {
-        await Templates.ListTemplatesHandler
-            .RequireAsync(access, currentUser, Permission, ct)
-            .ConfigureAwait(false);
-
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException(
                 "ECR-AUTH-0401",
                 "Анонімний запит не змінює довідники.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
+        // ⚠ Запис читається ДО перевірки права: сам грант (A7-58) видається на
+        // RegistryDefId, а його знає лише запис, не аргументи запиту (той
+        // самий порядок, що DeleteDocumentHandler — «чужого не видно» тут
+        // рівнозначно «404», а не «403»).
         var entry = await registries.FindEntryAsync(registryEntryId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-REG-0404",
@@ -56,6 +57,11 @@ public sealed class SetEntryValidityHandler(
                     ["messageKey"] = "err.ECR-REG-0404.registryEntry",
                     ["entryId"] = registryEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
+
+        // Глобальне право АБО ресурсний грант рівня Write на довідник запису.
+        await RegistryAccess
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, entry.RegistryDefId, ct)
+            .ConfigureAwait(false);
 
         var previousFrom = entry.ValidFrom;
         var previousTo = entry.ValidTo;

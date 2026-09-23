@@ -60,8 +60,11 @@ public sealed class UpsertRegistryEntryHandler(
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        await Templates.ListTemplatesHandler
-            .RequireAsync(access, currentUser, Permission, ct)
+        // ⚠ Глобальне право АБО ресурсний грант рівня Write на ЦЕЙ довідник
+        // (A7-58): dto.RegistryDefId уже відомий з запиту, тож жодного
+        // додаткового походу в базу перевірка не додає.
+        await RegistryAccess
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, dto.RegistryDefId, ct)
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId

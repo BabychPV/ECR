@@ -8053,7 +8053,8 @@
           "Project",
           "Sheet",
           "Table",
-          "Column"
+          "Column",
+          "Registry"
         ]
       },
       "RoleIdResponse": {

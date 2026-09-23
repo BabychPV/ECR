@@ -185,12 +185,27 @@ public enum GrantLevel : byte
 }
 
 /// <summary>Тип ресурсу, на який видається грант.</summary>
+/// <remarks>
+/// ⚠ <c>Registry = 4</c> додано append-only (`A7-58`): <c>sec.ResourceGrant.ResourceKind</c>
+/// зберігається як голий <c>tinyint</c> без <c>CHECK</c> — ні в SQL-скриптах
+/// (<c>Sql/*.sql</c>), ні в <see cref="ResourceKind"/>-конфігурації EF
+/// (<c>ResourceGrantConfiguration.Configure</c>: лише <c>HasConversion&lt;byte&gt;()</c>).
+/// Новий варіант тому не потребує міграції — той самий шлях, яким раніше
+/// розширювали <c>UsageKinds</c>.
+/// </remarks>
 public enum ResourceKind : byte
 {
     Project = 0,
     Sheet = 1,
     Table = 2,
-    Column = 3
+    Column = 3,
+
+    /// <summary>
+    /// Довідник (<c>cfg.RegistryDef.Id</c> у ролі <c>ResourceId</c>). Успадкування
+    /// <c>Project → Sheet → Table → Column</c> сюди НЕ поширюється: довідник не
+    /// належить проєкту, він спільний для всіх (ФВ-8.1).
+    /// </summary>
+    Registry = 4
 }
 
 /// <summary>Провайдер автентифікації. Нижче рівня входу не використовується.</summary>

@@ -79,8 +79,17 @@ public sealed class ImportRegistryEntriesHandler(
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        await Templates.ListTemplatesHandler
-            .RequireAsync(access, currentUser, UpsertRegistryEntryHandler.Permission, ct)
+        // ⚠ Глобальне право АБО ресурсний грант рівня Write на ЦЕЙ довідник
+        // (A7-58) — той самий "OR", що UpsertRegistryEntryHandler: імпорт це
+        // той самий запис даних, лише пакетом. Резолвер викликається лише
+        // тоді, коли глобального Registry.EditData нема; для нього самого
+        // definition нижче все одно читається ще раз — другий запит платить
+        // лише користувач без глобального права.
+        await RegistryAccess
+            .RequireAsync(
+                access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write,
+                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
+                ct)
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId

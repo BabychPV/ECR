@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Entities.Dictionaries;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Registries;
 
@@ -34,8 +35,17 @@ public sealed class GetRegistryEntriesHandler(
     public async Task<IReadOnlyList<RegistryEntryDto>> HandleAsync(
         string registryCode, DateOnly asOf, long? parentEntryId, CancellationToken ct)
     {
-        await Templates.ListTemplatesHandler
-            .RequireAsync(access, currentUser, Permission, ct)
+        // ⚠ Глобальне право АБО ресурсний грант рівня Read на ЦЕЙ довідник
+        // (A7-58). Резолвер довідника з коду викликається ЛИШЕ тоді, коли
+        // глобального Registry.View нема — власник глобального права не
+        // платить зайвим FindDefinitionAsync (RegistryEntriesAsOfValidationTests
+        // фіксує, що похід у базу за довідником не випереджає перевірку asOf
+        // нижче для такого користувача).
+        await RegistryAccess
+            .RequireAsync(
+                access, currentUser, Permission, GrantLevel.Read,
+                async token => (await registries.FindDefinitionAsync(registryCode, token).ConfigureAwait(false))?.Id,
+                ct)
             .ConfigureAwait(false);
 
         // ⛔ Відсутній або зіпсований `asOf` — ВІДМОВА, а не `0001-01-01`
