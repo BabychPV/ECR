@@ -62,6 +62,7 @@ import { deleteValidationRule, saveValidationRule } from '@/features/templates/v
 import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/templates/validationRule';
 import { LocalDraft } from '@/features/templates/LocalDraft';
 import { VersionDiff } from '@/features/templates/VersionDiff';
+import { LazyTableSlots, estimateTemplateTableHeight } from '@/features/templates/LazyTableSlots';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -163,6 +164,23 @@ const PresentationEditor = lazy(async () => ({
 }));
 
 /** Стан форми «правка правила доступу за id». */
+type TemplateTable = TemplateStructureDto['sheets'][number]['tables'][number];
+
+/**
+ * Назва таблиці в дереві структури — ОДНА на заповнювач і змонтовану
+ * таблицю (`LazyTableSlots`): розмітка не стрибає в мить монтування.
+ */
+function TableTitle({ table }: { table: TemplateTable }): JSX.Element {
+  return (
+    <>
+      {localized(table.nameL10n) || table.code}{' '}
+      <Text span c="dimmed">
+        ({table.code}) · {table.rowMode}
+      </Text>
+    </>
+  );
+}
+
 interface ManageSeed {
   readonly ruleId: number | null;
   readonly draft: UpdatePeriodAccessRuleDraft;
@@ -223,6 +241,12 @@ export function TemplateVersionPage(): JSX.Element {
   // навмисно — див. коментар біля `PresentationEditor` вище.
   const [presentationUsed, setPresentationUsed] = useState(false);
   const [sheetDraft, setSheetDraft] = useState<SheetDraft | null>(null);
+  /**
+   * Розгорнуті аркуші — лише для `LazyTableSlots`: перша таблиця розгорнутого
+   * аркуша монтується без події видимості. `Accordion` лишається
+   * некерованим — стан лише читається з `onChange`.
+   */
+  const [openSheets, setOpenSheets] = useState<string[]>([]);
   const [formulaDraft, setFormulaDraft] = useState<FormulaDraft | null>(null);
 
   // ⚠ Чернетка таблиці несе код аркуша окремо від самого `TableDraft`
@@ -861,7 +885,7 @@ export function TemplateVersionPage(): JSX.Element {
               </Group>
             )}
 
-            <Accordion multiple>
+            <Accordion multiple onChange={setOpenSheets}>
               {[...version.sheets]
                 .sort((a, b) => a.ordinal - b.ordinal)
                 .map((sheet) => (
@@ -920,7 +944,13 @@ export function TemplateVersionPage(): JSX.Element {
                         </Group>
                       )}
 
-                      {sheet.tables.map((table) => {
+                      <LazyTableSlots
+                        items={sheet.tables}
+                        active={openSheets.includes(sheet.code)}
+                        nameOf={(table) => localized(table.nameL10n) || table.code}
+                        titleOf={(table) => <TableTitle table={table} />}
+                        heightOf={estimateTemplateTableHeight}
+                        render={(table) => {
                         const nextColumnOrdinal =
                           table.columns.length === 0
                             ? 0
@@ -929,13 +959,10 @@ export function TemplateVersionPage(): JSX.Element {
                           table.rows.length === 0 ? 0 : Math.max(...table.rows.map((r) => r.ordinal)) + 1;
 
                         return (
-                          <div key={table.id}>
+                          <>
                             <Group justify="space-between" mt="sm">
                               <Text fw={600}>
-                                {localized(table.nameL10n) || table.code}{' '}
-                                <Text span c="dimmed">
-                                  ({table.code}) · {table.rowMode}
-                                </Text>
+                                <TableTitle table={table} />
                               </Text>
                               {canEditSheets && (
                                 <Group gap="xs">
@@ -1217,9 +1244,10 @@ export function TemplateVersionPage(): JSX.Element {
                                 )}
                               </>
                             )}
-                          </div>
+                          </>
                         );
-                      })}
+                        }}
+                      />
                     </Accordion.Panel>
                   </Accordion.Item>
                 ))}
