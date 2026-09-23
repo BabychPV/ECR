@@ -1,13 +1,14 @@
-// src/Ecr.Application/Documents/CellDateParser.cs
+// src/Ecr.Domain/Services/CellDateParser.cs
 using System.Globalization;
 
-namespace Ecr.Application.Documents;
+namespace Ecr.Domain.Services;
 
 /// <summary>
-/// Розбір дати з тексту — одне місце на всі шляхи введення (API, імпорт Excel).
+/// Розбір дати з тексту — одне місце на всі шляхи введення (API, імпорт Excel,
+/// довідники).
 /// </summary>
 /// <remarks>
-/// ⛔ Існує через аудит 2026-09-16, §8.2. Обидва шляхи розбирали дату через
+/// ⛔ Існує через аудит 2026-09-16, §8.2. Шляхи розбирали дату через
 /// <c>DateTime.TryParse(text, CultureInfo.InvariantCulture, …)</c>, а
 /// InvariantCulture читає <c>M.d.yyyy</c> — американський порядок. Тому
 /// <c>"1.4.2024"</c> ставало <b>4 січня</b>, а не 1 квітня: українець, що вводить
@@ -25,6 +26,13 @@ namespace Ecr.Application.Documents;
 /// ⚠ Порядок форматів має значення рівно в одному місці й саме там, де ціна
 /// помилки найвища: <c>1.4.2024</c> збігається і з <c>d.M.yyyy</c>, і з
 /// <c>M.d.yyyy</c>. Перемагає український — той, у якому цю дату й написали.
+///
+/// ⚠ 2026-09-23: клас перенесено з <c>Ecr.Application.Documents</c> у Domain,
+/// щоб <c>RegistryValue.Set</c> (значення поля довідника типу <c>Date</c>) міг
+/// викликати той самий розбір, а не дублювати його голим
+/// <c>DateTime.TryParse</c> — Domain нічого не референсить (`LayerRulesTests`,
+/// правило 1), тож спільний розбір може жити лише тут; Application лишається
+/// споживачем, як і був.
 /// </remarks>
 public static class CellDateParser
 {

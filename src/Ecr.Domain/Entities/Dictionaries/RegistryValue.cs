@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Services;
 
 namespace Ecr.Domain.Entities.Dictionaries;
 
@@ -204,13 +205,20 @@ public sealed class RegistryValue : Entity<long>
         }
     }
 
+    /// <remarks>
+    /// ⛔ Розбір рядка — через <see cref="CellDateParser"/>, а не голий
+    /// <c>DateTime.TryParse(…, InvariantCulture, …)</c> (той самий клас, що й
+    /// <c>CellValueReader.Date()</c> для комірок документа, аудит 2026-09-16,
+    /// §8.2): InvariantCulture читає <c>M.d.yyyy</c>, тож <c>"01.02.2026"</c>
+    /// стало б 2 січня замість 1 лютого — тихо переставлені день і місяць у
+    /// значенні поля довідника, без жодної відмови.
+    /// </remarks>
     private static DateTime AsDate(object value)
         => value switch
         {
             DateTime dt => dt,
             DateOnly d => d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
-            string s when DateTime.TryParse(
-                s, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var parsed) => parsed,
+            string s when CellDateParser.TryParse(s, out var parsed) => parsed,
             _ => throw new DomainException(
                 "ECR-REG-0422",
                 $"Значення «{value}» не є датою.",

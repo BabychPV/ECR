@@ -6,6 +6,7 @@ using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Errors;
+using Ecr.Domain.Services;
 using Ecr.Expressions.Ast;
 
 namespace Ecr.Application.Reporting;

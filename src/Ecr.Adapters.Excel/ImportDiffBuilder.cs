@@ -197,7 +197,7 @@ public sealed class ImportDiffBuilder
                 // `CellValueReader`: один розбір на обидва шляхи введення.
                 return cell.TryGetValue(out DateTime date)
                     ? date
-                    : Ecr.Application.Documents.CellDateParser.TryParse(text, out var parsed)
+                    : Ecr.Domain.Services.CellDateParser.TryParse(text, out var parsed)
                         ? parsed
                         : text;
 
