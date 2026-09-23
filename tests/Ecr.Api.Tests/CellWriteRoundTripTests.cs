@@ -631,6 +631,77 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         Assert.Equal(931.925m, decimal.Parse(only.NewValue!, System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    /// <summary>
+    /// Відхилене значення в батчі, що СТВОРЮЄ рядок, не лишає рядка-сироти:
+    /// повтор того самого ключа з правильним значенням — 200, а не 409.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знайдено тестом переповнення вище: рядок вставлявся до розбору значень
+    /// і поза транзакцією запису, тож 422 на «abc» лишав у <c>doc.TableRow</c>
+    /// порожній рядок, і наступна спроба користувача падала на
+    /// <c>ECR-ROW-0409</c> — «рядок із таким ключем уже існує» для рядка,
+    /// якого він ніколи не створював.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B04-2.3")]
+    public async Task Відхилене_значення_нового_рядка_не_лишає_рядка_сироти()
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+
+        var numberColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .ElementAt(1);
+
+        var rowKey = $"ORP{Guid.NewGuid():N}"[..12];
+
+        async Task<HttpResponseMessage> CreateAsync(string value)
+            => await client.PatchAsJsonAsync(patchUri, new
+            {
+                tableInstanceId = scenario.Document.TableInstanceId,
+                periodKey = scenario.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey,
+                        baseVersion = (string?)null,
+                        cells = new object[] { new { columnCode = numberColumn, value = (object)value } },
+                    },
+                },
+            }).ConfigureAwait(true);
+
+        var refused = await CreateAsync("abc").ConfigureAwait(true);
+        Assert.True(
+            refused.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"PATCH «abc»: очікували 422, отримали {refused.StatusCode}\n"
+            + $"{await refused.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        var retried = await CreateAsync("12.5").ConfigureAwait(true);
+        Assert.True(
+            retried.StatusCode == HttpStatusCode.OK,
+            $"Повтор із правильним значенням: очікували 200, отримали {retried.StatusCode} "
+            + $"(409 = відхилений батч лишив рядок-сироту)\n"
+            + $"{await retried.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+    }
+
     /// <summary>Рядки <c>aud.CellChange</c> однієї комірки — прямим ADO, бо <c>aud.*</c> поза моделлю EF.</summary>
     private async Task<List<(string? OldValue, string? NewValue)>> CellJournalAsync(
         long documentId, string rowKey, int columnDefId)

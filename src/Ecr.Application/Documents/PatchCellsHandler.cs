@@ -825,6 +825,8 @@ public sealed class PatchCellsHandler(
         // екземплярів таблиць (`MaterializeFixedRowsAsync`).
         if (context.Creations.Count > 0)
         {
+            EnsureCreationValuesReadable(context.Creations, context.ColumnDefs);
+
             var newIds = await rowStore
                 .CreateRowsAsync(
                     request.TableInstanceId, context.PeriodKey,
@@ -1622,6 +1624,39 @@ public sealed class PatchCellsHandler(
 
         public object? GetCell(string rowKey, string columnCode)
             => string.Equals(rowKey, row.RowKey, StringComparison.Ordinal) ? GetCell(columnCode) : null;
+    }
+
+    /// <summary>
+    /// Читає значення нових рядків ДО того, як рядки з'являться в базі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>rowStore.CreateRowsAsync</c> пише рядок одразу й поза транзакцією
+    /// <see cref="PersistChangesAsync"/>, а значення комірок розбирає лише
+    /// <see cref="Distribute"/> — ПІСЛЯ вставки. Тож будь-яка відмова значення
+    /// в батчі, що створює рядок (<c>abc</c> у числовій колонці, зайві знаки,
+    /// переповнення цілої частини, невідома колонка), давала клієнтові
+    /// <c>422</c>, а в <c>doc.TableRow</c> лишався порожній рядок-сирота:
+    /// повтор того самого запиту падав уже на <c>ECR-ROW-0409</c> «рядок із
+    /// таким ключем існує». Це порушує правило батчу «часткове застосування
+    /// заборонене» (<c>PatchCellsRequest</c>, B04 §2.3). Розбір тут —
+    /// той самий <see cref="ColumnOf"/> + <see cref="CellValueReader.Read"/>,
+    /// що й у <see cref="Distribute"/>, тож відмова однакова, лише раніше.
+    /// </remarks>
+    private static void EnsureCreationValuesReadable(
+        IReadOnlyList<PatchRow> creations, IReadOnlyDictionary<string, ColumnDef> columnDefs)
+    {
+        foreach (var row in creations)
+        {
+            foreach (var cell in row.Cells)
+            {
+                var column = ColumnOf(columnDefs, cell.ColumnCode);
+
+                if (!cell.IsEmpty)
+                {
+                    _ = CellValueReader.Read(cell.Value, column);
+                }
+            }
+        }
     }
 
     private static void Distribute(
