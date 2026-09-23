@@ -57,8 +57,15 @@ export interface ExpressionEditorProps {
   readonly ariaLabel: string;
   /** Висота поля; за замовчуванням — під однорядкову формулу з запасом. */
   readonly height?: string | undefined;
-  /** Повідомляє результат перевірки — щоб показати його поруч. */
-  readonly onValidated?: ((result: ExpressionValidationDto) => void) | undefined;
+  /**
+   * Повідомляє результат перевірки — щоб показати його поруч.
+   *
+   * ⚠ `null` — «перевіряти нічого»: вираз порожній (або з одних пробілів), і
+   * запит на сервер не йшов (`U-07`). Це НЕ «перевірено, порушень немає»:
+   * викликач не має малювати на `null` ні червоного, ні зеленого — лише
+   * нейтральний стан.
+   */
+  readonly onValidated?: ((result: ExpressionValidationDto | null) => void) | undefined;
 }
 
 /** Редактор виразів із підсвічуванням, підказками і перевіркою при введенні. */
@@ -280,6 +287,26 @@ export function ExpressionEditor(props: ExpressionEditorProps): JSX.Element {
   // ── Перевірка при введенні ────────────────────────────────────────────────
   useEffect(() => {
     if (!ready) return;
+
+    // ⛔ `U-07`: порожній рядок — не хибне введення, а ВІДСУТНІСТЬ введення.
+    // Сервер на `""` відповідає `ECR-TMPL-0422 Unexpected token ""`, і
+    // `/admin/expressions` щойно відкритий показував червоне «Findings: 1» до
+    // першої ж набраної літери. Тому: запиту немає (ні на відкритті, ні коли
+    // текст стерли), підкреслення знімаються, а викликач отримує `null` —
+    // «перевіряти нічого», а не зелене «перевірено, порушень немає» (те саме
+    // розрізнення, що `A7-28` у `SheetFillSummary.tsx`).
+    if (value.trim().length === 0) {
+      const monaco = api.current;
+      const model = editor.current?.getModel();
+
+      if (monaco !== null && model !== null && model !== undefined) {
+        monaco.showDiagnostics(model, []);
+      }
+
+      setValidateError(null);
+      onValidated?.(null);
+      return;
+    }
 
     const controller = new AbortController();
 
