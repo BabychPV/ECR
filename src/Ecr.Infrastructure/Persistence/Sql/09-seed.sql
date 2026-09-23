@@ -981,6 +981,13 @@ USING (VALUES
     -- ⚠ Публічна область (0) — лише те, що видно ДО входу або замість екрана
     -- (ФВ-14.9b): вимога увійти, блокування, разовий пароль, 500.
     (N'err.ECR-AUTH-0401.signInRequired',       N'en', N'You are not signed in or your session has ended: sign in again.', 0),
+    -- ⛔ `U-01`: відмова входу не мала ключа, тому `ErrorAlert.tsx` (рішення
+    -- 2026-09-20 — подробиця без `messageKey` не показується) не друкував
+    -- НІЧОГО, і користувач із хибним паролем бачив саму лише вказівку
+    -- «Sign in to continue.». Область публічна (0): це екран ДО входу.
+    -- ⚠ Текст навмисно не розрізняє «немає такого користувача» і «пароль не
+    -- той» — інакше форма входу перелічує чужі облікові записи (ФВ-6.11).
+    (N'err.ECR-AUTH-0401.invalidCredentials',   N'en', N'The user name or password is incorrect.', 0),
     (N'err.ECR-AUTH-0401.accountMissing',       N'en', N'Your account no longer exists: sign in again.', 1),
     (N'err.ECR-AUTH-0401.currentPasswordWrong', N'en', N'The current password is incorrect.', 1),
     (N'err.ECR-AUTH-0403.domainPassword',       N'en', N'The password of a domain account is changed in the domain, not here.', 1),

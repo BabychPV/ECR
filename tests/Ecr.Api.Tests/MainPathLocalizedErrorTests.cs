@@ -111,6 +111,48 @@ public sealed partial class MainPathLocalizedErrorTests
         Assert.Equal($"Only a closed period can be reopened; the period is {period.State}.", detail);
     }
 
+    /// <summary>
+    /// `U-01`: хибний пароль пояснює себе реченням, а не самим кодом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Предмет — не «механізм `messageKey` працює» (це доводить
+    /// <c>GenericMessageKeyLocalizationTests</c>), а те, що ключ несе САМ
+    /// <see cref="LoginHandler"/>. Без ключа <c>ErrorAlert.tsx</c> (рішення
+    /// 2026-09-20) не друкує подробицю ВЗАГАЛІ, і користувач бачить самі лише
+    /// «Sign in to continue.» плюс код: екран не каже, що сталося.
+    ///
+    /// ⚠ Прогін іде крізь справжній конвеєр і справжній <c>09-seed.sql</c>,
+    /// тому тест червоніє і від знятого ключа в коді, і від прибраного рядка
+    /// каталогу, і від кирилиці, що просочилася назад у <c>detail</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Хибний_пароль_називає_причину_а_не_лише_код()
+    {
+        var user = new User("ux-admin", "UX Admin", AuthProvider.Local);
+        user.SetPassword("hash-of-the-real-password");
+
+        var users = Substitute.For<IUserStore>();
+        users.FindByUserNameAsync("ux-admin", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetPolicyAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
+             .Returns(new PasswordPolicy("Default", minLength: 12, maxFailedAttempts: 5));
+
+        var hasher = Substitute.For<IPasswordHasher>();
+        hasher.Verify(Arg.Any<string>(), Arg.Any<string>()).Returns(false);
+
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+
+        var handler = new LoginHandler(
+            users, hasher, Substitute.For<IUnitOfWork>(), clock,
+            NullLogger<LoginHandler>.Instance);
+
+        var detail = await DetailAsync(
+            () => handler.HandleAsync("ux-admin", "wrong-password", "127.0.0.1", CancellationToken.None));
+
+        Assert.Equal("The user name or password is incorrect.", detail);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Необроблений_виняток_віддає_каталожне_речення_без_тексту_винятку()
