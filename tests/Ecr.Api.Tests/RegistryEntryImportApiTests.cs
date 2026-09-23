@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Ecr.Application.Registries;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Security;
@@ -12,6 +13,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -93,6 +95,108 @@ public sealed class RegistryEntryImportApiTests(SqlServerFixture sql)
         Assert.True(
             await DataRevisionAsync(fixture.DefinitionId).ConfigureAwait(true) > before,
             "DataRevision не зросла після імпорту, що щось змінив.");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
+    public async Task Зміна_поля_через_імпорт_пише_RegistryValueChanged_з_Id_нового_запису()
+    {
+        // ⛔ Закриває прогалину: ручне редагування (UpsertRegistryEntryHandler)
+        // пише aud.SecurityEvent на КОЖНУ зміну поля, а імпорт CSV досі
+        // відкидав RegistryValueFieldChange з ApplyValuesAsync мовчки — та сама
+        // зміна лишала слід лише зробленою руками. МУТАЦІЙНИЙ ДОКАЗ: прибрати
+        // цикл запису per-row подій в ImportRegistryEntriesHandler.HandleAsync
+        // (після SaveChangesAsync у транзакційному блоці) — і цей тест першим
+        // стає червоним.
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.EditData").ConfigureAwait(true);
+
+        var fixture = await SeedAsync().ConfigureAwait(true);
+
+        // Один рядок додає НОВИЙ запис (Id відомий лише після SaveChanges),
+        // другий змінює Amount наявного запису — обидва мають дати подію.
+        var csv = $"code,Name,Amount,RefCode\r\n"
+            + $"NEW{fixture.Tag},New entry,12.5,{fixture.OtherEntryCode}\r\n"
+            + $"{fixture.ExistingCode},Existing,99.75,\r\n";
+
+        var response = await ImportAsync(client, fixture.Code, csv, dryRun: false).ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+        Assert.True(body.GetProperty("applied").GetBoolean());
+
+        var newEntryId = await EntryIdAsync(fixture.DefinitionId, $"NEW{fixture.Tag}").ConfigureAwait(true);
+
+        // ⚠ Фільтр за registryDefId у DetailsJson, а не за ChangedByUserId:
+        // fixture.DefinitionId унікальний на прогін (новий довідник у SeedAsync),
+        // тож сторонні події з паралельних тестів це не зачепить. Весь
+        // патерн — ОДНА інтерпольована діра (як у MethodologyVersionMaintenanceTests),
+        // а не значення, вбудоване всередину рядкового літералу SQL: @-параметр
+        // усередині N'...' лишився б текстом, а не підставленим значенням.
+        var registryDefIdPattern = $"%\"registryDefId\":{fixture.DefinitionId},%";
+
+        await using var db = new EcrDbContext(Options());
+        var events = await db.Database
+            .SqlQuery<string>(
+                $"SELECT ISNULL(DetailsJson, N'') AS Value FROM aud.SecurityEvent WHERE EventType = {UpsertRegistryEntryHandler.ValueChangedEventType} AND DetailsJson LIKE {registryDefIdPattern} ORDER BY Id")
+            .ToListAsync().ConfigureAwait(true);
+
+        // Обидва рядки змінили хоча б одне поле — дві події, по одній на запис.
+        Assert.Equal(2, events.Count);
+
+        var byEntryId = events
+            .Select(json => JsonDocument.Parse(json).RootElement)
+            .ToDictionary(e => e.GetProperty("entryId").GetInt64());
+
+        Assert.True(byEntryId.ContainsKey(newEntryId));
+        Assert.True(byEntryId.ContainsKey(fixture.ExistingId));
+
+        var newEntryDetails = byEntryId[newEntryId];
+        Assert.Equal(fixture.DefinitionId, newEntryDetails.GetProperty("registryDefId").GetInt32());
+        var newEntryChanges = newEntryDetails.GetProperty("changes").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("field").GetString()!);
+        // Amount — CellDataType.Decimal: RawValue serialises його числом, не
+        // рядком (на відміну від LIMIT/String у RegistryValueAuditTests).
+        Assert.True(newEntryChanges.ContainsKey("Amount"));
+        Assert.Equal(12.5m, newEntryChanges["Amount"].GetProperty("newValue").GetDecimal());
+
+        var existingChanges = byEntryId[fixture.ExistingId].GetProperty("changes").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("field").GetString()!);
+        Assert.True(existingChanges.ContainsKey("Amount"));
+        Assert.Equal(99.75m, existingChanges["Amount"].GetProperty("newValue").GetDecimal());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Directive", "BE-24")]
+    public async Task Рядок_без_фактичної_зміни_поля_не_пише_RegistryValueChanged()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.EditData").ConfigureAwait(true);
+
+        var fixture = await SeedAsync().ConfigureAwait(true);
+
+        // Рядок називає лише код — жодного поля не передано (unchanged), тож
+        // ApplyValuesAsync поверне порожній перелік змін.
+        var csv = $"code,Name\r\n{fixture.ExistingCode},\r\n";
+
+        var response = await ImportAsync(client, fixture.Code, csv, dryRun: false).ConfigureAwait(true);
+        Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {app.ErrorsText}");
+
+        var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(true)).RootElement;
+
+        // Нічого не додано й не оновлено (жодних переданих значень) — імпорт
+        // виходить РАНІШЕ транзакції (added + updated == 0), тож і StructureChange
+        // не пишеться. Головне твердження тесту нижче: RegistryValueChanged
+        // теж відсутній.
+        Assert.False(body.GetProperty("applied").GetBoolean());
+
+        var count = await ValueChangedEventCountAsync(fixture.DefinitionId).ConfigureAwait(true);
+
+        Assert.Equal(0, count);
     }
 
     [Fact]
@@ -278,6 +382,18 @@ public sealed class RegistryEntryImportApiTests(SqlServerFixture sql)
             .ConfigureAwait(false);
     }
 
+    private async Task<long> EntryIdAsync(int registryDefId, string code)
+    {
+        await using var db = new EcrDbContext(Options());
+
+        return await db.RegistryEntries
+            .AsNoTracking()
+            .Where(e => e.RegistryDefId == registryDefId && e.Code == code && !e.IsDeleted)
+            .Select(e => e.Id)
+            .SingleAsync()
+            .ConfigureAwait(false);
+    }
+
     private async Task<decimal?> AmountAsync(long entryId)
     {
         await using var db = new EcrDbContext(Options());
@@ -304,6 +420,28 @@ public sealed class RegistryEntryImportApiTests(SqlServerFixture sql)
             .Select(d => d.DataRevision)
             .SingleAsync()
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Скільки подій <c>RegistryValueChanged</c> лишив імпорт цього довідника —
+    /// <c>registryDefId</c> у <c>DetailsJson</c> робить фільтр незалежним від
+    /// паралельних тестів (той самий підхід, що <c>SecurityEventsWithReasonAsync</c>
+    /// у <c>ConsistencyIssuesControllerTests</c>).
+    /// </summary>
+    private async Task<int> ValueChangedEventCountAsync(int registryDefId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) FROM aud.SecurityEvent
+            WHERE EventType = @type AND DetailsJson LIKE @pattern;
+            """;
+        command.Parameters.AddWithValue("@type", UpsertRegistryEntryHandler.ValueChangedEventType);
+        command.Parameters.AddWithValue("@pattern", $"%\"registryDefId\":{registryDefId},%");
+
+        return (int)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
     }
 
     private DbContextOptions<EcrDbContext> Options()
