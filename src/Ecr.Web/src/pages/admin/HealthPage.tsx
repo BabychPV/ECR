@@ -10,7 +10,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { t, tOr } from '@/shared/i18n';
+import { hasText, t } from '@/shared/i18n';
 
 type SystemFacts = components['schemas']['SystemFactsResponse'];
 
@@ -264,7 +264,9 @@ function fieldLabel(key: string): string {
  * що у `permissionLabel.ts`.
  */
 export function checkLabel(name: string): string {
-  return tOr(`health.check.${name}`, name);
+  const key = `health.check.${name}`;
+
+  return hasText(key) ? t(key) : name;
 }
 
 /**

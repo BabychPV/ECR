@@ -1,4 +1,4 @@
-import { tOr } from '@/shared/i18n';
+import { hasText, t } from '@/shared/i18n';
 
 /**
  * Людська назва права — і код, який лишається на екрані (`U-11`).
@@ -34,5 +34,7 @@ export function permissionLabelKey(code: string): string {
 
 /** Назва права мовою інтерфейсу; немає рядка в каталозі — сам код. */
 export function permissionLabel(code: string): string {
-  return tOr(permissionLabelKey(code), code);
+  const key = permissionLabelKey(code);
+
+  return hasText(key) ? t(key) : code;
 }

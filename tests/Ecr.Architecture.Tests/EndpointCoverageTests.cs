@@ -423,6 +423,18 @@ public sealed partial class EndpointCoverageTests
             ],
             "Підпис поля /health/db (FieldLabelKeys)."),
 
+        // ⚠ Запасний варіант — сам ідентифікатор (`hasText(key) ? t(key) : name`),
+        // тож перевірка без рядка в сіді не дає `⟦…⟧`; але три відомі — названі тут.
+        new("pages/admin/HealthPage.tsx", "key", 1, "pages/admin/HealthPage.tsx",
+            ["health.check.db", "health.check.jobs", "health.check.sources"],
+            "Назва картки перевірки стану (checkLabel, U-14): ім'я з AddCheck<…> у Program.cs."),
+
+        // ⚠ Ключі — увесь каталог sec.Permission із 09-seed.sql станом на 2026-09-23.
+        // Нове право без рядка тут цей сторож НЕ побачить (на екрані лишиться сам
+        // код, не `⟦…⟧`); повноту стереже permissionLabel.test.ts, що звіряє сід сам із собою.
+        new("features/security/permissionLabel.ts", "key", 1, "features/security/permissionLabel.ts",
+            PermissionLabelKeys, "Назва права в матриці /admin/security (U-11)."),
+
         new("features/projects/CreateProjectModal.tsx", "ProjectFieldLabelKey[field]", 1,
             "features/projects/CreateProjectModal.tsx",
             ["periods.code", "periods.name", "periods.timeZone", "periods.templateVersion", "periods.policy", "periods.customCount"],
@@ -498,6 +510,52 @@ public sealed partial class EndpointCoverageTests
         "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
+    ];
+
+    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 41 право каталогу <c>sec.Permission</c>.</summary>
+    private static string[] PermissionLabelKeys =>
+    [
+        "permission.Template.View",
+        "permission.Template.Edit",
+        "permission.Template.Publish",
+        "permission.Registry.View",
+        "permission.Registry.EditData",
+        "permission.Registry.EditDefinition",
+        "permission.Registry.Publish",
+        "permission.Document.View",
+        "permission.Document.Create",
+        "permission.Document.Delete",
+        "permission.Document.Import",
+        "permission.Document.Export",
+        "permission.Document.Reopen",
+        "permission.Document.ChangeKey",
+        "permission.Project.Manage",
+        "permission.Period.Configure",
+        "permission.Period.Reopen",
+        "permission.Calculation.View",
+        "permission.Calculation.EditFormula",
+        "permission.Calculation.EditConstant",
+        "permission.Calculation.EditRule",
+        "permission.Calculation.Publish",
+        "permission.Calculation.Recalculate",
+        "permission.Calculation.ManageRequiredInputs",
+        "permission.Report.ViewRegulatory",
+        "permission.Report.BuildSnapshot",
+        "permission.Report.Export",
+        "permission.Report.EditDefinition",
+        "permission.Report.ViewCampaign",
+        "permission.Integration.View",
+        "permission.Integration.Manage",
+        "permission.Integration.EditSchedule",
+        "permission.Uom.EditCatalog",
+        "permission.Security.ManageUsers",
+        "permission.Security.ManageRoles",
+        "permission.Security.ViewAudit",
+        "permission.Security.Simulate",
+        "permission.System.ViewHealth",
+        "permission.System.RunJob",
+        "permission.System.ManageLocalization",
+        "permission.System.ManageNotifications",
     ];
 
     private static string[] NotificationEventKeys =>
