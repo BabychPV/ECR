@@ -405,6 +405,61 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 ct);
     }
 
+    /// <summary>
+    /// Стан КОЖНОГО аркуша складу за період: рядок <c>wf.ApprovalState</c>, а
+    /// де його немає — <c>Draft</c>. ЄДИНЕ місце, звідки стан аркуша беруть і
+    /// картка документа (<see cref="StatesAsync"/>), і сторінка переліку
+    /// (<see cref="StatesBatchAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ U-03. Перелік показував «—» на документі, який смуга над ним рахувала
+    /// як «1 Draft», а фільтр <c>State = Draft</c> — повертав: три відповіді про
+    /// стан одного документа на одному екрані. Причина — джерелом рядків тут був
+    /// <c>wf.ApprovalState</c>, тобто аркуш БЕЗ рядка стану просто не потрапляв у
+    /// словник, тоді як <see cref="WhereState"/> і
+    /// <c>DocumentListSummaryStore</c> обидва рахують такий аркуш чернеткою
+    /// (рядок стану з'являється лише з першим поданням, <c>S-17</c>).
+    ///
+    /// ⛔ Тому джерело рядків — СКЛАД документа (<c>doc.DocumentSheet</c>,
+    /// <c>IsIncluded</c>), рівно як у тих двох; рядок стану лише ДОповнює його.
+    /// Це не четверте правило, а те саме, записане на шляху читання: щоб два
+    /// місця не розійшлися знову, обидва методи читають цей один запит.
+    ///
+    /// ⚠ Наслідок, який називаю прямо: рядок <c>ApprovalState</c> для аркуша
+    /// ПОЗА складом (аркуш вилучили після подання) у словник більше не
+    /// потрапляє. Так і має бути — і смуга, і фільтр його теж не бачать, а
+    /// показувати стан аркуша, якого в документі немає, означало б четверту
+    /// відповідь замість третьої.
+    ///
+    /// ⚠ Корельований підзапит, а не <c>LEFT JOIN</c> у LINQ: він перекладається
+    /// в один <c>OUTER APPLY</c>, тобто запит лишається ОДИН на всю сторінку
+    /// (<c>Q-167</c>) — жодного циклу по документах.
+    ///
+    /// ⚠ <c>PeriodKey</c> стоїть у предикаті партиційованої <c>wf.ApprovalState</c>
+    /// (урок <c>WR-05</c>).
+    /// </remarks>
+    private IQueryable<SheetStateRow> SheetStatesQuery(long[] documentIds, int periodKey)
+        => db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => documentIds.Contains(s.DocumentId) && s.IsIncluded)
+            .Join(
+                db.SheetDefs,
+                s => s.SheetDefId,
+                d => d.Id,
+                (s, d) => new { s.DocumentId, s.SheetDefId, d.Code })
+            .Select(s => new SheetStateRow(
+                s.DocumentId,
+                s.Code,
+                db.ApprovalStates
+                    .Where(a => a.DocumentId == s.DocumentId
+                                && a.SheetDefId == s.SheetDefId
+                                && a.PeriodKey == periodKey)
+                    .Select(a => (DocumentStatus?)a.Status)
+                    .FirstOrDefault()));
+
+    /// <summary>Аркуш складу і його стан; <c>null</c> — рядка стану ще немає.</summary>
+    private sealed record SheetStateRow(long DocumentId, string Code, DocumentStatus? Status);
+
     /// <summary>Стан аркушів за період; порожньо, якщо період не вказано.</summary>
     /// <remarks>
     /// ⛔ Q-271. Ключ словника — <c>SheetDef.Code</c>, а НЕ числовий
@@ -425,26 +480,28 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        var states = await db.ApprovalStates
-            .AsNoTracking()
-            .Where(a => a.DocumentId == documentId && a.PeriodKey == periodKey)
-            .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { s.Code, a.Status })
+        var states = await SheetStatesQuery([documentId], periodKey)
             .Take(MaxSheets)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
         return states.ToDictionary(
             s => s.Code,
-            s => s.Status.ToString(),
+            s => (s.Status ?? DocumentStatus.Draft).ToString(),
             StringComparer.Ordinal);
     }
 
     /// <summary>Стан аркушів кількох документів ОДНИМ запитом; порожньо, якщо період не вказано.</summary>
     /// <remarks>
     /// ⛔ Q-167 (аудит фази 2, продуктивність). Той самий стан, що й
-    /// <see cref="StatesAsync"/>, але для сторінки документів разом:
+    /// <see cref="StatesAsync"/> — буквально той самий запит
+    /// (<see cref="SheetStatesQuery"/>), лише для сторінки документів разом:
     /// `WHERE DocumentId IN (...)`, згруповано на клієнті, а не запит на
     /// кожен документ сторінки.
+    ///
+    /// ⚠ Документ БЕЗ жодного аркуша складу у словнику відсутній — як і
+    /// раніше. Рядка для нього тут узяти нізвідки: словник — «аркуш → стан»,
+    /// а аркушів немає.
     /// </remarks>
     private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>> StatesBatchAsync(
         IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
@@ -454,10 +511,10 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             return new Dictionary<long, IReadOnlyDictionary<string, string>>();
         }
 
-        var states = await db.ApprovalStates
-            .AsNoTracking()
-            .Where(a => documentIds.Contains(a.DocumentId) && a.PeriodKey == periodKey)
-            .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { a.DocumentId, s.Code, a.Status })
+        // Масив, а не `IReadOnlyList`: `Contains` над масивом EF перекладає в
+        // `IN (...)`, над інтерфейсом — не гарантовано (та сама причина, що в
+        // `ListAsync` для переліку проєктів).
+        var states = await SheetStatesQuery([.. documentIds], periodKey)
             .Take(documentIds.Count * MaxSheets)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -468,7 +525,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 g => g.Key,
                 IReadOnlyDictionary<string, string> (g) => g.ToDictionary(
                     s => s.Code,
-                    s => s.Status.ToString(),
+                    s => (s.Status ?? DocumentStatus.Draft).ToString(),
                     StringComparer.Ordinal));
     }
 

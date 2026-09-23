@@ -30,6 +30,13 @@ public sealed class DocumentStoreTests(SqlServerFixture sql)
             setup.Documents.Add(doc2);
             await setup.SaveChangesAsync(CancellationToken.None);
 
+            // ⛔ U-03: аркуш у СКЛАДІ документа, а не лише рядок стану. Стан
+            // аркуша читається від складу (`DocumentStore.SheetStatesQuery`) —
+            // рівно як його рахують смуга й фільтр; `ApprovalState` на аркуш,
+            // якого в документі немає, — не стан документа, а сміття даних.
+            setup.DocumentSheets.Add(new DocumentSheet(doc1.DocumentId, doc1.SheetDefId));
+            setup.DocumentSheets.Add(new DocumentSheet(doc2.Id, doc1.SheetDefId));
+
             setup.ApprovalStates.Add(new ApprovalState(doc1.DocumentId, doc1.SheetDefId, doc1.PeriodKey.Value));
             setup.ApprovalStates.Add(new ApprovalState(doc2.Id, doc1.SheetDefId, doc1.PeriodKey.Value));
             await setup.SaveChangesAsync(CancellationToken.None);
