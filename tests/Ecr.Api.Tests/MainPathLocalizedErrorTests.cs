@@ -212,6 +212,41 @@ public sealed partial class MainPathLocalizedErrorTests
         Assert.Equal("Column \"C5\" keeps at most 16 digits after the decimal point.", detail);
     }
 
+    /// <summary>
+    /// Відмова поля шапки називає поле й тип — мовою інтерфейсу, без
+    /// українського слова всередині англійського речення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти ключ тут був (<c>err.ECR-HDR-0422.typeMismatch</c>), але шаблон
+    /// підставляв <c>{expected}</c> = «число», і користувач бачив
+    /// «Header field "QTY" expects a число.». Перевірка на кирилицю в
+    /// <see cref="DetailAsync"/> ловить саме це; рівність речення — що тип
+    /// узято ТОЙ САМИЙ.
+    /// </remarks>
+    [Theory]
+    [InlineData(CellDataType.Decimal, "abc", "Header field \"QTY\" expects a number.")]
+    [InlineData(CellDataType.Bool, "abc", "Header field \"QTY\" expects true or false.")]
+    [InlineData(CellDataType.Date, "abc", "Header field \"QTY\" expects a date.")]
+    [InlineData(CellDataType.Lookup, "abc", "Header field \"QTY\" expects the identifier of a registry entry or unit.")]
+    [InlineData(CellDataType.Unit, "abc", "Header field \"QTY\" expects the identifier of a registry entry or unit.")]
+    [InlineData(CellDataType.Decimal, "931.9250000000000000123", "Header field \"QTY\" keeps at most 16 digits after the decimal point.")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Відмова_поля_шапки_називає_поле_мовою_інтерфейсу(
+        CellDataType dataType, string typed, string expected)
+    {
+        var field = new HeaderFieldDef(
+            templateVersionId: 1, EcrCode.Create("QTY"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Quantity" }), 1, dataType);
+
+        var detail = await DetailAsync(() =>
+        {
+            HeaderValueReader.Read(typed, field);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(expected, detail);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Необроблений_виняток_віддає_каталожне_речення_без_тексту_винятку()

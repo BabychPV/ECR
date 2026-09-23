@@ -423,7 +423,10 @@ DELETE t
     (N'grid.save',                                 N'en', N'Save ({count})'),
     -- U-18: рядок «Still needed» став спільним для діалогів створення —
     -- ключ `common.stillNeeded`.
-    (N'periods.stillNeeded',                       N'en', N'Still needed: {fields}')
+    (N'periods.stillNeeded',                       N'en', N'Still needed: {fields}'),
+    -- Відмова типу поля шапки: один ключ з `{expected}` підставляв українське
+    -- слово в англійське речення; замінено на `err.ECR-HDR-0422.expects*`.
+    (N'err.ECR-HDR-0422.typeMismatch',             N'en', N'Header field "{headerFieldCode}" expects a {expected}.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -942,7 +945,17 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.headerFieldDataTypeImmutable',         N'en', N'The data type of header field "{headerFieldCode}" cannot change after creation ({oldDataType} -> {newDataType}). Create a new field or clone the version.', 1),
     (N'err.ECR-HDR-0404.headerField',                N'en', N'Header field "{headerFieldCode}" does not exist in this document''s template version.', 1),
     (N'err.ECR-HDR-0422.validationBlocked',          N'en', N'The value for header field "{headerFieldCode}" does not match its type or required setting.', 1),
-    (N'err.ECR-HDR-0422.typeMismatch',               N'en', N'Header field "{headerFieldCode}" expects a {expected}.', 1),
+    -- ⛔ Було одним ключем `typeMismatch` з `{expected}`, а значенням
+    -- `expected` їхало українське слово: «Header field "QTY" expects a
+    -- число.». Резолвер другого рівня ключів не має — тип тепер частина
+    -- ключа, як `err.ECR-CELL-0422.expects*` (`U-02`). Старий ключ — у
+    -- «Прибраних ключах» вище.
+    (N'err.ECR-HDR-0422.expectsNumber',              N'en', N'Header field "{headerFieldCode}" expects a number.', 1),
+    (N'err.ECR-HDR-0422.expectsBoolean',             N'en', N'Header field "{headerFieldCode}" expects true or false.', 1),
+    (N'err.ECR-HDR-0422.expectsDate',                N'en', N'Header field "{headerFieldCode}" expects a date.', 1),
+    (N'err.ECR-HDR-0422.expectsIdentifier',          N'en', N'Header field "{headerFieldCode}" expects the identifier of a registry entry or unit.', 1),
+    -- `U-23` для шапки: той самий `decimal(34,16)`, та сама відмова.
+    (N'err.ECR-HDR-0422.tooManyDecimals',            N'en', N'Header field "{headerFieldCode}" keeps at most {maxScale} digits after the decimal point.', 1),
 
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
