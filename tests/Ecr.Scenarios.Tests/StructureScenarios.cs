@@ -169,15 +169,24 @@ public sealed class StructureScenarios(SqlServerFixture sql)
     /// S-05. Формула колонки, збережена у версії (<c>W5.3</c>).
     /// </summary>
     /// <remarks>
-    /// ⛔ `GET .../structure` (Правило 3 §3.2 — верифікація через ту саму
-    /// точку входу, якою читає клієнт) ще не показує наявних формул —
-    /// задокументований пропуск `W5.3` (`TemplateColumnDto` не несе поля
-    /// формули; додати його означало б правити
-    /// `TemplateStructureDto.cs`/`GetTemplateStructureHandler.cs`, поза
-    /// межами того зрізу). Тому доказ персистентності — ПОВТОРНИЙ `PUT` за
-    /// тією самою адресою (`tableDefId`/`scope`/`target`): якщо перший запис
-    /// не зберігся, другий запис на ту саму ціль поводився б як створення, а
-    /// не як заміна, і повернув би інше значення `Id`.
+    /// ⛔ Доказ персистентності — ПОВТОРНИЙ `PUT` за тією самою адресою
+    /// (`tableDefId`/`scope`/`target`): якщо перший запис не зберігся,
+    /// другий запис на ту саму ціль поводився б як створення, а не як
+    /// заміна, і повернув би інше значення `Id`.
+    ///
+    /// ✎ Дефект живого перегляду (2026-09-23): кнопка "Formula" в
+    /// `TemplateVersionPage.tsx` при ПОВТОРНОМУ відкритті діалогу на
+    /// колонці/рядку зі збереженою формулою показувала ПОРОЖНІЙ редактор —
+    /// `GET .../structure` не ніс тексту наявного виразу взагалі
+    /// (`TemplateColumnDto`/`TemplateRowDto` не мали відповідних полів), тож
+    /// клієнту фізично не було звідки його взяти без окремого запиту.
+    /// Формули вже вантажилися в кешований `TemplateVersionSnapshot`
+    /// (`MetadataCache.LoadAsync`, «ШОСТИЙ запит») для рушія перерахунку —
+    /// не вистачало лише проєкції в DTO, тому фікс іде шляхом (b): додано
+    /// `FormulaExpression`/`FormulaDialect` до обох DTO замість нового
+    /// GET-ендпоінта (не додає запиту до бази, не додає мережевого
+    /// round-trip на кожне відкриття діалогу). Перевірка нижче — саме
+    /// РИВОК, який раніше не проходив жодною ланкою.
     /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
@@ -298,6 +307,35 @@ public sealed class StructureScenarios(SqlServerFixture sql)
         var resavedBody = await resaveFormula.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(formulaId, resavedBody.GetProperty("id").GetInt32());
         Assert.Equal("A + B + 1", resavedBody.GetProperty("expression").GetString());
+
+        // ⛔ Регресія 2026-09-23: `GET .../structure` тепер несе ЧИННИЙ вираз
+        // — саме те, чого редактору бракувало при повторному відкритті
+        // (`TemplateVersionPage.tsx`, кнопка "Formula"). Читається структура
+        // ЗАНОВО (не той самий HttpClient-виклик, що зберігав) — так само,
+        // як робить браузер при повторному відкритті сторінки.
+        var structure = await admin.Client.GetAsync(
+            new Uri($"/api/v1/template-versions/{versionId}/structure", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, structure.StatusCode);
+
+        var structureBody = await structure.Content.ReadFromJsonAsync<JsonElement>();
+        var table = structureBody.GetProperty("sheets").EnumerateArray()
+            .Single(s => s.GetProperty("code").GetString() == "SHEET1")
+            .GetProperty("tables").EnumerateArray()
+            .Single(t => t.GetProperty("code").GetString() == "TABLE1");
+        var columnInStructure = table.GetProperty("columns").EnumerateArray()
+            .Single(c => c.GetProperty("id").GetInt32() == columnId);
+
+        Assert.Equal("A + B + 1", columnInStructure.GetProperty("formulaExpression").GetString());
+        Assert.Equal("Template", columnInStructure.GetProperty("formulaDialect").GetString());
+
+        // ⛔ Колонка БЕЗ формули (`manualColumnId` — та сама, на якій
+        // формулу щойно відхилили як ECR-TMPL-4227) не має видавати чужий
+        // вираз чи порожній рядок замість `null`: клієнт розрізняє «формули
+        // немає» (`emptyFormulaDraft`) і «формула є, текст порожній» лише за
+        // цим полем.
+        var manualColumnInStructure = table.GetProperty("columns").EnumerateArray()
+            .Single(c => c.GetProperty("id").GetInt32() == manualColumnId);
+        Assert.Equal(JsonValueKind.Null, manualColumnInStructure.GetProperty("formulaExpression").ValueKind);
     }
 
     /// <summary>Правило валідації таблиці (<c>W5.4</c>): те саме твердження, що й S-05 — синтаксично.</summary>
