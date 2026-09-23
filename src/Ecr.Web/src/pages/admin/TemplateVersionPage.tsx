@@ -57,7 +57,7 @@ import {
 import { deleteRow, saveRow } from '@/features/templates/rowApi';
 import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/features/templates/row';
 import { saveFormula } from '@/features/templates/formulaApi';
-import { emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
+import { draftOfFormula, emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
 import { deleteValidationRule, saveValidationRule } from '@/features/templates/validationRuleApi';
 import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/templates/validationRule';
 import { VersionDiff } from '@/features/templates/VersionDiff';
@@ -1069,7 +1069,17 @@ export function TemplateVersionPage(): JSX.Element {
                                               variant="subtle"
                                               onClick={() =>
                                                 setFormulaDraft(
-                                                  emptyFormulaDraft(table.id, 'Column', String(column.id)),
+                                                  // ⛔ Дефект 2026-09-23: раніше тут завжди був
+                                                  // emptyFormulaDraft — повторне відкриття на
+                                                  // колонці зі збереженою формулою показувало
+                                                  // порожній редактор, хоча PUT зберігав вираз
+                                                  // (структура тепер несе його — GET …/structure).
+                                                  column.formulaExpression !== null
+                                                    ? draftOfFormula(table.id, 'Column', String(column.id), {
+                                                        dialect: column.formulaDialect ?? 'Template',
+                                                        expression: column.formulaExpression,
+                                                      })
+                                                    : emptyFormulaDraft(table.id, 'Column', String(column.id)),
                                                 )
                                               }
                                             >
@@ -1166,7 +1176,17 @@ export function TemplateVersionPage(): JSX.Element {
                                                   size="compact-xs"
                                                   variant="subtle"
                                                   onClick={() =>
-                                                    setFormulaDraft(emptyFormulaDraft(table.id, 'Row', row.rowKey))
+                                                    setFormulaDraft(
+                                                      // ⛔ Той самий фікс, що й на колонці вище
+                                                      // (2026-09-23): порожній редактор на
+                                                      // рядку зі збереженою формулою.
+                                                      row.formulaExpression !== null
+                                                        ? draftOfFormula(table.id, 'Row', row.rowKey, {
+                                                            dialect: row.formulaDialect ?? 'Template',
+                                                            expression: row.formulaExpression,
+                                                          })
+                                                        : emptyFormulaDraft(table.id, 'Row', row.rowKey),
+                                                    )
                                                   }
                                                 >
                                                   {t('formulas.edit')}
