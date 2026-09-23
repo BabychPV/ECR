@@ -60,6 +60,7 @@ import { saveFormula } from '@/features/templates/formulaApi';
 import { draftOfFormula, emptyFormulaDraft, type FormulaDraft } from '@/features/templates/formula';
 import { deleteValidationRule, saveValidationRule } from '@/features/templates/validationRuleApi';
 import { emptyValidationRuleDraft, type ValidationRuleDraft } from '@/features/templates/validationRule';
+import { LocalDraft } from '@/features/templates/LocalDraft';
 import { VersionDiff } from '@/features/templates/VersionDiff';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
@@ -161,8 +162,40 @@ const PresentationEditor = lazy(async () => ({
   default: (await import('@/features/templates/PresentationEditor')).PresentationEditor,
 }));
 
+/** Стан форми «правка правила доступу за id». */
+interface ManageSeed {
+  readonly ruleId: number | null;
+  readonly draft: UpdatePeriodAccessRuleDraft;
+}
+
+function emptyManageSeed(templateVersionId: number): ManageSeed {
+  return {
+    ruleId: null,
+    draft: updatePeriodAccessRuleDraftOf({
+      id: 0,
+      templateVersionId,
+      ruleKind: 'AlwaysReadOnly',
+      sheetDefId: null,
+      tableDefId: null,
+      roleId: null,
+      rowKind: null,
+      fromSequence: null,
+      toSequence: null,
+      sourceColumnDefId: null,
+      relativeOffset: null,
+      conditionExpr: null,
+      onOutOfWindow: 'ReadOnly',
+    }),
+  };
+}
+
 /**
  * Редактор структури версії.
+ *
+ * ⛔ Чернетки діалогів — НЕ стан цієї сторінки (`LocalDraft`): тут лише
+ * «що відкрито і з чого почати». Інакше кожне натискання клавіші в діалозі
+ * перерендерювало б усе дерево структури — на версії з 91 таблицею це
+ * секунди на символ (замір 2026-09-23).
  *
  * ⛔ Опублікована версія структурно незмінна — це тримає тригер у базі, а не
  * лише інтерфейс. Кнопка публікації ховається не «щоб не заплутати», а тому
@@ -182,7 +215,6 @@ export function TemplateVersionPage(): JSX.Element {
   const session = useSession();
 
   const [cloning, setCloning] = useState(false);
-  const [newVersion, setNewVersion] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [deprecating, setDeprecating] = useState(false);
   const [editing, setEditing] = useState<TemplateColumnDto | null>(null);
@@ -227,37 +259,19 @@ export function TemplateVersionPage(): JSX.Element {
   // разом із таблицею, для якої відкрили форму — той самий tableId їде і в
   // PUT, і в DELETE.
   const [validationRuleTable, setValidationRuleTable] = useState<number | null>(null);
-  const [validationDraft, setValidationDraft] = useState<ValidationRuleDraft>(
-    emptyValidationRuleDraft(),
-  );
-  const [deleteRuleCode, setDeleteRuleCode] = useState('');
+  const [deletedRuleCount, setDeletedRuleCount] = useState(0);
 
   // ⛔ Правила доступу до періоду (`ФВ-2.15`) не мають коду — форма
-  // створення (`createPeriodDraft`) і форма правки наявного за `id`
-  // (`manageRuleId`/`manageDraft`) навмисно окремі, за тією самою причиною,
-  // що описана в `PeriodAccessRuleEditor.tsx`.
+  // створення і форма правки наявного за `id` навмисно окремі, за тією самою
+  // причиною, що описана в `PeriodAccessRuleEditor.tsx`. Самі чернетки живуть
+  // у діалозі (`LocalDraft`); тут — лише ключі, якими сторінка підставляє
+  // нове початкове значення.
   const [periodRulesOpen, setPeriodRulesOpen] = useState(false);
-  const [createPeriodDraft, setCreatePeriodDraft] = useState<CreatePeriodAccessRuleDraft>(
-    emptyPeriodAccessRuleDraft(),
-  );
-  const [manageRuleId, setManageRuleId] = useState<number | null>(null);
-  const [manageDraft, setManageDraft] = useState<UpdatePeriodAccessRuleDraft>(
-    updatePeriodAccessRuleDraftOf({
-      id: 0,
-      templateVersionId: id,
-      ruleKind: 'AlwaysReadOnly',
-      sheetDefId: null,
-      tableDefId: null,
-      roleId: null,
-      rowKind: null,
-      fromSequence: null,
-      toSequence: null,
-      sourceColumnDefId: null,
-      relativeOffset: null,
-      conditionExpr: null,
-      onOutOfWindow: 'ReadOnly',
-    }),
-  );
+  const [periodCreateKey, setPeriodCreateKey] = useState(0);
+  const [manageSeed, setManageSeed] = useState<{ key: number; value: ManageSeed }>(() => ({
+    key: 0,
+    value: emptyManageSeed(id),
+  }));
 
   const structure = useQuery({
     queryKey: queryKeys.templates.version(id),
@@ -314,7 +328,7 @@ export function TemplateVersionPage(): JSX.Element {
    * посилалися б у порожнечу.
    */
   const clone = useMutation({
-    mutationFn: () =>
+    mutationFn: (newVersion: string) =>
       apiFetch<VersionIdResponse>(`/api/v1/template-versions/${id}/clone`, {
         method: 'POST',
         body: JSON.stringify({ newVersion: newVersion.trim() } satisfies CloneVersionRequest),
@@ -322,7 +336,6 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsOf() });
       setCloning(false);
-      setNewVersion('');
       showDone(t('version.cloned'));
 
       // Одразу відкриваємо клон: інакше користувач лишається на замороженій
@@ -521,7 +534,7 @@ export function TemplateVersionPage(): JSX.Element {
       deleteValidationRule(id, tableId, code),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
-      setDeleteRuleCode('');
+      setDeletedRuleCount((n) => n + 1);
       showDone(t('validationRules.deleted'));
     },
     onError: showApiError,
@@ -537,13 +550,15 @@ export function TemplateVersionPage(): JSX.Element {
     mutationFn: (draft: CreatePeriodAccessRuleDraft) => createPeriodAccessRule(id, draft),
     onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
-      setCreatePeriodDraft(emptyPeriodAccessRuleDraft());
+      setPeriodCreateKey((n) => n + 1);
 
       // ⚠ Щойно створене правило одразу підставляється у форму «правка за
       // id» нижче: інакше побачений на екрані id довелося б передруковувати
       // руками, щоб одразу ж його відредагувати чи прибрати.
-      setManageRuleId(created.id);
-      setManageDraft(updatePeriodAccessRuleDraftOf(created));
+      setManageSeed((seed) => ({
+        key: seed.key + 1,
+        value: { ruleId: created.id, draft: updatePeriodAccessRuleDraftOf(created) },
+      }));
       showDone(t('periodRules.added'));
     },
     onError: showApiError,
@@ -563,7 +578,7 @@ export function TemplateVersionPage(): JSX.Element {
   const deletePeriodRuleMutation = useMutation({
     mutationFn: (ruleId: number) => deletePeriodAccessRule(id, ruleId),
     onSuccess: async () => {
-      setManageRuleId(null);
+      setManageSeed((seed) => ({ key: seed.key + 1, value: emptyManageSeed(id) }));
       showDone(t('periodRules.deleted'));
     },
     onError: showApiError,
@@ -964,11 +979,7 @@ export function TemplateVersionPage(): JSX.Element {
                                   <Button
                                     size="compact-xs"
                                     variant="subtle"
-                                    onClick={() => {
-                                      setValidationRuleTable(table.id);
-                                      setValidationDraft(emptyValidationRuleDraft());
-                                      setDeleteRuleCode('');
-                                    }}
+                                    onClick={() => setValidationRuleTable(table.id)}
                                   >
                                     {t('validationRules.title')}
                                   </Button>
@@ -1245,26 +1256,32 @@ export function TemplateVersionPage(): JSX.Element {
       />
 
       <Modal opened={cloning} onClose={() => setCloning(false)} title={t('version.clone')}>
-        <TextInput
-          label={t('templates.versionNumber')}
-          description={t('version.cloneHint')}
-          value={newVersion}
-          onChange={(event) => setNewVersion(event.currentTarget.value)}
-          data-autofocus
-        />
+        <LocalDraft initial="">
+          {(newVersion, setNewVersion) => (
+            <>
+              <TextInput
+                label={t('templates.versionNumber')}
+                description={t('version.cloneHint')}
+                value={newVersion}
+                onChange={(event) => setNewVersion(event.currentTarget.value)}
+                data-autofocus
+              />
 
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setCloning(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={newVersion.trim().length === 0}
-            loading={clone.isPending}
-            onClick={() => clone.mutate()}
-          >
-            {t('version.clone')}
-          </Button>
-        </Group>
+              <Group justify="flex-end" mt="md">
+                <Button variant="default" onClick={() => setCloning(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  disabled={newVersion.trim().length === 0}
+                  loading={clone.isPending}
+                  onClick={() => clone.mutate(newVersion)}
+                >
+                  {t('version.clone')}
+                </Button>
+              </Group>
+            </>
+          )}
+        </LocalDraft>
       </Modal>
 
       <Modal
@@ -1273,16 +1290,20 @@ export function TemplateVersionPage(): JSX.Element {
         title={sheetDraft?.isNew === true ? t('sheets.add') : t('sheets.edit')}
       >
         {sheetDraft !== null && (
-          <Suspense fallback={null}>
-            <SheetEditor
-              draft={sheetDraft}
-              disabled={!canEditSheets}
-              saving={saveSheetMutation.isPending}
-              onChange={setSheetDraft}
-              onSubmit={() => saveSheetMutation.mutate(sheetDraft)}
-              onCancel={() => setSheetDraft(null)}
-            />
-          </Suspense>
+          <LocalDraft initial={sheetDraft}>
+            {(draft, setDraft) => (
+              <Suspense fallback={null}>
+                <SheetEditor
+                  draft={draft}
+                  disabled={!canEditSheets}
+                  saving={saveSheetMutation.isPending}
+                  onChange={setDraft}
+                  onSubmit={() => saveSheetMutation.mutate(draft)}
+                  onCancel={() => setSheetDraft(null)}
+                />
+              </Suspense>
+            )}
+          </LocalDraft>
         )}
       </Modal>
 
@@ -1292,16 +1313,20 @@ export function TemplateVersionPage(): JSX.Element {
         title={tableDraft?.draft.isNew === true ? t('tableDef.add') : t('tableDef.edit')}
       >
         {tableDraft !== null && (
-          <Suspense fallback={null}>
-            <TableEditor
-              draft={tableDraft.draft}
-              disabled={!canEditSheets}
-              saving={saveTableMutation.isPending}
-              onChange={(draft) => setTableDraft({ sheetCode: tableDraft.sheetCode, draft })}
-              onSubmit={() => saveTableMutation.mutate(tableDraft)}
-              onCancel={() => setTableDraft(null)}
-            />
-          </Suspense>
+          <LocalDraft initial={tableDraft.draft}>
+            {(draft, setDraft) => (
+              <Suspense fallback={null}>
+                <TableEditor
+                  draft={draft}
+                  disabled={!canEditSheets}
+                  saving={saveTableMutation.isPending}
+                  onChange={setDraft}
+                  onSubmit={() => saveTableMutation.mutate({ sheetCode: tableDraft.sheetCode, draft })}
+                  onCancel={() => setTableDraft(null)}
+                />
+              </Suspense>
+            )}
+          </LocalDraft>
         )}
       </Modal>
 
@@ -1311,17 +1336,21 @@ export function TemplateVersionPage(): JSX.Element {
         title={columnEdit?.draft.isNew === true ? t('columns.add') : t('columns.edit')}
       >
         {columnEdit !== null && (
-          <Suspense fallback={null}>
-            <ColumnEditor
-              draft={columnEdit.draft}
-              disabled={!canEditSheets}
-              saving={saveColumnMutation.isPending}
-              templateVersionId={id}
-              onChange={(draft) => setColumnEdit({ tableId: columnEdit.tableId, draft })}
-              onSubmit={() => saveColumnMutation.mutate(columnEdit)}
-              onCancel={() => setColumnEdit(null)}
-            />
-          </Suspense>
+          <LocalDraft initial={columnEdit.draft}>
+            {(draft, setDraft) => (
+              <Suspense fallback={null}>
+                <ColumnEditor
+                  draft={draft}
+                  disabled={!canEditSheets}
+                  saving={saveColumnMutation.isPending}
+                  templateVersionId={id}
+                  onChange={setDraft}
+                  onSubmit={() => saveColumnMutation.mutate({ tableId: columnEdit.tableId, draft })}
+                  onCancel={() => setColumnEdit(null)}
+                />
+              </Suspense>
+            )}
+          </LocalDraft>
         )}
       </Modal>
 
@@ -1331,16 +1360,20 @@ export function TemplateVersionPage(): JSX.Element {
         title={headerFieldEdit?.isNew === true ? t('headerFields.add') : t('headerFields.edit')}
       >
         {headerFieldEdit !== null && (
-          <Suspense fallback={null}>
-            <HeaderFieldEditor
-              draft={headerFieldEdit}
-              disabled={!canEditSheets}
-              saving={saveHeaderFieldMutation.isPending}
-              onChange={setHeaderFieldEdit}
-              onSubmit={() => saveHeaderFieldMutation.mutate(headerFieldEdit)}
-              onCancel={() => setHeaderFieldEdit(null)}
-            />
-          </Suspense>
+          <LocalDraft initial={headerFieldEdit}>
+            {(draft, setDraft) => (
+              <Suspense fallback={null}>
+                <HeaderFieldEditor
+                  draft={draft}
+                  disabled={!canEditSheets}
+                  saving={saveHeaderFieldMutation.isPending}
+                  onChange={setDraft}
+                  onSubmit={() => saveHeaderFieldMutation.mutate(draft)}
+                  onCancel={() => setHeaderFieldEdit(null)}
+                />
+              </Suspense>
+            )}
+          </LocalDraft>
         )}
       </Modal>
 
@@ -1362,16 +1395,20 @@ export function TemplateVersionPage(): JSX.Element {
         title={rowEdit?.draft.isNew === true ? t('rows.add') : t('rows.edit')}
       >
         {rowEdit !== null && (
-          <Suspense fallback={null}>
-            <RowEditor
-              draft={rowEdit.draft}
-              disabled={!canEditSheets}
-              saving={saveRowMutation.isPending}
-              onChange={(draft) => setRowEdit({ tableId: rowEdit.tableId, draft })}
-              onSubmit={() => saveRowMutation.mutate(rowEdit)}
-              onCancel={() => setRowEdit(null)}
-            />
-          </Suspense>
+          <LocalDraft initial={rowEdit.draft}>
+            {(draft, setDraft) => (
+              <Suspense fallback={null}>
+                <RowEditor
+                  draft={draft}
+                  disabled={!canEditSheets}
+                  saving={saveRowMutation.isPending}
+                  onChange={setDraft}
+                  onSubmit={() => saveRowMutation.mutate({ tableId: rowEdit.tableId, draft })}
+                  onCancel={() => setRowEdit(null)}
+                />
+              </Suspense>
+            )}
+          </LocalDraft>
         )}
       </Modal>
 
@@ -1382,17 +1419,21 @@ export function TemplateVersionPage(): JSX.Element {
         size="lg"
       >
         {formulaDraft !== null && (
-          <Suspense fallback={null}>
-            <FormulaEditor
-              draft={formulaDraft}
-              templateVersionId={id}
-              disabled={!canEditSheets}
-              saving={saveFormulaMutation.isPending}
-              onChange={setFormulaDraft}
-              onSubmit={() => saveFormulaMutation.mutate(formulaDraft)}
-              onCancel={() => setFormulaDraft(null)}
-            />
-          </Suspense>
+          <LocalDraft initial={formulaDraft}>
+            {(draft, setDraft) => (
+              <Suspense fallback={null}>
+                <FormulaEditor
+                  draft={draft}
+                  templateVersionId={id}
+                  disabled={!canEditSheets}
+                  saving={saveFormulaMutation.isPending}
+                  onChange={setDraft}
+                  onSubmit={() => saveFormulaMutation.mutate(draft)}
+                  onCancel={() => setFormulaDraft(null)}
+                />
+              </Suspense>
+            )}
+          </LocalDraft>
         )}
       </Modal>
 
@@ -1413,45 +1454,52 @@ export function TemplateVersionPage(): JSX.Element {
             {/* ⚠ Межа охоплює ЛИШЕ форму, а не весь `Stack`: видалення за кодом
                 нижче — звичайні `TextInput`+`Button` із цього ж файла, і
                 ховати їх на час завантаження чужого чанка немає підстав. */}
-            <Suspense fallback={null}>
-              <ValidationRuleEditor
-                draft={validationDraft}
-                disabled={!canEditSheets}
-                saving={saveValidationRuleMutation.isPending}
-                onChange={setValidationDraft}
-                onSubmit={() =>
-                  saveValidationRuleMutation.mutate({
-                    tableId: validationRuleTable,
-                    draft: validationDraft,
-                  })
-                }
-                onCancel={() => setValidationRuleTable(null)}
-              />
-            </Suspense>
+            <LocalDraft initial={emptyValidationRuleDraft()}>
+              {(draft, setDraft) => (
+                <Suspense fallback={null}>
+                  <ValidationRuleEditor
+                    draft={draft}
+                    disabled={!canEditSheets}
+                    saving={saveValidationRuleMutation.isPending}
+                    onChange={setDraft}
+                    onSubmit={() =>
+                      saveValidationRuleMutation.mutate({ tableId: validationRuleTable, draft })
+                    }
+                    onCancel={() => setValidationRuleTable(null)}
+                  />
+                </Suspense>
+              )}
+            </LocalDraft>
 
             <Divider label={t('validationRules.delete')} />
 
-            <Group align="flex-end">
-              <TextInput
-                label={t('validationRules.code')}
-                value={deleteRuleCode}
-                onChange={(event) => setDeleteRuleCode(event.currentTarget.value)}
-              />
-              <Button
-                color="statusError"
-                variant="default"
-                disabled={!canEditSheets || deleteRuleCode.trim().length === 0}
-                loading={deleteValidationRuleMutation.isPending}
-                onClick={() =>
-                  deleteValidationRuleMutation.mutate({
-                    tableId: validationRuleTable,
-                    code: deleteRuleCode.trim(),
-                  })
-                }
-              >
-                {t('validationRules.delete')}
-              </Button>
-            </Group>
+            {/* ⚠ `key` скидає поле коду після успішного видалення — раніше це
+                робив `setDeleteRuleCode('')` зі стану сторінки. */}
+            <LocalDraft key={deletedRuleCount} initial="">
+              {(code, setCode) => (
+                <Group align="flex-end">
+                  <TextInput
+                    label={t('validationRules.code')}
+                    value={code}
+                    onChange={(event) => setCode(event.currentTarget.value)}
+                  />
+                  <Button
+                    color="statusError"
+                    variant="default"
+                    disabled={!canEditSheets || code.trim().length === 0}
+                    loading={deleteValidationRuleMutation.isPending}
+                    onClick={() =>
+                      deleteValidationRuleMutation.mutate({
+                        tableId: validationRuleTable,
+                        code: code.trim(),
+                      })
+                    }
+                  >
+                    {t('validationRules.delete')}
+                  </Button>
+                </Group>
+              )}
+            </LocalDraft>
           </Stack>
         )}
       </Modal>
@@ -1472,36 +1520,49 @@ export function TemplateVersionPage(): JSX.Element {
         {/* ⚠ Одна межа на обидві форми, а не дві: вони живуть в одному модулі,
             тобто в одному чанку — друга межа дала б другий порожній кадр без
             жодної користі. */}
+        {/* ⚠ Обидві чернетки — локальні (`LocalDraft`), як і решта діалогів:
+            сторінка лише підставляє нове початкове значення через `key`
+            (щойно створене правило, скидання після видалення). Недозбережене
+            введення при закритті вікна тепер не зберігається — як у кожному
+            іншому діалозі цієї сторінки. */}
         <Suspense fallback={null}>
         <Stack gap="lg">
-          <PeriodAccessRuleEditor
-            draft={createPeriodDraft}
-            disabled={!canEditSheets}
-            saving={createPeriodRuleMutation.isPending}
-            onChange={setCreatePeriodDraft}
-            onSubmit={() => createPeriodRuleMutation.mutate(createPeriodDraft)}
-          />
+          <LocalDraft key={periodCreateKey} initial={emptyPeriodAccessRuleDraft()}>
+            {(draft, setDraft) => (
+              <PeriodAccessRuleEditor
+                draft={draft}
+                disabled={!canEditSheets}
+                saving={createPeriodRuleMutation.isPending}
+                onChange={setDraft}
+                onSubmit={() => createPeriodRuleMutation.mutate(draft)}
+              />
+            )}
+          </LocalDraft>
 
           <Divider label={t('periodRules.manage')} />
 
-          <PeriodAccessRuleManager
-            ruleId={manageRuleId}
-            draft={manageDraft}
-            disabled={!canEditSheets}
-            saving={savePeriodRuleMutation.isPending || deletePeriodRuleMutation.isPending}
-            onRuleIdChange={setManageRuleId}
-            onChange={setManageDraft}
-            onSave={() => {
-              if (manageRuleId !== null) {
-                savePeriodRuleMutation.mutate({ ruleId: manageRuleId, draft: manageDraft });
-              }
-            }}
-            onDelete={() => {
-              if (manageRuleId !== null) {
-                deletePeriodRuleMutation.mutate(manageRuleId);
-              }
-            }}
-          />
+          <LocalDraft key={manageSeed.key} initial={manageSeed.value}>
+            {(manage, setManage) => (
+              <PeriodAccessRuleManager
+                ruleId={manage.ruleId}
+                draft={manage.draft}
+                disabled={!canEditSheets}
+                saving={savePeriodRuleMutation.isPending || deletePeriodRuleMutation.isPending}
+                onRuleIdChange={(ruleId) => setManage({ ...manage, ruleId })}
+                onChange={(draft) => setManage({ ...manage, draft })}
+                onSave={() => {
+                  if (manage.ruleId !== null) {
+                    savePeriodRuleMutation.mutate({ ruleId: manage.ruleId, draft: manage.draft });
+                  }
+                }}
+                onDelete={() => {
+                  if (manage.ruleId !== null) {
+                    deletePeriodRuleMutation.mutate(manage.ruleId);
+                  }
+                }}
+              />
+            )}
+          </LocalDraft>
         </Stack>
         </Suspense>
       </Modal>
