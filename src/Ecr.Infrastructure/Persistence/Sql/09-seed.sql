@@ -3131,6 +3131,33 @@ USING (VALUES
     (N'columns.errHeader',               N'en', N'Give the column a header in at least one language.', 1),
     (N'columns.errScale',                N'en', N'Scale cannot exceed precision.', 1),
 
+    -- Поля шапки версії шаблону (header-fields). Редактор — 1:1 зразок
+    -- редактора колонки вище, тому й тексти ті самі за змістом.
+    -- ⚠ Видалення поля шапки в контракті НЕМАЄ, тож ключа під нього теж нема:
+    -- порядок і обов'язковість змінюються правкою, а не стиранням.
+    (N'headerFields.title',              N'en', N'Header fields', 1),
+    (N'headerFields.add',                N'en', N'Add header field', 1),
+    (N'headerFields.edit',               N'en', N'Edit', 1),
+    (N'headerFields.code',               N'en', N'Code', 1),
+    (N'headerFields.codeHint',           N'en', N'The address of the field in the API. It cannot be renamed later.', 1),
+    (N'headerFields.label',              N'en', N'Label', 1),
+    (N'headerFields.labelHint',          N'en', N'Shown to the person filling in the form.', 1),
+    (N'headerFields.dataType',           N'en', N'Data type', 1),
+    (N'headerFields.dataTypeHint',       N'en', N'Fixed once the field is created: changing it would reinterpret values already entered.', 1),
+    (N'headerFields.ordinal',            N'en', N'Order', 1),
+    (N'headerFields.ordinalHint',        N'en', N'Display order only — not an identity; nothing refers to it.', 1),
+    (N'headerFields.required',           N'en', N'Required', 1),
+    (N'headerFields.lookupRegistryDefId', N'en', N'Registry', 1),
+    (N'headerFields.lookupRegistryDefIdHint', N'en', N'The registry this field looks values up from.', 1),
+    (N'headerFields.lookupRegistryDefIdEmpty', N'en', N'No registries found', 1),
+    (N'headerFields.empty',              N'en', N'No header fields yet.', 1),
+    (N'headerFields.save',               N'en', N'Save field', 1),
+    (N'headerFields.saved',              N'en', N'The header field has been saved.', 1),
+    (N'headerFields.errCode',            N'en', N'Give the field a code: it is how the field is addressed.', 1),
+    (N'headerFields.errCodeInvalid',     N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
+    (N'headerFields.errLabel',           N'en', N'Give the field a label in at least one language.', 1),
+    (N'headerFields.errLookupRequired',  N'en', N'Pick a registry for a Lookup field.', 1),
+
     -- ⛔ Обидві причини доти падали в `default` у `blockerLabel` і показувалися
     -- ГОЛИМ кодом (`StyleCode`, `StyleFontSize`) — тобто людина бачила слово з
     -- переліку розробника замість речення про те, що саме виправити.
