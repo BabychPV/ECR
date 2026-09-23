@@ -84,7 +84,7 @@ export function createProjectBody(form: {
 type MissingProjectField = 'code' | 'name' | 'timeZone' | 'version' | 'policy' | 'customPeriodCount';
 
 /** Ключ напису для кожного бракуючого поля — той самий, що й у `label` полів нижче. */
-const ProjectFieldLabelKey: Record<MissingProjectField, string> = {
+export const ProjectFieldLabelKey: Record<MissingProjectField, string> = {
   code: 'periods.code',
   name: 'periods.name',
   timeZone: 'periods.timeZone',
@@ -316,7 +316,17 @@ export function CreateProjectModal({
        */}
       {loadError !== null && <ErrorAlert error={loadError} onRetry={refetchSources} />}
 
+      {/*
+       * ⛔ U-13: кожне поле, яке може з'явитися в рядку «Still needed» нижче,
+       * позначене `required` — тобто зірочкою. Раніше її мав лише пояс, а
+       * рядок унизу перелічував п'ять незаповнених: форма казала одне
+       * позначкою і інше текстом. Вид періоду теж позначений, хоч і не може
+       * бути порожнім: він обов'язковий так само, просто має початкове
+       * значення, і поле без зірочки серед позначених читалося б як
+       * необов'язкове.
+       */}
       <TextInput
+        required
         label={t('periods.code')}
         description={t('periods.codeHint')}
         value={code}
@@ -324,13 +334,14 @@ export function CreateProjectModal({
         data-autofocus
       />
 
-      <LocalizedInput label={t('periods.name')} value={name} onChange={setName} />
+      <LocalizedInput required label={t('periods.name')} value={name} onChange={setName} />
 
       {/* ⛔ Вид періоду задається при створенні і потім визначає весь
           календар: у квартальному проєкті `Sequence` іде від 1 до 4, і
           змінити це згодом означало б переписати ключі всіх даних. */}
       <Select
         mt="sm"
+        required
         label={t('periods.kind')}
         description={t('periods.kindHint')}
         data={PeriodKinds}
@@ -379,6 +390,7 @@ export function CreateProjectModal({
           структури, ані гарантії, що комірки знайдуть свої описи. */}
       <Select
         mt="sm"
+        required
         label={t('periods.templateVersion')}
         description={t('periods.templateVersionHint')}
         data={publishedVersions}
@@ -388,6 +400,7 @@ export function CreateProjectModal({
 
       <Select
         mt="sm"
+        required
         label={t('periods.policy')}
         description={t('periods.policyHint')}
         data={(policies.data ?? []).map((policy) => ({
