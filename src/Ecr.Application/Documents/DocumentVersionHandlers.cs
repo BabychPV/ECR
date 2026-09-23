@@ -23,8 +23,19 @@ public sealed record CellChangeDto(
 public sealed record RowChangeDto(long RowId, string TableCode, string RowKey);
 
 /// <summary>
+/// Змінене поле шапки документа (ФВ-9.4); значення — рядком, тип — та сама конвенція, що й
+/// <see cref="CellChangeDto"/> (<c>null</c> — число або текст, інакше <c>date|bool|ref|unit</c>).
+/// Без людської назви поля (Label): клієнт резолвить її сам через метадані версії шаблону
+/// (<c>HeaderFieldDef</c>) — та сама симетрія, що вже прийнята для Lookup-полів шапки
+/// (<c>DocumentHeaderFieldDto</c> теж не несе назви обраного запису).
+/// </summary>
+public sealed record HeaderFieldChangeDto(
+    string Code, string? OldValue, string? NewValue, string? OldType, string? NewType);
+
+/// <summary>
 /// Різниця двох версій документа. <c>ToVersionId = null</c> — порівняння з поточним станом;
-/// <c>Truncated</c> — хоч один перелік обрізано стелею <see cref="CompareDocumentVersionsHandler.MaxItems"/>.
+/// <c>Truncated</c> — хоч один перелік обрізано стелею <see cref="CompareDocumentVersionsHandler.MaxItems"/>
+/// (лише клітинки й рядки — полів шапки завжди мало, окрема стеля для них не потрібна).
 /// </summary>
 public sealed record DocumentCompareDto(
     long DocumentId,
@@ -34,7 +45,8 @@ public sealed record DocumentCompareDto(
     IReadOnlyList<CellChangeDto> Changes,
     IReadOnlyList<RowChangeDto> AddedRows,
     IReadOnlyList<RowChangeDto> RemovedRows,
-    bool Truncated);
+    bool Truncated,
+    IReadOnlyList<HeaderFieldChangeDto> HeaderChanges);
 
 /// <summary>Перелік версій документа за період. Право <c>Document.View</c>.</summary>
 /// <remarks>Доступ вирішує <see cref="GetDocumentHandler"/>: чужий документ — той самий 404, що й неіснуючий.</remarks>
@@ -62,7 +74,12 @@ public sealed class ListDocumentVersionsHandler(GetDocumentHandler getDocument, 
 }
 
 /// <summary>Порівняння двох версій документа або версії з поточним станом. Право <c>Document.View</c>.</summary>
-public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocument, IDocumentVersionStore versions)
+public sealed class CompareDocumentVersionsHandler(
+    GetDocumentHandler getDocument,
+    IDocumentVersionStore versions,
+    IDocumentStore documents,
+    IMetadataCache metadata,
+    IDocumentHeaderStore headers)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -90,6 +107,7 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
         var key = new PeriodKey(older.PeriodKey);
 
         IReadOnlyList<SubmissionPayloadCell> newerCells;
+        IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newerHeader;
         if (toId is { } id)
         {
             var newer = await LoadAsync(documentId, id, ct).ConfigureAwait(false);
@@ -100,18 +118,52 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
             }
 
             newerCells = SubmissionPayload.Read(newer.PayloadJson);
+            newerHeader = SubmissionPayload.ReadHeader(newer.PayloadJson);
         }
         else
         {
             newerCells = await versions.ReadCurrentAsync(documentId, key, ct).ConfigureAwait(false);
+            newerHeader = await ReadCurrentHeaderAsync(documentId, ct).ConfigureAwait(false);
         }
 
-        return await DiffAsync(documentId, key, from, toId, SubmissionPayload.Read(older.PayloadJson), newerCells, ct).ConfigureAwait(false);
+        return await DiffAsync(
+            documentId, key, from, toId,
+            SubmissionPayload.Read(older.PayloadJson), newerCells,
+            SubmissionPayload.ReadHeader(older.PayloadJson), newerHeader,
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Живі значення шапки документа, закодовані в ту саму форму (Value, Type), що зберігає
+    /// зріз подання (<see cref="SubmissionPayload.EncodeHeader"/>) — щоб порівнювати з
+    /// <c>ReadHeader</c> без другого розбору типів. Поле без запису в <c>headers</c> — те саме
+    /// «немає в стані», що й відсутній ключ у зрізі (<see cref="SubmissionPayload.ReadHeader"/>).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, SubmissionPayloadHeaderValue>> ReadCurrentHeaderAsync(
+        long documentId, CancellationToken ct)
+    {
+        var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
+        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        var values = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+
+        var result = new Dictionary<string, SubmissionPayloadHeaderValue>(StringComparer.Ordinal);
+        foreach (var field in snapshot.HeaderFields)
+        {
+            if (values.TryGetValue(field.Id, out var value))
+            {
+                result[field.Code] = SubmissionPayload.EncodeHeader(value);
+            }
+        }
+
+        return result;
     }
 
     private async Task<DocumentCompareDto> DiffAsync(
         long documentId, PeriodKey key, long from, long? to,
-        IReadOnlyList<SubmissionPayloadCell> oldCells, IReadOnlyList<SubmissionPayloadCell> newCells, CancellationToken ct)
+        IReadOnlyList<SubmissionPayloadCell> oldCells, IReadOnlyList<SubmissionPayloadCell> newCells,
+        IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> oldHeader,
+        IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newHeader,
+        CancellationToken ct)
     {
         var oldMap = oldCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
         var newMap = newCells.ToDictionary(c => (RowId: c.Row, ColumnDefId: c.Column));
@@ -142,6 +194,21 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
         RowLabel Label(long rowId) => rows.GetValueOrDefault(rowId)
             ?? new RowLabel("", "#" + rowId.ToString(CultureInfo.InvariantCulture));
 
+        // Поле присутнє лише в одному стані — теж зміна (проти порожнього, той самий підхід,
+        // що для клітинок вище): GetValueOrDefault для відсутнього коду дає null, а SameValue(null, x)
+        // порівнює це як порожнє значення.
+        var headerChanges = oldHeader.Keys
+            .Union(newHeader.Keys, StringComparer.Ordinal)
+            .Where(code => !SameValue(oldHeader.GetValueOrDefault(code), newHeader.GetValueOrDefault(code)))
+            .OrderBy(code => code, StringComparer.Ordinal)
+            .Select(code => new HeaderFieldChangeDto(
+                code,
+                oldHeader.GetValueOrDefault(code)?.Value,
+                newHeader.GetValueOrDefault(code)?.Value,
+                oldHeader.GetValueOrDefault(code)?.Type,
+                newHeader.GetValueOrDefault(code)?.Type))
+            .ToList();
+
         return new DocumentCompareDto(
             documentId,
             key.Value,
@@ -157,7 +224,8 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
                 newMap.GetValueOrDefault(k)?.Type)).ToList(),
             added.Select(r => new RowChangeDto(r, Label(r).TableCode, Label(r).RowKey)).ToList(),
             removed.Select(r => new RowChangeDto(r, Label(r).TableCode, Label(r).RowKey)).ToList(),
-            truncated);
+            truncated,
+            headerChanges);
     }
 
     /// <summary>
@@ -172,20 +240,29 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
     /// тож такий зріз надійно не розпізнати: ці значення показуються як зміна від порожнього.
     /// </remarks>
     internal static bool SameValue(SubmissionPayloadCell? a, SubmissionPayloadCell? b)
+        => SameTyped(a?.Value, a?.Type, b?.Value, b?.Type);
+
+    /// <summary>
+    /// Той самий порівняльний контракт, що для клітинок — поле шапки кодується в ту саму пару
+    /// (Value, Type) (<see cref="SubmissionPayload.EncodeHeader"/>/<see cref="SubmissionPayload.ReadHeader"/>),
+    /// тож друге визначення правил порівняння типів тут не потрібне.
+    /// </summary>
+    internal static bool SameValue(SubmissionPayloadHeaderValue? a, SubmissionPayloadHeaderValue? b)
+        => SameTyped(a?.Value, a?.Type, b?.Value, b?.Type);
+
+    private static bool SameTyped(string? av, string? at, string? bv, string? bt)
     {
-        var av = a?.Value;
-        var bv = b?.Value;
         if (string.IsNullOrEmpty(av) || string.IsNullOrEmpty(bv))
         {
             return string.IsNullOrEmpty(av) && string.IsNullOrEmpty(bv);
         }
 
-        if (!string.Equals(a!.Type, b!.Type, StringComparison.Ordinal))
+        if (!string.Equals(at, bt, StringComparison.Ordinal))
         {
             return false;
         }
 
-        if (a.Type == SubmissionPayload.Date)
+        if (at == SubmissionPayload.Date)
         {
             return DateTime.TryParse(av, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var p)
                    && DateTime.TryParse(bv, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var q)
@@ -193,7 +270,7 @@ public sealed class CompareDocumentVersionsHandler(GetDocumentHandler getDocumen
                 : string.Equals(av, bv, StringComparison.Ordinal);
         }
 
-        if (a.Type is not null)
+        if (at is not null)
         {
             return string.Equals(av, bv, StringComparison.Ordinal);
         }

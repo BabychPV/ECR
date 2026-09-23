@@ -2643,7 +2643,7 @@
         "type": "object"
       },
       "DocumentCompareDto": {
-        "description": "Різниця двох версій документа. `ToVersionId = null` — порівняння з поточним станом;\n`Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems.",
+        "description": "Різниця двох версій документа. `ToVersionId = null` — порівняння з поточним станом;\n`Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems\n(лише клітинки й рядки — полів шапки завжди мало, окрема стеля для них не потрібна).",
         "properties": {
           "addedRows": {
             "items": {
@@ -2664,6 +2664,12 @@
           "fromVersionId": {
             "format": "int64",
             "type": "integer"
+          },
+          "headerChanges": {
+            "items": {
+              "$ref": "#/components/schemas/HeaderFieldChangeDto"
+            },
+            "type": "array"
           },
           "periodKey": {
             "format": "int32",
@@ -2694,7 +2700,8 @@
           "changes",
           "addedRows",
           "removedRows",
-          "truncated"
+          "truncated",
+          "headerChanges"
         ],
         "type": "object"
       },
@@ -3618,6 +3625,46 @@
           "sid",
           "matched",
           "roleCodes"
+        ],
+        "type": "object"
+      },
+      "HeaderFieldChangeDto": {
+        "description": "Змінене поле шапки документа (ФВ-9.4); значення — рядком, тип — та сама конвенція, що й\nCellChangeDto (`null` — число або текст, інакше `date|bool|ref|unit`).\nБез людської назви поля (Label): клієнт резолвить її сам через метадані версії шаблону\n(`HeaderFieldDef`) — та сама симетрія, що вже прийнята для Lookup-полів шапки\n(`DocumentHeaderFieldDto` теж не несе назви обраного запису).",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "newType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "newValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "oldValue": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "oldValue",
+          "newValue",
+          "oldType",
+          "newType"
         ],
         "type": "object"
       },

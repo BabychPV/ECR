@@ -14905,7 +14905,8 @@ export interface components {
             position: number;
         };
         /** @description Різниця двох версій документа. `ToVersionId = null` — порівняння з поточним станом;
-         *     `Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems. */
+         *     `Truncated` — хоч один перелік обрізано стелею int CompareDocumentVersionsHandler.MaxItems
+         *     (лише клітинки й рядки — полів шапки завжди мало, окрема стеля для них не потрібна). */
         DocumentCompareDto: {
             addedRows: components["schemas"]["RowChangeDto"][];
             changes: components["schemas"]["CellChangeDto"][];
@@ -14913,6 +14914,7 @@ export interface components {
             documentId: number;
             /** Format: int64 */
             fromVersionId: number;
+            headerChanges: components["schemas"]["HeaderFieldChangeDto"][];
             /** Format: int32 */
             periodKey: number;
             removedRows: components["schemas"]["RowChangeDto"][];
@@ -15367,6 +15369,18 @@ export interface components {
             roleCodes: string[];
             /** @description SID групи безпеки. */
             sid: string;
+        };
+        /** @description Змінене поле шапки документа (ФВ-9.4); значення — рядком, тип — та сама конвенція, що й
+         *     CellChangeDto (`null` — число або текст, інакше `date|bool|ref|unit`).
+         *     Без людської назви поля (Label): клієнт резолвить її сам через метадані версії шаблону
+         *     (`HeaderFieldDef`) — та сама симетрія, що вже прийнята для Lookup-полів шапки
+         *     (`DocumentHeaderFieldDto` теж не несе назви обраного запису). */
+        HeaderFieldChangeDto: {
+            code: string;
+            newType: null | string;
+            newValue: null | string;
+            oldType: null | string;
+            oldValue: null | string;
         };
         /** @description Поле шапки у відповіді на читання/запис через ці обробники. */
         HeaderFieldDefDto: {

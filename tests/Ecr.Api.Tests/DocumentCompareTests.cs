@@ -6,6 +6,7 @@ using System.Text.Json;
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Workflow;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
@@ -251,6 +252,112 @@ public sealed class DocumentCompareTests(SqlServerFixture sql)
 
         static string Payload(params SubmissionPayloadCell[] cells) => JsonSerializer.Serialize(cells);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Змінене_поле_шапки_видно_проти_поточного_стану()
+    {
+        var s = await ArrangeAsync(GrantLevel.Read).ConfigureAwait(true);
+        var d = s.Document;
+
+        int areaFieldId;
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var area = new HeaderFieldDef(
+                d.TemplateVersionId, EcrCode.Create("AREA"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Area" }), 0, CellDataType.String);
+            db.HeaderFieldDefs.Add(area);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            areaFieldId = area.Id;
+        }
+
+        var v1 = await SnapshotAsync(s, PayloadWithHeader(d.RowIds[0], ("AREA", "Kashagan"))).ConfigureAwait(true);
+
+        // Живе значення шапки — інше за те, що збережено в зрізі v1.
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            db.DocumentHeaderValues.Add(new DocumentHeaderValue(
+                d.DocumentId, areaFieldId, new DocumentHeaderValueData { ValueString = "Tengiz" }));
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var diff = await CompareAsync(client, app, d.DocumentId, v1, "current").ConfigureAwait(true);
+
+        var change = Assert.Single(diff.GetProperty("headerChanges").EnumerateArray());
+        Assert.Equal("AREA", change.GetProperty("code").GetString());
+        Assert.Equal("Kashagan", change.GetProperty("oldValue").GetString());
+        Assert.Equal("Tengiz", change.GetProperty("newValue").GetString());
+        Assert.Equal(JsonValueKind.Null, change.GetProperty("oldType").ValueKind);
+        Assert.Equal(JsonValueKind.Null, change.GetProperty("newType").ValueKind);
+
+        // Клітинки не чіпали — зміна шапки не потрапляє в changes.
+        Assert.Empty(diff.GetProperty("changes").EnumerateArray());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Поле_шапки_присутнє_лише_в_одному_стані_теж_зміна()
+    {
+        var s = await ArrangeAsync(GrantLevel.Read).ConfigureAwait(true);
+        var d = s.Document;
+
+        // AREA — присутнє лише в v1 (стерто до порожнього в v2); COUNT — з'явилося лише в v2.
+        var v1 = await SnapshotAsync(s, PayloadWithHeader(d.RowIds[0], ("AREA", "Kashagan"))).ConfigureAwait(true);
+        var v2 = await SnapshotAsync(s, PayloadWithHeader(d.RowIds[0], ("COUNT", "5"))).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var changes = (await CompareAsync(client, app, d.DocumentId, v1, v2.ToString(CultureInfo.InvariantCulture))
+                .ConfigureAwait(true))
+            .GetProperty("headerChanges").EnumerateArray()
+            .OrderBy(c => c.GetProperty("code").GetString(), StringComparer.Ordinal)
+            .ToList();
+
+        Assert.Equal(2, changes.Count);
+
+        Assert.Equal("AREA", changes[0].GetProperty("code").GetString());
+        Assert.Equal("Kashagan", changes[0].GetProperty("oldValue").GetString());
+        Assert.Equal(JsonValueKind.Null, changes[0].GetProperty("newValue").ValueKind);
+
+        Assert.Equal("COUNT", changes[1].GetProperty("code").GetString());
+        Assert.Equal(JsonValueKind.Null, changes[1].GetProperty("oldValue").ValueKind);
+        Assert.Equal("5", changes[1].GetProperty("newValue").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Без_змін_шапки_headerChanges_порожній()
+    {
+        var s = await ArrangeAsync(GrantLevel.Read).ConfigureAwait(true);
+        var d = s.Document;
+
+        var v1 = await SnapshotAsync(s, PayloadWithHeader(d.RowIds[0], ("AREA", "Kashagan"))).ConfigureAwait(true);
+        var v2 = await SnapshotAsync(s, PayloadWithHeader(d.RowIds[0], ("AREA", "Kashagan"))).ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var diff = await CompareAsync(client, app, d.DocumentId, v1, v2.ToString(CultureInfo.InvariantCulture))
+            .ConfigureAwait(true);
+
+        Assert.Empty(diff.GetProperty("headerChanges").EnumerateArray());
+    }
+
+    /// <summary>Зріз [{cells...}] + секція <c>header</c> — те саме, що пише <see cref="SubmissionPayload.Write"/>,
+    /// але зібране руками (рядком, без type — «текст або число», той самий формат, що клітинки).</summary>
+    private static string PayloadWithHeader(long rowId, params (string Code, string Value)[] header)
+        => JsonSerializer.Serialize(new
+        {
+            cells = new[] { new { row = rowId, column = 1, value = "x" } },
+            header = header.ToDictionary(h => h.Code, h => new { value = h.Value }, StringComparer.Ordinal),
+        });
 
     // ────────────────────────────── збірка ────────────────────────────
 
