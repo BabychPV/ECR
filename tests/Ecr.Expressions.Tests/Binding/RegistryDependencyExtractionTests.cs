@@ -9,7 +9,7 @@ namespace Ecr.Expressions.Tests.Binding;
 
 /// <summary>
 /// Видобуток Registry-залежності (<c>DependsOnKind = 2</c>) для
-/// <c>REGFIELD(lookup, "код")</c>.
+/// <c>REGFIELD(lookup, 'код')</c>.
 /// </summary>
 /// <remarks>
 /// ⛔ Ця залежність — не косметика графа: без неї

@@ -45,7 +45,7 @@ public interface IEvaluationContext
     public ExpressionValue GetHeader(string name);
 
     /// <summary>
-    /// Значення поля запису довідника (<c>REGFIELD(lookup, "код")</c>);
+    /// Значення поля запису довідника (<c>REGFIELD(lookup, 'код')</c>);
     /// <paramref name="registryEntryId"/> — id запису, узятий зі значення
     /// Lookup-комірки тим самим шляхом, яким комірки взагалі читаються у
     /// формулах (звичайний аргумент функції), а не новим механізмом.

@@ -277,7 +277,7 @@ public static class TemplateFunctions
     }
 
     /// <summary>
-    /// Значення поля запису довідника — <c>REGFIELD(lookup, "код")</c>.
+    /// Значення поля запису довідника — <c>REGFIELD(lookup, 'код')</c>.
     /// </summary>
     /// <remarks>
     /// ⚠ Аргументи приходять НЕ пласким списком, а власними групами (як

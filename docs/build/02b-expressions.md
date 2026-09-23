@@ -629,7 +629,7 @@ ROUNDDOWN 5 · TEXT 3 · CHAR 3 · CONCATENATE 2 · TEXTBEFORE 2 · TEXTAFTER 2
 | `IFERROR` | `IFERROR(value, fallback)` | перехоплює **лише** помилки §6.4, не `null` |
 | `SUMIF` | `SUMIF(range, condition, sum_range?)` | сума за умовою; `condition` — вираз над рядком |
 | `CONVERT` | `CONVERT(number, fromUnit, toUnit)` | §9 — **єдиний** спосіб змінити одиницю; доступна в `Template` і `Methodology`, у `Report` — ні (§8a) |
-| `REGFIELD` | `REGFIELD(lookup, "fieldCode")` | 2026-09-23 — поле запису довідника, на який показує Lookup-комірка; `lookup` — звичайне посилання на комірку (`[Permit]`), `fieldCode` — рядковий літерал (`RegistryFieldDef.Code`); тип результату визначає поле (decimal/text/bool/date), тому статично він `Null` — як у `IF`/`IFERROR`; відсутній запис чи поле — `#REF` |
+| `REGFIELD` | `REGFIELD(lookup, 'fieldCode')` | 2026-09-23 — поле запису довідника, на який показує Lookup-комірка; `lookup` — звичайне посилання на комірку (`[Permit]`), `fieldCode` — рядковий літерал (`RegistryFieldDef.Code`); тип результату визначає поле (decimal/text/bool/date), тому статично він `Null` — як у `IF`/`IFERROR`; відсутній запис чи поле — `#REF` |
 
 > **`VLOOKUP` відсутній навмисно.** Усі 429 його входжень у чинному шаблоні —
 > звернення до довідників, які тут замінені посиланням на реєстр

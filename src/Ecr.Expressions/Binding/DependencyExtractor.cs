@@ -187,7 +187,7 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
     }
 
     /// <summary>
-    /// Registry-ребро <c>REGFIELD(lookup, "код")</c>: адреса Lookup-комірки —
+    /// Registry-ребро <c>REGFIELD(lookup, 'код')</c>: адреса Lookup-комірки —
     /// та сама, що резолвить звичайний обхід аргументу, — і код поля з
     /// другого аргументу, разом.
     /// </summary>
