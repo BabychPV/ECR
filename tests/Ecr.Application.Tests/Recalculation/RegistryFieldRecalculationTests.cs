@@ -6,6 +6,7 @@ using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Expressions.Binding;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -47,6 +48,7 @@ public sealed class RegistryFieldRecalculationTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
     private readonly IRegistryStore _registry = Substitute.For<IRegistryStore>();
+    private readonly IDocumentHeaderStore _headers = Substitute.For<IDocumentHeaderStore>();
 
     private TableDef _table = null!;
     private int _permitId;
@@ -326,6 +328,8 @@ public sealed class RegistryFieldRecalculationTests
     private RecalculationService Service()
     {
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+        _headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(DocumentId, Period.Value, Arg.Any<CancellationToken>())
@@ -334,6 +338,7 @@ public sealed class RegistryFieldRecalculationTests
         return new(
             _cells, _rows, periods, _metadata, _versions, new RealFormulaEngine(), _units,
             _registry,
+            _headers,
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             _uow);
