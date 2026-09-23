@@ -520,6 +520,146 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         Assert.Equal(atLimit, readBack);
     }
 
+    /// <summary>
+    /// `U-22` + `U-23` наскрізно, рівно сценарієм живого стенда: число з
+    /// хвостом за межею сховища відхиляється, а повтор незмінного значення не
+    /// дає рядка в журналі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було на стенді: `931.925` → дописати `123` → «Saved»; у
+    /// <c>doc.CellValue</c> лишилося <c>931.9250000000000000</c> (SqlClient
+    /// округлив на клієнті), а <c>aud.CellChange</c> записав
+    /// <c>931.9250000000000000 → 931.9250000000000000123</c> — зміну, якої не
+    /// було. Тут перевіряється все це на справжній базі: код і ключ відмови,
+    /// незмінне значення в сховищі й ЧИСЛО рядків журналу по комірці.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-148")]
+    public async Task Хвіст_за_межею_сховища_відхиляється_а_повтор_значення_не_журналюється()
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+
+        var numberColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .ElementAt(1);
+
+        var rowKey = $"U22{Guid.NewGuid():N}"[..12];
+
+        async Task<HttpResponseMessage> PatchAsync(string? baseVersion, string value)
+            => await client.PatchAsJsonAsync(patchUri, new
+            {
+                tableInstanceId = scenario.Document.TableInstanceId,
+                periodKey = scenario.PeriodKey,
+                origin = "UserEdit",
+                rows = new[]
+                {
+                    new
+                    {
+                        rowKey,
+                        baseVersion,
+                        cells = new object[] { new { columnCode = numberColumn, value = (object)value } },
+                    },
+                },
+            }).ConfigureAwait(true);
+
+        // ── 1. Вихідне значення ──────────────────────────────────────────
+        var created = await PatchAsync(null, "931.925").ConfigureAwait(true);
+        var createdText = await created.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.OK, $"PATCH створення: {created.StatusCode}\n{createdText}\n{app.ErrorsText}");
+
+        var version = JsonDocument.Parse(createdText).RootElement
+            .GetProperty("rowVersions").GetProperty(rowKey).GetString();
+
+        // ── 2. Хвіст за межею сховища — відмова з ключем, а не «Saved» ───
+        var tail = await PatchAsync(version, "931.9250000000000000123").ConfigureAwait(true);
+        var tailText = await tail.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(
+            tail.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"PATCH із хвостом: очікували 422, отримали {tail.StatusCode}\n{tailText}\n{app.ErrorsText}");
+
+        var problem = JsonDocument.Parse(tailText).RootElement;
+        Assert.Equal("ECR-CELL-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-CELL-0422.tooManyDecimals", problem.GetProperty("messageKey").GetString());
+
+        // ── 3. Повтор того самого значення — 200, але без рядка журналу ──
+        var same = await PatchAsync(version, "931.925").ConfigureAwait(true);
+        Assert.True(
+            same.StatusCode == HttpStatusCode.OK,
+            $"PATCH того самого значення: {same.StatusCode}\n"
+            + $"{await same.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+
+        // ── 4. Сховище і журнал ──────────────────────────────────────────
+        await using (var db = scenario.Builder.CreateContext())
+        {
+            var stored = await db.CellValues
+                .AsNoTracking()
+                .Where(c => c.PeriodKeyValue == scenario.PeriodKey
+                            && c.ColumnDefId == scenario.Document.ColumnDefIds[1])
+                .Select(c => c.ValueNumeric)
+                .SingleAsync()
+                .ConfigureAwait(true);
+
+            Assert.Equal(931.925m, stored);
+        }
+
+        var journal = await CellJournalAsync(
+            scenario.Document.DocumentId, rowKey, scenario.Document.ColumnDefIds[1]).ConfigureAwait(true);
+
+        // ⛔ Рівно ОДИН рядок — створення. Ні відхилений хвіст, ні повтор
+        // незмінного числа журнал не зачепили: кожен рядок журналу — справжня
+        // зміна значення в сховищі.
+        var only = Assert.Single(journal);
+        Assert.Null(only.OldValue);
+        Assert.Equal(931.925m, decimal.Parse(only.NewValue!, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>Рядки <c>aud.CellChange</c> однієї комірки — прямим ADO, бо <c>aud.*</c> поза моделлю EF.</summary>
+    private async Task<List<(string? OldValue, string? NewValue)>> CellJournalAsync(
+        long documentId, string rowKey, int columnDefId)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT OldValue, NewValue FROM aud.CellChange
+            WHERE DocumentId = @documentId AND RowKey = @rowKey AND ColumnDefId = @columnDefId
+            ORDER BY ChangedAt;
+            """;
+        command.Parameters.AddWithValue("@documentId", documentId);
+        command.Parameters.AddWithValue("@rowKey", rowKey);
+        command.Parameters.AddWithValue("@columnDefId", columnDefId);
+
+        var rows = new List<(string?, string?)>();
+        await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+        while (await reader.ReadAsync().ConfigureAwait(false))
+        {
+            rows.Add((
+                reader.IsDBNull(0) ? null : reader.GetString(0),
+                reader.IsDBNull(1) ? null : reader.GetString(1)));
+        }
+
+        return rows;
+    }
+
     /// <summary>Рядок зрізу за ключем; відсутність рядка — падіння з поясненням.</summary>
     private static async Task<JsonElement> ReadRowAsync(
         HttpClient client, Uri sliceUri, string rowKey, EcrApiFactory app)

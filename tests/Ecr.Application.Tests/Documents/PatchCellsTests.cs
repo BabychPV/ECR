@@ -1188,6 +1188,52 @@ public sealed class PatchCellsTests
         Assert.Equal("7", record.NewValue);
     }
 
+    /// <summary>
+    /// `U-22`: запис того самого значення не дає рядка «зміни» в журналі — у
+    /// тому числі тоді, коли старе приходить зі сховища в іншому масштабі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Сховище віддає число в масштабі стовпця (<c>931.9250000000000000</c>),
+    /// користувач надсилає <c>931.925</c>. Доти журнал отримував рядок з
+    /// <c>OldValue ≠ NewValue</c> для незмінного числа — регуляторний артефакт
+    /// стверджував зміну, якої не було.
+    ///
+    /// ⚠ Другий бік — справжня зміна в тому самому батчі ЖУРНАЛЮЄТЬСЯ: інакше
+    /// фікс просто глушив би журнал, а не робив його правдивим.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "R-A2")]
+    public async Task Правка_що_нічого_не_змінила_не_дає_рядка_журналу()
+    {
+        _cells.ReadCellsAsync(Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<CellAddress, CellValueData>
+              {
+                  [new CellAddress(new PeriodKey(Period), 1001L, VolumeColumnId)] =
+                      new CellValueData { ValueNumeric = 931.9250000000000000m },
+              });
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", "931.925")])),
+            CancellationToken.None);
+
+        Assert.Empty(Audited());
+
+        // Та сама комірка, справжня зміна, — рядок є, і в ньому саме ті числа.
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", "931.926")])),
+            CancellationToken.None);
+
+        var record = Assert.Single(
+            _audit.ReceivedCalls()
+                .Where(c => c.GetMethodInfo().Name == nameof(IAuditWriter.WriteCellChangesAsync))
+                .Select(c => (IReadOnlyList<CellChangeRecord>)c.GetArguments()[0]!)
+                .Last());
+
+        Assert.Equal("931.9250000000000000", record.OldValue);
+        Assert.Equal("931.926", record.NewValue);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "R-A2")]
