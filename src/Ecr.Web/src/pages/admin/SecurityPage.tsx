@@ -40,6 +40,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
+import { PermissionCaption } from '@/features/security/PermissionCaption';
 import { t } from '@/shared/i18n';
 
 /**
@@ -363,9 +364,15 @@ export function SecurityPage(): JSX.Element {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>{t('security.role')}</Table.Th>
+                  {/* ⛔ Тут стояв `<Text size="xs">{permission.code}</Text>` —
+                      41 колонка, підписана сирим кодом сервера (`U-11`). Спосіб
+                      виправлення той самий, що в #437/#438/#440/#441: підпис із
+                      каталогу рядків. Різниця одна, і вона свідома — код
+                      ЛИШАЄТЬСЯ видимим другим рядком (`permissionLabel.ts`
+                      пояснює чому: адміністратор безпеки оперує саме кодами). */}
                   {permissions.map((permission) => (
                     <Table.Th key={permission.code}>
-                      <Text size="xs">{permission.code}</Text>
+                      <PermissionCaption code={permission.code} />
                     </Table.Th>
                   ))}
                 </Table.Tr>
@@ -635,7 +642,12 @@ export function SecurityPage(): JSX.Element {
                 key={permission.code}
                 label={
                   <Group gap="xs" wrap="nowrap">
-                    <Text size="sm">{permission.code}</Text>
+                    {/* ⚠ Той самий підпис, що в матриці (`U-11`): інакше одне
+                        й те саме право називалося б у таблиці мовою
+                        користувача, а у формі — англійським кодом. Код
+                        лишається другим рядком — його вводять у грантах і
+                        читають у журналі безпеки. */}
+                    <PermissionCaption code={permission.code} />
                     {/* ⚠ Небезпечні позначені ОКРЕМО (ФВ-6.12, D-40): їх
                         видають поіменно, і адміністратор має бачити, яке саме
                         право це таке, ще до того, як позначить прапорець. */}

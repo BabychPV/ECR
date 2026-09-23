@@ -3657,7 +3657,81 @@ USING (VALUES
     (N'notifications.channelGone',         N'en', N'The channel has been deleted; the log entry remains.', 1),
     (N'notifications.showMore',            N'en', N'Show more', 1),
     (N'notifications.noDeliveries',        N'en', N'No deliveries yet', 1),
-    (N'notifications.noDeliveriesHint',    N'en', N'Nothing has been sent since the log was started.', 1)
+    (N'notifications.noDeliveriesHint',    N'en', N'Nothing has been sent since the log was started.', 1),
+
+    -- ══ Назви прав для матриці `/admin/security` (`U-11`) ══
+    --
+    -- ⛔ Матриця підписувала 41 колонку сирим кодом сервера
+    -- (`Calculation.EditConstant`, `System.ManageLocalization`, …). Той самий
+    -- клас, який за тиждень закривали чотири рази (#437, #438, #440, #441), —
+    -- тут він лишався в найширшому місці продукту.
+    --
+    -- ⛔ Ключ — `permission.<Code>`, де `<Code>` записаний ТАК, ЯК ЙОГО НАЗИВАЄ
+    -- СЕРВЕР (`sec.Permission.Code` вище в цьому ж файлі). Це вже усталена тут
+    -- форма для ключів, похідних від значення сервера (`status.<вид>.<стан>`,
+    -- `deny.<причина>`): будь-яке приведення регістру дало б другу
+    -- відповідність, яку нема кому перевірити — рівно `A7-02`.
+    --
+    -- ⚠ Код НЕ зникає з екрана: він лишається другим рядком підпису
+    -- (`TwoLine`, `KIT.md` §1.7). Адміністратор безпеки оперує саме кодами —
+    -- вони в журналі `DangerousPermissionsGranted`, у відмові
+    -- `err.ECR-AUTH-0403.permission` («Requires permission {permission}») і в
+    -- шаблонах складених ролей (`Report.%`). Причина — в `permissionLabel.ts`.
+    --
+    -- ⚠ Назва описує ДІЮ, а не повторює код словами: «Edit constant» нічого не
+    -- додає до `Calculation.EditConstant`; «Edit methodology constants» каже,
+    -- ЧОГО саме стосується право. Область приватна (1): матриця — за входом.
+    (N'permission.Template.View',            N'en', N'View templates', 1),
+    (N'permission.Template.Edit',            N'en', N'Edit template structure', 1),
+    (N'permission.Template.Publish',         N'en', N'Publish template versions', 1),
+
+    (N'permission.Registry.View',            N'en', N'View registries', 1),
+    (N'permission.Registry.EditData',        N'en', N'Edit registry rows', 1),
+    (N'permission.Registry.EditDefinition',  N'en', N'Edit registry structure', 1),
+    (N'permission.Registry.Publish',         N'en', N'Publish registry versions', 1),
+
+    (N'permission.Document.View',            N'en', N'View documents', 1),
+    (N'permission.Document.Create',          N'en', N'Create documents', 1),
+    (N'permission.Document.Delete',          N'en', N'Delete draft documents', 1),
+    (N'permission.Document.Import',          N'en', N'Import documents from a workbook', 1),
+    (N'permission.Document.Export',          N'en', N'Export documents', 1),
+    (N'permission.Document.Reopen',          N'en', N'Return a submitted document to draft', 1),
+    (N'permission.Document.ChangeKey',       N'en', N'Change the business key of a document', 1),
+
+    (N'permission.Project.Manage',           N'en', N'Manage projects', 1),
+
+    (N'permission.Period.Configure',         N'en', N'Configure reporting periods', 1),
+    (N'permission.Period.Reopen',            N'en', N'Reopen a closed period', 1),
+
+    (N'permission.Calculation.View',         N'en', N'View methodologies', 1),
+    (N'permission.Calculation.EditFormula',  N'en', N'Edit methodology formulas', 1),
+    (N'permission.Calculation.EditConstant', N'en', N'Edit methodology constants', 1),
+    (N'permission.Calculation.EditRule',     N'en', N'Edit methodology rules', 1),
+    (N'permission.Calculation.Publish',      N'en', N'Publish methodology versions', 1),
+    (N'permission.Calculation.Recalculate',  N'en', N'Run a recalculation', 1),
+    (N'permission.Calculation.ManageRequiredInputs', N'en', N'Manage required input columns', 1),
+
+    (N'permission.Report.ViewRegulatory',    N'en', N'View regulatory reports', 1),
+    (N'permission.Report.BuildSnapshot',     N'en', N'Build a report snapshot', 1),
+    (N'permission.Report.Export',            N'en', N'Export reports', 1),
+    (N'permission.Report.EditDefinition',    N'en', N'Author regulatory report definitions', 1),
+    (N'permission.Report.ViewCampaign',      N'en', N'View the campaign overview of all projects', 1),
+
+    (N'permission.Integration.View',         N'en', N'View collection sources', 1),
+    (N'permission.Integration.Manage',       N'en', N'Manage collection sources and their secrets', 1),
+    (N'permission.Integration.EditSchedule', N'en', N'Edit collection schedules', 1),
+
+    (N'permission.Uom.EditCatalog',          N'en', N'Edit the catalogue of units of measure', 1),
+
+    (N'permission.Security.ManageUsers',     N'en', N'Manage users', 1),
+    (N'permission.Security.ManageRoles',     N'en', N'Manage roles and their permissions', 1),
+    (N'permission.Security.ViewAudit',       N'en', N'View the audit log', 1),
+    (N'permission.Security.Simulate',        N'en', N'Simulate the access of another user', 1),
+
+    (N'permission.System.ViewHealth',        N'en', N'View system health and the job queue', 1),
+    (N'permission.System.RunJob',            N'en', N'Start and cancel background jobs', 1),
+    (N'permission.System.ManageLocalization', N'en', N'Manage interface strings and languages', 1),
+    (N'permission.System.ManageNotifications', N'en', N'Manage notification channels and rules', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
