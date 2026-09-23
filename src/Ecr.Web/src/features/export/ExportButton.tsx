@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Anchor, Button, Group, SegmentedControl } from '@mantine/core';
+import { Anchor, Button, Divider, Group, SegmentedControl } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
@@ -140,15 +140,22 @@ export function ExportButton({
   }, [jobId, outcome, job.data?.error]);
 
   return (
-    <Group gap="xs">
-      <SegmentedControl
-        size="xs"
-        aria-label={t('document.exportFormat')}
-        value={format}
-        onChange={(value) => setFormat(value as ExportFormat)}
-        disabled={start.isPending || building}
-        data={exportFormatOptions()}
-      />
+    /*
+     * ⛔ `U-15`: експорт — ОДНА одиниця, видимо відокремлена від імпорту.
+     * Раніше рядок читався «Validate · Import from Excel · Excel CSV JSON ·
+     * Export»: перемикач формату стояв одразу за імпортом, без підпису, і
+     * читався як налаштування імпорту, хоча керує експортом. Тепер кнопка
+     * «Export» іде ПЕРШОЮ, формат — одразу за нею, обидва в спільній групі з
+     * `role="group"` за вертикальним роздільником: поруч з «Import from
+     * Excel» опиняється межа і слово «Export», а не голий перелік форматів.
+     * Нового тексту не додано — роздільник і порядок
+     * пояснюють належність, а ширина рядка не зростає.
+     */
+    <Group gap="xs" wrap="nowrap" role="group" aria-label={t('document.export')} data-testid="export-unit">
+      {/* ⚠ Роздільник — перший елемент самої одиниці, а не сторінки: так він
+          стоїть і там, де імпорту немає (оператор без `Document.Import`), і
+          відокремлює експорт від того, що йде перед ним. */}
+      <Divider orientation="vertical" />
 
       <Button
         size="xs"
@@ -158,6 +165,15 @@ export function ExportButton({
       >
         {building ? t('document.exportBuilding') : t('document.export')}
       </Button>
+
+      <SegmentedControl
+        size="xs"
+        aria-label={t('document.exportFormat')}
+        value={format}
+        onChange={(value) => setFormat(value as ExportFormat)}
+        disabled={start.isPending || building}
+        data={exportFormatOptions()}
+      />
 
       {/* ⚠ Посилання з'являється лише тоді, коли файл справді є. Показане
           заздалегідь, воно вело б на 404 рівно доти, доки книга будується, —
