@@ -1,9 +1,9 @@
-﻿import { lazy, Suspense, useState, type JSX } from 'react';
+﻿import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
 import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { PagedProjects } from '@/api/types';
+import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
 import { listDocuments, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
@@ -81,6 +81,62 @@ export function DocumentsPage(): JSX.Element {
     queryKey: ['projects'],
     queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
   });
+
+  /*
+   * ⛔ `U-10`. Перелік відкривався з ПОРОЖНІМ полем «Period», тому колонка
+   * «State» показувала «—» в кожному рядку — хоча відкритий період у проєкту
+   * рівно один і система його знає (`GET /projects/{id}/periods` віддає
+   * `isCurrent`). Екран мовчки показував «станів немає» там, де стан є.
+   *
+   * ⛔ Межа автовибору, і вона вузька в ДВІ сторони одразу:
+   *  1. проєкт має бути рівно ОДИН — перелік документів наскрізний по
+   *     проєктах, і взяти календар «першого-ліпшого» з десяти означало б
+   *     підставити в адресу період чужого проєкту;
+   *  2. період береться не «перший у списку», а позначений САМИМ сервером як
+   *     поточний (`isCurrent` — `CurrentPeriod`, `D-77`). Якщо позначки немає,
+   *     підставляється `Open`-період — і лише коли він один. Два відкриті
+   *     періоди — неоднозначність, і вибір лишається людині.
+   *
+   * ⛔ Фільтром це НЕ стає, і ця межа тут найважливіша: перелік документів
+   * періодом не фільтрується (див. шапку файла — період керує лише КОЛОНКОЮ
+   * стану), і автовибір не має цього змінити. Він робить рівно те, що зробила
+   * б людина, обравши період руками.
+   *
+   * ⚠ Значення йде в АДРЕСУ (`?periodKey=`), а не в локальний стан: воно має
+   * лишитися видимим у полі й у посиланні, яке звідси надсилають далі
+   * (`documentHref` нижче бере його ж). Локальний стан дав би посилання на
+   * «поточний місяць за замовчуванням» — рівно той дефект, який уже
+   * виправляли в `documentHref` (`UI-walkthrough F3`).
+   *
+   * ⚠ Запит робиться ЛИШЕ доки періоду в адресі немає: `enabled` знімає його,
+   * щойно вибір є, тож звичайне відкриття сторінки з посилання зайвого
+   * звернення не робить.
+   */
+  const onlyProject = projects.data?.items.length === 1 ? projects.data.items[0] : undefined;
+
+  const calendar = useQuery({
+    queryKey: ['periods', onlyProject?.id ?? null],
+    queryFn: () =>
+      apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(onlyProject?.id ?? 0)}/periods`),
+    enabled: periodKey === null && onlyProject !== undefined,
+  });
+
+  useEffect(() => {
+    if (periodKey !== null) return;
+
+    const periods = calendar.data?.periods;
+    if (periods === undefined) return;
+
+    const current = periods.find((period) => period.isCurrent);
+
+    // ⚠ `Open` береться лише коли він ОДИН: два відкриті періоди — це вибір,
+    // а не замовчування, і мовчки взяти один із них означало б показати стан
+    // не того періоду, про який думає людина.
+    const open = periods.filter((period) => period.state === 'Open');
+    const pick = current ?? (open.length === 1 ? open[0] : undefined);
+
+    if (pick !== undefined) setUrlParams({ periodKey: pick.periodKey, cursor: null });
+  }, [periodKey, calendar.data, setUrlParams]);
 
   /**
    * ⛔ Директива D15 §0, правило L10. Тут стояло
