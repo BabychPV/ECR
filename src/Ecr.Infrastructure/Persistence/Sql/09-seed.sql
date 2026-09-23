@@ -1300,13 +1300,18 @@ USING (VALUES
     (N'document.validationColumn',       N'en', N'Column', 1),
     (N'document.validationRule',         N'en', N'Rule', 1),
     (N'document.validationMessage',      N'en', N'What is wrong', 1),
-    -- Шапка документа (GET/PATCH …/header). ⚠ `lookupHint` каже про сире
-    -- число не від ліні: значення шапки приходить без `lookupRegistryDefId`
-    -- (на відміну від визначення поля), тож вибрати запис за назвою нема з
-    -- чого — поле чесно просить ідентифікатор, доки контракт його не несе.
+    -- Шапка документа (GET/PATCH …/header). Lookup-поле показує НАЗВУ запису
+    -- довідника: значення шапки тепер несе `lookupRegistryDefId` (`4f167396`),
+    -- тож клієнт резолвить запис тим самим способом, що й комірка сітки.
+    -- ⚠ `lookupHint` лишився ФОЛБЕКОМ: поле без `lookupRegistryDefId` нема за
+    -- чим резолвити, і тоді воно чесно просить ідентифікатор замість того, щоб
+    -- показувати порожній список. `lookupEmpty` — про порожній довідник, а не
+    -- про «нічого не знайдено за запитом».
     (N'document.header.title',           N'en', N'Document header', 1),
     (N'document.header.saved',           N'en', N'Header saved.', 1),
     (N'document.header.lookupHint',      N'en', N'Registry entry ID', 1),
+    (N'document.header.lookupLoading',   N'en', N'Directory is loading…', 1),
+    (N'document.header.lookupEmpty',     N'en', N'Directory has no entries', 1),
     -- Відновлення незбережених правок на екрані документа (ФВ-3.6, D14-12).
     -- ⚠ `partial` називає різницю вголос: у слід вміщається не все, і мовчазне
     -- «відновити N» там, де правок було більше, — та сама тиха втрата.
