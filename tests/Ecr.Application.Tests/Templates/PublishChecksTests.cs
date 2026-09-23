@@ -2,6 +2,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Templates;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Expressions;
 using Ecr.Expressions.Binding;
 using Ecr.Expressions.Parsing;
@@ -559,6 +560,92 @@ public sealed class PublishChecksTests
         Assert.NotEmpty(afterDelete);
         Assert.Contains(afterDelete, d => d.Code == ExpressionErrors.Unresolved);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Snapshot_переносить_HeaderFields_версії_а_не_лишає_їх_порожніми()
+    {
+        // ⛔ `TemplateVersionSnapshot.HeaderFields` — `init`-властивість із
+        // дефолтом `[]`, і виклик конструктора в `Snapshot()` її не
+        // встановлював: знімок публікації завжди бачив ПОРОЖНІЙ перелік полів
+        // шапки, навіть якщо `version.HeaderFields` реально мав записи. Цей
+        // тест — саме на межі `Snapshot()`, без формул і без резолвінгу.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        builder.Table(sheet, "Main");
+        var version = builder.Version();
+
+        version.AddHeaderField(HeaderField(version.Id, "Area"));
+
+        var snapshot = PublishChecks.Snapshot(version);
+
+        var field = Assert.Single(snapshot.HeaderFields);
+        Assert.Equal("Area", field.Code);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Snapshot_не_переносить_мяко_видалені_поля_шапки()
+    {
+        // Той самий фільтр, що вже застосовує `MetadataCache.LoadAsync` для
+        // рантайму (`Caching/MetadataCache.cs`, сьомий запит): публікація і
+        // рантайм мусять бачити ту саму шапку.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        builder.Table(sheet, "Main");
+        var version = builder.Version();
+
+        var field = HeaderField(version.Id, "Area");
+        version.AddHeaderField(field);
+        field.SoftDelete(userId: 1, DateTime.UtcNow);
+
+        var snapshot = PublishChecks.Snapshot(version);
+
+        Assert.Empty(snapshot.HeaderFields);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void HDR_з_невідомим_кодом_поля_відхиляє_публікацію()
+    {
+        // ⛔ Наскрізний доказ дефекту з опису задачі: `HDR("TYPO")` у формулі
+        // шаблону мусить зупинити ПУБЛІКАЦІЮ так само, як невідома таблиця чи
+        // колонка (`Посилання_на_неіснуючу_колонку_названо_поіменно` вище) —
+        // а не мовчки рахуватися як Null у рантаймі.
+        var fixture = Structure();
+        fixture.Version.AddHeaderField(HeaderField(fixture.Version.Id, "Area"));
+        fixture.Formula("HDR.TYPO");
+
+        var text = Render(Run(fixture.Version));
+
+        Assert.Contains("TYPO", text, StringComparison.Ordinal);
+        Assert.Contains(ExpressionErrors.Unresolved, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void HDR_з_відомим_кодом_поля_публікується_і_потрапляє_в_граф_залежностей()
+    {
+        // Друга половина, без якої перша нічого не означає: правильний код
+        // публікується без зауважень і дає Header-залежність
+        // (`DependsOnKind = 1`) у тому самому переліку, що йде в
+        // `cfg.FormulaDependency`.
+        var fixture = Structure();
+        fixture.Version.AddHeaderField(HeaderField(fixture.Version.Id, "Area"));
+        fixture.Formula("HDR.Area");
+
+        Assert.Empty(Run(fixture.Version));
+
+        var dependencies = PublishChecks.Dependencies(fixture.Version, _engine);
+        var header = Assert.Single(dependencies, d => d.DependsOnKind == DependencyExtractor.KindHeader);
+        Assert.Equal("Area", header.RowKey);
+    }
+
+    /// <summary>Поле шапки версії, типу String, для тестів HDR-резолвінгу.</summary>
+    private static HeaderFieldDef HeaderField(int templateVersionId, string code)
+        => new(
+            templateVersionId, EcrCode.Create(code),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = code }), ordinal: 1, CellDataType.String);
 
     private IReadOnlyList<ExpressionDiagnostic> Run(
         TemplateVersion version, UnitCatalogSnapshot? catalogue = null)
