@@ -4,7 +4,7 @@ using Ecr.Expressions.Evaluation;
 namespace Ecr.Expressions.Functions;
 
 /// <summary>
-/// Каталог функцій діалекту <c>Template</c> — рівно дванадцять (<c>02b</c> §7).
+/// Каталог функцій діалекту <c>Template</c> — рівно тринадцять (<c>02b</c> §7).
 /// Розширення — зміна контракту, тобто <c>questions.md</c> і зупинка.
 /// </summary>
 /// <remarks>
@@ -26,7 +26,7 @@ public sealed class FunctionRegistry
 {
 
     /// <summary>
-    /// Дванадцять функцій діалекту <c>Template</c> (02b §7).
+    /// Тринадцять функцій діалекту <c>Template</c> (02b §7).
     /// </summary>
     /// <remarks>
     /// ⚠ <c>CONVERT</c> тут не за симетрією з методологіями, а за потребою
