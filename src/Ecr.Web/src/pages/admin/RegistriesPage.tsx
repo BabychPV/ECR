@@ -170,6 +170,25 @@ export function RegistriesPage(): JSX.Element {
     );
   }, [code, entries.data, needle]);
 
+  /*
+   * ⛔ `U-08`. Правило порожніх станів, яке цей набір встановлює: **на екрані
+   * одночасно видно рівно ОДИН порожній стан — той, що пояснює НАЙБЛИЖЧУ
+   * перешкоду**; підпорядкований розділ свого не показує, доки головну
+   * перешкоду не знято.
+   *
+   * Тут це було порушено буквально: на чистій базі межа переліку довідників
+   * казала «No registries yet», а таблиця під нею — «Pick a registry above».
+   * Друга порада нездійсненна САМЕ тоді, коли показана перша: обирати нема з
+   * чого. Перелік записів підпорядкований переліку довідників (без довідника
+   * запису не існує), тож він і мовчить.
+   *
+   * ⚠ Умова — «дані приїхали І не порожні», а не `length > 0` над `?? []`:
+   * поки перелік у дорозі або відмовив, стан показує межа вище, і «Pick a
+   * registry» під спінером чи під помилкою — той самий другий порожній стан,
+   * лише з іншої причини.
+   */
+  const hasRegistries = registries.data !== undefined && registries.data.length > 0;
+
   const canEditData = can(session.data, 'Registry.EditData');
 
   /*
@@ -406,7 +425,7 @@ export function RegistriesPage(): JSX.Element {
        * ⚠ Малюється лише з обраним довідником: без нього фільтрувати нема
        * чого, а контрол без даних — це `D15-06`.
        */}
-      {code !== null && (
+      {hasRegistries && code !== null && (
         <FilterBar
           search={{
             label: t('registries.search'),
@@ -440,6 +459,9 @@ export function RegistriesPage(): JSX.Element {
        * `GET …/entries` віддає повний масив без курсора, тож підсумок «N / M»
        * не малюється зовсім (`D15-06`).
        */}
+      {/* ⛔ `U-08`: підпорядкована таблиця мовчить, доки перешкода «довідників
+          немає» не знята — див. `hasRegistries` вище. */}
+      {hasRegistries && (
       <DataTable<RegistryEntryDto>
         columns={columns}
         rows={rows}
@@ -454,6 +476,7 @@ export function RegistriesPage(): JSX.Element {
         clearFiltersLabel={t('filters.clear')}
         onRetry={() => void entries.refetch()}
       />
+      )}
 
       {selected !== undefined && (
         <RegistryEntryEditor
