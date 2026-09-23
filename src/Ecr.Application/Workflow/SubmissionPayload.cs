@@ -117,7 +117,12 @@ public static class SubmissionPayload
         return new(row, column, value, type);
     }
 
-    private static SubmissionPayloadHeaderValue EncodeHeader(DocumentHeaderValueData v)
+    /// <summary>
+    /// Кодує "живе" значення шапки (<see cref="DocumentHeaderValueData"/>) у ту саму форму
+    /// (Value, Type), що вже зберігається в зрізі подання — щоб порівнювати поточний стан
+    /// шапки зі знімком без другого розбору типів (<c>CompareDocumentVersionsHandler</c>).
+    /// </summary>
+    internal static SubmissionPayloadHeaderValue EncodeHeader(DocumentHeaderValueData v)
     {
         var (value, type) = EncodeTyped(
             v.ValueNumeric, v.ValueString, v.ValueDate, v.ValueBool, v.ValueRegistryEntryId, v.ValueUnitId);

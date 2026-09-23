@@ -71,6 +71,9 @@ function compareBody(patch: Partial<DocumentCompare>): DocumentCompare {
     addedRows: [],
     removedRows: [],
     truncated: false,
+    // headerChanges: DTO контракту (ФВ-9.4), рендер — окрема задача; тут лише
+    // тримаємо фікстуру повною, щоб тип DocumentCompare не ламав компіляцію.
+    headerChanges: [],
     ...patch,
   };
 }
