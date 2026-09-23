@@ -278,6 +278,78 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
   `ECR-UOM-0404`, `ECR-AUTH-0401`, `ECR-AUTH-0403`, `ECR-JOB-0404`,
   `ECR-JOB-0409`, `ECR-REQ-0422` уже були нейтральними.
 
+✎ **2026-09-23: шаблони — конструктор колонки й таблиці** —
+`ColumnDefHandlers.cs` (6) і доменний `ColumnDef.cs` (3), `TableDefHandlers.cs`
+(6) і доменний `TableDef.cs` (5) закрито повністю, 20 кидків; 185 у 66 файлах
+→ 165 у 62 файлах. Другий зріз тієї самої області боргу
+(`src/Ecr.Application/Templates/*`/`src/Ecr.Domain/Entities/Configuration/*`),
+після `PeriodAccessRuleHandlers`/`TableRelationHandlers` 2026-09-22.
+`FormulaDefHandlers.cs`, `RowDefHandlers.cs` і доменний `FormulaDef.cs`
+лишаються на наступний прохід — той самий поділ, що вже застосовувався в цій
+області (не увесь каталог одним PR).
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  чотирьох кидків «сесія не містить користувача» (Save/Delete колонки,
+  Save/Delete таблиці): той самий факт, що вже несуть `TableRelationHandlers`
+  і решта обробників структури шаблону.
+- `err.ECR-TMPL-0404.table` {tableDefId, versionId} — новий ключ, живе в
+  ОДНОМУ місці (`ColumnDefHandlers.FindTable`), спільному хелпері, яким
+  користуються і `SaveRowDefHandler`/`DeleteRowDefHandler`
+  (`RowDefHandlers.cs`): закриття цього кидка автоматично прибрало
+  українське речення з обох викликів рядка, не чіпаючи файл рядків.
+- Нові ключі за фактом, не за файлом: `err.ECR-TMPL-0404.columnCode`
+  {columnCode, tableDefId} і `.sheet`/`.tableByCode` — пошук за РЯДКОВИМ
+  кодом (на відміну від наявного `err.ECR-TMPL-0404.column` {columnDefId},
+  що йде за числовим Id); `.columnCodeTakenByDeleted`/`.tableCodeTakenByDeleted`
+  — код зайнятий м'яко видаленим записом (аудит 2026-09-16, §4.4);
+  `.columnDataTypeImmutable` {columnCode, oldDataType, newDataType} —
+  повторний PUT з іншим типом; `.scaleExceedsPrecision`,
+  `.lookupRequiresLookupType`, `.unitColumnHasRowUnit` — доменні перевірки
+  `ColumnDef`; `.maxDynamicRowsNotPositive`/`.maxDynamicRowsNeedsDynamicMode`,
+  `.tableIsDynamic` — доменні перевірки `TableDef`;
+  `err.ECR-TMPL-0409.columnCodeTaken`/`.rowKeyTaken` — дублікат коду/ключа
+  всередині таблиці (`TableDef.AddColumn`/`AddRow`), той самий числовий код,
+  що й «версія опублікована» (наявна перевантаженість коду, не змінена цим
+  зрізом).
+- Заголовки кодів не змінювались — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
+  `ECR-TMPL-0409`/`ECR-AUTH-0401` уже були нейтральними.
+
+✎ **2026-09-23: звітність і перелік проєктів** — `ReportDefHandlers.cs` (10)
+і `ProjectQueryHandlers.cs` (15) закрито повністю, 25 кидків; зріз узятий від
+того самого замiру 185/66, що й запис про `ColumnDefHandlers.cs`/
+`TableDefHandlers.cs` вище, — паралельно і без перетину файлів. Разом обидва
+зрізи: 185 у 66 файлах → **140 у 60 файлах**.
+- `err.ECR-AUTH-0401.signInRequired`, `err.ECR-AUTH-0403.permission`,
+  `err.ECR-REQ-0422.pageSizeOutOfRange` — наявні ключі, перевикористані в
+  `ListProjectsHandler` (той самий патерн, що вже несе `DocumentQueryHandlers`
+  для тієї самої перевірки курсорної сторінки).
+- `err.ECR-PRJ-0404.project` {projectId} — наявний ключ, перевикористаний у
+  трьох однакових кидках «проєкту не існує» (`ActivateProjectHandler`,
+  `ArchiveProjectHandler`, `ChangeProjectTimeZoneHandler`).
+- `err.ECR-AUTH-0403.noProjectManageGrant` {projectId} — наявний ключ,
+  перевикористаний у тих самих трьох обробниках для «немає гранта Manage на
+  проєкт».
+- Нові ключі: `err.ECR-PRD-4091.code` {code} (код політики періодів зайнято,
+  `CreatePeriodPolicyHandler`); `err.ECR-TMPL-0404.versionRequired` і
+  `err.ECR-PRD-0422.periodPolicyRequired` — проєкт не можна створити без
+  версії шаблону чи без політики періодів (`CreateProjectHandler`);
+  `err.ECR-PRJ-0422.notDraft` {status} і `.noPeriods` {projectId} —
+  активація проєкту не в чернетці / календар без жодного періоду
+  (`ActivateProjectHandler`); `err.ECR-PRD-0409.openPeriods` {projectId} —
+  архівація з відкритими періодами (`ArchiveProjectHandler`); перелік ключів
+  періодів лишається структурою `Details["periodKeys"]` окремим полем для
+  клієнта, у тексті подробиці не підставляється.
+- У `ReportDefHandlers.cs`: `err.ECR-RPT-0422.noColumns`, `.columnKind`
+  {kind, allowedKinds}, `.duplicateColumn` {code}, `.rowSource` {rowSource,
+  supportedSource}, `.nameRequired`, `.version` {maxLength} — створення опису
+  й версії звіту; `err.ECR-RPT-4091.code` {code} — код звіту зайнято;
+  `err.ECR-RPT-0404.def` {reportDefId}, `.version` {reportVersionId},
+  `.versionWrongDef` {reportVersionId, versionDefId, reportDefId} —
+  публікація версії.
+- Заголовки кодів не змінювались — `ECR-RPT-0422`/`ECR-RPT-4091`/
+  `ECR-RPT-0404`, `ECR-AUTH-0401`/`ECR-AUTH-0403`, `ECR-REQ-0422`,
+  `ECR-PRJ-0404`/`ECR-PRJ-0422`, `ECR-PRD-0409`/`ECR-PRD-0422`/`ECR-PRD-4091`,
+  `ECR-TMPL-0404` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -297,16 +369,13 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
-| `src/Ecr.Application/Projects/ProjectQueryHandlers.cs` | 15 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
-| `src/Ecr.Application/Reporting/ReportDefHandlers.cs` | 10 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 2 |
 | `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
 | `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/ColumnDefHandlers.cs` | 6 |
 | `src/Ecr.Application/Templates/CreateTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
@@ -314,7 +383,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
-| `src/Ecr.Application/Templates/TableDefHandlers.cs` | 6 |
 | `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |
 | `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
@@ -323,10 +391,8 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
 | `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/ColumnDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
 | `src/Ecr.Domain/Entities/Configuration/SheetDef.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/TableDef.cs` | 5 |
 | `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |

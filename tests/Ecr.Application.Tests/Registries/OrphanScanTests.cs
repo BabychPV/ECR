@@ -12,6 +12,7 @@ using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -324,11 +325,21 @@ public sealed class OrphanScanTests
     private GetTableSliceHandler Slice()
         => new(_rows, _cells, _metadata, Units(), _access, _methodologies, _periods, Styles());
 
+    /// <summary>Порожня шапка документа — тести цього файлу її не читають.</summary>
+    private static IDocumentHeaderStore Headers()
+    {
+        var store = NSubstitute.Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
+
     private SubmitSheetHandler Submit()
         => new(
             _cells, _rows, _workflow, _documents, _metadata,
             _access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
+            Headers(),
             new Ecr.Application.Reporting.ReportSnapshotSync(
                 NSubstitute.Substitute.For<IReportSnapshotBuilder>(),
                 NSubstitute.Substitute.For<IDocumentStore>()),

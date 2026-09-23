@@ -9,6 +9,7 @@ using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -189,10 +190,14 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
         registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
 
+        var headers = Substitute.For<IDocumentHeaderStore>();
+        headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+
         return new PatchCellsHandler(
             cellStore, rowStore, documentStore, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            methodologies, registries, auditWriter, auditReader, jobs, uow, user, clock);
+            methodologies, registries, headers, auditWriter, auditReader, jobs, uow, user, clock);
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

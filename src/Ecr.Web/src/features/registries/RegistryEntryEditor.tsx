@@ -59,6 +59,26 @@ export function RegistryEntryEditor({
     setValues({});
   }
 
+  /**
+   * ⛔ Обгортка над переданим `onClose`, а не сам `onClose` напряму. Скидає
+   * `loadedFor` ДО делегування: без цього друге відкриття «New entry»
+   * (`entry` знову `null`, `key` знову `null`) бачило `loadedFor === null` із
+   * попереднього відкриття, умова скиду вище не спрацьовувала, і стара форма
+   * лишалася заповненою — новий ввід у `TextInput` з `data-autofocus`
+   * (курсор у кінці наявного тексту) дописувався до старого, а не заміняв
+   * його. Після скиду `loadedFor` стає `undefined`, і наступне відкриття
+   * бачить `undefined !== null` — умова знову істинна.
+   *
+   * ⚠ Усі шляхи закриття модалки мають йти через цю функцію: сам
+   * `Modal.onClose` (він же Escape і клік поза модалкою — Mantine `Modal`
+   * викликає той самий `onClose` для обох), кнопка «Скасувати» і виклик з
+   * `upsert.onSuccess`.
+   */
+  const handleClose = (): void => {
+    setLoadedFor(undefined);
+    onClose();
+  };
+
   const upsert = useMutation({
     mutationFn: () =>
       apiFetch<RegistryEntryIdResponse>(
@@ -80,7 +100,7 @@ export function RegistryEntryEditor({
       ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(registry.code) });
-      onClose();
+      handleClose();
       showDone(entry === null ? t('registries.entryCreated') : t('registries.entrySaved'));
     },
     onError: showApiError,
@@ -89,7 +109,7 @@ export function RegistryEntryEditor({
   return (
     <Modal
       opened={opened}
-      onClose={onClose}
+      onClose={handleClose}
       title={entry === null ? t('registries.newEntry') : t('registries.editEntry')}
     >
       <TextInput
@@ -132,7 +152,7 @@ export function RegistryEntryEditor({
       )}
 
       <Group justify="flex-end" mt="md">
-        <Button variant="default" onClick={onClose}>
+        <Button variant="default" onClick={handleClose}>
           {t('common.cancel')}
         </Button>
         <Button

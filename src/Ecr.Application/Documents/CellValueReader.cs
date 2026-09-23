@@ -4,6 +4,7 @@ using System.Text.Json;
 using Ecr.Application.Errors;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;

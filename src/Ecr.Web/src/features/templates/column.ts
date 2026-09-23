@@ -23,8 +23,16 @@ type Schemas = components['schemas'];
 export type CellDataType = Schemas['CellDataType'];
 
 /**
- * Типи, які людина обирає у формі. `Formula`/`Calculated` рахує рушій
- * (`ColumnDef.IsComputed`) — колонку такого типу заводить не ця форма.
+ * Типи, які людина обирає у формі поля шапки документа (`HeaderFieldEditor.tsx`).
+ *
+ * ⛔ `Formula`/`Calculated` тут НЕ МОЖНА додавати: конструктор
+ * `HeaderFieldDef` (домен, `HeaderFieldDef.cs`) відхиляє обидва типи
+ * безумовно, помилкою `ECR-TMPL-0422`
+ * (`err.ECR-TMPL-0422.headerFieldTypeNotAllowed`) — шапка документа
+ * зберігає ВВЕДЕНЕ значення, а не РАХУЄ його, і жодного механізму
+ * обчислення (формула, прив'язка методології) для поля шапки в домені
+ * немає. На відміну від колонки таблиці (`EditableColumnDataTypes` нижче),
+ * тут це не питання форми — сервер не прийме такий запит ніколи.
  */
 export const EditableDataTypes: readonly CellDataType[] = [
   'String',
@@ -34,6 +42,34 @@ export const EditableDataTypes: readonly CellDataType[] = [
   'Date',
   'Lookup',
   'Unit',
+];
+
+/**
+ * Типи, які людина обирає у формі колонки таблиці (`ColumnEditor.tsx`).
+ *
+ * ⚠ Раніше `Formula`/`Calculated` тут не було — коментар над масивом
+ * стверджував, що такі колонки заводить «рушій» через
+ * `ColumnDef.IsComputed`, а не ця форма. Це виявилося хибним: тип колонки
+ * незмінний ПІСЛЯ створення (`ColumnEditor.tsx`, `disabled={!draft.isNew}`),
+ * а прикріпити формулу до колонки, заведеної як `Decimal`, сервер відмовляє
+ * (`err.ECR-TMPL-4227.formulaOnManualColumn`,
+ * `FormulaDefHandlers.cs:269-281`) — саме він і каже конфігуратору «завести
+ * колонку типу Formula» (тип не змінити), якого форма без цього рядка не
+ * давала обрати взагалі. Колонку такого типу мусить завести САМЕ ЦЯ форма;
+ * джерело значення (сама формула / прив'язка виходу методології) додається
+ * ОКРЕМИМ кроком ПІСЛЄ публікації (`PublishChecks.cs:547-579`,
+ * `ECR-TMPL-4226`). Сервер приймає обидва типи при створенні колонки
+ * (`tests/Ecr.Scenarios.Tests/DataEntryScenarios.cs:1112-1119` — Calculated,
+ * `:1145-1155` — Formula).
+ *
+ * ⚠ НЕ той самий список, що `EditableDataTypes` вище: поле шапки документа
+ * обчислюваних типів не підтримує взагалі (див. коментар там), тож
+ * розширення — окремий, не спільний, масив.
+ */
+export const EditableColumnDataTypes: readonly CellDataType[] = [
+  ...EditableDataTypes,
+  'Formula',
+  'Calculated',
 ];
 
 /** Колонка у відповіді `PUT …/tables/{tableId}/columns/{code}`. */

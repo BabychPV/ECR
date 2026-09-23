@@ -41,6 +41,22 @@ function json(body: unknown): RequestInit {
   return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
+/**
+ * Ключ кешу React Query для {@link listNotificationChannels}.
+ *
+ * ⛔ Єдиний спільний ключ, а не одне визначення на споживача: `ChannelsPanel`,
+ * `RulesMatrixPanel` і будь-хто ще, хто прочитає перелік каналів, мусять
+ * інвалідувати РІВНО той самий запис кешу, який читають інші. До фіксу
+ * `ChannelsPanel` читав і інвалідував `['notification-channels']`, а
+ * `RulesMatrixPanel` — власний `['notifications', 'channels']`: різний ВМІСТ
+ * ключа означає різний запис кешу React Query (збіг за вмістом масиву, а не
+ * за посиланням, тут не рятує — вміст був різний). Мутація каналу в
+ * `ChannelsPanel` (створення/редагування/видалення) інвалідувала лише свій
+ * запис, і `RulesMatrixPanel` лишався зі старими даними, доки щось інше не
+ * форсувало ремаунт (наприклад, `F5`).
+ */
+export const NotificationChannelsKey = ['notifications', 'channels'] as const;
+
 export function listNotificationChannels(): Promise<NotificationChannel[]> {
   return apiFetch<NotificationChannel[]>('/api/v1/notifications/channels');
 }

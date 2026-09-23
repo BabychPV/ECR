@@ -1,21 +1,26 @@
-import { useState, type JSX } from 'react';
+import { useMemo, useState, type JSX } from 'react';
 import { Badge, Button, Group, NativeSelect, Stack, Table, Text, Title } from '@mantine/core';
 import {
   compareCellDisplay,
   groupCompareByTable,
+  headerFieldLabel,
   isCompareEmpty,
   type TableDiff,
 } from '@/features/documents/documentCompareGroups';
 import {
   CurrentState,
   useDocumentCompare,
+  useDocumentHeaderFields,
   useDocumentVersions,
   type CompareTarget,
+  type DocumentHeaderField,
   type DocumentVersion,
+  type HeaderFieldChange,
   type RowChange,
 } from '@/features/documents/documentVersionsApi';
 import { formatDate, formatDateTime } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 import { Banner } from '@/shared/ui/Banner';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 
@@ -112,6 +117,16 @@ export function DocumentVersionCompare({
    */
   const failed = compare.error !== null;
   const shown = request === null ? undefined : compare.data;
+
+  /*
+   * ⚠ Резолв коду поля шапки в людську назву (`HeaderChangesBlock` нижче,
+   * `ФВ-9.4`) — лише тоді, коли ДІЙСНО є що резолвити: `headerChanges`
+   * непорожній. Той самий принцип лінивості, що й уся картка (`L2`) — запит
+   * шапки документа не йде ні до розгортання, ні навіть після нього, доки
+   * порівняння не принесло змінених полів шапки.
+   */
+  const needsHeaderLabels = shown !== undefined && shown.headerChanges.length > 0;
+  const headerFields = useDocumentHeaderFields(documentId, needsHeaderLabels);
 
   return (
     <Stack gap="xs" align="flex-start" data-testid="document-version-compare">
@@ -223,6 +238,13 @@ export function DocumentVersionCompare({
           забули перекласти. */}
       {opened && shown !== undefined && !isCompareEmpty(shown) && (
         <Stack gap="md" data-allow-dotted data-testid="document-compare-result">
+          {/* ⛔ Шапка — ПЕРЕД таблицями, той самий порядок, що на самій сторінці
+              документа (`DocumentHeaderPanel` перед `SheetFillSummary`,
+              `DocumentPage.tsx`): шапка логічно йде першою. */}
+          {shown.headerChanges.length > 0 && (
+            <HeaderChangesBlock changes={shown.headerChanges} fields={headerFields.data} />
+          )}
+
           {groupCompareByTable(shown).map((diff) => (
             <TableDiffBlock key={diff.tableCode} diff={diff} />
           ))}
@@ -290,6 +312,66 @@ function TableDiffBlock({ diff }: { readonly diff: TableDiff }): JSX.Element {
           tone="statusWarning"
         />
       )}
+    </Stack>
+  );
+}
+
+/**
+ * Зміни полів шапки документа (`ФВ-9.4`) — за зразком `TableDiffBlock`, той
+ * самий `CompareValue` для значень (без змін: `oldType`/`newType` полів
+ * шапки — та сама конвенція `null|date|bool|ref|unit`, що й для клітинок).
+ *
+ * ⚠ Колонка «поле» показує ЛЮДСЬКУ НАЗВУ, не сирий код: `HeaderFieldChangeDto`
+ * навмисно не несе назви (коментар контракту), клієнт резолвить її сам через
+ * живі поля шапки поточної версії шаблону (`useDocumentHeaderFields`,
+ * `documentVersionsApi.ts`). Поле, якого серед них немає (прибрали з версії
+ * шаблону, або резолв ще не прийшов), — `headerFieldLabel` фолбекає на сам
+ * код, а не порожнечу чи падіння (той самий принцип, що вже діє для
+ * видаленого запису Lookup у `DocumentHeaderPanel.tsx`/`lookupCellDisplay`).
+ */
+function HeaderChangesBlock({
+  changes,
+  fields,
+}: {
+  readonly changes: readonly HeaderFieldChange[];
+  readonly fields: readonly DocumentHeaderField[] | undefined;
+}): JSX.Element {
+  const labelByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const field of fields ?? []) {
+      const label = localized(field.label);
+      if (label.length > 0) map.set(field.code, label);
+    }
+
+    return map;
+  }, [fields]);
+
+  return (
+    <Stack gap="xs">
+      <Title order={4}>{t('document.compareHeaderTitle')}</Title>
+
+      <Table striped data-testid="document-compare-header-changes">
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>{t('document.compareField')}</Table.Th>
+            <Table.Th>{t('document.compareOldValue')}</Table.Th>
+            <Table.Th>{t('document.compareNewValue')}</Table.Th>
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {changes.map((change) => (
+            <Table.Tr key={change.code}>
+              <Table.Td>{headerFieldLabel(labelByCode, change.code)}</Table.Td>
+              <Table.Td>
+                <CompareValue value={change.oldValue} type={change.oldType} />
+              </Table.Td>
+              <Table.Td>
+                <CompareValue value={change.newValue} type={change.newType} />
+              </Table.Td>
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
     </Stack>
   );
 }

@@ -12,11 +12,12 @@ namespace Ecr.Infrastructure.Security;
 /// (<c>Q-299</c>).
 /// </summary>
 /// <remarks>
-/// ⚠ Чотири окремі запити (по одному на вид), а не один із <c>UNION</c>:
+/// ⚠ П'ять окремих запитів (по одному на вид), а не один із <c>UNION</c>:
 /// кожен вид живе у своїй таблиці з власним <c>Id</c> (<c>cfg.Project</c>,
-/// <c>cfg.SheetDef</c>, <c>cfg.TableDef</c>, <c>cfg.ColumnDef</c>), і
-/// перелік грантів однієї ролі — це щонайбільше кілька видів одночасно
-/// (рідко всі чотири), тож зайвого попиту в базу це не додає.
+/// <c>cfg.SheetDef</c>, <c>cfg.TableDef</c>, <c>cfg.ColumnDef</c>,
+/// <c>cfg.RegistryDef</c>), і перелік грантів однієї ролі — це щонайбільше
+/// кілька видів одночасно (рідко всі п'ять), тож зайвого попиту в базу це
+/// не додає.
 ///
 /// ⚠ Іменем ресурсу тут навмисно взято лише <c>Code</c>, не
 /// <c>NameL10n</c>/<c>HeaderL10n</c>: код — це ідентичність ресурсу
@@ -92,6 +93,21 @@ public sealed class ResourceNameResolver(EcrDbContext db) : IResourceNameResolve
             foreach (var row in rows)
             {
                 result[(ResourceKind.Column, row.Id)] = row.Code;
+            }
+        }
+
+        var registryIds = IdsOf(resources, ResourceKind.Registry);
+        if (registryIds.Count > 0)
+        {
+            var rows = await db.RegistryDefs.AsNoTracking()
+                .Where(r => registryIds.Contains(r.Id))
+                .Select(r => new { r.Id, r.Code })
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var row in rows)
+            {
+                result[(ResourceKind.Registry, row.Id)] = row.Code;
             }
         }
 

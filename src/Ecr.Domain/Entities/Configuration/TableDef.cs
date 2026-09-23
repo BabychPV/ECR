@@ -122,7 +122,14 @@ public sealed class TableDef : Entity<int>
     {
         if (max is { } m && m <= 0)
         {
-            throw new DomainException("ECR-TMPL-0422", $"MaxDynamicRows має бути додатним; отримано {m}.");
+            throw new DomainException(
+                "ECR-TMPL-0422",
+                $"MaxDynamicRows має бути додатним; отримано {m}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.maxDynamicRowsNotPositive",
+                    ["value"] = m.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⚠ Стеля має сенс скрізь, де рядки додає користувач, — тобто і в
@@ -132,7 +139,13 @@ public sealed class TableDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"MaxDynamicRows має сенс лише там, де рядки додає користувач; у таблиці {Code} режим {RowMode}.");
+                $"MaxDynamicRows має сенс лише там, де рядки додає користувач; у таблиці {Code} режим {RowMode}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.maxDynamicRowsNeedsDynamicMode",
+                    ["tableCode"] = Code,
+                    ["rowMode"] = RowMode.ToString(),
+                });
         }
 
         MaxDynamicRows = max;
@@ -147,7 +160,14 @@ public sealed class TableDef : Entity<int>
         if (_columns.Any(c => string.Equals(c.Code, column.Code, StringComparison.Ordinal)))
         {
             throw new DomainException(
-                "ECR-TMPL-0409", $"Колонка з кодом {column.Code} у таблиці {Code} уже існує.");
+                "ECR-TMPL-0409",
+                $"Колонка з кодом {column.Code} у таблиці {Code} уже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.columnCodeTaken",
+                    ["tableCode"] = Code,
+                    ["columnCode"] = column.Code,
+                });
         }
 
         _columns.Add(column);
@@ -194,13 +214,25 @@ public sealed class TableDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"Таблиця {Code} динамічна: її рядки створюються під час роботи, а не в шаблоні.");
+                $"Таблиця {Code} динамічна: її рядки створюються під час роботи, а не в шаблоні.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.tableIsDynamic",
+                    ["tableCode"] = Code,
+                });
         }
 
         if (_rows.Any(r => string.Equals(r.RowKeyValue, row.RowKeyValue, StringComparison.Ordinal)))
         {
             throw new DomainException(
-                "ECR-TMPL-0409", $"Рядок із ключем {row.RowKeyValue} у таблиці {Code} уже існує.");
+                "ECR-TMPL-0409",
+                $"Рядок із ключем {row.RowKeyValue} у таблиці {Code} уже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.rowKeyTaken",
+                    ["tableCode"] = Code,
+                    ["rowKey"] = row.RowKeyValue,
+                });
         }
 
         _rows.Add(row);

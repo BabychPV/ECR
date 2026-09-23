@@ -32,6 +32,7 @@ public sealed class SubmitSheetHandler(
     // методу вже обіцяла `BusinessRuleException` «валідація або осиротілі
     // рядки». Тепер обіцянка виконується, і придушення прибране.
     Validation.ValidationEngine validation,
+    IDocumentHeaderStore headers,
     Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
@@ -136,6 +137,20 @@ public sealed class SubmitSheetHandler(
         var tables = sheet?.Tables.Where(t => !t.IsDeleted).ToDictionary(t => t.Id)
                      ?? new Dictionary<int, Domain.Entities.Configuration.TableDef>();
 
+        // ⛔ Шапка документа читається РЕАЛЬНО — той самий дефект, що й у
+        // ValidateDocumentHandler/PatchCellsHandler: подання зобов'язане
+        // рахувати РІВНО те саме, що показує кнопка «Перевірити» (R-B3).
+        var headerValues = await headers.GetExpressionValuesAsync(documentId, ct).ConfigureAwait(false);
+
+        // ⛔ Ідентифікатор поля → код (ФВ-9.4). Лише зіставлення з версії шаблону
+        // (вже прочитаної як snapshot), запиту не додає. Значення шапки читаються
+        // ЗАНОВО всередині транзакції (SnapshotPayloadAsync) — той самий принцип
+        // свіжості, що й у клітинок: зріз подання має нести те, що правдиве ЗАРАЗ,
+        // а не те, що було правдиве на момент валідації вище.
+        var headerFieldCodes = snapshot.HeaderFields
+            .Where(f => !f.IsDeleted)
+            .ToDictionary(f => f.Id, f => f.Code);
+
         var blocking = new List<Validation.ValidationMessage>();
 
         foreach (var instance in instances)
@@ -166,7 +181,7 @@ public sealed class SubmitSheetHandler(
             if (table.ValidationRules.Count > 0)
             {
                 blocking.AddRange(Validation.TableValidation
-                    .Run(validation, table, cells, rowIds)
+                    .Run(validation, table, cells, rowIds, headerValues)
                     .Where(m => m.Severity == ValidationSeverity.Error));
             }
 
@@ -202,7 +217,8 @@ public sealed class SubmitSheetHandler(
         // `ExecuteInTransactionAsync` приєднується до зовнішньої транзакції
         // (`UnitOfWork.cs:174-178`), тож це обгортка, а не переробка.
         await uow.ExecuteInTransactionAsync(
-            innerCt => SubmitCoreAsync(documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, innerCt),
+            innerCt => SubmitCoreAsync(
+                documentId, sheetDefId, periodKey, key, userId, templateVersionId, instances, headerFieldCodes, innerCt),
             ct).ConfigureAwait(false);
     }
 
@@ -215,6 +231,7 @@ public sealed class SubmitSheetHandler(
         int userId,
         int templateVersionId,
         IReadOnlyList<TableInstanceRef> instances,
+        IReadOnlyDictionary<int, string> headerFieldCodes,
         CancellationToken ct)
     {
         var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
@@ -222,7 +239,7 @@ public sealed class SubmitSheetHandler(
         // ⚠ Іммутабельний зріз створюється ДО зміни стану: якщо зріз не
         // збережеться, аркуш не має стати поданим. Поданий аркуш без зрізу —
         // звіт, який неможливо ні звірити, ні перерахувати «як тоді».
-        var payload = await SnapshotPayloadAsync(instances, key, ct).ConfigureAwait(false);
+        var payload = await SnapshotPayloadAsync(documentId, instances, key, headerFieldCodes, ct).ConfigureAwait(false);
         var now = clock.UtcNow;
 
         // ⛔ `TemplateVersionId` — СПРАВЖНІЙ (директива №09 `W8` п.5).
@@ -357,7 +374,7 @@ public sealed class SubmitSheetHandler(
             ? instances[0].TemplateVersionId
             : await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
 
-    /// <summary>Зліпок значень аркуша у стабільному порядку.</summary>
+    /// <summary>Зліпок значень аркуша (і шапки документа) у стабільному порядку.</summary>
     /// <remarks>
     /// Порядок фіксований навмисно: контрольна сума має залежати від ДАНИХ, а
     /// не від того, як їх повернула база цього разу.
@@ -370,9 +387,24 @@ public sealed class SubmitSheetHandler(
     /// документа: майже завжди — з порожнечі, іноді — з чужих даних. Той
     /// самий клас помилки, що вже коштував перевірки осиротілих рядків
     /// (<c>IRowStore.GetOrphanedRowIdsAsync</c>).
+    ///
+    /// ⛔ Значення шапки (ФВ-9.4) копіюються в payload, а не лишаються
+    /// посиланням: за аналізом старої системи-джерела (Excel/VBA, вкладка
+    /// "Contract") подання ЗАВЖДИ вбудовує поточну шапку в збережений запис —
+    /// знімок на момент подання, потрібний для історичної точності (якщо
+    /// шапку пізніше змінять, уже подані звіти мають зберігати те, що було
+    /// правдою тоді). Поле без запису в <c>IDocumentHeaderStore.GetValuesAsync</c>
+    /// (шапки ніхто не торкався) у payload не потрапляє — той самий підхід,
+    /// що вже застосований до клітинок (R-B4: відсутність запису ≠ явна
+    /// порожнеча, але сюди різниця не проведена, бо шапка й так необов'язкова
+    /// в переважній більшості шаблонів).
     /// </remarks>
     private async Task<string> SnapshotPayloadAsync(
-        IReadOnlyList<TableInstanceRef> instances, PeriodKey periodKey, CancellationToken ct)
+        long documentId,
+        IReadOnlyList<TableInstanceRef> instances,
+        PeriodKey periodKey,
+        IReadOnlyDictionary<int, string> headerFieldCodes,
+        CancellationToken ct)
     {
         var cells = new List<CellRecord>();
 
@@ -382,7 +414,14 @@ public sealed class SubmitSheetHandler(
                 .ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false));
         }
 
-        return SubmissionPayload.Write(cells.Where(c => c.Address.PeriodKey.Value == periodKey.Value));
+        var headerRaw = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+        var headerByCode = headerRaw
+            .Where(kv => headerFieldCodes.ContainsKey(kv.Key))
+            .ToDictionary(kv => headerFieldCodes[kv.Key], kv => kv.Value, StringComparer.Ordinal);
+
+        return SubmissionPayload.Write(
+            cells.Where(c => c.Address.PeriodKey.Value == periodKey.Value),
+            headerByCode);
     }
 
     private static string Hash(string payload)

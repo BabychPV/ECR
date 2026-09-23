@@ -217,6 +217,38 @@ public sealed class CreateProjectTests
         await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Без_версії_шаблону_проєкт_не_створюється()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
+                .HandleAsync(
+                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                    PeriodKind.Monthly, year: 2026, templateVersionId: 0, periodPolicyId: PolicyId,
+                    CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.versionRequired", error.Details!["messageKey"]);
+        await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task Без_політики_періодів_проєкт_не_створюється()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => new CreateProjectHandler(_periods, _access, _users, _audit, _uow, _user, _clock)
+                .HandleAsync(
+                    "KASH_2026", new Dictionary<string, string> { ["en"] = "Kashagan" }, "Asia/Almaty",
+                    PeriodKind.Monthly, year: 2026, templateVersionId: 42, periodPolicyId: 0,
+                    CancellationToken.None));
+
+        Assert.Equal("ECR-PRD-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-0422.periodPolicyRequired", error.Details!["messageKey"]);
+        await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [InlineData(5)]

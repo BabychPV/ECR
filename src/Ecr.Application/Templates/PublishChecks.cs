@@ -400,7 +400,25 @@ public static class PublishChecks
         }
 
         return new TemplateVersionSnapshot(
-            version.Id, version.PresentationRevision, version.Sheets, columns, rows);
+            version.Id, version.PresentationRevision, version.Sheets, columns, rows)
+        {
+            // ⛔ Було відсутнє ЗОВСІМ: `HeaderFields` — `init`-властивість із
+            // дефолтом `[]`, і виклик конструктора вище її не встановлював,
+            // тож знімок публікації завжди бачив ПОРОЖНІЙ перелік полів шапки
+            // — навіть якщо `version.HeaderFields` реально мав записи.
+            // Наслідок той самий мовчазний клас дефекту, що вже документують
+            // `ECR-TMPL-4226` і `A7-63` нижче: `HDR("code")` з неіснуючим
+            // кодом публікувався без зауваження і в рантаймі рахувався як
+            // Null (`DependencyExtractor.Visit`, гілка `SymbolKind.Header`,
+            // не мала звідки взяти перелік полів, щоб код перевірити).
+            //
+            // ⚠ Фільтр `!IsDeleted` — той самий, яким уже живиться
+            // `MetadataCache.LoadAsync` (`Caching/MetadataCache.cs`, сьомий
+            // запит): публікація і рантайм мусять бачити ту саму шапку,
+            // інакше версія публікується за одним переліком полів, а
+            // резолвиться в рантаймі за іншим.
+            HeaderFields = [.. version.HeaderFields.Where(f => !f.IsDeleted)],
+        };
     }
 
     /// <summary>

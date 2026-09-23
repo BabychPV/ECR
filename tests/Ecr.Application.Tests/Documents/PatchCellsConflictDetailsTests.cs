@@ -8,6 +8,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -61,6 +62,10 @@ public sealed class PatchCellsConflictDetailsTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
+
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IAuditReader _auditReader = Substitute.For<IAuditReader>();
     private readonly IBackgroundJobScheduler _jobs = Substitute.For<IBackgroundJobScheduler>();
@@ -109,7 +114,15 @@ public sealed class PatchCellsConflictDetailsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _audit, _auditReader, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock);
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
 
     private static CellAddress Address(long rowId = TableRowId, int columnDefId = VolumeColumnId)
         => new(PeriodKey.Parse(Period), rowId, columnDefId);

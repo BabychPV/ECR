@@ -1,7 +1,52 @@
 import { describe, it, expect } from 'vitest';
 import type { TemplateColumnDto } from '@/api/types';
-import { columnDraftOf, columnBody, emptyColumnDraft, whyCannotSaveColumn, type ColumnDefDto } from '../column';
+import {
+  columnDraftOf,
+  columnBody,
+  EditableColumnDataTypes,
+  EditableDataTypes,
+  emptyColumnDraft,
+  whyCannotSaveColumn,
+  type ColumnDefDto,
+} from '../column';
 import { emptyStyleDraft } from '../style';
+
+/**
+ * Дефект, знайдений живим переглядом: `ColumnEditor.tsx` пропонував лише
+ * `EditableDataTypes` — масив без `Formula`/`Calculated`. Тип колонки
+ * незмінний після створення (`disabled={!draft.isNew}`), а прикріпити
+ * формулу до колонки, заведеної іншим типом, сервер відхиляє
+ * (`err.ECR-TMPL-4227.formulaOnManualColumn`) — колонку типу Formula чи
+ * Calculated через форму завести було НЕМОЖЛИВО.
+ *
+ * ⛔ Мутаційний доказ: якби `EditableColumnDataTypes` знову дорівнював
+ * `EditableDataTypes` (стара поведінка), перший `expect` нижче був би
+ * червоним — `'Formula'` і `'Calculated'` не входили б у перелік.
+ *
+ * ⚠ `EditableDataTypes` (без змін) далі використовує `HeaderFieldEditor.tsx`
+ * — поле шапки документа обчислюваних типів не підтримує взагалі
+ * (`HeaderFieldDef` відхиляє їх конструктором, `ECR-TMPL-0422`). Другий тест
+ * — запобіжник: якби хтось додав `Formula`/`Calculated` у СПІЛЬНИЙ масив
+ * замість нового, форма поля шапки почала б пропонувати вибір, який сервер
+ * ніколи не прийме.
+ */
+describe('EditableColumnDataTypes / EditableDataTypes: Formula й Calculated лише для колонки', () => {
+  it('форма колонки пропонує Formula і Calculated', () => {
+    expect(EditableColumnDataTypes).toContain('Formula');
+    expect(EditableColumnDataTypes).toContain('Calculated');
+  });
+
+  it('форма поля шапки документа їх НЕ пропонує — сервер відхиляє обидва типи для HeaderFieldDef', () => {
+    expect(EditableDataTypes).not.toContain('Formula');
+    expect(EditableDataTypes).not.toContain('Calculated');
+  });
+
+  it('EditableColumnDataTypes несе решту типів EditableDataTypes без втрат', () => {
+    for (const type of EditableDataTypes) {
+      expect(EditableColumnDataTypes).toContain(type);
+    }
+  });
+});
 
 /**
  * Той самий дефект, що й `table.test.ts` (Q-336, `table.ts`): форма колонки
@@ -96,6 +141,8 @@ describe('columnDraftOf: styleId — той самий клас "неповни�
     isHidden: false,
     displayFormat: null,
     unitSymbol: null,
+    formulaExpression: null,
+    formulaDialect: null,
   };
 
   const fullColumn: ColumnDefDto = {

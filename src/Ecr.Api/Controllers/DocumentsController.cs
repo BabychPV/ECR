@@ -1,5 +1,6 @@
 using Ecr.Application.Common;
 using Ecr.Application.Documents;
+using Ecr.Application.Documents.Dto;
 using Ecr.Domain.ValueObjects;
 using Ecr.Application.Workflow;
 using Microsoft.AspNetCore.Authorization;
@@ -34,7 +35,9 @@ public sealed class DocumentsController(
     PreviewImportHandler previewImport,
     ApplyImportHandler applyImport,
     DeleteDocumentHandler delete,
-    ChangeDocumentKeyHandler changeKey) : ControllerBase
+    ChangeDocumentKeyHandler changeKey,
+    GetDocumentHeaderHandler getHeader,
+    PatchDocumentHeaderHandler patchHeader) : ControllerBase
 {
     /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
     /// <remarks>
@@ -172,6 +175,30 @@ public sealed class DocumentsController(
             .ConfigureAwait(false);
 
         return NoContent();
+    }
+
+    /// <summary>Поточні значення шапки документа. Право <c>Document.View</c>.</summary>
+    [HttpGet("{id:long}/header")]
+    [ProducesResponseType<DocumentHeaderDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<DocumentHeaderDto>> GetHeader(long id, CancellationToken ct)
+        => Ok(await getHeader.HandleAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Оновлює значення полів шапки документа. Право — грант <c>Write</c> на
+    /// проєкт документа (через <c>IAccessDecisionService</c>, як і <c>PATCH
+    /// …/cells</c> — без окремого функціонального права).
+    /// </summary>
+    [HttpPatch("{id:long}/header")]
+    [ProducesResponseType<DocumentHeaderDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<DocumentHeaderDto>> PatchHeader(
+        long id, [FromBody] PatchDocumentHeaderRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await patchHeader.HandleAsync(id, request, ct).ConfigureAwait(false));
     }
 
     /// <summary>Валідація документа. Право <c>Document.View</c>.</summary>

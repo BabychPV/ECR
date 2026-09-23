@@ -21,6 +21,8 @@ public sealed class RecalculationService(
     ITemplateVersionStore versions,
     IFormulaEngine formulaEngine,
     IUnitCatalog unitCatalog,
+    IRegistryStore registryStore,
+    IDocumentHeaderStore headers,
     IAuditWriter audit,
     IClock clock,
     IUnitOfWork uow)
@@ -428,10 +430,29 @@ public sealed class RecalculationService(
         // джерела одиниць, і `CONVERT` у формулі шаблону відмовляв БЕЗУМОВНО,
         // незалежно від того, чи існує сама конверсія (директива №09 §6.5, `S-22`).
         var catalogue = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
+
+        // ⚠ Той самий принцип для REGFIELD: знімок полів довідника читається
+        // ТУТ, звужений до Registry-залежностей ЦІЛЕЙ цього прогону (`CAL-02`
+        // для довідника). Джерело — саме `dependencies` (`cfg.FormulaDependency`,
+        // `DependsOnKind = KindRegistry`): якщо видобувач цю залежність не
+        // заповнив, знімок лишиться порожнім, і REGFIELD віддасть `#REF`
+        // навіть коли Lookup-комірка заповнена, — це і є той міст, який
+        // з'єднує `DependencyExtractor` з фактичним перерахунком.
+        var registryFields = await LoadRegistryFieldsAsync(
+            dependencies, targets, tables, rowIdsByTable, values, ct).ConfigureAwait(false);
+
+        // ⛔ Шапка документа читається РЕАЛЬНО (раніше — EmptyHeaders,
+        // статичний порожній словник, і HDR.X завжди давав Null незалежно
+        // від того, що записано в doc.DocumentHeaderValue). Один запит на
+        // документ, а не на таблицю: шапка спільна для всіх таблиць
+        // документа, і повторювати запит на кожен виклик RunAsync було б
+        // зайвим походом у базу там, де достатньо одного.
+        var headerValues = await headers.GetExpressionValuesAsync(instance.DocumentId, ct).ConfigureAwait(false);
+
         var context = new SliceEvaluationContext(
-            snapshot, values, EmptyHeaders,
+            snapshot, values, headerValues,
             await PeriodOf(instance.DocumentId, periodKey, ct).ConfigureAwait(false),
-            catalogue, rowIdsByTable);
+            catalogue, rowIdsByTable, registryFields);
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.
@@ -915,9 +936,6 @@ public sealed class RecalculationService(
             (byte)periodKey.Sequence);
     }
 
-    private static readonly Dictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> EmptyHeaders =
-        new(StringComparer.Ordinal);
-
     /// <summary>Значення комірки як значення виразу.</summary>
     private static Ecr.Expressions.Evaluation.ExpressionValue FromCellValue(CellValueData value)
     {
@@ -936,10 +954,205 @@ public sealed class RecalculationService(
             return Ecr.Expressions.Evaluation.ExpressionValue.Date(date);
         }
 
-        return value.ValueString is { } text
-            ? Ecr.Expressions.Evaluation.ExpressionValue.Text(text)
-            : Ecr.Expressions.Evaluation.ExpressionValue.Null;
+        if (value.ValueString is { } text)
+        {
+            return Ecr.Expressions.Evaluation.ExpressionValue.Text(text);
+        }
+
+        // ⚠ Той самий вибір, що й у `CellValueMapping.ToExpressionValue`
+        // (`Ecr.Expressions`): id запису довідника — ЧИСЛО, а не окремий тип
+        // значення. Це навмисно те саме число, яке приймає перший аргумент
+        // REGFIELD, — «той самий механізм отримання значення комірки», яким
+        // комірки взагалі передаються у формулах.
+        if (value.ValueRegistryEntryId is { } entryId)
+        {
+            return Ecr.Expressions.Evaluation.ExpressionValue.Number(entryId);
+        }
+
+        return Ecr.Expressions.Evaluation.ExpressionValue.Null;
     }
+
+    /// <summary>
+    /// Знімок полів довідника для <c>REGFIELD</c>: id запису → (код поля →
+    /// значення), звужений до Registry-залежностей ФОРМУЛ-ЦІЛЕЙ цього прогону.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це і є міст між <c>DependencyExtractor</c> і фактичним перерахунком
+    /// (`CAL-02` для довідника, за тим самим принципом, що
+    /// <see cref="RecalculationReadScope"/> звужує читання таблиць документа).
+    /// Без Registry-запису в <c>dependencies</c> — байдуже, зламаний видобувач
+    /// чи формула щойно додана, — цикл нижче просто не знайде, що завантажити,
+    /// і <c>REGFIELD</c> поверне <c>#REF</c>, хоча Lookup-комірка заповнена.
+    ///
+    /// ⚠ Без пакетної оптимізації по всіх записях одразу (на відміну від
+    /// `Q-166` для комірок): запит на РЕЄСТР (раз на унікальний
+    /// <c>RegistryDefId</c>) і запит на ЗАПИС (раз на унікальний
+    /// <c>EntryId</c>). Формул із REGFIELD у корпусі одиниці, а не сотні —
+    /// той самий бюджет тут не спрацьовує, і пакетувати нема що вимірювати.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>?>
+        LoadRegistryFieldsAsync(
+            IReadOnlyList<Domain.Entities.Configuration.FormulaDependency> dependencies,
+            IReadOnlyList<int> targets,
+            Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
+            Dictionary<int, IReadOnlyDictionary<string, long>> rowIdsByTable,
+            Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
+            CancellationToken ct)
+    {
+        var targetIds = new HashSet<int>(targets);
+
+        // 1. Які (таблиця, рядок?, колонка, код поля) читає REGFIELD серед
+        //    формул-ЦІЛЕЙ. `RowKey == null` — колонкова формула: залежність
+        //    стосується КОЖНОГО рядка таблиці (той самий випадок, що
+        //    `RecalculationPlanBuilder.AddCellEdge` уже обробляє для Cell).
+        var needed = new List<(int TableDefId, string? RowKey, int ColumnDefId, string FieldCode)>();
+
+        foreach (var dependency in dependencies)
+        {
+            if (dependency.DependsOnKind != Ecr.Expressions.Binding.DependencyExtractor.KindRegistry
+                || dependency.FormulaDefId is not { } formulaId
+                || !targetIds.Contains(formulaId)
+                || dependency.TableDefId is not { } tableDefId
+                || dependency.ColumnDefId is not { } columnDefId
+                || dependency.FilterJson is not { } fieldCode)
+            {
+                continue;
+            }
+
+            needed.Add((tableDefId, dependency.RowKey, columnDefId, fieldCode));
+        }
+
+        if (needed.Count == 0)
+        {
+            return null;
+        }
+
+        // 2. entryId ← уже завантажені `values` (Lookup-комірка читається тим
+        //    самим шляхом, що й будь-яка інша), + який довідник (з колонки).
+        var neededFieldsByEntry = new Dictionary<long, HashSet<string>>();
+        var registryDefByEntry = new Dictionary<long, int>();
+
+        foreach (var (tableDefId, rowKey, columnDefId, fieldCode) in needed)
+        {
+            if (!tables.TryGetValue(tableDefId, out var table))
+            {
+                continue;
+            }
+
+            var column = table.Columns.FirstOrDefault(c => c.Id == columnDefId && !c.IsDeleted);
+            if (column?.LookupRegistryDefId is not { } registryDefId)
+            {
+                continue;
+            }
+
+            IEnumerable<string> rowKeys = rowKey is not null
+                ? [rowKey]
+                : rowIdsByTable.TryGetValue(tableDefId, out var rows) ? rows.Keys : [];
+
+            foreach (var key in rowKeys)
+            {
+                if (!values.TryGetValue(new CellKey(0, tableDefId, key, columnDefId), out var cell)
+                    || cell.AsNumber() is not { } entryIdRaw)
+                {
+                    continue;
+                }
+
+                var entryId = (long)entryIdRaw;
+                registryDefByEntry[entryId] = registryDefId;
+
+                if (!neededFieldsByEntry.TryGetValue(entryId, out var fields))
+                {
+                    neededFieldsByEntry[entryId] = fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                fields.Add(fieldCode);
+            }
+        }
+
+        if (neededFieldsByEntry.Count == 0)
+        {
+            return null;
+        }
+
+        // 3. Визначення полів — по одному запиту на УНІКАЛЬНИЙ довідник.
+        var fieldDefsByRegistry =
+            new Dictionary<int, IReadOnlyDictionary<string, Domain.Entities.Configuration.RegistryFieldDef>>();
+
+        foreach (var registryDefId in registryDefByEntry.Values.Distinct())
+        {
+            var definition = await registryStore.FindDefinitionByIdAsync(registryDefId, ct).ConfigureAwait(false);
+            fieldDefsByRegistry[registryDefId] = definition?.Fields
+                .ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase)
+                ?? new Dictionary<string, Domain.Entities.Configuration.RegistryFieldDef>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        // 4. Значення — по одному запиту на УНІКАЛЬНИЙ запис.
+        var snapshot = new Dictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>();
+
+        foreach (var (entryId, fieldCodes) in neededFieldsByEntry)
+        {
+            if (!fieldDefsByRegistry.TryGetValue(registryDefByEntry[entryId], out var fieldDefs))
+            {
+                continue;
+            }
+
+            var registryValues = await registryStore.ListValuesAsync(entryId, ct).ConfigureAwait(false);
+            var byFieldDefId = registryValues.ToDictionary(v => v.RegistryFieldDefId);
+
+            var perEntry = new Dictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>(
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var fieldCode in fieldCodes)
+            {
+                if (!fieldDefs.TryGetValue(fieldCode, out var fieldDef)
+                    || !byFieldDefId.TryGetValue(fieldDef.Id, out var registryValue))
+                {
+                    // Немає такого поля або запис ще не заповнив його —
+                    // `GetRegistryField` віддасть #REF на відсутній ключ; тут
+                    // просто нема що покласти в знімок.
+                    continue;
+                }
+
+                if (ToExpressionValue(registryValue, fieldDef.DataType) is { } mapped)
+                {
+                    perEntry[fieldCode] = mapped;
+                }
+            }
+
+            if (perEntry.Count > 0)
+            {
+                snapshot[entryId] = perEntry;
+            }
+        }
+
+        return snapshot;
+    }
+
+    /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
+    /// <remarks>
+    /// ⚠ <c>Lookup</c>/<c>Unit</c>/<c>Formula</c>/<c>Calculated</c> тут
+    /// НЕМАЄ: перші два REGFIELD сьогодні не читає (задача — decimal/text/
+    /// bool/date), а останні два в довіднику взагалі не існують
+    /// (<c>RegistryValue.Set</c> їх забороняє при записі).
+    /// </remarks>
+    private static Ecr.Expressions.Evaluation.ExpressionValue? ToExpressionValue(
+        Domain.Entities.Dictionaries.RegistryValue value, Domain.Enums.CellDataType dataType)
+        => dataType switch
+        {
+            Domain.Enums.CellDataType.Decimal or Domain.Enums.CellDataType.Int => value.ValueNumeric is { } n
+                ? Ecr.Expressions.Evaluation.ExpressionValue.Number(n)
+                : null,
+            Domain.Enums.CellDataType.String => value.ValueString is { } s
+                ? Ecr.Expressions.Evaluation.ExpressionValue.Text(s)
+                : null,
+            Domain.Enums.CellDataType.Bool => value.ValueBool is { } b
+                ? Ecr.Expressions.Evaluation.ExpressionValue.Boolean(b)
+                : null,
+            Domain.Enums.CellDataType.Date => value.ValueDate is { } d
+                ? Ecr.Expressions.Evaluation.ExpressionValue.Date(d)
+                : null,
+            _ => null,
+        };
 
     /// <summary>Значення виразу як значення комірки; <c>null</c> — записувати нічого.</summary>
     private static CellValueData? ToCellValue(Ecr.Expressions.Evaluation.ExpressionValue value)

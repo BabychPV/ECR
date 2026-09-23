@@ -74,7 +74,10 @@ public sealed class SaveColumnDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -108,7 +111,13 @@ public sealed class SaveColumnDefHandler(
                 $"Код колонки «{code}» зайнятий видаленою колонкою цієї таблиці. " +
                 "Код — це ідентичність: комірки посилаються саме на нього, тому повторно " +
                 "використати його в цій версії не можна. Заведіть колонку з іншим кодом " +
-                "або клонуйте версію.");
+                "або клонуйте версію.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.columnCodeTakenByDeleted",
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["columnCode"] = code,
+                });
         }
 
         if (existing is not null && existing.DataType != command.DataType)
@@ -118,7 +127,14 @@ public sealed class SaveColumnDefHandler(
             throw new BusinessRuleException(
                 ErrorCodes.TemplateInvalid,
                 $"Тип колонки «{code}» незмінний після створення " +
-                $"({existing.DataType} → {command.DataType}). Заведіть нову колонку або клонуйте версію.");
+                $"({existing.DataType} → {command.DataType}). Заведіть нову колонку або клонуйте версію.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.columnDataTypeImmutable",
+                    ["columnCode"] = code,
+                    ["oldDataType"] = existing.DataType.ToString(),
+                    ["newDataType"] = command.DataType.ToString(),
+                });
         }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -232,7 +248,14 @@ public sealed class SaveColumnDefHandler(
     internal static TableDef FindTable(TemplateVersion version, int tableDefId)
         => version.Sheets.SelectMany(s => s.Tables).FirstOrDefault(t => t.Id == tableDefId)
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Таблиці {tableDefId} у версії {version.Id} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Таблиці {tableDefId} у версії {version.Id} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.table",
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = version.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
     /// <summary>Складає DTO колонки для відповіді.</summary>
     internal static ColumnDefDto Map(ColumnDef column)
@@ -359,7 +382,10 @@ public sealed class DeleteColumnDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -369,7 +395,14 @@ public sealed class DeleteColumnDefHandler(
 
         var column = table.Columns.FirstOrDefault(c => string.Equals(c.Code, code, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Колонки «{code}» у таблиці {tableDefId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Колонки «{code}» у таблиці {tableDefId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.columnCode",
+                    ["columnCode"] = code,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
         var change = classifier.ClassifyDeletion(nameof(ColumnDef), hasDocuments);

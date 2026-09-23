@@ -4,6 +4,7 @@ using Ecr.Application.Validation;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using Xunit;
 
@@ -17,6 +18,10 @@ public sealed class ValidationEngineTests
 {
     /// <summary>Справжній рушій, а не заглушка: перевіряються самі правила.</summary>
     private static ValidationEngine Engine() => new(new RealFormulaEngine());
+
+    /// <summary>Порожня шапка документа — ці тести не про <c>HDR.X</c>.</summary>
+    private static readonly IReadOnlyDictionary<string, ExpressionValue> NoHeaders =
+        new Dictionary<string, ExpressionValue>();
 
     private static ColumnDef Column(string code, CellDataType type = CellDataType.Decimal)
     {
@@ -39,7 +44,8 @@ public sealed class ValidationEngineTests
         var messages = Engine().ValidateCell(
             Column("Volume"),
             new CellValueData { ValueNumeric = -5m },
-            [Rule("POSITIVE", ValidationSeverity.Error, scope: 0, "[Volume] >= 0")]);
+            [Rule("POSITIVE", ValidationSeverity.Error, scope: 0, "[Volume] >= 0")],
+            NoHeaders);
 
         var message = Assert.Single(messages);
         Assert.Equal(ValidationSeverity.Error, message.Severity);
@@ -55,7 +61,8 @@ public sealed class ValidationEngineTests
         var messages = Engine().ValidateScope(
             scope: 3,
             [Rule("BALANCE", ValidationSeverity.Error, scope: 3, "[Total] = 0")],
-            new Values { ["Total"] = 42m });
+            new Values { ["Total"] = 42m },
+            NoHeaders);
 
         var message = Assert.Single(messages);
 
@@ -75,7 +82,8 @@ public sealed class ValidationEngineTests
         var messages = Engine().ValidateCell(
             Column("Volume"),
             new CellValueData { ValueNumeric = 10m },
-            [Rule("BROKEN", ValidationSeverity.Error, scope: 0, "[Volume] >>> 0")]);
+            [Rule("BROKEN", ValidationSeverity.Error, scope: 0, "[Volume] >>> 0")],
+            NoHeaders);
 
         var message = Assert.Single(messages);
 
@@ -96,8 +104,8 @@ public sealed class ValidationEngineTests
         var c = Rule("C", ValidationSeverity.Info, scope: 0, "[Volume] <> 0");
         var value = new CellValueData { ValueNumeric = -5m };
 
-        var forward = Engine().ValidateCell(Column("Volume"), value, [a, b, c]);
-        var backward = Engine().ValidateCell(Column("Volume"), value, [c, b, a]);
+        var forward = Engine().ValidateCell(Column("Volume"), value, [a, b, c], NoHeaders);
+        var backward = Engine().ValidateCell(Column("Volume"), value, [c, b, a], NoHeaders);
 
         // Правила не мають між собою порядку виконання: їхній набір — це
         // множина, а не програма. Залежність від порядку означала б, що
@@ -114,7 +122,7 @@ public sealed class ValidationEngineTests
         var column = Column("Volume");
         column.SetRequired(true);
 
-        var messages = Engine().ValidateCell(column, CellValueData.Empty, []);
+        var messages = Engine().ValidateCell(column, CellValueData.Empty, [], NoHeaders);
 
         var message = Assert.Single(messages);
 
@@ -136,12 +144,12 @@ public sealed class ValidationEngineTests
         var rules = new[] { Rule("POSITIVE", ValidationSeverity.Error, scope: 0, "[Volume] >= 0") };
         var value = new CellValueData { ValueNumeric = -5m };
 
-        var before = Engine().ValidateCell(column, value, rules);
+        var before = Engine().ValidateCell(column, value, rules, NoHeaders);
 
         // «Переживає перезавантаження» означає, що результат — ФУНКЦІЯ від
         // збережених даних і конфігурації, а не від стану процесу. Новий
         // рушій, новий набір об'єктів, ті самі вхідні — та сама відповідь.
-        var after = Engine().ValidateCell(column, value, rules);
+        var after = Engine().ValidateCell(column, value, rules, NoHeaders);
 
         Assert.Equal(
             before.Select(m => (m.Severity, m.RuleCode, m.BlocksSave)),

@@ -48,6 +48,14 @@ public sealed class TemplateVersionConfiguration : IEntityTypeConfiguration<Temp
                .HasConstraintName("FK_SheetDef_Version");
         builder.Navigation(x => x.Sheets).UsePropertyAccessMode(PropertyAccessMode.Field);
 
+        // Поля шапки — рівень версії, не таблиці (та сама навігація через
+        // приватне поле, що й Sheets вище).
+        builder.HasMany(x => x.HeaderFields)
+               .WithOne()
+               .HasForeignKey(f => f.TemplateVersionId)
+               .HasConstraintName("FK_HeaderFieldDef_Version");
+        builder.Navigation(x => x.HeaderFields).UsePropertyAccessMode(PropertyAccessMode.Field);
+
         builder.Ignore(x => x.IsStructurallyFrozen);
         builder.Ignore(x => x.CacheKey);
 

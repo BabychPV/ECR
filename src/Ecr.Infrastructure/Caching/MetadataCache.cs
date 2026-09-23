@@ -292,6 +292,16 @@ public sealed class MetadataCache(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // Сьомий запит — ПОЛЯ ШАПКИ ДОКУМЕНТА. Рівень версії, не таблиці,
+        // тому фільтр — за TemplateVersionId, а не за tableIds (на відміну
+        // від решти шести запитів вище).
+        var headerFields = await db.HeaderFieldDefs
+            .AsNoTracking()
+            .Where(f => f.TemplateVersionId == templateVersionId && !f.IsDeleted)
+            .OrderBy(f => f.Ordinal)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         // Граф збирається в пам'яті: так кожна сутність приїжджає рівно один
         // раз. Складається він доменними AddColumn/AddRow/AddTable, а не
         // окремим «швидким» шляхом: перевірки на дублікати кодів мають бути
@@ -339,6 +349,9 @@ public sealed class MetadataCache(
             revision,
             sheets,
             columns.ToDictionary(c => c.Id),
-            rows.ToDictionary(r => (r.TableDefId, r.RowKeyValue)));
+            rows.ToDictionary(r => (r.TableDefId, r.RowKeyValue)))
+        {
+            HeaderFields = headerFields,
+        };
     }
 }

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getNotificationRules,
   listNotificationChannels,
+  NotificationChannelsKey,
   replaceNotificationRules,
   type NotificationChannel,
   type NotificationRule,
@@ -40,9 +41,21 @@ const Severities = ['Info', 'Warning', 'Error'] as const satisfies readonly Seve
  */
 const DefaultSeverity: Severity = 'Info';
 
-/** Ключі кешу. Свого домену у фабриці `queryKeys` сповіщення ще не мають. */
+/** Ключ кешу правил. Свого домену у фабриці `queryKeys` сповіщення ще не мають. */
 const RulesKey = ['notifications', 'rules'] as const;
-const ChannelsKey = ['notifications', 'channels'] as const;
+
+/*
+ * ⚠ Ключ каналів — `NotificationChannelsKey` з `api.ts`, а не локальна
+ * константа: цей блок і `ChannelsPanel` читають той самий
+ * `listNotificationChannels()`, і мутація каналу в `ChannelsPanel` мусить
+ * інвалідувати рівно той запис кешу, який тут перечитується. До фіксу тут
+ * була своя локальна константа `['notifications', 'channels']`, а
+ * `ChannelsPanel` інвалідував `['notification-channels']` — інший вміст
+ * ключа, тобто інший запис кешу React Query: мутація каналу (створення,
+ * редагування, видалення) інвалідувала лише кеш `ChannelsPanel`, і ця панель
+ * лишалася зі старими даними, доки щось інше не форсувало ремаунт (`F5`) —
+ * див. коментар при визначенні константи.
+ */
 
 /** Клітинка чернетки: чи діє правило і з якою межею. */
 interface Cell {
@@ -95,7 +108,7 @@ export function RulesMatrixPanel(): JSX.Element {
 
   const rules = useQuery<NotificationRuleMatrix>({ queryKey: RulesKey, queryFn: getNotificationRules });
   const channels = useQuery<NotificationChannel[]>({
-    queryKey: ChannelsKey,
+    queryKey: NotificationChannelsKey,
     queryFn: listNotificationChannels,
   });
 

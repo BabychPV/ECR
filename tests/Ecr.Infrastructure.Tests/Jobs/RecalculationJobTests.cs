@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Jobs;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -292,9 +293,20 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
             Substitute.For<ITemplateVersionStore>(),
             Substitute.For<IFormulaEngine>(),
             units,
+            Substitute.For<Ecr.Application.Ports.IRegistryStore>(),
+            HeaderStore(),
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             Substitute.For<Ecr.Application.Ports.IUnitOfWork>());
+    }
+
+    /// <summary>Порожня шапка документа — тести цього файлу її не читають.</summary>
+    private static Ecr.Application.Ports.IDocumentHeaderStore HeaderStore()
+    {
+        var store = Substitute.For<Ecr.Application.Ports.IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
     }
 
     private static RunCalculationHandler RunHandler()

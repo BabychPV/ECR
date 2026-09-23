@@ -145,6 +145,7 @@ public sealed class ColumnDefTests
             () => Save().HandleAsync(1, _table.Id, "Jan", Command(dataType: CellDataType.String), CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.columnDataTypeImmutable", error.Details!["messageKey"]);
     }
 
     [Fact]
@@ -157,6 +158,7 @@ public sealed class ColumnDefTests
                 CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.lookupRequiresLookupType", error.Details!["messageKey"]);
     }
 
     [Fact]
@@ -167,6 +169,7 @@ public sealed class ColumnDefTests
             () => Save().HandleAsync(1, tableDefId: 999, "Jan", Command(), CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.table", error.Details!["messageKey"]);
     }
 
     [Fact]
@@ -207,6 +210,7 @@ public sealed class ColumnDefTests
             () => Delete().HandleAsync(1, _table.Id, "Missing", CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.columnCode", error.Details!["messageKey"]);
     }
 
     [Fact]
@@ -251,6 +255,7 @@ public sealed class ColumnDefTests
                 1, _table.Id, "LIMIT", Command(dataType: CellDataType.String), CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.columnCodeTakenByDeleted", error.Details!["messageKey"]);
 
         // ⛔ Головне: повідомлення каже про ВИДАЛЕНУ колонку, а не про
         // «незмінність типу» — саме заміна цього тексту і є фіксом.

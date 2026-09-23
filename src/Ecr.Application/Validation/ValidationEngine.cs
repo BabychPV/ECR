@@ -24,12 +24,18 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// <param name="column">Колонка, до якої належить значення.</param>
     /// <param name="value">Значення комірки.</param>
     /// <param name="rules">Правила таблиці; беруться лише з <c>Scope = 0</c>.</param>
+    /// <param name="headers">
+    /// Значення шапки документа, ключовані кодом поля — для <c>HDR.X</c> у
+    /// виразі правила; порожній словник — прогін без шапки.
+    /// </param>
     public IReadOnlyList<ValidationMessage> ValidateCell(
-        ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyList<ValidationRule> rules)
+        ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyList<ValidationRule> rules,
+        IReadOnlyDictionary<string, ExpressionValue> headers)
     {
         ArgumentNullException.ThrowIfNull(column);
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(rules);
+        ArgumentNullException.ThrowIfNull(headers);
 
         var messages = new List<ValidationMessage>();
 
@@ -49,7 +55,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
                 continue;
             }
 
-            Evaluate(rule, CellContext(column, value), column.TableDefId, null, column.Code, messages);
+            Evaluate(rule, CellContext(column, value, headers), column.TableDefId, null, column.Code, messages);
         }
 
         // ⚠ Повертаються ВСІ порушення, а не перше: користувач має побачити
@@ -61,17 +67,23 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// <param name="scope">Рівень правил: 1 рядок, 2 таблиця, 3 документ.</param>
     /// <param name="rules">Правила таблиці.</param>
     /// <param name="context">Джерело значень для виразів правил.</param>
+    /// <param name="headers">
+    /// Значення шапки документа, ключовані кодом поля — для <c>HDR.X</c> у
+    /// виразі правила; порожній словник — прогін без шапки.
+    /// </param>
     public IReadOnlyList<ValidationMessage> ValidateScope(
-        byte scope, IReadOnlyList<ValidationRule> rules, IValidationContext context)
+        byte scope, IReadOnlyList<ValidationRule> rules, IValidationContext context,
+        IReadOnlyDictionary<string, ExpressionValue> headers)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(headers);
 
         var messages = new List<ValidationMessage>();
 
         foreach (var rule in rules.Where(r => r.IsActive && r.Scope == scope))
         {
-            Evaluate(rule, new ScopeContext(context), rule.TableDefId, null, null, messages);
+            Evaluate(rule, new ScopeContext(context) { Headers = headers }, rule.TableDefId, null, null, messages);
         }
 
         return messages;
@@ -148,8 +160,12 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
             ? $"Колонка «{column.Code}» обов'язкова."
             : structuralCode;
 
-    private static SingleCellContext CellContext(ColumnDef column, Domain.ValueObjects.CellValueData value)
-        => new SingleCellContext(column.Code, CellValueMapping.ToExpressionValue(value, ExpressionValue.Null));
+    private static SingleCellContext CellContext(
+        ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyDictionary<string, ExpressionValue> headers)
+        => new SingleCellContext(column.Code, CellValueMapping.ToExpressionValue(value, ExpressionValue.Null))
+        {
+            Headers = headers,
+        };
 
     /// <summary>Контекст правила рівня комірки: видно рівно одну колонку.</summary>
     private sealed class SingleCellContext(string columnCode, ExpressionValue value) : ValidationEvaluationContext

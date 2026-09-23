@@ -18,4 +18,10 @@ public sealed record TemplateVersionSnapshot(
 {
     /// <summary>Ключ кешу.</summary>
     public string CacheKey => $"v{TemplateVersionId}:r{PresentationRevision}";
+
+    /// <summary>
+    /// Поля шапки документа (рівень версії, не таблиці); порожній список —
+    /// нормальний стан для версій без визначеної шапки.
+    /// </summary>
+    public IReadOnlyList<HeaderFieldDef> HeaderFields { get; init; } = [];
 }

@@ -101,6 +101,32 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
     public static string ToFilterJson(AstNode condition)
         => JsonSerializer.Serialize(new Dictionary<string, string> { ["where"] = AstPrinter.Print(condition) });
 
+    /// <summary>Резолвить посилання на поле шапки документа (<c>HDR.Код</c>).</summary>
+    /// <param name="node">Вузол символьного посилання з <c>Kind = SymbolKind.Header</c>.</param>
+    /// <param name="diagnostics">Куди складати зауваження публікації.</param>
+    /// <returns>Визначення поля або <c>null</c>, якщо такого коду немає в знімку.</returns>
+    /// <remarks>
+    /// ⛔ За зразком <see cref="FindTable"/>: до цього методу така перевірка
+    /// не існувала взагалі, і `DependencyExtractor.Visit` додавав Header-
+    /// залежність за `header.Name` БЕЗ жодного резолвінгу — код поля міг бути
+    /// друкарською помилкою, публікація мовчала, а формула в рантаймі
+    /// рахувалася як Null.
+    /// </remarks>
+    public HeaderFieldDef? ResolveHeader(SymbolReferenceNode node, List<ExpressionDiagnostic>? diagnostics)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+
+        var field = snapshot.HeaderFields.FirstOrDefault(
+            f => string.Equals(f.Code, node.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (field is null)
+        {
+            Report(diagnostics, node, $"Поля шапки '{node.Name}' немає в опублікованій версії шаблону.");
+        }
+
+        return field;
+    }
+
     private TableDef? FindTable(CellReferenceNode node, int currentTableDefId, List<ExpressionDiagnostic>? diagnostics)
     {
         var tables = snapshot.Sheets.SelectMany(s => s.Tables.Select(t => (Sheet: s, Table: t))).ToList();

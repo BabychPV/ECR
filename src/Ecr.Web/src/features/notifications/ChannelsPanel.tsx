@@ -23,6 +23,7 @@ import {
   createNotificationChannel,
   deleteNotificationChannel,
   listNotificationChannels,
+  NotificationChannelsKey,
   replaceNotificationChannelSecret,
   testNotificationChannel,
   updateNotificationChannel,
@@ -49,12 +50,18 @@ export function ChannelsPanel(): JSX.Element {
   const [secret, setSecret] = useState('');
 
   const channels = useQuery({
-    queryKey: ['notification-channels'],
+    queryKey: NotificationChannelsKey,
     queryFn: listNotificationChannels,
   });
 
+  /*
+   * ⛔ Ключ — `NotificationChannelsKey` з `api.ts`, СПІЛЬНИЙ із
+   * `RulesMatrixPanel`: інвалідація за власним ключем цього компонента не
+   * зачепила б кеш іншого споживача тих самих даних, і той показував би старе
+   * до випадкового ремаунту (був дефект — див. коментар біля константи).
+   */
   const invalidate = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ['notification-channels'] });
+    await queryClient.invalidateQueries({ queryKey: NotificationChannelsKey });
   };
 
   const save = useMutation({

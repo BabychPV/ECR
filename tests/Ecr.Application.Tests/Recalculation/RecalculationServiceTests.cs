@@ -2,6 +2,7 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -18,6 +19,10 @@ public sealed class RecalculationServiceTests
         var units = Substitute.For<IUnitCatalog>();
         units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
 
+        var headers = Substitute.For<IDocumentHeaderStore>();
+        headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+
         return new(Substitute.For<ICellStore>(),
                Substitute.For<IRowStore>(),
                Substitute.For<IPeriodStore>(),
@@ -25,6 +30,8 @@ public sealed class RecalculationServiceTests
                Substitute.For<ITemplateVersionStore>(),
                Substitute.For<IFormulaEngine>(),
                units,
+               Substitute.For<IRegistryStore>(),
+               headers,
                Substitute.For<IAuditWriter>(),
                new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
                Substitute.For<IUnitOfWork>());

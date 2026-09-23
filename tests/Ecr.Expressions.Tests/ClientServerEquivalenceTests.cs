@@ -73,14 +73,18 @@ public sealed class ClientServerEquivalenceTests
 
         var declared = FunctionRegistry.Names;
 
-        // ⚠ CONVERT — єдиний виняток, і не за недоглядом: конверсія потребує
-        // довідника uom, якого на клієнті немає й не буде. Підказка під час
-        // введення просто не показує одиниць — розходитися тут нічому.
-        var shared = declared.Except(["CONVERT"], StringComparer.OrdinalIgnoreCase);
+        // ⚠ CONVERT і REGFIELD — єдині винятки, і не за недоглядом.
+        // CONVERT потребує довідника uom, якого на клієнті немає й не буде.
+        // REGFIELD (2026-09-23) потребує і резолвінгу посилання на комірку, і
+        // даних довідника — клієнт не резолвить посилань на комірки взагалі
+        // («клієнт не резолвить посилань на комірки» — коментар нижче,
+        // `evaluate.ts`), тож підказка під час введення однаково не порахує
+        // REGFIELD, і розходитися тут нічому так само, як із CONVERT.
+        var shared = declared.Except(["CONVERT", "REGFIELD"], StringComparer.OrdinalIgnoreCase);
 
         // Функція, якої немає в наборі, — це функція, чию поведінку клієнт і
         // сервер ніде не звіряють. Саме там і з'явиться перше розходження.
-        Assert.Equal(12, declared.Count);
+        Assert.Equal(13, declared.Count);
         Assert.Empty(shared.Except(covered, StringComparer.OrdinalIgnoreCase));
     }
 

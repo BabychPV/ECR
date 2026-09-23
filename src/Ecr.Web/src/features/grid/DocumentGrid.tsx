@@ -58,6 +58,34 @@ import { showApiError } from '@/shared/ui/notify';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
 
+/**
+ * Остання календарна дата періоду (`periodKey` — `YYYYMM`, той самий формат,
+ * що вже кодує `DocumentPage.tsx`/`shared/ui/PeriodPicker.tsx`) як
+ * `"YYYY-MM-DD"` — `asOf` для темпоральних Lookup-довідників комірок: документ
+ * за березень має бачити довідник станом на березень, а не на сьогодні
+ * (ФВ-8.5).
+ *
+ * ⛔ Не переюзано з `PeriodPicker.tsx`: розбір `periodKey` там лишається
+ * приватним (`parsePeriodKey` не експортовано), а сам файл — поза межами
+ * дозволених для цієї задачі. Формула ТА САМА (`YYYYMM`, місяць `1..12`),
+ * продубльована тут як кілька рядків, а не переосмислена вдруге.
+ *
+ * `null` — `periodKey` не в очікуваному форматі (місяць поза `1..12`):
+ * викликач тоді не надсилає `asOf`, а не падає на невалідній даті.
+ */
+function periodEndDateIso(periodKey: number): string | null {
+  const year = Math.trunc(periodKey / 100);
+  const month = periodKey - year * 100;
+
+  if (month < 1 || month > 12) return null;
+
+  // День `0` наступного місяця — останній день ЦЬОГО: конструктор `Date`
+  // сам нормалізує переповнення (грудень → січень наступного року).
+  const lastDay = new Date(year, month, 0).getDate();
+
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
 /** Властивості grid. */
 export interface DocumentGridProps {
   /** Документ. */
@@ -588,17 +616,50 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   });
 
   const lookupRegistryCodes = useMemo(() => {
-    const byId = new Map((registriesList.data ?? []).map((registry) => [registry.id, registry.code]));
+    const byId = new Map(
+      (registriesList.data ?? []).map((registry) => [registry.id, registry] as const),
+    );
     return lookupRegistryDefIds
-      .map((id) => ({ id, code: byId.get(id) }))
-      .filter((entry): entry is { id: number; code: string } => entry.code !== undefined);
+      .map((id) => {
+        const registry = byId.get(id);
+        return { id, code: registry?.code, isTemporal: registry?.isTemporal ?? false };
+      })
+      .filter(
+        (entry): entry is { id: number; code: string; isTemporal: boolean } =>
+          entry.code !== undefined,
+      );
   }, [lookupRegistryDefIds, registriesList.data]);
 
+  /*
+   * ⛔ Дефект живого прогону: `GET …/entries` вимагав `asOf` БЕЗУМОВНО, і
+   * жоден Lookup-піцкер комірки сітки його не надсилав — сервер (фікс у
+   * `GetRegistryEntriesHandler.cs`, той самий PR) відмовляв `422` для
+   * КОЖНОГО довідника, включно з нетемпоральним. Тепер `asOf` іде лише для
+   * ТЕМПОРАЛЬНОГО довідника — і це дата КІНЦЯ ПЕРІОДУ документа
+   * (`periodEndDateIso`), а не «сьогодні»: комірка березневого документа має
+   * пропонувати записи, чинні в березні (ФВ-8.5), навіть якщо сьогодні
+   * жовтень.
+   */
+  const lookupAsOf = periodEndDateIso(periodKey);
+
   const lookupEntriesQueries = useQueries({
-    queries: lookupRegistryCodes.map(({ code }) => ({
-      queryKey: queryKeys.registries.entries(code),
-      queryFn: () => apiFetch<RegistryEntryDto[]>(`/api/v1/registries/${encodeURIComponent(code)}/entries`),
-    })),
+    queries: lookupRegistryCodes.map(({ code, isTemporal }) => {
+      const asOf = isTemporal ? lookupAsOf : null;
+
+      // ⚠ Базовий шлях — ОКРЕМИЙ шаблонний рядок, без `?asOf=` усередині:
+      // `EndpointCoverageTests.Кожна_адреса_яку_викликає_клієнт_існує_на_сервері`
+      // бере ВЕСЬ вміст МІЖ парою лапок як адресу — рядок запиту в тому
+      // самому літералі виглядав би для неї окремим неіснуючим маршрутом.
+      const baseUrl = `/api/v1/registries/${encodeURIComponent(code)}/entries`;
+
+      return {
+        queryKey: [...queryKeys.registries.entries(code), asOf],
+        queryFn: () =>
+          apiFetch<RegistryEntryDto[]>(
+            asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
+          ),
+      };
+    }),
   });
 
   const lookupEntriesByRegistryId = useMemo(() => {

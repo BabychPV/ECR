@@ -14,6 +14,7 @@ public sealed class ValidateDocumentHandler(
     IMetadataCache metadata,
     IValidationResultStore results,
     ValidationEngine engine,
+    IDocumentHeaderStore headers,
     Domain.Abstractions.IClock clock,
     IUnitOfWork uow,
     Security.IAccessDecisionService access,
@@ -88,6 +89,12 @@ public sealed class ValidateDocumentHandler(
         var rowIdsByInstance = await rowStore
             .GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
 
+        // ⛔ Шапка документа читається РЕАЛЬНО (раніше HDR.X у правилах
+        // валідації завжди давав Null). Один запит на весь документ: шапка
+        // та сама для кожної з до ~90 таблиць, повторювати запит у циклі
+        // нижче означало б піти в базу настільки ж зайвий раз.
+        var headerValues = await headers.GetExpressionValuesAsync(documentId, ct).ConfigureAwait(false);
+
         var messages = new List<ValidationMessage>();
 
         foreach (var (instance, table) in toValidate)
@@ -99,7 +106,7 @@ public sealed class ValidateDocumentHandler(
                 ? foundRows
                 : new Dictionary<string, long>(StringComparer.Ordinal);
 
-            messages.AddRange(TableValidation.Run(engine, table, cells, rowIds));
+            messages.AddRange(TableValidation.Run(engine, table, cells, rowIds, headerValues));
         }
 
         var summary = new ValidationSummary(

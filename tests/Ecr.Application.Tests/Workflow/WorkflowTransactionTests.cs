@@ -11,6 +11,7 @@ using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.Data.SqlClient;
@@ -220,9 +221,14 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
                      Arg.Any<CancellationToken>())
                  .Returns<IReadOnlyList<ReportSnapshotSummary>>([]);
 
+        var headers = Substitute.For<IDocumentHeaderStore>();
+        headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+
         return new SubmitSheetHandler(
             cells, rows, new WorkflowStore(db), documents, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
+            headers,
             new ReportSnapshotSync(snapshots, documents),
             new UnitOfWork(db), User(), new TestClock(Now));
     }

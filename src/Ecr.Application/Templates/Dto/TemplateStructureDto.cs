@@ -113,6 +113,19 @@ public sealed record TableDto(
 /// <param name="IsHidden">Колонка прихована; презентаційне поле.</param>
 /// <param name="DisplayFormat">Формат показу; презентаційне поле.</param>
 /// <param name="UnitSymbol">Позначення одиниці, якщо задана.</param>
+/// <param name="FormulaExpression">
+/// Текст наявної формули колонки, якщо вона є; <c>null</c> — формули ще
+/// немає. Додано без нового запиту до бази: <c>GetTemplateStructureHandler</c>
+/// читає кешований <c>TemplateVersionSnapshot</c>, який уже вантажить
+/// формули (<c>MetadataCache.LoadAsync</c>, «ШОСТИЙ запит — ФОРМУЛИ
+/// ШАБЛОНУ») для рушія перерахунку — тут лише додано проєкцію в DTO. До
+/// цього поля кнопка "Formula" в редакторі (<c>TemplateVersionPage.tsx</c>)
+/// завжди відкривала порожній редактор, навіть коли формула вже збережена:
+/// вираз ніде не приходив клієнту без окремого запиту, якого не існувало.
+/// </param>
+/// <param name="FormulaDialect">
+/// Діалект <see cref="FormulaExpression"/>; заповнений лише разом із ним.
+/// </param>
 public sealed record TemplateColumnDto(
     int Id,
     string Code,
@@ -123,7 +136,9 @@ public sealed record TemplateColumnDto(
     bool IsRequired,
     bool IsHidden,
     string? DisplayFormat,
-    string? UnitSymbol);
+    string? UnitSymbol,
+    string? FormulaExpression,
+    ExpressionDialect? FormulaDialect);
 
 /// <summary>
 /// Рядок у СТРУКТУРІ шаблону — опис, а не дані.
@@ -143,10 +158,19 @@ public sealed record TemplateColumnDto(
 /// <param name="Label">Локалізований підпис.</param>
 /// <param name="ParentRowKey">Батьківський рядок в ієрархії; <c>null</c> — корінь.</param>
 /// <param name="IsReadOnly">Рядок недоступний для введення.</param>
+/// <param name="FormulaExpression">
+/// Текст наявної формули рядка, якщо вона є; <c>null</c> — формули ще
+/// немає. Той самий фікс, що й <see cref="TemplateColumnDto.FormulaExpression"/>.
+/// </param>
+/// <param name="FormulaDialect">
+/// Діалект <see cref="FormulaExpression"/>; заповнений лише разом із ним.
+/// </param>
 public sealed record TemplateRowDto(
     string RowKey,
     int Ordinal,
     string RowKind,
     string? Label,
     string? ParentRowKey,
-    bool IsReadOnly);
+    bool IsReadOnly,
+    string? FormulaExpression,
+    ExpressionDialect? FormulaDialect);

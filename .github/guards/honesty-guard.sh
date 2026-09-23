@@ -33,34 +33,45 @@ REPORT="$(printf '%s\n' "$DIFF" | awk '
   /^\+/ && !/^\+\+\+/ {
     text = substr($0, 2)
 
+    # Чистий рядок-коментар: після обрізання пробілів починається з "//"
+    # (накриває і "///"). Рядок з кодом і коментарем у кінці (наприклад
+    # `throw new NotImplementedException(); // TODO`) сюди НЕ потрапляє —
+    # trimmed починається з коду, не з "//". Це відрізняє РЕАЛЬНИЙ патерн
+    # від коментаря, що лише ЗГАДУЄ його як приклад чи пояснення (правила
+    # 1, 2, 4, 5 мають ловити код, а не текст про код).
+    trimmed = text
+    gsub(/^[[:space:]]+/, "", trimmed)
+    is_comment = (trimmed ~ /^\/\//)
+
     # ── 1. Тавтологічний асерт ────────────────────────────────────────────
-    if (text ~ /Assert\.True[[:space:]]*\([[:space:]]*true[[:space:]]*\)/ ||
-        text ~ /Assert\.False[[:space:]]*\([[:space:]]*false[[:space:]]*\)/) {
+    if (!is_comment && (text ~ /Assert\.True[[:space:]]*\([[:space:]]*true[[:space:]]*\)/ ||
+        text ~ /Assert\.False[[:space:]]*\([[:space:]]*false[[:space:]]*\)/)) {
       emit(file, line, "тавтологічний асерт — нічого не перевіряє", text)
     }
 
     # ── 2. Вимкнений тест ─────────────────────────────────────────────────
-    if (text ~ /Skip[[:space:]]*=/ || text ~ /\[Ignore/) {
+    if (!is_comment && (text ~ /Skip[[:space:]]*=/ || text ~ /\[Ignore/)) {
       emit(file, line, "тест вимкнено (Skip/Ignore)", text)
     }
 
     # ── 3. Закоментований атрибут тесту ───────────────────────────────────
+    # Свідомо шукає в коментарях — is_comment тут НЕ застосовується.
     if (text ~ /^[[:space:]]*\/\/[[:space:]]*\[(Fact|Theory)/) {
       emit(file, line, "атрибут тесту закоментовано", text)
     }
 
     # ── 4. Порожній catch ─────────────────────────────────────────────────
     # Однорядковий: catch { } / catch (Exception) { }
-    if (text ~ /catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}/) {
+    if (!is_comment && text ~ /catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}/) {
       emit(file, line, "порожній catch — помилку проковтнуто", text)
     }
 
     # ── 5. Заглушка в бойовому коді ───────────────────────────────────────
     # Лише src/: у tools/ є відомі одноразові утиліти-заглушки.
-    if (file ~ /^src\// && text ~ /NotImplementedException/) {
+    if (!is_comment && file ~ /^src\// && text ~ /NotImplementedException/) {
       emit(file, line, "NotImplementedException у бойовому коді", text)
     }
-    if (text ~ /Assert\.Fail[[:space:]]*\([[:space:]]*"not implemented"/) {
+    if (!is_comment && text ~ /Assert\.Fail[[:space:]]*\([[:space:]]*"not implemented"/) {
       emit(file, line, "залишок заглушки етапу 0", text)
     }
 

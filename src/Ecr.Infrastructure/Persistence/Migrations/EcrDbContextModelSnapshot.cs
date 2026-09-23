@@ -942,6 +942,63 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.HeaderFieldDef", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<byte>("DataType")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_HeaderFieldDef_Del");
+
+                    b.Property<bool>("IsRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_HeaderFieldDef_Req");
+
+                    b.Property<string>("LabelL10n")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("LookupRegistryDefId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TemplateVersionId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TemplateVersionId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("UQ_HeaderFieldDef");
+
+                    b.ToTable("HeaderFieldDef", "cfg", t =>
+                        {
+                            t.HasCheckConstraint("CK_HeaderFieldDef_Lookup", "DataType <> 5 OR LookupRegistryDefId IS NOT NULL");
+                        });
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PeriodAccessRuleDef", b =>
                 {
                     b.Property<int>("Id")
@@ -1957,6 +2014,47 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UQ_Document");
 
                     b.ToTable("Document", "doc");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentHeaderValue", b =>
+                {
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("HeaderFieldDefId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsEmpty")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false, "DF_DocumentHeaderValue_Empty");
+
+                    b.Property<bool?>("ValueBool")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("ValueDate")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<decimal?>("ValueNumeric")
+                        .HasPrecision(34, 16)
+                        .HasColumnType("decimal(34,16)");
+
+                    b.Property<int?>("ValueRegistryEntryId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ValueString")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int?>("ValueUnitId")
+                        .HasColumnType("int");
+
+                    b.HasKey("DocumentId", "HeaderFieldDefId");
+
+                    b.ToTable("DocumentHeaderValue", "doc", t =>
+                        {
+                            t.HasCheckConstraint("CK_DocumentHeaderValue_Empty", "IsEmpty = 0 OR (ValueString IS NULL AND ValueNumeric IS NULL AND ValueDate IS NULL AND ValueBool IS NULL AND ValueRegistryEntryId IS NULL AND ValueUnitId IS NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentIndexValue", b =>
@@ -4496,6 +4594,22 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_FDep_Formula");
                 });
 
+            modelBuilder.Entity("Ecr.Domain.Entities.Configuration.HeaderFieldDef", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Configuration.RegistryDef", null)
+                        .WithMany()
+                        .HasForeignKey("LookupRegistryDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_HeaderFieldDef_Registry");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.TemplateVersion", null)
+                        .WithMany("HeaderFields")
+                        .HasForeignKey("TemplateVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_HeaderFieldDef_Version");
+                });
+
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.PeriodAccessRuleDef", b =>
                 {
                     b.HasOne("Ecr.Domain.Entities.Configuration.SheetDef", null)
@@ -4764,6 +4878,35 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_Document_Project");
+                });
+
+            modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentHeaderValue", b =>
+                {
+                    b.HasOne("Ecr.Domain.Entities.Documents.Document", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocumentHeaderValue_Document");
+
+                    b.HasOne("Ecr.Domain.Entities.Configuration.HeaderFieldDef", null)
+                        .WithMany()
+                        .HasForeignKey("HeaderFieldDefId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DocumentHeaderValue_Field");
+
+                    b.HasOne("Ecr.Domain.Entities.Dictionaries.RegistryEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ValueRegistryEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_DocumentHeaderValue_Entry");
+
+                    b.HasOne("Ecr.Domain.Entities.Units.Unit", null)
+                        .WithMany()
+                        .HasForeignKey("ValueUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("FK_DocumentHeaderValue_Unit");
                 });
 
             modelBuilder.Entity("Ecr.Domain.Entities.Documents.DocumentIndexValue", b =>
@@ -5295,6 +5438,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Ecr.Domain.Entities.Configuration.TemplateVersion", b =>
                 {
+                    b.Navigation("HeaderFields");
+
                     b.Navigation("Sheets");
                 });
 

@@ -63,6 +63,20 @@ public sealed class TestEvaluationContext : IBudgetedEvaluationContext
     /// <summary>Поля шапки (<c>HDR.Name</c>).</summary>
     public Dictionary<string, ExpressionValue> Headers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Поля довідника для <c>REGFIELD</c>: id запису → (код поля → значення).</summary>
+    public Dictionary<long, Dictionary<string, ExpressionValue>> RegistryFields { get; } = new();
+
+    /// <summary>Записує значення поля запису довідника.</summary>
+    public void SetRegistryField(long registryEntryId, string fieldCode, ExpressionValue value)
+    {
+        if (!RegistryFields.TryGetValue(registryEntryId, out var byField))
+        {
+            RegistryFields[registryEntryId] = byField = new(StringComparer.OrdinalIgnoreCase);
+        }
+
+        byField[fieldCode] = value;
+    }
+
     /// <summary>Множники конверсії: <c>from|to</c> → коефіцієнт.</summary>
     /// <remarks>
     /// Це ЯВНІ конверсії <c>uom.Conversion</c>, і вони мають пріоритет над
@@ -257,6 +271,13 @@ public sealed class TestEvaluationContext : IBudgetedEvaluationContext
     /// <inheritdoc />
     public ExpressionValue GetHeader(string name)
         => Headers.GetValueOrDefault(name, ExpressionValue.Null);
+
+    /// <inheritdoc />
+    public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
+        => RegistryFields.TryGetValue(registryEntryId, out var byField)
+           && byField.TryGetValue(fieldCode, out var value)
+            ? value
+            : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
     public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)

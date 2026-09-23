@@ -1,18 +1,28 @@
 // src/Ecr.Application/Registries/UpsertRegistryEntryHandler.cs
+using System.Text.Json;
 using Ecr.Application.Common;
+using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Dictionaries;
+using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Registries;
+
+/// <summary>Одна фактична зміна значення поля запису довідника — для аудиту.</summary>
+/// <param name="FieldCode">Код поля довідника.</param>
+/// <param name="OldValue">Значення до зміни; <c>null</c> — поле не було заповнене.</param>
+/// <param name="NewValue">Значення після зміни; <c>null</c> — поле очищене.</param>
+internal sealed record RegistryValueFieldChange(string FieldCode, object? OldValue, object? NewValue);
 
 /// <summary>Створення і зміна запису довідника (ФВ-8.6, ФВ-8.7).</summary>
 public sealed class UpsertRegistryEntryHandler(
     IRegistryStore registries,
     IUnitOfWork uow,
+    IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock)
@@ -27,6 +37,20 @@ public sealed class UpsertRegistryEntryHandler(
     /// </remarks>
     public const string Permission = "Registry.EditData";
 
+    /// <summary>Тип події журналу безпеки.</summary>
+    /// <remarks>
+    /// ⚠ Досі зміна ЗНАЧЕННЯ поля запису довідника не лишала жодного сліду —
+    /// на відміну від зміни ОПИСУ довідника (<c>SaveRegistryDefinitionHandler</c>,
+    /// <c>aud.StructureChange</c>) чи зміни комірки документа
+    /// (<c>aud.CellChange</c>). Подія пишеться в <c>aud.SecurityEvent</c> —
+    /// той самий журнал, що вже приймає довільні події через
+    /// <c>EventType</c>/<c>DetailsJson</c> (<c>DocumentKeyChanged</c>,
+    /// <c>UserLocked</c> тощо) — окрема таблиця історії значень не завелася б
+    /// без міграції, а її тут свідомо нема (правило проєкту: одна міграція за
+    /// раз, паралельно вже йде інша).
+    /// </remarks>
+    public const string ValueChangedEventType = "RegistryValueChanged";
+
     /// <summary>Створює або оновлює запис і повертає його ідентифікатор.</summary>
     /// <param name="dto">Опис запису.</param>
     /// <param name="ct">Токен скасування.</param>
@@ -36,8 +60,11 @@ public sealed class UpsertRegistryEntryHandler(
     {
         ArgumentNullException.ThrowIfNull(dto);
 
-        await Templates.ListTemplatesHandler
-            .RequireAsync(access, currentUser, Permission, ct)
+        // ⚠ Глобальне право АБО ресурсний грант рівня Write на ЦЕЙ довідник
+        // (A7-58): dto.RegistryDefId уже відомий з запиту, тож жодного
+        // додаткового походу в базу перевірка не додає.
+        await RegistryAccess
+            .RequireAsync(access, currentUser, Permission, GrantLevel.Write, dto.RegistryDefId, ct)
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
@@ -68,7 +95,7 @@ public sealed class UpsertRegistryEntryHandler(
         entry.Rename(dto.Display);
         entry.SetParent(dto.ParentEntryId);
 
-        await ApplyValuesAsync(registries, definition, entry, dto.Values, ct).ConfigureAwait(false);
+        var changes = await ApplyValuesAsync(registries, definition, entry, dto.Values, ct).ConfigureAwait(false);
 
         // ⛔ Вікно дії сюди НЕ приймається, хоча воно є полем запису: його
         // зміна тягне перерахунок IsOrphaned (ФВ-8.13a), і зроблена мимохідь
@@ -81,6 +108,30 @@ public sealed class UpsertRegistryEntryHandler(
         definition.BumpDataRevision();
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        // Журнал — ПІСЛЯ коміту, як у ChangeDocumentKeyHandler/DeleteDocumentHandler:
+        // IAuditWriter пише власним підключенням, а Id нового запису відомий
+        // лише тепер, коли EF підставив згенероване значення.
+        //
+        // ⚠ Подія — ОДНА на весь виклик, навіть якщо змінилося кілька полів:
+        // перелік змін лежить у DetailsJson. Подія не пишеться, якщо жодне
+        // значення фактично не змінилося (повторне збереження тим самим
+        // значенням, або запит без Values).
+        if (changes.Count > 0)
+        {
+            await audit.WriteSecurityEventAsync(
+                new SecurityEventRecord(
+                    clock.UtcNow, ValueChangedEventType, TargetUserId: null, TargetRoleId: null,
+                    JsonSerializer.Serialize(new
+                    {
+                        registryDefId = definition.Id,
+                        entryId = entry.Id,
+                        changes = changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
+                    }),
+                    userId, currentUser.CorrelationId),
+                ct).ConfigureAwait(false);
+        }
+
         return entry.Id;
     }
 
@@ -97,8 +148,27 @@ public sealed class UpsertRegistryEntryHandler(
     /// передається параметром замість поля екземпляра: метод раніше читав
     /// лише це поле, тож перетворення на static нічого не втратило.
     /// </para>
+    /// <para>
+    /// ⛔ Значення проходить через <see cref="CellValueReader.Normalize"/> ПЕРЕД
+    /// <c>RegistryValue.Set</c> — той самий крок, який `A7-01` уже додав для
+    /// комірок документа. Через HTTP <c>values</c> приходить
+    /// <c>Dictionary&lt;string, object?&gt;</c>, і <c>System.Text.Json</c> кладе
+    /// в кожне значення <see cref="JsonElement"/>, а не готовий
+    /// <c>decimal</c>/<c>bool</c>/<c>DateTime</c>. <c>RegistryValue.Set</c>
+    /// приводить значення голими <c>Convert.ToDecimal</c>/<c>ToBoolean</c>/
+    /// <c>ToInt64</c> і патерн-матчем для дати — жоден не впізнає
+    /// <see cref="JsonElement"/>, тож СПРАВЖНІЙ запит із коректним числом,
+    /// булевим чи датою відмовляв би так само, як зіпсований ввід (виміряно
+    /// тестом до фіксу: коректне число для поля <c>Int</c> давало
+    /// <c>422 err.ECR-REG-0422.valueNotNumber</c>). Для <c>String</c> це
+    /// «випадково працювало» — <c>JsonElement.ToString()</c> повертає текст.
+    /// CSV-імпорт (<see cref="Registries.ImportRegistryEntriesHandler"/>) цей
+    /// самий метод не зачіпає: він передає ГОТОВИЙ <c>string</c> (текст рядка
+    /// CSV), а <see cref="CellValueReader.Normalize"/> для не-<c>JsonElement</c>
+    /// входу — тотожність.
+    /// </para>
     /// </remarks>
-    internal static async Task ApplyValuesAsync(
+    internal static async Task<IReadOnlyList<RegistryValueFieldChange>> ApplyValuesAsync(
         IRegistryStore registries,
         Domain.Entities.Configuration.RegistryDef definition,
         RegistryEntry entry,
@@ -107,7 +177,7 @@ public sealed class UpsertRegistryEntryHandler(
     {
         if (values is null || values.Count == 0)
         {
-            return;
+            return [];
         }
 
         var fields = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
@@ -134,17 +204,33 @@ public sealed class UpsertRegistryEntryHandler(
                 .ToDictionary(v => v.RegistryFieldDefId)
             : [];
 
+        var changes = new List<RegistryValueFieldChange>();
+
         foreach (var (code, raw) in values)
         {
             var field = fields[code];
+            var isNew = !existing.TryGetValue(field.Id, out var value);
 
-            if (!existing.TryGetValue(field.Id, out var value))
+            if (isNew)
             {
                 value = new RegistryValue(entry, field.Id);
                 registries.AddValue(value);
             }
 
-            value.Set(field.DataType, raw, field.UnitId);
+            // ⚠ «Старе» читається З ЖИВОГО об'єкта ДО Set (Set заноляє всі
+            // колонки — RegistryValue.Clear), «нове» — з нього ж ПІСЛЯ: так
+            // порівняння бачить те саме типізоване значення, яке реально
+            // ляже в базу, а не сирий вхід запиту (він може прийти рядком
+            // для числового поля, і порівняння з боксованим decimal завжди
+            // «відрізнялося» б).
+            var oldValue = isNew ? null : RawValue(value!, field.DataType);
+            value!.Set(field.DataType, CellValueReader.Normalize(raw), field.UnitId);
+            var newValue = RawValue(value, field.DataType);
+
+            if (!Equals(oldValue, newValue))
+            {
+                changes.Add(new RegistryValueFieldChange(code, oldValue, newValue));
+            }
         }
 
         var missing = definition.Fields
@@ -166,7 +252,32 @@ public sealed class UpsertRegistryEntryHandler(
                     ["fields"] = string.Join(", ", missing),
                 });
         }
+
+        return changes;
     }
+
+    /// <summary>Типізоване значення поля — для порівняння до/після і для аудиту.</summary>
+    /// <remarks>
+    /// ⚠ Той самий вибір колонки за типом, що вже застосовує
+    /// <c>ImportDiffBuilder.Display</c> для комірок документа
+    /// (<c>Ecr.Adapters.Excel</c>) — тут навмисно НЕ перевикористаний напряму:
+    /// той метод читає <c>CellValueData</c> (комірка документа, посилання на
+    /// довідник), цей — <c>RegistryValue</c> (сам запис довідника); типи різні,
+    /// хоч і структурно схожі.
+    /// </remarks>
+    private static object? RawValue(RegistryValue value, CellDataType dataType) => dataType switch
+    {
+        CellDataType.String => value.ValueString,
+        CellDataType.Int or CellDataType.Decimal => value.ValueNumeric,
+        CellDataType.Bool => value.ValueBool,
+        CellDataType.Date => value.ValueDate,
+        CellDataType.Lookup => value.ValueRefEntryId,
+        CellDataType.Unit => value.ValueUnitId,
+
+        // Formula/Calculated неможливі: RegistryValue.Set кидає раніше, ніж
+        // виконання сюди дійде.
+        _ => null,
+    };
 
     private async Task<RegistryEntry> LoadAsync(long id, int registryDefId, CancellationToken ct)
     {

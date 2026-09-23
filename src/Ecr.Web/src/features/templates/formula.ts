@@ -58,12 +58,26 @@ export function emptyFormulaDraft(
   };
 }
 
-/** Чернетка з наявної формули — для правки. */
+/**
+ * Чернетка з наявної формули — для правки.
+ *
+ * ⚠ Приймає лише `dialect`/`expression`, а не повний `FormulaDto` —
+ * навмисне звуження (не `Pick<FormulaDto, …>`): виклик іде і з реального
+ * `FormulaDto` (`saveFormula`/`formulaApi.ts`), і з
+ * `TemplateColumnDto`/`TemplateRowDto` (`GET …/structure`), де решта полів
+ * `FormulaDto` (`Id`, `TableDefId`, `Scope`, `ColumnDefId`, `RowDefId`)
+ * просто відсутні — адресу цілі й так передають `tableDefId`/`scope`/
+ * `target` параметрами вище. Фікс дефекту 2026-09-23: кнопка "Formula" при
+ * повторному відкритті діалогу на колонці/рядку зі збереженою формулою
+ * завжди будувала `emptyFormulaDraft`, тому редактор показував порожній
+ * вираз, хоча сервер зберіг його ще при першому `PUT` (`FormulaEditor.tsx`
+ * → `TemplateVersionPage.tsx`).
+ */
 export function draftOfFormula(
   tableDefId: number,
   scope: FormulaScope,
   target: string,
-  formula: FormulaDto,
+  formula: { dialect: ExpressionDialect; expression: string },
 ): FormulaDraft {
   return {
     tableDefId,

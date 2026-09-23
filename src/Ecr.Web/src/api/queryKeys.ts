@@ -71,6 +71,13 @@ const templates = {
    * (директива registry-lookup / cell-style, PR B1).
    */
   stylesOf: (versionId: number) => ['templates', 'stylesOf', versionId] as const,
+
+  /**
+   * `GET /api/v1/template-versions/{versionId}/header-fields` — поля шапки
+   * документа версії (рівень усього документа, не таблиці; той самий
+   * draft→publish контракт, що колонки, `W5.2`).
+   */
+  headerFieldsOf: (versionId: number) => ['templates', 'headerFieldsOf', versionId] as const,
 };
 
 /** Домен `registries`: перелік довідників, записи, опис (definition), історія. */

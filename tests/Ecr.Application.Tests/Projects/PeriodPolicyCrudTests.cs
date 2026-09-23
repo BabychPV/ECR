@@ -59,6 +59,8 @@ public sealed class PeriodPolicyCrudTests
             () => handler.HandleAsync("ECR_Standard", 0, 15, 45, 45, CancellationToken.None));
 
         Assert.Equal(ErrorCodes.PeriodPolicyDuplicate, error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-4091.code", error.Details!["messageKey"]);
+        Assert.Equal("ECR_Standard", error.Details["code"]);
         _periods.DidNotReceiveWithAnyArgs().AddPolicy(default!);
     }
 
@@ -145,6 +147,11 @@ public sealed class PeriodPolicyCrudTests
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => handler.HandleAsync("NEW", 0, 15, 45, 45, CancellationToken.None));
 
+        // ⚠ Немає messageKey навмисно: `PermissionCheck.RequireAsync` уже
+        // локалізує цей код через окремий точковий шлях у
+        // `ExceptionHandlingMiddleware` (поле `permission`, не messageKey) —
+        // тому рядок лишається в `contracts/localization-debt.md`.
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.False(denied.Details!.ContainsKey("messageKey"));
     }
 }

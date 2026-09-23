@@ -96,6 +96,7 @@ public sealed class ArchiveProjectTests
             () => Handler().HandleAsync(project.Id, CancellationToken.None));
 
         Assert.Equal("ECR-PRD-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-0409.openPeriods", error.Details!["messageKey"]);
         Assert.Equal(ProjectStatus.Active, project.Status);
     }
 
@@ -112,6 +113,7 @@ public sealed class ArchiveProjectTests
             () => Handler().HandleAsync(project.Id, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", denied.Details!["messageKey"]);
         Assert.Equal(ProjectStatus.Active, project.Status);
     }
 }

@@ -102,6 +102,7 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Rows)
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Formulas)
                .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.ValidationRules)
+               .Include(v => v.HeaderFields)
 
                // ⛔ AsSplitQuery, а не один нероздільний запит (аудит
                // 2026-09-16, §6.3). Чотири СЕСТРИНСЬКІ колекції
@@ -131,6 +132,7 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Rows)
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.Formulas)
             .Include(v => v.Sheets).ThenInclude(sheet => sheet.Tables).ThenInclude(t => t.ValidationRules)
+            .Include(v => v.HeaderFields)
 
             // ⛔ Той самий декартів добуток, що й у `GetWithStructureAsync`
             // (аудит §6.3) — і тут він дорожчий: клон читає ВСЮ структуру.

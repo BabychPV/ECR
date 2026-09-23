@@ -9,6 +9,7 @@ using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -203,6 +204,9 @@ public sealed class SubmitApproveTests
     private readonly IDocumentStore _documents = Substitute.For<IDocumentStore>();
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
 
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
     /// <summary>Проведення стану аркушів у зрізи звітності.</summary>
     private Ecr.Application.Reporting.ReportSnapshotSync Reports()
         => new(_reportSnapshots, _documents);
@@ -210,7 +214,24 @@ public sealed class SubmitApproveTests
     private SubmitSheetHandler Submit()
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
+               _headers,
                Reports(), _uow, _user, _clock);
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+
+        // ⚠ Порожня шапка за замовчуванням: більшість тестів цього файлу її не
+        // читає, а SnapshotPayloadAsync (ФВ-9.4) кличе GetValuesAsync БЕЗУМОВНО
+        // на кожне подання — без цього стабу NSubstitute повернув би `null`
+        // замість словника, і `SnapshotPayloadAsync` падав би з NRE на
+        // `.Where(...)` у кожному тесті цього файлу, не лише в тих, що про шапку.
+        store.GetValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, DocumentHeaderValueData>());
+        return store;
+    }
 
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 
@@ -338,6 +359,68 @@ public sealed class SubmitApproveTests
         Assert.Equal(Now, snapshot.SubmittedAt);
         Assert.Contains("12500", snapshot.PayloadJson, StringComparison.Ordinal);
         Assert.Equal(64, snapshot.ContentHash.Length);
+    }
+
+    /// <summary>Одне поле шапки <c>AREA</c> (тип <c>String</c>) для тестів ФВ-9.4.</summary>
+    private static Ecr.Domain.Entities.Configuration.HeaderFieldDef AreaHeaderField(int id)
+    {
+        var field = new Ecr.Domain.Entities.Configuration.HeaderFieldDef(
+            TemplateVersion, EcrCode.Create("AREA"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Area" }), 1, CellDataType.String);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(field, id);
+        return field;
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Подання_копіює_значення_шапки_документа_в_зріз_як_окрему_секцію()
+    {
+        // ⛔ За аналізом старої системи (Excel/VBA, вкладка "Contract"): подання
+        // будь-якої звітної таблиці ЗАНОВО читає й ВБУДОВУЄ шапку в збережений
+        // запис — знімок на момент подання, не посилання. Якщо шапку пізніше
+        // змінять, уже подані звіти мають зберігати те, що було правдою тоді.
+        const int AreaFieldId = 55;
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot() with { HeaderFields = [AreaHeaderField(AreaFieldId)] });
+
+        _headers.GetValuesAsync(Document, Arg.Any<CancellationToken>())
+                .Returns(new Dictionary<int, DocumentHeaderValueData>
+                {
+                    [AreaFieldId] = new() { ValueString = "Дніпровський" },
+                });
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        var snapshot = Assert.Single(_snapshots);
+        var header = SubmissionPayload.ReadHeader(snapshot.PayloadJson);
+
+        Assert.Equal(new SubmissionPayloadHeaderValue("Дніпровський", null), header["AREA"]);
+
+        // Клітинки лишаються там же, де й завжди — секція header їх не заступає.
+        var cells = SubmissionPayload.Read(snapshot.PayloadJson);
+        Assert.Contains(cells, c => c.Value == "12500");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Подання_без_жодного_значення_шапки_дає_порожню_секцію_header_і_не_падає()
+    {
+        // Поле шапки в шаблоні Є, але його ніхто не заповнював — GetValuesAsync
+        // не повертає запису взагалі (той самий контракт, що для клітинок,
+        // R-B4: відсутній запис ≠ явна порожнеча, але тут різниця не потрібна).
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot() with { HeaderFields = [AreaHeaderField(55)] });
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        var snapshot = Assert.Single(_snapshots);
+        Assert.Empty(SubmissionPayload.ReadHeader(snapshot.PayloadJson));
+
+        // ⚠ Формат лишається як до ФВ-9.4 (голий масив) — ContentHash документів
+        // без заповненої шапки не зрушується попри нову можливість.
+        Assert.StartsWith("[", snapshot.PayloadJson, StringComparison.Ordinal);
     }
 
     [Fact]

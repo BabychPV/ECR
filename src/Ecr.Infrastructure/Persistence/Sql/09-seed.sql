@@ -640,6 +640,18 @@ USING (VALUES
     -- R7: книга зрізу будується в пам'яті цілком, тому стеля рядків — відмова,
     -- а не мовчазне обрізання: книга з «майже всіма» рядками виглядає повною.
     (N'err.ECR-RPT-0422.exportTooLarge',     N'en', N'Snapshot {snapshotId} has more than {limit} rows: a workbook that large is not built. Use the rows endpoint or the rpt.v_* view.', 1),
+    -- Борг локалізації (contracts/localization-debt.md, ReportDefHandlers.cs):
+    -- заведення й публікація опису звіту та його версій.
+    (N'err.ECR-RPT-0422.noColumns',          N'en', N'A report version needs at least one column: there would be nothing to show in the snapshot.', 1),
+    (N'err.ECR-RPT-0422.columnKind',         N'en', N'Column kind "{kind}" is unknown: the snapshot row stores only {allowedKinds}.', 1),
+    (N'err.ECR-RPT-0422.duplicateColumn',    N'en', N'Column "{code}" is described twice: the column code is part of the snapshot row''s key.', 1),
+    (N'err.ECR-RPT-0422.rowSource',          N'en', N'Row source "{rowSource}" is not supported by the snapshot builder: today there is one — "{supportedSource}" (the current run''s results).', 1),
+    (N'err.ECR-RPT-0422.nameRequired',       N'en', N'Give the report a name in at least one language: it is addressed by that name in the list.', 1),
+    (N'err.ECR-RPT-0422.version',            N'en', N'The report version number must be from 1 to {maxLength} characters.', 1),
+    (N'err.ECR-RPT-4091.code',               N'en', N'A report with code "{code}" is already described.', 1),
+    (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
+    (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
+    (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
@@ -865,6 +877,36 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.expressionRequired',        N'en', N'An Expression rule without a condition does nothing: an empty condition here is the same as no rule.', 1),
     (N'err.ECR-CFG-0422.hideRetired',                N'en', N'The "Hide" behavior can no longer be set: hiding is not one of the three allowed reactions. Use "ReadOnly" instead — it means the same "not allowed".', 1),
 
+    -- Борг локалізації: конструктор колонки й таблиці (`ColumnDefHandlers`/
+    -- `ColumnDef`, `TableDefHandlers`/`TableDef`). `table`/`sheet` — той самий
+    -- факт, звідки б до нього не дійшли (створення/зміна чи видалення).
+    (N'err.ECR-TMPL-0404.table',                     N'en', N'Table {tableDefId} does not exist in template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0404.columnCode',                N'en', N'Column "{columnCode}" does not exist in table {tableDefId}.', 1),
+    (N'err.ECR-TMPL-0404.sheet',                     N'en', N'Sheet "{sheetCode}" does not exist in template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0404.tableByCode',               N'en', N'Table "{tableCode}" does not exist on sheet "{sheetCode}".', 1),
+    (N'err.ECR-TMPL-0422.columnCodeTakenByDeleted',  N'en', N'Column code "{columnCode}" in table {tableDefId} is taken by a deleted column: cells still reference it by code, so it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.columnDataTypeImmutable',   N'en', N'The data type of column "{columnCode}" cannot change after creation ({oldDataType} -> {newDataType}). Create a new column or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.scaleExceedsPrecision',     N'en', N'Scale ({scale}) cannot exceed precision ({precision}) in column "{columnCode}".', 1),
+    (N'err.ECR-TMPL-0422.lookupRequiresLookupType',  N'en', N'A registry can only be attached to a Lookup column; column "{columnCode}" has type {dataType}.', 1),
+    (N'err.ECR-TMPL-0422.unitColumnHasRowUnit',      N'en', N'Column "{columnCode}" has type Unit: its unit is set per row (doc.CellValue.ValueUnitId), not on the column.', 1),
+    (N'err.ECR-TMPL-0422.tableCodeTakenByDeleted',   N'en', N'Table code "{tableCode}" on sheet "{sheetCode}" is taken by a deleted table: it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.maxDynamicRowsNotPositive', N'en', N'MaxDynamicRows must be positive; got {value}.', 1),
+    (N'err.ECR-TMPL-0422.maxDynamicRowsNeedsDynamicMode', N'en', N'MaxDynamicRows only makes sense where users add rows; table "{tableCode}" is in {rowMode} mode.', 1),
+    (N'err.ECR-TMPL-0422.tableIsDynamic',            N'en', N'Table "{tableCode}" is dynamic: its rows are created at runtime, not in the template.', 1),
+    (N'err.ECR-TMPL-0409.columnCodeTaken',           N'en', N'A column with code "{columnCode}" already exists in table "{tableCode}".', 1),
+    (N'err.ECR-TMPL-0409.rowKeyTaken',               N'en', N'A row with key "{rowKey}" already exists in table "{tableCode}".', 1),
+    (N'err.ECR-TMPL-0409.headerFieldCodeTaken',      N'en', N'A header field with code "{headerFieldCode}" already exists in this template version.', 1),
+
+    -- Поля шапки документа (foundation): той самий draft->publish шлях, що
+    -- колонки таблиці, тому подробиці — під ECR-TMPL-0422/0404, як у колонок.
+    (N'err.ECR-TMPL-0422.headerFieldTypeNotAllowed',            N'en', N'A document header field cannot have type {dataType}: the header stores an entered value, it does not compute one.', 1),
+    (N'err.ECR-TMPL-0422.headerFieldLookupRequiresLookupType',  N'en', N'A registry can only be attached to a Lookup header field; field "{headerFieldCode}" has type {dataType}.', 1),
+    (N'err.ECR-TMPL-0422.headerFieldCodeTakenByDeleted',        N'en', N'Header field code "{headerFieldCode}" is taken by a deleted field: document values still reference it by code, so it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.headerFieldDataTypeImmutable',         N'en', N'The data type of header field "{headerFieldCode}" cannot change after creation ({oldDataType} -> {newDataType}). Create a new field or clone the version.', 1),
+    (N'err.ECR-HDR-0404.headerField',                N'en', N'Header field "{headerFieldCode}" does not exist in this document''s template version.', 1),
+    (N'err.ECR-HDR-0422.validationBlocked',          N'en', N'The value for header field "{headerFieldCode}" does not match its type or required setting.', 1),
+    (N'err.ECR-HDR-0422.typeMismatch',               N'en', N'Header field "{headerFieldCode}" expects a {expected}.', 1),
+
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
 
@@ -998,6 +1040,14 @@ USING (VALUES
     (N'err.ECR-PRD-0422.periodNotInProject',    N'en', N'Period {periodId} does not belong to project "{projectCode}".', 1),
     (N'err.ECR-PRD-0422.pinReasonRequired',     N'en', N'A reason is required to pin the current period.', 1),
     (N'err.ECR-PRD-0409.timeZoneLocked',        N'en', N'The site time zone cannot be changed once the first period has been opened.', 1),
+    -- Борг локалізації (ProjectQueryHandlers.cs): перелік, створення й
+    -- перехід стану проєкту, CRUD політик періодів.
+    (N'err.ECR-PRD-4091.code',                  N'en', N'A period policy with code "{code}" already exists.', 1),
+    (N'err.ECR-TMPL-0404.versionRequired',      N'en', N'A project cannot be created without a template version.', 1),
+    (N'err.ECR-PRD-0422.periodPolicyRequired',  N'en', N'A project cannot be created without a period policy.', 1),
+    (N'err.ECR-PRJ-0422.notDraft',              N'en', N'Only a draft can be activated; the project is in state {status}.', 1),
+    (N'err.ECR-PRJ-0422.noPeriods',             N'en', N'The calendar of project {projectId} produced no period: check the period kind, the reporting year and the offset policy.', 1),
+    (N'err.ECR-PRD-0409.openPeriods',           N'en', N'Project {projectId} has periods that are not closed: archiving is not possible.', 1),
     (N'err.ECR-PRD-4225.graceAfterHardClose',   N'en', N'The grace period ({graceOffsetDays} days) cannot be longer than the hard close ({hardCloseOffsetDays} days): the period would close for good before its own grace period ends.', 1),
     (N'err.ECR-PRD-4225.negativeYearGrace',     N'en', N'The year-end grace period ({yearGraceOffsetDays} days) cannot be negative.', 1),
     -- BE-25: only a never-published, never-used methodology version can be deleted.
@@ -1125,6 +1175,8 @@ USING (VALUES
     (N'err.ECR-CELL-4221',  N'en', N'The cell is computed', 1),
     (N'err.ECR-CELL-4222',  N'en', N'Value out of range', 1),
     (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry', 1),
+    (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
+    (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
     (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),
 
     -- Періоди і проєкти.
@@ -1248,6 +1300,18 @@ USING (VALUES
     (N'document.validationColumn',       N'en', N'Column', 1),
     (N'document.validationRule',         N'en', N'Rule', 1),
     (N'document.validationMessage',      N'en', N'What is wrong', 1),
+    -- Шапка документа (GET/PATCH …/header). Lookup-поле показує НАЗВУ запису
+    -- довідника: значення шапки тепер несе `lookupRegistryDefId` (`4f167396`),
+    -- тож клієнт резолвить запис тим самим способом, що й комірка сітки.
+    -- ⚠ `lookupHint` лишився ФОЛБЕКОМ: поле без `lookupRegistryDefId` нема за
+    -- чим резолвити, і тоді воно чесно просить ідентифікатор замість того, щоб
+    -- показувати порожній список. `lookupEmpty` — про порожній довідник, а не
+    -- про «нічого не знайдено за запитом».
+    (N'document.header.title',           N'en', N'Document header', 1),
+    (N'document.header.saved',           N'en', N'Header saved.', 1),
+    (N'document.header.lookupHint',      N'en', N'Registry entry ID', 1),
+    (N'document.header.lookupLoading',   N'en', N'Directory is loading…', 1),
+    (N'document.header.lookupEmpty',     N'en', N'Directory has no entries', 1),
     -- Відновлення незбережених правок на екрані документа (ФВ-3.6, D14-12).
     -- ⚠ `partial` називає різницю вголос: у слід вміщається не все, і мовчазне
     -- «відновити N» там, де правок було більше, — та сама тиха втрата.
@@ -1297,6 +1361,10 @@ USING (VALUES
     (N'document.compareAdded',           N'en', N'new', 1),
     (N'document.compareRemovedTitle',    N'en', N'Rows removed', 1),
     (N'document.compareRemoved',         N'en', N'removed', 1),
+    -- Окремий блок змін шапки документа (ФВ-9.4): назву поля беремо з
+    -- визначення шапки, а якщо його там немає — показуємо код як є.
+    (N'document.compareHeaderTitle',     N'en', N'Header fields', 1),
+    (N'document.compareField',           N'en', N'Field', 1),
     (N'document.compareTruncatedTitle',  N'en', N'Not everything is shown', 1),
     (N'document.compareTruncatedHint',   N'en', N'The server stopped at {changes} changed cell(s), {added} added and {removed} removed row(s); more may exist.', 1),
     (N'grid.loading',                    N'en', N'Loading the table...', 1),
@@ -3078,6 +3146,33 @@ USING (VALUES
     (N'columns.errCodeInvalid',          N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
     (N'columns.errHeader',               N'en', N'Give the column a header in at least one language.', 1),
     (N'columns.errScale',                N'en', N'Scale cannot exceed precision.', 1),
+
+    -- Поля шапки версії шаблону (header-fields). Редактор — 1:1 зразок
+    -- редактора колонки вище, тому й тексти ті самі за змістом.
+    -- ⚠ Видалення поля шапки в контракті НЕМАЄ, тож ключа під нього теж нема:
+    -- порядок і обов'язковість змінюються правкою, а не стиранням.
+    (N'headerFields.title',              N'en', N'Header fields', 1),
+    (N'headerFields.add',                N'en', N'Add header field', 1),
+    (N'headerFields.edit',               N'en', N'Edit', 1),
+    (N'headerFields.code',               N'en', N'Code', 1),
+    (N'headerFields.codeHint',           N'en', N'The address of the field in the API. It cannot be renamed later.', 1),
+    (N'headerFields.label',              N'en', N'Label', 1),
+    (N'headerFields.labelHint',          N'en', N'Shown to the person filling in the form.', 1),
+    (N'headerFields.dataType',           N'en', N'Data type', 1),
+    (N'headerFields.dataTypeHint',       N'en', N'Fixed once the field is created: changing it would reinterpret values already entered.', 1),
+    (N'headerFields.ordinal',            N'en', N'Order', 1),
+    (N'headerFields.ordinalHint',        N'en', N'Display order only — not an identity; nothing refers to it.', 1),
+    (N'headerFields.required',           N'en', N'Required', 1),
+    (N'headerFields.lookupRegistryDefId', N'en', N'Registry', 1),
+    (N'headerFields.lookupRegistryDefIdHint', N'en', N'The registry this field looks values up from.', 1),
+    (N'headerFields.lookupRegistryDefIdEmpty', N'en', N'No registries found', 1),
+    (N'headerFields.empty',              N'en', N'No header fields yet.', 1),
+    (N'headerFields.save',               N'en', N'Save field', 1),
+    (N'headerFields.saved',              N'en', N'The header field has been saved.', 1),
+    (N'headerFields.errCode',            N'en', N'Give the field a code: it is how the field is addressed.', 1),
+    (N'headerFields.errCodeInvalid',     N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
+    (N'headerFields.errLabel',           N'en', N'Give the field a label in at least one language.', 1),
+    (N'headerFields.errLookupRequired',  N'en', N'Pick a registry for a Lookup field.', 1),
 
     -- ⛔ Обидві причини доти падали в `default` у `blockerLabel` і показувалися
     -- ГОЛИМ кодом (`StyleCode`, `StyleFontSize`) — тобто людина бачила слово з

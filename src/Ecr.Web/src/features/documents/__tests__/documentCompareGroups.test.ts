@@ -3,6 +3,7 @@ import {
   compareCellDisplay,
   compareCellText,
   groupCompareByTable,
+  headerFieldLabel,
   isCompareEmpty,
 } from '@/features/documents/documentCompareGroups';
 import {
@@ -11,10 +12,16 @@ import {
   documentVersionsUrl,
   type CellChange,
   type DocumentCompare,
+  type HeaderFieldChange,
 } from '@/features/documents/documentVersionsApi';
 
 /** Комірка зі значенням і типом — коротко, з дефолтом `null` для обох. */
 function cell(patch: Partial<CellChange> & Pick<CellChange, 'tableCode' | 'rowKey' | 'columnCode'>): CellChange {
+  return { oldValue: null, newValue: null, oldType: null, newType: null, ...patch };
+}
+
+/** Зміна поля шапки — коротко, з дефолтом `null` для обох типів (ФВ-9.4). */
+function headerChange(patch: Partial<HeaderFieldChange> & Pick<HeaderFieldChange, 'code'>): HeaderFieldChange {
   return { oldValue: null, newValue: null, oldType: null, newType: null, ...patch };
 }
 
@@ -36,6 +43,7 @@ function compare(patch: Partial<DocumentCompare>): DocumentCompare {
     addedRows: [],
     removedRows: [],
     truncated: false,
+    headerChanges: [],
     ...patch,
   };
 }
@@ -92,15 +100,21 @@ describe('groupCompareByTable: різниця по таблицях', () => {
   });
 });
 
-describe('isCompareEmpty: «версії однакові» — це всі ТРИ переліки', () => {
+describe('isCompareEmpty: «версії однакові» — це всі ЧОТИРИ переліки', () => {
   it('усе порожнє — однакові', () => {
     expect(isCompareEmpty(compare({}))).toBe(true);
   });
 
   /*
-   * ⛔ Три окремі випадки, бо мутація «дивитись лише на changes» — саме та, що
-   * напрошується: версія, у якій рядок зник, а жодне число не змінилося,
+   * ⛔ Чотири окремі випадки, бо мутація «дивитись лише на changes» — саме та,
+   * що напрошується: версія, у якій рядок зник, а жодне число не змінилося,
    * оголошувалася б однаковою, і людина не дізналася б про втрачений рядок.
+   *
+   * ⛔ Мутаційний доказ (ФВ-9.4): версія, у якій змінилась ЛИШЕ шапка —
+   * `changes`/`addedRows`/`removedRows` порожні, `headerChanges` непорожній —
+   * ловить мутацію старого `isCompareEmpty` (без урахування `headerChanges`):
+   * без цього рядка тест `'зміна лише шапки'` нижче лишався б зеленим, навіть
+   * якби `headerChanges.length` прибрали з умови зовсім.
    */
   it.each([
     [
@@ -111,8 +125,30 @@ describe('isCompareEmpty: «версії однакові» — це всі ТР
     ],
     ['доданий рядок', compare({ addedRows: [{ rowId: 5, tableCode: 'T1', rowKey: 'r9' }] })],
     ['видалений рядок', compare({ removedRows: [{ rowId: 6, tableCode: 'T1', rowKey: 'r0' }] })],
+    [
+      'зміна лише шапки',
+      compare({ headerChanges: [headerChange({ code: 'HDR1', oldValue: '1', newValue: '2' })] }),
+    ],
   ])('%s — версії НЕ однакові', (_name, value) => {
     expect(isCompareEmpty(value)).toBe(false);
+  });
+});
+
+describe('headerFieldLabel: людська назва поля шапки, код — фолбек', () => {
+  it('поле є в мапі — людська назва', () => {
+    const labelByCode = new Map([['HDR1', 'Дата затвердження']]);
+
+    expect(headerFieldLabel(labelByCode, 'HDR1')).toBe('Дата затвердження');
+  });
+
+  /*
+   * ⛔ Мутаційний доказ: поле, прибране з версії шаблону (код є в
+   * `headerChanges`, немає серед живих полів — тобто немає в мапі), — код
+   * ТЕКСТОМ, а не падіння чи порожнеча. Той самий сценарій, що для резолву
+   * ще не прийшов (мапа порожня, поки триває запит).
+   */
+  it('поля немає в мапі (прибрали з версії шаблону, або резолв ще не прийшов) — сам код', () => {
+    expect(headerFieldLabel(new Map(), 'HDR_REMOVED')).toBe('HDR_REMOVED');
   });
 });
 

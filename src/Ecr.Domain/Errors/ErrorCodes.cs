@@ -226,6 +226,21 @@ public static class ErrorCodes
     /// </remarks>
     public const string CellRegistryEntryMissing = "ECR-CELL-4223";
 
+    /// <summary>
+    /// Код у <c>PATCH …/documents/{id}/header</c> не відповідає жодному полю
+    /// шапки версії шаблону цього документа.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окрема родина <c>HDR</c>, а не запозичений <see cref="CellInvalid"/>
+    /// чи <see cref="TemplateNotFound"/>: суб'єкт відмови — поле шапки
+    /// ДОКУМЕНТА, інший маршрут на клієнті, ніж коміркова сітка чи адмін
+    /// структури шаблону.
+    /// </remarks>
+    public const string HeaderFieldNotFound = "ECR-HDR-0404";
+
+    /// <summary>Значення поля шапки документа не відповідає типу чи обов'язковості.</summary>
+    public const string HeaderValueInvalid = "ECR-HDR-0422";
+
     // Періоди і проєкти
     public const string PeriodClosed = "ECR-PRD-0409";
     public const string PeriodOutOfProject = "ECR-PRD-0422";

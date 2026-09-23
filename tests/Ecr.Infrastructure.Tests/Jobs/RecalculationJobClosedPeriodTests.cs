@@ -9,6 +9,7 @@ using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
@@ -50,6 +51,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
     private readonly IMetadataCache _metadata = Substitute.For<IMetadataCache>();
     private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -460,9 +462,20 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             _versions,
             new RealFormulaEngine(),
             units,
+            Substitute.For<IRegistryStore>(),
+            _headers,
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
             uow);
+    }
+
+    /// <summary>Порожня шапка документа — тести цього файлу її не читають.</summary>
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
     }
 
     private static RunCalculationHandler RunHandler()

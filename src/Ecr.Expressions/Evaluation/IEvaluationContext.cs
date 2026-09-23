@@ -44,6 +44,30 @@ public interface IEvaluationContext
     /// <summary>Поле шапки документа (<c>HDR.Name</c>).</summary>
     public ExpressionValue GetHeader(string name);
 
+    /// <summary>
+    /// Значення поля запису довідника (<c>REGFIELD(lookup, 'код')</c>);
+    /// <paramref name="registryEntryId"/> — id запису, узятий зі значення
+    /// Lookup-комірки тим самим шляхом, яким комірки взагалі читаються у
+    /// формулах (звичайний аргумент функції), а не новим механізмом.
+    /// </summary>
+    /// <param name="registryEntryId">Запис довідника.</param>
+    /// <param name="fieldCode">Код поля (<c>RegistryFieldDef.Code</c>).</param>
+    /// <returns>
+    /// Типізоване значення поля; запису чи поля немає — <c>#REF</c> (той самий
+    /// код, яким рушій вже позначає нерезолвлене посилання).
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Замовчування — <c>#REF</c>, а не виняток чи <c>NotImplementedException</c>
+    /// (той самий принцип, що <c>ITypeContext.GetConstantType</c> у <c>Binding</c>).
+    /// Діалекти й контексти, які документа не бачать за побудовою (методологія,
+    /// діалект звітів), успадковують цю відмову без окремого перевизначення —
+    /// так само, як вони вже відмовляють у <see cref="GetCell"/> і
+    /// <see cref="GetHeader"/>. Контексти, де реєстр справді доступний
+    /// (шаблон, правила валідації), перевизначають метод реальними даними.
+    /// </remarks>
+    public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
+        => ExpressionValue.Error(ExpressionErrors.BadReference);
+
     /// <summary>Календарний контекст. Значення залежать від <c>CalendarMode</c> (D-78).</summary>
     public PeriodContext Period { get; }
 

@@ -11,7 +11,7 @@ import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import {
   type ColumnBlocker,
   type ColumnDraft,
-  EditableDataTypes,
+  EditableColumnDataTypes,
   whyCannotSaveColumn,
 } from './column';
 import { emptyStyleDraft, styleDraftOf, type StyleDefDto } from './style';
@@ -158,7 +158,7 @@ export function ColumnEditor({
       <Select
         label={t('columns.dataType')}
         description={t('columns.dataTypeHint')}
-        data={EditableDataTypes}
+        data={EditableColumnDataTypes}
         value={draft.dataType}
         disabled={disabled || !draft.isNew}
         allowDeselect={false}

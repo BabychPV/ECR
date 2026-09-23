@@ -68,6 +68,7 @@ public static class DependencyInjection
 
         services.AddScoped<ICellStore, NormalizedCellStore>();
         services.AddScoped<IRowStore, RowStore>();
+        services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();
         services.AddScoped<ITableFillStore, TableFillStore>();
         services.AddScoped<IDocumentListSummaryStore, DocumentListSummaryStore>();
         services.AddScoped<ICampaignSummaryStore, CampaignSummaryStore>();

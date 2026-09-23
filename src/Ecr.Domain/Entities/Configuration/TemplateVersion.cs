@@ -15,6 +15,7 @@ namespace Ecr.Domain.Entities.Configuration;
 public sealed class TemplateVersion : Entity<int>
 {
     private readonly List<SheetDef> _sheets = [];
+    private readonly List<HeaderFieldDef> _headerFields = [];
 
     private TemplateVersion() { }
 
@@ -45,6 +46,9 @@ public sealed class TemplateVersion : Entity<int>
     public int CreatedByUserId { get; private set; }
 
     public IReadOnlyList<SheetDef> Sheets => _sheets;
+
+    /// <summary>Поля шапки документа — рівень усього документа, не таблиці.</summary>
+    public IReadOnlyList<HeaderFieldDef> HeaderFields => _headerFields;
 
     /// <summary>Чи заборонені структурні зміни.</summary>
     public bool IsStructurallyFrozen => Status is TemplateVersionStatus.Published or TemplateVersionStatus.Deprecated;
@@ -175,5 +179,36 @@ public sealed class TemplateVersion : Entity<int>
         }
 
         _sheets.Add(sheet);
+    }
+
+    /// <summary>Додає поле шапки до версії.</summary>
+    /// <remarks>
+    /// ⚠ Той самий контракт, що <see cref="AddSheet"/>: код поля — його
+    /// ідентичність і адреса в <c>PUT …/header-fields/{code}</c>. Унікальність
+    /// перевіряється серед УСІХ полів, включно з м'яко видаленими (той самий
+    /// вибір, що <c>TableDef.AddColumn</c>) — «звільнити» код видаленого поля
+    /// свідомо не можна на рівні домену; окрему, пояснювальну відмову для
+    /// цього випадку дає <c>SaveHeaderFieldDefHandler</c> ДО виклику цього
+    /// методу, тому сюди запит із кодом видаленого поля не доходить узагалі.
+    /// </remarks>
+    /// <exception cref="DomainException">Поле з таким кодом уже є у версії.</exception>
+    public void AddHeaderField(HeaderFieldDef field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+
+        if (_headerFields.Any(f => string.Equals(f.Code, field.Code, StringComparison.Ordinal)))
+        {
+            throw new DomainException(
+                "ECR-TMPL-0409",
+                $"Поле шапки з кодом {field.Code} у версії {Version} уже існує: код — це ідентичність, " +
+                "на нього посилається адреса PUT-запиту.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.headerFieldCodeTaken",
+                    ["headerFieldCode"] = field.Code,
+                });
+        }
+
+        _headerFields.Add(field);
     }
 }

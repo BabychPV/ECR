@@ -9,6 +9,7 @@ using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Expressions.Evaluation;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -35,6 +36,10 @@ public sealed class PatchCellsTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
+
+    /// <summary>Шапка документа — тести цього файлу її не читають.</summary>
+    private readonly IDocumentHeaderStore _headers = CreateHeaderStore();
+
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 
     /// <summary>Читач журналу — джерело автора й часу чужої правки (`BE-06`).</summary>
@@ -163,7 +168,15 @@ public sealed class PatchCellsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _audit, _auditReader, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock);
+
+    private static IDocumentHeaderStore CreateHeaderStore()
+    {
+        var store = Substitute.For<IDocumentHeaderStore>();
+        store.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<string, ExpressionValue>());
+        return store;
+    }
 
     /// <summary>Відповідь служби доступу на створення рядків.</summary>
     /// <param name="keys">Ключі, про які питали.</param>

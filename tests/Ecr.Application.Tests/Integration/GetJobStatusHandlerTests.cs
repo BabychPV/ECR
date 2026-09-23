@@ -83,6 +83,23 @@ public sealed class GetJobStatusHandlerTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public async Task Анонім_без_ідентифікатора_користувача_відхиляється_до_будь_якого_запиту_до_задач()
+    {
+        _user.UserId.Returns((int?)null);
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync(JobId, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0401", denied.ErrorCode);
+        Assert.Equal("err.ECR-AUTH-0401.anonymous", denied.Details!["messageKey"]);
+
+        // ⛔ Автентифікація перевіряється ДО звернення до планувальника —
+        // анонім не має отримувати жодної відомості про існування задачі.
+        await _jobs.DidNotReceive().GetStatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Невідома_задача_дає_404_а_не_403_без_права()
     {
         _user.UserId.Returns(Stranger);

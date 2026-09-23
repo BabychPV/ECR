@@ -3,7 +3,12 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentVersionCompare } from '@/features/documents/DocumentVersionCompare';
-import type { CellChange, DocumentCompare } from '@/features/documents/documentVersionsApi';
+import type {
+  CellChange,
+  DocumentCompare,
+  DocumentHeaderField,
+  HeaderFieldChange,
+} from '@/features/documents/documentVersionsApi';
 import { loadCatalog, resetMissingReports } from '@/shared/i18n';
 import { testTheme } from '@/test/render';
 
@@ -51,6 +56,8 @@ const Strings: Record<string, string> = {
     'The server stopped at {changes} changed cell(s), {added} added and {removed} removed row(s); more may exist.',
   'document.compareBoolYes': 'Yes',
   'document.compareBoolNo': 'No',
+  'document.compareHeaderTitle': 'Header fields',
+  'document.compareField': 'Field',
   'state.errorTitle': 'The request failed',
   'state.errorUnknown': 'An unexpected error occurred.',
   'common.retry': 'Retry',
@@ -71,6 +78,7 @@ function compareBody(patch: Partial<DocumentCompare>): DocumentCompare {
     addedRows: [],
     removedRows: [],
     truncated: false,
+    headerChanges: [],
     ...patch,
   };
 }
@@ -78,6 +86,27 @@ function compareBody(patch: Partial<DocumentCompare>): DocumentCompare {
 /** Змінена комірка — коротко, з дефолтом `null` для обох типів (`oldType`/`newType`). */
 function cell(patch: Partial<CellChange> & Pick<CellChange, 'tableCode' | 'rowKey' | 'columnCode'>): CellChange {
   return { oldValue: null, newValue: null, oldType: null, newType: null, ...patch };
+}
+
+/** Зміна поля шапки — коротко, з дефолтом `null` для обох типів (ФВ-9.4). */
+function headerChange(
+  patch: Partial<HeaderFieldChange> & Pick<HeaderFieldChange, 'code'>,
+): HeaderFieldChange {
+  return { oldValue: null, newValue: null, oldType: null, newType: null, ...patch };
+}
+
+/** Поле шапки поточної версії шаблону (`GET …/header`) — лише те, що читає резолв назви. */
+function headerField(
+  patch: Partial<DocumentHeaderField> & Pick<DocumentHeaderField, 'code'>,
+): DocumentHeaderField {
+  return {
+    headerFieldDefId: 1,
+    dataType: 'String',
+    isRequired: false,
+    label: { values: {} },
+    value: null,
+    ...patch,
+  };
 }
 
 /** Відмова сервера у форматі `EcrProblemDetails`. */
@@ -89,6 +118,7 @@ interface Refusal {
 function mockApi(
   compare: DocumentCompare | Refusal,
   versions: unknown = Versions,
+  headerFields: readonly DocumentHeaderField[] = [],
 ): { calls: string[] } {
   const calls: string[] = [];
 
@@ -130,6 +160,16 @@ function mockApi(
         }
 
         return json(compare);
+      }
+
+      // ⚠ Резолв назви поля шапки (`HeaderChangesBlock`, ФВ-9.4): не
+      // `/documents/{id}/compare` і не `/documents/{id}/versions`, а окремий
+      // `GET …/documents/{id}/header` — перевірка на `/compare`/`/versions`
+      // вище не зачепить це заодно, тому власна гілка.
+      if (url.includes('/header') && method === 'GET') {
+        calls.push(url);
+
+        return json({ fields: headerFields });
       }
 
       throw new Error(`Немає мока для ${method} ${url}`);
@@ -379,6 +419,108 @@ describe('Порівняння версій: що показано', () => {
     await screen.findByTestId('document-compare-changes');
 
     expect(changeRows()).toEqual(['r1|C1|true|false']);
+  }, 60_000);
+});
+
+/**
+ * Зміни полів шапки документа (`ФВ-9.4`): блок `HeaderChangesBlock`.
+ *
+ * ⛔ Три твердження, кожне зі своєю мутацією:
+ *  1. блок стоїть ПЕРЕД таблицями (порядок, той самий, що `DocumentHeaderPanel`
+ *     перед `SheetFillSummary` на самій сторінці документа);
+ *  2. код поля резолвиться в людську назву через `GET …/header` — не сирий код;
+ *  3. поле, прибране з версії шаблону (код є в `headerChanges`, немає серед
+ *     живих полів), — код текстом, а не падіння чи порожнеча.
+ *
+ * ⚠ Непорожній `headerChanges` — сам собою мутаційний доказ на `isCompareEmpty`
+ * (юніт-тест у `documentCompareGroups.test.ts`); тут — те саме поведінково,
+ * на екрані: «версії однакові» не показується.
+ */
+describe('Порівняння версій: зміни шапки документа (ФВ-9.4)', () => {
+  it('блок шапки — ПЕРЕД таблицями (порядок у DOM)', async () => {
+    mockApi(
+      compareBody({
+        changes: [cell({ tableCode: 'T1', rowKey: 'r1', columnCode: 'C1', oldValue: '1', newValue: '2' })],
+        headerChanges: [headerChange({ code: 'HDR1', oldValue: 'Draft', newValue: 'Final' })],
+      }),
+      Versions,
+      [headerField({ code: 'HDR1', label: { values: { en: 'Approval date' } } })],
+    );
+    await show();
+    await runCompare();
+
+    await screen.findByTestId('document-compare-header-changes');
+    screen.getByTestId('document-compare-changes');
+
+    // ⛔ Мутація порядку (таблиці перед шапкою) валить це: перевіряється
+    // ПОРЯДОК появи обох блоків у DOM, а не лише факт, що обидва є.
+    const order = Array.from(
+      document.querySelectorAll(
+        '[data-testid="document-compare-header-changes"], [data-testid="document-compare-changes"]',
+      ),
+    ).map((el) => el.getAttribute('data-testid'));
+
+    expect(order).toEqual(['document-compare-header-changes', 'document-compare-changes']);
+  }, 60_000);
+
+  it('код поля резолвиться в людську назву, не сирий код', async () => {
+    mockApi(
+      compareBody({
+        headerChanges: [headerChange({ code: 'HDR1', oldValue: 'Draft', newValue: 'Final' })],
+      }),
+      Versions,
+      [headerField({ code: 'HDR1', label: { values: { en: 'Approval date' } } })],
+    );
+    await show();
+    await runCompare();
+
+    // ⚠ `findByText`, а не `findByTestId` + синхронна перевірка: резолв назви —
+    // ОКРЕМИЙ запит (`useDocumentHeaderFields`), що приходить ПІЗНІШЕ за перший
+    // малюнок блоку (фолбек на код, доки він триває) — `findByTestId` тут
+    // побачив би рядок ще з кодом замість назви й дав хибний зелений.
+    await screen.findByText('Approval date');
+
+    const row = screen.getByTestId('document-compare-header-changes');
+
+    // ⛔ Мутація «показати код замість назви» валить це: рядок ніс би «HDR1»
+    // замість «Approval date».
+    expect(row.textContent ?? '').not.toContain('HDR1');
+  }, 60_000);
+
+  it('поле, прибране з версії шаблону, — показано сирий код, а не падіння', async () => {
+    mockApi(
+      compareBody({
+        headerChanges: [headerChange({ code: 'HDR_GONE', oldValue: 'Draft', newValue: 'Final' })],
+      }),
+      Versions,
+      // ⚠ Жодного визначення серед живих полів — код «прибраний» з поточної
+      // версії шаблону, і резолв фолбекає на сам код.
+      [],
+    );
+    await show();
+    await runCompare();
+
+    const row = await screen.findByTestId('document-compare-header-changes');
+    expect(row.textContent ?? '').toContain('HDR_GONE');
+  }, 60_000);
+
+  it('зміна ЛИШЕ шапки — «версії однакові» НЕ показується', async () => {
+    mockApi(
+      compareBody({
+        headerChanges: [headerChange({ code: 'HDR1', oldValue: 'Draft', newValue: 'Final' })],
+      }),
+      Versions,
+      [headerField({ code: 'HDR1', label: { values: { en: 'Approval date' } } })],
+    );
+    await show();
+    await runCompare();
+
+    await screen.findByTestId('document-compare-header-changes');
+
+    // ⛔ Мутаційний доказ поведінково (юніт-доказ — `documentCompareGroups.test.ts`):
+    // непорожній `headerChanges` при порожніх `changes`/`addedRows`/`removedRows`
+    // не повинен показувати «версії однакові».
+    expect(screen.queryByTestId('document-compare-identical')).toBeNull();
   }, 60_000);
 });
 

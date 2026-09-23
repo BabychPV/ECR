@@ -2,7 +2,9 @@ using Ecr.Application.Ports;
 using Ecr.Application.Templates;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Expressions;
+using Ecr.Expressions.Binding;
 using Ecr.Expressions.Parsing;
 using Ecr.TestKit;
 using Xunit;
@@ -285,6 +287,70 @@ public sealed class PublishChecksTests
     }
 
     [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public void Цикл_через_REGFIELD_виявляється_так_само_як_цикл_через_Cell()
+    {
+        // ⛔ Registry-ребро (`DependsOnKind = 2`) мусить брати участь у ТІЙ
+        // САМІЙ побудові топологічного порядку, що й Cell — `PublishChecks.
+        // DependsOn` не фільтрує за видом залежності, лише за адресою
+        // (TableDefId/RowKey/ColumnDefId). Формула на "Result" читає поле
+        // довідника через Lookup-колонку "Permit" (Registry-ребро), а формула
+        // на "Permit" читає назад "Result" (звичайне Cell-ребро) — справжній
+        // цикл, зібраний з ДВОХ різних видів залежності.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        var permit = builder.Column(table, "Permit", CellDataType.Lookup);
+        var result = builder.Column(table, "Result");
+        builder.Row(table, "7001001", 1);
+
+        var toResult = builder.Formula(table, "REGFIELD([Permit], 'Limit')", column: result);
+        var toPermit = builder.Formula(table, "[Result]", column: permit);
+
+        var version = builder.Version();
+        var text = Render(Run(version));
+
+        Assert.Contains(ExpressionErrors.Cycle, text, StringComparison.Ordinal);
+        Assert.Contains(
+            toResult.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            text, StringComparison.Ordinal);
+        Assert.Contains(
+            toPermit.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-2.9")]
+    public void REGFIELD_публікується_і_потрапляє_в_граф_залежностей_як_Registry()
+    {
+        // ⚠ «Коректно проходить перевірку залежностей» — тут буквально:
+        // публікація не дає жодного зауваження, а `PublishChecks.Dependencies`
+        // (та сама функція, що наповнює `cfg.FormulaDependency`) віддає
+        // Registry-запис поряд зі звичайним Cell для тієї самої Lookup-комірки.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main");
+        var permit = builder.Column(table, "Permit", CellDataType.Lookup);
+        var result = builder.Column(table, "Result");
+        builder.Row(table, "7001001", 1);
+        builder.Formula(table, "REGFIELD([Permit], 'Limit')", column: result);
+
+        var version = builder.Version();
+
+        Assert.Empty(Run(version));
+
+        var dependencies = PublishChecks.Dependencies(version, _engine);
+
+        Assert.Contains(dependencies, d => d.DependsOnKind == DependencyExtractor.KindCell && d.ColumnDefId == permit.Id);
+        var registry = Assert.Single(
+            dependencies, d => d.DependsOnKind == DependencyExtractor.KindRegistry);
+        Assert.Equal(permit.Id, registry.ColumnDefId);
+        Assert.Equal("Limit", registry.FilterJson);
+    }
+
+    [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait("Requirement", "ФВ-16.7")]
     public void Несумісні_одиниці_без_CONVERT_відхиляють_публікацію()
@@ -494,6 +560,92 @@ public sealed class PublishChecksTests
         Assert.NotEmpty(afterDelete);
         Assert.Contains(afterDelete, d => d.Code == ExpressionErrors.Unresolved);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Snapshot_переносить_HeaderFields_версії_а_не_лишає_їх_порожніми()
+    {
+        // ⛔ `TemplateVersionSnapshot.HeaderFields` — `init`-властивість із
+        // дефолтом `[]`, і виклик конструктора в `Snapshot()` її не
+        // встановлював: знімок публікації завжди бачив ПОРОЖНІЙ перелік полів
+        // шапки, навіть якщо `version.HeaderFields` реально мав записи. Цей
+        // тест — саме на межі `Snapshot()`, без формул і без резолвінгу.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        builder.Table(sheet, "Main");
+        var version = builder.Version();
+
+        version.AddHeaderField(HeaderField(version.Id, "Area"));
+
+        var snapshot = PublishChecks.Snapshot(version);
+
+        var field = Assert.Single(snapshot.HeaderFields);
+        Assert.Equal("Area", field.Code);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Snapshot_не_переносить_мяко_видалені_поля_шапки()
+    {
+        // Той самий фільтр, що вже застосовує `MetadataCache.LoadAsync` для
+        // рантайму (`Caching/MetadataCache.cs`, сьомий запит): публікація і
+        // рантайм мусять бачити ту саму шапку.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        builder.Table(sheet, "Main");
+        var version = builder.Version();
+
+        var field = HeaderField(version.Id, "Area");
+        version.AddHeaderField(field);
+        field.SoftDelete(userId: 1, DateTime.UtcNow);
+
+        var snapshot = PublishChecks.Snapshot(version);
+
+        Assert.Empty(snapshot.HeaderFields);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void HDR_з_невідомим_кодом_поля_відхиляє_публікацію()
+    {
+        // ⛔ Наскрізний доказ дефекту з опису задачі: `HDR("TYPO")` у формулі
+        // шаблону мусить зупинити ПУБЛІКАЦІЮ так само, як невідома таблиця чи
+        // колонка (`Посилання_на_неіснуючу_колонку_названо_поіменно` вище) —
+        // а не мовчки рахуватися як Null у рантаймі.
+        var fixture = Structure();
+        fixture.Version.AddHeaderField(HeaderField(fixture.Version.Id, "Area"));
+        fixture.Formula("HDR.TYPO");
+
+        var text = Render(Run(fixture.Version));
+
+        Assert.Contains("TYPO", text, StringComparison.Ordinal);
+        Assert.Contains(ExpressionErrors.Unresolved, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void HDR_з_відомим_кодом_поля_публікується_і_потрапляє_в_граф_залежностей()
+    {
+        // Друга половина, без якої перша нічого не означає: правильний код
+        // публікується без зауважень і дає Header-залежність
+        // (`DependsOnKind = 1`) у тому самому переліку, що йде в
+        // `cfg.FormulaDependency`.
+        var fixture = Structure();
+        fixture.Version.AddHeaderField(HeaderField(fixture.Version.Id, "Area"));
+        fixture.Formula("HDR.Area");
+
+        Assert.Empty(Run(fixture.Version));
+
+        var dependencies = PublishChecks.Dependencies(fixture.Version, _engine);
+        var header = Assert.Single(dependencies, d => d.DependsOnKind == DependencyExtractor.KindHeader);
+        Assert.Equal("Area", header.RowKey);
+    }
+
+    /// <summary>Поле шапки версії, типу String, для тестів HDR-резолвінгу.</summary>
+    private static HeaderFieldDef HeaderField(int templateVersionId, string code)
+        => new(
+            templateVersionId, EcrCode.Create(code),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = code }), ordinal: 1, CellDataType.String);
 
     private IReadOnlyList<ExpressionDiagnostic> Run(
         TemplateVersion version, UnitCatalogSnapshot? catalogue = null)
