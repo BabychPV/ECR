@@ -350,11 +350,59 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
   `ECR-PRJ-0404`/`ECR-PRJ-0422`, `ECR-PRD-0409`/`ECR-PRD-0422`/`ECR-PRD-4091`,
   `ECR-TMPL-0404` уже були нейтральними.
 
+## ✎ 2026-09-23: сито бачить фабрики — 140 → 146, і це НЕ регрес
+
+⛔ Як і 2026-09-18: у коді не з'явилося жодної нової відмови — стало чеснішим
+сито. `MessageKeyRatchetTests` рахував лише `throw new T(`, тож відмова, зібрана
+в методі-фабриці (`throw InvalidCredentials()`, `throw Mismatch(…)`,
+`?? throw Unavailable(…)`) чи повернута з `TryMap…` (`return new T(…)`), була
+для нього невидимою. Так найчастіша інтерактивна відмова — не той тип у комірці
+(`CellValueReader.Mismatch`) — і пережила перший зріз українською.
+
+**Нове правило:** місце — це СТВОРЕННЯ винятку одного з шести типів, а не рядок
+із `throw`: (1) кожне `new [Кваліфікатор.]T(` будь-де; (2) цільово-типізоване
+`new(` у позиції результату в тілі члена, оголошений тип повернення якого — T
+(`BusinessRuleException Invalid(…) => new(…)`). Коментарі замасковано. Боргом
+НЕ вважаються: переобгортка (`new T(error.ErrorCode, error.Message, details)` у
+`ExcelImporter.Blame` — текст написано й пораховано там, де виняток створено
+вперше) і кидок, чий локальний словник подробиць отримав `"messageKey"` в
+ініціалізаторі чи рядком нижче (`RecalculationWritePolicy.Reject`,
+`UserPreferenceHandlers.Invalid`).
+
+**Що знайшло розширене сито — 6 нових місць, 2 нові файли (140 у 60 → 146 у 62):**
+- `src/Ecr.Adapters.PiAf/CollectionRunner.cs` — 2, новий рядок: `return new
+  SourceAuthenticationException(…)` після відмови джерела в автентифікації і
+  фабрика `Unavailable(message, sourceEntityId)`, що її кидають три `?? throw`.
+- `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs` — 4 → 5: фабрика
+  `Unavailable(message) => new(…)` («Джерело N не існує або вимкнене.»).
+- `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` — 2 → 3: перша з
+  двох однойменних фабрик `NotFound(snapshotId)` («Зрізу N немає.»), друга вже з
+  ключем.
+- `src/Ecr.Infrastructure/Persistence/RowStore.cs` — 1, новий рядок:
+  `DuplicateRowKeyException(rowKeys)` («Рядок із ключем … уже існує»).
+- `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` — 1 → 2:
+  `TryMapDuplicateKey`, програна гонитва за `UQ_Document` (`DAT-09`).
+
+⚠ Чотири фабрики з опису задачі (`LoginHandler.InvalidCredentials`,
+`CellValueReader.Mismatch`/`Storable`, `HeaderValueReader.Storable`,
+`PatchCellsHandler.ColumnOf`) на момент заміру вже несли ключ — сито тепер
+бачить і їх, але боргу там немає. Лідирують за приростом адаптери PI
+(`CollectionRunner` + `PiSqlClientDataSource`, 3 з 6).
+
+⚠ Сторож плейсхолдерів (`Кожен_плейсхолдер_шаблону_має_підстановку_в_кидку`)
+лишився на старому ситі: розширене одразу знаходить
+`UnitOfWork.TryMapDuplicateKey` → `err.ECR-REG-0409.entryCodeTaken`, чий шаблон
+чекає `{id}`, а поля `["id"]` у кидку немає. Це виправлення самої відмови —
+окрема робота, після якої сторож розширюється тим самим рядком.
+
+Порівнювати 146 з 140 не можна — це різні заміри. Наступне порівняння — від 146.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
+| `src/Ecr.Adapters.PiAf/CollectionRunner.cs` | 2 |
 | `src/Ecr.Adapters.PiAf/PiAfCatalogReader.cs` | 2 |
-| `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs` | 4 |
+| `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs` | 5 |
 | `src/Ecr.Adapters.PiAf/PiWebApiDataSource.cs` | 4 |
 | `src/Ecr.Adapters.PiAf/SourceUnitConverter.cs` | 2 |
 | `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
@@ -370,7 +418,7 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
-| `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 2 |
+| `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 3 |
 | `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
 | `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
@@ -406,8 +454,9 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Infrastructure/Persistence/DocumentStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/PeriodStore.cs` | 1 |
+| `src/Ecr.Infrastructure/Persistence/RowStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/TemplateVersionStore.cs` | 8 |
-| `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` | 1 |
+| `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` | 2 |
 | `src/Ecr.Infrastructure/Persistence/WorkflowStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Security/AccessDecisionService.cs` | 1 |
 | `src/Ecr.Infrastructure/Security/SimulationService.cs` | 1 |
