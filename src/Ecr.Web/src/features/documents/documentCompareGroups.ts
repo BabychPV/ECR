@@ -82,15 +82,34 @@ export function groupCompareByTable(compare: DocumentCompare): TableDiff[] {
  * розбіжностей немає». Показати друге замість першого означало б запевнити
  * людину, що подання не змінювалося, хоча насправді його не порівнювали.
  *
- * ⚠ Усі три переліки разом, а не лише `changes`: версія, у якій РЯДОК зник, а
- * жодне число не змінилося, теж не однакова з попередньою.
+ * ⚠ Усі ЧОТИРИ переліки разом, а не лише `changes`: версія, у якій РЯДОК
+ * зник, а жодне число не змінилося, теж не однакова з попередньою — і так
+ * само версія, у якій змінилась ЛИШЕ шапка (`headerChanges`, `ФВ-9.4`), а
+ * жодна клітинка чи рядок таблиці не чіпалися.
  */
 export function isCompareEmpty(compare: DocumentCompare): boolean {
   return (
     compare.changes.length === 0 &&
     compare.addedRows.length === 0 &&
-    compare.removedRows.length === 0
+    compare.removedRows.length === 0 &&
+    compare.headerChanges.length === 0
   );
+}
+
+/**
+ * Людська назва поля шапки за кодом; сам код, якщо резолв ще не прийшов або
+ * поле прибрали з версії шаблону (`HeaderChangesBlock`, `DocumentVersionCompare.tsx`).
+ *
+ * ⚠ Мапа приходить ГОТОВОЮ (код → вже локалізована назва): сама `localized()`
+ * потребує контексту застосунку (мову), якого цей чистий модуль навмисно не
+ * має (той самий принцип, що тримає форматування дати/bool поза ним, —
+ * коментар `CompareValue` у `DocumentVersionCompare.tsx`).
+ */
+export function headerFieldLabel(
+  labelByCode: ReadonlyMap<string, string>,
+  code: string,
+): string {
+  return labelByCode.get(code) ?? code;
 }
 
 /** Що показуємо замість значення, якого немає. */
