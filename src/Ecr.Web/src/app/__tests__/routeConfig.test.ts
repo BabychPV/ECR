@@ -26,6 +26,21 @@ describe('app/routes — реєстр маршрутів', () => {
     expect(unique.size, 'два записи реєстру ведуть на ту саму адресу').toBe(paths.length);
   });
 
+  it('кожен маршрут /admin/* несе право — жоден адмін-екран не рендериться без гарда', () => {
+    // ⛔ Гард (`RouteGuard`) пропускає рендер наскрізь, коли `permission`
+    // не задано. Глибокі адреси шаблону, версії, зв'язків, конструктора
+    // довідника й версій методології жили саме так: користувач без права
+    // бачив шапку сторінки й сирі 403 під нею замість сторінки відмови
+    // (UX-прохід 2026-09-24). Правило тримає це для будь-якого нового
+    // адмін-маршруту, а не лише для п'яти виправлених.
+    const unguarded = routeList
+      .filter((route) => route.path.startsWith('/admin'))
+      .filter((route) => route.handle.permission === undefined)
+      .map((route) => route.path);
+
+    expect(unguarded).toEqual([]);
+  });
+
   it('ідентифікатори записів унікальні', () => {
     const ids = routeList.map((route) => route.id);
     const unique = new Set(ids);

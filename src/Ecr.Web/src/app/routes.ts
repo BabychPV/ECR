@@ -201,6 +201,11 @@ export const routes = {
     path: '/admin/templates/:id',
     handle: {
       labelKey: 'nav.templates',
+      // ⛔ Право — те, що сервер вимагає для ЧИТАННЯ шаблону (`Template.View`,
+      // `GetTemplateStructureHandler`). Без нього гард пропускав рендер, і
+      // користувач без права бачив шапку сторінки з двома сирими 403 під нею
+      // замість сторінки відмови з назвою права (UX-прохід 2026-09-24).
+      permission: 'Template.View',
       crumb: {
         ancestorIds: ['admin-templates'],
         resolveParam: 'id',
@@ -213,6 +218,7 @@ export const routes = {
     path: '/admin/templates/:id/versions/:versionId',
     handle: {
       labelKey: 'version.title',
+      permission: 'Template.View',
       crumb: { resolveParam: 'versionId', resolveWith: 'templateVersionLabel' },
       // ⚠ `skeletonShape: 'form'` (`PR nav-arch #6`) — найглибший (3 рівні)
       // представницький маршрут: сама сторінка вже позначає власний
@@ -230,7 +236,11 @@ export const routes = {
     // дає крихти версії для цього маршруту. Без цього поля людина бачила б
     // «Шаблон / Зв'язки» замість «Шаблон / Версія / Зв'язки» — саме той
     // четвертий рівень, на якому директива вимагає перевірити усічення.
-    handle: { labelKey: 'tables.relationsTitle', crumb: { ancestorIds: ['admin-template-version'] } },
+    handle: {
+      labelKey: 'tables.relationsTitle',
+      permission: 'Template.View',
+      crumb: { ancestorIds: ['admin-template-version'] },
+    },
   },
   adminRegistries: {
     id: 'admin-registries',
@@ -243,6 +253,8 @@ export const routes = {
     path: '/admin/registries/:code/definition',
     handle: {
       labelKey: 'registries.constructor',
+      // Читання визначення — `Registry.View` (`RegistryDefinitionHandlers`).
+      permission: 'Registry.View',
       crumb: {
         ancestorIds: ['admin-registries'],
         resolveParam: 'code',
@@ -259,7 +271,7 @@ export const routes = {
   adminMethodologyVersions: {
     id: 'admin-methodology-versions',
     path: '/admin/methodologies/:id/versions',
-    handle: { labelKey: 'methodologies.versionsTitle' },
+    handle: { labelKey: 'methodologies.versionsTitle', permission: 'Calculation.View' },
   },
   adminExpressions: {
     id: 'admin-expressions',
