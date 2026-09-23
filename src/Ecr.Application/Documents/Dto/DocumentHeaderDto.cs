@@ -15,13 +15,26 @@ namespace Ecr.Application.Documents.Dto;
 /// (не розрізняє «ще не заповнили» і «явно стерли» — те саме спрощення,
 /// що вже діє для <c>GET …/tables/{id}</c>).
 /// </param>
+/// <param name="LookupRegistryDefId">
+/// Довідник поля — лише для <see cref="CellDataType.Lookup"/>, інакше
+/// <c>null</c>. Той самий контракт, що <c>HeaderFieldDefDto</c>
+/// (<c>GET …/template-versions/{id}/header-fields</c>): без цього поля
+/// клієнт не може показати значення шапки повноцінним lookup-picker'ом,
+/// як для Lookup-комірок сітки, — лише сире <c>ValueRegistryEntryId</c>.
+/// ⚠ Людської назви обраного запису DTO НЕ несе: для звичайних
+/// Lookup-комірок сітки (<c>RowDto.Cells</c>) такого поля теж немає —
+/// клієнт резолвить назву сам через окремий виклик реєстру
+/// (<c>LookupCellEditor</c> + <c>RegistryEntryDto[]</c>), тож вигадувати
+/// новий формат саме тут означало б розійтися із симетрією.
+/// </param>
 public sealed record DocumentHeaderFieldDto(
     int HeaderFieldDefId,
     string Code,
     LocalizedText Label,
     CellDataType DataType,
     bool IsRequired,
-    object? Value);
+    object? Value,
+    int? LookupRegistryDefId = null);
 
 /// <summary>Шапка документа: усі поля версії шаблону з поточними значеннями.</summary>
 /// <param name="Fields">Поля в порядку <c>Ordinal</c>.</param>

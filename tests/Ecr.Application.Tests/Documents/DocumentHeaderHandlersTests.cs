@@ -41,8 +41,16 @@ public sealed class DocumentHeaderHandlersTests
         TemplateVersionId, EcrCode.Create("Count"),
         new LocalizedText(new Dictionary<string, string> { ["en"] = "Count" }), 1, CellDataType.Int);
 
+    private const int PermitRegistryDefId = 7;
+
+    private readonly HeaderFieldDef _permit = new(
+        TemplateVersionId, EcrCode.Create("Permit"),
+        new LocalizedText(new Dictionary<string, string> { ["en"] = "Permit" }), 2, CellDataType.Lookup);
+
     public DocumentHeaderHandlersTests()
     {
+        _permit.SetLookup(PermitRegistryDefId);
+
         _user.UserId.Returns(9);
 
         _documents.FindAsync(DocumentId, Arg.Any<PeriodKeyFilter>(), Arg.Any<CancellationToken>())
@@ -54,7 +62,7 @@ public sealed class DocumentHeaderHandlersTests
         _metadataCache.GetAsync(TemplateVersionId, Arg.Any<CancellationToken>()).Returns(new TemplateVersionSnapshot(
             TemplateVersionId, 0, [], new Dictionary<int, ColumnDef>(), new Dictionary<(int, string), RowDef>())
         {
-            HeaderFields = [_area, _count],
+            HeaderFields = [_area, _count, _permit],
         });
 
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
@@ -78,10 +86,24 @@ public sealed class DocumentHeaderHandlersTests
     {
         var result = await Get().HandleAsync(DocumentId, CancellationToken.None);
 
-        Assert.Equal(2, result.Fields.Count);
+        Assert.Equal(3, result.Fields.Count);
         var field = Assert.Single(result.Fields, f => f.Code == "Area");
         Assert.Null(field.Value);
         Assert.False(field.IsRequired);
+        Assert.Null(field.LookupRegistryDefId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    public async Task GET_Lookup_поле_несе_LookupRegistryDefId()
+    {
+        var result = await Get().HandleAsync(DocumentId, CancellationToken.None);
+
+        var permit = Assert.Single(result.Fields, f => f.Code == "Permit");
+        Assert.Equal(PermitRegistryDefId, permit.LookupRegistryDefId);
+
+        var nonLookup = Assert.Single(result.Fields, f => f.Code == "Area");
+        Assert.Null(nonLookup.LookupRegistryDefId);
     }
 
     [Fact]
@@ -132,6 +154,7 @@ public sealed class DocumentHeaderHandlersTests
             Arg.Any<CancellationToken>());
 
         Assert.Equal("Kashagan", Assert.Single(result.Fields, f => f.Code == "Area").Value);
+        Assert.Equal(PermitRegistryDefId, Assert.Single(result.Fields, f => f.Code == "Permit").LookupRegistryDefId);
     }
 
     [Fact]

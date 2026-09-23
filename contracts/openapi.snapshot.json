@@ -2738,6 +2738,14 @@
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Підпис поля мовами каталогу."
           },
+          "lookupRegistryDefId": {
+            "description": "Довідник поля — лише для CellDataType.Lookup, інакше\n`null`. Той самий контракт, що `HeaderFieldDefDto`\n(`GET …/template-versions/{id}/header-fields`): без цього поля\nклієнт не може показати значення шапки повноцінним lookup-picker'ом,\nяк для Lookup-комірок сітки, — лише сире `ValueRegistryEntryId`.\n⚠ Людської назви обраного запису DTO НЕ несе: для звичайних\nLookup-комірок сітки (`RowDto.Cells`) такого поля теж немає —\nклієнт резолвить назву сам через окремий виклик реєстру\n(`LookupCellEditor` + `RegistryEntryDto[]`), тож вигадувати\nновий формат саме тут означало б розійтися із симетрією.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "value": {
             "description": "Поточне значення як «сире» значення CLR; `null` — поле не заповнене\n(не розрізняє «ще не заповнили» і «явно стерли» — те саме спрощення,\nщо вже діє для `GET …/tables/{id}`)."
           }

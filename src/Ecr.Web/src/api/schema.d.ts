@@ -14940,6 +14940,20 @@ export interface components {
             isRequired: boolean;
             /** @description Підпис поля мовами каталогу. */
             label: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int32
+             * @description Довідник поля — лише для CellDataType.Lookup, інакше
+             *     `null`. Той самий контракт, що `HeaderFieldDefDto`
+             *     (`GET …/template-versions/{id}/header-fields`): без цього поля
+             *     клієнт не може показати значення шапки повноцінним lookup-picker'ом,
+             *     як для Lookup-комірок сітки, — лише сире `ValueRegistryEntryId`.
+             *     ⚠ Людської назви обраного запису DTO НЕ несе: для звичайних
+             *     Lookup-комірок сітки (`RowDto.Cells`) такого поля теж немає —
+             *     клієнт резолвить назву сам через окремий виклик реєстру
+             *     (`LookupCellEditor` + `RegistryEntryDto[]`), тож вигадувати
+             *     новий формат саме тут означало б розійтися із симетрією.
+             */
+            lookupRegistryDefId?: null | number;
             /** @description Поточне значення як «сире» значення CLR; `null` — поле не заповнене
              *     (не розрізняє «ще не заповнили» і «явно стерли» — те саме спрощення,
              *     що вже діє для `GET …/tables/{id}`). */
@@ -17489,7 +17503,7 @@ export interface components {
          * @description Тип ресурсу, на який видається грант.
          * @enum {unknown}
          */
-        ResourceKind: "Project" | "Sheet" | "Table" | "Column";
+        ResourceKind: "Project" | "Sheet" | "Table" | "Column" | "Registry";
         /** @description Створена роль. */
         RoleIdResponse: {
             /**

@@ -51,7 +51,8 @@ public sealed class GetDocumentHeaderHandler(
             .OrderBy(f => f.Ordinal)
             .Select(f => new DocumentHeaderFieldDto(
                 f.Id, f.Code, f.LabelL10n, f.DataType, f.IsRequired,
-                values.TryGetValue(f.Id, out var value) ? HeaderValueMapping.ToRuleValue(value) : null))
+                values.TryGetValue(f.Id, out var value) ? HeaderValueMapping.ToRuleValue(value) : null,
+                f.LookupRegistryDefId))
             .ToList();
 
         return new DocumentHeaderDto(fields);
@@ -168,7 +169,8 @@ public sealed class PatchDocumentHeaderHandler(
             .OrderBy(f => f.Ordinal)
             .Select(f => new DocumentHeaderFieldDto(
                 f.Id, f.Code, f.LabelL10n, f.DataType, f.IsRequired,
-                values.TryGetValue(f.Id, out var value) ? HeaderValueMapping.ToRuleValue(value) : null))
+                values.TryGetValue(f.Id, out var value) ? HeaderValueMapping.ToRuleValue(value) : null,
+                f.LookupRegistryDefId))
             .ToList();
 
         return new DocumentHeaderDto(result);
