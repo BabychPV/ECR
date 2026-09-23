@@ -66,6 +66,19 @@ export function SourcesPage(): JSX.Element {
 
   const hasConnections = connections.data !== undefined && connections.data.length > 0;
 
+  /*
+   * ⛔ Підпорядкований розділ мовчить лише тоді, коли йому СВОГО показати
+   * нічого. Перша редакція цього правила ховала сутності за самою лише
+   * відсутністю з'єднань — і разом із заглушкою ховала РЕАЛЬНІ рядки, коли
+   * сервер віддав сутності при порожньому переліку з'єднань (так будують
+   * світ `SourcesPage.perRowCollect/inactiveA11y/runStatusTone`). Перешкода
+   * «з'єднань немає» найближча лише для ПОРОЖНЬОГО розділу; розділ із даними
+   * показує дані, хай би що казав сусід.
+   */
+  const hasEntities = sources.data !== undefined && sources.data.length > 0;
+
+  const showSubordinate = hasConnections || hasEntities;
+
   const collect = useMutation({
     mutationFn: (id: number) => {
       const to = new Date();
@@ -94,7 +107,7 @@ export function SourcesPage(): JSX.Element {
     <ListPage
       header={{ title: t('sources.title') }}
       table={
-        !hasConnections ? null : (
+        !showSubordinate ? null : (
         <Stack gap="sm" data-source-entities="">
         {/* ⛔ `U-09`: у розділу не було ні власного заголовка, ні дії — на
             відміну від «Connections» поруч, тож три таблиці поспіль читалися
@@ -242,7 +255,7 @@ export function SourcesPage(): JSX.Element {
       {/* ⛔ `U-09`: журнал прогонів підпорядкований з'єднанням двічі —
           прогін не існує без сутності, сутність не існує без з'єднання. Доки
           з'єднань немає, свого порожнього стану він не показує. */}
-      {hasConnections && <CollectionRunsPanel />}
+      {showSubordinate && <CollectionRunsPanel />}
     </ListPage>
   );
 }

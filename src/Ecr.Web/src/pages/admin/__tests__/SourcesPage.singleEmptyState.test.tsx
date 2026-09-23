@@ -43,6 +43,18 @@ const Connection = {
   transport: 'PiWebApi',
 };
 
+const Entity = {
+  id: 1,
+  code: 'FLD-1',
+  dataSourceId: 7,
+  displayName: 'Field weather feed',
+  entityPath: null,
+  isActive: true,
+  lastRun: null,
+  oldestGap: null,
+  transport: 'Rest',
+};
+
 const SeededStrings: Record<string, string> = {
   'sources.title': 'Sources',
   'sources.entity': 'Entity',
@@ -72,7 +84,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Сервер: з'єднань стільки, скільки просить випадок; усе решта — порожнє. */
-function serve(connections: readonly unknown[]): void {
+function serve(connections: readonly unknown[], entities: readonly unknown[] = []): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -98,7 +110,7 @@ function serve(connections: readonly unknown[]): void {
       }
 
       if (path.endsWith('/api/v1/data-sources')) return json(connections);
-      if (path.endsWith('/api/v1/sources')) return json([]);
+      if (path.endsWith('/api/v1/sources')) return json(entities);
       if (path.endsWith('/api/v1/collection-runs')) return json({ items: [], nextCursor: null });
 
       return json(null);
@@ -167,5 +179,27 @@ describe('SourcesPage: рівно один порожній стан (U-09)', ()
     expect(screen.getByRole('heading', { level: 2, name: 'Entities' })).toBeDefined();
     expect(screen.getByRole('heading', { level: 2, name: 'Connections' })).toBeDefined();
     expect(screen.getByRole('heading', { level: 2, name: 'Collection runs' })).toBeDefined();
+  });
+
+  it("з'єднань немає, але сутності Є — рядки сутностей на екрані, не сховані", async () => {
+    /*
+     * ⛔ Межа правила. Підпорядкований розділ мовчить лише тоді, коли йому
+     * СВОГО показати нічого. Перша редакція `U-09` ховала сутності за самою
+     * лише відсутністю з'єднань — і разом із заглушкою ховала справжні рядки
+     * (падали `SourcesPage.perRowCollect/inactiveA11y/runStatusTone`).
+     *
+     * ⛔ Мутаційний доказ: `showSubordinate = hasConnections` → цей випадок
+     * червоний («Field weather feed» не знайдено).
+     */
+    serve([], [Entity]);
+    await loadCatalog('en', 'private');
+
+    show();
+
+    await screen.findByText('Field weather feed');
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Entities' })).toBeDefined();
+    // Порожній стан сутностей НЕ показано — рядки є; єдина заглушка — з'єднань.
+    expect(screen.queryByText('No collection sources configured')).toBeNull();
   });
 });
