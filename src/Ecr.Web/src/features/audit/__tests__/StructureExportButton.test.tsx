@@ -121,8 +121,9 @@ describe('AuditPage: експорт журналу структурних змі
       // ⛔ Мутація: не передати entityType/changedBy у запит — червоне тут.
       expect(exportUrls).toHaveLength(1);
       const query = new URLSearchParams(exportUrls[0]!.split('?')[1]);
-      expect(query.get('from')).toBe('2026-01-01');
-      expect(query.get('to')).toBe('2026-01-08');
+      expect(query.get('from')).toBe(new Date(2026, 0, 1).toISOString());
+      // ⚠ `U-20`: кінець вікна — північ НАСТУПНОЇ доби: названий день у вікні.
+      expect(query.get('to')).toBe(new Date(2026, 0, 9).toISOString());
       expect(query.get('entityType')).toBe('cfg.RegistryDef');
       expect(query.get('changedByUserId')).toBe('41');
       expect(query.has('limit')).toBe(false);
