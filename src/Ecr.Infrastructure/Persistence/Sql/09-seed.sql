@@ -3731,7 +3731,20 @@ USING (VALUES
     (N'permission.System.ViewHealth',        N'en', N'View system health and the job queue', 1),
     (N'permission.System.RunJob',            N'en', N'Start and cancel background jobs', 1),
     (N'permission.System.ManageLocalization', N'en', N'Manage interface strings and languages', 1),
-    (N'permission.System.ManageNotifications', N'en', N'Manage notification channels and rules', 1)
+    (N'permission.System.ManageNotifications', N'en', N'Manage notification channels and rules', 1),
+
+    -- ══ Назви карток стану на `/admin/health` (`U-14`) ══
+    --
+    -- ⛔ Заголовками карток стояли імена реєстрації перевірок — `db`, `jobs`,
+    -- `sources` (`Program.cs`, `AddCheck<DatabaseHealthCheck>("db", …)`),
+    -- маленькими літерами, над цілком людським реченням, яке `Q-304` уже
+    -- перевело на цей самий каталог («Database is available.»).
+    --
+    -- ⚠ Ключ несе ІМ'Я перевірки так, як його реєструє сервер; невідома
+    -- перевірка показує саме ім'я, а не позначений ключ (`checkLabel`).
+    (N'health.check.db',                     N'en', N'Database', 1),
+    (N'health.check.jobs',                   N'en', N'Background jobs', 1),
+    (N'health.check.sources',                N'en', N'Collection sources', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
