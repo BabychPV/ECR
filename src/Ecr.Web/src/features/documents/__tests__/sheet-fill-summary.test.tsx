@@ -63,6 +63,44 @@ afterEach(() => {
 });
 
 describe('SheetFillSummary', () => {
+  /**
+   * `U-06`: дріб не лишається голим.
+   *
+   * ⛔ Що саме доводиться. Тут стояв `toBe('2 / 3')` — і він лишався б
+   * ЗЕЛЕНИМ при рівно тій ваді, про яку звіт: число правильне, а що воно
+   * рахує, не сказано ніде. Тому перевіряється не саме число, а те, що
+   * підпис береться з каталогу за ключем `document.tablesFilled` і несе
+   * ОБИДВА числа. Каталог у компонентних тестах порожній, тож `t()`
+   * навмисно повертає `⟦ключ (параметри)⟧` — саме в цьому вигляді ключ і
+   * параметри видно в DOM.
+   *
+   * ⚠ Що текст за цим ключем справді СЛОВА, а не знову дріб, доводить
+   * сусідній `sheet-fill-summary.label.test.ts` — по самому `09-seed.sql`.
+   */
+  it('показує підпис із каталогу (ключ + обидва числа), а не голий дріб', async () => {
+    respond([
+      table({ tableDefId: 1, filledCells: 4, inputCells: 4 }),
+      table({ tableDefId: 2, filledCells: 3, inputCells: 4 }),
+      table({ tableDefId: 3, filledCells: 0, inputCells: 0 }),
+    ]);
+
+    show();
+
+    await waitFor(() => {
+      const text = screen.getByTestId('sheet-fill-count').textContent ?? '';
+
+      expect(text).toContain('document.tablesFilled');
+      expect(text).toContain('filled=2');
+      expect(text).toContain('total=3');
+    });
+
+    // ⛔ І прямо: голого дробу «2 / 3» на екрані більше немає. Без цього
+    // рядка тест лишився б зеленим, якби підпис приписали ПОРУЧ із дробом,
+    // а сам дріб залишили — тобто вада «два показники, один без пояснення»
+    // проїхала б.
+    expect(screen.getByTestId('sheet-fill-count').textContent?.trim()).not.toBe('2 / 3');
+  });
+
   it('рахує заповненими лише таблиці, у яких закриті всі вхідні комірки', async () => {
     respond([
       table({ tableDefId: 1, filledCells: 4, inputCells: 4 }),
@@ -77,7 +115,12 @@ describe('SheetFillSummary', () => {
     show();
 
     await waitFor(() => {
-      expect(screen.getByTestId('sheet-fill-count').textContent).toBe('2 / 3');
+      // ⚠ Числа читаються з параметрів підпису (`U-06`): каталог у тестах
+      // порожній, тож `t()` віддає `⟦ключ (filled=2, total=3)⟧`.
+      const text = screen.getByTestId('sheet-fill-count').textContent ?? '';
+
+      expect(text).toContain('filled=2');
+      expect(text).toContain('total=3');
     });
   });
 

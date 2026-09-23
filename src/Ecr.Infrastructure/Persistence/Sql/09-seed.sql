@@ -1308,6 +1308,13 @@ USING (VALUES
     (N'documents.state',                 N'en', N'State', 1),
     (N'documents.empty',                 N'en', N'No documents for this period.', 1),
     (N'documents.more',                  N'en', N'Load more', 1),
+    -- ⛔ `U-06`: підпис над деревом аркушів. Голий дріб «0 / 91» стояв тут
+    -- без жодного слова і читався як «не введено нічого» на документі,
+    -- заповненому на ~90 %: у чисельник потрапляють лише таблиці, у яких
+    -- закриті ВСІ вхідні комірки, тож таблиця з 710 заповненими з 774 не
+    -- рахується зовсім. Текст називає саме це, а не «заповненість» узагалі —
+    -- інакше підпис лише замінив би одну двозначність іншою.
+    (N'document.tablesFilled',           N'en', N'Tables filled completely: {filled} of {total}', 1),
     (N'document.validate',               N'en', N'Validate', 1),
     (N'document.validationClean',        N'en', N'Validation passed with no errors.', 1),
     (N'document.validationErrors',       N'en', N'Validation found {count} error(s).', 1),

@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import { Badge, Group, Text } from '@mantine/core';
 import { summarize, useTableStatus } from '@/features/documents/api';
+import { t } from '@/shared/i18n';
 
 /** Який документ і за який період підсумовувати. */
 export interface SheetFillSummaryProps {
@@ -12,14 +13,18 @@ export interface SheetFillSummaryProps {
 }
 
 /**
- * «68 / 91» над деревом аркушів і крапка помилки (`BE-10`).
+ * «Tables filled completely: 68 of 91» над деревом аркушів і крапка помилки
+ * (`BE-10`).
  *
- * ⚠ Підпис навмисно ЧИСЛОВИЙ, без жодного слова. Рядки інтерфейсу живуть у
- * каталозі (`ui.*` у сіді), а новий ключ означав би правку
- * `09-seed.sql` — файла, який зараз змінює інший відкритий PR. Прозовий
- * підпис («68 of 91 tables filled») приходить разом із деревом аркушів у
- * `DIRECTIVE-15-FRONTEND.md`; дріб читається й без нього, а вигадувати
- * ключ, якого немає в каталозі, означало б показати `⟦document.tablesFilled⟧`.
+ * ✎ `U-06`: до цього коміту тут стояв ГОЛИЙ дріб, без жодного слова, і
+ * причина була процесна — новий ключ каталогу означав би правку
+ * `09-seed.sql`, яку тоді тримав інший відкритий PR. Причина відпала, а
+ * борг лишався, і коштував він рівно того, чого й мав: на документі,
+ * заповненому на ~90 %, головний показник читався як «не введено нічого».
+ * Дріб рахує ТАБЛИЦІ, ЗАПОВНЕНІ ПОВНІСТЮ, — таблиця з 710 заповненими
+ * комірками з 774 у чисельник не потрапляє взагалі, і без цих слів «0 / 91»
+ * не можна прочитати правильно навіть здогадом. Тому підпис називає не
+ * «заповненість», а саме те, що рахується: `document.tablesFilled`.
  *
  * ⛔ Крапка помилки НЕ малюється, доки документ не перевіряли. Сірий стан і
  * зелений — різні відповіді: «не знаємо» і «порушень немає». Показати друге
@@ -37,7 +42,7 @@ export function SheetFillSummary({ documentId, periodKey }: SheetFillSummaryProp
   return (
     <Group gap="xs" data-testid="sheet-fill-summary">
       <Text size="sm" fw={600} data-testid="sheet-fill-count">
-        {summary.filled} / {summary.total}
+        {t('document.tablesFilled', { filled: summary.filled, total: summary.total })}
       </Text>
 
       {summary.hasErrors === true && (
