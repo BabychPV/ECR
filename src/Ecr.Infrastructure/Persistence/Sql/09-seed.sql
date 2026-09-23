@@ -2304,6 +2304,8 @@ USING (VALUES
     (N'version.cloned',                  N'en', N'The clone is ready and open.', 1),
     (N'version.presentation',            N'en', N'Appearance', 1),
     (N'version.patched',                 N'en', N'Applied; the version is now at revision {revision}.', 1),
+    -- Підпис лічильника поруч із заголовком версії (раніше — голе `r0`).
+    (N'version.presentationRevision',    N'en', N'Appearance revision {revision}', 1),
     (N'version.headerHint',              N'en', N'The heading operators see above the column.', 1),
     (N'version.displayFormat',           N'en', N'Display format', 1),
     (N'version.displayFormatHint',       N'en', N'How the number is shown; it does not change the stored value.', 1),

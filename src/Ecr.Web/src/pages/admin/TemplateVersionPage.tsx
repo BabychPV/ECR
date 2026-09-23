@@ -625,9 +625,14 @@ export function TemplateVersionPage(): JSX.Element {
         title={`${t('version.title')} ${String(id)}`}
         actions={
           <Group gap="xs">
+            {/* ⚠ Лічильник правок презентаційного шару (кнопка «Appearance»
+                на колонці: підпис, порядок, формат, видимість — `ФВ-7.2`).
+                Раніше тут стояло голе `r0`, і людина не розуміла, що це. */}
             {structure.data !== undefined && (
-              <Text size="xs" c="dimmed">
-                r{structure.data.presentationRevision}
+              <Text size="xs" c="dimmed" data-presentation-revision>
+                {t('version.presentationRevision', {
+                  revision: structure.data.presentationRevision,
+                })}
               </Text>
             )}
             {/* ⚠ Порівняння версій доступне за правом ПЕРЕГЛЯДУ: питання
