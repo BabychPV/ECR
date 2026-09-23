@@ -156,12 +156,22 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                     // клієнт бачить ОДНУ причину незалежно від того, який із
                     // двох одночасних запитів програв гонитву за унікальним
                     // індексом.
+                    //
+                    // ⛔ Ключ ОКРЕМИЙ від `.entryCodeTaken`: той шаблон називає
+                    // `{id}` запису-переможця, а тут відомий лише ПЕРЕМОЖЕНИЙ
+                    // (його Id база так і не видала). Без поля резолвер лишав
+                    // `(Id {id})` фігурними дужками на екрані. Добувати Id
+                    // переможця окремим запитом під час мапінгу збою — зайвий
+                    // обмін із базою саме там, де вона щойно відмовила; змінити
+                    // спільний шаблон — втратити Id у частому послідовному
+                    // шляху, де він є.
                     return new BusinessRuleException(
                         ErrorCodes.RegistryEntryInUse,
                         $"Запис із кодом «{registryEntry.Code}» у цьому довіднику вже існує.",
                         new Dictionary<string, object?>
                         {
-                            ["messageKey"] = "err.ECR-REG-0409.entryCodeTaken", ["code"] = registryEntry.Code,
+                            ["messageKey"] = "err.ECR-REG-0409.entryCodeTakenConcurrently",
+                            ["code"] = registryEntry.Code,
                         });
             }
         }

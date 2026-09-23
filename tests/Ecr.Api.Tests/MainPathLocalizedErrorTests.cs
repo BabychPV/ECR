@@ -277,7 +277,7 @@ public sealed partial class MainPathLocalizedErrorTests
     }
 
     /// <summary>Проганяє відмову крізь конвеєр і повертає перевірену <c>detail</c>.</summary>
-    private static async Task<string> DetailAsync(Func<Task> act)
+    internal static async Task<string> DetailAsync(Func<Task> act)
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.Language.Returns("en");

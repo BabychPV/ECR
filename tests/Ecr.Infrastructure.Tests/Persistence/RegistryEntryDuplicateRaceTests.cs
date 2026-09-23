@@ -70,7 +70,11 @@ public sealed class RegistryEntryDuplicateRaceTests(SqlServerFixture sql)
         // ⛔ Q-30x: без Details["messageKey"] подробиця доїжджала клієнту
         // сирим українським реченням незалежно від мови інтерфейсу.
         Assert.NotNull(thrown.Details);
-        Assert.Equal("err.ECR-REG-0409.entryCodeTaken", thrown.Details!["messageKey"]);
+        //
+        // ⚠ Ключ `.entryCodeTakenConcurrently`, а не `.entryCodeTaken`: шаблон
+        // останнього чекає `{id}` переможця, якого тут немає, і лишав фігурні
+        // дужки на екрані. Жодного поля, крім `code`, новий шаблон не чекає.
+        Assert.Equal("err.ECR-REG-0409.entryCodeTakenConcurrently", thrown.Details!["messageKey"]);
         Assert.Equal(code, thrown.Details["code"]);
     }
 

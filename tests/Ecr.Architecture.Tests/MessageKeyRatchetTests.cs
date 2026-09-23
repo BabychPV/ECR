@@ -291,14 +291,11 @@ public sealed partial class MessageKeyRatchetTests
 
         foreach (var file in SourceTree.Production())
         {
-            // ⚠ Цей сторож лишається на СТАРОМУ ситі — лише `throw new T(`.
-            // Розширене сито (фабрики, `return new T(`) одразу знаходить
-            // розбіжність: `UnitOfWork.TryMapDuplicateKey` віддає
-            // `err.ECR-REG-0409.entryCodeTaken`, чий шаблон чекає `{id}`, а поля
-            // `["id"]` немає. Це виправлення самої відмови — окрема робота
-            // (`Q-341`); тут воно не ховається, а назване, і розширення цього
-            // сторожа йде разом із ним.
-            foreach (var site in Sites(file.Text).Where(s => Thrown(file.Text, s.Index)))
+            // ⚠ Те саме сито, що й храповик: фабрики й `return new T(` теж.
+            // Доти сторож бачив лише `throw new T(` і пропустив
+            // `UnitOfWork.TryMapDuplicateKey` — шаблон `.entryCodeTaken` чекав
+            // `{id}`, а поля не було, і користувач бачив фігурні дужки.
+            foreach (var site in Sites(file.Text))
             {
                 var key = InlineKey().Match(site.Arguments);
 
@@ -716,19 +713,6 @@ public sealed partial class MessageKeyRatchetTests
         }
 
         return result;
-    }
-
-    /// <summary>Чи стоїть перед місцем саме <c>throw</c> (лише пробіли між).</summary>
-    private static bool Thrown(string text, int index)
-    {
-        var i = index - 1;
-        while (i >= 0 && char.IsWhiteSpace(text[i]))
-        {
-            i--;
-        }
-
-        return i >= 4 && string.CompareOrdinal(text, i - 4, "throw", 0, 5) == 0
-               && (i < 5 || !(char.IsLetterOrDigit(text[i - 5]) || text[i - 5] == '_'));
     }
 
     private static int Line(string text, int index)

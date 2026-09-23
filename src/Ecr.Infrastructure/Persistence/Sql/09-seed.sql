@@ -584,6 +584,7 @@ USING (VALUES
     -- Покриває і зайнятий код, і видалення запису, на який посилаються.
     (N'err.ECR-REG-0409',  N'en', N'Registry entry conflict', 1),
     (N'err.ECR-REG-0409.entryCodeTaken', N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', 1),
+    (N'err.ECR-REG-0409.entryCodeTakenConcurrently', N'en', N'An entry with code "{code}" was just created in this registry by another request.', 1),
     (N'err.ECR-USR-0409',  N'en', N'User name already in use', 1),
     (N'err.ECR-USR-0409.userNameTaken', N'en', N'A user named "{userName}" already exists.', 1),
     -- ⛔ Аудит-пас 4: ще шість джерел, той самий клас дефекту (Q-303/Q-304)
