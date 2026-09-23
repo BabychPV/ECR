@@ -385,7 +385,15 @@ UPDATE t
     (N'err.ECR-CALC-4221',               N'en', N'Recalculation of a closed period', N'Recalculation is not allowed'),
     -- U-17: заголовок банера відсилав «див. помилку вище» — а помилка і є цей
     -- самий банер; той самий текст стояв ще й позначкою над ним.
-    (N'grid.saveError',                  N'en', N'Not saved — see the error above', N'The server rejected this change')
+    (N'grid.saveError',                  N'en', N'Not saved — see the error above', N'The server rejected this change'),
+    -- `U-09`, пунктуація порожніх станів зведена до ОДНОГО правила:
+    -- ЗАГОЛОВОК порожнього стану — без крапки в кінці, ПІДКАЗКА під ним —
+    -- повне речення з крапкою. Так уже написані 40+ заголовків каталогу
+    -- («No registries yet», «Pick a project», «Enter a job id»); ці два були
+    -- єдиними винятками, і на екрані `/admin/jobs` виняток стояв просто під
+    -- правилом.
+    (N'jobs.recentEmpty',                N'en', N'No jobs yet.', N'No jobs yet'),
+    (N'documents.empty',                 N'en', N'No documents for this period.', N'No documents for this period')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1340,7 +1348,7 @@ USING (VALUES
     (N'period.next',                     N'en', N'Next period', 1),
     (N'documents.sheets',                N'en', N'Sheets', 1),
     (N'documents.state',                 N'en', N'State', 1),
-    (N'documents.empty',                 N'en', N'No documents for this period.', 1),
+    (N'documents.empty',                 N'en', N'No documents for this period', 1),
     (N'documents.more',                  N'en', N'Load more', 1),
     -- ⛔ `U-06`: підпис над деревом аркушів. Голий дріб «0 / 91» стояв тут
     -- без жодного слова і читався як «не введено нічого» на документі,
@@ -1904,7 +1912,7 @@ USING (VALUES
     (N'jobs.title',                      N'en', N'Jobs', 1),
     (N'jobs.id',                         N'en', N'Job id', 1),
     (N'jobs.watch',                      N'en', N'Watch', 1),
-    (N'jobs.recentEmpty',                N'en', N'No jobs yet.', 1),
+    (N'jobs.recentEmpty',                N'en', N'No jobs yet', 1),
     -- Шухляда «My tasks» у шапці (BE-08): власні фонові задачі, усім ролям.
     (N'jobs.myTasks',                    N'en', N'My tasks', 1),
     (N'jobs.myTasksClose',               N'en', N'Close my tasks', 1),
