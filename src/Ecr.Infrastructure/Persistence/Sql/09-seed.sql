@@ -382,7 +382,10 @@ UPDATE t
     (N'err.ECR-PRD-0409',                N'en', N'The period is closed', N'Period state conflict'),
     (N'err.ECR-PRD-0422',                N'en', N'The period is outside the project', N'Invalid period request'),
     (N'err.ECR-AUTH-0403.jobNotYours',   N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', N'This background job was started by someone else: permission {permission} is required to act on it.'),
-    (N'err.ECR-CALC-4221',               N'en', N'Recalculation of a closed period', N'Recalculation is not allowed')
+    (N'err.ECR-CALC-4221',               N'en', N'Recalculation of a closed period', N'Recalculation is not allowed'),
+    -- U-17: заголовок банера відсилав «див. помилку вище» — а помилка і є цей
+    -- самий банер; той самий текст стояв ще й позначкою над ним.
+    (N'grid.saveError',                  N'en', N'Not saved — see the error above', N'The server rejected this change')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1436,7 +1439,13 @@ USING (VALUES
     (N'grid.roundedShow',                N'en', N'Show the list', 1),
     (N'grid.saving',                     N'en', N'Saving...', 1),
     (N'grid.saved',                      N'en', N'Saved', 1),
-    (N'grid.saveError',                  N'en', N'Not saved — see the error above', 1),
+    -- ⛔ `U-17`: одна відмова — одне повідомлення. Обидва місця (позначка в
+    -- рядку кнопок і банер із причиною) показували ОДИН ключ, тобто той
+    -- самий текст двічі поруч, і верхній напис відсилав «вище» до того, що
+    -- насправді нижче. Тепер позначка — два слова власним ключем, а банер
+    -- каже, ЧИЯ це відмова; сама причина стоїть у його тілі.
+    (N'grid.saveFailedMark',             N'en', N'Not saved', 1),
+    (N'grid.saveError',                  N'en', N'The server rejected this change', 1),
     -- ⛔ `BE-05`: статус-рядок перерахунку. Запис і перерахунок — різні моменти:
     -- комірка вже в базі, а обчислені колонки ще ні, і до появи `jobId` у
     -- відповіді сказати про це було нічим.
