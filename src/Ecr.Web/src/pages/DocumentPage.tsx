@@ -10,7 +10,10 @@ import type {
   DocumentTableDto,
   ValidationResultResponse,
 } from '@/api/types';
-import { useBusinessKeyChangeAction } from '@/features/documents/BusinessKeyChangeAction';
+import {
+  hasProjectWriteGrant,
+  useBusinessKeyChangeAction,
+} from '@/features/documents/BusinessKeyChangeAction';
 import {
   DeleteDocumentPermission,
   useDeleteDocumentAction,
@@ -69,6 +72,20 @@ const WorkflowHistory = lazy(async () => ({
 const loadDocumentVersionCompare = () => import('@/features/documents/DocumentVersionCompare');
 const DocumentVersionCompare = lazy(async () => ({
   default: (await loadDocumentVersionCompare()).DocumentVersionCompare,
+}));
+
+/**
+ * П'ята лінива панель — шапка документа (`GET/PATCH …/documents/{id}/header`).
+ *
+ * ⚠ Той самий прийом, що чотири вище: модуль вантажиться лише тоді, коли
+ * панель ДІЙСНО з'являється на екрані. На відміну від `WorkflowHistory`/
+ * `DocumentVersionCompare`, показ тут вирішує не право чи розгортання, а
+ * ВІДПОВІДЬ сервера (порожній перелік полів — панелі немає) — тому запит
+ * усередині компонента неминучий; лінивим лишається лише сам код панелі.
+ */
+const loadDocumentHeaderPanel = () => import('@/features/documents/DocumentHeaderPanel');
+const DocumentHeaderPanel = lazy(async () => ({
+  default: (await loadDocumentHeaderPanel()).DocumentHeaderPanel,
 }));
 
 /**
@@ -467,6 +484,19 @@ export function DocumentPage(): JSX.Element {
           ⚠ Статичний імпорт бюджету чанка не чіпає (`D-132`): компонент
           працює зі сховищем правок і зрізом, ядра `RevoGrid` не торкаючись. */}
       <RestoreEditsBanner documentId={documentId} userId={session.data?.userId} />
+
+      {/* ⛔ Шапка документа: поля версії шаблону з поточними значеннями.
+          Компонент сам вирішує, чи малюватися — порожній перелік полів
+          означає «у цього документа шапки немає», не помилку (контракт
+          `GET …/header`). Право редагування — той самий грант `Write` на
+          проєкт, що й `PATCH …/cells` (`hasProjectWriteGrant`,
+          `BusinessKeyChangeAction.tsx`), без окремого функціонального права. */}
+      <Suspense fallback={null}>
+        <DocumentHeaderPanel
+          documentId={documentId}
+          canEdit={hasProjectWriteGrant(session.data, document.projectId)}
+        />
+      </Suspense>
 
       {/* ⛔ `BE-10`. Компонент сам вирішує, чи малюватися: доки сервер не
           відповів, він повертає `null`, а не «0 з 0» — заповненість, якої ще
