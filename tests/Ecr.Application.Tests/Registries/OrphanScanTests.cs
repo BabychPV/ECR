@@ -343,7 +343,7 @@ public sealed class OrphanScanTests
             new Ecr.Application.Reporting.ReportSnapshotSync(
                 NSubstitute.Substitute.For<IReportSnapshotBuilder>(),
                 NSubstitute.Substitute.For<IDocumentStore>()),
-            _uow, _user, _clock);
+            _uow, _user, _clock, NSubstitute.Substitute.For<ISheetEditGate>());
 
     private static RegistryDef Definition()
         => new(EcrCode.Create("PERMITS"), Text("Permits"), isTemporal: true);

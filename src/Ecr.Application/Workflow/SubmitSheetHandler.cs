@@ -36,7 +36,8 @@ public sealed class SubmitSheetHandler(
     Reporting.ReportSnapshotSync reports,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    ISheetEditGate sheetGate)
 {
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="documentId">Документ.</param>
@@ -74,6 +75,35 @@ public sealed class SubmitSheetHandler(
                 });
         }
 
+        // ⛔ Уся перевірка й сам зріз — ПІД винятковим блокуванням аркуша × періоду,
+        // однією транзакцією (`ISheetEditGate`, `SubmitEditRaceTests`). Доти
+        // транзакція відкривалась лише навколо запису зрізу і не брала жодного
+        // блокування до `SaveChanges`: правка того самого аркуша, що приходила,
+        // поки подання ще не зафіксоване, бачила під RCSI стан `Draft` і
+        // проходила — у зріз не потрапляла, а в живій комірці й журналі лишалась
+        // (`docs/build/UX-PASS-2026-09-23.md`).
+        //
+        // ⚠ Блокування береться ДО перевірки прав і валідації, а не лише навколо
+        // зрізу: інакше правка між валідацією і зрізом дала б зріз, якого
+        // валідація не бачила. Ціна — правки ЦЬОГО аркуша за ЦЕЙ період чекають
+        // секунди подання; правки сусідніх аркушів і інших періодів — ні.
+        await uow.ExecuteInTransactionAsync(
+            async innerCt =>
+            {
+                await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
+                await SubmitUnderLockAsync(documentId, sheetDefId, periodKey, key, userId, innerCt)
+                    .ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Права, осиротілі рядки, валідація і зріз — під блокуванням, яке взяв
+    /// <see cref="HandleAsync"/>.
+    /// </summary>
+    private async Task SubmitUnderLockAsync(
+        long documentId, int sheetDefId, int periodKey, PeriodKey key, int userId, CancellationToken ct)
+    {
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         var decision = await access.CanSubmitAsync(profile, documentId, sheetDefId, key, ct)

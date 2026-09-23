@@ -168,7 +168,8 @@ public sealed class PatchCellsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
+               Substitute.For<ISheetEditGate>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {

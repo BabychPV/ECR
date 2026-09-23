@@ -2974,6 +2974,20 @@ public interface IWorkflowStore
 }
 ```
 
+#### `ISheetEditGate`
+
+Серіалізація подання аркуша і правок його комірок на ключі «документ × аркуш × період» (`sp_getapplock`, власник — транзакція). Правка бере спільне блокування першою дією транзакції запису і перевіряє стан аркуша під ним; подання — виняткове, від перевірки прав до коміту зрізу. Закриває стан «правку прийнято й зажурналізовано, а в `calc.SubmissionSnapshot` її немає» (`SubmitEditRaceTests`). Сигнатури — у `src/Ecr.Application/Ports/ISheetEditGate.cs`.
+
+```csharp
+public interface ISheetEditGate
+{
+    public Task<DocumentStatus> EnterEditAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+    public Task EnterSubmitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+}
+```
+
 ## 6. Формат помилки
 
 Усі помилки API повертаються як `application/problem+json`

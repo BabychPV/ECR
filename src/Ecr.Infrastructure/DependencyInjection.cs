@@ -83,6 +83,7 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
+        services.AddScoped<ISheetEditGate, SheetEditGate>();
         services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();

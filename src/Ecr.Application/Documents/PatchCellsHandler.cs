@@ -37,7 +37,13 @@ public sealed class PatchCellsHandler(
     IBackgroundJobScheduler jobs,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ⛔ Спільне блокування аркуша × періоду ВСЕРЕДИНІ транзакції запису і
+    // повторна перевірка стану під ним (`SubmitEditRaceTests`). Перевірка прав
+    // нижче (`EnsureAccessAsync`) іде ПОЗА транзакцією, і сама по собі вона не
+    // бачить подання, яке ще не зафіксоване.
+    ISheetEditGate sheetGate)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -1444,6 +1450,8 @@ public sealed class PatchCellsHandler(
         CancellationToken ct)
         => uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            await EnsureSheetStillEditableAsync(context, changes, innerCt).ConfigureAwait(false);
+
             await cellStore.ApplyAsync(
                 new CellChangeSet(
                     request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
@@ -1466,6 +1474,62 @@ public sealed class PatchCellsHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct);
+
+    /// <summary>
+    /// Перша дія транзакції запису: спільне блокування аркуша × періоду і стан
+    /// аркуша, прочитаний ПІД ним.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. <see cref="EnsureAccessAsync"/> читав стан аркуша поза
+    /// транзакцією, під RCSI — тобто бачив останній ЗАФІКСОВАНИЙ стан. Подання,
+    /// що йшло паралельно, до свого коміту лишало аркуш <c>Draft</c>, правка
+    /// проходила, і в підсумку була прийнята й зажурналізована, але в зріз
+    /// подання не потрапила (<c>docs/build/UX-PASS-2026-09-23.md</c>). Те саме —
+    /// коли правка перевірила права ДО подання, а писала ПІСЛЯ його коміту.
+    ///
+    /// ⚠ Що стало. Подання тримає виняткове блокування того самого ключа від
+    /// початку до коміту (<c>SubmitSheetHandler</c>), тож тут є рівно два
+    /// варіанти: подання ще не почалося — правка пише, і подання, взявши
+    /// блокування після її коміту, її прочитає; або подання вже зафіксоване —
+    /// стан тут <c>Submitted</c>, і правку відхилено тією самою відмовою, що й
+    /// у <see cref="EnsureAccessAsync"/>. Проміжного варіанта більше немає.
+    ///
+    /// ⚠ Правки між собою НЕ серіалізуються — блокування спільне.
+    /// </remarks>
+    private async Task EnsureSheetStillEditableAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var status = await sheetGate
+            .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+            .ConfigureAwait(false);
+
+        var reason = status switch
+        {
+            DocumentStatus.Submitted => (EditDenyReason?)EditDenyReason.DocumentSubmitted,
+            DocumentStatus.Approved => EditDenyReason.DocumentApproved,
+            _ => null,
+        };
+
+        if (reason is null)
+        {
+            return;
+        }
+
+        var denied = changes.Upserts.Count + changes.Deletes.Count;
+
+        // ⚠ Той самий код, ключ і форма подробиць, що й у `EnsureAccessAsync`:
+        // для людини це та сама відмова, хоч би на якому кроці її спіймали.
+        throw new AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Заборонених комірок у батчі: {denied}. Причина першої: {reason}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
+                ["deniedCount"] = denied.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["reason"] = reason.ToString(),
+                ["detail"] = null,
+            });
+    }
 
     /// <summary>Записує аудит батчу — усередині тієї ж транзакції, ДО коміту.</summary>
     private async Task WriteAuditAsync(

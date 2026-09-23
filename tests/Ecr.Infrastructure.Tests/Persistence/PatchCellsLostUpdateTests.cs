@@ -217,7 +217,7 @@ public sealed class PatchCellsLostUpdateTests(SqlServerFixture sql)
         return new PatchCellsHandler(
             cellStore, rowStore, documentStore, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            methodologies, registries, headers, auditWriter, new AuditReader(db), jobs, uow, user, clock);
+            methodologies, registries, headers, auditWriter, new AuditReader(db), jobs, uow, user, clock, new SheetEditGate(db));
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

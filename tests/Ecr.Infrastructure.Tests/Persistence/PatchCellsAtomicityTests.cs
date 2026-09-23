@@ -168,7 +168,7 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             cells, rows, documents, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             methodologies, registries, headers, audit, Substitute.For<IAuditReader>(),
-            jobs, uow, user, clock);
+            jobs, uow, user, clock, Substitute.For<ISheetEditGate>());
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

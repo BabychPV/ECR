@@ -215,7 +215,7 @@ public sealed class SubmitApproveTests
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _headers,
-               Reports(), _uow, _user, _clock);
+               Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
