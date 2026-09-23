@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useParams } from 'react-router-dom';
+import { useTemplateCard } from '@/features/templates/templateCardQuery';
 
 /**
  * Layout-маршрут секції `admin/templates/:id/*` (`PR nav-arch #2`).
@@ -24,5 +25,13 @@ import { Outlet } from 'react-router-dom';
  * продовження, коли з'явиться `useMatches()`.
  */
 export function TemplateVersionLayout(): JSX.Element {
+  // ⛔ Картка шаблону вантажиться на рівні СЕКЦІЇ, а не лише на самій картці:
+  // крихта з назвою шаблону (`breadcrumbResolvers.templateName`) резолвиться
+  // лише з кешу, і без цього запиту пряме посилання на версію чи оновлення
+  // сторінки показували «Templates / Templates / …». Той самий ключ, що й у
+  // `TemplateCardPage`, тож на картці це не другий запит, а той самий.
+  const { id } = useParams();
+  useTemplateCard(Number(id));
+
   return <Outlet />;
 }
