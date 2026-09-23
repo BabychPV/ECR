@@ -1,10 +1,13 @@
-import { lazy, Suspense, useState, type JSX } from 'react';
-import { Button, Checkbox, Group, Stack, TextInput, Title } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
+import { Button, Checkbox, Group, Select, Stack, TextInput, Title } from '@mantine/core';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
+import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
+import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
 import { cellText, sameCellValue } from '@/features/grid/cellValue';
+import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -20,18 +23,29 @@ import { showDone } from '@/shared/ui/notify';
  * КОНКРЕТНОГО документа через `GET/PATCH …/documents/{id}/header` і не знає
  * структури версії напряму.
  *
- * ⚠ Значення поля типу `Lookup` тут показується й редагується як сире число
- * `ValueRegistryEntryId` (той самий контракт, що комірка `Lookup` у сітці,
- * `LookupCellEditor.ts`), а не як назва запису довідника: `DocumentHeaderFieldDto`
- * не несе `lookupRegistryDefId` (на відміну від `HeaderFieldDefDto` адмінського
- * маршруту), тож клієнт не знає, ЯКИЙ довідник запитати за назвою запису.
- * Показ назви замість ідентифікатора — наступний крок, коли контракт віддасть
- * цей ідентифікатор і сюди (відкрите питання — у звіті).
+ * ✎ Поле типу `Lookup` тепер показується й редагується повноцінним picker'ом
+ * (`Select`), не сирим числом `ValueRegistryEntryId`: сервер (`4f167396`)
+ * почав заповнювати `DocumentHeaderFieldDto.lookupRegistryDefId`, і клієнт
+ * резолвить людську назву обраного запису ТИМ САМИМ шляхом, що вже діє для
+ * Lookup-КОМІРОК сітки (`DocumentGrid.tsx` + `LookupCellEditor.ts`, директива
+ * registry-lookup, PR A4): `GET /api/v1/registries` (ID → код), тоді
+ * `GET /api/v1/registries/{code}/entries` (код → записи), і `entry.display`
+ * як підпис. `lookupCellDisplay` (той самий файл, звідси лише ЧИТАЄТЬСЯ,
+ * не редагується — умова задачі) дає той самий фолбек на сирий ідентифікатор
+ * для запису, якого в довіднику більше немає.
+ *
+ * ⚠ `lookupRegistryDefId` формально й далі `null`-опційний у контракті
+ * (поле не Lookup, або Lookup без довідника) — захисно деградує до старого
+ * поводження: сире число текстом (нижче, `HeaderFieldInput`).
  */
 
 type DocumentHeaderDto = components['schemas']['DocumentHeaderDto'];
 type DocumentHeaderField = components['schemas']['DocumentHeaderFieldDto'];
 type PatchHeaderField = components['schemas']['PatchHeaderField'];
+
+/** Стабільне посилання на порожній перелік — поле без довідника (ще
+ * завантажується/немає) не отримує новий масив на кожен рендер. */
+const EmptyLookupEntries: readonly RegistryEntryDto[] = [];
 
 /** Поле дати — за `import()`, той самий прийом, що `pages/admin/PeriodsPage.tsx`.
  *
@@ -197,6 +211,89 @@ export function DocumentHeaderPanel({
     queryFn: () => documentHeader(documentId),
   });
 
+  // ⛔ Той самий резолв, що `DocumentGrid.tsx` для Lookup-колонок сітки
+  // (директива registry-lookup, PR A4): `lookupRegistryDefId` — це ID
+  // довідника, а записи адресуються КОДОМ (`GET …/registries/{code}/entries`),
+  // тож резолв іде у два кроки — перелік довідників (ID → код) один раз,
+  // потім по одному запиту записів НА ДОВІДНИК (кілька полів шапки можуть
+  // ділити той самий довідник).
+  const lookupRegistryDefIds = useMemo(
+    () => [
+      ...new Set(
+        fieldsOf(header.data)
+          .filter(
+            (field) =>
+              field.dataType === 'Lookup' &&
+              field.lookupRegistryDefId !== null &&
+              field.lookupRegistryDefId !== undefined,
+          )
+          .map((field) => field.lookupRegistryDefId as number),
+      ),
+    ],
+    [header.data],
+  );
+
+  const registriesList = useQuery({
+    queryKey: queryKeys.registries.list(),
+    queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
+    enabled: lookupRegistryDefIds.length > 0,
+  });
+
+  const lookupRegistryCodes = useMemo(() => {
+    const byId = new Map((registriesList.data ?? []).map((registry) => [registry.id, registry.code]));
+    return lookupRegistryDefIds
+      .map((id) => ({ id, code: byId.get(id) }))
+      .filter((entry): entry is { id: number; code: string } => entry.code !== undefined);
+  }, [lookupRegistryDefIds, registriesList.data]);
+
+  const lookupEntriesQueries = useQueries({
+    queries: lookupRegistryCodes.map(({ code }) => ({
+      queryKey: queryKeys.registries.entries(code),
+      queryFn: () => apiFetch<RegistryEntryDto[]>(`/api/v1/registries/${encodeURIComponent(code)}/entries`),
+    })),
+  });
+
+  const lookupEntriesByRegistryId = useMemo(() => {
+    const map = new Map<number, readonly RegistryEntryDto[]>();
+    lookupRegistryCodes.forEach(({ id }, index) => {
+      const entries = lookupEntriesQueries[index]?.data;
+      if (entries !== undefined) map.set(id, entries);
+    });
+
+    return map;
+  }, [lookupRegistryCodes, lookupEntriesQueries]);
+
+  // ⚠ Чи довідник конкретного поля ще завантажується — окремо від глобальної
+  // `registriesList.isPending`, бо кожен запис довідника йде своїм запитом
+  // (`lookupEntriesQueries`). Реєстр, якого немає серед `lookupRegistryCodes`
+  // (перелік довідників довантажився, а САМ довідник у ньому відсутній —
+  // видалили) НЕ вважається «завантажується»: дані вже остаточні, просто
+  // порожні.
+  const lookupPendingByRegistryId = useMemo(() => {
+    const map = new Map<number, boolean>();
+    lookupRegistryCodes.forEach(({ id }, index) => {
+      map.set(id, lookupEntriesQueries[index]?.isPending ?? false);
+    });
+
+    return map;
+  }, [lookupRegistryCodes, lookupEntriesQueries]);
+
+  /*
+   * ⚠ Той самий банер, що `DocumentGrid.tsx` для Lookup-колонок сітки:
+   * відмова довідника — НЕ те саме, що «поле без довідника» і не те саме, що
+   * «довідник порожній» (`gridColumns`-коментар того файлу пояснює чому це
+   * дорожчий клас помилки — шапку бачить оператор щодня, а не адміністратор).
+   */
+  const lookupError =
+    lookupRegistryDefIds.length > 0
+      ? (registriesList.error ?? lookupEntriesQueries.find((query) => query.error !== null)?.error ?? null)
+      : null;
+
+  const refetchLookups = (): void => {
+    void registriesList.refetch();
+    lookupEntriesQueries.forEach((query) => void query.refetch());
+  };
+
   const [draft, setDraft] = useState<Draft>({});
   const [loadedFor, setLoadedFor] = useState<number | null>(null);
 
@@ -251,6 +348,8 @@ export function DocumentHeaderPanel({
     <Stack gap="xs" data-testid="document-header-panel">
       <Title order={4}>{t('document.header.title')}</Title>
 
+      {lookupError !== null && <ErrorAlert error={lookupError} onRetry={refetchLookups} />}
+
       <Stack gap="xs">
         {fields.map((field) => (
           <HeaderFieldInput
@@ -259,6 +358,16 @@ export function DocumentHeaderPanel({
             value={draft[field.code]}
             disabled={!canEdit || save.isPending}
             onChange={(value) => setField(field.code, value)}
+            lookupEntries={
+              field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+                ? EmptyLookupEntries
+                : (lookupEntriesByRegistryId.get(field.lookupRegistryDefId) ?? EmptyLookupEntries)
+            }
+            lookupPending={
+              field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined
+                ? false
+                : (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
+            }
           />
         ))}
       </Stack>
@@ -295,11 +404,17 @@ function HeaderFieldInput({
   value,
   disabled,
   onChange,
+  lookupEntries,
+  lookupPending,
 }: {
   field: DocumentHeaderField;
   value: unknown;
   disabled: boolean;
   onChange: (value: unknown) => void;
+  /** Записи довідника поля (лише для `dataType === 'Lookup'` із заданим `lookupRegistryDefId`). */
+  lookupEntries: readonly RegistryEntryDto[];
+  /** Чи довідник ЦЬОГО поля ще завантажується (окремий запит на довідник). */
+  lookupPending: boolean;
 }): JSX.Element {
   const label = `${localized(field.label)}${field.isRequired ? ' *' : ''}`;
 
@@ -332,14 +447,70 @@ function HeaderFieldInput({
     );
   }
 
-  // ⚠ `Lookup` — сире число `ValueRegistryEntryId`, не назва запису (коментар
-  // угорі файлу: контракт не несе `lookupRegistryDefId` для полів шапки).
-  const description = field.dataType === 'Lookup' ? t('document.header.lookupHint') : undefined;
+  if (field.dataType === 'Lookup') {
+    // ⛔ Захисний фолбек: контракт (`4f167396`) заповнює
+    // `lookupRegistryDefId` для КОЖНОГО поля `Lookup`, але DTO лишає його
+    // `null`-опційним — поле без довідника деградує до старого поводження
+    // (сире число текстом), а не падає й не ховає дані.
+    if (field.lookupRegistryDefId === null || field.lookupRegistryDefId === undefined) {
+      return (
+        <TextInput
+          label={label}
+          description={t('document.header.lookupHint')}
+          disabled={disabled}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          data-header-field={field.code}
+        />
+      );
+    }
+
+    // ⚠ Чернетка Lookup-поля — той самий РЯДОК, що для Int/Decimal (`Draft`,
+    // коментар угорі файлу): `effectiveValueOf` уже приводить його до числа
+    // через `coerce(raw, 'Lookup')` при збереженні (`edits.ts`, той самий
+    // приймач, що й `LookupCellEditor` шле в `PatchCells`). Тут лишається
+    // лише перевести рядок ⇄ вибір `Select`.
+    const selectedId = typeof value === 'string' && value.trim().length > 0 ? Number(value) : null;
+    const selectedIdValid = selectedId !== null && Number.isFinite(selectedId);
+
+    // ⛔ Той самий резолв, що `LookupCellEditor.ts` для комірки сітки: запис,
+    // якого серед завантажених `entries` немає (видалили з довідника,
+    // застарілий кеш), — фолбек на сирий ідентифікатор ТЕКСТОМ
+    // (`lookupCellDisplay`, той самий фолбек, повторений тут), а не порожнеча
+    // й не падіння. Mantine `Select` показує підпис лише для значення, яке Є
+    // в `data` — тому такий запис і додається синтетичною опцією.
+    const known = selectedIdValid && lookupEntries.some((entry) => entry.id === selectedId);
+    const options = [
+      ...lookupEntries.map((entry) => ({ value: String(entry.id), label: entry.display })),
+      ...(selectedIdValid && !known
+        ? [{ value: String(selectedId), label: lookupCellDisplay(selectedId, lookupEntries) }]
+        : []),
+    ];
+
+    return (
+      <Select
+        label={label}
+        disabled={disabled || lookupPending}
+        searchable
+        clearable
+        nothingFoundMessage={
+          lookupPending ? t('document.header.lookupLoading') : t('document.header.lookupEmpty')
+        }
+        data={options}
+        value={selectedIdValid ? String(selectedId) : null}
+        // ⛔ Порожній вибір (X у `clearable`) — це «прибрати вибір», не
+        // «нічого не сталося»: `onChange('')` таки викликається (той самий
+        // аргумент, що в `LookupCellEditor.render`: `save(null)` на порожній
+        // опції), інакше очистити раз обране поле стало б неможливим.
+        onChange={(next) => onChange(next ?? '')}
+        data-header-field={field.code}
+      />
+    );
+  }
 
   return (
     <TextInput
       label={label}
-      description={description}
       disabled={disabled}
       value={typeof value === 'string' ? value : ''}
       onChange={(event) => onChange(event.currentTarget.value)}

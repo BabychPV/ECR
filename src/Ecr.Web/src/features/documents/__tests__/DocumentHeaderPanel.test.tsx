@@ -28,6 +28,7 @@ interface HeaderField {
   isRequired: boolean;
   label: { values: Record<string, string> };
   value: unknown;
+  lookupRegistryDefId?: number | null;
 }
 
 function field(patch: Partial<HeaderField>): HeaderField {
@@ -42,6 +43,46 @@ function field(patch: Partial<HeaderField>): HeaderField {
   };
 }
 
+/** Довідник — фікстура `GET /api/v1/registries` (`RegistryDefDto`). */
+interface RegistryDef {
+  code: string;
+  fields: unknown[];
+  id: number;
+  isHierarchical: boolean;
+  isTemporal: boolean;
+  nameL10n: { values: Record<string, string> };
+}
+
+function registryDef(patch: Partial<RegistryDef> & { id: number; code: string }): RegistryDef {
+  return {
+    fields: [],
+    isHierarchical: false,
+    isTemporal: false,
+    nameL10n: { values: { en: patch.code } },
+    ...patch,
+  };
+}
+
+/** Запис довідника — фікстура `GET /api/v1/registries/{code}/entries` (`RegistryEntryDto`). */
+interface RegistryEntry {
+  code: string;
+  display: string;
+  id: number;
+  parentEntryId: number | null;
+  validFrom: string | null;
+  validTo: string | null;
+}
+
+function registryEntry(patch: Partial<RegistryEntry> & { id: number; display: string }): RegistryEntry {
+  return {
+    code: String(patch.id),
+    parentEntryId: null,
+    validFrom: null,
+    validTo: null,
+    ...patch,
+  };
+}
+
 interface Sent {
   url: string;
   method: string;
@@ -50,7 +91,11 @@ interface Sent {
 
 const sent: Sent[] = [];
 
-function mockServer(fields: HeaderField[], patchResponse?: { status: number; body?: unknown }): void {
+function mockServer(
+  fields: HeaderField[],
+  patchResponse?: { status: number; body?: unknown },
+  registries?: { list: readonly RegistryDef[]; entries: Readonly<Record<string, readonly RegistryEntry[]>> },
+): void {
   sent.length = 0;
 
   vi.stubGlobal(
@@ -83,6 +128,24 @@ function mockServer(fields: HeaderField[], patchResponse?: { status: number; bod
             });
       }
 
+      // ⚠ Той самий двокроковий резолв, що `DocumentGrid.tsx` для Lookup-
+      // колонок сітки: перелік довідників (ID → код), тоді записи ЗА КОДОМ.
+      if (url.endsWith('/api/v1/registries') && method === 'GET') {
+        return new Response(JSON.stringify(registries?.list ?? []), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const entriesMatch = /\/api\/v1\/registries\/([^/]+)\/entries$/.exec(url);
+      if (entriesMatch !== null && method === 'GET') {
+        const code = decodeURIComponent(entriesMatch[1] ?? '');
+        return new Response(JSON.stringify(registries?.entries[code] ?? []), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
       throw new Error(`неочікуваний запит у тесті: ${method} ${url}`);
     }),
   );
@@ -92,8 +155,9 @@ function show(options: {
   fields: HeaderField[];
   canEdit?: boolean;
   patchResponse?: { status: number; body?: unknown };
+  registries?: { list: readonly RegistryDef[]; entries: Readonly<Record<string, readonly RegistryEntry[]>> };
 }): QueryClient {
-  mockServer(options.fields, options.patchResponse);
+  mockServer(options.fields, options.patchResponse, options.registries);
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -280,19 +344,145 @@ describe('DocumentHeaderPanel: збереження', () => {
     });
   });
 
-  it('Date і Lookup рендеряться без падіння (лінивий DateInput, сире число Lookup)', async () => {
+  it('Date рендериться без падіння (лінивий DateInput, `import(\'@mantine/dates\')`)', async () => {
     show({
       fields: [
         field({ code: 'REPORT_DATE', dataType: 'Date', value: '2026-01-15', label: { values: { en: 'Date' } } }),
-        field({ code: 'REF', dataType: 'Lookup', value: 42, label: { values: { en: 'Ref' } } }),
       ],
     });
 
-    await screen.findByLabelText('Ref');
-    expect((await screen.findByLabelText('Ref')).getAttribute('value')).toBe('42');
-
-    // `DateInput` — окремий чанк (`import('@mantine/dates')`); дочекатись,
-    // доки Suspense розв'яжеться і поле з'явиться.
+    // `DateInput` — окремий чанк; дочекатись, доки Suspense розв'яжеться і
+    // поле з'явиться.
     await waitFor(() => expect(screen.queryByLabelText('Date')).not.toBeNull());
+  });
+});
+
+/**
+ * Lookup-поле шапки — повноцінний picker, не сире число (`4f167396` дав
+ * `lookupRegistryDefId`; клієнт резолвить назву й вибір ТИМ САМИМ шляхом, що
+ * `DocumentGrid.tsx`/`LookupCellEditor.ts` для Lookup-комірок сітки:
+ * `GET /api/v1/registries` → код, тоді `GET /api/v1/registries/{code}/entries`
+ * → записи, `entry.display` як підпис. Взаємодія з `Select` — той самий
+ * прийом, що `ColumnEditor.registryLookup.test.tsx` (клік по полю відкриває
+ * список, опції шукаються через `screen`, бо випадний список рендериться в
+ * порталі поза деревом форми).
+ */
+describe('DocumentHeaderPanel: Lookup-поле — picker за довідником', () => {
+  it('показує людську назву обраного запису, не сирий ValueRegistryEntryId', async () => {
+    show({
+      fields: [
+        field({
+          code: 'UNIT',
+          dataType: 'Lookup',
+          value: 42,
+          lookupRegistryDefId: 7,
+          label: { values: { en: 'Unit' } },
+        }),
+      ],
+      registries: {
+        list: [registryDef({ id: 7, code: 'UNITS' })],
+        entries: { UNITS: [registryEntry({ id: 42, display: 'Кілограм' })] },
+      },
+    });
+
+    const select = await screen.findByLabelText('Unit');
+
+    // ⛔ Мутаційний доказ: поверни показ сирого `ValueRegistryEntryId`
+    // замість резолву через довідник — і це порівняння почервоніє (`value`
+    // знову стане `'42'`, не назвою запису).
+    await waitFor(() => {
+      expect((select as HTMLInputElement).value).toBe('Кілограм');
+    });
+  });
+
+  it('вибір запису в picker надсилає числовий ValueRegistryEntryId у PATCH, не назву', async () => {
+    show({
+      fields: [
+        field({
+          code: 'UNIT',
+          dataType: 'Lookup',
+          value: null,
+          lookupRegistryDefId: 7,
+          label: { values: { en: 'Unit' } },
+        }),
+      ],
+      registries: {
+        list: [registryDef({ id: 7, code: 'UNITS' })],
+        entries: {
+          UNITS: [
+            registryEntry({ id: 42, display: 'Кілограм' }),
+            registryEntry({ id: 43, display: 'Тонна' }),
+          ],
+        },
+      },
+    });
+
+    const select = await screen.findByLabelText('Unit');
+
+    // ⚠ Доки записи довідника не приїхали, поле вимкнене (`lookupPending`) —
+    // клік по вимкненому `Select` не відкриває список, і `findByRole('option')`
+    // нижче не знайшов би нічого ніколи.
+    await waitFor(() => expect(select.hasAttribute('disabled')).toBe(false));
+
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole('option', { name: 'Тонна' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+
+    // ⛔ Мутаційний доказ: надішли текст («Тонна») чи рядок замість числа —
+    // цей рядок почервоніє.
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'UNIT', isEmpty: false, value: 43 }],
+    });
+  });
+
+  it('запис видалено з довідника — не падає, показує зрозумілий стан (id, не порожньо)', async () => {
+    show({
+      fields: [
+        field({
+          code: 'UNIT',
+          dataType: 'Lookup',
+          value: 999,
+          lookupRegistryDefId: 7,
+          label: { values: { en: 'Unit' } },
+        }),
+      ],
+      registries: {
+        // 999 навмисно відсутній серед записів — запис видалили з довідника.
+        list: [registryDef({ id: 7, code: 'UNITS' })],
+        entries: { UNITS: [registryEntry({ id: 42, display: 'Кілограм' })] },
+      },
+    });
+
+    const select = await screen.findByLabelText('Unit');
+
+    // ⛔ Мутаційний доказ: показ порожнього поля замість ідентифікатора (той
+    // самий фолбек, що `lookupCellDisplay` для READ-показу комірки сітки) —
+    // або падіння рендера — цей рядок почервоніє.
+    await waitFor(() => {
+      expect((select as HTMLInputElement).value).toBe('999');
+    });
+
+    // Панель лишається робочою: рендер не впав, кнопка збереження є.
+    expect(screen.queryByRole('button', { name: '⟦common.save⟧' })).not.toBeNull();
+  });
+
+  it('lookupRegistryDefId відсутній (null) — захисний фолбек: сире число текстовим полем', async () => {
+    show({
+      fields: [
+        field({
+          code: 'REF',
+          dataType: 'Lookup',
+          value: 42,
+          lookupRegistryDefId: null,
+          label: { values: { en: 'Ref' } },
+        }),
+      ],
+    });
+
+    const input = await screen.findByLabelText('Ref');
+    expect((input as HTMLInputElement).value).toBe('42');
   });
 });
