@@ -64,8 +64,22 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
                 return;
 
             case SymbolReferenceNode { Kind: SymbolKind.Header } header:
-                found.Add(new ExtractedDependency(
-                    KindHeader, null, header.Name, null, null, null, found.Count));
+                // ⛔ До цього рядка код поля НЕ перевірявся: залежність
+                // додавалася за `header.Name` без резолвінгу, і `HDR("TYPO")`
+                // з неіснуючим кодом публікувався без жодного зауваження —
+                // той самий мовчазний клас дефекту, що вже описаний для
+                // невідомої таблиці/колонки (`CellReferenceNode` нижче, через
+                // `resolver.Resolve`). `ResolveHeader` звітує в `diagnostics`
+                // тим самим каналом (`ExpressionDiagnostic`, код
+                // `ExpressionErrors.Unresolved`) і повертає `null` — тоді
+                // залежність не додається, рівно як `Add(CellReferenceNode …)`
+                // не додає її для нерезолвленого посилання на комірку.
+                if (resolver.ResolveHeader(header, diagnostics) is not null)
+                {
+                    found.Add(new ExtractedDependency(
+                        KindHeader, null, header.Name, null, null, null, found.Count));
+                }
+
                 return;
 
             case SymbolReferenceNode { Kind: SymbolKind.Formula } formula:
