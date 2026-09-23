@@ -60,4 +60,70 @@ public sealed class SubmissionPayloadTests
         Assert.Equal(new SubmissionPayloadCell(1001, 11, "12500", null), cells[0]);
         Assert.Equal(new SubmissionPayloadCell(1002, 11, null, null), cells[1]);
     }
+
+    [Fact]
+    [Trait("Requirement", "ФВ-9.4")]
+    public void Шапка_документа_потрапляє_в_окрему_секцію_зрізу()
+    {
+        var json = SubmissionPayload.Write(
+            [Cell(1, 1, new CellValueData { ValueNumeric = 12500.5m })],
+            new Dictionary<string, DocumentHeaderValueData>
+            {
+                ["AREA"] = new() { ValueString = "Дніпровський" },
+                ["INSPECTED"] = new() { ValueDate = new DateTime(2026, 3, 31) },
+                ["ACTIVE"] = new() { ValueBool = true },
+                ["CONTRACTOR"] = new() { ValueRegistryEntryId = 777 },
+                ["FLOW_UNIT"] = new() { ValueUnitId = 5 },
+            });
+
+        // Клітинки читаються так само, як завжди — секція header їх не заступає.
+        var cells = SubmissionPayload.Read(json);
+        Assert.Single(cells);
+        Assert.Equal("12500.5", cells[0].Value);
+
+        var header = SubmissionPayload.ReadHeader(json);
+        Assert.Equal(5, header.Count);
+        Assert.Equal(new SubmissionPayloadHeaderValue("Дніпровський", null), header["AREA"]);
+        Assert.Equal(new SubmissionPayloadHeaderValue("2026-03-31T00:00:00.0000000", "date"), header["INSPECTED"]);
+        Assert.Equal(new SubmissionPayloadHeaderValue("true", "bool"), header["ACTIVE"]);
+        Assert.Equal(new SubmissionPayloadHeaderValue("777", "ref"), header["CONTRACTOR"]);
+        Assert.Equal(new SubmissionPayloadHeaderValue("5", "unit"), header["FLOW_UNIT"]);
+    }
+
+    [Fact]
+    [Trait("Requirement", "ФВ-9.4")]
+    public void Без_значень_шапки_секція_header_відсутня_а_зріз_клітинок_не_міняється()
+    {
+        var cells = new[] { Cell(1, 1, new CellValueData { ValueNumeric = 1m }) };
+
+        // ⚠ `null` (шаблон без полів шапки) і порожній словник (поля є, але жодне не
+        // заповнене) мають дати РІВНО той самий payload — голий масив клітинок, як до
+        // ФВ-9.4: інакше ContentHash документів без шапки зрушився б без потреби.
+        var withoutHeaderArg = SubmissionPayload.Write(cells);
+        var withNullHeader = SubmissionPayload.Write(cells, null);
+        var withEmptyHeader = SubmissionPayload.Write(cells, new Dictionary<string, DocumentHeaderValueData>());
+
+        Assert.Equal(withoutHeaderArg, withNullHeader);
+        Assert.Equal(withoutHeaderArg, withEmptyHeader);
+        Assert.StartsWith("[", withoutHeaderArg, StringComparison.Ordinal);
+
+        Assert.Empty(SubmissionPayload.ReadHeader(withoutHeaderArg));
+    }
+
+    [Fact]
+    [Trait("Requirement", "ФВ-9.4")]
+    public void Старий_зріз_без_секції_header_дає_порожній_словник_і_не_падає()
+    {
+        // ⛔ Літерал у форматі, яким уже записані подані зрізи ДО ФВ-9.4 (та сама
+        // фікстура, що вище, — жодної секції header у ній немає взагалі).
+        const string Legacy = """[{"row":1,"column":1,"value":"12500.5"},{"row":1,"column":2,"value":"abc"},{"row":2,"column":1,"value":null}]""";
+
+        var header = SubmissionPayload.ReadHeader(Legacy);
+
+        Assert.Empty(header);
+
+        // І клітинки з того самого зрізу читаються як і раніше.
+        var cells = SubmissionPayload.Read(Legacy);
+        Assert.Equal(3, cells.Count);
+    }
 }
