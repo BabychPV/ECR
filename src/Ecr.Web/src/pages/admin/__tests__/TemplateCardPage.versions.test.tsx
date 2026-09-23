@@ -8,6 +8,7 @@ import type { JSX } from 'react';
 import { TemplateCardPage } from '@/pages/admin/TemplateCardPage';
 import { useSession } from '@/shared/session/useSession';
 import { testTheme } from '@/test/render';
+import { t } from '@/shared/i18n';
 
 /**
  * U-19 (UX-PASS 2026-09-23): сторінка шаблону знала менше, ніж рядок
@@ -142,7 +143,7 @@ async function versionsTable(): Promise<HTMLElement> {
     () => {
       const section = document.querySelector<HTMLElement>('[data-template-versions]');
       expect(section).not.toBeNull();
-      expect(within(section as HTMLElement).getByRole('link', { name: '1.1.0.0 · r3' })).toBeDefined();
+      expect(within(section as HTMLElement).getByRole('link', { name: '1.1.0.0' })).toBeDefined();
 
       return section as HTMLElement;
     },
@@ -159,12 +160,19 @@ describe('TemplateCardPage: версії шаблону і один «назад
       show();
 
       const section = await versionsTable();
-      const first = within(section).getByRole('link', { name: '1.0.0.0 · r0' });
+      const first = within(section).getByRole('link', { name: '1.0.0.0' });
 
       expect(first.getAttribute('href')).toBe('/admin/templates/7/versions/11');
-      expect(within(section).getByRole('link', { name: '1.1.0.0 · r3' }).getAttribute('href')).toBe(
+      expect(within(section).getByRole('link', { name: '1.1.0.0' }).getAttribute('href')).toBe(
         '/admin/templates/7/versions/12',
       );
+
+      // ⛔ Лічильник правок вигляду підписаний і показаний лише там, де він
+      // щось каже: у версії з трьома правками — є, у версії без правок — немає
+      // (раніше сирі «· r3» / «· r0» стояли в тексті посилання).
+      expect(within(section).getByText(t('version.presentationRevision', { revision: 3 }))).toBeDefined();
+      expect(within(section).queryByText(t('version.presentationRevision', { revision: 0 }))).toBeNull();
+      expect(section.textContent ?? '').not.toMatch(/·\s*r\d/);
 
       await user.click(first);
       expect(await screen.findByTestId('version-page', {}, { timeout: Timeout })).toBeDefined();

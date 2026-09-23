@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Anchor, Button, Group, Modal, TextInput } from '@mantine/core';
+import { Anchor, Button, Group, Modal, Text, TextInput } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -191,8 +191,15 @@ export function TemplatesPage(): JSX.Element {
                 size="sm"
                 to={`/admin/templates/${template.id}/versions/${version.id}`}
               >
-                {version.version} · r{version.presentationRevision}
+                {version.version}
               </Anchor>
+              {/* ⚠ Лічильник правок вигляду — лише коли він щось каже: «r0»
+                  без підпису читався як незрозумілий код (UX-прохід 2026-09-23). */}
+              {version.presentationRevision > 0 && (
+                <Text size="xs" c="dimmed">
+                  {t('version.presentationRevision', { revision: version.presentationRevision })}
+                </Text>
+              )}
               <StatusBadge kind="version" state={version.status} quiet />
             </Group>
           ))}

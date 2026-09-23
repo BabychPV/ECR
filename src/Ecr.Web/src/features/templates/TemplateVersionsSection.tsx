@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Anchor, Button, Group, Stack, Title } from '@mantine/core';
+import { Anchor, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -60,9 +60,17 @@ export function TemplateVersionsSection({
       key: 'version',
       label: t('templates.versionNumber'),
       render: (version) => (
-        <Anchor component={Link} size="sm" to={templateVersionHref(templateId, version.id)}>
-          {version.version} · r{version.presentationRevision}
-        </Anchor>
+        <Group gap="xs" wrap="nowrap">
+          <Anchor component={Link} size="sm" to={templateVersionHref(templateId, version.id)}>
+            {version.version}
+          </Anchor>
+          {/* ⚠ Лічильник правок вигляду — лише коли він щось каже (див. TemplatesPage). */}
+          {version.presentationRevision > 0 && (
+            <Text size="xs" c="dimmed">
+              {t('version.presentationRevision', { revision: version.presentationRevision })}
+            </Text>
+          )}
+        </Group>
       ),
       sortValue: (version) => version.version,
     },
