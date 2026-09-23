@@ -141,6 +141,8 @@ describe('columnDraftOf: styleId — той самий клас "неповни�
     isHidden: false,
     displayFormat: null,
     unitSymbol: null,
+    formulaExpression: null,
+    formulaDialect: null,
   };
 
   const fullColumn: ColumnDefDto = {

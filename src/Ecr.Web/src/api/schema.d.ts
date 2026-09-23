@@ -18742,6 +18742,16 @@ export interface components {
             dataType: string;
             /** @description Формат показу; презентаційне поле. */
             displayFormat: null | string;
+            formulaDialect: null | components["schemas"]["ExpressionDialect"];
+            /** @description Текст наявної формули колонки, якщо вона є; `null` — формули ще
+             *     немає. Додано без нового запиту до бази: `GetTemplateStructureHandler`
+             *     читає кешований `TemplateVersionSnapshot`, який уже вантажить
+             *     формули (`MetadataCache.LoadAsync`, «ШОСТИЙ запит — ФОРМУЛИ
+             *     ШАБЛОНУ») для рушія перерахунку — тут лише додано проєкцію в DTO. До
+             *     цього поля кнопка "Formula" в редакторі (`TemplateVersionPage.tsx`)
+             *     завжди відкривала порожній редактор, навіть коли формула вже збережена:
+             *     вираз ніде не приходив клієнту без окремого запиту, якого не існувало. */
+            formulaExpression: null | string;
             /** @description Заголовок усіма мовами каталогу. */
             headerL10n: components["schemas"]["LocalizedText"];
             /**
@@ -18808,6 +18818,10 @@ export interface components {
         };
         /** @description Рядок у СТРУКТУРІ шаблону — опис, а не дані. */
         TemplateRowDto: {
+            formulaDialect: null | components["schemas"]["ExpressionDialect"];
+            /** @description Текст наявної формули рядка, якщо вона є; `null` — формули ще
+             *     немає. Той самий фікс, що й string? TemplateColumnDto.FormulaExpression. */
+            formulaExpression: null | string;
             /** @description Рядок недоступний для введення. */
             isReadOnly: boolean;
             /** @description Локалізований підпис. */

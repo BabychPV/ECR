@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Templates.Dto;
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
 
 namespace Ecr.Application.Templates;
@@ -89,7 +90,22 @@ public sealed class GetTemplateStructureHandler(
     // конструктор запису вимагає значення для кожного поля, тож зміна форми
     // `TableDto` без цього рядка просто не збереться.
     private static TableDto Table(TableDef table, IReadOnlyDictionary<int, string> symbols)
-        => new(
+    {
+        // ⛔ Формули читаються тут, один раз на таблицю, а не всередині
+        // Column()/Row(): table.Formulas — плоский список без індексу за
+        // ціллю, і без цих словників кожна колонка/рядок перебирала б його
+        // цілком (квадратична проєкція від розміру таблиці). Лише НЕ
+        // видалені — той самий фільтр, що вже стоїть у
+        // FormulaDefHandlers.FindTarget: м'яко видалена формула не мала б
+        // з'являтися в редакторі, ніби вона все ще діє.
+        var columnFormulas = table.Formulas
+            .Where(f => !f.IsDeleted && f.Scope == FormulaScope.Column && f.ColumnDefId is not null)
+            .ToDictionary(f => f.ColumnDefId!.Value, f => f);
+        var rowFormulas = table.Formulas
+            .Where(f => !f.IsDeleted && f.Scope == FormulaScope.Row && f.RowDefId is not null)
+            .ToDictionary(f => f.RowDefId!.Value, f => f);
+
+        return new TableDto(
             table.Id,
             table.Code,
             table.NameL10n,
@@ -97,18 +113,24 @@ public sealed class GetTemplateStructureHandler(
             table.LayoutKind,
             table.RowMode,
             table.MaxDynamicRows,
-            [.. table.Columns.OrderBy(c => c.Ordinal).Select(c => Column(c, symbols))],
-            [.. RowsOf(table)]);
-
-    /// <summary>Рядки таблиці з розгорнутою ієрархією за ключами.</summary>
-    private static IEnumerable<TemplateRowDto> RowsOf(TableDef table)
-    {
-        var keysById = table.Rows.ToDictionary(r => r.Id, r => r.RowKeyValue);
-        return table.Rows.OrderBy(r => r.Ordinal).Select(r => Row(r, keysById));
+            [.. table.Columns.OrderBy(c => c.Ordinal).Select(c => Column(c, symbols, columnFormulas))],
+            [.. RowsOf(table, rowFormulas)]);
     }
 
-    private static TemplateColumnDto Column(ColumnDef column, IReadOnlyDictionary<int, string> symbols)
-        => new(
+    /// <summary>Рядки таблиці з розгорнутою ієрархією за ключами.</summary>
+    private static IEnumerable<TemplateRowDto> RowsOf(
+        TableDef table, IReadOnlyDictionary<int, FormulaDef> rowFormulas)
+    {
+        var keysById = table.Rows.ToDictionary(r => r.Id, r => r.RowKeyValue);
+        return table.Rows.OrderBy(r => r.Ordinal).Select(r => Row(r, keysById, rowFormulas));
+    }
+
+    private static TemplateColumnDto Column(
+        ColumnDef column, IReadOnlyDictionary<int, string> symbols, IReadOnlyDictionary<int, FormulaDef> formulas)
+    {
+        var formula = formulas.GetValueOrDefault(column.Id);
+
+        return new TemplateColumnDto(
             column.Id,
             column.Code,
 
@@ -122,10 +144,17 @@ public sealed class GetTemplateStructureHandler(
             column.IsRequired,
             column.IsHidden,
             column.DisplayFormat,
-            column.UnitId is { } unitId && symbols.TryGetValue(unitId, out var symbol) ? symbol : null);
+            column.UnitId is { } unitId && symbols.TryGetValue(unitId, out var symbol) ? symbol : null,
+            formula?.Expression,
+            formula?.Dialect);
+    }
 
-    private static TemplateRowDto Row(RowDef row, Dictionary<int, string> keysById)
-        => new(
+    private static TemplateRowDto Row(
+        RowDef row, Dictionary<int, string> keysById, IReadOnlyDictionary<int, FormulaDef> rowFormulas)
+    {
+        var formula = rowFormulas.GetValueOrDefault(row.Id);
+
+        return new TemplateRowDto(
             row.RowKeyValue,
             row.Ordinal,
             row.RowKind.ToString(),
@@ -134,5 +163,8 @@ public sealed class GetTemplateStructureHandler(
             // ⚠ Батько віддається КЛЮЧЕМ, а не Id: клієнт будує ієрархію за
             // ідентичностями, які переживають клон версії. Id після клону інші.
             row.ParentRowDefId is { } parent && keysById.TryGetValue(parent, out var key) ? key : null,
-            row.IsReadOnly);
+            row.IsReadOnly,
+            formula?.Expression,
+            formula?.Dialect);
+    }
 }

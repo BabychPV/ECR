@@ -10950,6 +10950,24 @@
               "string"
             ]
           },
+          "formulaDialect": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExpressionDialect",
+                "description": "Діалект string? TemplateColumnDto.FormulaExpression; заповнений лише разом із ним."
+              }
+            ]
+          },
+          "formulaExpression": {
+            "description": "Текст наявної формули колонки, якщо вона є; `null` — формули ще\nнемає. Додано без нового запиту до бази: `GetTemplateStructureHandler`\nчитає кешований `TemplateVersionSnapshot`, який уже вантажить\nформули (`MetadataCache.LoadAsync`, «ШОСТИЙ запит — ФОРМУЛИ\nШАБЛОНУ») для рушія перерахунку — тут лише додано проєкцію в DTO. До\nцього поля кнопка \"Formula\" в редакторі (`TemplateVersionPage.tsx`)\nзавжди відкривала порожній редактор, навіть коли формула вже збережена:\nвираз ніде не приходив клієнту без окремого запиту, якого не існувало.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "headerL10n": {
             "$ref": "#/components/schemas/LocalizedText",
             "description": "Заголовок усіма мовами каталогу."
@@ -10994,7 +11012,9 @@
           "isRequired",
           "isHidden",
           "displayFormat",
-          "unitSymbol"
+          "unitSymbol",
+          "formulaExpression",
+          "formulaDialect"
         ],
         "type": "object"
       },
@@ -11069,6 +11089,24 @@
       "TemplateRowDto": {
         "description": "Рядок у СТРУКТУРІ шаблону — опис, а не дані.",
         "properties": {
+          "formulaDialect": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ExpressionDialect",
+                "description": "Діалект string? TemplateRowDto.FormulaExpression; заповнений лише разом із ним."
+              }
+            ]
+          },
+          "formulaExpression": {
+            "description": "Текст наявної формули рядка, якщо вона є; `null` — формули ще\nнемає. Той самий фікс, що й string? TemplateColumnDto.FormulaExpression.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "isReadOnly": {
             "description": "Рядок недоступний для введення.",
             "type": "boolean"
@@ -11107,7 +11145,9 @@
           "rowKind",
           "label",
           "parentRowKey",
-          "isReadOnly"
+          "isReadOnly",
+          "formulaExpression",
+          "formulaDialect"
         ],
         "type": "object"
       },
