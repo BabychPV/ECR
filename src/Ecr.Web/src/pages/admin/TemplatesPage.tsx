@@ -6,14 +6,13 @@ import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
   CreateTemplateRequest,
-  CreateTemplateVersionRequest,
   TemplateIdResponse,
   TemplatePage,
   TemplateSummary,
   TemplateVersionPage,
   TemplateVersionSummary,
-  VersionIdResponse,
 } from '@/api/types';
+import { NewTemplateVersionModal } from '@/features/templates/NewTemplateVersionModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -40,7 +39,6 @@ export function TemplatesPage(): JSX.Element {
 
   // Для якого шаблону заводимо версію; `null` — діалог закритий.
   const [versioning, setVersioning] = useState<number | null>(null);
-  const [versionNumber, setVersionNumber] = useState('');
 
   const templates = useQuery({
     queryKey: queryKeys.templates.list(),
@@ -108,35 +106,14 @@ export function TemplatesPage(): JSX.Element {
   });
 
   /**
-   * Створення версії шаблону.
+   * Остання версія шаблону — від неї клонується наступна.
    *
    * ⚠ Клон робиться з ОСТАННЬОЇ версії, якщо вона є: порожня версія поруч із
    * наявною структурою — майже завжди помилка, а не намір. Номер задає
    * людина: `Major.Minor.Patch.Build` несе сенс (`ФВ-2.8`), і вигадувати його
-   * за користувача означало б вигадувати клас зміни.
+   * за користувача означало б вигадувати клас зміни. Сам діалог —
+   * `NewTemplateVersionModal` (спільний із карткою шаблону, `U-19`).
    */
-  const createVersion = useMutation({
-    mutationFn: (target: { templateId: number; cloneFrom: number | null }) =>
-      apiFetch<VersionIdResponse>(`/api/v1/templates/${target.templateId}/versions`, {
-        method: 'POST',
-        body: JSON.stringify({
-          versionNumber: versionNumber.trim(),
-          cloneFromVersionId: target.cloneFrom,
-        } satisfies CreateTemplateVersionRequest),
-      }),
-    onSuccess: async (_result, target) => {
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.templates.versionsOf(target.templateId),
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.list() });
-      setVersioning(null);
-      setVersionNumber('');
-      showDone(t('templates.versionCreated'));
-    },
-    onError: showApiError,
-  });
-
-  /** Остання версія шаблону — від неї клонується наступна. */
   const latestVersionOf = (templateId: number): number | null => {
     const versions = versionsOf.get(templateId) ?? [];
 
@@ -314,39 +291,11 @@ export function TemplatesPage(): JSX.Element {
         </Group>
       </Modal>
 
-      <Modal
-        opened={versioning !== null}
+      <NewTemplateVersionModal
+        templateId={versioning}
+        cloneFrom={versioning === null ? null : latestVersionOf(versioning)}
         onClose={() => setVersioning(null)}
-        title={t('templates.newVersion')}
-      >
-        <TextInput
-          label={t('templates.versionNumber')}
-          description={t('templates.versionNumberHint')}
-          value={versionNumber}
-          onChange={(event) => setVersionNumber(event.currentTarget.value)}
-          data-autofocus
-        />
-
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setVersioning(null)}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={versionNumber.trim().length === 0}
-            loading={createVersion.isPending}
-            onClick={() => {
-              if (versioning !== null) {
-                createVersion.mutate({
-                  templateId: versioning,
-                  cloneFrom: latestVersionOf(versioning),
-                });
-              }
-            }}
-          >
-            {t('common.save')}
-          </Button>
-        </Group>
-      </Modal>
+      />
     </>
   );
 }

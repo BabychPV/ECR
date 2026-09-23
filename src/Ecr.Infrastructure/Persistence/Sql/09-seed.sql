@@ -2209,6 +2209,11 @@ USING (VALUES
     (N'templates.versionCreated',        N'en', N'The version has been created from the latest one.', 1),
     (N'templates.versionNumber',         N'en', N'Version number', 1),
     (N'templates.versionNumberHint',     N'en', N'Major.Minor.Patch.Build — the number says what kind of change this is.', 1),
+    -- U-19: перелік версій на картці шаблону (`TemplateVersionsSection`).
+    (N'templates.versionStatus',         N'en', N'Status', 1),
+    (N'templates.versionPublishedAt',    N'en', N'Published', 1),
+    (N'templates.versionsEmpty',         N'en', N'No versions yet', 1),
+    (N'templates.versionsEmptyHint',     N'en', N'A version holds the sheets and columns of the template. Create the first one to lay out its structure.', 1),
 
     -- Картка шаблону (`UI-09`): перейменування, архівування, повернення в обіг.
     -- ⚠ `templates.card` — назва РІВНЯ, а не заглушка замість назви шаблону:
