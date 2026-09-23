@@ -7,6 +7,7 @@ import {
   Divider,
   Group,
   Modal,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -47,6 +48,12 @@ import {
 } from '@/features/templates/table';
 import { deleteColumn, saveColumn } from '@/features/templates/columnApi';
 import { columnDraftOf, emptyColumnDraft, type ColumnDefDto, type ColumnDraft } from '@/features/templates/column';
+import { getHeaderFields, saveHeaderField } from '@/features/templates/headerFieldApi';
+import {
+  emptyHeaderFieldDraft,
+  headerFieldDraftOf,
+  type HeaderFieldDraft,
+} from '@/features/templates/headerField';
 import { deleteRow, saveRow } from '@/features/templates/rowApi';
 import { emptyRowDraft, rowDraftOf, type RowDefDto, type RowDraft } from '@/features/templates/row';
 import { saveFormula } from '@/features/templates/formulaApi';
@@ -92,6 +99,16 @@ import { t } from '@/shared/i18n';
  */
 const ColumnEditor = lazy(async () => ({
   default: (await import('@/features/templates/ColumnEditor')).ColumnEditor,
+}));
+
+/**
+ * Редактор поля шапки документа (рівень усього документа, не таблиці) — той
+ * самий лінивий патерн, що `ColumnEditor` вище, і з тієї самої причини
+ * (`D-132`, коментар над `ColumnEditor`): монтується лише всередині своєї
+ * `<Modal>`, чанк вантажиться, коли форму справді відкрили.
+ */
+const HeaderFieldEditor = lazy(async () => ({
+  default: (await import('@/features/templates/HeaderFieldEditor')).HeaderFieldEditor,
 }));
 
 const SheetEditor = lazy(async () => ({
@@ -189,6 +206,10 @@ export function TemplateVersionPage(): JSX.Element {
   const [columnEdit, setColumnEdit] = useState<{ tableId: number; draft: ColumnDraft } | null>(null);
   const [rowEdit, setRowEdit] = useState<{ tableId: number; draft: RowDraft } | null>(null);
 
+  // ⚠ Поле шапки документа (рівень усього документа, не таблиці) не
+  // адресується `tableId` — на відміну від чернеток колонки й рядка вище.
+  const [headerFieldEdit, setHeaderFieldEdit] = useState<HeaderFieldDraft | null>(null);
+
   // ФВ-8.14: id колонки, для якої зараз відкрито «де використовується».
   // ⛔ Кнопка показується для КОЖНОЇ колонки завжди, незалежно від того, чи є
   // в неї використання (`total: 0` теж чинний, а не привід ховати афордансу).
@@ -241,6 +262,17 @@ export function TemplateVersionPage(): JSX.Element {
   const structure = useQuery({
     queryKey: queryKeys.templates.version(id),
     queryFn: () => apiFetch<TemplateStructureDto>(`/api/v1/template-versions/${id}/structure`),
+  });
+
+  /**
+   * Поля шапки документа версії (рівень усього документа, не таблиці) —
+   * окремий ендпоінт від `…/structure` (контракт серверної сесії): відповідь
+   * несе повний `HeaderFieldDefDto` без бідної структури-проти-PUT, яку
+   * компенсує `savedColumns` для колонок (`headerField.ts`).
+   */
+  const headerFields = useQuery({
+    queryKey: queryKeys.templates.headerFieldsOf(id),
+    queryFn: () => getHeaderFields(id),
   });
 
   /**
@@ -400,6 +432,22 @@ export function TemplateVersionPage(): JSX.Element {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.templates.version(id) });
       showDone(t('columns.deleted'));
+    },
+    onError: showApiError,
+  });
+
+  /**
+   * Запис поля шапки документа — той самий draft→publish контракт, що
+   * колонка (`W5.2`), рівень усього документа. DELETE не існує (свідоме
+   * рішення серверної сесії, `docs/build/02-contracts.md` §9) — тому, на
+   * відміну від колонки, для полів шапки нижче немає мутації видалення.
+   */
+  const saveHeaderFieldMutation = useMutation({
+    mutationFn: (draft: HeaderFieldDraft) => saveHeaderField(id, draft),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.headerFieldsOf(id) });
+      setHeaderFieldEdit(null);
+      showDone(t('headerFields.saved'));
     },
     onError: showApiError,
   });
@@ -675,6 +723,87 @@ export function TemplateVersionPage(): JSX.Element {
         <Alert color="statusWarning" variant="light" mb="sm">
           {t('version.structureFrozen')}
         </Alert>
+      )}
+
+      {/*
+       * ⛔ Поля шапки документа (рівень усього документа, не таблиці) — той
+       * самий draft→publish контракт, що колонки (`W5.2`), тому та сама
+       * заморожена структура (банер вище, `canEditSheets` — той самий прапорець
+       * `structure.data?.isEditable`) забороняє й тут: другого банера немає
+       * навмисно, причина заморозки на сторінці вже одна.
+       */}
+      <Group justify="space-between" mb="xs" mt="md">
+        <Text fw={600}>{t('headerFields.title')}</Text>
+        {canEditSheets && (
+          <Button
+            size="xs"
+            variant="default"
+            onClick={() => setHeaderFieldEdit(emptyHeaderFieldDraft(null))}
+          >
+            {t('headerFields.add')}
+          </Button>
+        )}
+      </Group>
+
+      {headerFields.error !== null && (
+        <ErrorAlert error={headerFields.error} onRetry={() => void headerFields.refetch()} />
+      )}
+
+      {headerFields.error === null && headerFields.isPending && (
+        <Skeleton height={80} radius="sm" mb="sm" />
+      )}
+
+      {headerFields.error === null && !headerFields.isPending && (
+        headerFields.data.length === 0 ? (
+          <Text size="sm" c="dimmed" mb="sm">
+            {t('headerFields.empty')}
+          </Text>
+        ) : (
+          <Table striped withTableBorder mb="md">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>{t('headerFields.label')}</Table.Th>
+                <Table.Th>{t('headerFields.dataType')}</Table.Th>
+                <Table.Th />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {[...headerFields.data]
+                .sort((a, b) => a.ordinal - b.ordinal)
+                .map((field) => (
+                  <Table.Tr key={field.id}>
+                    <Table.Td>
+                      {localized(field.labelL10n) || field.code}{' '}
+                      <Text span c="dimmed">
+                        ({field.code})
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      {field.dataType}
+                      {field.isRequired && (
+                        <Badge ml="xs" size="xs" variant="light">
+                          {t('headerFields.required')}
+                        </Badge>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      {canEditSheets && (
+                        <Group gap="xs" wrap="nowrap" justify="flex-end">
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            onClick={() => setHeaderFieldEdit(headerFieldDraftOf(field))}
+                          >
+                            {t('headerFields.edit')}
+                          </Button>
+                        </Group>
+                      )}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+            </Table.Tbody>
+          </Table>
+        )
       )}
 
       {/*
@@ -1171,6 +1300,25 @@ export function TemplateVersionPage(): JSX.Element {
               onChange={(draft) => setColumnEdit({ tableId: columnEdit.tableId, draft })}
               onSubmit={() => saveColumnMutation.mutate(columnEdit)}
               onCancel={() => setColumnEdit(null)}
+            />
+          </Suspense>
+        )}
+      </Modal>
+
+      <Modal
+        opened={headerFieldEdit !== null}
+        onClose={() => setHeaderFieldEdit(null)}
+        title={headerFieldEdit?.isNew === true ? t('headerFields.add') : t('headerFields.edit')}
+      >
+        {headerFieldEdit !== null && (
+          <Suspense fallback={null}>
+            <HeaderFieldEditor
+              draft={headerFieldEdit}
+              disabled={!canEditSheets}
+              saving={saveHeaderFieldMutation.isPending}
+              onChange={setHeaderFieldEdit}
+              onSubmit={() => saveHeaderFieldMutation.mutate(headerFieldEdit)}
+              onCancel={() => setHeaderFieldEdit(null)}
             />
           </Suspense>
         )}
