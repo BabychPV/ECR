@@ -1,5 +1,5 @@
 import type { JSX } from 'react';
-import { Stack } from '@mantine/core';
+import { Stack, Title } from '@mantine/core';
 import { ChannelsPanel } from '@/features/notifications/ChannelsPanel';
 import { DeliveriesPanel } from '@/features/notifications/DeliveriesPanel';
 import { RulesMatrixPanel } from '@/features/notifications/RulesMatrixPanel';
@@ -25,6 +25,23 @@ export function NotificationsPage(): JSX.Element {
       <PageHeader title={t('notifications.title')} />
 
       <ChannelsPanel />
+
+      {/*
+        ⚠ `RulesMatrixPanel` навмисно не малює власного заголовка
+        (`RulesMatrixPanel.tsx`, коментар над `aria-label` таблиці): окремий
+        `<Title>` усередині блоку рвав би `heading-order`, тож рівень
+        задає сторінка — рівно так само, як `ChannelsPanel` малює свій
+        (`order={2} size="h5"`), щоб два блоки лишалися сусідніми заголовками
+        одного рівня, а не одним заголовком і одним без нього.
+
+        ⛔ Без цього заголовка порожній стенд (каналів ще нуль) показував два
+        ІДЕНТИЧНІ блоки тексту («каналів немає») підряд без жодного заголовка
+        між ними — один від `ChannelsPanel`, другий від `RulesMatrixPanel`, і
+        це читалося як зламаний дублікат, а не як дві різні секції.
+      */}
+      <Title order={2} size="h5">
+        {t('notifications.rules')}
+      </Title>
 
       <RulesMatrixPanel />
 
