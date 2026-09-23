@@ -1,6 +1,7 @@
 import { useState, type JSX } from 'react';
 import { Button, Group, NumberInput, Table, Text, TextInput } from '@mantine/core';
 import { useStructureChanges, type StructureChangePage } from '@/features/audit/api';
+import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
@@ -32,7 +33,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
 
   return (
     <>
-      <Group gap="xs" align="end" mb="md" wrap="wrap">
+      <Group gap="xs" align="end" mb="xs" wrap="wrap" data-audit-filter-row="structure">
         <TextInput
           size="xs"
           miw={200}
@@ -48,6 +49,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
           miw={140}
           label={t('audit.author')}
           description={t('audit.authorHint')}
+          styles={readerOnlyDescription}
           value={changedBy ?? ''}
           onChange={(value) => {
             setChangedBy(typeof value === 'number' ? value : null);
@@ -55,6 +57,9 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
           }}
         />
       </Group>
+
+      {/* ⚠ `U-21`: та сама будова ряду, що в журналі комірок, — див. `FilterHints`. */}
+      <FilterHints texts={[t('audit.authorHint')]} />
 
       <AsyncBoundary<StructureChangePage>
         isPending={changes.isPending}

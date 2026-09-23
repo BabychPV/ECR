@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
 import { cellChangeOrigins, isSingleCell, useCellChanges } from '@/features/audit/api';
+import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { StructureExportButton } from '@/features/audit/StructureExportButton';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -135,7 +136,10 @@ export function AuditPage(): JSX.Element {
               // читався б як «за цим документом змін не було».
               display={structure ? 'none' : undefined}
               label={t('audit.document')}
+              // ⚠ `U-21`: пояснення лишається для читалки, а видиме — під рядом
+              // фільтрів (`FilterHints`); інакше воно зсуває ряд шапки.
               description={t('audit.documentHint')}
+              styles={readerOnlyDescription}
               value={documentId ?? ''}
               onChange={(value) => {
                 setDocumentId(typeof value === 'number' ? value : null);
@@ -155,12 +159,13 @@ export function AuditPage(): JSX.Element {
       <>
       {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
           витіснили б заголовок за край на ноутбучній ширині. */}
-      <Group gap="xs" align="end" mb="md" wrap="wrap">
+      <Group gap="xs" align="end" mb="xs" wrap="wrap" data-audit-filter-row="cells">
         <NumberInput
           size="xs"
           miw={140}
           label={t('audit.author')}
           description={t('audit.authorHint')}
+          styles={readerOnlyDescription}
           value={author ?? ''}
           onChange={(value) => {
             setAuthor(typeof value === 'number' ? value : null);
@@ -185,6 +190,7 @@ export function AuditPage(): JSX.Element {
           miw={120}
           label={t('audit.rowKey')}
           description={t('audit.cellHint')}
+          styles={readerOnlyDescription}
           value={rowKey ?? ''}
           onChange={(event) => {
             setRowKey(event.currentTarget.value);
@@ -195,6 +201,8 @@ export function AuditPage(): JSX.Element {
           size="xs"
           miw={120}
           label={t('audit.columnDefId')}
+          description={t('audit.cellHint')}
+          styles={readerOnlyDescription}
           value={columnDefId ?? ''}
           onChange={(value) => {
             setColumnDefId(typeof value === 'number' ? value : null);
@@ -241,6 +249,12 @@ export function AuditPage(): JSX.Element {
           {t('audit.reset')}
         </Button>
       </Group>
+
+      {/* ⚠ `U-21`: пояснення ПІД рядом, а не під підписами — інакше підписи
+          полів із поясненням і без нього стоять на різній висоті. Пояснення
+          до «Document» теж тут: поле живе в шапці поруч із датами, і його
+          `description` зсував так само вже ряд шапки. */}
+      <FilterHints texts={[t('audit.documentHint'), t('audit.authorHint'), t('audit.cellHint')]} />
 
       <AsyncBoundary<CellChangePage>
         isPending={changes.isPending}
