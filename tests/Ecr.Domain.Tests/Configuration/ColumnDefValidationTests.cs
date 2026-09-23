@@ -83,6 +83,7 @@ public sealed class ColumnDefValidationTests
         // одночасно — а котра з них правильна, з'ясувалося б на звірці.
         var error = Assert.Throws<DomainException>(() => column.SetUnit(8));
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.unitColumnHasRowUnit", error.Details!["messageKey"]);
         Assert.Null(column.UnitId);
 
         // Звичайній числовій колонці — задається, і це норма (ФВ-16.1).
@@ -130,6 +131,24 @@ public sealed class ColumnDefValidationTests
         narrow.SetNumericFormat(precision: 5, scale: 2);
         Assert.Null(narrow.ValidateValue(new CellValueData { ValueNumeric = 123.45m }));
         Assert.Equal("ECR-CELL-0422", narrow.ValidateValue(new CellValueData { ValueNumeric = 1234.56m }));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-16.1")]
+    public void Scale_більший_за_Precision_відхиляється_доменом()
+    {
+        // ⚠ Округлити мовчки не можна: втрачений знак — це змінене число у
+        // звіті, і виявиться воно лише на звірці (той самий довід, що й у
+        // `ValidateValue` п.7 нижче).
+        var column = Column(CellDataType.Decimal, "Ratio");
+
+        var error = Assert.Throws<DomainException>(() => column.SetNumericFormat(precision: 3, scale: 5));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.scaleExceedsPrecision", error.Details!["messageKey"]);
+        Assert.Null(column.Precision);
+        Assert.Null(column.Scale);
     }
 
     [Fact]

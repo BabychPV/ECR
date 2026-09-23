@@ -278,6 +278,41 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
   `ECR-UOM-0404`, `ECR-AUTH-0401`, `ECR-AUTH-0403`, `ECR-JOB-0404`,
   `ECR-JOB-0409`, `ECR-REQ-0422` уже були нейтральними.
 
+✎ **2026-09-23: шаблони — конструктор колонки й таблиці** —
+`ColumnDefHandlers.cs` (6) і доменний `ColumnDef.cs` (3), `TableDefHandlers.cs`
+(6) і доменний `TableDef.cs` (5) закрито повністю, 20 кидків; 185 у 66 файлах
+→ 165 у 62 файлах. Другий зріз тієї самої області боргу
+(`src/Ecr.Application/Templates/*`/`src/Ecr.Domain/Entities/Configuration/*`),
+після `PeriodAccessRuleHandlers`/`TableRelationHandlers` 2026-09-22.
+`FormulaDefHandlers.cs`, `RowDefHandlers.cs` і доменний `FormulaDef.cs`
+лишаються на наступний прохід — той самий поділ, що вже застосовувався в цій
+області (не увесь каталог одним PR).
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  чотирьох кидків «сесія не містить користувача» (Save/Delete колонки,
+  Save/Delete таблиці): той самий факт, що вже несуть `TableRelationHandlers`
+  і решта обробників структури шаблону.
+- `err.ECR-TMPL-0404.table` {tableDefId, versionId} — новий ключ, живе в
+  ОДНОМУ місці (`ColumnDefHandlers.FindTable`), спільному хелпері, яким
+  користуються і `SaveRowDefHandler`/`DeleteRowDefHandler`
+  (`RowDefHandlers.cs`): закриття цього кидка автоматично прибрало
+  українське речення з обох викликів рядка, не чіпаючи файл рядків.
+- Нові ключі за фактом, не за файлом: `err.ECR-TMPL-0404.columnCode`
+  {columnCode, tableDefId} і `.sheet`/`.tableByCode` — пошук за РЯДКОВИМ
+  кодом (на відміну від наявного `err.ECR-TMPL-0404.column` {columnDefId},
+  що йде за числовим Id); `.columnCodeTakenByDeleted`/`.tableCodeTakenByDeleted`
+  — код зайнятий м'яко видаленим записом (аудит 2026-09-16, §4.4);
+  `.columnDataTypeImmutable` {columnCode, oldDataType, newDataType} —
+  повторний PUT з іншим типом; `.scaleExceedsPrecision`,
+  `.lookupRequiresLookupType`, `.unitColumnHasRowUnit` — доменні перевірки
+  `ColumnDef`; `.maxDynamicRowsNotPositive`/`.maxDynamicRowsNeedsDynamicMode`,
+  `.tableIsDynamic` — доменні перевірки `TableDef`;
+  `err.ECR-TMPL-0409.columnCodeTaken`/`.rowKeyTaken` — дублікат коду/ключа
+  всередині таблиці (`TableDef.AddColumn`/`AddRow`), той самий числовий код,
+  що й «версія опублікована» (наявна перевантаженість коду, не змінена цим
+  зрізом).
+- Заголовки кодів не змінювались — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
+  `ECR-TMPL-0409`/`ECR-AUTH-0401` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
@@ -306,7 +341,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/ColumnDefHandlers.cs` | 6 |
 | `src/Ecr.Application/Templates/CreateTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
@@ -314,7 +348,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
-| `src/Ecr.Application/Templates/TableDefHandlers.cs` | 6 |
 | `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |
 | `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
@@ -323,10 +356,8 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
 | `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
 | `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/ColumnDef.cs` | 3 |
 | `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
 | `src/Ecr.Domain/Entities/Configuration/SheetDef.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/TableDef.cs` | 5 |
 | `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |

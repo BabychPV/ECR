@@ -73,7 +73,10 @@ public sealed class SaveTableDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         // ⛔ Той самий відстежуваний граф, що й у `SaveSheetDefHandler`: порожній
         // `IRepository.FindAsync` без `Include` віддав би `Sheets` (і, отже,
@@ -87,7 +90,14 @@ public sealed class SaveTableDefHandler(
         var sheet = version.Sheets.FirstOrDefault(
             s => string.Equals(s.Code, sheetCode, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Аркуша «{sheetCode}» у версії {templateVersionId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Аркуша «{sheetCode}» у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.sheet",
+                    ["sheetCode"] = sheetCode,
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var ecrCode = EcrCode.Create(code);
         var name = new LocalizedText(new Dictionary<string, string>(command.NameL10n, StringComparer.OrdinalIgnoreCase));
@@ -109,7 +119,13 @@ public sealed class SaveTableDefHandler(
                 ErrorCodes.TemplateInvalid,
                 $"Код таблиці «{code}» зайнятий видаленою таблицею цього аркуша. " +
                 "Код — це ідентичність, і повторно використати його в цій версії не можна. " +
-                "Заведіть таблицю з іншим кодом або клонуйте версію.");
+                "Заведіть таблицю з іншим кодом або клонуйте версію.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.tableCodeTakenByDeleted",
+                    ["sheetCode"] = sheetCode,
+                    ["tableCode"] = code,
+                });
         }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -273,7 +289,10 @@ public sealed class DeleteTableDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -282,11 +301,25 @@ public sealed class DeleteTableDefHandler(
         var sheet = version.Sheets.FirstOrDefault(
             s => string.Equals(s.Code, sheetCode, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Аркуша «{sheetCode}» у версії {templateVersionId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Аркуша «{sheetCode}» у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.sheet",
+                    ["sheetCode"] = sheetCode,
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var table = sheet.Tables.FirstOrDefault(t => string.Equals(t.Code, code, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Таблиці «{code}» на аркуші «{sheetCode}» немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Таблиці «{code}» на аркуші «{sheetCode}» немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.tableByCode",
+                    ["tableCode"] = code,
+                    ["sheetCode"] = sheetCode,
+                });
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
         var change = classifier.ClassifyDeletion(nameof(TableDef), hasDocuments);

@@ -865,6 +865,25 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.expressionRequired',        N'en', N'An Expression rule without a condition does nothing: an empty condition here is the same as no rule.', 1),
     (N'err.ECR-CFG-0422.hideRetired',                N'en', N'The "Hide" behavior can no longer be set: hiding is not one of the three allowed reactions. Use "ReadOnly" instead — it means the same "not allowed".', 1),
 
+    -- Борг локалізації: конструктор колонки й таблиці (`ColumnDefHandlers`/
+    -- `ColumnDef`, `TableDefHandlers`/`TableDef`). `table`/`sheet` — той самий
+    -- факт, звідки б до нього не дійшли (створення/зміна чи видалення).
+    (N'err.ECR-TMPL-0404.table',                     N'en', N'Table {tableDefId} does not exist in template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0404.columnCode',                N'en', N'Column "{columnCode}" does not exist in table {tableDefId}.', 1),
+    (N'err.ECR-TMPL-0404.sheet',                     N'en', N'Sheet "{sheetCode}" does not exist in template version {versionId}.', 1),
+    (N'err.ECR-TMPL-0404.tableByCode',               N'en', N'Table "{tableCode}" does not exist on sheet "{sheetCode}".', 1),
+    (N'err.ECR-TMPL-0422.columnCodeTakenByDeleted',  N'en', N'Column code "{columnCode}" in table {tableDefId} is taken by a deleted column: cells still reference it by code, so it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.columnDataTypeImmutable',   N'en', N'The data type of column "{columnCode}" cannot change after creation ({oldDataType} -> {newDataType}). Create a new column or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.scaleExceedsPrecision',     N'en', N'Scale ({scale}) cannot exceed precision ({precision}) in column "{columnCode}".', 1),
+    (N'err.ECR-TMPL-0422.lookupRequiresLookupType',  N'en', N'A registry can only be attached to a Lookup column; column "{columnCode}" has type {dataType}.', 1),
+    (N'err.ECR-TMPL-0422.unitColumnHasRowUnit',      N'en', N'Column "{columnCode}" has type Unit: its unit is set per row (doc.CellValue.ValueUnitId), not on the column.', 1),
+    (N'err.ECR-TMPL-0422.tableCodeTakenByDeleted',   N'en', N'Table code "{tableCode}" on sheet "{sheetCode}" is taken by a deleted table: it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.maxDynamicRowsNotPositive', N'en', N'MaxDynamicRows must be positive; got {value}.', 1),
+    (N'err.ECR-TMPL-0422.maxDynamicRowsNeedsDynamicMode', N'en', N'MaxDynamicRows only makes sense where users add rows; table "{tableCode}" is in {rowMode} mode.', 1),
+    (N'err.ECR-TMPL-0422.tableIsDynamic',            N'en', N'Table "{tableCode}" is dynamic: its rows are created at runtime, not in the template.', 1),
+    (N'err.ECR-TMPL-0409.columnCodeTaken',           N'en', N'A column with code "{columnCode}" already exists in table "{tableCode}".', 1),
+    (N'err.ECR-TMPL-0409.rowKeyTaken',               N'en', N'A row with key "{rowKey}" already exists in table "{tableCode}".', 1),
+
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
 

@@ -145,6 +145,7 @@ public sealed class TableDefTests
             Command(rowMode: TableRowMode.Fixed, maxDynamicRows: 50), CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.maxDynamicRowsNeedsDynamicMode", error.Details!["messageKey"]);
     }
 
     [Fact]
@@ -155,6 +156,25 @@ public sealed class TableDefTests
             () => Save().HandleAsync(1, "Missing", "Balances", Command(), CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.sheet", error.Details!["messageKey"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    public async Task Код_видаленої_таблиці_дає_ЗРОЗУМІЛУ_відмову_а_не_дублікат()
+    {
+        // ⛔ Той самий фікс, що й у `ColumnDefTests.Код_видаленої_колонки_…`:
+        // код — ідентичність, і `SheetDef.AddTable` тримає його унікальним
+        // включно з м'яко видаленими. Заведення таблиці з кодом видаленої
+        // мусить пояснювати ЩО сталося, а не мовчки «оживляти» стару.
+        await Save().HandleAsync(1, "Water", "LIMIT", Command(), CancellationToken.None);
+        await Delete().HandleAsync(1, "Water", "LIMIT", CancellationToken.None);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().HandleAsync(1, "Water", "LIMIT", Command(), CancellationToken.None));
+
+        Assert.Equal("ECR-TMPL-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.tableCodeTakenByDeleted", error.Details!["messageKey"]);
     }
 
     [Fact]
@@ -199,6 +219,7 @@ public sealed class TableDefTests
             () => Delete().HandleAsync(1, "Water", "Missing", CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.tableByCode", error.Details!["messageKey"]);
     }
 
     [Fact]
@@ -209,6 +230,7 @@ public sealed class TableDefTests
             () => Delete().HandleAsync(1, "Missing", "Balances", CancellationToken.None));
 
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0404.sheet", error.Details!["messageKey"]);
     }
 
     [Fact]

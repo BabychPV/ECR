@@ -187,6 +187,7 @@ public sealed class EdgeCaseTests
             table.AddRow(new RowDef(table.Id, RowKey.Create("7001001"), 2, Name("Другий"), RowKind.Item)));
 
         Assert.Equal("ECR-TMPL-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0409.rowKeyTaken", error.Details!["messageKey"]);
         Assert.Single(table.Rows);
     }
 

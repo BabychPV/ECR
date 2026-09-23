@@ -100,7 +100,14 @@ public sealed class ColumnDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"Scale ({scl}) не може перевищувати Precision ({prc}) у колонці {Code}.");
+                $"Scale ({scl}) не може перевищувати Precision ({prc}) у колонці {Code}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.scaleExceedsPrecision",
+                    ["columnCode"] = Code,
+                    ["precision"] = prc.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["scale"] = scl.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         Precision = precision;
@@ -115,7 +122,13 @@ public sealed class ColumnDef : Entity<int>
         {
             throw new DomainException(
                 "ECR-TMPL-0422",
-                $"Довідник можна прив'язати лише до колонки типу Lookup; у {Code} тип {DataType}.");
+                $"Довідник можна прив'язати лише до колонки типу Lookup; у {Code} тип {DataType}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.lookupRequiresLookupType",
+                    ["columnCode"] = Code,
+                    ["dataType"] = DataType.ToString(),
+                });
         }
 
         LookupRegistryDefId = registryDefId;
@@ -139,7 +152,12 @@ public sealed class ColumnDef : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0422",
                 $"Колонка {Code} має тип Unit: одиниця задається на рядок "
-                + "(doc.CellValue.ValueUnitId), а не на колонку.");
+                + "(doc.CellValue.ValueUnitId), а не на колонку.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.unitColumnHasRowUnit",
+                    ["columnCode"] = Code,
+                });
         }
 
         UnitId = unitId;
