@@ -219,7 +219,7 @@ public sealed class RowLocalRecalculationTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow);
+            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>

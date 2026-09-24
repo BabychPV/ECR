@@ -297,7 +297,7 @@ public sealed class RecalculationJobTests(SqlServerFixture sql)
             HeaderStore(),
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            Substitute.For<Ecr.Application.Ports.IUnitOfWork>());
+            Substitute.For<Ecr.Application.Ports.IUnitOfWork>(), Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>Порожня шапка документа — тести цього файлу її не читають.</summary>

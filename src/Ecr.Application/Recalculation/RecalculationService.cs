@@ -25,7 +25,14 @@ public sealed class RecalculationService(
     IDocumentHeaderStore headers,
     IAuditWriter audit,
     IClock clock,
-    IUnitOfWork uow)
+    IUnitOfWork uow,
+
+    // ⛔ Спільне блокування кожного аркуша, у який пише прогін, першою дією
+    // транзакції запису, і стан аркуша, прочитаний ПІД ним
+    // (`SubmitRecalculationRaceTests`) — той самий механізм, що в
+    // `PatchCellsHandler`. Без нього перерахунок, що перетинався з поданням,
+    // переписував обчислені числа вже поданого аркуша повз зріз подання.
+    ISheetEditGate sheetGate)
 {
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
     /// <remarks>
@@ -536,6 +543,16 @@ public sealed class RecalculationService(
         // Recalculation | Migration`) — досі жоден код його не використовував.
         var now = clock.UtcNow;
 
+        // Аркуш кожного екземпляра, у який цей прогін пише: ключ блокування
+        // «документ × аркуш × період» (`ISheetEditGate`).
+        var sheetOfInstance = instances
+            .Where(t => byInstance.ContainsKey(t.TableInstanceId) && tables.ContainsKey(t.TableDefId))
+            .ToDictionary(t => t.TableInstanceId, t => tables[t.TableDefId].SheetDefId);
+
+        // ⚠ Рахується ВСЕРЕДИНІ транзакції: аркуш, поданий, поки прогін рахував,
+        // не пишеться, і повернути «записано N» за нього означало б збрехати.
+        var applied = 0;
+
         // ⚠ Один запис на екземпляр: перерахунок торкається десятків комірок,
         // і окрема транзакція на кожну перетворила б фонову задачу на джерело
         // блокувань саме тоді, коли документ активно правлять.
@@ -552,8 +569,26 @@ public sealed class RecalculationService(
         // значення й аудит лягають ОДНИМ комітом або не лягають зовсім.
         await uow.ExecuteInTransactionAsync(async token =>
         {
+            // ⚠ Лічильник обнуляється на КОЖНУ спробу: стратегія повторів EF
+            // може виконати це замикання вдруге.
+            applied = 0;
+
+            var writable = await EnterSheetsAsync(
+                instance.DocumentId, periodKey, sheetOfInstance.Values, token).ConfigureAwait(false);
+
             foreach (var (target, records) in byInstance.Where(pair => pair.Value.Count > 0))
             {
+                // ⛔ Аркуш поданий або затверджений — його обчислені числа вже в
+                // зрізі подання й не змінюються (ФВ-9.17, `RecalculationWritePolicy`):
+                // шлях змінити подане — Reopen. Екземпляр без відомого аркуша не
+                // пишеться з тієї самої причини — перевірити його нема чим.
+                if (!sheetOfInstance.TryGetValue(target, out var sheetDefId) || !writable.Contains(sheetDefId))
+                {
+                    continue;
+                }
+
+                applied += records.Count;
+
                 // ⚠ Старі значення читаються ДО запису — після `ApplyAsync` їх уже
                 // немає ніде, а саме вони й становлять половину запису аудиту
                 // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
@@ -620,7 +655,59 @@ public sealed class RecalculationService(
             await uow.SaveChangesAsync(token).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
-        return written;
+        return applied;
+    }
+
+    /// <summary>
+    /// Спільні блокування аркушів, у які пише прогін, — у СТАБІЛЬНОМУ порядку;
+    /// повертає аркуші, у які писати можна.
+    /// </summary>
+    /// <param name="documentId">Документ прогону.</param>
+    /// <param name="periodKey">Період прогону.</param>
+    /// <param name="sheetDefIds">Аркуші екземплярів, у які прогін пише (з повторами).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Що було. Перерахунок читав дані й писав <c>doc.CellValue</c> без
+    /// жодного блокування і без перевірки стану аркуша. Подання, що
+    /// перетиналося з ним, фіксувало у <c>calc.SubmissionSnapshot</c> старе
+    /// обчислене число, а перерахунок одразу після того писав нове в живу комірку
+    /// вже ПОДАНОГО аркуша — подана форма й дані розходились мовчки
+    /// (<c>SubmitRecalculationRaceTests</c>, обидва порядки). Той самий дефект і
+    /// без гонки: каскадна задача після правки (<c>FormulaRecalculationJob</c>)
+    /// стану аркуша не перевіряла зовсім, тож правка → «Подати» → задача з черги
+    /// переписувала подане число.
+    ///
+    /// ⚠ Порядок блокувань — за ключем «документ × аркуш × період», тобто
+    /// всередині одного прогону (документ і період сталі) — за
+    /// <c>SheetDefId</c> за зростанням. Прогін бере кілька СПІЛЬНИХ блокувань в
+    /// одній транзакції; спільні між собою сумісні, але черга SQL Server FIFO:
+    /// спільний запит стає за винятковим (подання), що вже чекає. Два
+    /// багатоаркушеві власники спільних блокувань у різному порядку плюс два
+    /// подання в черзі дають цикл; однаковий порядок його виключає. Подання
+    /// тримає ОДИН ключ і на перерахунок не чекає ні на що інше, правка — теж
+    /// один ключ.
+    ///
+    /// ⚠ Не взято вчасно — <c>ECR-DOC-4091</c> з порту: задача падає з причиною,
+    /// а не пише повз блокування.
+    /// </remarks>
+    private async Task<IReadOnlySet<int>> EnterSheetsAsync(
+        long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, CancellationToken ct)
+    {
+        var writable = new HashSet<int>();
+
+        foreach (var sheetDefId in sheetDefIds.Distinct().Order())
+        {
+            var status = await sheetGate
+                .EnterEditAsync(documentId, sheetDefId, periodKey, ct)
+                .ConfigureAwait(false);
+
+            if (status is not (Domain.Enums.DocumentStatus.Submitted or Domain.Enums.DocumentStatus.Approved))
+            {
+                writable.Add(sheetDefId);
+            }
+        }
+
+        return writable;
     }
 
     /// <summary>Обчислює одну формулу в усіх її цільових комірках.</summary>
