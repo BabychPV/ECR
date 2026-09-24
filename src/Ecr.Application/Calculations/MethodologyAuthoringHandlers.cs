@@ -856,6 +856,7 @@ public sealed class SetMethodologyModesHandler(
 /// <summary>Прив'язки методології до колонок документів (<c>D-69</c>).</summary>
 public sealed class ListCalculationBindingsHandler(
     ICalculationBindingStore bindings,
+    IMethodologyDraftStore drafts,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
@@ -866,12 +867,29 @@ public sealed class ListCalculationBindingsHandler(
     /// <param name="methodologyId">Методологія.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Прив'язки, включно з вимкненими.</returns>
+    /// <exception cref="NotFoundException">Методології немає.</exception>
     public async Task<IReadOnlyList<CalculationBindingDto>> HandleAsync(
         int methodologyId, CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var found = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
+
+        // ⛔ B-07: порожній перелік — ще не відповідь «прив'язок немає».
+        // Неіснуюча методологія давала `200 []`, і клієнт показував «жодної
+        // прив'язки» на адресі, якої не існує. Питаємо лише коли порожньо:
+        // методологія з прив'язками існує за побудовою (`FK_CalcBinding_Methodology`).
+        if (found.Count == 0 && await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                "ECR-CALC-0404",
+                $"Методології {methodologyId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.methodology",
+                    ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
 
         // Назви таблиць — одним запитом на весь перелік, не по запиту на прив'язку.
         var tables = await bindings

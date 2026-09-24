@@ -120,6 +120,7 @@ public sealed class TemplatesController(
     /// </remarks>
     [HttpGet("{id:int}/versions")]
     [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.TemplateVersionSummary>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ListVersions(
         int id, [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
         => Ok(await listVersions.HandleAsync(id, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)

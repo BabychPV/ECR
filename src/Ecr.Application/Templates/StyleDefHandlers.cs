@@ -98,6 +98,7 @@ public sealed class SaveStyleDefHandler(
 /// </summary>
 public sealed class ListStyleDefsHandler(
     IStyleCatalog styles,
+    ITemplateVersionStore versions,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
@@ -105,11 +106,27 @@ public sealed class ListStyleDefsHandler(
     public const string Permission = "Template.View";
 
     /// <summary>Усі стилі версії.</summary>
+    /// <exception cref="NotFoundException"><c>ECR-TMPL-0404</c> — версії немає.</exception>
     public async Task<IReadOnlyList<StyleDefDto>> HandleAsync(int templateVersionId, CancellationToken ct)
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var all = await styles.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        // ⛔ B-07: неіснуюча версія давала `200 []` — «стилів немає» на адресі,
+        // якої не існує. Питаємо лише коли порожньо: версія зі стилями існує.
+        if (all.Count == 0
+            && await versions.FindTemplateOfVersionAsync(templateVersionId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                Domain.Errors.ErrorCodes.TemplateNotFound,
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
 
         return [.. all.Values.OrderBy(s => s.Code, StringComparer.Ordinal).Select(SaveStyleDefHandler.Map)];
     }

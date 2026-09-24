@@ -373,7 +373,23 @@ public sealed class ListUserRolesHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
-        return await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
+        var roles = await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
+
+        // ⛔ B-07: неіснуючий користувач давав `200 []` — «ролей немає» на
+        // адресі, якої не існує. Питаємо лише коли порожньо.
+        if (roles.Count == 0 && await users.FindByIdAsync(userId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                Domain.Errors.ErrorCodes.SecurityPrincipalNotFound,
+                $"Користувача {userId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                    ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return roles;
     }
 }
 

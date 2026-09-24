@@ -113,6 +113,24 @@ public sealed class ListTemplateVersionsHandler(
                 ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
         }
 
-        return await templates.ListVersionsAsync(templateId, page, ct).ConfigureAwait(false);
+        var versions = await templates.ListVersionsAsync(templateId, page, ct).ConfigureAwait(false);
+
+        // ⛔ B-07: неіснуючий шаблон давав `200` з порожньою сторінкою —
+        // «версій немає» на адресі, якої не існує. Питаємо лише коли порожньо:
+        // шаблон без жодної версії законний, але існувати мусить.
+        if (versions.Items.Count == 0
+            && await templates.FindTemplateAsync(templateId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                ErrorCodes.TemplateNotFound,
+                $"Шаблон {templateId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.template",
+                    ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return versions;
     }
 }

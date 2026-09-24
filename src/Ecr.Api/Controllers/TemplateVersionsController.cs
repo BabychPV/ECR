@@ -590,6 +590,7 @@ public sealed class TemplateVersionsController(
     /// </remarks>
     [HttpGet("styles")]
     [ProducesResponseType<IReadOnlyList<StyleDefDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<StyleDefDto>>> ListStyles(int id, CancellationToken ct)
         => Ok(await listStyles.HandleAsync(id, ct).ConfigureAwait(false));
 

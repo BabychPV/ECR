@@ -53,7 +53,7 @@ public sealed class ListCalculationBindingsTests
                 [5] = new("T_WASTE", t5),
             });
 
-        var result = await new ListCalculationBindingsHandler(_bindings, _access, _user)
+        var result = await new ListCalculationBindingsHandler(_bindings, Substitute.For<IMethodologyDraftStore>(), _access, _user)
             .HandleAsync(MethodologyId, CancellationToken.None);
 
         Assert.Equal(["T_FUEL", "T_FUEL", "T_WASTE"], result.Select(b => b.TableCode));
@@ -75,7 +75,7 @@ public sealed class ListCalculationBindingsTests
         _bindings.ListTableNamesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<int, BoundTableName>());
 
-        var result = await new ListCalculationBindingsHandler(_bindings, _access, _user)
+        var result = await new ListCalculationBindingsHandler(_bindings, Substitute.For<IMethodologyDraftStore>(), _access, _user)
             .HandleAsync(MethodologyId, CancellationToken.None);
 
         Assert.Null(Assert.Single(result).TableCode);

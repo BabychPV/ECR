@@ -180,6 +180,7 @@ public sealed class SecurityController(
     /// </remarks>
     [HttpGet("roles/{id:int}/grants")]
     [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.ResourceGrantDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ListGrants(int id, CancellationToken ct)
         => Ok(await listGrants.HandleAsync(id, ct).ConfigureAwait(false));
 
@@ -245,6 +246,7 @@ public sealed class SecurityController(
     /// <summary>Ролі користувача. Право <c>Security.ManageUsers</c>.</summary>
     [HttpGet("users/{id:int}/roles")]
     [ProducesResponseType<IReadOnlyList<string>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<string>>> UserRoles(int id, CancellationToken ct)
         => Ok(await listUserRoles.HandleAsync(id, ct).ConfigureAwait(false));
 

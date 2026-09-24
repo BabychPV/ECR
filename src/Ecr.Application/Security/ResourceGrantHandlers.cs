@@ -61,6 +61,21 @@ public sealed class ListResourceGrantsHandler(
 
         if (grants.Count == 0)
         {
+            // ⛔ B-07: неіснуюча роль давала `200 []` — «грантів немає» на
+            // адресі, якої не існує. Роль із грантами існує за побудовою, тож
+            // питаємо лише тут.
+            if ((await users.ListRolesAsync(ct).ConfigureAwait(false)).All(r => r.Id != roleId))
+            {
+                throw new NotFoundException(
+                    ErrorCodes.SecurityPrincipalNotFound,
+                    $"Ролі {roleId} не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                        ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
             return grants;
         }
 

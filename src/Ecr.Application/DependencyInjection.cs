@@ -256,6 +256,9 @@ public static class DependencyInjection
         services.AddScoped<Calculations.SaveMethodologyFormulaHandler>();
         services.AddScoped<Calculations.DeleteMethodologyFormulaHandler>();
 
+        // B-07: версія з маршруту мусить належати методології з маршруту.
+        services.AddScoped<Calculations.MethodologyVersionScope>();
+
         // Авторство методології з нуля (директива №09, `W6`): сама методологія,
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка
         // до колонки документа.
