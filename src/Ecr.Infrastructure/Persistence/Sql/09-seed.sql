@@ -1031,6 +1031,9 @@ USING (VALUES
     (N'err.ECR-REG-0422.valueNotBoolean',    N'en', N'The value "{value}" is not a boolean.', 1),
     (N'err.ECR-REG-0422.valueNotDate',       N'en', N'The value "{value}" is not a date.', 1),
     (N'err.ECR-REG-0422.valueNotEntryId',    N'en', N'The value "{value}" is not a registry entry identifier.', 1),
+    -- V-08(b), V-17(a): значення поля Lookup — живий запис оголошеного довідника.
+    (N'err.ECR-REG-0422.lookupEntryNotFound', N'en', N'Field "{field}": registry entry {value} does not exist.', 1),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} ("{entryCode}") belongs to another registry.', 1),
     (N'err.ECR-REG-0422.selfLink',           N'en', N'Entry {entryId} cannot be linked to itself.', 1),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'en', N'Link attributes must be a JSON object.', 1),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'en', N'Link attributes are not valid JSON: {reason}', 1),

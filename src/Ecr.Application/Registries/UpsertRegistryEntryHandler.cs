@@ -6,6 +6,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -227,6 +228,11 @@ public sealed class UpsertRegistryEntryHandler(
             value!.Set(field.DataType, CellValueReader.Normalize(raw), field.UnitId);
             var newValue = RawValue(value, field.DataType);
 
+            if (field.DataType == CellDataType.Lookup && value.ValueRefEntryId is { } target)
+            {
+                await RequireLookupTargetAsync(registries, field, target, ct).ConfigureAwait(false);
+            }
+
             if (!Equals(oldValue, newValue))
             {
                 changes.Add(new RegistryValueFieldChange(code, oldValue, newValue));
@@ -254,6 +260,59 @@ public sealed class UpsertRegistryEntryHandler(
         }
 
         return changes;
+    }
+
+    /// <summary>
+    /// Значення поля Lookup мусить бути живим записом САМЕ того довідника, який
+    /// оголошує поле (V-08(b), V-17(a), третій раунд UX).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти неіснуючий Id доходив до бази й падав на <c>FK_RegValue_Ref</c> —
+    /// <c>500</c> «зверніться до адміністратора» на звичайну описку в полі, — а
+    /// Id запису ІНШОГО довідника приймався (<c>201</c>): число валідне,
+    /// посилання — ні, і каскади та списки вибору на такому значенні мовчки
+    /// показували чуже.
+    /// ⚠ Видалений логічно запис — теж «не знайдено»: він поза обігом, і нове
+    /// посилання на нього не має з'являтися.
+    /// </remarks>
+    private static async Task RequireLookupTargetAsync(
+        IRegistryStore registries, RegistryFieldDef field, long target, CancellationToken ct)
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        var entry = await registries.FindEntryAsync(target, ct).ConfigureAwait(false);
+
+        if (entry is null || entry.IsDeleted)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поле «{field.Code}»: запису довідника {target} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.lookupEntryNotFound",
+                    ["field"] = field.Code,
+                    ["value"] = target.ToString(invariant),
+                });
+        }
+
+        if (field.RefRegistryDefId is { } expected && entry.RegistryDefId != expected)
+        {
+            var expectedDefinition = await registries
+                .FindDefinitionByIdAsync(expected, ct).ConfigureAwait(false);
+            var expectedCode = expectedDefinition?.Code ?? expected.ToString(invariant);
+
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поле «{field.Code}» посилається на довідник «{expectedCode}», а запис {target} "
+                + $"(«{entry.Code}») належить іншому довіднику.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.lookupWrongRegistry",
+                    ["field"] = field.Code,
+                    ["value"] = target.ToString(invariant),
+                    ["entryCode"] = entry.Code,
+                    ["expectedRegistry"] = expectedCode,
+                });
+        }
     }
 
     /// <summary>Типізоване значення поля — для порівняння до/після і для аудиту.</summary>
