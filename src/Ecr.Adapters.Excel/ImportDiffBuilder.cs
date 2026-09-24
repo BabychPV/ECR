@@ -136,7 +136,7 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-4221",
-                        "Комірка обчислюється системою: значення з файлу не застосовується.",
+                        "The cell is calculated by the system: the value from the file is not applied.",
                         table.Code, table.NameL10n, ImportMessageKeys.Calculated));
 
                     continue;
@@ -146,7 +146,7 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ROW-0404",
-                        "Рядка з таким ключем у документі немає: імпорт рядків не створює.",
+                        "The document has no row with this key: import does not create rows.",
                         table.Code, table.NameL10n, ImportMessageKeys.NoRow));
 
                     continue;
@@ -157,11 +157,17 @@ public sealed class ImportDiffBuilder
                 // ⚠ Заборонені комірки НЕ застосовуються і показуються
                 // переліком (ФВ-4.4). Мовчазне пропускання виглядало б як
                 // успішний імпорт, після якого частина чисел не змінилася.
+                //
+                // ⛔ F-30: діагностика — англійською і з причиною-кодом, без
+                // `decision.Detail`. Та буває готовим українським реченням
+                // («Сеанс симуляції користувача …»), і саме воно їхало в
+                // `message` відповіді поруч із ключем. Людині текст дає ключ
+                // (`deny.<причина>` — той самий, що в підказці сітки).
                 if (decisions.TryGetValue(address, out var decision) && !decision.IsAllowed)
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ACCS-0403",
-                        decision.Detail ?? $"Змінювати комірку не дозволено: {decision.Reason}.",
+                        $"Editing the cell is not allowed: {decision.Reason}.",
                         table.Code, table.NameL10n, ImportMessageKeys.Denied(decision.Reason)));
 
                     continue;
@@ -178,8 +184,22 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
-                        $"Число має понад {CellValueReader.StorageIntegerDigits} розрядів до коми: сховище його не вмістить.",
+                        $"The number has more than {CellValueReader.StorageIntegerDigits} digits before the decimal point: storage cannot hold it.",
                         table.Code, table.NameL10n, ImportMessageKeys.IntegerDigits));
+
+                    continue;
+                }
+
+                // ⛔ F-06: тип перевіряє ТОЙ САМИЙ читач, що й запис
+                // (`CellValueReader.Read` у `PatchCellsHandler`). Доти `abc` у
+                // числовій колонці ставав звичайною зміною, Apply був активний, а
+                // застосування відповідало 422 «expects a number» — на всю
+                // книгу, вже після того, як людина погодилася на перегляд.
+                if (TypeMismatch(incoming, definition) is { } mismatch)
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch, mismatch.Message,
+                        table.Code, table.NameL10n, mismatch.MessageKey));
 
                     continue;
                 }
@@ -190,6 +210,33 @@ public sealed class ImportDiffBuilder
         }
 
         return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions);
+    }
+
+    /// <summary>
+    /// Відмова читача запису для значення з книги; <c>null</c> — значення
+    /// ляже в комірку.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ключ відмови — ІМПОРТНИЙ (<see cref="ImportMessageKeys.TypeMismatch"/>):
+    /// ключ читача несе в тексті «Column "{columnCode}"», а рядок переліку
+    /// перегляду вже має колонку окремим стовпцем і підстановок не передає.
+    /// </remarks>
+    private static (string Message, string? MessageKey)? TypeMismatch(object? incoming, ColumnDef definition)
+    {
+        try
+        {
+            _ = CellValueReader.Read(incoming, definition);
+
+            return null;
+        }
+        catch (Ecr.Application.Errors.BusinessRuleException error)
+            when (string.Equals(error.ErrorCode, CellValueReader.TypeMismatch, StringComparison.Ordinal))
+        {
+            var readerKey = error.Details?.GetValueOrDefault("messageKey") as string;
+
+            return ($"The value does not match the column type ({readerKey ?? error.ErrorCode}).",
+                    ImportMessageKeys.TypeMismatch(readerKey));
+        }
     }
 
     /// <summary>Читає значення з книги у формі, придатній для <c>PatchCell</c>.</summary>
@@ -421,4 +468,33 @@ public static class ImportMessageKeys
 
     /// <summary>Правка заборонена правами або станом — той самий текст, що в підказці сітки.</summary>
     public static string Denied(EditDenyReason reason) => $"deny.{reason}";
+
+    /// <summary>Значення з книги не читається як число (F-06).</summary>
+    public const string ExpectsNumber = "err.ECR-CELL-0422.importExpectsNumber";
+
+    /// <summary>Значення з книги не читається як true/false.</summary>
+    public const string ExpectsBoolean = "err.ECR-CELL-0422.importExpectsBoolean";
+
+    /// <summary>Значення з книги не читається як дата.</summary>
+    public const string ExpectsDate = "err.ECR-CELL-0422.importExpectsDate";
+
+    /// <summary>Код із книги не знайдено серед записів довідника (або одиниць) колонки.</summary>
+    public const string ExpectsIdentifier = "err.ECR-CELL-0422.importExpectsIdentifier";
+
+    /// <summary>Імпортний ключ для відмови читача запису за ключем самого читача.</summary>
+    /// <param name="readerKey"><c>messageKey</c> відмови <c>CellValueReader</c>.</param>
+    /// <remarks>
+    /// ⚠ Невідомий ключ читача (нова перевірка там) лишається як є — клієнт
+    /// покаже загальну «комірку відхилено»: краще менш точний текст, ніж
+    /// мовчазна зміна, на якій Apply впаде на всю книгу.
+    /// </remarks>
+    public static string? TypeMismatch(string? readerKey) => readerKey switch
+    {
+        "err.ECR-CELL-0422.expectsNumber" => ExpectsNumber,
+        "err.ECR-CELL-0422.expectsBoolean" => ExpectsBoolean,
+        "err.ECR-CELL-0422.expectsDate" => ExpectsDate,
+        "err.ECR-CELL-0422.expectsIdentifier" => ExpectsIdentifier,
+        "err.ECR-CELL-0422.tooManyIntegerDigits" => IntegerDigits,
+        _ => readerKey,
+    };
 }

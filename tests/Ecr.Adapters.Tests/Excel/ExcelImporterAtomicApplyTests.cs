@@ -304,4 +304,47 @@ public sealed class ExcelImporterAtomicApplyTests
         // раз, а не будувати наново з файлу, якого може вже не бути під рукою.
         await _previews.DidNotReceive().RemoveAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F-24")]
+    [InlineData(5, 0)]
+    [InlineData(6, 1)]
+    public async Task Конфлікт_імпорту_перелічує_лише_комірки_що_змінилися_після_перегляду(
+        int theirValue, int expectedConflicts)
+    {
+        // Перегляд бачив у R1.Volume число 5. Конфлікт версії — рядковий, і
+        // обробник запису кладе в перелік КОЖНУ комірку батчу розбіжного рядка.
+        _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(JsonSerializer.Serialize(
+            new ImportPlan(
+                DocumentId,
+                Period,
+                [
+                    new TableDiff(
+                        Instances[0], Period, [new ImportChange("R1", "Volume", 5m, 10m)], [],
+                        new Dictionary<string, string> { ["R1"] = "0xAA" }),
+                ]),
+            Options));
+
+        _cells.When(c => c.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>()))
+              .Do(_ => throw new ConcurrencyConflictException(
+                  "ECR-CELL-0409", "Батч відхилено.",
+                  new Dictionary<string, object?>
+                  {
+                      ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+                      ["conflicts"] = new List<CellConflictDto>
+                      {
+                          new("R1", "Volume", 10m, (decimal)theirValue, "Other", "UserEdit", null, "0xBB"),
+                      },
+                  }));
+
+        var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(
+            () => Importer().ApplyAsync(DocumentId, Token, CancellationToken.None));
+
+        // ⛔ Мутація: прибрати звуження в `Blame` — при 5 (ніхто, крім імпорту,
+        // комірки не міняв) перелік знову міститиме її.
+        var conflicts = Assert.IsAssignableFrom<IEnumerable<CellConflictDto>>(error.Details!["conflicts"]);
+        Assert.Equal(expectedConflicts, conflicts.Count());
+        Assert.Equal("err.ECR-CELL-0409.batchStale", error.Details["messageKey"]);
+    }
 }

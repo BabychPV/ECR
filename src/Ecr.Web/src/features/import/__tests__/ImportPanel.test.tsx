@@ -6,6 +6,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ImportPreview } from '@/api/types';
 import { ImportPanel } from '../ImportPanel';
 import { testTheme } from '@/test/render';
+import { showDone } from '@/shared/ui/notify';
+
+vi.mock('@/shared/ui/notify', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/ui/notify')>()),
+  showDone: vi.fn(),
+}));
 
 /**
  * Діалог перегляду імпорту (`V-10`).
@@ -153,5 +159,68 @@ describe('ImportPanel: перелік змін і відмов', () => {
     // Відмова блокує застосування — і діалог НЕ каже «файл збігається з аркушем».
     expect(screen.queryByText('⟦import.noChanges⟧')).toBeNull();
     expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
+  });
+});
+
+describe('ImportPanel: четвертий раунд (F-01, F-06)', () => {
+  it('F-06: відмова типу показана текстом каталогу, Apply вимкнено', async () => {
+    mockPreview({
+      previewToken: 'tok',
+      changes: [],
+      rejected: [
+        {
+          rowKey: 'R1',
+          columnCode: 'A',
+          reasonCode: 'ECR-CELL-0422',
+          message: 'The value does not match the column type (err.ECR-CELL-0422.expectsNumber).',
+          messageKey: 'err.ECR-CELL-0422.importExpectsNumber',
+          tableCode: 'T1',
+        },
+      ],
+      conflicts: [],
+    });
+
+    await openPreview();
+
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('⟦err.ECR-CELL-0422.importExpectsNumber⟧ (ECR-CELL-0422)')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('F-01: 202 з jobId — «у фоні, дивись My tasks», а не «застосовано»', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/import/preview')) {
+          return new Response(
+            JSON.stringify({
+              previewToken: 'tok',
+              changes: [{ rowKey: 'R1', columnCode: 'A', oldValue: null, newValue: 1, tableCode: 'T1' }],
+              rejected: [],
+              conflicts: [],
+            } satisfies ImportPreview),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        if (url.includes('/import/apply')) {
+          return new Response(JSON.stringify({ jobId: 'IExcelImportJob-1' }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+
+        throw new Error(`неочікуваний запит у тесті: ${url}`);
+      }),
+    );
+
+    await openPreview();
+    await userEvent.click(screen.getByRole('button', { name: '⟦import.apply⟧' }));
+
+    // ⛔ Мутація: прибрати гілку `isQueued` — тут буде `⟦import.applied⟧`.
+    await vi.waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledWith('⟦import.queued⟧'));
+    expect(vi.mocked(showDone)).not.toHaveBeenCalledWith('⟦import.applied⟧');
   });
 });

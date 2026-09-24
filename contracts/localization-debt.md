@@ -400,7 +400,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 
 | Файл | Місць |
 |---|---|
-| `src/Ecr.Adapters.Excel/ExcelImporter.cs` | 7 |
 | `src/Ecr.Adapters.PiAf/CollectionRunner.cs` | 2 |
 | `src/Ecr.Adapters.PiAf/PiAfCatalogReader.cs` | 2 |
 | `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs` | 5 |

@@ -2,7 +2,14 @@ import { useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { ImportApplyRequest, ImportChange, ImportPreview, ImportRejection } from '@/api/types';
+import type {
+  ImportApplyRequest,
+  ImportChange,
+  ImportPreview,
+  ImportRejection,
+  JobAcceptedResponse,
+  PatchCellsResponse,
+} from '@/api/types';
 import { denyText } from '@/features/grid/permissions';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -54,11 +61,22 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
 
   const apply = useMutation({
     mutationFn: (previewToken: string) =>
-      apiFetch(`/api/v1/documents/${documentId}/import/apply`, {
+      apiFetch<PatchCellsResponse | JobAcceptedResponse>(`/api/v1/documents/${documentId}/import/apply`, {
         method: 'POST',
         body: JSON.stringify({ previewToken } satisfies ImportApplyRequest),
       }),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      // ⛔ F-01: понад поріг (`LargeImportThreshold`, 2000 комірок) сервер
+      // відповідає `202` з `jobId` — імпорт ЩЕ НЕ застосовано. «Imported»
+      // тут було б неправдою: зрізи перечитались би до запису, а людина
+      // вирішила б, що зміни вже в документі. Результат — у «My tasks».
+      if (isQueued(result)) {
+        setPreview(null);
+        await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+        showDone(t('import.queued'));
+        return;
+      }
+
       // Зрізи таблиць перечитуються цілком: імпорт зачіпає рядки, яких немає
       // на екрані, і часткове оновлення показало б половину змін.
       //
@@ -219,6 +237,11 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
   );
 }
 
+/** Чи відповідь застосування — «поставлено в чергу», а не готовий результат. */
+function isQueued(result: PatchCellsResponse | JobAcceptedResponse): result is JobAcceptedResponse {
+  return 'jobId' in result && typeof result.jobId === 'string' && result.jobId !== '';
+}
+
 /**
  * Значення комірки в таблиці diff.
  *
@@ -273,6 +296,15 @@ function rejectionText(rejection: ImportRejection): string {
       return t('err.ECR-IMP-0422.importInstanceMissing');
     case 'err.ECR-IMP-0422.importTableMissing':
       return t('err.ECR-IMP-0422.importTableMissing');
+    // ⛔ F-06: відмова типу — у перегляді, а не 422 на Apply.
+    case 'err.ECR-CELL-0422.importExpectsNumber':
+      return t('err.ECR-CELL-0422.importExpectsNumber');
+    case 'err.ECR-CELL-0422.importExpectsBoolean':
+      return t('err.ECR-CELL-0422.importExpectsBoolean');
+    case 'err.ECR-CELL-0422.importExpectsDate':
+      return t('err.ECR-CELL-0422.importExpectsDate');
+    case 'err.ECR-CELL-0422.importExpectsIdentifier':
+      return t('err.ECR-CELL-0422.importExpectsIdentifier');
     default:
       return (key.startsWith('deny.') ? denyText(key.slice('deny.'.length)) : null) ?? t('import.rejectedCell');
   }
