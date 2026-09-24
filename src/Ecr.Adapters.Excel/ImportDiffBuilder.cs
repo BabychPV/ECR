@@ -96,9 +96,27 @@ public sealed class ImportDiffBuilder
                 }
 
                 var cell = worksheet.Cell(row.Number, column.Number);
+
+                // ⛔ `V-10`. Формула в обчислюваній комірці — це те, що туди
+                // поклав САМ експорт (`ExcelExporter.WriteFormulas`), а не
+                // значення користувача: система однаково порахує комірку сама.
+                // Порівнювати її кешований результат (а Excel перерахує його,
+                // щойно користувач змінить вхідну комірку поруч) означало б
+                // відхиляти кожну книгу, у якій змінили хоч одне вхідне число, —
+                // і з «усе або нічого» Apply не ставав доступним ніколи.
+                if (IsCalculated(definition) && cell.HasFormula)
+                {
+                    continue;
+                }
+
                 var incoming = Read(cell, definition, lookups);
                 var existing = values.GetValueOrDefault((row.RowKey, column.ColumnDefId))?.Value;
 
+                // ⛔ `V-10`. Обчислювані й read-only комірки порівнюються з
+                // поточним значенням ТАК САМО, як вхідні, і відхиляються
+                // (нижче) лише тоді, коли користувач їх ЗМІНИВ. Незмінена
+                // обчислювана комірка експортованої книги пропускається мовчки:
+                // вона не правка, а копія того, що система й так тримає.
                 if (Same(incoming, existing, definition))
                 {
                     continue;
@@ -194,7 +212,13 @@ public sealed class ImportDiffBuilder
                     ? integer
                     : text;
 
-            case CellDataType.Decimal:
+            // ⛔ `V-10`: обчислювані колонки (`Formula`, `Calculated`) тримають
+            // ЧИСЛО (`ValueNumeric`) і експортуються числом — і читаються так
+            // само. Доти вони падали в `default` і читалися текстом, тож
+            // `Same()` порівнював «10» з `ValueString`, якого в них немає, і
+            // КОЖНА непорожня обчислювана комірка незміненої книги ставала
+            // відмовою.
+            case CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated:
                 // ⛔ `U-23`: двійковий хвіст Excel нормалізується ТУТ, явно і
                 // до прев'ю, а не мовчки в сховищі. `0.1 + 0.2` в аркуші — це
                 // `0.30000000000000004` (17 знаків), а сховище тримає 16
@@ -273,34 +297,57 @@ public sealed class ImportDiffBuilder
         => column.DataType is CellDataType.Formula or CellDataType.Calculated || column.IsReadOnly;
 
     /// <summary>Чи збігається значення з файлу з тим, що вже записано.</summary>
+    /// <remarks>
+    /// ⛔ `V-10`. Порівнюється з <see cref="Current"/> — тим самим значенням, яке
+    /// експорт кладе в книгу (<c>ExcelExporter.WriteValue</c> бере поле ЗА ТИПОМ
+    /// колонки), а не з усім <see cref="CellValueData"/>. Інакше комірка, що
+    /// в базі непорожня, а в книзі порожня (порожній рядок <c>''</c>, або число в
+    /// колонці дати), давала «зміну» на незміненій книзі — фантом
+    /// <c>R4 C1 '' → —</c> на DOC-000001.
+    /// </remarks>
     private static bool Same(object? incoming, CellValueData? existing, ColumnDef definition)
     {
-        if (existing is null || existing.IsEmpty)
+        var current = Current(existing, definition);
+
+        if (incoming is string { Length: 0 })
         {
-            return incoming is null;
+            incoming = null;
+        }
+
+        if (current is null || incoming is null)
+        {
+            return current is null && incoming is null;
         }
 
         return definition.DataType switch
         {
-            CellDataType.Int or CellDataType.Decimal =>
-                incoming is decimal d ? existing.ValueNumeric == d
-                : incoming is int i && existing.ValueNumeric == i,
-            CellDataType.Bool => incoming is bool b && existing.ValueBool == b,
-            CellDataType.Date => incoming is DateTime t && existing.ValueDate == t,
-            CellDataType.Lookup => incoming is long id && existing.ValueRegistryEntryId == id,
+            CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
+                current is decimal number
+                && (incoming is decimal d ? number == d : incoming is int i && number == i),
+            CellDataType.Bool => incoming is bool b && current is bool flag && flag == b,
+            CellDataType.Date => incoming is DateTime t && current is DateTime date && date == t,
+            CellDataType.Lookup => incoming is long id && current is long entry && entry == id,
 
             // ⛔ Unit порівнюється за `ValueUnitId` (аудит §8.3). Без цієї гілки
             // порівняння йшло через `ValueString`, який для Unit-комірки
             // ЗАВЖДИ `null` — тож `Same()` повертав `false` для будь-якої
             // непорожньої Unit-комірки, і кожна з них позначалася зміненою.
-            CellDataType.Unit => incoming is int unitId && existing.ValueUnitId == unitId,
+            CellDataType.Unit => incoming is int unitId && current is int unit && unit == unitId,
 
-            _ => string.Equals(existing.ValueString, incoming as string, StringComparison.Ordinal),
+            _ => string.Equals(current as string, incoming as string, StringComparison.Ordinal),
         };
     }
 
-    /// <summary>Поточне значення у вигляді, придатному для показу в переліку змін.</summary>
-    private static object? Display(CellValueData? value, ColumnDef definition)
+    /// <summary>
+    /// Поточне значення комірки в тій формі, у якій його бачить книга: поле за
+    /// ТИПОМ колонки; порожній рядок і відсутнє поле — <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порожній рядок і відсутність значення — одне й те саме для людини, і
+    /// Excel не вміє їх розрізнити взагалі: порожня комірка книги повертається
+    /// як «нічого», а не як <c>''</c>.
+    /// </remarks>
+    private static object? Current(CellValueData? value, ColumnDef definition)
     {
         if (value is null || value.IsEmpty)
         {
@@ -315,9 +362,12 @@ public sealed class ImportDiffBuilder
             CellDataType.Date => value.ValueDate,
             CellDataType.Lookup => value.ValueRegistryEntryId,
             CellDataType.Unit => value.ValueUnitId,
-            _ => value.ValueString,
+            _ => string.IsNullOrEmpty(value.ValueString) ? null : value.ValueString,
         };
     }
+
+    /// <summary>Поточне значення у вигляді, придатному для показу в переліку змін.</summary>
+    private static object? Display(CellValueData? value, ColumnDef definition) => Current(value, definition);
 }
 
 /// <summary>Diff однієї таблиці.</summary>
