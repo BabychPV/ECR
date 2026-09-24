@@ -31,7 +31,7 @@ import { describe, it, expect } from 'vitest';
  * чого немає в переліку файлів). Тому для ЦЬОГО файлу перевірка —
  * джерельна, тим самим прийомом, що вже використовує
  * `shared/theme/__tests__/motion.test.tsx` для `router.tsx`: читає реальний
- * `SecurityPage.tsx` і стверджує, що виклик `PasswordInput` для разового
+ * `CreateUserModal.tsx` (діалог «New user», винесений із `SecurityPage.tsx`) і стверджує, що виклик `PasswordInput` для разового
  * пароля передає `visibilityToggleButtonProps`. Два інші файли картки
  * (`LoginPage.test.tsx`/`ChangePasswordPage.test.tsx`) уже доводять РАНТАЙМ
  * (`aria-hidden`/`tabIndex` на справжньому DOM) для того самого механізму
@@ -41,7 +41,7 @@ import { describe, it, expect } from 'vitest';
  * деінде.
  */
 const source = readFileSync(
-  path.resolve(process.cwd(), 'src/pages/admin/SecurityPage.tsx'),
+  path.resolve(process.cwd(), 'src/features/security/CreateUserModal.tsx'),
   'utf8',
 );
 

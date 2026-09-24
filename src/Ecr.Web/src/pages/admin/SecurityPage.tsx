@@ -1,63 +1,35 @@
-import { Suspense, lazy, useState, type JSX } from 'react';
+import { Suspense, lazy, useMemo, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
-  Checkbox,
   Group,
-  Modal,
-  MultiSelect,
-  PasswordInput,
-  ScrollArea,
   SegmentedControl,
-  Select,
-  Stack,
   Switch,
   Table,
   Text,
-  TextInput,
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import { createUserBody } from '@/features/security/createUserBody';
-import { RoleActions } from '@/features/security/RoleActions';
 import type {
-  CreateRoleRequest,
   PermissionCatalogItem,
-  RoleIdResponse,
   RoleView,
   SetAlertsRequest,
-  UserIdResponse,
   UserPage,
   UserView,
 } from '@/api/types';
+import { CreateRoleModal } from '@/features/security/CreateRoleModal';
+import { CreateUserModal } from '@/features/security/CreateUserModal';
+import { RoleMatrix } from '@/features/security/RoleMatrix';
 import { StartSimulationButton } from '@/features/security/SimulationPanel';
 import { UserAdminActions } from '@/features/security/UserAdminActions';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
-import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { showApiError } from '@/shared/ui/notify';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
-import { PermissionCaption } from '@/features/security/PermissionCaption';
 import { t } from '@/shared/i18n';
-
-/**
- * Аргументи для кнопки-тумблера видимості пароля (`Q-260`).
- *
- * ⛔ Mantine ставить на цю кнопку `aria-hidden="true"` і `tabIndex={-1}` за
- * замовчуванням, доки `visibilityToggleButtonProps` цього не перекриє
- * (`PasswordInput.mjs`) — сама наявність об'єкта вже знімає `aria-hidden`, а
- * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
- * для миші: клавіатура й читалка його не бачили взагалі.
- *
- * ⚠ Напис — ЛІТЕРАЛ, не `t()`: рядки цього застосунку йдуть із серверного
- * каталогу (`09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський.
- * Ключа під цей напис там ще немає; голий `t()` без рядка в каталозі показав
- * би читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
- */
-const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
 
 /** Без адреси алерти нікуди надсилати — перемикач вимкнено з названою причиною (`D-125`). */
 function noEmail(user: UserView): boolean {
@@ -126,25 +98,12 @@ export function SecurityPage(): JSX.Element {
   const queryClient = useQueryClient();
   const session = useSession();
 
+  // ⛔ Сторінка знає лише «діалог відкрито/закрито». Чернетки «New role» і
+  // «New user» живуть у самих діалогах (`CreateRoleModal`, `CreateUserModal`):
+  // коли вони були станом сторінки, кожен символ перерендерював матрицю
+  // ролей × 41 право — медіана 97–120 мс на символ на стенді (2026-09-24).
   const [creatingRole, setCreatingRole] = useState(false);
-  const [roleCode, setRoleCode] = useState('');
-  const [roleName, setRoleName] = useState<LocalizedValue>({});
-  const [rolePermissions, setRolePermissions] = useState<string[]>([]);
-
   const [creatingUser, setCreatingUser] = useState(false);
-  const [userName, setUserName] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [provider, setProvider] = useState('Windows');
-  const [sid, setSid] = useState('');
-
-  // ⛔ Разовий пароль ВВОДИТЬ адміністратор (`A7-60`). Сервер його не
-  // генерує і не має генерувати: повернути пароль у відповіді API прямо
-  // заборонено (`D-11`, `ФВ-6.11`), а надіслати листом нікуди — адреси в
-  // щойно створеного запису ще немає. Ризик — адміністратор знає пароль —
-  // знімається обов'язковою зміною при першому вході (`ФВ-6.18`).
-  const [oneTimePassword, setOneTimePassword] = useState('');
-  const [email, setEmail] = useState('');
-  const [newUserRoles, setNewUserRoles] = useState<string[]>([]);
 
   // Кого редагуємо: `null` — діалог закритий.
   const [editingAccess, setEditingAccess] = useState<UserView | null>(null);
@@ -167,96 +126,6 @@ export function SecurityPage(): JSX.Element {
     },
     // ⚠ Причина показується як є: «немає пошти» — це те, що людина може
     // виправити, а «не вдалося» — ні.
-    onError: showApiError,
-  });
-
-  /**
-   * Створення ролі (`ФВ-6.3`).
-   *
-   * ⛔ Дії не було в інтерфейсі: сторож вважав `POST /roles` досяжним, бо
-   * клієнт читає `GET /roles` тією самою адресою (`A7-42`). Тобто матриця
-   * прав показувала ролі й не давала завести жодної нової — а рольова
-   * модель без цього зводиться до вбудованих ролей назавжди.
-   *
-   * ⚠ Права обираються з тих, що вже оголошені: вигадати право на клієнті
-   * не можна, сервер приймає лише коди з каталогу.
-   */
-  // ⛔ Аудит-пас 5: скидання чернетки жило ЛИШЕ в `onSuccess` — Cancel/закриття
-  // діалогу (`onClose`) лишали код/назву/права в стані, і повторне відкриття
-  // «Add role» показувало чернетку ПОПЕРЕДНЬОЇ спроби, не порожню форму.
-  const resetRoleForm = (): void => {
-    setCreatingRole(false);
-    setRoleCode('');
-    setRoleName({});
-    setRolePermissions([]);
-  };
-
-  const createRole = useMutation({
-    mutationFn: () =>
-      apiFetch<RoleIdResponse>('/api/v1/roles', {
-        method: 'POST',
-        body: JSON.stringify({
-          code: roleCode.trim(),
-          nameL10n: roleName,
-          permissionCodes: rolePermissions,
-        } satisfies CreateRoleRequest),
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['roles'] });
-      resetRoleForm();
-      showDone(t('security.roleCreated'));
-    },
-    onError: showApiError,
-  });
-
-  /**
-   * Заведення користувача.
-   *
-   * ⛔ Так само недосяжна дія (`A7-42`). Доменні користувачі з'являються
-   * після першого входу самі, а локальні — лише тут; без цього екрана
-   * локального облікового запису не існувало б узагалі.
-   *
-   * ⛔ Пароль тут НЕ вводиться. Локальний обліковий запис створюється
-   * сервером із разовим паролем і прапорцем `MustChangePassword`
-   * (`ФВ-6.18`): пароль, який знає той, хто його видав, — це не пароль.
-   */
-  // ⛔ Аудит-пас 5: той самий дефект, що й `resetRoleForm` — скидання чернетки
-  // жило ЛИШЕ в `onSuccess`, і Cancel/закриття діалогу лишали ім'я/пароль/
-  // ролі в стані для наступного відкриття.
-  const resetUserForm = (): void => {
-    setCreatingUser(false);
-    setUserName('');
-    setDisplayName('');
-    setSid('');
-    setOneTimePassword('');
-    setEmail('');
-    setNewUserRoles([]);
-  };
-
-  const createUser = useMutation({
-    mutationFn: () =>
-      apiFetch<UserIdResponse>('/api/v1/users', {
-        method: 'POST',
-        // ⛔ Склад тіла — окремою чистою функцією (`createUserBody`). Саме
-        // тут жили `A7-60`, `A7-61` і `A7-62`, і перевірити їх рендером
-        // Mantine у jsdom неможливо за прийнятний час.
-        body: JSON.stringify(
-          createUserBody({
-            userName,
-            displayName,
-            provider,
-            sid,
-            oneTimePassword,
-            email,
-            roleCodes: newUserRoles,
-          }),
-        ),
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['users'] });
-      resetUserForm();
-      showDone(t('security.userCreated'));
-    },
     onError: showApiError,
   });
 
@@ -289,8 +158,11 @@ export function SecurityPage(): JSX.Element {
   // не доходить: матриця стоїть за `AsyncBoundary` з `permissionCatalog.error`,
   // форма ролі — за `ErrorAlert`. Інакше відмова каталогу малювала матрицю без
   // жодної колонки прав, і це читалося як «у ролей немає прав».
-  const permissions = [...(permissionCatalog.data ?? [])].sort((a, b) =>
-    a.code.localeCompare(b.code),
+  // ⚠ `useMemo` — щоб `RoleMatrix` (`memo`) отримував те саме посилання, доки
+  // каталог не змінився.
+  const permissions = useMemo(
+    () => [...(permissionCatalog.data ?? [])].sort((a, b) => a.code.localeCompare(b.code)),
+    [permissionCatalog.data],
   );
 
   const retryReferences = (): void => {
@@ -348,87 +220,11 @@ export function SecurityPage(): JSX.Element {
           onRetry={retryReferences}
         >
           {(all) => (
-          // ⛔ `overflowX` тут стояв НА самій `<Table>` — без обмеження
-          // ширини в цього елемента нема чого переповнювати, і замість
-          // таблиці горизонтально прокручувалась уся сторінка разом із
-          // навігацією (виявлено реальним переглядом матриці прав, не
-          // прогоном тестів: 38 колонок прав ширші за будь-який екран).
-          // `ScrollArea` без фіксованої висоти обмежує лише ШИРИНУ —
-          // рядки таблиці й далі ростуть за змістом; перша колонка
-          // лишається прилипленою до лівого краю САМЕ ЦЬОГО контейнера
-          // (перевірено `getBoundingClientRect` після скролу, не лише
-          // оком: `position: sticky` рахує від контейнера прокрутки, а
-          // не від сторінки).
-          <ScrollArea type="auto" offsetScrollbars>
-            <Table striped withTableBorder className="ecr-sticky-head ecr-sticky-first">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>{t('security.role')}</Table.Th>
-                  {/* ⛔ Тут стояв `<Text size="xs">{permission.code}</Text>` —
-                      41 колонка, підписана сирим кодом сервера (`U-11`). Спосіб
-                      виправлення той самий, що в #437/#438/#440/#441: підпис із
-                      каталогу рядків. Різниця одна, і вона свідома — код
-                      ЛИШАЄТЬСЯ видимим другим рядком (`permissionLabel.ts`
-                      пояснює чому: адміністратор безпеки оперує саме кодами). */}
-                  {permissions.map((permission) => (
-                    <Table.Th key={permission.code}>
-                      <PermissionCaption code={permission.code} />
-                    </Table.Th>
-                  ))}
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {all.map((role) => (
-                  <Table.Tr key={role.id} opacity={role.isActive ? 1 : 0.5}>
-                    <Table.Td>
-                      {role.code}
-                      {/* ⛔ `opacity={0.5}` на рядку — єдиний сигнал неактивності:
-                          непомітно при бляклому екрані, невидимо для читалки
-                          (`opacity` не входить у доступне ім'я). Бейдж дає той
-                          самий факт текстом (UX-аудит, знахідка 2/3). */}
-                      {!role.isActive && (
-                        <Badge ml="xs" size="xs" color="gray" variant="outline">
-                          {t('security.inactive')}
-                        </Badge>
-                      )}
-                      {role.isBuiltIn && (
-                        <Badge ml="xs" size="xs" variant="light">
-                          {t('security.builtIn')}
-                        </Badge>
-                      )}
-
-                      {/* ⚠ Небезпечні права показуються ОКРЕМО: у складені ролі
-                          вони не входять навмисно, і адміністратор має бачити
-                          різницю (ФВ-6.12, D-40). */}
-                      {role.dangerousPermissions.length > 0 && (
-                        <Badge ml="xs" size="xs" color="statusError" variant="light">
-                          {t('security.dangerous', { count: role.dangerousPermissions.length })}
-                        </Badge>
-                      )}
-
-                      {/* ⛔ UI-аудит, lane 1: роль без жодного права виглядала
-                          в цій таблиці однаково з «навмисно вузькою роллю» —
-                          рядок увесь порожній, і нічого не пояснює різницю
-                          між «звужена свідомо» і «нічого не робить». */}
-                      {role.permissions.length === 0 && role.dangerousPermissions.length === 0 && (
-                        <Badge ml="xs" size="xs" color="statusWarning" variant="outline">
-                          {t('security.noPermissions')}
-                        </Badge>
-                      )}
-
-                      {/* Клонувати / перейменувати / видалити (`BE-14`). */}
-                      {can(session.data, 'Security.ManageRoles') && <RoleActions role={role} />}
-                    </Table.Td>
-                    {permissions.map((permission) => (
-                      <Table.Td key={permission.code}>
-                        {role.permissions.includes(permission.code) ? '✓' : ''}
-                      </Table.Td>
-                    ))}
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea>
+            <RoleMatrix
+              roles={all}
+              permissions={permissions}
+              canManage={can(session.data, 'Security.ManageRoles')}
+            />
           )}
         </AsyncBoundary>
       )}
@@ -602,100 +398,13 @@ export function SecurityPage(): JSX.Element {
         </AsyncBoundary>
       )}
 
-      <Modal
+      <CreateRoleModal
         opened={creatingRole}
-        onClose={resetRoleForm}
-        title={t('security.createRole')}
-        size="lg"
-      >
-        <TextInput
-          label={t('security.roleCode')}
-          description={t('security.roleCodeHint')}
-          value={roleCode}
-          onChange={(event) => setRoleCode(event.currentTarget.value)}
-          data-autofocus
-        />
-
-        <LocalizedInput label={t('security.roleName')} value={roleName} onChange={setRoleName} />
-
-        <Text size="sm" mt="sm" fw={600}>
-          {t('security.permissions')}
-        </Text>
-        <Text size="xs" c="dimmed" mb="xs">
-          {t('security.permissionsHint')}
-        </Text>
-
-        {/* ⚠ Перелік — це ПОВНИЙ каталог (директива №11, T2), а не перетин
-            того, що вже оголошено в наявних ролях: право без жодного носія
-            інакше не можна було б призначити НІКОМУ. Вигадати право на
-            клієнті все одно не можна — сервер приймає лише коди з каталогу,
-            і показувати поле вільного вводу означало б обіцяти те, що
-            завершиться відмовою. */}
-        {/* ⛔ Каталог не приїхав — причина замість порожнього місця, і «Зберегти»
-            вимкнено: роль без прав, збережена тому, що прапорців не було, —
-            не вибір адміністратора. */}
-        <ErrorAlert error={permissionCatalog.error} onRetry={retryReferences} />
-        <ScrollArea h={220}>
-          <Stack gap="xs">
-            {permissions.map((permission) => (
-              <Checkbox
-                key={permission.code}
-                label={
-                  <Group gap="xs" wrap="nowrap">
-                    {/* ⚠ Той самий підпис, що в матриці (`U-11`): інакше одне
-                        й те саме право називалося б у таблиці мовою
-                        користувача, а у формі — англійським кодом. Код
-                        лишається другим рядком — його вводять у грантах і
-                        читають у журналі безпеки. */}
-                    <PermissionCaption code={permission.code} />
-                    {/* ⚠ Небезпечні позначені ОКРЕМО (ФВ-6.12, D-40): їх
-                        видають поіменно, і адміністратор має бачити, яке саме
-                        право це таке, ще до того, як позначить прапорець. */}
-                    {permission.isDangerous && (
-                      <Badge size="xs" color="statusError" variant="light">
-                        {t('security.dangerous', { count: 1 })}
-                      </Badge>
-                    )}
-                  </Group>
-                }
-                checked={rolePermissions.includes(permission.code)}
-                onChange={(event) => {
-                  // ⛔ Той самий клас дефекту, що `CreateDocumentModal.tsx`:
-                  // `event.currentTarget` React обнуляє одразу після
-                  // завершення обробника, а апдейтер `setRolePermissions`
-                  // читав його ЛІНИВО — під `StrictMode` (`main.tsx`) React
-                  // навмисно кличе апдейтер ДВІЧІ, і другий виклик падає з
-                  // `TypeError: Cannot read properties of null (reading
-                  // 'checked')`, розбиваючи весь застосунок без
-                  // `ErrorBoundary` на маршруті.
-                  const checked = event.currentTarget.checked;
-
-                  setRolePermissions((current) =>
-                    checked
-                      ? [...current, permission.code]
-                      : current.filter((code) => code !== permission.code),
-                  );
-                }}
-              />
-            ))}
-          </Stack>
-        </ScrollArea>
-
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={resetRoleForm}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={
-              roleCode.trim().length === 0 || !hasAnyText(roleName) || permissionCatalog.error !== null
-            }
-            loading={createRole.isPending}
-            onClick={() => createRole.mutate()}
-          >
-            {t('common.save')}
-          </Button>
-        </Group>
-      </Modal>
+        onClose={() => setCreatingRole(false)}
+        permissions={permissions}
+        permissionCatalogError={permissionCatalog.error}
+        onRetry={retryReferences}
+      />
 
       {accessUsed && (
         <Suspense fallback={null}>
@@ -707,106 +416,13 @@ export function SecurityPage(): JSX.Element {
         </Suspense>
       )}
 
-      <Modal
+      <CreateUserModal
         opened={creatingUser}
-        onClose={resetUserForm}
-        title={t('security.createUser')}
-      >
-        <Select
-          label={t('security.kind')}
-          description={t('security.kindHint')}
-          data={['Windows', 'Local']}
-          value={provider}
-          onChange={(value) => setProvider(value ?? 'Windows')}
-          allowDeselect={false}
-        />
-
-        <TextInput
-          mt="sm"
-          label={t('security.login')}
-          value={userName}
-          onChange={(event) => setUserName(event.currentTarget.value)}
-          data-autofocus
-        />
-
-        <TextInput
-          mt="sm"
-          label={t('security.name')}
-          value={displayName}
-          onChange={(event) => setDisplayName(event.currentTarget.value)}
-        />
-
-        {provider === 'Windows' && (
-          <TextInput
-            mt="sm"
-            label={t('security.sid')}
-            description={t('security.sidHint')}
-            value={sid}
-            onChange={(event) => setSid(event.currentTarget.value)}
-          />
-        )}
-
-        {/* ⛔ Разовий пароль вводить адміністратор. Сервер його НЕ генерує:
-            повернути пароль у відповіді API заборонено (`D-11`, `ФВ-6.11`), а
-            надіслати листом нікуди — адреси ще немає. Обов'язкова зміна при
-            першому вході (`ФВ-6.18`) робить його справді разовим. */}
-        {provider === 'Local' && (
-          <>
-            <PasswordInput
-              mt="sm"
-              label={t('security.oneTimePassword')}
-              description={t('security.oneTimePasswordHint')}
-              value={oneTimePassword}
-              onChange={(event) => setOneTimePassword(event.currentTarget.value)}
-              visibilityToggleButtonProps={passwordToggleProps}
-            />
-            <Text size="xs" c="dimmed" mt="xs">
-              {t('security.localHint')}
-            </Text>
-          </>
-        )}
-
-        {/* ⛔ Адреса: без неї сповіщення не надходять нікому (`ФВ-12`). */}
-        <TextInput
-          mt="sm"
-          label={t('security.email')}
-          description={t('security.emailHint')}
-          value={email}
-          onChange={(event) => setEmail(event.currentTarget.value)}
-        />
-
-        {/* ⛔ Ролі задаються ОДРАЗУ. Обліковий запис без жодної ролі
-            виглядає працездатним і не може нічого. */}
-        <ErrorAlert error={roles.error} onRetry={retryReferences} />
-        <MultiSelect
-          mt="sm"
-          label={t('security.roles')}
-          description={t('security.rolesHint')}
-          data={(roles.data ?? []).map((r) => r.code)}
-          value={newUserRoles}
-          onChange={setNewUserRoles}
-          searchable
-        />
-
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={resetUserForm}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            // ⛔ Ролі не приїхали (банер сторінки каже чому) — не зберігаємо:
-            // порожній перелік ролей тут не вибір, а відмова довідника.
-            disabled={
-              userName.trim().length === 0
-              || (provider === 'Local' && oneTimePassword.length === 0)
-              || roles.error !== null
-            }
-            loading={createUser.isPending}
-            onClick={() => createUser.mutate()}
-          >
-            {t('common.save')}
-          </Button>
-        </Group>
-      </Modal>
+        onClose={() => setCreatingUser(false)}
+        roles={roles.data ?? []}
+        rolesError={roles.error}
+        onRetry={retryReferences}
+      />
     </>
   );
 }
