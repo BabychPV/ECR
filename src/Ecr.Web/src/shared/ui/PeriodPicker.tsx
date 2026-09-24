@@ -1,7 +1,8 @@
-import { useState, type JSX } from 'react';
+import type { JSX } from 'react';
 import { ActionIcon, Group, NumberInput, type MantineSize } from '@mantine/core';
 import { formatDate } from '@/shared/format';
 import { t } from '@/shared/i18n';
+import { useFieldDraft } from './useFieldDraft';
 
 /**
  * `PeriodPicker` (директива №15 §2, Шар 3, UI-06; те саме завдання, що
@@ -149,35 +150,41 @@ export function PeriodPicker({
 }: PeriodPickerProps): JSX.Element {
   /*
    * ⛔ Незавершений набір живе ЛИШЕ тут, у полі, і не йде в `onChange`: див.
-   * `isCompletePeriodKey`. Чернетка прив'язана до `value`, для якого її
-   * набрано (`forValue`): щойно `value` змінився ззовні (стрілка, адреса,
-   * автопідбір періоду), вона застаріла й поле знову показує `value` — без
-   * ефекту синхронізації.
+   * `isCompletePeriodKey`.
+   *
+   * ⛔ Поки поле у фокусі, воно показує РІВНО набране — зовнішній `value` у
+   * нього не пише (`useFieldDraft`). Раніше чернетка «застарівала», щойно
+   * `value` змінювався ззовні, і поле знову показувало `value`: автовибір
+   * періоду на `/` дописував `202609` у щойно очищене поле, і набір `202608`
+   * давав `202608202609` (живий стенд, 5 з 5). Те саме робило б запізніле
+   * відлуння адреси при повільному рендері. Ззовні (стрілка, «Назад»,
+   * навігація) `value` приймається, коли поле не у фокусі.
    */
-  const [draft, setDraft] = useState<{ text: string | number; forValue: number | null } | null>(
-    null,
-  );
-  const typed = draft !== null && draft.forValue === value ? draft.text : null;
-  const typing = typed !== null;
+  const field = useFieldDraft<string | number>(value ?? '');
+  const local = field.value;
+  const complete = typeof local === 'number' && isCompletePeriodKey(local);
 
-  const prevValue = value === null ? null : shiftPeriod(value, -1);
-  const nextValue = value === null ? null : shiftPeriod(value, 1);
+  // ⚠ Стрілки крокують від набраного, лише коли воно повне; від неповного —
+  // від ЧИННОГО періоду, як і раніше.
+  const current = complete ? local : value;
+  const prevValue = current === null ? null : shiftPeriod(current, -1);
+  const nextValue = current === null ? null : shiftPeriod(current, 1);
   // ⚠ Поки набір неповний, підпис попереднього періоду під полем брехав би
-  // («2026» над «September 2026») — тому підпису немає, як і для `null`.
-  const caption = value === null || typing ? undefined : periodCaption(value);
+  // («2026» над «September 2026») — тому підпису немає, як і для порожнього.
+  const caption = complete ? periodCaption(local) : undefined;
 
   const commit = (next: number | null): void => {
-    setDraft(null);
+    field.setValue(next ?? '');
     onChange(next);
   };
 
   const handleInput = (next: string | number): void => {
+    field.setValue(next);
+
     if (next === '') {
-      commit(null);
+      onChange(null);
     } else if (typeof next === 'number' && isCompletePeriodKey(next)) {
-      commit(next);
-    } else {
-      setDraft({ text: next, forValue: value });
+      onChange(next);
     }
   };
 
@@ -200,11 +207,17 @@ export function PeriodPicker({
         label={label ?? t('documents.period')}
         description={caption}
         disabled={disabled}
-        value={typed ?? value ?? ''}
+        value={local}
         onChange={handleInput}
+        onFocus={field.onFocus}
         // ⚠ Незавершений набір, покинутий фокусом, повертає поле до чинного
         // періоду: інакше поле показувало б «2026», а список — інший період.
-        onBlur={() => setDraft(null)}
+        // Повний набір лишається: `value` у цю мить може ще нести запізніле
+        // відлуння адреси, і підтягнути його означало б стерти набране.
+        onBlur={() => {
+          field.onBlur();
+          if (!complete) field.setValue(value ?? '');
+        }}
       />
 
       <ActionIcon
