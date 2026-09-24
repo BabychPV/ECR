@@ -43,6 +43,9 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     private MsSqlContainer? _container;
 
+    /// <summary>Сторож попереджень EF — до першого ж запиту будь-якого тесту з базою.</summary>
+    static SqlServerFixture() => EfWarningGuard.Install();
+
     /// <summary>Рядок підключення до тестової БД.</summary>
     public string ConnectionString { get; private set; } = string.Empty;
 
@@ -400,8 +403,8 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// </remarks>
     public EcrDbContext CreateContext()
     {
-        var options = new DbContextOptionsBuilder<EcrDbContext>()
-            .UseSqlServer(ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
+        var options = EfWarningGuard.Apply(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo")))
             .Options;
 
         return new EcrDbContext(options);

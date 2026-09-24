@@ -65,7 +65,12 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         // Пояс обов'язковий і видимий, тож вставка без нього має падати гучно,
         // а не отримувати чужий +06:00.
 
-        builder.Property(x => x.CurrentPeriodMode).HasDefaultValueSql("0", "DF_Project_CPMode");
+        // ⚠ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601) не
+        // надсилав би CLR-замовчування (0) і підставляв би DEFAULT схеми;
+        // тут вони збігаються (0), тож втрати не було — але правило одне для
+        // всіх переліків із DEFAULT, щоб наступна зміна DEFAULT не відкрила її.
+        builder.Property(x => x.CurrentPeriodMode).HasDefaultValueSql("0", "DF_Project_CPMode").ValueGeneratedNever();
         builder.Property(x => x.IsArchiving).HasDefaultValue(false, "DF_Project_Arch");
         builder.Navigation(x => x.Periods).UsePropertyAccessMode(PropertyAccessMode.Field);
 

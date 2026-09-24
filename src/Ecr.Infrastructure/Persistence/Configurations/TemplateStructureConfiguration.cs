@@ -79,7 +79,12 @@ public sealed class TableDefConfiguration : IEntityTypeConfiguration<TableDef>
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
-        builder.Property(x => x.StorageMode).HasDefaultValueSql("0", "DF_TableDef_Storage");
+        // ⚠ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601) не
+        // надсилав би CLR-замовчування (0) і підставляв би DEFAULT схеми;
+        // тут вони збігаються (0), тож втрати не було — але правило одне для
+        // всіх переліків із DEFAULT, щоб наступна зміна DEFAULT не відкрила її.
+        builder.Property(x => x.StorageMode).HasDefaultValueSql("0", "DF_TableDef_Storage").ValueGeneratedNever();
         builder.Property(x => x.IsDeleted).HasDefaultValue(false, "DF_TableDef_Del");
         builder.LocalizedText(x => x.NameL10n);
 

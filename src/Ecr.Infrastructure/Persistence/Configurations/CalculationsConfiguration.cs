@@ -123,7 +123,14 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
         builder.Property(x => x.Level).HasColumnName("Level");
         builder.Property(x => x.NumericMode).HasDefaultValue(Domain.Enums.NumericMode.Legacy);
         builder.Property(x => x.CalendarMode).HasDefaultValue(Domain.Enums.CalendarMode.Actual);
-        builder.Property(x => x.TraceLevel).HasDefaultValue(Domain.Enums.TraceLevel.ErrorsOnly);
+        // ⛔ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601)
+        // вважав `Off` (= 0, CLR-замовчування) «незаданим» і на INSERT
+        // мовчки підставляв DEFAULT схеми (`ErrorsOnly`): версія з `Off`,
+        // зокрема клон (`CloneAsDraft`), у базі ставала `ErrorsOnly`.
+        // Конструктор сутності задає значення явно, тож на DEFAULT схеми код
+        // не покладається.
+        builder.Property(x => x.TraceLevel).HasDefaultValue(Domain.Enums.TraceLevel.ErrorsOnly).ValueGeneratedNever();
         builder.Property(x => x.EffectiveFrom).HasColumnType("date");
         builder.Property(x => x.ChangeReason).HasMaxLength(1000);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");

@@ -36,7 +36,12 @@ public sealed class FormulaDefConfiguration : IEntityTypeConfiguration<FormulaDe
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
-        builder.Property(x => x.Dialect).HasDefaultValueSql("0", "DF_Formula_Dialect");
+        // ⚠ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601) не
+        // надсилав би CLR-замовчування (0) і підставляв би DEFAULT схеми;
+        // тут вони збігаються (0), тож втрати не було — але правило одне для
+        // всіх переліків із DEFAULT, щоб наступна зміна DEFAULT не відкрила її.
+        builder.Property(x => x.Dialect).HasDefaultValueSql("0", "DF_Formula_Dialect").ValueGeneratedNever();
         builder.Property(x => x.EvaluationOrder).HasDefaultValue(0, "DF_Formula_Order");
         builder.Property(x => x.IsCrossSheet).HasDefaultValue(false, "DF_Formula_Cross");
         builder.Property(x => x.IsSnapshot).HasDefaultValue(false, "DF_Formula_Snap");
@@ -247,7 +252,13 @@ public sealed class RegistryDefConfiguration : IEntityTypeConfiguration<Registry
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsTemporal).HasDefaultValue(false, "DF_RegDef_Temp");
-        builder.Property(x => x.SourceKind).HasDefaultValueSql("2", "DF_RegDef_Src");
+        // ⛔ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601)
+        // вважав `External` (= 0, CLR-замовчування) «незаданим» і на INSERT
+        // мовчки підставляв DEFAULT схеми (`2` = `Local`). Конструктор
+        // сутності задає значення явно, тож на DEFAULT схеми код не
+        // покладається.
+        builder.Property(x => x.SourceKind).HasDefaultValueSql("2", "DF_RegDef_Src").ValueGeneratedNever();
         builder.Property(x => x.DataRevision).HasDefaultValue(0, "DF_RegDef_Rev");
         builder.Property(x => x.DefinitionVersion).HasDefaultValue(1, "DF_RegDef_Ver");
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_RegDef_Act");
