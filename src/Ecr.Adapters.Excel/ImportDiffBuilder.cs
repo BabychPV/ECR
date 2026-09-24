@@ -407,6 +407,9 @@ public static class ImportMessageKeys
     /// <summary>Рядка з ключем із файлу в документі немає.</summary>
     public const string NoRow = "err.ECR-ROW-0404.importNoRow";
 
+    /// <summary>Значення стоїть поза рядками таблиці (під нею чи в таблиці без рядків).</summary>
+    public const string OutsideRows = "err.ECR-ROW-0404.importOutsideRows";
+
     /// <summary>Ціла частина числа не вміщується в сховище.</summary>
     public const string IntegerDigits = "err.ECR-CELL-0422.importIntegerDigits";
 

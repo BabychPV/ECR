@@ -15586,6 +15586,9 @@ export interface components {
         ImportRejection: {
             /** @description Колонка; для відмови цілої таблиці — її код. */
             columnCode: string;
+            /** @description Адреса комірки книги (`B3`) для значення, у якого немає рядка системи
+             *     (`V-10`: поза рядками таблиці); інакше `null`. */
+            excelCell?: null | string;
             /** @description Діагностичний текст для журналу — НЕ для показу людині. */
             message: string;
             /** @description Ключ тексту причини в каталозі (D-95). ⛔ `V-10`: інтерфейс показує текст

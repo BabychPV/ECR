@@ -102,6 +102,52 @@ public sealed class ImportRoundTripScenarios(SqlServerFixture sql)
         Assert.Equal(7m, await ReadAsync(admin.Client, doc, instanceId, "R2", "A"));
     }
 
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Finding", "V-10")]
+    public async Task Значення_поза_рядками_таблиці_відхиляється_з_поясненням_а_не_ігнорується()
+    {
+        // ⛔ DOC-000003: у таблиці порожнього документа немає жодного рядка, а
+        // число, введене одразу під заголовком, мовчки пропадало — і діалог
+        // писав «The file matches the sheet».
+        using var app = new EcrApiFactory(sql);
+
+        var admin = await Provisioning.AdministratorAsync(
+            app,
+            Prefix,
+            [
+                "Project.Manage", "Document.View", "Document.Create", "Template.Edit", "Template.Publish",
+                "Document.Export", "Document.Import", "System.ViewHealth",
+            ]);
+
+        var doc = await DataEntryScenarios.ArrangeRealDocumentAsync(app, admin, Prefix, rowMode: "Dynamic");
+        admin = doc.Admin;
+
+        _ = await TableInstanceAsync(admin.Client, doc);
+
+        var book = await ExportAsync(app, admin.Client, doc, includeFormulas: true);
+
+        byte[] edited;
+        using (var workbook = new XLWorkbook(new MemoryStream(book)))
+        {
+            var sheet = workbook.Worksheets.First(w => w.Visibility == XLWorksheetVisibility.Visible);
+            sheet.Cell(HeaderRow(sheet) + 1, Column(sheet, "A")).Value = 42;
+
+            using var output = new MemoryStream();
+            workbook.SaveAs(output);
+            edited = output.ToArray();
+        }
+
+        var preview = await PreviewAsync(app, admin.Client, doc.DocumentId, edited);
+
+        Assert.Equal(0, preview.GetProperty("changes").GetArrayLength());
+        var rejection = Assert.Single(preview.GetProperty("rejected").EnumerateArray().ToList());
+        Assert.Equal("err.ECR-ROW-0404.importOutsideRows", rejection.GetProperty("messageKey").GetString());
+        Assert.Equal("A3", rejection.GetProperty("excelCell").GetString());
+        Assert.Equal("TABLE1", rejection.GetProperty("tableCode").GetString());
+        Assert.Equal("A", rejection.GetProperty("columnCode").GetString());
+    }
+
     /// <summary>Номер рядка книги для ключа рядка: підпис рядка — «Row N» у порядку ключів.</summary>
     /// <remarks>
     /// ⚠ Книга не пише ключ рядка видимо; рядки йдуть у порядку шаблону одразу

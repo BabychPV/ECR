@@ -211,6 +211,14 @@ public sealed class ExcelImporter(
             rejected.AddRange(diff.Rejected);
         }
 
+        // ⛔ `V-10`: значення поза рядками таблиць (порожній документ, рядок під
+        // таблицею) — відмова з поясненням, а не мовчазний пропуск, після якого
+        // діалог каже «файл збігається з аркушем».
+        foreach (var sheet in validBlocks.GroupBy(v => v.Block.SheetName, StringComparer.OrdinalIgnoreCase))
+        {
+            rejected.AddRange(StrayValueDetector.Find(workbook.Worksheet(sheet.Key), [.. sheet]));
+        }
+
         var token = Guid.NewGuid().ToString("N");
 
         await previews

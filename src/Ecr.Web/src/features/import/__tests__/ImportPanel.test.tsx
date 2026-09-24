@@ -125,4 +125,33 @@ describe('ImportPanel: перелік змін і відмов', () => {
     expect(within(table).getByText('⟦deny.RowReadOnly⟧ (ECR-ACCS-0403)')).toBeTruthy();
     expect(within(table).queryByText(/Правило доступу|обчислюється системою/)).toBeNull();
   });
+
+  it('V-10: значення поза рядками таблиці показано адресою комірки книги', async () => {
+    mockPreview({
+      previewToken: 'tok',
+      changes: [],
+      rejected: [
+        {
+          rowKey: '—',
+          columnCode: 'C2',
+          reasonCode: 'ECR-ROW-0404',
+          message: 'Значення B3 стоїть поза рядками таблиці: імпорт рядків не створює.',
+          messageKey: 'err.ECR-ROW-0404.importOutsideRows',
+          tableCode: 'T1',
+          excelCell: 'B3',
+        },
+      ],
+      conflicts: [],
+    });
+
+    await openPreview();
+
+    const table = screen.getByRole('table');
+    expect(within(table).getByRole('cell', { name: 'B3' })).toBeTruthy();
+    expect(within(table).getByText('⟦err.ECR-ROW-0404.importOutsideRows⟧ (ECR-ROW-0404)')).toBeTruthy();
+
+    // Відмова блокує застосування — і діалог НЕ каже «файл збігається з аркушем».
+    expect(screen.queryByText('⟦import.noChanges⟧')).toBeNull();
+    expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
+  });
 });

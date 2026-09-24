@@ -72,6 +72,10 @@ public sealed record ImportChange(
 /// Для відмови правами — <c>deny.&lt;EditDenyReason&gt;</c>, ті самі тексти, що
 /// в підказці сірої комірки сітки.
 /// </param>
+/// <param name="ExcelCell">
+/// Адреса комірки книги (<c>B3</c>) для значення, у якого немає рядка системи
+/// (`V-10`: поза рядками таблиці); інакше <c>null</c>.
+/// </param>
 public sealed record ImportRejection(
     string RowKey,
     string ColumnCode,
@@ -79,4 +83,5 @@ public sealed record ImportRejection(
     string Message,
     string? TableCode = null,
     Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
-    string? MessageKey = null);
+    string? MessageKey = null,
+    string? ExcelCell = null);

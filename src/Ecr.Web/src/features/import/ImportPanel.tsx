@@ -183,9 +183,13 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                 </Table.Thead>
                 <Table.Tbody>
                   {preview.rejected.map((rejection) => (
-                    <Table.Tr key={`${rejection.tableCode ?? ''}:${rejection.rowKey}:${rejection.columnCode}`}>
+                    <Table.Tr
+                      key={`${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
+                    >
                       <Table.Td>{tableOf(rejection)}</Table.Td>
-                      <Table.Td>{rejection.rowKey}</Table.Td>
+                      {/* ⚠ Значення поза рядками таблиці рядка системи не має —
+                          людині показується адреса комірки книги (`V-10`). */}
+                      <Table.Td>{rejection.excelCell ?? rejection.rowKey}</Table.Td>
                       <Table.Td>{rejection.columnCode}</Table.Td>
                       <Table.Td>
                         {rejectionText(rejection)} ({rejection.reasonCode})
@@ -261,6 +265,8 @@ function rejectionText(rejection: ImportRejection): string {
       return t('err.ECR-CELL-4221.importCalculated');
     case 'err.ECR-ROW-0404.importNoRow':
       return t('err.ECR-ROW-0404.importNoRow');
+    case 'err.ECR-ROW-0404.importOutsideRows':
+      return t('err.ECR-ROW-0404.importOutsideRows');
     case 'err.ECR-CELL-0422.importIntegerDigits':
       return t('err.ECR-CELL-0422.importIntegerDigits');
     case 'err.ECR-IMP-0422.importInstanceMissing':
