@@ -53,10 +53,24 @@ describe('rejectionMarksOf — які відмови тримають правк
     expect(rejectionMarksOf(problem(422, 'ECR-X-0422'), [bad, good])).toHaveLength(2);
   });
 
-  it('409, 5xx і мережа НЕ тримають: повтор має везти ті самі правки', () => {
-    expect(rejectionMarksOf(problem(409, 'ECR-CELL-0409'), [bad])).toEqual([]);
+  it('5xx і мережа НЕ тримають: повтор має везти ті самі правки', () => {
     expect(rejectionMarksOf(problem(500, 'ECR-SYS-0500'), [bad])).toEqual([]);
+    expect(rejectionMarksOf(problem(429, 'ECR-SYS-0429'), [bad])).toEqual([]);
     expect(rejectionMarksOf(new TypeError('Failed to fetch'), [bad])).toEqual([]);
+  });
+
+  it('409 тримає розбіжні комірки з переліку — і лише їх', () => {
+    const marks = rejectionMarksOf(
+      problem(409, 'ECR-CELL-0409', { conflicts: [{ rowKey: 'r1', columnCode: 'C2', theirValue: 1 }] }),
+      [bad, good],
+    );
+
+    expect(marks.map((mark) => mark.edit)).toEqual([good]);
+    expect(marks[0]?.scope).toBe('cell');
+  });
+
+  it('409 без переліку тримає весь пакет — інакше він пішов би знову й знову', () => {
+    expect(rejectionMarksOf(problem(409, 'ECR-CELL-0409'), [bad, good])).toHaveLength(2);
   });
 
   it('ECR-CALC-0437 тримає правки названих РЯДКІВ із рівнем «рядок»', () => {

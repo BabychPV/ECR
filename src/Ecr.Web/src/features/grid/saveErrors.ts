@@ -59,11 +59,16 @@ export function cellsOfSaveError(
  * Які правки пакета ТРИМАТИ після відмови (`V-01`) — і чи тримати взагалі.
  *
  * ⛔ Тримаються лише відмови, які повторення НЕ вилікує: невірне значення
- * (`422`), заборона (`403`), кривий запит (`400`). Мережа, `5xx`, `429` і
- * `401` — минущі: наступний пакет має везти ті самі правки, і тримати їх
- * означало б кинути правильні дані через збій зв'язку. `409` — окремий шлях
- * (`useCellPatch`, перелік розбіжностей): рішення там ухвалює людина, і
- * поведінку конфлікту цей модуль не чіпає.
+ * (`422`), заборона (`403`), кривий запит (`400`) і конфлікт версії рядка
+ * (`409`). Мережа, `5xx`, `429` і `401` — минущі: наступний пакет має везти ті
+ * самі правки, і тримати їх означало б кинути правильні дані через збій
+ * зв'язку.
+ *
+ * ⛔ `409` доти НЕ тримався — і конфліктна правка (зі старою `baseVersion`)
+ * їхала з кожним наступним пакетом, який сервер знову відхиляв цілком: той
+ * самий клас, що й `V-01`. Тепер вона тримається, доки людина її не розв'яже
+ * (Retry або нова правка комірки). Поведінка конфлікту для людини — перелік
+ * розбіжностей (`useCellPatch`, `BE-06`) — не змінена.
  *
  * ⚠ Комірку названо — тримається рівно вона (`cellsOfSaveError`). Не названо
  * жодної з надісланих — тримається ВЕСЬ пакет: інакше він пішов би знову
@@ -80,8 +85,24 @@ export function rejectionMarksOf(
   attempted: readonly PendingEdit[],
 ): readonly { edit: PendingEdit; message: string; scope: 'cell' | 'row' }[] {
   if (!(error instanceof EcrApiError)) return [];
-  if (error.isConflict) return [];
-  if (![400, 403, 422].includes(error.problem.status) && !error.isRequiredInputMissing) return [];
+  if (![400, 403, 409, 422].includes(error.problem.status) && !error.isRequiredInputMissing) return [];
+
+  if (error.isConflict) {
+    // ⚠ Названі розбіжні комірки; не названо жодної з надісланих — увесь пакет
+    // (конфлікт версії стосується рядка, і без переліку не відомо, чиєї комірки).
+    const conflicted = new Set(
+      (error.conflicts as { rowKey?: unknown; columnCode?: unknown }[]).map(
+        (conflict) => `${String(conflict.rowKey)}:${String(conflict.columnCode)}`,
+      ),
+    );
+    const hit = attempted.filter((edit) => conflicted.has(`${edit.rowKey}:${edit.columnCode}`));
+
+    return (hit.length > 0 ? hit : attempted).map((edit) => ({
+      edit,
+      message: error.message,
+      scope: 'cell' as const,
+    }));
+  }
 
   if (error.isRequiredInputMissing) {
     const rows = new Set(error.requiredInputCells.map((cell) => cell.rowKey));
