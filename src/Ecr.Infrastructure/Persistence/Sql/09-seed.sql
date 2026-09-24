@@ -901,6 +901,11 @@ USING (VALUES
     -- назавжди лишається на своїй версії (рішення людини на `Q15-05`), тож
     -- речення мусить це сказати — інакше адміністратор боятиметься кнопки.
     (N'err.ECR-TMPL-0422.templateNameRequired',  N'en', N'A template needs a name in at least one language.', 1),
+    -- V-19: відмова збереження/публікації виразу. Коли зауваження несе власний
+    -- ключ (`expr.*`), відмова бере його; ці два — для решти.
+    (N'err.ECR-TMPL-0422.expressionInvalid',     N'en', N'The expression is not valid: check {code} at position {position}.', 1),
+    (N'err.ECR-TMPL-0422.publishRejected',       N'en', N'The template version cannot be published: {count} problem(s) found; the first is {code} at position {position}.', 1),
+    (N'err.ECR-TMPL-0422.publishReasonRequired', N'en', N'A publication reason is required: an empty line explains nothing to whoever later asks why this version was put into use.', 1),
     (N'err.ECR-TMPL-0409.templateArchived',      N'en', N'Template "{code}" is archived: new documents are no longer created from it, while existing ones keep working.', 1),
     (N'err.ECR-TMPL-0409.templateAlreadyArchived', N'en', N'Template "{code}" is already archived.', 1),
     (N'err.ECR-TMPL-0409.templateNotArchived',     N'en', N'Template "{code}" is not archived: there is nothing to bring back.', 1),
@@ -3470,6 +3475,20 @@ USING (VALUES
     -- V-03: дві формули в одну комірку. Адреси — у нотації мови виразів
     -- (`RTOT·*`, `*·CFRM`, `RTOT·CFRM`), а не словами.
     (N'expr.publish.formulaTargetConflict',    N'en', N'Formulas {first} and {second} both calculate cell {cell} in table "{table}": a cell can be calculated by only one formula. Remove one of the two formulas.', 1),
+    -- V-19: зауваження резолвера посилань (`ReferenceResolver`, `RangeExpander`,
+    -- `DependencyExtractor`) — раніше лише українським реченням без ключа.
+    (N'expr.ref.unknownColumn',                N'en', N'Column "{column}" does not exist in table "{table}".', 1),
+    (N'expr.ref.unknownRow',                   N'en', N'Row "{row}" does not exist in table "{table}".', 1),
+    (N'expr.ref.unknownTable',                 N'en', N'Table "{sheet}.{table}" does not exist in this template version.', 1),
+    (N'expr.ref.unknownHeaderField',           N'en', N'Header field "{name}" does not exist in this template version.', 1),
+    (N'expr.ref.ownTableMissing',              N'en', N'Table {tableDefId} that owns the expression is not in the template structure.', 1),
+    (N'expr.ref.rowKeyInDynamicTable',         N'en', N'Table "{table}" is dynamic: a specific row ("{row}") cannot be referenced, only a predicate.', 1),
+    (N'expr.ref.predicateInFixedTable',        N'en', N'Table "{table}" has fixed rows: a predicate is not needed, the rows are known in advance.', 1),
+    (N'expr.ref.unknownRowSelector',           N'en', N'Unknown row selector.', 1),
+    (N'expr.ref.monthPlaceholderOutsideColumn', N'en', N'The Month placeholder can only be used in a formula bound to a month column.', 1),
+    (N'expr.ref.unknownRangeBound',            N'en', N'Row "{row}" does not exist in table "{table}": the range bound cannot be resolved.', 1),
+    (N'expr.ref.reversedRange',                N'en', N'Range "{from}:{to}" is written in reverse order.', 1),
+    (N'expr.ref.rangeTableUnavailable',        N'en', N'The range cannot be expanded: its table is not available.', 1),
     -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
     (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
 

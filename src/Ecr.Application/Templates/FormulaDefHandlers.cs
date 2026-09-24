@@ -70,7 +70,8 @@ public sealed class SaveFormulaDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IFormulaEngine formulaEngine)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -120,6 +121,15 @@ public sealed class SaveFormulaDefHandler(
         var (table, existing, resolvedId) = FindTarget(version, tableDefId, scope, target);
 
         RequireComputedColumn(table, scope, resolvedId);
+
+        // ⛔ V-19: синтаксис і посилання — ДО запису. Раніше `[CDEC] * * 2` і
+        // `[NOPE] + 1` зберігалися з «saved», і автор дізнавався про помилку
+        // лише на публікації, та ще й загальним «does not pass validation».
+        ExpressionRejection.RequireValid(
+            formulaEngine, version, command.Expression, command.Dialect,
+            scope == FormulaScope.Column
+                ? new ExpressionSite(table.Id, null, resolvedId)
+                : new ExpressionSite(table.Id, table.Rows.First(r => r.Id == resolvedId).RowKeyValue, null));
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 

@@ -46,7 +46,8 @@ public sealed class SaveValidationRuleHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IFormulaEngine formulaEngine)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -83,6 +84,13 @@ public sealed class SaveValidationRuleHandler(
             .FirstOrDefault(t => t.Id == tableDefId)
             ?? throw new NotFoundException(
                 ErrorCodes.TemplateNotFound, $"Таблиці {tableDefId} у версії {templateVersionId} немає.");
+
+        // ⛔ V-19: правило з `[CDEC] >= ` зберігалося з «saved», а публікація
+        // вирази правил не перевіряла зовсім — зламане правило доїжджало до
+        // документа. Діалект той самий, яким правило рахує `ValidationEngine`.
+        ExpressionRejection.RequireValid(
+            formulaEngine, version, command.Expression, ExpressionDialect.Template,
+            new ExpressionSite(table.Id, null, command.ColumnDefId));
 
         var ecrCode = EcrCode.Create(code);
         var message = new LocalizedText(new Dictionary<string, string>(command.MessageL10n, StringComparer.OrdinalIgnoreCase));

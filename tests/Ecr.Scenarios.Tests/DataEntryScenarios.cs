@@ -1133,6 +1133,28 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                 $"колонка {code}: {addCalculated.StatusCode}: {app.ErrorsText}");
         }
 
+        // ✎ V-19: поле шапки заводиться ДО формули — збереження формули тепер
+        // резолвить посилання, і `HDR.Area` на ще не заведене поле відхилялося б.
+        // ⛔ Поле шапки — ДО публікації, тим самим шляхом чернетка→публікація,
+        // що колонка/аркуш/таблиця вище: PUT .../header-fields/{code} відмовляє
+        // ECR-TMPL-0409 на опублікованій версії (EnsureStructurallyMutable).
+        if (headerField is { } field)
+        {
+            var addHeaderField = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/header-fields/{field.Code}", UriKind.Relative),
+                new
+                {
+                    labelL10n = new Dictionary<string, string> { ["en"] = field.Code },
+                    ordinal = 0,
+                    dataType = field.DataType,
+                    isRequired = false,
+                    lookupRegistryDefId = (int?)null,
+                });
+            Assert.True(
+                addHeaderField.StatusCode == HttpStatusCode.OK,
+                $"поле шапки {field.Code}: {addHeaderField.StatusCode}: {app.ErrorsText}");
+        }
+
         // ⛔ Колонка-формула і сама формула — ДО публікації, і це не порядок
         // зручності. Розкриті залежності (`cfg.FormulaDependency`) складає
         // саме публікація (`PublishChecks.Dependencies`), а без них
@@ -1221,26 +1243,6 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                     isActive = true,
                 });
             Assert.True(addRule.StatusCode == HttpStatusCode.OK, $"{addRule.StatusCode}: {app.ErrorsText}");
-        }
-
-        // ⛔ Поле шапки — ДО публікації, тим самим шляхом чернетка→публікація,
-        // що колонка/аркуш/таблиця вище: PUT .../header-fields/{code} відмовляє
-        // ECR-TMPL-0409 на опублікованій версії (EnsureStructurallyMutable).
-        if (headerField is { } field)
-        {
-            var addHeaderField = await client.PutAsJsonAsync(
-                new Uri($"/api/v1/template-versions/{versionId}/header-fields/{field.Code}", UriKind.Relative),
-                new
-                {
-                    labelL10n = new Dictionary<string, string> { ["en"] = field.Code },
-                    ordinal = 0,
-                    dataType = field.DataType,
-                    isRequired = false,
-                    lookupRegistryDefId = (int?)null,
-                });
-            Assert.True(
-                addHeaderField.StatusCode == HttpStatusCode.OK,
-                $"поле шапки {field.Code}: {addHeaderField.StatusCode}: {app.ErrorsText}");
         }
 
         var publish = await client.PostAsJsonAsync(

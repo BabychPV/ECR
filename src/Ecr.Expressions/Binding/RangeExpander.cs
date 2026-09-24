@@ -52,7 +52,8 @@ public sealed class RangeExpander
             diagnostics?.Add(new ExpressionDiagnostic(
                 ExpressionErrors.Unresolved,
                 $"Рядка '{missing}' немає в таблиці '{table.Code}' — межа діапазону не резолвиться.",
-                position, 1));
+                position, 1, "expr.ref.unknownRangeBound",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["row"] = missing, ["table"] = table.Code }));
             return [];
         }
 
@@ -64,7 +65,8 @@ public sealed class RangeExpander
             diagnostics?.Add(new ExpressionDiagnostic(
                 ExpressionErrors.Unresolved,
                 $"Діапазон '{fromRowKey}:{toRowKey}' записаний у зворотному порядку.",
-                position, 1));
+                position, 1, "expr.ref.reversedRange",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["from"] = fromRowKey, ["to"] = toRowKey }));
             return [];
         }
 

@@ -168,7 +168,7 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
                 diagnostics?.Add(new ExpressionDiagnostic(
                     ExpressionErrors.Unresolved,
                     "Діапазон неможливо розкрити: таблиця недоступна.",
-                    reference.Position, 1));
+                    reference.Position, 1, "expr.ref.rangeTableUnavailable"));
                 return;
             }
 

@@ -429,7 +429,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
 | `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/PublishTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
