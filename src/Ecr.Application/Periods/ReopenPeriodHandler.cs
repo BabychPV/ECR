@@ -95,6 +95,24 @@ public sealed class ReopenPeriodHandler(
                                   ["periodId"] = periodId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                               });
 
+            // ⛔ Право `Period.Reopen` — функціональне, воно не каже, ЧИЇ періоди
+            // можна відкривати. Без гранта на проєкт власник права відкривав би
+            // періоди проєктів, яких навіть не бачить (UX-прохід 2026-09-24,
+            // рішення людини). Рівень — Manage, як і в `SetCurrentPeriodHandler`:
+            // це структурна зміна проєкту, не правка даних. Перевірка стоїть ДО
+            // архівної: інакше відмова «проєкт архівований» розповідала б про
+            // чужий проєкт тому, хто його не бачить.
+            if (profile.LevelFor(ResourceKind.Project, project.Id) < GrantLevel.Manage)
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {project.Id}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                        ["projectId"] = project.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
             // Архівований проєкт — кінцевий стан: відкривати в ньому нема чого,
             // дані вже поїхали в архівні партиції (ФВ-1.10).
             if (project.Status == ProjectStatus.Archived)

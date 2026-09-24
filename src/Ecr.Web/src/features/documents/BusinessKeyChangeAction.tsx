@@ -33,13 +33,26 @@ import {
  * перевіряється ПЕРШИМ.
  */
 export function hasProjectWriteGrant(me: MeDto | undefined, projectId: number): boolean {
+  return hasProjectGrant(me, projectId, 'Write');
+}
+
+/**
+ * Чи має користувач на проєкт грант щонайменше `required` — дзеркало
+ * `profile.LevelFor(ResourceKind.Project, id) < required` на сервері.
+ * Заборона виграє на будь-якому рівні (ФВ-6.6).
+ */
+export function hasProjectGrant(
+  me: MeDto | undefined,
+  projectId: number,
+  required: GrantLevelName,
+): boolean {
   if (me === undefined) return false;
 
   const key = `Project:${String(projectId)}`;
   if ((me.denies ?? []).includes(key)) return false;
 
   const level = (me.grants ?? {})[key] as GrantLevelName | undefined;
-  return level !== undefined && meetsGrant(level, 'Write');
+  return level !== undefined && meetsGrant(level, required);
 }
 
 /**

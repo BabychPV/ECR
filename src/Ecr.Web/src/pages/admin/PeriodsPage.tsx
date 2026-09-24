@@ -31,6 +31,7 @@ import { markSlicesStale } from '@/features/grid/sliceCache';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
 import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
+import { hasProjectGrant } from '@/features/documents/BusinessKeyChangeAction';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
@@ -542,7 +543,13 @@ export function PeriodsPage(): JSX.Element {
 
   const manages = can(session.data, 'Project.Manage');
   const configures = can(session.data, 'Period.Configure');
-  const reopens = can(session.data, 'Period.Reopen');
+  // ⛔ Право `Period.Reopen` не каже, ЧИЇ періоди: сервер вимагає ще й гранта
+  // Manage на проєкт (`ReopenPeriodHandler`). Без цієї умови кнопка обіцяла б
+  // дію, яка завершиться 403.
+  const reopens =
+    can(session.data, 'Period.Reopen') &&
+    projectId !== null &&
+    hasProjectGrant(session.data, projectId, 'Manage');
   const recalculates = can(session.data, 'Calculation.Recalculate');
 
   return (

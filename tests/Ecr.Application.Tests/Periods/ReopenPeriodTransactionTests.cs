@@ -1,5 +1,6 @@
 // tests/Ecr.Application.Tests/Periods/ReopenPeriodTransactionTests.cs
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Periods;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -63,7 +64,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         await using var db = CreateContext();
         var spy = new TransactionWatchingPeriodStore(new PeriodStore(db), db);
 
-        var handler = Handler(spy, db, new UnitOfWork(db));
+        var handler = Handler(spy, db, new UnitOfWork(db), arranged.ProjectId);
 
         await handler
             .HandleAsync(arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None)
@@ -102,7 +103,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
 
         await using var db = CreateContext();
-        var handler = Handler(new PeriodStore(db), db, new FailingUnitOfWork(new UnitOfWork(db)));
+        var handler = Handler(new PeriodStore(db), db, new FailingUnitOfWork(new UnitOfWork(db)), arranged.ProjectId);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => handler.HandleAsync(
@@ -135,7 +136,7 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
 
         await using var db = CreateContext();
-        var handler = Handler(new PeriodStore(db), db, new UnitOfWork(db));
+        var handler = Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId);
 
         await handler
             .HandleAsync(arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None)
@@ -144,12 +145,45 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
         Assert.Equal(1, await AuditRowsAsync(arranged.PeriodId).ConfigureAwait(true));
     }
 
-    private ReopenPeriodHandler Handler(IPeriodStore periods, EcrDbContext db, IUnitOfWork uow)
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Без_гранта_Manage_на_проєкт_період_не_відкривається_і_журнал_чистий()
+    {
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ. Прибрати перевірку `LevelFor(Project) < Manage` у
+        // `ReopenPeriodHandler` — і червоним стає рівно цей тест: власник права
+        // `Period.Reopen` з грантом лише Write відкриває період чужого проєкту.
+        // ⚠ Саме Write, а не «жодного гранта»: так видно, що межа — Manage.
+        var arranged = await ArrangeAsync(PeriodState.Closed).ConfigureAwait(true);
+
+        await using var db = CreateContext();
+        var handler = Handler(new PeriodStore(db), db, new UnitOfWork(db), arranged.ProjectId, GrantLevel.Write);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => handler.HandleAsync(
+                arranged.PeriodId, "уточнення за скаргою", Now.AddDays(3), CancellationToken.None))
+            .ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", error.Details!["messageKey"]);
+        Assert.Equal(0, await AuditRowsAsync(arranged.PeriodId).ConfigureAwait(true));
+
+        await using var check = CreateContext();
+        Assert.Equal(
+            PeriodState.Closed,
+            await check.Periods.Where(p => p.Id == arranged.PeriodId).Select(p => p.State)
+                       .FirstAsync().ConfigureAwait(true));
+    }
+
+    private ReopenPeriodHandler Handler(
+        IPeriodStore periods, EcrDbContext db, IUnitOfWork uow, int projectId,
+        GrantLevel projectGrant = GrantLevel.Manage)
     {
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>())
               .Returns(new AccessBuilder { UserId = UserId }
                   .Permission(ReopenPeriodHandler.Permission)
+                  .Grant(ResourceKind.Project, projectId, projectGrant)
                   .Build());
 
         var user = Substitute.For<ICurrentUser>();
