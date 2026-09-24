@@ -106,6 +106,10 @@ public sealed class PublishTemplateVersionHandler(
         // відмова на правила означала б два кола виправлень замість одного.
         diagnostics = [.. diagnostics, .. PublishChecks.CheckRules(version)];
 
+        // ⛔ V-03: дві формули в одну комірку — відхиляється тут, до
+        // перерахунку, який на такій конфігурації падав на PRIMARY KEY.
+        diagnostics = [.. diagnostics, .. FormulaTargetConflicts.Check(version, formulaEngine)];
+
         // ⛔ Плюс перевірка СТРУКТУРИ: версія без жодного аркуша публікувалася
         // кодом `204`, і ні домен, ні сервер цього не бачили (директива №09
         // §6.5, `S-09`). `TemplateVersion.Publish` навмисно не перевіряє це
@@ -132,7 +136,8 @@ public sealed class PublishTemplateVersionHandler(
                 new Dictionary<string, object?>
                 {
                     ["diagnostics"] = diagnostics
-                        .Select(d => new DiagnosticInfo(d.Code, d.Message, d.Position, d.Length))
+                        .Select(d => new DiagnosticInfo(
+                            d.Code, d.Message, d.Position, d.Length, d.MessageKey, d.MessageParams))
                         .ToList(),
                 });
         }

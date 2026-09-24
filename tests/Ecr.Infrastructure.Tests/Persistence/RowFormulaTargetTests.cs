@@ -68,6 +68,30 @@ public sealed class RowFormulaTargetTests(SqlServerFixture sql)
         Assert.Equal(2, written);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Рядкова_й_колонкова_формули_в_одну_комірку_не_валять_перерахунок_і_пише_остання_за_порядком()
+    {
+        var doc = await ArrangeAsync();
+
+        await using var db = CreateContext();
+
+        // До виправлення: SqlException «Violation of PRIMARY KEY constraint … @cells».
+        await Build(db, doc, withColumnFormula: true)
+            .RecalculateAllAsync(doc.DocumentId, doc.PeriodKey, CancellationToken.None);
+
+        var total = doc.RowIds[2];
+
+        // Колонкова формула [CDEC] * 2 — друга за порядком: у RTOT·CFRM її
+        // значення від уже порахованого RTOT·CDEC = 15, тобто 30, а не 15
+        // рядкової.
+        Assert.Equal(10m, await NumericAsync(doc, doc.RowIds[0], Column.Formula));
+        Assert.Equal(20m, await NumericAsync(doc, doc.RowIds[1], Column.Formula));
+        Assert.Equal(15m, await NumericAsync(doc, total, Column.Decimal));
+        Assert.Equal(30m, await NumericAsync(doc, total, Column.Formula));
+    }
+
     /// <summary>Порядкові номери колонок у будівнику (1-based).</summary>
     private enum Column
     {

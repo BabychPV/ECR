@@ -3467,6 +3467,9 @@ USING (VALUES
     -- ПОВІДОМЛЕННЯ в редакторі формул, а не смерть процесу від
     -- StackOverflowException, якого в .NET не перехоплює жоден catch.
     (N'expr.nestingTooDeep',                   N'en', N'The expression is nested deeper than {max} levels.', 1),
+    -- V-03: дві формули в одну комірку. Адреси — у нотації мови виразів
+    -- (`RTOT·*`, `*·CFRM`, `RTOT·CFRM`), а не словами.
+    (N'expr.publish.formulaTargetConflict',    N'en', N'Formulas {first} and {second} both calculate cell {cell} in table "{table}": a cell can be calculated by only one formula. Remove one of the two formulas.', 1),
     -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
     (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
 

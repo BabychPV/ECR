@@ -486,7 +486,16 @@ public sealed class RecalculationService(
 
         // Результати групуються за екземпляром: кожна таблиця пишеться
         // своїм набором змін, бо `CellChangeSet` адресує один екземпляр.
-        var byInstance = new Dictionary<long, List<CellRecord>>();
+        //
+        // ⛔ V-03: усередині екземпляра — СЛОВНИК за адресою, а не список.
+        // Рядкова й колонкова формули можуть цілити в одну комірку (публікація
+        // це тепер відхиляє, але вже опубліковані версії лишаються), і список
+        // давав два записи з однією адресою: `NormalizedCellStore.ApplyAsync`
+        // падав на `PRIMARY KEY … dbo.@cells`, подання — 500, фонова задача
+        // ретраїла хвилинами. Правило пріоритету детерміноване: пише ОСТАННЯ
+        // в порядку обчислення — саме її значення вже лежить у контексті й
+        // його читають залежні формули, тож база й каскад не розходяться.
+        var byInstance = new Dictionary<long, Dictionary<CellAddress, CellRecord>>();
 
         foreach (var formulaId in targets)
         {
@@ -535,7 +544,7 @@ public sealed class RecalculationService(
                 periodKey, context, values, stored, sink);
         }
 
-        var written = byInstance.Values.Sum(list => list.Count);
+        var written = byInstance.Values.Sum(cells => cells.Count);
         if (written == 0)
         {
             return 0;
@@ -599,8 +608,10 @@ public sealed class RecalculationService(
             var writable = await EnterSheetsAsync(
                 instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token).ConfigureAwait(false);
 
-            foreach (var (target, records) in byInstance.Where(pair => pair.Value.Count > 0))
+            foreach (var (target, cells) in byInstance.Where(pair => pair.Value.Count > 0))
             {
+                IReadOnlyList<CellRecord> records = [.. cells.Values];
+
                 // ⛔ Аркуш поданий або затверджений — його обчислені числа вже в
                 // зрізі подання й не змінюються (ФВ-9.17, `RecalculationWritePolicy`):
                 // шлях змінити подане — Reopen. Екземпляр без відомого аркуша не
@@ -763,7 +774,7 @@ public sealed class RecalculationService(
         SliceEvaluationContext context,
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         IReadOnlyDictionary<CellKey, CellValueData> stored,
-        List<CellRecord> upserts)
+        Dictionary<CellAddress, CellRecord> upserts)
     {
         foreach (var (rowKey, columnDefId) in Targets(table, formula, rowIds, rowFilter))
         {
@@ -822,13 +833,18 @@ public sealed class RecalculationService(
             // `старе = нове`, і — до п. 3 — стільки ж піднятих `RowVersion`.
             // Порівняння винесене в `CellValueComparison.AreEqual` і
             // перевірене окремо: саме воно вирішує, що таке «те саме».
+            var address = new CellAddress(periodKey, rowId, columnDefId);
+
+            // ⚠ V-03: «те саме, що в базі» від ПІЗНІШОЇ формули знімає й запис
+            // ранішої в ту саму комірку — інакше в базу пішло б значення, яке
+            // в контексті вже перекрите.
             if (CellValueComparison.AreEqual(stored.GetValueOrDefault(key), data))
             {
+                upserts.Remove(address);
                 continue;
             }
 
-            upserts.Add(new CellRecord(
-                new CellAddress(periodKey, rowId, columnDefId), table.Id, data));
+            upserts[address] = new CellRecord(address, table.Id, data);
         }
     }
 

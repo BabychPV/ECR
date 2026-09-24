@@ -166,6 +166,7 @@ public sealed partial class QuartzJobAdapter(
                 // ⚠ Ретрай — НЕ Failed. Клієнт, що опитує стан, має й далі
                 // бачити задачу «у виконанні», а не короткий спалах «провалу»,
                 // який за кілька секунд сам собою стає «виконується» знову.
+                LogJobRetrying(logger, jobId, typeName ?? "—", ex);
                 await ScheduleRetryAsync(context, attempt, correlationId, progress, clock, ex).ConfigureAwait(false);
                 return;
             }
@@ -181,13 +182,16 @@ public sealed partial class QuartzJobAdapter(
                         progress,
                         jobId,
                         "Failed",
-                        JobProgressMessageCodec.Shorten(ex.Message, IJobProgressStore.MaxErrorLength),
+                        // ⛔ V-03: текст винятку БАЗИ (імена об'єктів, значення
+                        // ключа) у `/jobs` не йде — лише в журнал рядком нижче.
+                        JobProgressMessageCodec.Shorten(
+                            JobFailureText.For(ex, correlationId), IJobProgressStore.MaxErrorLength),
                         clock,
                         CancellationToken.None,
                         ErrorCodeOf(ex)))
                 .ConfigureAwait(false);
 
-            LogJobFailed(logger, jobId, typeName ?? "—");
+            LogJobFailed(logger, jobId, typeName ?? "—", ex);
 
             // ⛔ Деталь задачі НЕ видаляється тут. Дурабельна саме на цей
             // випадок (QuartzJobScheduler.EnqueueCoreAsync): без неї
@@ -322,7 +326,8 @@ public sealed partial class QuartzJobAdapter(
         => ex is not (DomainException
             or NotFoundException
             or AccessDeniedException
-            or SourceAuthenticationException);
+            or SourceAuthenticationException)
+           && !JobFailureText.IsConstraintViolation(ex);
 
     /// <summary>
     /// Планує новий одноразовий триґер того самого <c>JobKey</c> з
@@ -373,7 +378,7 @@ public sealed partial class QuartzJobAdapter(
                     ["attempt"] = nextAttempt.ToString(CultureInfo.InvariantCulture),
                     ["max"] = MaxRetryAttempts.ToString(CultureInfo.InvariantCulture),
                     ["delaySeconds"] = delay.TotalSeconds.ToString("0", CultureInfo.InvariantCulture),
-                    ["error"] = ex.Message,
+                    ["error"] = JobFailureText.For(ex, correlationId),
                 });
 
             // ⛔ Саме тут жила найдорожча частина дефекту, знайденого наскрізною
@@ -502,7 +507,10 @@ public sealed partial class QuartzJobAdapter(
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) завершилася помилкою.")]
-    private static partial void LogJobFailed(ILogger logger, string jobId, string typeName);
+    private static partial void LogJobFailed(ILogger logger, string jobId, string typeName, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; заплановано повтор.")]
+    private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);
 
     [LoggerMessage(
         Level = LogLevel.Information,
