@@ -477,6 +477,15 @@ public sealed partial class EndpointCoverageTests
         new("pages/admin/ExpressionsPage.tsx", "`expressions.check.${check}`", 1, "pages/admin/ExpressionsPage.tsx",
             ["expressions.check.Cycle", "expressions.check.References", "expressions.check.Types", "expressions.check.Units"],
             "SkippedChecks перевірки виразу."),
+        new("pages/admin/RegistriesPage.tsx", "`registries.referenceKind.${kind}`", 1,
+            "pages/admin/RegistriesPage.tsx",
+            [
+                "registries.referenceKind.cells", "registries.referenceKind.headerValues",
+                "registries.referenceKind.registryValues", "registries.referenceKind.childEntries",
+                "registries.referenceKind.links", "registries.referenceKind.methodologyConstants",
+                "registries.referenceKind.methodologySubstances",
+            ],
+            "V-08: види посилань на запис довідника (RegistryEntryReferences.ByKind)."),
 
         new("shared/ui/StatusBadge.tsx", "statusKey(kind, state)", 1, "shared/ui/StatusBadge.tsx",
             [.. StatusKeys("sheet"), .. StatusKeys("period"), .. StatusKeys("job"), .. StatusKeys("version"),
