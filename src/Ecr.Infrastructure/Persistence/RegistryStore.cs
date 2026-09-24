@@ -159,12 +159,12 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     /// а не оптимізацією. Ціна чесної відповіді тут — повний прохід по
     /// партиціях, і він виправданий: викликач один
     /// (<c>RegistryAdminHandlers</c>, видалення запису), і це не гарячий шлях.
-    /// </remarks>
     /// <para>
     /// ⛔ V-08: решта видів рахується тут само, одним викликом. Посилання з
     /// записів, які самі видалені логічно, не блокують: такий запис поза обігом
     /// і сам нічого не показує.
     /// </para>
+    /// </remarks>
     public async Task<RegistryEntryReferences> CountReferencesAsync(long registryEntryId, CancellationToken ct)
     {
         var cells = await db.CellValues
