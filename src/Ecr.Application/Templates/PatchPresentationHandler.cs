@@ -20,6 +20,7 @@ public sealed class PatchPresentationHandler(
     IRepository<Domain.Entities.Configuration.TemplateVersion, int> versions,
     ITemplateVersionStore store,
     ChangeClassifier classifier,
+    IMetadataCache metadataCache,
     IAuditWriter audit,
     IUnitOfWork uow,
     IClock clock,
@@ -170,6 +171,15 @@ public sealed class PatchPresentationHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ⛔ R-11: без інвалідації `GET …/structure` читав прогрітий знімок зі
+        // СТАРОЮ ревізією й старими підписами — екран показував «Appearance
+        // revision» на крок позаду, і щойно збережений підпис з'являвся лише
+        // після наступної правки. Той самий виклик, що в усіх структурних
+        // обробниках (`SaveColumnDefHandler`, `SaveSheetDefHandler` та ін.);
+        // тут його не було єдиного. Ключ кешу несе ревізію, але знімок під
+        // ключем версії лишався попереднім.
+        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
 
         return newRevision;
     }
