@@ -5,6 +5,7 @@ import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -25,6 +26,10 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
   // ⛔ Набір у полях — у запит після паузи, як у журналі комірок (`AuditPage`).
   const appliedEntityType = useDebouncedFilter(entityType);
   const appliedChangedBy = useDebouncedFilter(changedBy);
+  // ⛔ Поля показують ВЛАСНЕ значення, не адресу (`useFieldDraft`; той самий
+  // дефект втрати символів, що в «Row key» журналу комірок).
+  const entityTypeField = useFieldDraft(entityType ?? '');
+  const changedByField = useFieldDraft<string | number>(changedBy ?? '');
 
   const applied = {
     from,
@@ -45,8 +50,11 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
           size="xs"
           miw={200}
           label={t('audit.entityType')}
-          value={entityType ?? ''}
+          value={entityTypeField.value}
+          onFocus={entityTypeField.onFocus}
+          onBlur={entityTypeField.onBlur}
           onChange={(event) => {
+            entityTypeField.setValue(event.currentTarget.value);
             setEntityType(event.currentTarget.value);
           }}
         />
@@ -56,8 +64,11 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
           label={t('audit.author')}
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
-          value={changedBy ?? ''}
+          value={changedByField.value}
+          onFocus={changedByField.onFocus}
+          onBlur={changedByField.onBlur}
           onChange={(value) => {
+            changedByField.setValue(value);
             setChangedBy(typeof value === 'number' ? value : null);
           }}
         />

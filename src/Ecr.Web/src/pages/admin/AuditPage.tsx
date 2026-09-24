@@ -20,6 +20,7 @@ import { Timestamp } from '@/shared/ui/Timestamp';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -64,6 +65,22 @@ export function AuditPage(): JSX.Element {
 
   const fromDate = from ?? isoDaysAgo(7);
   const toDate = to ?? isoDaysAgo(0);
+
+  /*
+   * ⛔ Поля вводу показують ВЛАСНЕ значення (`useFieldDraft`), а не адресу:
+   * адреса — похідна від поля й у нього не пише, поки воно у фокусі. Живий
+   * стенд (2026-09-24, процесор 4×, 5 з 5): «Row key», кероване значенням з
+   * адреси, при наборі `R12345` лишало `"R"` чи `"5"` — навігація
+   * застосовується переходом, адреса запізнюється, і React повертав полю
+   * старе значення між натисканнями. Зовнішня зміна (кнопка «Reset»,
+   * навігація) приймається, коли поле не у фокусі.
+   */
+  const fromField = useFieldDraft(fromDate);
+  const toField = useFieldDraft(toDate);
+  const documentField = useFieldDraft<string | number>(documentId ?? '');
+  const authorField = useFieldDraft<string | number>(author ?? '');
+  const rowKeyField = useFieldDraft(rowKey ?? '');
+  const columnField = useFieldDraft<string | number>(columnDefId ?? '');
 
   /*
    * ⛔ Поля, що набираються з клавіатури, йдуть у запит ПІСЛЯ паузи
@@ -139,8 +156,11 @@ export function AuditPage(): JSX.Element {
               // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №1/8: перехід на DateInput змінює тип значення (string → Date) і стан сторінки, тому окремим PR; список боргу сторожить lintRules.test.ts
               type="date"
               label={t('audit.from')}
-              value={fromDate}
+              value={fromField.value}
+              onFocus={fromField.onFocus}
+              onBlur={fromField.onBlur}
               onChange={(event) => {
+                fromField.setValue(event.currentTarget.value);
                 setFrom(event.currentTarget.value);
               }}
             />
@@ -149,8 +169,11 @@ export function AuditPage(): JSX.Element {
               // eslint-disable-next-line no-restricted-syntax -- D15-09, борг №2/8: див. коментар вище
               type="date"
               label={t('audit.to')}
-              value={toDate}
+              value={toField.value}
+              onFocus={toField.onFocus}
+              onBlur={toField.onBlur}
               onChange={(event) => {
+                toField.setValue(event.currentTarget.value);
                 setTo(event.currentTarget.value);
               }}
             />
@@ -165,8 +188,11 @@ export function AuditPage(): JSX.Element {
               // фільтрів (`FilterHints`); інакше воно зсуває ряд шапки.
               description={t('audit.documentHint')}
               styles={readerOnlyDescription}
-              value={documentId ?? ''}
+              value={documentField.value}
+              onFocus={documentField.onFocus}
+              onBlur={documentField.onBlur}
               onChange={(value) => {
+                documentField.setValue(value);
                 setDocumentId(typeof value === 'number' ? value : null);
               }}
             />
@@ -190,8 +216,11 @@ export function AuditPage(): JSX.Element {
           label={t('audit.author')}
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
-          value={author ?? ''}
+          value={authorField.value}
+          onFocus={authorField.onFocus}
+          onBlur={authorField.onBlur}
           onChange={(value) => {
+            authorField.setValue(value);
             setAuthor(typeof value === 'number' ? value : null);
           }}
         />
@@ -213,8 +242,11 @@ export function AuditPage(): JSX.Element {
           label={t('audit.rowKey')}
           description={t('audit.cellHint')}
           styles={readerOnlyDescription}
-          value={rowKey ?? ''}
+          value={rowKeyField.value}
+          onFocus={rowKeyField.onFocus}
+          onBlur={rowKeyField.onBlur}
           onChange={(event) => {
+            rowKeyField.setValue(event.currentTarget.value);
             setRowKey(event.currentTarget.value);
           }}
         />
@@ -224,8 +256,11 @@ export function AuditPage(): JSX.Element {
           label={t('audit.columnDefId')}
           description={t('audit.cellHint')}
           styles={readerOnlyDescription}
-          value={columnDefId ?? ''}
+          value={columnField.value}
+          onFocus={columnField.onFocus}
+          onBlur={columnField.onBlur}
           onChange={(value) => {
+            columnField.setValue(value);
             setColumnDefId(typeof value === 'number' ? value : null);
           }}
         />

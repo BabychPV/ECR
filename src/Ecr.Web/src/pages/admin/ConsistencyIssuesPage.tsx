@@ -16,6 +16,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -49,6 +50,10 @@ export function ConsistencyIssuesPage(): JSX.Element {
   // ⛔ Код правила набирається з клавіатури — у запит після паузи, а не на
   // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
   const appliedRule = useDebouncedFilter(rule);
+  // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`): кероване
+  // адресою, воно при процесорі 4× із набору `CNS-0123` лишало `"C3"`, `"S3"`
+  // (живий стенд, 5 з 5) — адреса запізнюється, і React повертав полю старе.
+  const ruleField = useFieldDraft(rule);
   // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
   const [cursor, setCursor] = useFilterCursor(`${appliedRule}|${String(openOnly)}`);
 
@@ -81,8 +86,11 @@ export function ConsistencyIssuesPage(): JSX.Element {
               miw={220}
               label={t('consistency.rule')}
               description={t('consistency.ruleHint')}
-              value={rule}
+              value={ruleField.value}
+              onFocus={ruleField.onFocus}
+              onBlur={ruleField.onBlur}
               onChange={(event) => {
+                ruleField.setValue(event.currentTarget.value);
                 setRuleCode(event.currentTarget.value);
               }}
             />
