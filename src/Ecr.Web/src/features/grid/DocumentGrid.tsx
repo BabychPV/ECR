@@ -1076,6 +1076,27 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data],
   );
 
+  const applyHistory = useCallback(
+    (edits: CellEdit[] | null) => {
+      if (edits === null || data === undefined) return;
+
+      const versions = new Map(data.rows.map((row) => [row.rowKey, row.rowVersion]));
+
+      touchHistory();
+
+      void save(
+        edits.map((edit) => ({
+          rowKey: edit.rowKey,
+          columnCode: edit.columnCode,
+          value: edit.after,
+          isEmpty: false,
+          baseVersion: versions.get(edit.rowKey) ?? null,
+        })),
+      );
+    },
+    [data, save, touchHistory],
+  );
+
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const modifier = event.ctrlKey || event.metaKey;
@@ -1098,28 +1119,13 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         applyHistory(history.current.redo());
       }
     },
-    [pending, save],
-  );
-
-  const applyHistory = useCallback(
-    (edits: CellEdit[] | null) => {
-      if (edits === null || data === undefined) return;
-
-      const versions = new Map(data.rows.map((row) => [row.rowKey, row.rowVersion]));
-
-      touchHistory();
-
-      void save(
-        edits.map((edit) => ({
-          rowKey: edit.rowKey,
-          columnCode: edit.columnCode,
-          value: edit.after,
-          isEmpty: false,
-          baseVersion: versions.get(edit.rowKey) ?? null,
-        })),
-      );
-    },
-    [data, save, touchHistory],
+    // ⛔ `V-15`: `applyHistory` у залежностях ОБОВ'ЯЗКОВИЙ. Тут стояло лише
+    // `[pending, save]`, і обробник тримав `applyHistory` того рендера, де його
+    // створили, — зі старим `data`. Undo/redo зберігають повз сховище
+    // (`pending` не змінюється), тож обробник не оновлювався: Ctrl+Y брав
+    // крок зі стека, а зберігав зі старими версіями рядків або не зберігав
+    // зовсім (`data === undefined` першого рендера) — кнопки ж працювали.
+    [pending, save, applyHistory],
   );
 
   // ⚠ Правило порожнечі — у чистому модулі `emptiness.ts`, а не тут: воно
