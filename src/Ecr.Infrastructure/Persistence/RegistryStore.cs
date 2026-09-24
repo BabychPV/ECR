@@ -160,8 +160,43 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     /// партиціях, і він виправданий: викликач один
     /// (<c>RegistryAdminHandlers</c>, видалення запису), і це не гарячий шлях.
     /// </remarks>
-    public Task<int> CountReferencesAsync(long registryEntryId, CancellationToken ct)
-        => db.CellValues.CountAsync(c => c.ValueRegistryEntryId == registryEntryId, ct);
+    /// <para>
+    /// ⛔ V-08: решта видів рахується тут само, одним викликом. Посилання з
+    /// записів, які самі видалені логічно, не блокують: такий запис поза обігом
+    /// і сам нічого не показує.
+    /// </para>
+    public async Task<RegistryEntryReferences> CountReferencesAsync(long registryEntryId, CancellationToken ct)
+    {
+        var cells = await db.CellValues
+            .CountAsync(c => c.ValueRegistryEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        var headers = await db.DocumentHeaderValues
+            .CountAsync(h => h.ValueRegistryEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        var values = await (
+                from value in db.RegistryValues.AsNoTracking()
+                join owner in db.RegistryEntries.AsNoTracking() on value.RegistryEntryId equals owner.Id
+                where value.ValueRefEntryId == registryEntryId
+                      && owner.Id != registryEntryId
+                      && !owner.IsDeleted
+                select value.Id)
+            .CountAsync(ct).ConfigureAwait(false);
+
+        var children = await db.RegistryEntries
+            .CountAsync(e => e.ParentEntryId == registryEntryId && !e.IsDeleted, ct).ConfigureAwait(false);
+
+        var links = await db.RegistryEntryLinks
+            .CountAsync(l => l.LeftEntryId == registryEntryId || l.RightEntryId == registryEntryId, ct)
+            .ConfigureAwait(false);
+
+        var constants = await db.MethodologyConstants
+            .CountAsync(c => c.SubstanceEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        var substances = await db.MethodologySubstances
+            .CountAsync(m => m.SubstanceEntryId == registryEntryId, ct).ConfigureAwait(false);
+
+        return new RegistryEntryReferences(cells, headers, values, children, links, constants, substances);
+    }
 
     /// <inheritdoc />
     public async Task<UsageResponse> FindDefinitionUsageAsync(

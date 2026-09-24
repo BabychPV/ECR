@@ -162,7 +162,8 @@ public sealed class RegistryResolverTests
     {
         var entry = Entry(101, Permits, "PERMIT_A");
         _registries.FindEntryAsync(101, Arg.Any<CancellationToken>()).Returns(entry);
-        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(17);
+        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>())
+            .Returns(RegistryEntryReferences.None with { Cells = 17 });
 
         /*
          * ⚠ Довідник тепер читається ДО видалення: обробник звіряє код зі
@@ -193,7 +194,7 @@ public sealed class RegistryResolverTests
             .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
 
         // Без посилань — видалення логічне і проходить.
-        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(0);
+        _registries.CountReferencesAsync(101, Arg.Any<CancellationToken>()).Returns(RegistryEntryReferences.None);
         await handler.HandleAsync("PERMITS", 101, CancellationToken.None);
         Assert.True(entry.IsDeleted);
 

@@ -102,9 +102,18 @@ public interface IRegistryStore
         int registryDefId, CancellationToken ct);
 
     /// <summary>
-    /// Скільки комірок посилається на запис. Нуль — видаляти можна.
+    /// Хто посилається на запис — за видами. Усі нулі — видаляти можна.
     /// </summary>
-    public Task<int> CountReferencesAsync(long registryEntryId, CancellationToken ct);
+    /// <remarks>
+    /// ⛔ V-08 (третій раунд UX, 2026-09-24). Доти рахувалися самі комірки
+    /// документів, і видалення запису, на який посилались інші записи
+    /// (<c>dic.RegistryValue.ValueRefEntryId</c>, поле Lookup) чи константи
+    /// методологій (<c>calc.MethodologyConstant.SubstanceEntryId</c>),
+    /// проходило мовчки (<c>204</c>, <c>IsDeleted = 1</c>). Зовнішні ключі цього
+    /// не ловлять: видалення логічне, рядок лишається, і посилання мовчки
+    /// починає вказувати на запис поза обігом.
+    /// </remarks>
+    public Task<RegistryEntryReferences> CountReferencesAsync(long registryEntryId, CancellationToken ct);
 
     /// <summary>
     /// «Де використано» ВИЗНАЧЕННЯ довідника: хто посилається на сам довідник,
@@ -221,3 +230,61 @@ public sealed record RegistryFieldMapping(
     string? SourceUnitCode,
     string? TargetUnitCode,
     bool IsActive);
+
+/// <summary>Посилання на запис довідника за видами (<c>ФВ-8.6</c>, V-08).</summary>
+/// <param name="Cells">Комірки документів (<c>doc.CellValue</c>).</param>
+/// <param name="HeaderValues">Поля шапки документів (<c>doc.DocumentHeaderValue</c>).</param>
+/// <param name="RegistryValues">
+/// Значення полів Lookup інших ЖИВИХ записів довідників (<c>dic.RegistryValue</c>).
+/// </param>
+/// <param name="ChildEntries">Живі дочірні записи ієрархії (<c>ParentEntryId</c>).</param>
+/// <param name="Links">Зв'язки каскаду й M:N (<c>dic.RegistryEntryLink</c>), з будь-якого боку.</param>
+/// <param name="MethodologyConstants">Константи методологій, звужені цією речовиною.</param>
+/// <param name="MethodologySubstances">Речовини, оголошені у версіях методологій.</param>
+/// <remarks>
+/// ⚠ Посилання з записів, які самі вже видалені логічно, не рахуються: інакше
+/// два записи, що посилаються один на одного, не видалити ніколи.
+/// </remarks>
+public sealed record RegistryEntryReferences(
+    int Cells,
+    int HeaderValues,
+    int RegistryValues,
+    int ChildEntries,
+    int Links,
+    int MethodologyConstants,
+    int MethodologySubstances)
+{
+    /// <summary>Посилань немає.</summary>
+    public static RegistryEntryReferences None { get; } = new(0, 0, 0, 0, 0, 0, 0);
+
+    /// <summary>Усього посилань.</summary>
+    public int Total =>
+        Cells + HeaderValues + RegistryValues + ChildEntries + Links + MethodologyConstants + MethodologySubstances;
+
+    /// <summary>
+    /// Ненульові види за стабільними ключами — те, що клієнт показує переліком
+    /// (<c>registries.referenceKind.{ключ}</c>).
+    /// </summary>
+    public IReadOnlyDictionary<string, int> ByKind()
+    {
+        var kinds = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        void Add(string kind, int count)
+        {
+            if (count > 0)
+            {
+                kinds[kind] = count;
+            }
+        }
+
+        Add("cells", Cells);
+        Add("headerValues", HeaderValues);
+        Add("registryValues", RegistryValues);
+        Add("childEntries", ChildEntries);
+        Add("links", Links);
+        Add("methodologyConstants", MethodologyConstants);
+        Add("methodologySubstances", MethodologySubstances);
+
+        return kinds;
+    }
+}

@@ -32,6 +32,9 @@ const SeededStrings: Record<string, string> = {
   'registries.editEntry': 'Edit',
   'registries.search': 'Search',
   'registries.searchPlaceholder': 'Filter by code or name',
+  'registries.referencedBy': 'Referenced by',
+  'registries.referenceKind.cells': 'Document cells',
+  'registries.referenceKind.methodologyConstants': 'Methodology constants',
   'common.delete': 'Delete',
   'common.cancel': 'Cancel',
   'common.save': 'Save',
@@ -83,6 +86,9 @@ const inUse = {
   // рівно так, як їх пише `ExceptionHandlingMiddleware`.
   registryEntryId: 42,
   references: 7,
+
+  // ⛔ V-08: розклад за видами — сервер віддає лише ненульові.
+  referenceKinds: { cells: 5, methodologyConstants: 2 },
 };
 
 interface Attempt {
@@ -221,6 +227,12 @@ describe('Видалення запису довідника з інтерфей
 
     // Текст відмови — серверний, уже локалізований каталогом помилок.
     expect(screen.getByText('Entry «KG» is referenced by 7 cells.')).toBeDefined();
+
+    // ⛔ V-08: ХТО посилається — переліком за видами. Мутація: прибрати
+    // `blockedBy` у `RegistriesPage.tsx` — рядків переліку немає.
+    const kinds = within(dialog).getByRole('list', { name: 'Referenced by' });
+    expect(within(kinds).getByText('Document cells: 5')).toBeDefined();
+    expect(within(kinds).getByText('Methodology constants: 2')).toBeDefined();
 
     // ⛔ І пропонується саме вікно чинності, а не повтор: `POST …/validity` —
     // єдина дія, яка змінює стан справи, а не запит.

@@ -1,11 +1,15 @@
 ﻿import { useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Group, Modal, Select, Stack, Text } from '@mantine/core';
+import { Badge, Button, Group, List, Modal, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
-import { entryReferences, useDeleteRegistryEntry } from '@/features/registries/api';
+import {
+  entryReferenceKinds,
+  entryReferences,
+  useDeleteRegistryEntry,
+} from '@/features/registries/api';
 import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
 import {
   RegistryEntryEditor,
@@ -145,6 +149,9 @@ export function RegistriesPage(): JSX.Element {
   // ⛔ Не `null` означає «відмовлено, бо на запис посилаються N комірок». Саме
   // це число, а не текст відмови, вирішує, ЩО показати замість «повторити».
   const blocked = entryReferences(remove.error);
+
+  // ⛔ V-08: ХТО посилається — комірки, інші записи, константи методологій.
+  const blockedBy = entryReferenceKinds(remove.error);
 
   const needle = (query ?? '').trim().toLowerCase();
 
@@ -537,6 +544,17 @@ export function RegistriesPage(): JSX.Element {
                 <Badge color="statusWarning">{blocked}</Badge>
                 <Text size="sm">{remove.error?.message}</Text>
               </Group>
+
+              {/* ⛔ V-08: розклад посилань за видами — куди йти виправляти. */}
+              {blockedBy.length > 0 && (
+                <List size="sm" aria-label={t('registries.referencedBy')}>
+                  {blockedBy.map(({ kind, count }) => (
+                    <List.Item key={kind}>
+                      {t(`registries.referenceKind.${kind}`)}: {count}
+                    </List.Item>
+                  ))}
+                </List>
+              )}
 
               {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
                   треба не запит, а намір — запис виводять з обігу датою

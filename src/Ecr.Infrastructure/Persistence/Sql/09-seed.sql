@@ -399,7 +399,13 @@ UPDATE t
                                                 N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s), {approvalSteps} approval route step(s), {periodAccessRules} period access rule(s). Remove them first.'),
     -- V-16: сервер перевіряє лише довжину (`ChangePasswordHandler`,
     -- `PasswordPolicy.MinLength`); прапорці складності не вмикаються (`P-1`).
-    (N'password.policy',                 N'en', N'At least 12 characters, with upper case, lower case and a digit.', N'At least 12 characters.')
+    (N'password.policy',                 N'en', N'At least 12 characters, with upper case, lower case and a digit.', N'At least 12 characters.'),
+    -- V-08: відмова видалення запису довідника рахує тепер не лише комірки, а
+    -- підказка коду обіцяла, що запис «ніколи не видаляється» — неправда.
+    (N'err.ECR-REG-0409.entryReferenced', N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.',
+                                                N'Entry "{code}" cannot be deleted: it is still referenced {referenceCount} time(s) — by document cells, other registry entries or methodology constants. Close it with an end date instead: history stays readable and new periods will not offer it.'),
+    (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.',
+                                                N'Cells store the entry id, so the code can change. An entry that anything still references cannot be removed — close it with an end date instead.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1004,7 +1010,7 @@ USING (VALUES
     (N'err.ECR-REG-0422.duplicateCodes',     N'en', N'Codes repeat in the set: {codes}.', 1),
     (N'err.ECR-REG-0422.switchReasonRequired', N'en', N'Give a reason for switching the master source.', 1),
     (N'err.ECR-REG-0422.openPeriod',         N'en', N'The registry source cannot be switched while periods are open: some documents would be filled from one list of entries and some from another.', 1),
-    (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
+    (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: it is still referenced {referenceCount} time(s) — by document cells, other registry entries or methodology constants. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
     -- BE-24 крок 2: чернетка опису довідника і її публікація.
     (N'err.ECR-REG-0404.definitionDraft',    N'en', N'Registry "{registryCode}" has no draft definition.', 1),
     (N'err.ECR-REG-0409.definitionDraftChanged', N'en', N'The draft definition of registry "{registryCode}" was changed or published after you opened it. Reload it and repeat your changes.', 1),
@@ -1580,6 +1586,15 @@ USING (VALUES
     (N'registries.parent',               N'en', N'Parent', 1),
     (N'registries.fields',               N'en', N'Fields', 1),
     (N'registries.validity',             N'en', N'Valid', 1),
+    -- V-08: розклад відмови «на запис посилаються» за видами (`referenceKinds`).
+    (N'registries.referencedBy',                         N'en', N'Referenced by', 1),
+    (N'registries.referenceKind.cells',                  N'en', N'Document cells', 1),
+    (N'registries.referenceKind.headerValues',           N'en', N'Document header fields', 1),
+    (N'registries.referenceKind.registryValues',         N'en', N'Other registry entries (lookup fields)', 1),
+    (N'registries.referenceKind.childEntries',           N'en', N'Child entries', 1),
+    (N'registries.referenceKind.links',                  N'en', N'Cascade links', 1),
+    (N'registries.referenceKind.methodologyConstants',   N'en', N'Methodology constants', 1),
+    (N'registries.referenceKind.methodologySubstances',  N'en', N'Methodology substances', 1),
     (N'registries.hierarchical',         N'en', N'hierarchical', 1),
     (N'registries.temporal',             N'en', N'time-bound', 1),
     -- ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
@@ -2460,7 +2475,7 @@ USING (VALUES
     (N'registries.editEntry',            N'en', N'Edit', 1),
     (N'registries.entryCreated',         N'en', N'The entry has been created.', 1),
     (N'registries.entrySaved',           N'en', N'The entry has been saved.', 1),
-    (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.', 1),
+    (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change. An entry that anything still references cannot be removed — close it with an end date instead.', 1),
     -- Імпорт записів довідника з CSV (BE-24 крок 3). ⚠ Перший перегляд іде
     -- сухим прогоном (dryRun): файл не застосовується, доки людина не
     -- натисне «Apply». Файл із помилковими рядками не застосовується взагалі —
