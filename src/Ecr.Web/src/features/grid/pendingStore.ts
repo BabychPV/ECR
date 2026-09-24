@@ -53,6 +53,38 @@ const slices = new Map<SliceKey, ReadonlyMap<CellKey, PendingEdit>>();
 
 const listeners = new Set<() => void>();
 
+/**
+ * Правка, яку сервер ВІДХИЛИВ (`V-01`), разом із причиною.
+ *
+ * ⛔ Що ламалося. Відхилена комірка (`abc` у `Int`, `422`) лишалася в сховищі
+ * звичайною незбереженою правкою — і автозбереження везло її з КОЖНИМ
+ * наступним пакетом. Сервер часткового застосування не робить, тож відхиляв
+ * увесь пакет: нові правки ІНШИХ комірок не зберігалися теж і зникали після
+ * перезавантаження. Одна помилка оператора зупиняла збереження всього аркуша.
+ *
+ * ⚠ Тепер відмова ТРИМАЄ правку: вона лишається незбереженою (позначка,
+ * причина, «Retry save»), але автозбереження її не везе. Повторюється вона
+ * лише явно — кнопкою/Ctrl+S або новою правкою ЦІЄЇ комірки.
+ *
+ * ⚠ Тримається саме ЗНАЧЕННЯ, яке відхилили (`edit`), а не комірка взагалі:
+ * якщо в комірці вже інше значення, відмова його не стосується (`sendableEdits`).
+ */
+export interface PendingRejection {
+  /** Правка в тому вигляді, в якому її відхилили. */
+  readonly edit: PendingEdit;
+  /** Причина — текст сервера як є. */
+  readonly message: string;
+  /**
+   * `cell` — відпускає лише нова правка цієї комірки (невірне значення);
+   * `row` — будь-яка нова правка рядка (`ECR-CALC-0437`: бракує іншої комірки
+   * рядка, і саме її заповнення має поїхати РАЗОМ із відхиленою).
+   */
+  readonly scope: 'cell' | 'row';
+}
+
+/** Відмови за зрізами; існують лише для комірок, що досі в `slices`. */
+const rejections = new Map<SliceKey, ReadonlyMap<CellKey, PendingRejection>>();
+
 /*
  * ⚠ Порожня мапа — ОДИН екземпляр на весь модуль. `useSyncExternalStore`
  * порівнює знімки за посиланням і кидає «getSnapshot should be cached», якщо
@@ -60,6 +92,7 @@ const listeners = new Set<() => void>();
  * перемальовування на кожному зрізі без правок, тобто на більшості.
  */
 const Empty: ReadonlyMap<CellKey, PendingEdit> = new Map();
+const EmptyRejections: ReadonlyMap<CellKey, PendingRejection> = new Map();
 
 function notify(): void {
   for (const listener of listeners) listener();
@@ -90,6 +123,7 @@ export function openDocument(documentId: number): void {
 
   openDocumentId = documentId;
   slices.clear();
+  rejections.clear();
   notify();
 }
 
@@ -131,7 +165,30 @@ export function replacePendingSlice(
     slices.set(key, edits);
   }
 
+  pruneRejections(key, edits);
   notify();
+}
+
+/**
+ * Прибирає відмови, які більше нічого не тримають: комірку зберегли (її немає
+ * в `edits`) або в ній уже ІНШЕ значення.
+ *
+ * ⚠ Одне місце на всі шляхи зміни зрізу — `put`, підтвердження, заміна: відмова,
+ * що пережила свою правку, тримала б наступну, якої сервер ще не бачив.
+ */
+function pruneRejections(key: SliceKey, edits: ReadonlyMap<CellKey, PendingEdit>): void {
+  const current = rejections.get(key);
+  if (current === undefined) return;
+
+  const next = new Map<CellKey, PendingRejection>();
+  for (const [cell, rejection] of current) {
+    const edit = edits.get(cell);
+    if (edit !== undefined && wasSent(rejection.edit, edit)) next.set(cell, rejection);
+  }
+
+  if (next.size === current.size) return;
+  if (next.size === 0) rejections.delete(key);
+  else rejections.set(key, next);
 }
 
 /** Додає або оновлює одну правку зрізу. */
@@ -140,10 +197,131 @@ export function putPendingEdit(
   periodKey: number,
   edit: PendingEdit,
 ): void {
+  const key = sliceKey(tableInstanceId, periodKey);
   const next = new Map(pendingSlice(tableInstanceId, periodKey));
   next.set(cellKey(edit), edit);
 
+  // ⛔ `V-01`: нова правка ЦІЄЇ комірки — явна дія, що відпускає відмову (тож і
+  // однакове значення, набране вдруге, поїде знову). Відмову рівня рядка
+  // (`ECR-CALC-0437`) відпускає будь-яка правка рядка: саме вона, найімовірніше,
+  // і заповнює те, чого бракувало.
+  releaseRejections(key, (cell, rejection) =>
+    cell === cellKey(edit) || (rejection.scope === 'row' && rejection.edit.rowKey === edit.rowKey),
+  );
+
   replacePendingSlice(tableInstanceId, periodKey, next);
+}
+
+function releaseRejections(
+  key: SliceKey,
+  release: (cell: CellKey, rejection: PendingRejection) => boolean,
+): void {
+  const current = rejections.get(key);
+  if (current === undefined) return;
+
+  const next = new Map([...current].filter(([cell, rejection]) => !release(cell, rejection)));
+  if (next.size === current.size) return;
+
+  // ⚠ Без `notify()`: єдиний викликач (`putPendingEdit`) одразу замінює зріз,
+  // і сповіщення піде звідти — одне на правку, а не два.
+  if (next.size === 0) rejections.delete(key);
+  else rejections.set(key, next);
+}
+
+/**
+ * Знімає незбережену правку однієї комірки — оператор повернув у неї
+ * збережене значення (`edits.revertsToSaved`). Відмова, якщо була, зникає
+ * разом із правкою (`pruneRejections`).
+ */
+export function discardPendingEdit(
+  tableInstanceId: number,
+  periodKey: number,
+  cell: Pick<PendingEdit, 'rowKey' | 'columnCode'>,
+): void {
+  const current = pendingSlice(tableInstanceId, periodKey);
+  if (!current.has(cellKey(cell))) return;
+
+  const next = new Map(current);
+  next.delete(cellKey(cell));
+  replacePendingSlice(tableInstanceId, periodKey, next);
+}
+
+/**
+ * Позначає правки відхиленими (`V-01`).
+ *
+ * ⚠ Позначається лише те, що ДОСІ лежить у сховищі з тим самим значенням:
+ * доки запит летів, оператор міг виправити комірку, і нове значення сервер ще
+ * не бачив — тримати його за чужу відмову не можна.
+ *
+ * @returns Скільки правок позначено.
+ */
+export function markPendingRejected(
+  tableInstanceId: number,
+  periodKey: number,
+  marks: readonly PendingRejection[],
+): number {
+  const key = sliceKey(tableInstanceId, periodKey);
+  const edits = pendingSlice(tableInstanceId, periodKey);
+  const next = new Map(rejections.get(key) ?? EmptyRejections);
+  let marked = 0;
+
+  for (const mark of marks) {
+    const cell = cellKey(mark.edit);
+    const edit = edits.get(cell);
+    if (edit === undefined || !wasSent(mark.edit, edit)) continue;
+
+    next.set(cell, mark);
+    marked += 1;
+  }
+
+  if (marked === 0) return 0;
+
+  rejections.set(key, next);
+  notify();
+
+  return marked;
+}
+
+/** Відмови зрізу. Посилання стабільне, доки вони не змінювалися. */
+export function pendingRejections(
+  tableInstanceId: number,
+  periodKey: number,
+): ReadonlyMap<CellKey, PendingRejection> {
+  return rejections.get(sliceKey(tableInstanceId, periodKey)) ?? EmptyRejections;
+}
+
+/** Відмови зрізу з підпискою на зміни. */
+export function usePendingRejections(
+  tableInstanceId: number,
+  periodKey: number,
+): ReadonlyMap<CellKey, PendingRejection> {
+  return useSyncExternalStore(
+    subscribePending,
+    () => pendingRejections(tableInstanceId, periodKey),
+    () => EmptyRejections,
+  );
+}
+
+/**
+ * Правки зрізу, які автозбереження МАЄ ПРАВО везти: усе, крім відхилених
+ * (`V-01`).
+ *
+ * ⛔ Саме цей фільтр і є виправленням: відхилена правка в пакеті — це пакет,
+ * який сервер відхилить цілком, хоч би скільки в ньому було правильних правок.
+ */
+export function sendableEdits(
+  tableInstanceId: number,
+  periodKey: number,
+  edits: readonly PendingEdit[] = [...pendingSlice(tableInstanceId, periodKey).values()],
+): PendingEdit[] {
+  const held = pendingRejections(tableInstanceId, periodKey);
+  if (held.size === 0) return [...edits];
+
+  return edits.filter((edit) => {
+    const rejection = held.get(cellKey(edit));
+
+    return rejection === undefined || !wasSent(rejection.edit, edit);
+  });
 }
 
 /**
@@ -220,20 +398,25 @@ export function hasPending(): boolean {
 }
 
 /** Зрізи, у яких є незбережені правки, — для надсилання їх усіх разом. */
-export function pendingSlices(): readonly {
+export function pendingSlices(options: { sendableOnly?: boolean } = {}): readonly {
   readonly tableInstanceId: number;
   readonly periodKey: number;
   readonly edits: readonly PendingEdit[];
 }[] {
-  return [...slices].map(([key, edits]) => {
-    const [tableInstanceId, periodKey] = key.split(':');
+  return [...slices]
+    .map(([key, edits]) => {
+      const [tableInstanceId, periodKey] = key.split(':').map(Number) as [number, number];
+      const all = [...edits.values()];
 
-    return {
-      tableInstanceId: Number(tableInstanceId),
-      periodKey: Number(periodKey),
-      edits: [...edits.values()],
-    };
-  });
+      return {
+        tableInstanceId,
+        periodKey,
+        // ⛔ `V-01`: автозбереження й `beforeunload` беруть лише те, що не
+        // тримає відмова, — див. `sendableEdits`.
+        edits: options.sendableOnly === true ? sendableEdits(tableInstanceId, periodKey, all) : all,
+      };
+    })
+    .filter((slice) => slice.edits.length > 0);
 }
 
 /**
@@ -245,6 +428,7 @@ export function pendingSlices(): readonly {
 export function resetPending(): void {
   openDocumentId = null;
   slices.clear();
+  rejections.clear();
   notify();
 }
 

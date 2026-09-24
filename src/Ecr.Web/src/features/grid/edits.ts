@@ -92,6 +92,33 @@ export function captureEdit(
 }
 
 /**
+ * Чи введене ПОВЕРТАЄ комірку до збереженого значення (`V-01`).
+ *
+ * ⛔ `captureEdit` таке ігнорує — і правильно, коли незбереженої правки немає.
+ * Але коли вона є (зокрема відхилена, `abc`), «набрати старе число назад» — це
+ * і є виправлення, а без цієї перевірки воно не робило нічого: відхилена правка
+ * лишалась у сховищі з маркером і «Retry save» назавжди.
+ */
+export function revertsToSaved(
+  slice: TableSliceDto,
+  signal: EditSignal,
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
+): boolean {
+  if (signal.columnCode.length === 0 || signal.rowKey.length === 0) return false;
+
+  const column = columnIndexOf(slice).get(signal.columnCode);
+  if (column === undefined || !decide(slice, signal.rowKey, column).editable) return false;
+
+  const row = rows.get(signal.rowKey);
+  if (row === undefined) return false;
+
+  const after = coerce(signal.raw, column.dataType);
+  const before = row.cells[signal.columnCode] ?? null;
+
+  return column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
+}
+
+/**
  * Поточне значення комірки; `null` — не заповнювали.
  *
  * ⛔ `CL-03`, найдорожче з трьох місць: знімок undo для вставки кличе цю

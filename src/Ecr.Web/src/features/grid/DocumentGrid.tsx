@@ -9,7 +9,7 @@ import type { ColumnDto, CreateRowRequest, RegistryDefDto, RegistryEntryDto, Tab
 import { cellAppearanceOf } from './cellAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
-import { captureEdit, coerce, valueOf } from './edits';
+import { captureEdit, coerce, revertsToSaved, valueOf } from './edits';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
@@ -25,18 +25,20 @@ import {
   useRecalculationStatus,
   type PendingEdit,
 } from './useCellPatch';
-import { registerSliceSaver, scheduleAutosave } from './autosave';
+import { holdRejectedEdits, registerSliceSaver, scheduleAutosave } from './autosave';
 // ⚠ Ключ комірки СХОВИЩА під власним іменем: у цьому файлі вже є `cellKey`
 // з `permissions.ts`, і хоч обидва дають `rowKey:columnCode`, ключем мапи
 // правок має бути рівно той, яким її будує сам сховищний модуль.
 import {
   cellKey as pendingCellKey,
+  discardPendingEdit,
   discardPendingRows,
+  pendingSlice,
   putPendingEdit,
+  usePendingRejections,
   usePendingSlice,
 } from './pendingStore';
 import { installEnterKeyCompat } from './keyboardCompat';
-import { cellsOfSaveError } from './saveErrors';
 import {
   TableCornerAnchor,
   clampSelection,
@@ -349,7 +351,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // «незбережено», без відновлення.
         //
         // ⚠ Фільтр — той самий `touchedRowKeys`, за яким уже фільтруються
-        // `requiredInputBlocked`/`saveErrorCells` нижче: успіх патчу
+        // `requiredInputBlocked`/`requiredInputWarnings` нижче: успіх патчу
         // стосується РІВНО його рядків і нічиїх більше.
         //
         // ⚠ `D14-12`: підтвердження йде у СХОВИЩЕ документа, а не в стан
@@ -382,12 +384,17 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             })),
         ]);
 
-        // ⚠ Успіх ЦЬОГО патчу знімає банер і маркери лише з рядків, яких він
-        // стосувався: помилка іншого, ще не повтореного збереження, не має
-        // права мовчки зникнути через УСПІХ чужого патчу.
+        // ⚠ Успіх ЦЬОГО патчу знімає банер. Маркери відхилених комірок живуть у
+        // сховищі (`V-01`) і знімаються там же, рівно з тими комірками, які
+        // сервер щойно прийняв (`discardPendingRows` вище): відхилена комірка
+        // того самого рядка, якої в пакеті не було, лишається позначеною.
         setSaveError(null);
-        setSaveErrorCells((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
       } catch (error) {
+        // ⛔ `V-01`: відхилені правки ТРИМАЮТЬСЯ — лишаються незбереженими, з
+        // маркером і причиною, але наступні пакети автозбереження їх уже не
+        // везуть. Правильні правки, відхилені разом із ними, довозяться окремо.
+        holdRejectedEdits(tableInstanceId, periodKey, error, edits);
+
         if (error instanceof EcrApiError && error.isRequiredInputMissing) {
           setRequiredInputBlocked((prev) => [
             ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
@@ -398,7 +405,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // (`requiredInputBlocked`) — другий банер із тим самим по суті
           // повідомленням розсіював би увагу, а не додавав інформацію.
           setSaveError(null);
-          setSaveErrorCells((prev) => prev.filter((c) => !touchedRowKeys.has(c.rowKey)));
         } else if (error instanceof EcrApiError) {
           // ⛔ Q-30x (High): ось сам фікс — реальний, локалізований текст
           // сервера («Колонка «C1» очікує число.» і подібні) показується як
@@ -406,10 +412,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           // цей рядок і мала на увазі заглушка «NOT SAVED — SEE THE ERROR
           // ABOVE», яка досі не мала на що вказувати.
           setSaveError(error.message);
-          setSaveErrorCells((prev) => [
-            ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
-            ...cellsOfSaveError(error, edits),
-          ]);
         } else {
           setSaveError(String(error));
         }
@@ -480,7 +482,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // коректно, але ніде не показувалась — тулбар малював тільки заглушку
   // «NOT SAVED — SEE THE ERROR ABOVE», а сам текст губився в необробленому
   // знеструмленні проміса, яке бачить лише консоль розробника. `saveError` —
-  // ТЕКСТ сервера як є (ФВ-14.24), `saveErrorCells` — комірки, яких він
+  // ТЕКСТ сервера як є (ФВ-14.24), `rejections` — комірки, яких він
   // стосується (`cellsOfSaveError`, `saveErrors.ts`), для маркера поверх
   // клітинки за тим самим взірцем, що й обов'язкові вхідні колонки (Q-306).
   //
@@ -488,7 +490,12 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // (`requiredInputBlocked` нижче) — дублювати той самий текст у двох
   // банерах означало б розсіювати увагу там, де причина вже названа.
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveErrorCells, setSaveErrorCells] = useState<readonly RequiredInputCell[]>([]);
+
+  // ⛔ `V-01`: комірки, які сервер відхилив, — зі СХОВИЩА документа, а не зі
+  // стану сітки. Там їх бачить автозбереження (щоб не везти), там вони
+  // переживають розмонтування сітки і там знімаються, щойно комірку прийнято
+  // або виправлено.
+  const rejections = usePendingRejections(tableInstanceId, periodKey);
 
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
@@ -582,10 +589,26 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // відповіді сервера (`cellsOfSaveError`, `saveErrors.ts`), не здогадом.
   const saveErrorByCell = useMemo(() => {
     const byCell = new Map<string, string>();
-    for (const cell of saveErrorCells) byCell.set(cellKey(cell.rowKey, cell.columnCode), cell.message);
+    for (const rejection of rejections.values()) {
+      byCell.set(cellKey(rejection.edit.rowKey, rejection.edit.columnCode), rejection.message);
+    }
 
     return byCell;
-  }, [saveErrorCells]);
+  }, [rejections]);
+
+  // ⚠ Банер пояснює ВІДХИЛЕНІ комірки, доки вони є, навіть коли останній пакет
+  // (інших комірок) пройшов: «Saved» поруч із червоним кутом без причини
+  // читалося б як «усе збережено». Відмови рівня рядка (`ECR-CALC-0437`) сюди
+  // не йдуть — у них власний, повніший банер (`requiredInputBlocked`).
+  const saveErrorText = useMemo(() => {
+    if (saveError !== null) return saveError;
+
+    const reasons = new Set(
+      [...rejections.values()].filter((r) => r.scope === 'cell').map((r) => r.message),
+    );
+
+    return reasons.size === 0 ? null : [...reasons].join(' ');
+  }, [saveError, rejections]);
 
   // ⛔ Директива registry-lookup, PR A4: `ColumnDto.lookupRegistryDefId` — це
   // ID довідника, а ендпоінт записів адресується КОДОМ
@@ -745,9 +768,28 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ⚠ `overrides` перекриває значення зі зрізу лише для комірок, підтверджених
   // ЩОЙНО (`ФВ-2.16`, `#43`): сервер про них ще не знає, і без цього шару
   // підтверджений ввід зникав би з екрана до першого успішного збереження.
+  //
+  // ⛔ `V-01`: і ВІДХИЛЕНЕ значення лежить поверх зрізу. Без цього перший же
+  // успішний патч іншої комірки перебудовував рядки зі зрізу, і в комірці з
+  // червоним кутом показувалось старе збережене число замість `abc`, яке сервер
+  // відхилив, — тобто маркер пояснював значення, якого на екрані немає.
+  // ⚠ Лише відхилені, не всі незбережені: відмови змінюються рідко, а
+  // перебудова рядків на кожну правку коштувала б 500×60 комірок.
+  const shownOverrides = useMemo(() => {
+    if (rejections.size === 0) return overrides;
+
+    const merged = new Map(overrides);
+    for (const rejection of rejections.values()) {
+      const key = cellKey(rejection.edit.rowKey, rejection.edit.columnCode);
+      if (!merged.has(key)) merged.set(key, rejection.edit.value);
+    }
+
+    return merged;
+  }, [overrides, rejections]);
+
   const rows = useMemo(
-    () => (data === undefined ? [] : gridRows(data, overrides)),
-    [data, overrides],
+    () => (data === undefined ? [] : gridRows(data, shownOverrides)),
+    [data, shownOverrides],
   );
 
   /**
@@ -908,7 +950,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       if (data === undefined) return null;
 
       const captured = captureEdit(data, signal);
-      if (captured === null) return null;
+      if (captured === null) {
+        // ⛔ `V-01`: повернення збереженого значення в комірку з незбереженою
+        // (зокрема відхиленою) правкою — це скасування правки, а не «нічого».
+        if (
+          pendingSlice(tableInstanceId, periodKey).has(pendingCellKey(signal)) &&
+          revertsToSaved(data, signal)
+        ) {
+          discardPendingEdit(tableInstanceId, periodKey, signal);
+        }
+
+        return null;
+      }
 
       history.current.push({
         label: t('grid.edit', { column: captured.columnHeader }),
@@ -1265,7 +1318,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * жодного його виклику тут не прибрано — змінено лише підпис і
          * видимість кнопки.
          */}
-        {saveStatus === 'error' && pending.size > 0 && (
+        {/*
+         * ⚠ `V-01`: і тоді, коли останній пакет пройшов, а відхилені комірки
+         * лишились: автозбереження їх більше не везе, тож повтор — лише руками.
+         */}
+        {(saveStatus === 'error' || rejections.size > 0) && pending.size > 0 && (
           <Button
             size="xs"
             loading={isPending}
@@ -1309,7 +1366,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
          * єдиний постійний слід відмови (банер може бути прокручений), а з
          * ним і `role="alert"`, на якому стоїть `DocumentGrid.a11y-status`.
          */}
-        {saveStatus === 'error' && (
+        {(saveStatus === 'error' || rejections.size > 0) && (
           <Badge color="statusError" variant="light" role="alert" data-save-status="error">
             {t('grid.saveFailedMark')}
           </Badge>
@@ -1365,7 +1422,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         )}
       </Group>
 
-      {saveError !== null && (
+      {saveErrorText !== null && (
         // ⛔ Q-30x (High): ЄДИНЕ місце, де сказано, ЧОМУ не збереглося.
         // Текст — рівно той, що назвав сервер (ФВ-14.24): код розрізняє
         // причини, текст — людині.
@@ -1374,7 +1431,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // помилка і є цей самий блок, а над ним лишилася тільки коротка
         // позначка в рядку кнопок. Одна відмова — одне повідомлення.
         <Alert color="statusError" title={t('grid.saveError')} role="alert">
-          <Text size="sm">{saveError}</Text>
+          <Text size="sm">{saveErrorText}</Text>
         </Alert>
       )}
 
