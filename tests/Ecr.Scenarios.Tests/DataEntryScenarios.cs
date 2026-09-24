@@ -411,13 +411,17 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             new Uri($"/api/v1/documents/{doc.DocumentId}/rows", UriKind.Relative),
             new { tableInstanceId, rowKey = (string?)null });
 
-        // ⛔ Доказ сценарію: без Manage на таблиці Forbidden доводив би лише
-        // «немає гранта», а не «isDeny перекрив дозвіл». Причина в тілі —
-        // те саме, що прийшло б і за просту відсутність гранта (`NoGrant`),
-        // тому дискримінатор — саме мутація нижче, а не сам код причини.
-        Assert.Equal(HttpStatusCode.Forbidden, createRow.StatusCode);
+        // ⛔ Доказ сценарію: заборона на проєкт перекриває Manage на таблиці.
+        //
+        // ✎ V-02: відповідь — `404 ECR-DOC-0404`, а не `403 NoGrant`. Заборона
+        // на проєкт робить документ НЕВИДИМИМ (`GET /documents/{id}` теж 404),
+        // і `CreateRowHandler` тепер перевіряє видимість першою — до того
+        // відмова про таблицю (`ECR-ROW-0409`, `NoGrant`) розповідала про
+        // документ, якого цей користувач не бачить. Без `IsDeny` (грант
+        // Manage на таблиці) рядок створився б — дискримінатор той самий.
+        Assert.Equal(HttpStatusCode.NotFound, createRow.StatusCode);
         var body = await createRow.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("NoGrant", body.GetProperty("reason").GetString());
+        Assert.Equal("ECR-DOC-0404", body.GetProperty("errorCode").GetString());
     }
 
     [Fact]
@@ -461,6 +465,12 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             new { tableInstanceId, rowKey = (string?)null });
 
         Assert.True(createRow.StatusCode == HttpStatusCode.Forbidden, $"{createRow.StatusCode}: {app.ErrorsText}");
+
+        // ✎ V-06: до виправлення цей `403` приходив як `NoGrant` — адміністратор
+        // без гранта на проєкт, — а не від симуляції, яка профілю запиту
+        // взагалі не торкалася. Тепер відмова саме симуляції, до обробника.
+        var body = await createRow.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-SIM-0403", body.GetProperty("errorCode").GetString());
     }
 
     /// <remarks>
