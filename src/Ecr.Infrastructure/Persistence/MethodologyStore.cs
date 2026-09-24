@@ -91,6 +91,7 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .Where(b => b.MethodologyId == id && b.IsActive)
             .Select(b => b.TableDefId)
             .Distinct()
+            .OrderBy(tableId => tableId)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -219,6 +220,8 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
         var formulas = await db.MethodologyFormulas
             .AsNoTracking()
             .Where(f => versionIds.Contains(f.MethodologyVersionId))
+            .OrderBy(f => f.MethodologyVersionId)
+            .ThenBy(f => f.Id)
             .Select(f => new { f.MethodologyVersionId, f.Code })
             .Take(MaxChildren)
             .ToListAsync(ct)
@@ -253,6 +256,7 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
 
         var existing = await db.MethodologyDependencies
             .Where(d => d.FromMethodologyId == fromMethodologyId)
+            .OrderBy(d => d.Id)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -298,6 +302,7 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
         => await db.MethodologyRequiredInputs
             .AsNoTracking()
             .Where(r => r.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(r => r.Id)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -310,6 +315,7 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .Where(b => b.IsActive && b.TableDefId == tableDefId)
             .Select(b => b.MethodologyId)
             .Distinct()
+            .OrderBy(methodologyId => methodologyId)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);

@@ -374,6 +374,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     public async Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
         => await TableInstancesQuery(db, documentId, periodKey)
+            .OrderBy(t => t.Id)
             .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId })
             .Join(db.Projects, x => x.ProjectId, p => p.Id,
                   (x, p) => new TableInstanceRef(
@@ -509,6 +510,7 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
     public async Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
         => await OrphanedRowIdsQuery(db, documentId, periodKey)
+            .OrderBy(id => id)
             .Take(MaxOrphanReport)
             .ToListAsync(ct)
             .ConfigureAwait(false);

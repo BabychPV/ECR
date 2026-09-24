@@ -95,6 +95,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                         && paths.Contains(p.SourcePath)
                         && p.Timestamp >= from
                         && p.Timestamp <= to)
+            .OrderBy(p => p.Id)
             .Take(MaxIntervals)
             .ToListAsync(ct)
             .ConfigureAwait(false);

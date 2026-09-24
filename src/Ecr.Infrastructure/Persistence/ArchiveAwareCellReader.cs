@@ -77,6 +77,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                 on new { P = cell.PeriodKeyValue, I = cell.TableRowId }
                 equals new { P = row.PeriodKeyValue, I = row.Id }
             where row.TableInstanceId == tableInstanceId && row.PeriodKeyValue == periodKey.Value
+            orderby cell.TableRowId, cell.ColumnDefId
             select new ArchivedCell(
                 cell.PeriodKeyValue, cell.TableRowId, cell.ColumnDefId, cell.TableDefId,
                 cell.ValueString, cell.ValueNumeric, cell.ValueDate, cell.ValueBool,
@@ -108,6 +109,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                   ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
                 WHERE r.TableInstanceId = {tableInstanceId}
                   AND r.PeriodKey = {periodKey.Value}
+                ORDER BY c.TableRowId, c.ColumnDefId
                 """)
             .ToListAsync(ct)
             .ConfigureAwait(false);

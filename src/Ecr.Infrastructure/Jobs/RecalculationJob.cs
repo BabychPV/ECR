@@ -412,6 +412,10 @@ public sealed class RecalculationJob(
         var scopes = await scopesQuery
             .Select(i => i.PeriodKeyValue)
             .Distinct()
+            // За зростанням ДО стелі: на межі беруться найраніші періоди —
+            // ті, від яких рахуються наступні (`[Period:-1]`), — а не
+            // довільні (EF 10102).
+            .OrderBy(key => key)
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -469,6 +473,8 @@ public sealed class RecalculationJob(
         }
 
         var instances = await instancesQuery
+            .OrderBy(i => i.PeriodKeyValue)
+            .ThenBy(i => i.Id)
             .Take(MaxBindings)
             .Select(i => new InstanceRow(i.Id, i.TableDefId, i.PeriodKeyValue))
             .ToListAsync(ct)
@@ -484,6 +490,7 @@ public sealed class RecalculationJob(
         var bindings = await db.CalculationBindings
             .AsNoTracking()
             .Where(b => b.IsActive && tableDefIds.Contains(b.TableDefId))
+            .OrderBy(b => b.Id)
             .Take(MaxBindings)
             .Select(b => new BindingRow(b.TableDefId, b.MethodologyId))
             .ToListAsync(ct)

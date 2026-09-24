@@ -6,13 +6,19 @@ using Microsoft.Extensions.Logging;
 namespace Ecr.TestKit;
 
 /// <summary>
-/// Сторож попереджень EF, які в продукті лише пишуться в журнал, а в тестах
-/// мають ПАДАТИ.
+/// Сторож двох попереджень EF, які в продукті лише пишуться в журнал, а в
+/// тестах мають ПАДАТИ.
 /// </summary>
 /// <remarks>
-/// ⛔ Знайдено в журналі сервера під час <c>tools/smoke.ps1</c>, коли всі
-/// кроки були зелені — тобто жоден тест цього не бачив:
+/// ⛔ Обидва знайдено в журналі сервера під час <c>tools/smoke.ps1</c>, коли
+/// всі кроки були зелені — тобто жоден тест їх не бачив:
 /// <list type="bullet">
+/// <item><c>[10102]</c> <see cref="CoreEventId.RowLimitingOperationWithoutOrderByWarning"/> —
+/// <c>Skip</c>/<c>Take</c> без <c>OrderBy</c>: сторінка повертає рядки в
+/// порядку, який обирає план запиту, між сторінками рядки дублюються або
+/// губляться, а стеля <c>Take</c> бере довільну підмножину. ⚠
+/// <c>First</c>/<c>FirstOrDefault</c> без порядку EF цим попередженням НЕ
+/// позначає (перевірено), тож їх сторож не бачить.</item>
 /// <item><c>[20601]</c> <see cref="RelationalEventId.BoolWithDefaultWarning"/> —
 /// перелік/bool із default constraint, але без sentinel: явно задане CLR-
 /// замовчування (0) EF не надсилає, і в базу мовчки лягає замовчування
@@ -32,6 +38,7 @@ public static class EfWarningGuard
 {
     private static readonly EventId[] Guarded =
     [
+        CoreEventId.RowLimitingOperationWithoutOrderByWarning,
         RelationalEventId.BoolWithDefaultWarning,
     ];
 
@@ -51,7 +58,7 @@ public static class EfWarningGuard
         DiagnosticListener.AllListeners.Subscribe(new AllListenersObserver());
     }
 
-    /// <summary>Робить охоронювані попередження винятком для цього контексту.</summary>
+    /// <summary>Робить обидва попередження винятком для цього контексту.</summary>
     /// <param name="builder">Будівник опцій.</param>
     /// <typeparam name="TContext">Тип контексту.</typeparam>
     /// <returns>Той самий будівник.</returns>

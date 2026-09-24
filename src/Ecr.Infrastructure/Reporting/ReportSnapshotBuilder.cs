@@ -485,6 +485,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                 on state.DocumentId equals document.Id
             where document.ProjectId == projectId
                   && (periodKey == null || state.PeriodKey == periodKey.Value.Value)
+            orderby state.Id
             select state.Status;
 
         var statuses = await query.Take(MaxRows).ToListAsync(ct).ConfigureAwait(false);
@@ -665,6 +666,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                         && s.PeriodKey == snapshot.PeriodKey
                         && s.Id != snapshot.Id
                         && s.IsCurrent)
+            .OrderBy(s => s.Id)
             .Take(MaxCurrentSnapshots)
             .ToListAsync(ct)
             .ConfigureAwait(false);

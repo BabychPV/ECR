@@ -123,6 +123,7 @@ public sealed class NotificationJob(
             : await db.SourceEntities
                 .AsNoTracking()
                 .Where(e => sourceIds.Contains(e.Id))
+                .OrderBy(e => e.Id)
                 .Take(MaxDigestItems)
                 .Select(e => new { e.Id, e.Code })
                 .ToDictionaryAsync(e => e.Id, e => e.Code, ct)

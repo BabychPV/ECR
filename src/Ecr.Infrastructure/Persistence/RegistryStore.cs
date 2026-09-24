@@ -138,6 +138,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             join right in db.RegistryEntries.AsNoTracking()
                 on link.RightEntryId equals right.Id
             where right.RegistryDefId == registryDefId
+            orderby link.Id
             select link;
 
         return await query.Take(MaxLinks).ToListAsync(ct).ConfigureAwait(false);
@@ -273,6 +274,7 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         long registryEntryId, CancellationToken ct)
         => await db.RegistryValues
                    .Where(v => v.RegistryEntryId == registryEntryId)
+                   .OrderBy(v => v.Id)
                    .Take(MaxEntries)
                    .ToListAsync(ct)
                    .ConfigureAwait(false);

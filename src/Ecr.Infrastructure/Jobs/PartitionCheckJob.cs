@@ -138,6 +138,10 @@ public sealed class PartitionCheckJob(
 
             // Take(1) при COUNT — не оптимізація, а межа, якої вимагає
             // архітектурне правило 6: воно читає інструкцію, а не наміри.
+            // `COUNT(*)` повертає рівно один рядок, тож порядок нічого не
+            // вибирає — він тут лише для того, щоб `Take` не був без
+            // `OrderBy` (EF 10102), а не щоб приглушити попередження.
+            .OrderBy(v => v)
             .Take(1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -155,6 +159,10 @@ public sealed class PartitionCheckJob(
                 JOIN sys.partition_functions pf ON pf.function_id = rv.function_id
                 WHERE pf.name = N'pf_ByPeriodKey'
                 """)
+            // ⚠ Найстаріші межі нам не потрібні: рахуємо ті, що ПОПЕРЕДУ.
+            // Без порядку стеля брала б довільну тисячу, і за понад тисячу
+            // меж запас міг би вийти нулем при повній решті (EF 10102).
+            .OrderByDescending(v => v)
             .Take(MaxBoundaries)
             .ToListAsync(ct)
             .ConfigureAwait(false);

@@ -203,6 +203,10 @@ public sealed class AccessDecisionService(
         var assignments = await db.RoleAssignments
             .AsNoTracking()
             .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
+            // Найновіші призначення першими — той самий порядок, що й у
+            // відбитку груп вище: на стелі обидва бачать ОДНІ Й ТІ САМІ
+            // призначення, а не дві різні довільні вибірки (EF 10102).
+            .OrderByDescending(a => a.Id)
             .Take(MaxRoleAssignments)
             .ToListAsync(ct)
             .ConfigureAwait(false);

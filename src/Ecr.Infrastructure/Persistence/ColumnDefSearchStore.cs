@@ -38,7 +38,7 @@ public sealed class ColumnDefSearchStore(EcrDbContext db) : IColumnDefSearchStor
             where !column.IsDeleted
             join table in db.TableDefs.AsNoTracking() on column.TableDefId equals table.Id
             join sheet in db.SheetDefs.AsNoTracking() on table.SheetDefId equals sheet.Id
-            orderby column.Code
+            orderby column.Code, column.Id
             select new
             {
                 Column = column,

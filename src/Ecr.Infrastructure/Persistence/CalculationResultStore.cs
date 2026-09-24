@@ -194,6 +194,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
                         && r.PeriodKey == run.PeriodKey
                         && r.Id != calculationRunId
                         && r.Status == CalculationRun.CurrentStatus)
+            .OrderBy(r => r.Id)
             .Take(MaxSupersededRuns)
             .ToListAsync(ct)
             .ConfigureAwait(false);

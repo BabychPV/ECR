@@ -193,6 +193,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var rules = await db.SheetGroupRules
             .AsNoTracking()
             .Where(r => r.TemplateVersionId == templateVersionId)
+            .OrderBy(r => r.Id)
             .Take(MaxRules)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -205,6 +206,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var groups = await db.SheetDefs
             .AsNoTracking()
             .Where(s => s.TemplateVersionId == templateVersionId && s.SheetGroup != null)
+            .OrderBy(s => s.Id)
             .Select(s => new { s.Id, s.SheetGroup })
             .Take(MaxSheets)
             .ToListAsync(ct)
@@ -250,6 +252,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var rules = await db.SheetGroupRules
             .AsNoTracking()
             .Where(r => r.TemplateVersionId == templateVersionId)
+            .OrderBy(r => r.Id)
             .Take(MaxRules)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -551,7 +554,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// <remarks>
     /// ⚠ Читання збереженого підсумку, не повторний прогін (<c>BE-09</c>).
     /// Документа без підсумку у словнику НЕМАЄ — і саме це дає <c>null</c>.
-    /// Два підсумки з однаковим <c>RunAt</c> — рідкість; береться будь-який із них.
+    /// Два підсумки з однаковим <c>RunAt</c> — рідкість; береться пізніше записаний (більший <c>Id</c>).
     /// </remarks>
     private async Task<IReadOnlyDictionary<long, LatestFindings>> LatestFindingsBatchAsync(
         IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
@@ -568,6 +571,11 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                         && v.RunAt == db.ValidationResults
                             .Where(x => x.DocumentId == v.DocumentId && x.PeriodKey == periodKey)
                             .Max(x => x.RunAt))
+            // ⚠ Порядок визначає, КОТРИЙ із двох підсумків з однаковим `RunAt`
+            // бере `g.First()` нижче: пізніше записаний (більший `Id`), а не
+            // той, що план запиту віддав першим (EF 10102).
+            .OrderBy(v => v.DocumentId)
+            .ThenByDescending(v => v.Id)
             .Select(v => new LatestFindings(v.DocumentId, v.ErrorCount, v.WarningCount))
             .Take(documentIds.Count * MaxRunTies)
             .ToListAsync(ct)
@@ -659,6 +667,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         var late = await LateEditDocumentIds(period)
             .Where(id => ids.Contains(id))
+            .OrderBy(id => id)
             .Take(documentIds.Count)
             .ToListAsync(ct)
             .ConfigureAwait(false);

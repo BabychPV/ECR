@@ -279,6 +279,10 @@ public sealed class ConsistencyCheckJob(
                 where cell.PeriodKeyValue == periodKey
                       && cell.ValueRegistryEntryId != null
                       && !db.RegistryEntries.Any(e => e.Id == cell.ValueRegistryEntryId)
+                // Порядок — ключ комірки в межах партиції: на бюджеті `Take`
+                // повторний прогін бачить ТІ САМІ перші знахідки, а не
+                // довільну вибірку плану (EF 10102).
+                orderby cell.TableRowId, cell.ColumnDefId
                 select new OrphanRow(cell.PeriodKeyValue, cell.TableRowId, cell.ValueRegistryEntryId!.Value);
 
             var found = await query.Take(budget).ToListAsync(ct).ConfigureAwait(false);
@@ -326,6 +330,7 @@ public sealed class ConsistencyCheckJob(
                 where row.PeriodKeyValue == periodKey
                       && !db.TableInstances.Any(
                           i => i.Id == row.TableInstanceId && i.PeriodKeyValue == periodKey)
+                orderby row.Id
                 select new BrokenRow(row.PeriodKeyValue, row.Id, row.TableInstanceId);
 
             var found = await query.Take(budget).ToListAsync(ct).ConfigureAwait(false);
@@ -456,6 +461,7 @@ public sealed class ConsistencyCheckJob(
                   && !column.IsDeleted && !table.IsDeleted && !sheet.IsDeleted
                   && liveVersions.Contains(sheet.TemplateVersionId)
                   && !db.CalculationBindings.Any(b => b.ColumnDefId == column.Id && b.IsActive)
+            orderby column.Id
             select new UnboundColumnRow(column.Id, table.Code, column.Code, sheet.TemplateVersionId);
 
         var found = await query.Take(MaxIssues).ToListAsync(ct).ConfigureAwait(false);

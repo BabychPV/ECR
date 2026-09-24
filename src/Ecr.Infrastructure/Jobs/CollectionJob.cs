@@ -205,6 +205,8 @@ public sealed class CollectionJob(
                 t.PeriodKeyValue,
                 d.ProjectId,
             })
+            .OrderBy(t => t.PeriodKeyValue)
+            .ThenBy(t => t.Id)
             .Take(MaxMaterializationTargets)
             .ToListAsync(ct)
             .ConfigureAwait(false);

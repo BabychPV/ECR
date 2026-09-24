@@ -289,6 +289,8 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .AsNoTracking()
             .Join(db.Permissions, rp => rp.PermissionCode, p => p.Id,
                   (rp, p) => new { rp.RoleId, Code = p.Id, p.IsDangerous })
+            .OrderBy(x => x.RoleId)
+            .ThenBy(x => x.Code)
             .Take(MaxRoles * MaxPermissions)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -521,6 +523,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .AsNoTracking()
             .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
             .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { Assignment = a, r.Code })
+            .OrderByDescending(x => x.Assignment.Id)
             .Take(MaxAssignments)
             .ToListAsync(ct)
             .ConfigureAwait(false);
