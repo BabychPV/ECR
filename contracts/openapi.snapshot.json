@@ -3030,6 +3030,83 @@
         ],
         "type": "object"
       },
+      "DocumentTemplateDto": {
+        "description": "З чого складається новий документ проєкту.",
+        "properties": {
+          "groupRules": {
+            "description": "Правила складу (`SheetGroupRule`) — для попередження ДО збереження.",
+            "items": {
+              "$ref": "#/components/schemas/SheetGroupRuleDto"
+            },
+            "type": "array"
+          },
+          "sheets": {
+            "description": "Аркуші версії в порядку `Ordinal`.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentTemplateSheetDto"
+            },
+            "type": "array"
+          },
+          "templateCode": {
+            "description": "Код шаблону.",
+            "type": "string"
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону проєкту — те, що йде в `templateVersionId`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "version": {
+            "description": "Позначення версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "templateVersionId",
+          "templateCode",
+          "version",
+          "sheets",
+          "groupRules"
+        ],
+        "type": "object"
+      },
+      "DocumentTemplateSheetDto": {
+        "description": "Аркуш, який можна включити в новий документ.",
+        "properties": {
+          "code": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isMandatory": {
+            "description": "Чи обов'язковий аркуш.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва всіма мовами каталогу."
+          },
+          "sheetGroup": {
+            "description": "Група для правил складу; `null` — поза групами.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "sheetGroup",
+          "isMandatory"
+        ],
+        "type": "object"
+      },
       "DocumentVersionDto": {
         "description": "Версія документа — зріз подання аркуша (ФВ-5.22).",
         "properties": {
@@ -22191,6 +22268,89 @@
           }
         },
         "summary": "Встановлює поточний період проєкту. Право `Period.Configure`.",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}/document-template": {
+      "get": {
+        "description": "⚠ Не потребує `Template.View`: це не перегляд шаблону, а рівно те,\nбез чого не створити документ, — версію визначає проєкт.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Версія шаблону проєкту й аркуші для нового документа. Право\n`Document.Create` і грант `Write` на проєкт (V-12).",
         "tags": [
           "Projects"
         ]

@@ -7325,6 +7325,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/document-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Версія шаблону проєкту й аркуші для нового документа. Право
+         *     `Document.Create` і грант `Write` на проєкт (V-12).
+         * @description ⚠ Не потребує `Template.View`: це не перегляд шаблону, а рівно те,
+         *     без чого не створити документ, — версію визначає проєкт.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentTemplateDto"];
+                        "text/json": components["schemas"]["DocumentTemplateDto"];
+                        "text/plain": components["schemas"]["DocumentTemplateDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/periods": {
         parameters: {
             query?: never;
@@ -15120,6 +15187,38 @@ export interface components {
              * @description Порядок таблиці в аркуші.
              */
             tableOrdinal: number;
+        };
+        /** @description З чого складається новий документ проєкту. */
+        DocumentTemplateDto: {
+            /** @description Правила складу (`SheetGroupRule`) — для попередження ДО збереження. */
+            groupRules: components["schemas"]["SheetGroupRuleDto"][];
+            /** @description Аркуші версії в порядку `Ordinal`. */
+            sheets: components["schemas"]["DocumentTemplateSheetDto"][];
+            /** @description Код шаблону. */
+            templateCode: string;
+            /**
+             * Format: int32
+             * @description Версія шаблону проєкту — те, що йде в `templateVersionId`.
+             */
+            templateVersionId: number;
+            /** @description Позначення версії. */
+            version: string;
+        };
+        /** @description Аркуш, який можна включити в новий документ. */
+        DocumentTemplateSheetDto: {
+            /** @description Код аркуша. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.
+             */
+            id: number;
+            /** @description Чи обов'язковий аркуш. */
+            isMandatory: boolean;
+            /** @description Назва всіма мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Група для правил складу; `null` — поза групами. */
+            sheetGroup: null | string;
         };
         /** @description Версія документа — зріз подання аркуша (ФВ-5.22). */
         DocumentVersionDto: {
