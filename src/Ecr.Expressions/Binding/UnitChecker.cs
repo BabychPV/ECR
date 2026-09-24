@@ -46,7 +46,7 @@ public sealed class UnitChecker
                     Check(conditional.WhenTrue, context, diagnostics),
                     Check(conditional.WhenFalse, context, diagnostics),
                     node, context, diagnostics,
-                    "Гілки умови мають бути в одній одиниці.");
+                    "expr.unit.branchesDiffer", "The branches of a condition must be in the same unit.");
 
             case BinaryNode binary:
                 return CheckBinary(binary, context, diagnostics);
@@ -71,7 +71,7 @@ public sealed class UnitChecker
                 // ⚠ Неявних конверсій не буває (D-74). Тонни плюс кілограми —
                 // це не «приблизно правильно», це число, помножене на тисячу.
                 return Same(left, right, node, context, diagnostics,
-                    "Додавання значень у різних одиницях потребує явного CONVERT.");
+                    "expr.unit.addNeedsConvert", "Adding values in different units needs an explicit CONVERT.");
 
             case BinaryOperator.Multiply:
             {
@@ -82,7 +82,9 @@ public sealed class UnitChecker
 
                 // Добуток двох розмірних величин дає похідну одиницю; якщо
                 // такої в довіднику немає, її не можна вигадати.
-                Report(diagnostics, node, "Добуток двох розмірних величин не має оголошеної одиниці.");
+                Report(diagnostics, node,
+                    "expr.unit.productUndeclared", null,
+                    "The product of two dimensioned quantities has no declared unit.");
                 return null;
             }
 
@@ -95,7 +97,9 @@ public sealed class UnitChecker
 
                 if (left is null)
                 {
-                    Report(diagnostics, node, "Ділення безрозмірного на розмірне не має оголошеної одиниці.");
+                    Report(diagnostics, node,
+                        "expr.unit.inverseUndeclared", null,
+                        "Dividing a dimensionless value by a dimensioned one has no declared unit.");
                     return null;
                 }
 
@@ -103,7 +107,8 @@ public sealed class UnitChecker
                 if (derived is null)
                 {
                     Report(diagnostics, node,
-                        "Похідної одиниці для цього ділення немає в довіднику uom.Unit.");
+                        "expr.unit.derivedMissing", null,
+                        "The unit catalogue (uom.Unit) has no derived unit for this division.");
                 }
 
                 return derived;
@@ -114,7 +119,7 @@ public sealed class UnitChecker
             case BinaryOperator.Greater:
             case BinaryOperator.GreaterOrEqual:
                 Same(left, right, node, context, diagnostics,
-                    "Порівняння значень у різних одиницях потребує явного CONVERT.");
+                    "expr.unit.compareNeedsConvert", "Comparing values in different units needs an explicit CONVERT.");
                 return null;
 
             default:
@@ -139,8 +144,8 @@ public sealed class UnitChecker
                     if (HasRowScopedUnit(argument, context))
                     {
                         Report(diagnostics, node,
-                            "Агрегація колонки з одиницею на рядок потребує явного CONVERT "
-                            + "до спільної одиниці (ФВ-16.8).");
+                            "expr.unit.rowScopedAggregate", null,
+                            "Aggregating a column with a per-row unit needs an explicit CONVERT to a common unit.");
                     }
                 }
 
@@ -153,7 +158,7 @@ public sealed class UnitChecker
                     result = result is null
                         ? unit
                         : Same(result, unit, node, context, diagnostics,
-                            "Агрегація значень у різних одиницях потребує явного CONVERT.");
+                            "expr.unit.aggregateNeedsConvert", "Aggregating values in different units needs an explicit CONVERT.");
                 }
 
                 return result;
@@ -183,7 +188,8 @@ public sealed class UnitChecker
         if (node.Arguments.Count < 3)
         {
             Report(diagnostics, node,
-                "CONVERT потребує трьох аргументів: значення, вихідна одиниця, цільова одиниця.");
+                "expr.unit.convertArity", null,
+                "CONVERT takes three arguments: the value, the source unit and the target unit.");
             return null;
         }
 
@@ -195,15 +201,18 @@ public sealed class UnitChecker
         if (to is null)
         {
             Report(diagnostics, node,
-                "Цільова одиниця CONVERT задається літералом, а не виразом: "
-                + "інакше одиниця результату невідома до запуску.");
+                "expr.unit.convertTargetLiteral", null,
+                "The target unit of CONVERT must be a literal, not an expression: otherwise the unit of "
+                + "the result is unknown until run time.");
             return null;
         }
 
         var target = context.ResolveUnitByCode(to);
         if (target is null)
         {
-            Report(diagnostics, node, $"Одиниці «{to}» немає в довіднику uom.Unit.");
+            Report(diagnostics, node,
+                "expr.unit.unknownUnit", DiagnosticParams.Of(("unit", to)),
+                $"Unit \"{to}\" does not exist in the unit catalogue (uom.Unit).");
             return null;
         }
 
@@ -218,7 +227,8 @@ public sealed class UnitChecker
             if (node.Arguments[1] is not CellReferenceNode)
             {
                 Report(diagnostics, node,
-                    "Вихідна одиниця CONVERT — це літерал або посилання на колонку одиниці.");
+                    "expr.unit.convertSourceForm", null,
+                    "The source unit of CONVERT is a literal or a reference to a unit column.");
             }
 
             return target;
@@ -227,7 +237,9 @@ public sealed class UnitChecker
         var source = context.ResolveUnitByCode(from);
         if (source is null)
         {
-            Report(diagnostics, node, $"Одиниці «{from}» немає в довіднику uom.Unit.");
+            Report(diagnostics, node,
+                "expr.unit.unknownUnit", DiagnosticParams.Of(("unit", from)),
+                $"Unit \"{from}\" does not exist in the unit catalogue (uom.Unit).");
             return null;
         }
 
@@ -236,8 +248,9 @@ public sealed class UnitChecker
         if (context.GetDimension(source.Value) != context.GetDimension(target.Value))
         {
             Report(diagnostics, node,
-                $"CONVERT з «{from}» у «{to}» неможливий: різні розмірності. "
-                + "Потрібен контекстний коефіцієнт, а він належить методології.");
+                "expr.unit.convertDimensions", DiagnosticParams.Of(("from", from), ("to", to)),
+                $"CONVERT from \"{from}\" to \"{to}\" is impossible: the dimensions differ. "
+                + "That needs a context coefficient, which belongs to a methodology.");
             return null;
         }
 
@@ -275,6 +288,7 @@ public sealed class UnitChecker
         AstNode node,
         IUnitContext context,
         List<ExpressionDiagnostic> diagnostics,
+        string messageKey,
         string message)
     {
         if (left is null)
@@ -290,17 +304,28 @@ public sealed class UnitChecker
         var leftDimension = context.GetDimension(left.Value);
         var rightDimension = context.GetDimension(right.Value);
 
-        Report(diagnostics, node,
-            leftDimension == rightDimension
-                ? message
-                : "Операнди різних розмірностей: конверсія між ними неможлива в принципі.");
+        if (leftDimension == rightDimension)
+        {
+            Report(diagnostics, node, messageKey, null, message);
+        }
+        else
+        {
+            Report(diagnostics, node,
+                "expr.unit.dimensionMismatch", null,
+                "The operands have different dimensions: no conversion between them is possible at all.");
+        }
 
         return left;
     }
 
-    private static void Report(List<ExpressionDiagnostic> diagnostics, AstNode node, string message)
+    private static void Report(
+        List<ExpressionDiagnostic> diagnostics,
+        AstNode node,
+        string messageKey,
+        IReadOnlyDictionary<string, string>? messageParams,
+        string message)
         => diagnostics.Add(new ExpressionDiagnostic(
-            ExpressionErrors.UnitMismatch, message, node.Position, 1));
+            ExpressionErrors.UnitMismatch, message, node.Position, 1, messageKey, messageParams));
 }
 
 /// <summary>Джерело одиниць.</summary>

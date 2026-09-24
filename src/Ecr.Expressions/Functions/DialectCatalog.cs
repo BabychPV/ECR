@@ -154,16 +154,22 @@ public static class DialectCatalog
     /// під час прогону не буває — відсутній <c>@Arg</c> це
     /// <c>ARGUMENT_MISSING</c>, нечислова константа — <c>CONSTANT_NOT_NUMERIC</c>,
     /// і обидві виявляються при публікації.
+    /// <para>
+    /// ⛔ V-20: кожна заміна несе ВЛАСНИЙ ключ каталогу — повне речення, а не
+    /// вставку в чуже: порада «замість неї — …» українською доїжджала до
+    /// редактора виразів за будь-якої мови інтерфейсу. Англійський текст тут —
+    /// лише запасний.
+    /// </para>
     /// </remarks>
-    private static readonly Dictionary<string, string> Replacements =
+    private static readonly Dictionary<string, (string MessageKey, string Text)> Replacements =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["POWER"] = "Pow(a, b)",
-            ["TRUNC"] = "Truncate(a) — лише до цілого; до знаків: Truncate(a * 10^n) / 10^n",
-            ["MOD"] = "оператор %",
-            ["SWITCH"] = "вкладені if(умова, тоді, інакше)",
-            ["COALESCE"] = "нічого: null під час прогону в діалекті методологій не буває",
-            ["IFERROR"] = "нічого: помилка обчислення в діалекті методологій не перехоплюється",
+            ["POWER"] = ("expr.unknownFunctionReplacement.POWER", "Pow(a, b)"),
+            ["TRUNC"] = ("expr.unknownFunctionReplacement.TRUNC", "Truncate(a) — to an integer only; to n digits: Truncate(a * 10^n) / 10^n"),
+            ["MOD"] = ("expr.unknownFunctionReplacement.MOD", "the % operator"),
+            ["SWITCH"] = ("expr.unknownFunctionReplacement.SWITCH", "nested if(condition, then, else)"),
+            ["COALESCE"] = ("expr.unknownFunctionReplacement.COALESCE", "nothing: null does not occur at run time in the methodology dialect"),
+            ["IFERROR"] = ("expr.unknownFunctionReplacement.IFERROR", "nothing: an evaluation error is not caught in the methodology dialect"),
         };
 
     /// <summary>
@@ -182,12 +188,33 @@ public static class DialectCatalog
 
         if (ByLowerCase.TryGetValue(name, out var exact))
         {
-            return $"регістр значущий, і пишеться воно '{exact}'";
+            return $"names are case-sensitive: write '{exact}'";
         }
 
         return Replacements.TryGetValue(name, out var replacement)
-            ? $"замість неї — {replacement}"
+            ? $"use {replacement.Text} instead"
             : null;
+    }
+
+    /// <summary>Правильне написання імені, що відрізняється лише регістром; <c>null</c> — такого немає.</summary>
+    /// <param name="name">Ім'я, яке не знайшлося в каталозі.</param>
+    public static string? CaseCorrection(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        return ByLowerCase.TryGetValue(name, out var exact) ? exact : null;
+    }
+
+    /// <summary>
+    /// Ключ каталогу й запасний англійський текст заміни для імені, якого в
+    /// діалекті немає; <c>null</c> — заміни немає.
+    /// </summary>
+    /// <param name="name">Ім'я, яке не знайшлося в каталозі.</param>
+    public static (string MessageKey, string Text)? Replacement(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        return Replacements.TryGetValue(name, out var replacement) ? replacement : null;
     }
 
     /// <summary>Імена функцій діалекту методологій.</summary>

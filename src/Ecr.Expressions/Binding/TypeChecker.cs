@@ -81,11 +81,13 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
 
         if (node.Operator == UnaryOperator.Not)
         {
-            Require(operand, ExpressionValueType.Boolean, node, diagnostics, "Заперечення застосовне лише до булевого значення.");
+            Require(operand, ExpressionValueType.Boolean, node, diagnostics,
+                "expr.type.notNeedsBoolean", null, "Negation applies only to a Boolean value.");
             return ExpressionValueType.Boolean;
         }
 
-        Require(operand, ExpressionValueType.Number, node, diagnostics, "Унарний знак застосовний лише до числа.");
+        Require(operand, ExpressionValueType.Number, node, diagnostics,
+            "expr.type.signNeedsNumber", null, "A unary sign applies only to a number.");
         return ExpressionValueType.Number;
     }
 
@@ -110,7 +112,9 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
                     // Date − Date → Number (днів); Date + Date не має сенсу.
                     if (node.Operator == BinaryOperator.Add)
                     {
-                        Report(diagnostics, node, "Дати не додаються; різниця дат дає число днів.");
+                        Report(diagnostics, node,
+                            "expr.type.datesNotAdded", null,
+                            "Dates cannot be added; the difference of two dates is a number of days.");
                     }
 
                     return ExpressionValueType.Number;
@@ -136,8 +140,10 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
 
             case BinaryOperator.And:
             case BinaryOperator.Or:
-                Require(left, ExpressionValueType.Boolean, node, diagnostics, "Логічна операція потребує булевих операндів.");
-                Require(right, ExpressionValueType.Boolean, node, diagnostics, "Логічна операція потребує булевих операндів.");
+                Require(left, ExpressionValueType.Boolean, node, diagnostics,
+                    "expr.type.logicalNeedsBoolean", null, "A logical operation needs Boolean operands.");
+                Require(right, ExpressionValueType.Boolean, node, diagnostics,
+                    "expr.type.logicalNeedsBoolean", null, "A logical operation needs Boolean operands.");
                 return ExpressionValueType.Boolean;
 
             default:
@@ -148,7 +154,8 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
                 if (!Comparable(left, right))
                 {
                     Report(diagnostics, node,
-                        $"Порівняння несумісних типів: {left} і {right}.");
+                        "expr.type.incomparable", DiagnosticParams.Of(("left", left.ToString()), ("right", right.ToString())),
+                        $"Comparison of incompatible types: {left} and {right}.");
                 }
 
                 return ExpressionValueType.Boolean;
@@ -160,7 +167,8 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
         ConditionalNode node, ITypeContext context, List<ExpressionDiagnostic> diagnostics)
     {
         var condition = Check(node.Condition, context, diagnostics);
-        Require(condition, ExpressionValueType.Boolean, node, diagnostics, "Умова має бути булевою.");
+        Require(condition, ExpressionValueType.Boolean, node, diagnostics,
+            "expr.type.conditionNeedsBoolean", null, "The condition must be Boolean.");
 
         var whenTrue = Check(node.WhenTrue, context, diagnostics);
         var whenFalse = Check(node.WhenFalse, context, diagnostics);
@@ -179,7 +187,7 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
                 // Умова IF має бути Boolean — це помилка ПУБЛІКАЦІЇ, а не
                 // рантайму: інакше «IF(значення; …)» тихо йшов би однією гілкою.
                 Require(argumentTypes[0], ExpressionValueType.Boolean, node, diagnostics,
-                    "Перший аргумент IF має бути умовою.");
+                    "expr.type.ifNeedsCondition", null, "The first argument of IF must be a condition.");
                 return argumentTypes[1] == ExpressionValueType.Null ? argumentTypes[2] : argumentTypes[1];
 
             case "IFERROR" when argumentTypes.Count == 2:
@@ -210,13 +218,16 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
     private static void RequireNumeric(
         ExpressionValueType actual, AstNode node, List<ExpressionDiagnostic> diagnostics)
         => Require(actual, ExpressionValueType.Number, node, diagnostics,
-            $"У арифметиці очікувалося число, а тип операнда — {actual}.");
+            "expr.type.arithmeticNeedsNumber", DiagnosticParams.Of(("actual", actual.ToString())),
+            $"Arithmetic expects a number, but the operand is of type {actual}.");
 
     private static void Require(
         ExpressionValueType actual,
         ExpressionValueType expected,
         AstNode node,
         List<ExpressionDiagnostic> diagnostics,
+        string messageKey,
+        IReadOnlyDictionary<string, string>? messageParams,
         string message)
     {
         // Null сумісний з будь-чим: порожня комірка не робить формулу
@@ -226,12 +237,17 @@ public sealed class TypeChecker(Func<string, FunctionSignature?>? signatures = n
             return;
         }
 
-        Report(diagnostics, node, message);
+        Report(diagnostics, node, messageKey, messageParams, message);
     }
 
-    private static void Report(List<ExpressionDiagnostic> diagnostics, AstNode node, string message)
+    private static void Report(
+        List<ExpressionDiagnostic> diagnostics,
+        AstNode node,
+        string messageKey,
+        IReadOnlyDictionary<string, string>? messageParams,
+        string message)
         => diagnostics.Add(new ExpressionDiagnostic(
-            ExpressionErrors.Unresolved, message, node.Position, 1));
+            ExpressionErrors.Unresolved, message, node.Position, 1, messageKey, messageParams));
 }
 
 /// <summary>Джерело типів для посилань.</summary>

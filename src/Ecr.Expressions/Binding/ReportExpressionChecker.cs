@@ -82,7 +82,9 @@ public static class ReportExpressionChecker
         // Null сумісний з усім (§6.2): `NULL` як значення комірки — законний результат.
         if (expected is { } required && actual != required && actual != ExpressionValueType.Null)
         {
-            Report(diagnostics, expression.Root, $"Очікувався результат типу {required}, а вираз дає {actual}.");
+            Report(diagnostics, expression.Root,
+                "expr.report.resultType", DiagnosticParams.Of(("expected", required.ToString()), ("actual", actual.ToString())),
+                $"A result of type {required} was expected, but the expression gives {actual}.");
         }
 
         return actual;
@@ -101,19 +103,27 @@ public static class ReportExpressionChecker
         switch (node)
         {
             case CellReferenceNode reference when !IsRowColumn(reference):
-                Report(diagnostics, node, "Правило звіту бачить лише колонки свого рядка: [Код].");
+                Report(diagnostics, node,
+                    "expr.report.ownRowColumnsOnly", null,
+                    "A report rule sees only the columns of its own row: [Code].");
                 break;
 
             case CellReferenceNode reference when scope.ColumnType(reference.ColumnSelector) is null:
-                Report(diagnostics, node, $"Колонки «{reference.ColumnSelector}» рядок звіту не має.");
+                Report(diagnostics, node,
+                    "expr.report.columnMissing", DiagnosticParams.Of(("column", reference.ColumnSelector)),
+                    $"The report row has no column \"{reference.ColumnSelector}\".");
                 break;
 
             case SymbolReferenceNode { Kind: SymbolKind.Argument } symbol when scope.ParameterType(symbol.Name) is null:
-                Report(diagnostics, node, $"Параметра «@{symbol.Name}» звіт не має.");
+                Report(diagnostics, node,
+                    "expr.report.parameterMissing", DiagnosticParams.Of(("name", symbol.Name)),
+                    $"The report has no parameter \"@{symbol.Name}\".");
                 break;
 
             case SymbolReferenceNode { Kind: not SymbolKind.Argument } or PeriodPropertyNode:
-                Report(diagnostics, node, "Правило звіту бачить лише колонки свого рядка і параметри звіту.");
+                Report(diagnostics, node,
+                    "expr.report.scope", null,
+                    "A report rule sees only the columns of its own row and the report parameters.");
                 break;
 
             case UnaryNode unary:
@@ -141,8 +151,14 @@ public static class ReportExpressionChecker
         }
     }
 
-    private static void Report(List<ExpressionDiagnostic> diagnostics, AstNode node, string message)
-        => diagnostics.Add(new ExpressionDiagnostic(ExpressionErrors.Unresolved, message, node.Position, 1));
+    private static void Report(
+        List<ExpressionDiagnostic> diagnostics,
+        AstNode node,
+        string messageKey,
+        IReadOnlyDictionary<string, string>? messageParams,
+        string message)
+        => diagnostics.Add(new ExpressionDiagnostic(
+            ExpressionErrors.Unresolved, message, node.Position, 1, messageKey, messageParams));
 
     private sealed class TypeContext(ReportExpressionScope scope) : ITypeContext
     {

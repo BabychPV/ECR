@@ -33,10 +33,6 @@ public static class CycleDescription
     public static string Describe(
         IReadOnlyList<int>? path, Func<int, string>? nameOf = null)
     {
-        var ids = path ?? [];
-        var names = ids.Select(id => nameOf?.Invoke(id) ?? id.ToString(
-            System.Globalization.CultureInfo.InvariantCulture)).ToList();
-
         // ⛔ Цикл довжиною в один вузол — це самопосилання, і воно потребує
         // ІНШИХ слів. «Формули утворюють цикл: X → X» читач сприймає як збій
         // сортувальника, а не як опис своєї формули, і йде шукати проблему не
@@ -54,16 +50,45 @@ public static class CycleDescription
         // ⚠ Порівнюються ІДЕНТИФІКАТОРИ, не імена: `nameOf` не зобов'язаний
         // давати унікальні підписи, і два різні вузли з однаковим іменем — це
         // справжній цикл, а не самопосилання.
+        return Diagnostic(path, nameOf).Message;
+    }
+
+    /// <summary>
+    /// Те саме — діагностикою з ключем каталогу (<c>expr.cycle*</c>) для
+    /// локалізації клієнтом.
+    /// </summary>
+    /// <param name="path">Шлях циклу; порожній — цикл є, але шлях невідомий.</param>
+    /// <param name="nameOf">Ім'я формули за ідентифікатором.</param>
+    /// <remarks>
+    /// ⛔ V-20: текст був українським реченням без ключа і доїжджав до
+    /// людини як є (перевірки публікації шаблону — <c>PublishChecks</c>).
+    /// Англійський текст — запасний.
+    /// </remarks>
+    public static Parsing.ExpressionDiagnostic Diagnostic(
+        IReadOnlyList<int>? path, Func<int, string>? nameOf = null)
+    {
+        var ids = path ?? [];
+        var names = ids.Select(id => nameOf?.Invoke(id) ?? id.ToString(
+            System.Globalization.CultureInfo.InvariantCulture)).ToList();
+
         if (ids.Count > 0 && ids.All(id => id == ids[0]))
         {
-            return $"Формула «{names[0]}» читає власний результат. Порядку "
-                + "обчислення для неї не існує: значення потрібне їй самій до "
-                + "того, як воно з'явиться. У чинній системі така формула "
-                + "мовчки не рахувалася зовсім.";
+            return new Parsing.ExpressionDiagnostic(
+                ExpressionErrors.Cycle,
+                $"Formula \"{names[0]}\" reads its own result. It has no evaluation order: it needs "
+                + "the value before the value exists. In the legacy system such a formula was silently "
+                + "never calculated.",
+                0, 1,
+                "expr.cycleSelf", Parsing.DiagnosticParams.Of(("name", names[0])));
         }
 
         return names.Count == 0
-            ? "Формули утворюють цикл."
-            : $"Формули утворюють цикл: {string.Join(" → ", names)}.";
+            ? new Parsing.ExpressionDiagnostic(
+                ExpressionErrors.Cycle, "The formulas form a cycle.", 0, 1, "expr.cycleUnknownPath")
+            : new Parsing.ExpressionDiagnostic(
+                ExpressionErrors.Cycle,
+                $"The formulas form a cycle: {string.Join(" → ", names)}.",
+                0, 1,
+                "expr.cycle", Parsing.DiagnosticParams.Of(("path", string.Join(" → ", names))));
     }
 }

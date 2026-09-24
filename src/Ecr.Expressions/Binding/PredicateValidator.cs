@@ -73,8 +73,9 @@ public static class PredicateValidator
         {
             case FunctionNode function:
                 Report(diagnostics, node,
-                    $"Виклик функції '{function.Name}' у предикаті заборонений: предикат обчислюється " +
-                    "над кожним рядком таблиці.");
+                    "expr.predicate.functionCall", DiagnosticParams.Of(("name", function.Name)),
+                    $"Calling function \"{function.Name}\" in a predicate is not allowed: the predicate "
+                    + "is evaluated for every row of the table.");
                 return;
 
             case CellReferenceNode reference:
@@ -82,25 +83,27 @@ public static class PredicateValidator
                 if (reference.PeriodOffset != 0)
                 {
                     Report(diagnostics, node,
-                        "Крос-періодне посилання в предикаті заборонене: фільтрація свого періоду " +
-                        "не має читати чужий.");
+                        "expr.predicate.crossPeriod", null,
+                        "A cross-period reference is not allowed in a predicate: filtering this period "
+                        + "must not read another one.");
                 }
 
                 if (reference.Row is RowSelector.Predicate)
                 {
-                    Report(diagnostics, node, "Вкладений предикат заборонений.");
+                    Report(diagnostics, node, "expr.predicate.nested", null, "A nested predicate is not allowed.");
                 }
                 else if (reference.Row is not RowSelector.Current)
                 {
                     Report(diagnostics, node,
-                        "У предикаті дозволені лише колонки ТОГО САМОГО рядка.");
+                        "expr.predicate.sameRowOnly", null,
+                        "A predicate may reference only columns of the SAME row.");
                 }
 
                 return;
             }
 
             case ConditionalNode:
-                Report(diagnostics, node, "Тернарний оператор у предикаті заборонений.");
+                Report(diagnostics, node, "expr.predicate.ternary", null, "The ternary operator is not allowed in a predicate.");
                 return;
 
             default:
@@ -124,6 +127,12 @@ public static class PredicateValidator
             _ => [],
         };
 
-    private static void Report(List<ExpressionDiagnostic> diagnostics, AstNode node, string message)
-        => diagnostics.Add(new ExpressionDiagnostic(ExpressionErrors.Syntax, message, node.Position, 1));
+    private static void Report(
+        List<ExpressionDiagnostic> diagnostics,
+        AstNode node,
+        string messageKey,
+        IReadOnlyDictionary<string, string>? messageParams,
+        string message)
+        => diagnostics.Add(new ExpressionDiagnostic(
+            ExpressionErrors.Syntax, message, node.Position, 1, messageKey, messageParams));
 }

@@ -128,9 +128,9 @@ public sealed class ValidateExpressionHandler(
             resultType = ReportExpressionChecker.Check(
                 expression,
                 new ReportExpressionScope(
-                    Declared(context.Columns, "колонки", diagnostics),
-                    Declared(context.Parameters, "параметра", diagnostics)),
-                TypeOf(context.ExpectedType, "результату", "очікуваного", diagnostics),
+                    Declared(context.Columns, "column", diagnostics),
+                    Declared(context.Parameters, "parameter", diagnostics)),
+                TypeOf(context.ExpectedType, "result", "expected", diagnostics),
                 diagnostics);
         }
 
@@ -167,8 +167,21 @@ public sealed class ValidateExpressionHandler(
 
         // ⚠ Зауваженням, а не відмовою запиту: невідомий тип — це помилка ОПИСУ
         // звіту, і редактор правил має показати її поруч із рештою.
+        // ⛔ V-20: ключ каталогу, а не українське речення — редактор показував
+        // його як є за будь-якої мови інтерфейсу.
+        var messageKey = what switch
+        {
+            "column" => "expr.report.unknownColumnType",
+            "parameter" => "expr.report.unknownParameterType",
+            _ => "expr.report.unknownResultType",
+        };
+
         diagnostics.Add(new ExpressionDiagnostic(
-            ExpressionErrors.Unresolved, $"Невідомий тип «{type}» {what} «{name}».", 0, 1));
+            ExpressionErrors.Unresolved,
+            $"Unknown type \"{type}\" of {what} \"{name}\".",
+            0, 1,
+            messageKey,
+            Ecr.Expressions.Parsing.DiagnosticParams.Of(("type", type ?? string.Empty), ("name", name))));
         return null;
     }
 

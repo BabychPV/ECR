@@ -120,10 +120,7 @@ public static class PublishChecks
         var ordering = formulaEngine.BuildEvaluationOrder(nodes);
         if (!ordering.IsSuccess)
         {
-            diagnostics.Add(new ExpressionDiagnostic(
-                ExpressionErrors.Cycle,
-                Ecr.Expressions.Graph.CycleDescription.Describe(ordering.CyclePath),
-                0, 1));
+            diagnostics.Add(Ecr.Expressions.Graph.CycleDescription.Diagnostic(ordering.CyclePath));
         }
         else
         {

@@ -145,8 +145,8 @@ public sealed class DialectCatalogTests
 
     [Theory]
     [InlineData("POWER", "Pow(a, b)")]
-    [InlineData("MOD", "оператор %")]
-    [InlineData("SWITCH", "вкладені if")]
+    [InlineData("MOD", "the % operator")]
+    [InlineData("SWITCH", "nested if")]
     [InlineData("POW", "'Pow'")]
     [InlineData("ROUND", "'Round'")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]

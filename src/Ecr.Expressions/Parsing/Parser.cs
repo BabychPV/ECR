@@ -768,22 +768,44 @@ public sealed class Parser
     /// як є, той самий шлях, яким сьогодні йдуть усі діагностики зв'язування
     /// (<c>TypeChecker</c>, <c>UnitChecker</c> і сусіди), яких ця картка теж
     /// свідомо не торкається.
+    /// <para>
+    /// ⛔ V-20 (третій раунд UX): рішення вище переглянуто. Діагностика з
+    /// порадою йшла ПОВНІСТЮ українською (<c>IF(1 &gt; 0, 'a', 'b')</c> →
+    /// «Функція 'IF' недоступна в діалекті Methodology…») за будь-якої мови
+    /// інтерфейсу. Тепер порада — окремий ключ на кожен вид: регістр
+    /// (<c>expr.unknownFunctionCase</c>, з правильним написанням параметром) і
+    /// заміна (<c>expr.unknownFunctionReplacement.*</c>, по ключу на ім'я — повне
+    /// речення, а не вставка).
+    /// </para>
     /// </remarks>
     private static void ReportUnknownFunction(State s, string name, Token token)
     {
-        var advice = s.Dialect == ExpressionDialect.Methodology ? DialectCatalog.Advice(name) : null;
+        var methodology = s.Dialect == ExpressionDialect.Methodology;
+        var dialect = s.Dialect.ToString();
 
-        if (advice is null)
+        if (methodology && DialectCatalog.CaseCorrection(name) is { } exact)
         {
             s.Error(
-                "expr.unknownFunction", Params(("name", name), ("dialect", s.Dialect.ToString())),
-                $"Function \"{name}\" is not available in the {s.Dialect} dialect.",
+                "expr.unknownFunctionCase", Params(("name", name), ("dialect", dialect), ("exact", exact)),
+                $"Function \"{name}\" is not available in the {dialect} dialect. In the legacy engine "
+                + $"(NCalc 1.3.8) names are case-sensitive: write \"{exact}\".",
+                token.Position, token.Length);
+            return;
+        }
+
+        if (methodology && DialectCatalog.Replacement(name) is { } replacement)
+        {
+            s.Error(
+                replacement.MessageKey, Params(("name", name), ("dialect", dialect)),
+                $"Function \"{name}\" is not available in the {dialect} dialect. In the legacy engine "
+                + $"(NCalc 1.3.8) use {replacement.Text} instead.",
                 token.Position, token.Length);
             return;
         }
 
         s.Error(
-            $"Функція '{name}' недоступна в діалекті {s.Dialect}. У наборі чинного рушія (NCalc 1.3.8) {advice}.",
+            "expr.unknownFunction", Params(("name", name), ("dialect", dialect)),
+            $"Function \"{name}\" is not available in the {dialect} dialect.",
             token.Position, token.Length);
     }
 

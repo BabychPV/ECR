@@ -51,7 +51,7 @@ public sealed class ReportDialectTests
         var diagnostic = Assert.Single(Check(text));
 
         Assert.Equal(ExpressionErrors.Unresolved, diagnostic.Code);
-        Assert.Contains($"«{column}»", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains($"\"{column}\"", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class ReportDialectTests
         var diagnostic = Assert.Single(Check("[Value] > @Limit"));
 
         Assert.Equal(ExpressionErrors.Unresolved, diagnostic.Code);
-        Assert.Contains("«@Limit»", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("\"@Limit\"", diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Theory]
