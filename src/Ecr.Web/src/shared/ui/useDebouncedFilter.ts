@@ -1,3 +1,4 @@
+import { useCallback, useState } from 'react';
 import { useDebouncedValue } from '@mantine/hooks';
 
 /**
@@ -25,4 +26,34 @@ export function useDebouncedFilter<T extends string | number | boolean | null>(v
   const [debounced] = useDebouncedValue(value, FilterDebounceMs);
 
   return debounced;
+}
+
+/**
+ * Курсор сторінки («More»), прив'язаний до ЗАСТОСОВАНОГО фільтра.
+ *
+ * ⛔ Курсор позначає позицію в конкретній видачі, тож зі зміною фільтра він
+ * мусить зникнути — але разом із ВІДКЛАДЕНИМ значенням, а не з сирим. Скидання
+ * з `onChange` поля (сире значення) давало після гортання зайвий запит
+ * «старий фільтр, перша сторінка» ще до того, як минала пауза.
+ *
+ * Тому курсор не скидається руками взагалі: він дійсний, лише поки
+ * `filterKey` той самий, для якого його отримано. Змінився ключ — курсор
+ * `null`, у тому самому рендері, що й новий фільтр.
+ *
+ * @param filterKey рядок, що однозначно описує застосований фільтр (без курсора).
+ */
+export function useFilterCursor(
+  filterKey: string,
+): readonly [string | null, (cursor: string | null) => void] {
+  const [state, setState] = useState<{ readonly cursor: string | null; readonly forKey: string }>({
+    cursor: null,
+    forKey: filterKey,
+  });
+
+  const setCursor = useCallback(
+    (cursor: string | null) => setState({ cursor, forKey: filterKey }),
+    [filterKey],
+  );
+
+  return [state.forKey === filterKey ? state.cursor : null, setCursor];
 }

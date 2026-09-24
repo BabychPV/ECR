@@ -15,7 +15,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -43,13 +43,14 @@ import { t } from '@/shared/i18n';
 export function ConsistencyIssuesPage(): JSX.Element {
   const [ruleCode, setRuleCode] = useUrlState('ruleCode');
   const [showResolved, setShowResolved] = useUrlState('showResolved');
-  const [cursor, setCursor] = useState<string | null>(null);
 
   const openOnly = showResolved !== '1';
   const rule = ruleCode ?? '';
   // ⛔ Код правила набирається з клавіатури — у запит після паузи, а не на
   // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
   const appliedRule = useDebouncedFilter(rule);
+  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
+  const [cursor, setCursor] = useFilterCursor(`${appliedRule}|${String(openOnly)}`);
 
   // ⚠ Дія «перевірити зараз» — лише з правом, яке вимагає сам ендпоінт
   // (`System.RunJob`), а не тим, яким відкрито екран: інакше кнопка обіцяла б
@@ -83,7 +84,6 @@ export function ConsistencyIssuesPage(): JSX.Element {
               value={rule}
               onChange={(event) => {
                 setRuleCode(event.currentTarget.value);
-                setCursor(null);
               }}
             />
             <Checkbox
@@ -91,7 +91,6 @@ export function ConsistencyIssuesPage(): JSX.Element {
               checked={openOnly}
               onChange={(event) => {
                 setShowResolved(event.currentTarget.checked ? null : '1');
-                setCursor(null);
               }}
             />
             {runs && (

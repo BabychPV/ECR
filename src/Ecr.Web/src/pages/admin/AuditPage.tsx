@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react';
+import type { JSX } from 'react';
 import {
   Badge,
   Button,
@@ -12,14 +12,14 @@ import {
   TextInput,
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
-import { cellChangeOrigins, isSingleCell, useCellChanges } from '@/features/audit/api';
+import { cellChangeOrigins, cellChangesQuery, isSingleCell, useCellChanges } from '@/features/audit/api';
 import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
 import { StructureExportButton } from '@/features/audit/StructureExportButton';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
-import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -61,7 +61,6 @@ export function AuditPage(): JSX.Element {
   const [lateOnly, setLateOnly] = useUrlState('lateOnly');
   const [view, setView] = useUrlState('view');
   const setParams = useUrlParamsSetter();
-  const [cursor, setCursor] = useState<string | null>(null);
 
   const fromDate = from ?? isoDaysAgo(7);
   const toDate = to ?? isoDaysAgo(0);
@@ -88,7 +87,7 @@ export function AuditPage(): JSX.Element {
   const cellWithoutDocument =
     documentId === null && ((rowKey !== null && rowKey.length > 0) || columnDefId !== null);
 
-  const filter = {
+  const applied = {
     from: fromDate,
     to: toDate,
     documentId: appliedDocumentId,
@@ -98,8 +97,13 @@ export function AuditPage(): JSX.Element {
     origin,
     lateOnly: lateOnly === 'true',
     limit: 100,
-    cursor,
   };
+
+  // ⛔ Курсор скидається разом із ЗАСТОСОВАНИМ фільтром (`useFilterCursor`), а
+  // не з `onChange` полів: інакше після «More» перша ж клавіша давала зайвий
+  // запит «старий фільтр, перша сторінка» ще до паузи debounce.
+  const [cursor, setCursor] = useFilterCursor(cellChangesQuery(applied));
+  const filter = { ...applied, cursor };
 
   // ⚠ `BE-16`: друга вкладка — журнал структурних змін. Вкладка живе в адресі
   // (`?view=structure`), бо саме адресу людина надсилає колезі. Журнал комірок
@@ -138,7 +142,6 @@ export function AuditPage(): JSX.Element {
               value={fromDate}
               onChange={(event) => {
                 setFrom(event.currentTarget.value);
-                setCursor(null);
               }}
             />
             <TextInput
@@ -149,7 +152,6 @@ export function AuditPage(): JSX.Element {
               value={toDate}
               onChange={(event) => {
                 setTo(event.currentTarget.value);
-                setCursor(null);
               }}
             />
             <NumberInput
@@ -166,7 +168,6 @@ export function AuditPage(): JSX.Element {
               value={documentId ?? ''}
               onChange={(value) => {
                 setDocumentId(typeof value === 'number' ? value : null);
-                setCursor(null);
               }}
             />
           </Group>
@@ -192,7 +193,6 @@ export function AuditPage(): JSX.Element {
           value={author ?? ''}
           onChange={(value) => {
             setAuthor(typeof value === 'number' ? value : null);
-            setCursor(null);
           }}
         />
         <Select
@@ -205,7 +205,6 @@ export function AuditPage(): JSX.Element {
           value={origin}
           onChange={(value) => {
             setOrigin(value);
-            setCursor(null);
           }}
         />
         <TextInput
@@ -217,7 +216,6 @@ export function AuditPage(): JSX.Element {
           value={rowKey ?? ''}
           onChange={(event) => {
             setRowKey(event.currentTarget.value);
-            setCursor(null);
           }}
         />
         <NumberInput
@@ -229,7 +227,6 @@ export function AuditPage(): JSX.Element {
           value={columnDefId ?? ''}
           onChange={(value) => {
             setColumnDefId(typeof value === 'number' ? value : null);
-            setCursor(null);
           }}
         />
         <Checkbox
@@ -238,7 +235,6 @@ export function AuditPage(): JSX.Element {
           checked={lateOnly === 'true'}
           onChange={(event) => {
             setLateOnly(event.currentTarget.checked ? 'true' : null);
-            setCursor(null);
           }}
         />
         {/* ⚠ Значок «історія однієї комірки» — не прикраса: саме в цьому стані
@@ -266,7 +262,6 @@ export function AuditPage(): JSX.Element {
               origin: null,
               lateOnly: null,
             });
-            setCursor(null);
           }}
         >
           {t('audit.reset')}

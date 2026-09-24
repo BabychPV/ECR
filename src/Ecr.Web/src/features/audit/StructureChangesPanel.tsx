@@ -1,10 +1,10 @@
-import { useState, type JSX } from 'react';
+import type { JSX } from 'react';
 import { Button, Group, NumberInput, Table, Text, TextInput } from '@mantine/core';
-import { useStructureChanges, type StructureChangePage } from '@/features/audit/api';
+import { structureChangesQuery, useStructureChanges, type StructureChangePage } from '@/features/audit/api';
 import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
+import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -21,20 +21,22 @@ import { t } from '@/shared/i18n';
 export function StructureChangesPanel({ from, to }: { from: string; to: string }): JSX.Element {
   const [entityType, setEntityType] = useUrlState('entityType');
   const [changedBy, setChangedBy] = useUrlNumber('changedBy');
-  const [cursor, setCursor] = useState<string | null>(null);
 
   // ⛔ Набір у полях — у запит після паузи, як у журналі комірок (`AuditPage`).
   const appliedEntityType = useDebouncedFilter(entityType);
   const appliedChangedBy = useDebouncedFilter(changedBy);
 
-  const changes = useStructureChanges({
+  const applied = {
     from,
     to,
     entityType: appliedEntityType,
     changedByUserId: appliedChangedBy,
     limit: 100,
-    cursor,
-  });
+  };
+  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
+  const [cursor, setCursor] = useFilterCursor(structureChangesQuery(applied));
+
+  const changes = useStructureChanges({ ...applied, cursor });
 
   return (
     <>
@@ -46,7 +48,6 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
           value={entityType ?? ''}
           onChange={(event) => {
             setEntityType(event.currentTarget.value);
-            setCursor(null);
           }}
         />
         <NumberInput
@@ -58,7 +59,6 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
           value={changedBy ?? ''}
           onChange={(value) => {
             setChangedBy(typeof value === 'number' ? value : null);
-            setCursor(null);
           }}
         />
       </Group>
