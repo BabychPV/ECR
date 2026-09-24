@@ -941,6 +941,11 @@ USING (VALUES
     (N'err.ECR-TMPL-0409.templateArchived',      N'en', N'Template "{code}" is archived: new documents are no longer created from it, while existing ones keep working.', 1),
     (N'err.ECR-TMPL-0409.templateAlreadyArchived', N'en', N'Template "{code}" is already archived.', 1),
     (N'err.ECR-TMPL-0409.templateNotArchived',     N'en', N'Template "{code}" is not archived: there is nothing to bring back.', 1),
+    -- B-04 / X-30: номер нової версії шаблону і джерело клону.
+    (N'err.ECR-TMPL-0422.versionNumberRequired',   N'en', N'A version number is required, in the form Major.Minor.Patch.Build.', 1),
+    (N'err.ECR-TMPL-0422.versionNumberFormat',     N'en', N'Version number "{version}" does not match the form Major.Minor.Patch.Build.', 1),
+    (N'err.ECR-TMPL-0422.cloneSourceOtherTemplate', N'en', N'Version {sourceVersionId} belongs to another template: a version can only be cloned within its own template ({templateId}).', 1),
+    (N'err.ECR-TMPL-0409.versionNumberTaken',      N'en', N'Version {version} already exists in this template.', 1),
 
     -- Борг локалізації: правила доступу до періоду й зв'язки між таблицями
     -- (`PeriodAccessRuleHandlers`/`PeriodAccessRuleDef`,

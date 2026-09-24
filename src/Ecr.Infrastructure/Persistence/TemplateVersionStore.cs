@@ -86,16 +86,16 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     {
         if (!await db.Templates.AnyAsync(t => t.Id == templateId, ct).ConfigureAwait(false))
         {
-            throw new NotFoundException("ECR-TMPL-0404", $"Шаблон {templateId} не знайдено.");
+            throw new NotFoundException(
+                "ECR-TMPL-0404", $"Шаблон {templateId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.template",
+                    ["templateId"] = templateId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
-        if (await db.TemplateVersions
-                .AnyAsync(v => v.TemplateId == templateId && v.Version == versionNumber, ct)
-                .ConfigureAwait(false))
-        {
-            throw new Application.Errors.BusinessRuleException(
-                "ECR-TMPL-0409", $"Версія {versionNumber} у цьому шаблоні вже існує.");
-        }
+        await EnsureVersionNumberFreeAsync(templateId, versionNumber, ct).ConfigureAwait(false);
 
         var version = new TemplateVersion(templateId, versionNumber, userId, utcNow);
         db.TemplateVersions.Add(version);
@@ -152,6 +152,12 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             .ConfigureAwait(false)
             ?? throw new NotFoundException("ECR-TMPL-0404", $"Версії шаблону {sourceVersionId} не існує.");
 
+        // ⛔ X-30 (UX-прохід, четвертий раунд): номер, що вже є в шаблоні, —
+        // `409` з ключем, а не `UQ_TemplateVersion` → голий `500`. Цей шлях
+        // перевірки не мав зовсім, на відміну від `CreateDraftAsync` поруч.
+        // Шаблон — той, що в ДЖЕРЕЛА: саме в нього клон і ляже.
+        await EnsureVersionNumberFreeAsync(source.TemplateId, newVersion, ct).ConfigureAwait(false);
+
         var clonedFrom = source.Id;
         var (clone, links) = TemplateVersionCloner.Prepare(source, newVersion, userId, utcNow);
 
@@ -177,6 +183,31 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         }).ConfigureAwait(false);
 
         return clone.Id;
+    }
+
+    /// <summary>
+    /// Номер версії вільний у шаблоні; інакше <c>409 ECR-TMPL-0409</c> з ключем.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перевірка-передумова, а не заміна <c>UQ_TemplateVersion</c>: дві
+    /// одночасні спроби з тим самим номером обидві її пройдуть, і друга впаде на
+    /// індексі. Це гонитва двох адміністраторів над одним шаблоном — рідкісна, і
+    /// її ціна (одна невдала спроба) нижча за блокування шаблону на час клону.
+    /// </remarks>
+    private async Task EnsureVersionNumberFreeAsync(int templateId, string versionNumber, CancellationToken ct)
+    {
+        if (await db.TemplateVersions
+                .AnyAsync(v => v.TemplateId == templateId && v.Version == versionNumber, ct)
+                .ConfigureAwait(false))
+        {
+            throw new Application.Errors.BusinessRuleException(
+                "ECR-TMPL-0409", $"Версія {versionNumber} у цьому шаблоні вже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.versionNumberTaken",
+                    ["version"] = versionNumber,
+                });
+        }
     }
 
     private async Task SaveCloneAsync(
