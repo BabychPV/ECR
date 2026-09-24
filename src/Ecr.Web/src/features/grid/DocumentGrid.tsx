@@ -427,6 +427,30 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [patch, periodKey, tableInstanceId],
   );
 
+  /**
+   * Надсилає правки, що НЕ пройшли через `applyEditedValue` (вставка, undo/redo),
+   * — але спершу кладе їх у сховище документа.
+   *
+   * ⛔ Доти вставка й undo/redo будували патч повз сховище: відхилена вставка
+   * показувала причину, але без маркера комірки й «Retry save», і зникала з
+   * перезавантаженням; а незбережена клавіатурна правка тієї самої комірки
+   * лишалась у сховищі й наступним автозбереженням ПЕРЕЗАПИСУВАЛА щойно
+   * скасоване. Тепер це той самий шлях, що й у звичайної правки: успіх знімає
+   * правку зі сховища (`discardPendingRows`), відмова тримає її (`V-01`) — з
+   * маркером, Retry і не блокуючи інших.
+   *
+   * ⚠ Надсилання НЕГАЙНЕ, як і було: вставка з Excel — одна свідома дія, і
+   * чекати дебаунсу для неї нема чого.
+   */
+  const saveThroughStore = useCallback(
+    (edits: PendingEdit[]) => {
+      for (const edit of edits) putPendingEdit(tableInstanceId, periodKey, edit);
+
+      void save(edits);
+    },
+    [save, tableInstanceId, periodKey],
+  );
+
   // ⚠ `save` читають ззовні React-рендера (автозбереження документа), тож
   // потрібне ОСТАННЄ його втілення, а не те, що було на момент підписки.
   const saveRef = useRef(save);
@@ -932,9 +956,9 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       });
 
       touchHistory();
-      void save(edits);
+      saveThroughStore(edits);
     },
-    [data, readOnly, save, touchHistory],
+    [data, readOnly, saveThroughStore, touchHistory],
   );
 
   /**
@@ -1137,7 +1161,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       touchHistory();
 
-      void save(
+      saveThroughStore(
         edits.map((edit) => ({
           rowKey: edit.rowKey,
           columnCode: edit.columnCode,
@@ -1147,7 +1171,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         })),
       );
     },
-    [data, save, touchHistory],
+    [data, saveThroughStore, touchHistory],
   );
 
   const onKeyDown = useCallback(
