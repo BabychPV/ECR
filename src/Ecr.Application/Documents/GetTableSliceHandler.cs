@@ -160,8 +160,12 @@ public sealed class GetTableSliceHandler(
         // шістдесят колонок не повинні коштувати шістдесяти походів у базу.
         var styleById = await styles.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
+        // ⛔ `V-14`: прихована колонка (Appearance → Hidden) приходила в зріз, і
+        // сітка показувала її та давала редагувати — хоча експорт її вже
+        // пропускає (`DocumentDataExporter`). Приховане не віддається тут, і
+        // «видно оператору» означає одне й те саме в сітці та в книзі.
         var columns = table.Columns
-            .Where(c => !c.IsDeleted)
+            .Where(c => !c.IsDeleted && !c.IsHidden)
             .OrderBy(c => c.Ordinal)
             .Select(c => new ColumnDto(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
