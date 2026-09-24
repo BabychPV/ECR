@@ -660,6 +660,8 @@ USING (VALUES
     -- зовнішнього ключа і виходила назовні голим `500` — тобто дефект даних
     -- виглядав як збій сервера.
     (N'err.ECR-REQ-0422.periodMismatch',     N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.', 1),
+    -- B-05: походження правки з тіла `PATCH …/cells` — лише людське.
+    (N'err.ECR-REQ-0422.cellOriginNotAllowed', N'en', N'Origin "{origin}" cannot be set by a client: an edit made here is recorded as {allowed}.', 1),
     (N'err.ECR-IMP-0422.notAWorkbook',       N'en', N'The file cannot be read as an .xlsx workbook.', 1),
     -- ⚠ Збір із SQL-джерела, яке не є PI (`ФВ-11.8`, транспорт `Sql`). Усі
     -- чотири подробиці кажуть, ЩО саме поправити: ключ налаштування, поле

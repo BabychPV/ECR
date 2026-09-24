@@ -180,7 +180,7 @@ public sealed class PatchCellsHandler(
     private const int ConflictAuditWindowMonths = 13;
 
     /// <summary>Походження зміни, яку зробила ЛЮДИНА.</summary>
-    private const string UserEditOrigin = "UserEdit";
+    private const string UserEditOrigin = CellChangeOrigins.UserEdit;
 
     /// <summary>Ім'я автора для зміни, яку зробила не людина.</summary>
     private const string SystemUser = "system";

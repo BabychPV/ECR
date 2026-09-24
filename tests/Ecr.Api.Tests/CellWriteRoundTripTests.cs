@@ -793,6 +793,95 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
             + $"{await retried.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
     }
 
+    /// <summary>
+    /// Клієнт не може заявити НЕлюдське походження правки: <c>422</c> з
+    /// ключем, у сховищі й журналі — нічого (B-05).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До виправлення кожен із цих запитів давав <c>200</c>, і рядок
+    /// <c>aud.CellChange</c> ніс <c>Origin = "Recalculation"</c> (чи <c>NOPE</c>)
+    /// під іменем людини, яка його надіслала; конфлікт «людина/система» далі
+    /// вважав таку правку системною. Сценарій — той самий, у якому
+    /// <c>UserEdit</c> законно проходить (тести вище), тож відмова тут
+    /// можлива лише через походження.
+    /// </remarks>
+    [Theory]
+    [InlineData("NOPE")]
+    [InlineData("Recalculation")]
+    [InlineData("Import")]
+    [InlineData("Integration")]
+    [InlineData("useredit")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B-05")]
+    public async Task Походження_правки_крім_UserEdit_відхиляється_422_і_нічого_не_пишеться(string origin)
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var sliceUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/tables/{scenario.Document.TableInstanceId}",
+            UriKind.Relative);
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        var opened = await client.GetAsync(sliceUri).ConfigureAwait(true);
+        Assert.True(opened.IsSuccessStatusCode, $"GET зрізу: {opened.StatusCode}: {app.ErrorsText}");
+
+        var numberColumn = JsonDocument
+            .Parse(await opened.Content.ReadAsStringAsync().ConfigureAwait(true))
+            .RootElement.GetProperty("columns")
+            .EnumerateArray()
+            .Select(c => c.GetProperty("code").GetString()!)
+            .ElementAt(1);
+
+        var rowKey = $"ORG{Guid.NewGuid():N}"[..12];
+
+        var refused = await client.PatchAsJsonAsync(patchUri, new
+        {
+            tableInstanceId = scenario.Document.TableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin,
+            rows = new[]
+            {
+                new
+                {
+                    rowKey,
+                    baseVersion = (string?)null,
+                    cells = new object[] { new { columnCode = numberColumn, value = (object)"7" } },
+                },
+            },
+        }).ConfigureAwait(true);
+
+        var body = await refused.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(
+            refused.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"PATCH з origin «{origin}»: очікували 422, отримали {refused.StatusCode}\n{body}\n{app.ErrorsText}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REQ-0422.cellOriginNotAllowed", problem.GetProperty("messageKey").GetString());
+        Assert.Equal(
+            $"Origin \"{origin}\" cannot be set by a client: an edit made here is recorded as UserEdit.",
+            problem.GetProperty("detail").GetString());
+
+        // ⛔ І в базі нічого: ні рядка, ні комірки, ні запису журналу.
+        await using (var db = scenario.Builder.CreateContext())
+        {
+            Assert.Equal(
+                0,
+                await db.TableRows.AsNoTracking()
+                    .CountAsync(r => r.TableInstanceId == scenario.Document.TableInstanceId && r.RowKeyValue == rowKey)
+                    .ConfigureAwait(true));
+        }
+
+        Assert.Empty(await CellJournalAsync(
+            scenario.Document.DocumentId, rowKey, scenario.Document.ColumnDefIds[1]).ConfigureAwait(true));
+    }
+
     /// <summary>Рядки <c>aud.CellChange</c> однієї комірки — прямим ADO, бо <c>aud.*</c> поза моделлю EF.</summary>
     private async Task<List<(string? OldValue, string? NewValue)>> CellJournalAsync(
         long documentId, string rowKey, int columnDefId)

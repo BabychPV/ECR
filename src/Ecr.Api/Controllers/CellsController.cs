@@ -62,6 +62,11 @@ public sealed class CellsController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ⛔ B-05: `origin` з тіла — лише людський. Системні походження
+        // (`Import`, `Integration`, `Recalculation`) приходять у обробник
+        // іншими шляхами, і через HTTP заявити їх означало б підробити журнал.
+        CellChangeOrigins.RequireClientOrigin(request.Origin);
+
         // ⚠ Належність екземпляра таблиці документові перевіряється ТУТ і до
         // будь-якої роботи. Без цієї перевірки шлях у URL стає декоративним:
         // клієнт указав би чужий TableInstanceId і писав би в чужий документ,
