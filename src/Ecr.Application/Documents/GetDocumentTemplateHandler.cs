@@ -119,6 +119,12 @@ public sealed class GetDocumentTemplateHandler(
                     ["versionId"] = templateVersionId.ToString(CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ `V-11`: архівований шаблон нових документів не приймає (`BE-26`,
+        // `Template.EnsureOfferedForNewDocuments`), тож і діалогу він не
+        // пропонується: людина бачить ту саму відмову `ECR-TMPL-0409`, яку дав би
+        // `POST /documents`, — ДО того, як обере аркуші.
+        template.EnsureOfferedForNewDocuments();
+
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
         var groupRules = await documents.GetGroupRulesAsync(templateVersionId, ct).ConfigureAwait(false);
 

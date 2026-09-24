@@ -96,6 +96,40 @@ public sealed class DocumentTemplateForProjectTests(SqlServerFixture sql)
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "V-11")]
+    public async Task Архівований_шаблон_проєкту_не_пропонується_для_нового_документа()
+    {
+        // ⛔ `V-11`: діалог пропонував версії й архівного шаблону (`FTPL02`).
+        // Склад нового документа архівованого шаблону — та сама відмова
+        // ECR-TMPL-0409, що дав би `POST /documents`.
+        var s = await ArrangeAsync(OperatorPermissions, deny: false).ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var templateId = db.TemplateVersions
+                .Where(v => v.Id == s.Document.TemplateVersionId)
+                .Select(v => v.TemplateId)
+                .Single();
+            var template = db.Templates.Single(t => t.Id == templateId);
+            template.Archive();
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app, s.UserName).ConfigureAwait(true);
+
+        var response = await client
+            .GetAsync(new Uri($"/api/v1/projects/{s.Document.ProjectId}/document-template", UriKind.Relative))
+            .ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(response.StatusCode == HttpStatusCode.Conflict, $"{response.StatusCode}: {body}; {app.ErrorsText}");
+        Assert.Equal("ECR-TMPL-0409", JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString());
+    }
+
     private static async Task<HttpClient> SignInAsync(EcrApiFactory app, string userName)
     {
         var client = app.CreateClient();

@@ -2285,6 +2285,8 @@ USING (VALUES
     (N'import.apply',                    N'en', N'Apply', 1),
     (N'import.applied',                  N'en', N'The import has been applied.', 1),
     -- V-10: причини відмов прев'ю — мовою інтерфейсу, за messageKey відмови.
+    -- V-11: документ заводиться на версії шаблону проєкту.
+    (N'err.ECR-DOC-0422.versionNotProject', N'en', N'A document is created on the template version of its project; a different version is not accepted.', 1),
     (N'import.rejectedCell',             N'en', N'This value cannot be imported.', 1),
     (N'err.ECR-CELL-4221.importCalculated', N'en', N'The system calculates this cell, and the file changes its value: the value from the file is not applied.', 1),
     (N'err.ECR-ROW-0404.importNoRow',    N'en', N'The document has no row with this key: import does not create rows.', 1),

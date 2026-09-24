@@ -338,6 +338,15 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<int?> FindProjectTemplateVersionIdAsync(int projectId, CancellationToken ct)
+        => await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (int?)p.TemplateVersionId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct)
     {
         // Один запит через увесь ланцюг: документ → проєкт. Версія живе на

@@ -542,7 +542,12 @@ public sealed class DocumentsController(
 
 /// <summary>Запит на створення документа.</summary>
 /// <param name="ProjectId">Проєкт.</param>
-/// <param name="TemplateVersionId">Опублікована версія шаблону.</param>
+/// <param name="TemplateVersionId">
+/// Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;
+/// поле, якщо задане, мусить із нею збігатися (інакше <c>422</c>
+/// <c>err.ECR-DOC-0422.versionNotProject</c>). Клієнту його надсилати не треба:
+/// склад аркушів для діалогу дає <c>GET /projects/{id}/document-template</c>.
+/// </param>
 /// <param name="SheetDefIds">Аркуші, які входять у документ.</param>
 /// <param name="Name">
 /// Людське ім'я документа мовами каталогу; <c>null</c> — без імені.
@@ -551,9 +556,9 @@ public sealed class DocumentsController(
 /// </param>
 public sealed record CreateDocumentRequest(
     int ProjectId,
-    int TemplateVersionId,
     IReadOnlyList<int> SheetDefIds,
-    IReadOnlyDictionary<string, string>? Name = null);
+    IReadOnlyDictionary<string, string>? Name = null,
+    int? TemplateVersionId = null);
 
 /// <summary>Дія над документом у межах одного періоду.</summary>
 /// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>

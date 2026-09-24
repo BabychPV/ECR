@@ -1812,14 +1812,16 @@
             "type": "array"
           },
           "templateVersionId": {
-            "description": "Опублікована версія шаблону.",
+            "description": "Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;\nполе, якщо задане, мусить із нею збігатися (інакше `422`\n`err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:\nсклад аркушів для діалогу дає `GET /projects/{id}/document-template`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
           "projectId",
-          "templateVersionId",
           "sheetDefIds"
         ],
         "type": "object"

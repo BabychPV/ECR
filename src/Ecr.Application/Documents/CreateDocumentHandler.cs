@@ -5,6 +5,7 @@ using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Documents;
@@ -28,7 +29,11 @@ public sealed class CreateDocumentHandler(
 
     /// <summary>Створює документ із заданим складом аркушів.</summary>
     /// <param name="projectId">Проєкт.</param>
-    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="templateVersionId">
+    /// Версія шаблону з запиту; <c>null</c> — не задано (береться версія
+    /// проєкту). ⛔ `V-11`: версію документа визначає ПРОЄКТ; задана інша —
+    /// відмова <c>ECR-DOC-0422</c> (<c>err.ECR-DOC-0422.versionNotProject</c>).
+    /// </param>
     /// <param name="sheetDefIds">Аркуші, які входять у документ.</param>
     /// <param name="name">
     /// Людське ім'я документа мовами каталогу; <c>null</c> — не задано.
@@ -39,7 +44,7 @@ public sealed class CreateDocumentHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Ідентифікатор документа.</returns>
     public async Task<long> HandleAsync(
-        int projectId, int templateVersionId, IReadOnlyList<int> sheetDefIds,
+        int projectId, int? templateVersionId, IReadOnlyList<int> sheetDefIds,
         IReadOnlyDictionary<string, string>? name, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(sheetDefIds);
@@ -70,6 +75,8 @@ public sealed class CreateDocumentHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може створювати документи.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
+        var versionId = await ProjectVersionAsync(projectId, templateVersionId, ct).ConfigureAwait(false);
+
         // ⛔ Архівований шаблон НЕ пропонується для нових документів (директива
         // №15, `BE-26`). Правило стоїть саме тут, а не лише у фільтрі переліку:
         // `templateVersionId` приходить із тіла запиту, і «не показувати в
@@ -80,19 +87,19 @@ public sealed class CreateDocumentHandler(
         // СТВОРЕННІ й ніде більше. Документ назавжди лишається на своїй версії
         // (рішення людини на `Q15-05`), тож заборона правок обірвала б звітний
         // період посеред роботи.
-        var template = await templates.FindTemplateOfVersionAsync(templateVersionId, ct).ConfigureAwait(false)
+        var template = await templates.FindTemplateOfVersionAsync(versionId, ct).ConfigureAwait(false)
                        ?? throw new NotFoundException(
-                           "ECR-TMPL-0404", $"Версії шаблону {templateVersionId} не існує.",
+                           "ECR-TMPL-0404", $"Версії шаблону {versionId} не існує.",
                            new Dictionary<string, object?>
                            {
                                ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
-                               ["versionId"] = templateVersionId.ToString(
+                               ["versionId"] = versionId.ToString(
                                    System.Globalization.CultureInfo.InvariantCulture),
                            });
 
         template.EnsureOfferedForNewDocuments();
 
-        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+        var snapshot = await metadata.GetAsync(versionId, ct).ConfigureAwait(false);
         var known = snapshot.Sheets.Select(s => s.Id).ToHashSet();
 
         var unknown = sheetDefIds.Where(id => !known.Contains(id)).ToList();
@@ -113,7 +120,7 @@ public sealed class CreateDocumentHandler(
         // поданні: документ із неповним складом виглядав би готовим, а не
         // виявився б непридатним у момент здачі.
         var violations = await documents
-            .ValidateCompositionAsync(templateVersionId, sheetDefIds, ct).ConfigureAwait(false);
+            .ValidateCompositionAsync(versionId, sheetDefIds, ct).ConfigureAwait(false);
 
         if (violations.Count > 0)
         {
@@ -135,7 +142,7 @@ public sealed class CreateDocumentHandler(
             // даних значень ще немає, тому ключ будується з проєкту і версії —
             // унікальність у межах проєкту тримає індекс, а не домовленість.
             var businessKey = await documents
-                .NextBusinessKeyAsync(projectId, templateVersionId, ct).ConfigureAwait(false);
+                .NextBusinessKeyAsync(projectId, versionId, ct).ConfigureAwait(false);
 
             var document = new Document(projectId, businessKey, userId, now);
 
@@ -189,6 +196,52 @@ public sealed class CreateDocumentHandler(
 
             return document.Id;
         }
+    }
+
+    /// <summary>
+    /// Версія шаблону, на якій заводиться документ, — версія ПРОЄКТУ.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ `V-11`. Документ власної версії не зберігає: усе читання документа —
+    /// зріз, експорт, права, перерахунок — бере версію з проєкту
+    /// (<c>RowStore.GetTableInstancesAsync</c>, <c>DocumentStore.GetTemplateVersionIdAsync</c>,
+    /// <c>AccessDecisionService</c>). Доти версія бралася з тіла запиту, і
+    /// документ на ЧУЖІЙ версії (P99819007 + FTPL01) створювався, а відкривався
+    /// «без аркушів» і з 404 на кожен зріз: аркуші належали одній версії,
+    /// структура читалася за іншою. «Документ назавжди на своїй версії»
+    /// (рішення 4 `DIRECTIVE-15-DECISIONS.md`) тримається саме тим, що версія
+    /// проєкту не змінюється.
+    ///
+    /// ⚠ Поле запиту лишається (зворотна сумісність) і, якщо задане, мусить
+    /// збігатися з версією проєкту — розбіжність не виправляється мовчки, а
+    /// називається: клієнт, що її надіслав, помиляється щодо структури.
+    /// </remarks>
+    private async Task<int> ProjectVersionAsync(int projectId, int? requested, CancellationToken ct)
+    {
+        var projectVersion = await documents
+            .FindProjectTemplateVersionIdAsync(projectId, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRJ-0404.project",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+
+        if (requested is { } version && version != projectVersion)
+        {
+            throw new BusinessRuleException(
+                "ECR-DOC-0422",
+                $"Документ заводиться на версії шаблону проєкту ({projectVersion}), а не на {version}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0422.versionNotProject",
+                    ["projectVersionId"] = projectVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["requestedVersionId"] = version.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return projectVersion;
     }
 
     /// <summary>

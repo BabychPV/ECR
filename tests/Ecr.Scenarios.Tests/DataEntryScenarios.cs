@@ -955,11 +955,14 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         Assert.True(periods.GetArrayLength() > 0, $"календар проєкту {projectId} порожній.");
         var periodKey = periods[0].GetProperty("periodKey").GetInt32();
 
-        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(admin.Client, prefix);
-
+        // ✎ `V-11`: документ заводиться на версії ПРОЄКТУ, тож версії в запиті
+        // немає. Доти тут заводилася ОКРЕМА порожня версія, і документ жив на
+        // версії, чужій для свого проєкту, — рівно той стан, у якому документ
+        // відкривається без аркушів; сервер його більше не приймає
+        // (`err.ECR-DOC-0422.versionNotProject`).
         var createDoc = await admin.Client.PostAsJsonAsync(
             new Uri("/api/v1/documents", UriKind.Relative),
-            new { projectId, templateVersionId = versionId, sheetDefIds = Array.Empty<int>() });
+            new { projectId, sheetDefIds = Array.Empty<int>() });
         Assert.Equal(HttpStatusCode.Created, createDoc.StatusCode);
         var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
 

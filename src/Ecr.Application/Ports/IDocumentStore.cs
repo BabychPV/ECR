@@ -206,6 +206,15 @@ public interface IDocumentStore
     /// </remarks>
     public Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct);
 
+    /// <summary>Версія шаблону ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
+    /// <remarks>
+    /// ⛔ `V-11`: версія документа — це версія його проєкту (документ власної
+    /// версії не зберігає; <see cref="GetTemplateVersionIdAsync"/> і
+    /// <c>RowStore</c> читають її з проєкту). Тому створення документа бере
+    /// версію ЗВІДСИ, а не з тіла запиту.
+    /// </remarks>
+    public Task<int?> FindProjectTemplateVersionIdAsync(int projectId, CancellationToken ct);
+
     /// <summary>
     /// Фіксує зміну документа: <c>ModifiedAt</c> і <c>ModifiedByUserId</c>.
     /// </summary>

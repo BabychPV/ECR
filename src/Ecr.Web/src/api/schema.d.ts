@@ -14612,9 +14612,12 @@ export interface components {
             sheetDefIds: number[];
             /**
              * Format: int32
-             * @description Опублікована версія шаблону.
+             * @description Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;
+             *     поле, якщо задане, мусить із нею збігатися (інакше `422`
+             *     `err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:
+             *     склад аркушів для діалогу дає `GET /projects/{id}/document-template`.
              */
-            templateVersionId: number;
+            templateVersionId?: null | number;
         };
         /** @description Запит на створення мапінгу. */
         CreateEntityFieldMapRequest: {
