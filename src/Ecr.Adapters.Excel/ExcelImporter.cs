@@ -154,7 +154,8 @@ public sealed class ExcelImporter(
                 rejected.Add(new ImportRejection(
                     "—", block.TableCode, "ECR-IMP-0422",
                     "Екземпляра таблиці з файлу немає в цьому документі за цей період: "
-                    + "структуру, ймовірно, змінено після експорту."));
+                    + "структуру, ймовірно, змінено після експорту.",
+                    block.TableCode));
 
                 continue;
             }
@@ -163,7 +164,8 @@ public sealed class ExcelImporter(
             {
                 rejected.Add(new ImportRejection(
                     "—", block.TableCode, "ECR-IMP-0422",
-                    "Таблиці з файлу немає в чинній версії шаблону."));
+                    "Таблиці з файлу немає в чинній версії шаблону.",
+                    block.TableCode));
 
                 continue;
             }

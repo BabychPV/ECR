@@ -136,7 +136,8 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-4221",
-                        "Комірка обчислюється системою: значення з файлу не застосовується."));
+                        "Комірка обчислюється системою: значення з файлу не застосовується.",
+                        table.Code, table.NameL10n));
 
                     continue;
                 }
@@ -145,7 +146,8 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ROW-0404",
-                        "Рядка з таким ключем у документі немає: імпорт рядків не створює."));
+                        "Рядка з таким ключем у документі немає: імпорт рядків не створює.",
+                        table.Code, table.NameL10n));
 
                     continue;
                 }
@@ -159,7 +161,8 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ACCS-0403",
-                        decision.Detail ?? $"Змінювати комірку не дозволено: {decision.Reason}."));
+                        decision.Detail ?? $"Змінювати комірку не дозволено: {decision.Reason}.",
+                        table.Code, table.NameL10n));
 
                     continue;
                 }
@@ -175,12 +178,14 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
-                        $"Число має понад {CellValueReader.StorageIntegerDigits} розрядів до коми: сховище його не вмістить."));
+                        $"Число має понад {CellValueReader.StorageIntegerDigits} розрядів до коми: сховище його не вмістить.",
+                        table.Code, table.NameL10n));
 
                     continue;
                 }
 
-                changes.Add(new ImportChange(row.RowKey, column.Code, Display(existing, definition), incoming));
+                changes.Add(new ImportChange(
+                    row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n));
             }
         }
 

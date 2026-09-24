@@ -111,6 +111,30 @@ public sealed class ImportDiffBuilderRoundTripTests
         Assert.Empty(diff.Rejected);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public void Зміна_й_відмова_називають_таблицю()
+    {
+        // ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і колонок однакові
+        // (`R1`/`C1`), тож рядок переліку без таблиці не каже, де зміниться число.
+        var (table, column) = Table(CellDataType.Decimal);
+
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.Worksheets.Add("S0");
+        worksheet.Cell(2, 1).Value = 5;
+
+        var change = Assert.Single(Build(worksheet, table, column, new CellValueData { ValueNumeric = 4m }).Changes);
+
+        Assert.Equal(table.Code, change.TableCode);
+        Assert.NotNull(change.TableNameL10n);
+
+        column.SetReadOnly(true);
+        var rejection = Assert.Single(Build(worksheet, table, column, new CellValueData { ValueNumeric = 4m }).Rejected);
+
+        Assert.Equal(table.Code, rejection.TableCode);
+        Assert.NotNull(rejection.TableNameL10n);
+    }
+
     private static (TableDef Table, ColumnDef Column) Table(CellDataType type)
     {
         var builder = new TemplateBuilder { TemplateVersionId = 1 };

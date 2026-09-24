@@ -15556,10 +15556,20 @@ export interface components {
         };
         /** @description Зміна, яку принесе імпорт. */
         ImportChange: {
+            /** @description Колонка. */
             columnCode: string;
+            /** @description Значення з файлу; `null` — порожньо. */
             newValue: unknown;
+            /** @description Поточне значення; `null` — порожньо. */
             oldValue: unknown;
+            /** @description Рядок. */
             rowKey: string;
+            /** @description Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок
+             *     ОДНАКОВІ (`R1`/`C1`), тож без таблиці рядок переліку не каже,
+             *     ДЕ саме зміниться число. `null` лише в плані, збереженому до цієї
+             *     правки. */
+            tableCode?: null | string;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /** @description Результат попереднього перегляду імпорту. */
         ImportPreview: {
@@ -15574,10 +15584,17 @@ export interface components {
         };
         /** @description Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4). */
         ImportRejection: {
+            /** @description Колонка; для відмови цілої таблиці — її код. */
             columnCode: string;
+            /** @description Текст причини. */
             message: string;
+            /** @description Код причини (`ECR-…`). */
             reasonCode: string;
+            /** @description Рядок; `—` — причина не про рядок. */
             rowKey: string;
+            /** @description Таблиця відмови (`V-10`, як і в ImportChange). */
+            tableCode?: null | string;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /** @description Тіла відповідей, спільні для кількох контролерів. */
         JobAcceptedResponse: {

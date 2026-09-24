@@ -86,6 +86,10 @@ public sealed class ImportRoundTripScenarios(SqlServerFixture sql)
         Assert.Equal("R1", change.GetProperty("rowKey").GetString());
         Assert.Equal("A", change.GetProperty("columnCode").GetString());
 
+        // ⚠ `V-10`: і НАЗИВАЄ таблицю — у шаблоні з десятками таблиць однакові
+        // `R1`/`A` нічого не кажуть без неї.
+        Assert.Equal("TABLE1", change.GetProperty("tableCode").GetString());
+
         // 3. Apply → база.
         var apply = await admin.Client.PostAsJsonAsync(
             new Uri($"/api/v1/documents/{doc.DocumentId}/import/apply", UriKind.Relative),

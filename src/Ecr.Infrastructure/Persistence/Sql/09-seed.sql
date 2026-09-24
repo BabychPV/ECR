@@ -2275,6 +2275,8 @@ USING (VALUES
     (N'import.blockedTitle',             N'en', N'This file cannot be applied as it is', 1),
     (N'import.blockedHint',              N'en', N'Partial application is not allowed: fix the file or refresh the sheet and import again.', 1),
     (N'import.noChanges',                N'en', N'The file matches the sheet: there is nothing to apply.', 1),
+    -- V-10: зміна й відмова називають таблицю (ключі R1/C1 однакові в десятках таблиць).
+    (N'import.table',                    N'en', N'Table', 1),
     (N'import.row',                      N'en', N'Row', 1),
     (N'import.column',                   N'en', N'Column', 1),
     (N'import.was',                      N'en', N'Was', 1),

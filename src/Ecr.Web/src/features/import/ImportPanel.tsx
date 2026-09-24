@@ -2,10 +2,11 @@ import { useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { ImportApplyRequest, ImportPreview } from '@/api/types';
+import type { ImportApplyRequest, ImportChange, ImportPreview, ImportRejection } from '@/api/types';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 
 /** Куди імпортувати. */
 export interface ImportPanelProps {
@@ -148,6 +149,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
               <Table striped withTableBorder className="ecr-sticky-head">
                 <Table.Thead>
                   <Table.Tr>
+                    <Table.Th>{t('import.table')}</Table.Th>
                     <Table.Th>{t('import.row')}</Table.Th>
                     <Table.Th>{t('import.column')}</Table.Th>
                     <Table.Th>{t('import.was')}</Table.Th>
@@ -156,7 +158,8 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                 </Table.Thead>
                 <Table.Tbody>
                   {preview.changes.map((change) => (
-                    <Table.Tr key={`${change.rowKey}:${change.columnCode}`}>
+                    <Table.Tr key={`${change.tableCode ?? ''}:${change.rowKey}:${change.columnCode}`}>
+                      <Table.Td>{tableOf(change)}</Table.Td>
                       <Table.Td>{change.rowKey}</Table.Td>
                       <Table.Td>{change.columnCode}</Table.Td>
                       <Table.Td>{show(change.oldValue)}</Table.Td>
@@ -171,6 +174,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
               <Table striped withTableBorder>
                 <Table.Thead>
                   <Table.Tr>
+                    <Table.Th>{t('import.table')}</Table.Th>
                     <Table.Th>{t('import.row')}</Table.Th>
                     <Table.Th>{t('import.column')}</Table.Th>
                     <Table.Th>{t('import.reason')}</Table.Th>
@@ -178,7 +182,8 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                 </Table.Thead>
                 <Table.Tbody>
                   {preview.rejected.map((rejection) => (
-                    <Table.Tr key={`${rejection.rowKey}:${rejection.columnCode}`}>
+                    <Table.Tr key={`${rejection.tableCode ?? ''}:${rejection.rowKey}:${rejection.columnCode}`}>
+                      <Table.Td>{tableOf(rejection)}</Table.Td>
                       <Table.Td>{rejection.rowKey}</Table.Td>
                       <Table.Td>{rejection.columnCode}</Table.Td>
                       <Table.Td>
@@ -220,4 +225,17 @@ function show(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
 
   return String(value);
+}
+
+/**
+ * Таблиця рядка переліку — назвою мовою інтерфейсу, а коли назви немає, кодом.
+ *
+ * ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і колонок однакові
+ * (`R1`/`C1`), тож «R1 · C1 · 5 → 6» без таблиці не каже, ДЕ зміниться число.
+ * Прочерк — лише для плану, побудованого до цієї правки (поля ще не було).
+ */
+function tableOf(item: ImportChange | ImportRejection): string {
+  const name = localized(item.tableNameL10n);
+
+  return name !== '' ? name : (item.tableCode ?? '—');
 }

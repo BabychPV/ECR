@@ -3921,12 +3921,36 @@
         "description": "Зміна, яку принесе імпорт.",
         "properties": {
           "columnCode": {
+            "description": "Колонка.",
             "type": "string"
           },
-          "newValue": {},
-          "oldValue": {},
+          "newValue": {
+            "description": "Значення з файлу; `null` — порожньо."
+          },
+          "oldValue": {
+            "description": "Поточне значення; `null` — порожньо."
+          },
           "rowKey": {
+            "description": "Рядок.",
             "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок\nОДНАКОВІ (`R1`/`C1`), тож без таблиці рядок переліку не каже,\nДЕ саме зміниться число. `null` лише в плані, збереженому до цієї\nправки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу — для показу."
+              }
+            ]
           }
         },
         "required": [
@@ -3978,16 +4002,38 @@
         "description": "Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4).",
         "properties": {
           "columnCode": {
+            "description": "Колонка; для відмови цілої таблиці — її код.",
             "type": "string"
           },
           "message": {
+            "description": "Текст причини.",
             "type": "string"
           },
           "reasonCode": {
+            "description": "Код причини (`ECR-…`).",
             "type": "string"
           },
           "rowKey": {
+            "description": "Рядок; `—` — причина не про рядок.",
             "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця відмови (`V-10`, як і в ImportChange).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу — для показу."
+              }
+            ]
           }
         },
         "required": [
