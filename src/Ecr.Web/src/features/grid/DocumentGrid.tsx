@@ -2,14 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/core';
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
-import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { ColumnDto, CreateRowRequest, RegistryDefDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
+import type {
+  CellConflictDto,
+  ColumnDto,
+  CreateRowRequest,
+  RegistryDefDto,
+  RegistryEntryDto,
+  TableSliceDto,
+} from '@/api/types';
 import { cellAppearanceOf } from './cellAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
-import { captureEdit, coerce, revertsToSaved, valueOf } from './edits';
+import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
+import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
@@ -20,7 +28,7 @@ import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './per
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
-  conflictTimeLabel,
+  moreConflictsOf,
   useCellPatch,
   useRecalculationStatus,
   type PendingEdit,
@@ -237,14 +245,19 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       apiFetch<TableSliceDto>(`/api/v1/documents/${documentId}/tables/${tableInstanceId}`),
   });
 
-  const {
-    patch,
-    isPending,
-    conflicts,
-    moreConflicts,
-    status: saveStatus,
-    recalculationJobId,
-  } = useCellPatch(documentId);
+  const { patch, isPending, status: saveStatus, recalculationJobId } = useCellPatch(documentId);
+
+  const queryClient = useQueryClient();
+
+  /**
+   * Конфлікт версії, який людина ще не розв'язала (`B-09`).
+   *
+   * ⛔ Не стан хука (`useCellPatch.conflicts`): той скидається на КОЖЕН
+   * наступний патч, і правка сусідньої комірки гасила панель, хоча конфліктна
+   * правка лишалась утриманою — з червоним кутом і без жодного пояснення, що
+   * з нею робити. Тепер панель живе, доки конфліктні комірки незбережені.
+   */
+  const [openConflict, setOpenConflict] = useState<OpenConflict | null>(null);
 
   // ⚠ `BE-05`: стеження за перерахунком — ЛИШЕ читання стану задачі. Зріз
   // цей хук не чіпає взагалі (ні `invalidateQueries`, ні `refetch`): саме
@@ -324,8 +337,17 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   } | null>(null);
 
   const save = useCallback(
-    async (edits: PendingEdit[]) => {
-      if (edits.length === 0) return;
+    async (requested: PendingEdit[], versionOverrides?: ReadonlyMap<string, string>) => {
+      if (requested.length === 0) return;
+
+      // ⛔ `B-09`: версія рядка — у мить НАДСИЛАННЯ, а не введення. Правка, що
+      // чекала повтору, інакше їхала б зі старою версією й діставала `409` на
+      // власних змінах — при кожному повторі, вічно (`withKnownVersions`).
+      const edits = withKnownVersions(
+        requested,
+        queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey)),
+        versionOverrides,
+      );
 
       // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
       // нижче. Позначки інших рядків (з попереднього, ще не повтореного
@@ -395,6 +417,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // везуть. Правильні правки, відхилені разом із ними, довозяться окремо.
         holdRejectedEdits(tableInstanceId, periodKey, error, edits);
 
+        if (error instanceof EcrApiError && error.isConflict) {
+          // ⛔ `B-09`: конфлікт має ВИХІД, а не лише перелік — панель
+          // («Keep mine» / «Discard mine») живе, доки його не розв'язали.
+          setOpenConflict({
+            conflicts: error.conflicts as CellConflictDto[],
+            more: moreConflictsOf(error),
+          });
+        }
+
         if (error instanceof EcrApiError && error.isRequiredInputMissing) {
           setRequiredInputBlocked((prev) => [
             ...prev.filter((c) => !touchedRowKeys.has(c.rowKey)),
@@ -424,7 +455,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // симптом, який документує Stage 1), без жодного адресата.
       }
     },
-    [patch, periodKey, tableInstanceId],
+    [patch, periodKey, tableInstanceId, queryClient],
   );
 
   /**
@@ -1205,6 +1236,75 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [pending, save, applyHistory],
   );
 
+  /**
+   * Конфлікт, що ще стосується незбереженого (`B-09`).
+   *
+   * ⚠ Комірка, яку людина вже виправила іншим шляхом (нова правка, скасування
+   * до збереженого), з панелі зникає: розв'язувати там більше нічого. Немає
+   * жодної — немає й панелі.
+   */
+  const shownConflict = useMemo<OpenConflict | null>(() => {
+    if (openConflict === null) return null;
+
+    const open = openConflict.conflicts.filter(
+      (conflict) =>
+        conflict.columnCode === '*'
+          ? [...pending.values()].some((edit) => edit.rowKey === conflict.rowKey)
+          : pending.has(pendingCellKey(conflict)),
+    );
+
+    return open.length === 0 ? null : { conflicts: open, more: openConflict.more };
+  }, [openConflict, pending]);
+
+  /**
+   * «Keep mine»: мої значення конфліктних рядків — ще раз, із ЧИННОЮ версією,
+   * яку назвав сервер (`conflicts[].currentVersion`).
+   *
+   * ⚠ Після відповіді зріз перечитується: успіх підняв версію рядка, але
+   * чужі значення інших комірок того самого рядка кеш так і не бачив — без
+   * перечитування сітка показувала б їх старими.
+   */
+  const keepMine = useCallback(async () => {
+    if (shownConflict === null) return;
+
+    const versions = new Map(
+      shownConflict.conflicts
+        .filter(hasCurrentVersion)
+        .map((conflict) => [conflict.rowKey, conflict.currentVersion] as const),
+    );
+
+    const edits = [...pending.values()].filter((edit) => versions.has(edit.rowKey));
+
+    setOpenConflict(null);
+    await save(edits, versions);
+    void slice.refetch();
+  }, [shownConflict, pending, save, slice]);
+
+  /**
+   * «Discard mine»: мої значення конфліктних комірок викидаються, сітка
+   * показує чинні.
+   *
+   * ⚠ Лише КОНФЛІКТНІ комірки: інші незбережені правки того самого рядка —
+   * не предмет цього рішення, і вони поїдуть звичайним шляхом уже з версією,
+   * яку принесе перечитаний зріз.
+   */
+  const discardMine = useCallback(() => {
+    if (shownConflict === null) return;
+
+    for (const conflict of shownConflict.conflicts) {
+      if (conflict.columnCode === '*') {
+        for (const edit of pending.values()) {
+          if (edit.rowKey === conflict.rowKey) discardPendingEdit(tableInstanceId, periodKey, edit);
+        }
+      } else {
+        discardPendingEdit(tableInstanceId, periodKey, conflict);
+      }
+    }
+
+    setOpenConflict(null);
+    void slice.refetch();
+  }, [shownConflict, pending, tableInstanceId, periodKey, slice]);
+
   // ⚠ Правило порожнечі — у чистому модулі `emptiness.ts`, а не тут: воно
   // різне для фіксованої і динамічної таблиці (`S-13`), і саме тому має бути
   // перевіреним окремо від сітки, яку в jsdom не рендерять.
@@ -1474,48 +1574,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         </Alert>
       )}
 
-      {conflicts.length > 0 && (
-        <Alert color="statusWarning" title={t('grid.conflictTitle')}>
-          {/* ⛔ «Перезаписати мовчки» не є опцією: користувач бачить, чия
-              правка і яка саме, і вирішує сам. */}
-          <Text size="sm">{t('grid.conflictHint', { count: conflicts.length })}</Text>
+      {shownConflict !== null && data !== undefined && (
+        // ⛔ «Перезаписати мовчки» не є опцією: людина бачить своє і чуже
+        // значення поруч, чия правка і коли, — і вирішує сама (`B-09`).
+        <ConflictPanel
+          conflict={shownConflict}
+          rowLabel={(rowKey) => {
+            const row = data.rows.find((candidate) => candidate.rowKey === rowKey);
 
-          {/* ⛔ `BE-06`: перелік, а не саме лише число. Лічильник «змінено
-              комірок: 3» не веде до жодної дії — людина не дізнається ні що
-              саме розійшлося, ні чия це правка, ні коли вона сталася, а
-              вирішувати «беру їхнє / лишаю своє» доводиться саме за цим.
-              Сервер до цієї роботи й не мав чого сказати: поля заповнювалися
-              заглушками. */}
-          <List size="sm">
-            {conflicts.map((conflict) => (
-              <List.Item key={`${conflict.rowKey}:${conflict.columnCode}`}>
-                {t('grid.conflictItem', {
-                  row: conflict.rowKey,
-                  column: conflict.columnCode,
-                  // ⚠ `cellText`, не `String(...)`: чуже значення приходить тим
-                  // самим десятковим рядком, і «їхнє значення 12.4000000000»
-                  // у реченні, за яким людина вирішує «беру їхнє / лишаю
-                  // своє», читалося б як інше число.
-                  value:
-                    conflict.theirValue === null || conflict.theirValue === undefined
-                      ? t('grid.conflictNoValue')
-                      : cellText(conflict.theirValue),
-
-                  // ⚠ `null` означає «невідомо», і воно так і написано словом.
-                  // Порожнє місце на цьому рядку читалося б як «ніхто».
-                  user: conflict.theirUser ?? t('grid.conflictUnknownUser'),
-                  time: conflictTimeLabel(conflict.theirChangedAt) ?? t('grid.conflictUnknownTime'),
-                })}
-              </List.Item>
-            ))}
-          </List>
-
-          {moreConflicts > 0 && (
-            // ⛔ Стеля переліку — 100 комірок; решта не має зникати мовчки.
-            // Людина, яка бачить сто рядків із трьохсот, вважає, що бачить усі.
-            <Text size="sm">{t('grid.conflictMore', { count: moreConflicts })}</Text>
-          )}
-        </Alert>
+            return row === undefined ? rowKey : rowLabelOf(row);
+          }}
+          columnHeader={(code) => data.columns.find((column) => column.code === code)?.header ?? code}
+          busy={isPending}
+          onKeepMine={() => void keepMine()}
+          onDiscardMine={discardMine}
+        />
       )}
 
       {requiredInputBlocked.length > 0 && (

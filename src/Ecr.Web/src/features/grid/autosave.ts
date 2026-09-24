@@ -16,6 +16,9 @@ import {
   sendableEdits,
   subscribePending,
 } from './pendingStore';
+import { queryKeys } from '@/api/queryKeys';
+import type { TableSliceDto } from '@/api/types';
+import { withKnownVersions } from './edits';
 import { rejectionMarksOf } from './saveErrors';
 import {
   applyPatchLocally,
@@ -354,7 +357,14 @@ async function saveOrphanSlice(
   documentId: number,
   slice: PendingSlice,
 ): Promise<void> {
-  const request = buildRequest(slice.tableInstanceId, slice.periodKey, slice.edits);
+  // ⛔ `B-09`: версія рядка — остання відома кешу, а не та, з якою правку
+  // зроблено (`withKnownVersions`): інакше правка, що чекала повтору, їхала б
+  // зі старою версією й діставала `409` на власних змінах.
+  const request = buildRequest(
+    slice.tableInstanceId,
+    slice.periodKey,
+    withKnownVersions(slice.edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
+  );
 
   // ⚠ Знімок ТОГО, ЩО ПІШЛО: доки patch летить, у той самий зріз може
   // прийти нова правка з іншої сітки чи з відновленої черги — і підтверджувати
@@ -433,10 +443,26 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
         for (const slice of pendingSlices({ sendableOnly: true })) {
           sendPatchBeacon(
             documentId,
-            buildRequest(slice.tableInstanceId, slice.periodKey, slice.edits),
+            buildRequest(
+              slice.tableInstanceId,
+              slice.periodKey,
+              withKnownVersions(
+                slice.edits,
+                cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey),
+              ),
+            ),
           );
         }
       }),
-    [documentId],
+    [documentId, queryClient],
   );
+}
+
+/** Зріз із кешу — без запиту; `undefined`, якщо його ще не читали. */
+function cachedSlice(
+  queryClient: QueryClient,
+  tableInstanceId: number,
+  periodKey: number,
+): TableSliceDto | undefined {
+  return queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey));
 }

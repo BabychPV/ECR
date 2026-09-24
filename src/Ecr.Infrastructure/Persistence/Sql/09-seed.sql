@@ -412,7 +412,12 @@ UPDATE t
     (N'version.diffOther',               N'en', N'Compare with version id', N'Compare with version'),
     (N'version.diffOtherHint',           N'en', N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).',
                                                 N'Another version of this template. Changes are always shown from the older version to the newer one.'),
-    (N'version.diffPick',                N'en', N'Enter the other version', N'Pick the other version')
+    (N'version.diffPick',                N'en', N'Enter the other version', N'Pick the other version'),
+    -- B-09: у конфлікту з'явився вихід — підказка його називає; рядок переліку — і моє значення.
+    (N'grid.conflictHint', N'en', N'{count} cell(s) were changed by another user. Review them before saving again.',
+                                                N'{count} cell(s) were changed by someone else after this table was loaded. Keep your values to overwrite theirs, or discard yours to see theirs.'),
+    (N'grid.conflictItem', N'en', N'Row {row}, column {column}: their value {value} — {user}, {time}',
+                                                N'Row {row}, column {column}: yours {yours}, theirs {value} — {user}, {time}')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1509,12 +1514,12 @@ USING (VALUES
     (N'grid.edit',                       N'en', N'Edit {column}', 1),
     (N'grid.paste',                      N'en', N'Paste {count} cell(s)', 1),
     (N'grid.conflictTitle',              N'en', N'Someone changed these cells', 1),
-    (N'grid.conflictHint',               N'en', N'{count} cell(s) were changed by another user. Review them before saving again.', 1),
+    (N'grid.conflictHint',               N'en', N'{count} cell(s) were changed by someone else after this table was loaded. Keep your values to overwrite theirs, or discard yours to see theirs.', 1),
     -- ⛔ `BE-06`: перелік, а не саме лише число. До цих рядків сітка показувала
     -- лише лічильник, бо сервер і не мав чого сказати: чиє значення, хто і коли
     -- заповнювалися заглушками, і час чужої правки дорівнював поточному часу
     -- сервера. Рішення «беру їхнє / лишаю своє» ухвалюють саме за цими трьома.
-    (N'grid.conflictItem',               N'en', N'Row {row}, column {column}: their value {value} — {user}, {time}', 1),
+    (N'grid.conflictItem',               N'en', N'Row {row}, column {column}: yours {yours}, theirs {value} — {user}, {time}', 1),
     -- ⚠ Стеля переліку — 100 комірок: решту показує лічильник, бо людина, яка
     -- бачить сто рядків із трьохсот, вважає, що бачить усі.
     (N'grid.conflictMore',               N'en', N'And {count} more changed cell(s) not listed here.', 1),
@@ -4076,7 +4081,11 @@ USING (VALUES
     (N'enum.outOfWindow.ReadOnly', N'en', N'Read-only', 1),
     (N'enum.outOfWindow.Warn', N'en', N'Warn', 1),
     (N'enum.outOfWindow.AllowWithConfirmation', N'en', N'Allow with confirmation', 1),
-    (N'enum.outOfWindow.Hide', N'en', N'Hide', 1)
+    (N'enum.outOfWindow.Hide', N'en', N'Hide', 1),
+    -- B-09: конфлікт версії має вихід — «Keep mine» / «Discard mine».
+    (N'grid.conflictKeepMine', N'en', N'Keep mine', 1),
+    (N'grid.conflictDiscardMine', N'en', N'Discard mine', 1),
+    (N'grid.conflictRowGone', N'en', N'Row {row} no longer exists: your changes to it cannot be saved.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
