@@ -59,6 +59,11 @@ public sealed class CreateRowTests
         // не має ЖОДНОГО гранта. Тобто набір закріплював саме те, що прав тут
         // не питають, — і будь-яка перевірка звалила б усі шість (`A7 §4.2`).
         Allow();
+
+        // ⚠ Документ видимий: видимість — перша перевірка обробника (V-02),
+        // окремий тест нижче підставляє невидимий.
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(EditDecision.Allow());
     }
 
     /// <summary>Служба доступу дозволяє створення.</summary>

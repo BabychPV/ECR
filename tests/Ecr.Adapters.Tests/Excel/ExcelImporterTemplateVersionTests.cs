@@ -58,6 +58,8 @@ public sealed class ExcelImporterTemplateVersionTests
     {
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
 
         // ⚠ Порожній словник рішень — жодна адреса не заборонена явно
         // (той самий прийом, що й у PatchCellsTests): ImportDiffBuilder

@@ -96,6 +96,21 @@ public sealed class PatchCellsHandler(
 
         var context = await LoadContextAsync(request, ct).ConfigureAwait(false);
 
+        // ⛔ Порожній пакет — no-op (V-02, третій раунд UX-проходу). До цього
+        // `PATCH` з `rows: []` не мав жодної адреси для перевірки прав, тож
+        // `EnsureAccessAsync` не питав нічого, а запис однаково «торкався»
+        // документа (`ModifiedAt/By`) і віддавав версії ВСІХ рядків таблиці.
+        // Видимість документа вже перевірена в `LoadContextAsync`; писати тут
+        // нема чого — тож і відповідати нема чим, крім нуля.
+        if (context.Creations.Count == 0 && context.Updates.Count == 0)
+        {
+            return new PatchCellsResponse(
+                AppliedCells: 0,
+                RowVersions: new Dictionary<string, string>(StringComparer.Ordinal),
+                Validation: [],
+                RecalculationJobId: null);
+        }
+
         EnforceRowCreationRules(context);
         await EnsureNoVersionConflictsAsync(context, ct).ConfigureAwait(false);
         await EnsureAccessAsync(request, context, ct).ConfigureAwait(false);
@@ -181,6 +196,7 @@ public sealed class PatchCellsHandler(
     private sealed record RequestContext(
         PeriodKey PeriodKey,
         int UserId,
+        AccessProfile Profile,
         TableInstanceRef Instance,
         TemplateVersionSnapshot Snapshot,
         TableDef Table,
@@ -248,6 +264,30 @@ public sealed class PatchCellsHandler(
         //    Потрібна, щоб резолвити коди колонок у ColumnDefId; вигадувати
         //    їх не можна, це частина первинного ключа комірки.
         var instance = await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
+
+        // ⛔ Видимість документа — ПЕРШОЮ, до будь-якої відмови, що щось
+        // розповідає про таблицю (V-02). Далі по шляху відмови називають ключі
+        // наявних рядків (`ECR-ROW-0409`), версії й чужі значення
+        // (`ECR-CELL-0409`), період екземпляра — і все це раніше діставалося
+        // користувачеві із забороною на проєкт, бо права на комірки
+        // перевірялися лише ПІСЛЯ них і лише для непорожнього батчу.
+        //
+        // ⚠ Відповідь — та сама, що й на читання (`GET /documents/{id}`): 404,
+        // а не 403. Різниця між «заборонено» і «не знайдено» сама була б
+        // відомістю про те, що документ існує.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        var read = await access.CanReadDocumentAsync(profile, instance.DocumentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {instance.DocumentId} не знайдено.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = instance.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
 
         // ⛔ Період із ТІЛА звіряється з періодом екземпляра таблиці
         // (`DIRECTIVE-14-ARCH.md`, `DAT-04`). Не звірявся ніде: розбіжність
@@ -325,10 +365,15 @@ public sealed class PatchCellsHandler(
         // 3. Створення і оновлення розділяються за BaseVersion (R-B2):
         //    null означає намір СТВОРИТИ рядок, а не «мені байдуже до версії».
         var creations = request.Rows.Where(r => r.BaseVersion is null).ToList();
-        var updates = request.Rows.Where(r => r.BaseVersion is not null).ToList();
+        //
+        // ⛔ Оновлення без жодної комірки — не оновлення (V-02): прав на нього
+        // перевірити нема на чому (адрес немає), а `BuildCellChangesAsync`
+        // однаково «торкнувся» б рядка й документа. Такий рядок просто не
+        // входить у батч.
+        var updates = request.Rows.Where(r => r.BaseVersion is not null && r.Cells is { Count: > 0 }).ToList();
 
         return new RequestContext(
-            periodKey, userId, instance, snapshot, table, columnDefs, columns, versions, rowIds, creations, updates);
+            periodKey, userId, profile, instance, snapshot, table, columnDefs, columns, versions, rowIds, creations, updates);
     }
 
     /// <summary>
@@ -678,7 +723,7 @@ public sealed class PatchCellsHandler(
     /// </remarks>
     private async Task EnsureAccessAsync(PatchCellsRequest request, RequestContext context, CancellationToken ct)
     {
-        var profile = await access.BuildProfileAsync(context.UserId, ct).ConfigureAwait(false);
+        var profile = context.Profile;
         var denied = new List<EditDecision>();
 
         var addresses = new List<CellAddress>();

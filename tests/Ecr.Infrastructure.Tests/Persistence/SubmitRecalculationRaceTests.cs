@@ -324,6 +324,8 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
 
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>()).Returns(Profile());
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         access.CanSubmitAsync(
                   Arg.Any<AccessProfile>(), doc.DocumentId, doc.SheetDefId, Arg.Any<PeriodKey>(),
                   Arg.Any<CancellationToken>())

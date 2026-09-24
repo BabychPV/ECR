@@ -110,6 +110,8 @@ public sealed class PatchCellsLocalizedErrorTests
         _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, long> { [RowKeyValue] = 1001L });
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
     }

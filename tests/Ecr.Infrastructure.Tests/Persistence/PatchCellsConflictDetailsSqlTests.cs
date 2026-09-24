@@ -168,6 +168,8 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
               .Returns(doc.RowIds
                   .SelectMany(rowId => doc.ColumnDefIds

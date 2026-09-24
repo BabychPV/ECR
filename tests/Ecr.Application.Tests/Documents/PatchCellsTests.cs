@@ -107,6 +107,8 @@ public sealed class PatchCellsTests
         _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         // ⛔ Тут стояв ПОРОЖНІЙ словник, і всі тести нижче проходили — бо
         // обробник трактував відсутність рішення про доступ як ДОЗВІЛ
         // (`DIRECTIVE-14-ARCH.md`, `DAT-04`; `S-15` частини 1). Після

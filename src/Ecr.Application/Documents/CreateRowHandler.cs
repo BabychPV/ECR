@@ -49,6 +49,24 @@ public sealed class CreateRowHandler(
                 });
         }
 
+        // ⛔ Видимість документа — до будь-якої відмови про таблицю (V-02, той
+        // самий клас, що й у `PatchCellsHandler`). Нижче відмови кажуть режим
+        // таблиці, межу рядків і чи зайнятий ключ — і все це діставалося
+        // користувачеві із забороною на проєкт, бо права питалися лише
+        // наприкінці. Відповідь — як на читання: 404, не 403.
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {documentId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
         var table = snapshot.Sheets
