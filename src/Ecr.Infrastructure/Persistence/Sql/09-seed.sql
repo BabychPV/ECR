@@ -1095,6 +1095,9 @@ USING (VALUES
     (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),
+    -- Sheet lock (SheetEditGate) not acquired in time: the other action is still running.
+    (N'err.ECR-DOC-4091.sheetBeingSubmitted',   N'en', N'This sheet is being submitted right now. Your changes were not saved; try again in a moment.', 1),
+    (N'err.ECR-DOC-4091.sheetBeingEdited',      N'en', N'This sheet is being saved or recalculated right now. The sheet was not submitted; try again in a moment.', 1),
     (N'err.ECR-ROW-0409.rowsFromTemplate',      N'en', N'Table "{tableCode}" has RowMode = {rowMode}: its rows come from the template, so rows cannot be added.', 1),
     (N'err.ECR-ROW-0409.rowLimitReached',       N'en', N'Table "{tableCode}" has reached its dynamic-row limit: {max}.', 1),
     (N'err.ECR-ROW-0409.rowKeyExists',          N'en', N'A row with key "{rowKey}" already exists in this table.', 1),
@@ -1235,6 +1238,7 @@ USING (VALUES
     -- Документи, рядки, комірки.
     (N'err.ECR-DOC-0404',   N'en', N'Document not found', 1),
     (N'err.ECR-DOC-0409',   N'en', N'The document is submitted', 1),
+    (N'err.ECR-DOC-4091',   N'en', N'The sheet is busy', 1),
     (N'err.ECR-DOC-0422',   N'en', N'Invalid document composition', 1),
     (N'err.ECR-ROW-0404',   N'en', N'Row not found', 1),
     (N'err.ECR-ROW-0409',   N'en', N'Row key conflict', 1),

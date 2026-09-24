@@ -1,7 +1,9 @@
-using System.Data;
+﻿using System.Data;
 using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -30,21 +32,27 @@ namespace Ecr.Infrastructure.Persistence;
 /// в одній транзакції бере спільні блокування кількох аркушів, теж не утворює
 /// циклу: подання тримає ОДИН ключ і на імпорт не чекає.
 /// </remarks>
-public sealed class SheetEditGate(EcrDbContext db) : ISheetEditGate
+public sealed class SheetEditGate(EcrDbContext db, SheetEditGatePolicy? policy = null) : ISheetEditGate
 {
-    /// <summary>Скільки чекати на блокування, мс.</summary>
-    /// <remarks>
-    /// ⚠ Подання триває секунди (валідація + зріз). Тридцять секунд — з
-    /// великим запасом; довше — це вже не черга, а щось зависле, і тоді чесніше
-    /// відмовити, ніж тримати запит нескінченно.
-    /// </remarks>
-    private const int LockTimeoutMs = 30_000;
+    /// <summary>Режим <c>sp_getapplock</c> для правки й перерахунку.</summary>
+    private const string SharedMode = "Shared";
+
+    /// <summary>Режим <c>sp_getapplock</c> для подання.</summary>
+    private const string ExclusiveMode = "Exclusive";
+
+    /// <summary><c>sp_getapplock</c>: очікування вичерпано.</summary>
+    private const int LockTimedOut = -1;
+
+    /// <summary><c>sp_getapplock</c>: запит обрано жертвою дедлоку.</summary>
+    private const int LockDeadlockVictim = -3;
+
+    private readonly TimeSpan _lockTimeout = (policy ?? SheetEditGatePolicy.Default).LockTimeout;
 
     /// <inheritdoc />
     public async Task<DocumentStatus> EnterEditAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
     {
-        await AcquireAsync(documentId, sheetDefId, periodKey, "Shared", ct).ConfigureAwait(false);
+        await AcquireAsync(documentId, sheetDefId, periodKey, SharedMode, ct).ConfigureAwait(false);
 
         // ⛔ Стан читається ПІСЛЯ блокування і окремим запитом: під RCSI знімок
         // береться на початку ОПЕРАТОРА, тож цей оператор бачить подання, яке
@@ -63,7 +71,7 @@ public sealed class SheetEditGate(EcrDbContext db) : ISheetEditGate
 
     /// <inheritdoc />
     public Task EnterSubmitAsync(long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
-        => AcquireAsync(documentId, sheetDefId, periodKey, "Exclusive", ct);
+        => AcquireAsync(documentId, sheetDefId, periodKey, ExclusiveMode, ct);
 
     private async Task AcquireAsync(
         long documentId, int sheetDefId, PeriodKey periodKey, string mode, CancellationToken ct)
@@ -85,25 +93,93 @@ public sealed class SheetEditGate(EcrDbContext db) : ISheetEditGate
         command.Parameters.Add(new SqlParameter("@Resource", SqlDbType.NVarChar, 255) { Value = resource });
         command.Parameters.Add(new SqlParameter("@LockMode", SqlDbType.VarChar, 32) { Value = mode });
         command.Parameters.Add(new SqlParameter("@LockOwner", SqlDbType.VarChar, 32) { Value = "Transaction" });
-        command.Parameters.Add(new SqlParameter("@LockTimeout", SqlDbType.Int) { Value = LockTimeoutMs });
+        command.Parameters.Add(new SqlParameter("@LockTimeout", SqlDbType.Int)
+        {
+            Value = (int)Math.Min(int.MaxValue, _lockTimeout.TotalMilliseconds),
+        });
         var result = new SqlParameter("@Result", SqlDbType.Int) { Direction = ParameterDirection.ReturnValue };
         command.Parameters.Add(result);
 
         // ⚠ Таймаут команди — більший за таймаут блокування: інакше клієнт
         // обірвав би очікування раніше, ніж сервер відповів би кодом відмови.
-        command.CommandTimeout = (LockTimeoutMs / 1000) + 15;
+        command.CommandTimeout = (int)Math.Ceiling(_lockTimeout.TotalSeconds) + 15;
 
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
         // 0 — узято одразу, 1 — узято після очікування; від'ємне — відмова.
         var code = (int)result.Value!;
+
+        if (code is LockTimedOut or LockDeadlockVictim)
+        {
+            throw Busy(documentId, sheetDefId, periodKey, mode, code);
+        }
+
         if (code < 0)
         {
-            // ⚠ `InvalidOperationException`, а не `TimeoutException`: останній
-            // стратегія повторів EF вважає транзієнтним і повторила б усе тіло
-            // транзакції, тобто очікування помножилося б на число повторів.
+            // ⚠ Решта від'ємних кодів (-2 — запит скасовано, -999 — помилка
+            // параметрів) — не «аркуш зайнятий», а збій, і вдавати його
+            // зрозумілою відмовою означало б сховати дефект.
             throw new InvalidOperationException(
                 $"Не вдалося взяти блокування аркуша «{resource}» ({mode}): sp_getapplock повернув {code}.");
         }
     }
+
+    /// <summary>Відмова «аркуш зайнятий» — <c>409 ECR-DOC-4091</c>.</summary>
+    /// <remarks>
+    /// ⛔ Що було. Тайм-аут очікування віддавався голим
+    /// <c>InvalidOperationException</c>, тобто <c>500 ECR-SYS-0500</c> «зверніться
+    /// до адміністратора» — на стан, який за секунду минає сам: подання ЦЬОГО
+    /// аркуша ще не закінчилось (<c>SheetEditGateTimeoutTests</c>).
+    ///
+    /// ⚠ 409, а не 423 чи 503. <c>423</c> у цьому API вже означає заблокований
+    /// обліковий запис (<c>ECR-AUTH-0423</c>), <c>503</c> — несправний сервіс; а тут
+    /// запит розминувся з чужою дією над ТИМ САМИМ ресурсом — те саме сімейство, що
+    /// <c>ECR-CELL-0409</c>, і повтор за мить його знімає.
+    ///
+    /// ⚠ <see cref="ConcurrencyConflictException"/>, а не <c>TimeoutException</c>:
+    /// останній стратегія повторів EF вважає транзієнтним і повторила б усе тіло
+    /// транзакції, тобто очікування помножилося б на число повторів.
+    ///
+    /// ⚠ Жертва дедлоку (-3) — та сама відмова: для людини це той самий стан
+    /// «зайнято, повторіть», а транзакція однаково відкочується.
+    /// </remarks>
+    private static ConcurrencyConflictException Busy(
+        long documentId, int sheetDefId, PeriodKey periodKey, string mode, int code)
+    {
+        // ⚠ Хто ЧЕКАВ, той і читає відмову: правка чи перерахунок (спільне)
+        // чекали на подання, а подання (виняткове) — на правку чи перерахунок.
+        var messageKey = mode == ExclusiveMode
+            ? "err.ECR-DOC-4091.sheetBeingEdited"
+            : "err.ECR-DOC-4091.sheetBeingSubmitted";
+
+        return new ConcurrencyConflictException(
+            ErrorCodes.SheetBusy,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"Аркуш {sheetDefId} документа {documentId} за період {periodKey.Value} зайнятий " +
+                $"({mode}, sp_getapplock = {code}): повторіть дію за мить."),
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = messageKey,
+                ["sheetDefId"] = sheetDefId.ToString(CultureInfo.InvariantCulture),
+                ["periodKey"] = periodKey.Value.ToString(CultureInfo.InvariantCulture),
+            });
+    }
+}
+
+/// <summary>Налаштування <see cref="SheetEditGate"/>.</summary>
+/// <param name="LockTimeout">Скільки чекати на блокування аркуша.</param>
+/// <remarks>
+/// ⚠ Подання триває секунди (валідація + зріз). Тридцять секунд — з великим
+/// запасом; довше — це вже не черга, а щось зависле, і тоді чесніше відмовити,
+/// ніж тримати запит нескінченно. Задається <c>Database:SheetLockTimeoutSeconds</c>;
+/// тест підміняє запис у контейнері, щоб не чекати пів хвилини.
+/// </remarks>
+public sealed record SheetEditGatePolicy(TimeSpan LockTimeout)
+{
+    /// <summary>Типове очікування, секунд.</summary>
+    public const int DefaultLockTimeoutSeconds = 30;
+
+    /// <summary>Типові налаштування.</summary>
+    public static SheetEditGatePolicy Default { get; } = new(TimeSpan.FromSeconds(DefaultLockTimeoutSeconds));
 }

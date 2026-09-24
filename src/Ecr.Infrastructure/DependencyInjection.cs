@@ -84,6 +84,9 @@ public static class DependencyInjection
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
         services.AddScoped<ISheetEditGate, SheetEditGate>();
+        services.AddSingleton(new SheetEditGatePolicy(TimeSpan.FromSeconds(Math.Clamp(
+            ReadInt(configuration, "Database:SheetLockTimeoutSeconds", SheetEditGatePolicy.DefaultLockTimeoutSeconds),
+            1, 300))));
         services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();

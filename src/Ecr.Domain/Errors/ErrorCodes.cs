@@ -192,6 +192,19 @@ public static class ErrorCodes
     // Документи, рядки, комірки
     public const string DocumentNotFound = "ECR-DOC-0404";
     public const string DocumentSubmitted = "ECR-DOC-0409";
+
+    /// <summary>
+    /// Аркуш зараз зайнятий: блокування «документ × аркуш × період» не взято за
+    /// відведений час (<c>ECR-DOC-4091</c>, <c>SheetEditGate</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код, а не <see cref="DocumentSubmitted"/>: той каже «аркуш
+    /// подано, потрібен Reopen», тобто стан, який повтором не минає. Тут —
+    /// навпаки: подання (або правка) ще триває, і той самий запит за мить
+    /// пройде. Клієнт, що розрізняє відмови за кодом, мусить бачити різницю.
+    /// </remarks>
+    public const string SheetBusy = "ECR-DOC-4091";
+
     public const string DocumentCompositionInvalid = "ECR-DOC-0422";
     public const string RowNotFound = "ECR-ROW-0404";
     public const string RowDuplicate = "ECR-ROW-0409";
