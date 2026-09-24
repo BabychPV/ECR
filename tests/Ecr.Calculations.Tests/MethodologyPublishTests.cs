@@ -75,6 +75,12 @@ public sealed class MethodologyPublishTests
         _store.GetFormulasAsync(VersionId, Arg.Any<CancellationToken>()).Returns(Formulas());
         _store.GetTestCasesAsync(VersionId, Arg.Any<CancellationToken>()).Returns(TestCases());
 
+        // ⚠ Формули вживають `CST.EF`: публікація тепер відхиляє невідому
+        // константу поіменно (V-18, `CheckUnknownConstants`), тож набір мусить
+        // її мати — інакше кожен тест тут падав би на чужій причині.
+        _store.GetConstantsAsync(VersionId, Arg.Any<CancellationToken>())
+            .Returns([new MethodologyConstant(VersionId, EcrCode.Create("EF"), 1m, 1)]);
+
         // ⚠ За замовчуванням — БЕЗ прив'язок: предмет більшості тестів цього
         // класу не структурна перевірка ECR-CALC-0438 (її власні тести нижче
         // налаштовують прив'язки самі), а решта правил публікації. Методологія
