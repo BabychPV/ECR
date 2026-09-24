@@ -402,7 +402,9 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     public async Task<Ecr.Application.Security.RoleUsage> CountRoleUsageAsync(int roleId, CancellationToken ct)
         => new(
             await db.RoleAssignments.CountAsync(a => a.RoleId == roleId, ct).ConfigureAwait(false),
-            await db.ResourceGrants.CountAsync(g => g.RoleId == roleId, ct).ConfigureAwait(false));
+            await db.ResourceGrants.CountAsync(g => g.RoleId == roleId, ct).ConfigureAwait(false),
+            await db.ApprovalSteps.CountAsync(s => s.RoleId == roleId, ct).ConfigureAwait(false),
+            await db.PeriodAccessRules.CountAsync(r => r.RoleId == roleId, ct).ConfigureAwait(false));
 
     /// <inheritdoc />
     public async Task RenameRoleAsync(

@@ -393,7 +393,10 @@ UPDATE t
     -- єдиними винятками, і на екрані `/admin/jobs` виняток стояв просто під
     -- правилом.
     (N'jobs.recentEmpty',                N'en', N'No jobs yet.', N'No jobs yet'),
-    (N'documents.empty',                 N'en', N'No documents for this period.', N'No documents for this period')
+    (N'documents.empty',                 N'en', N'No documents for this period.', N'No documents for this period'),
+    -- V-09: роль у маршруті погодження чи правилі доступу до періоду теж «зайнята».
+    (N'err.ECR-SEC-0409.roleInUse',      N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s). Remove them first.',
+                                                N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s), {approvalSteps} approval route step(s), {periodAccessRules} period access rule(s). Remove them first.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -563,7 +566,7 @@ USING (VALUES
     (N'err.ECR-SEC-0409.roleCodeTaken', N'en', N'A role with code "{code}" already exists.', 1),
     -- ⛔ `BE-14`: та сама родина, інші причини — роль не видаляється, доки на
     -- ній щось тримається, а вбудована не видаляється й не перейменовується.
-    (N'err.ECR-SEC-0409.roleInUse', N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s). Remove them first.', 1),
+    (N'err.ECR-SEC-0409.roleInUse', N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s), {approvalSteps} approval route step(s), {periodAccessRules} period access rule(s). Remove them first.', 1),
     (N'err.ECR-SEC-0409.roleBuiltIn', N'en', N'Role "{code}" is built in: it cannot be renamed or deleted.', 1),
     (N'err.ECR-SEC-0404.roleNotFound', N'en', N'Role {roleId} does not exist.', 1),
     -- Ролі групам каталогу (ФВ-6.15): небезпечна роль — лише з підтвердженням.
@@ -2381,6 +2384,8 @@ USING (VALUES
     (N'security.deleteRoleConfirm',      N'en', N'Delete role "{code}"? This cannot be undone.', 1),
     (N'security.roleDeleteRefused',      N'en', N'The role cannot be deleted', 1),
     (N'security.roleAssignments',        N'en', N'Assignments', 1),
+    (N'security.roleApprovalSteps',      N'en', N'Approval route steps', 1),
+    (N'security.rolePeriodAccessRules',  N'en', N'Period access rules', 1),
     -- Ролі, призначені групам каталогу (ФВ-6.15): перелік, відкликання, призначення.
     (N'groupRoles.title',                N'en', N'Roles assigned to directory groups', 1),
     (N'groupRoles.group',                N'en', N'Group', 1),

@@ -28,6 +28,8 @@ const Strings: Record<string, string> = {
   'security.roleDeleteRefused': 'The role cannot be deleted',
   'security.roleAssignments': 'Assignments',
   'security.grants': 'Grants',
+  'security.roleApprovalSteps': 'Approval route steps',
+  'security.rolePeriodAccessRules': 'Period access rules',
   'security.roleCloned': 'Cloned',
 };
 
@@ -111,6 +113,36 @@ describe('RoleActions (BE-14)', () => {
         Array.from(screen.getByRole('dialog').querySelectorAll('button')).map((b) => b.textContent),
       ).not.toContain('Remove'),
     );
+  });
+
+  it('V-09: роль лише в маршруті погодження — діалог називає кроки маршруту', async () => {
+    stubFetch(() =>
+      json(
+        {
+          title: 'Role conflict',
+          status: 409,
+          detail: 'Role "Reviewers" is in use.',
+          errorCode: 'ECR-SEC-0409',
+          correlationId: 'c-2',
+          assignments: '0',
+          grants: '0',
+          approvalSteps: '2',
+          periodAccessRules: '0',
+        },
+        409,
+        'application/problem+json',
+      ),
+    );
+    await renderActions(role());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await screen.findByRole('dialog');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Remove' }).at(-1) as HTMLElement);
+
+    await screen.findByText('The role cannot be deleted');
+    expect(screen.getByText('Approval route steps: 2')).not.toBeNull();
+    // ⚠ Нульовий лічильник нового виду не показується: «0 правил» — шум.
+    expect(screen.queryByText(/Period access rules/)).toBeNull();
   });
 
   it('клон надсилає новий код на /roles/{id}/clone', async () => {

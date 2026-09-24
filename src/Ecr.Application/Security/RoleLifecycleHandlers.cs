@@ -12,7 +12,20 @@ namespace Ecr.Application.Security;
 /// <summary>Що тримається на ролі — відповідь на «чому її не можна видалити».</summary>
 /// <param name="Assignments">Призначення особам і групам, включно з простроченими.</param>
 /// <param name="Grants">Ресурсні гранти.</param>
-public sealed record RoleUsage(int Assignments, int Grants);
+/// <param name="ApprovalSteps">
+/// Кроки маршрутів погодження (<c>wf.ApprovalStep.RoleId</c>). ⛔ Зовнішнього
+/// ключа на роль там немає, тож без цього лічильника роль видалялася, а
+/// маршрут лишався з кроком на неіснуючу роль (V-09).
+/// </param>
+/// <param name="PeriodAccessRules">
+/// Правила доступу до періоду, прив'язані до ролі (<c>PeriodAccessRuleDef.RoleId</c>)
+/// — той самий клас: посилання без зовнішнього ключа.
+/// </param>
+public sealed record RoleUsage(int Assignments, int Grants, int ApprovalSteps = 0, int PeriodAccessRules = 0)
+{
+    /// <summary>Чи тримається на ролі хоч щось.</summary>
+    public bool IsInUse => Assignments > 0 || Grants > 0 || ApprovalSteps > 0 || PeriodAccessRules > 0;
+}
 
 /// <summary>Спільні кроки трьох дій над роллю (директива №15, BE-14).</summary>
 internal static class RoleLifecycle
@@ -142,17 +155,20 @@ public sealed class DeleteRoleHandler(
         // людей, яких адміністратор у цю мить не бачить. Спершу зняти
         // призначення й гранти — свідомо, по одному екрану на кожне.
         var usage = await users.CountRoleUsageAsync(roleId, ct).ConfigureAwait(false);
-        if (usage.Assignments > 0 || usage.Grants > 0)
+        if (usage.IsInUse)
         {
             throw new BusinessRuleException(
                 ErrorCodes.SecurityConflict,
-                $"Роль «{role.Code}» використовується: призначень {usage.Assignments}, грантів {usage.Grants}.",
+                $"Роль «{role.Code}» використовується: призначень {usage.Assignments}, грантів {usage.Grants}, "
+                + $"кроків маршрутів погодження {usage.ApprovalSteps}, правил доступу до періоду {usage.PeriodAccessRules}.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-SEC-0409.roleInUse",
                     ["code"] = role.Code,
                     ["assignments"] = usage.Assignments.ToString(CultureInfo.InvariantCulture),
                     ["grants"] = usage.Grants.ToString(CultureInfo.InvariantCulture),
+                    ["approvalSteps"] = usage.ApprovalSteps.ToString(CultureInfo.InvariantCulture),
+                    ["periodAccessRules"] = usage.PeriodAccessRules.ToString(CultureInfo.InvariantCulture),
                 });
         }
 
