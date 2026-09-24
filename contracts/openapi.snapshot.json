@@ -2833,6 +2833,29 @@
         ],
         "type": "object"
       },
+      "DocumentSheetState": {
+        "description": "Аркуш складу документа в переліку: код, назва, стан за період.",
+        "properties": {
+          "code": {
+            "description": "Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша мовами каталогу."
+          },
+          "state": {
+            "description": "Стан робочого процесу; аркуш без рядка стану — `Draft`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "state"
+        ],
+        "type": "object"
+      },
       "DocumentSummary": {
         "description": "Документ у переліку.",
         "properties": {
@@ -2905,6 +2928,16 @@
             },
             "description": "Стан робочого процесу: аркуш → статус.",
             "type": "object"
+          },
+          "sheets": {
+            "description": "Аркуші складу з назвою і станом — ті самі рядки, що в\nSheetStates, але В ПОРЯДКУ аркушів (`SheetDef.Ordinal`)\nі з людською назвою. Потрібне переліку: без назви в колонці «State» стояв\nвнутрішній код аркуша (`S99819007`). ⚠ Адитивне поле: словник\nSheetStates лишається як був. `null` — шлях читання\nйого не несе (сховище заповнює завжди; як і стан — порожньо без періоду).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentSheetState"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "warningCount": {
             "description": "Попередження звідти ж; `null` — за тим самим правилом.",

@@ -15006,6 +15006,15 @@ export interface components {
              */
             periodKey: number;
         };
+        /** @description Аркуш складу документа в переліку: код, назва, стан за період. */
+        DocumentSheetState: {
+            /** @description Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`. */
+            code: string;
+            /** @description Назва аркуша мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Стан робочого процесу; аркуш без рядка стану — `Draft`. */
+            state: string;
+        };
         /** @description Документ у переліку. */
         DocumentSummary: {
             /** @description Бізнес-ключ, унікальний у межах проєкту. */
@@ -15056,6 +15065,13 @@ export interface components {
             sheetStates: {
                 [key: string]: string;
             };
+            /** @description Аркуші складу з назвою і станом — ті самі рядки, що в
+             *     SheetStates, але В ПОРЯДКУ аркушів (`SheetDef.Ordinal`)
+             *     і з людською назвою. Потрібне переліку: без назви в колонці «State» стояв
+             *     внутрішній код аркуша (`S99819007`). ⚠ Адитивне поле: словник
+             *     SheetStates лишається як був. `null` — шлях читання
+             *     його не несе (сховище заповнює завжди; як і стан — порожньо без періоду). */
+            sheets?: null | components["schemas"]["DocumentSheetState"][];
             /**
              * Format: int32
              * @description Попередження звідти ж; `null` — за тим самим правилом.

@@ -11,7 +11,7 @@ import { useDocumentListFilters } from '@/features/documents/documentListFilters
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
-import { localized } from '@/shared/i18n/localized';
+import { localized, type LocalizedText } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -357,19 +357,18 @@ export function DocumentsPage(): JSX.Element {
                          * незалежних написів.
                          */
                         <Group gap="md">
-                          {Object.entries(document.sheetStates).map(([sheet, state]) => (
-                            <Group key={sheet} gap="xs" wrap="nowrap">
-                              {/* ⛔ Аркуш ОДИН — код лише шум: питання «чий
-                                  це стан» не виникає, а внутрішній код
-                                  (`S99819007`) людині нічого не каже.
-                                  ⚠ Коли аркушів кілька, лишається КОД, а не
-                                  назва: `DocumentSummary.sheetStates` несе
-                                  лише коди, а назв аркушів у переліку немає
-                                  (їх віддає тільки `…/documents/{id}/tables`
-                                  по одному документу). */}
+                          {sheetLabels(document).map(({ code, label, state }) => (
+                            <Group key={code} gap="xs" wrap="nowrap">
+                              {/* ⛔ Аркуш ОДИН — підпис лише шум: питання «чий
+                                  це стан» не виникає.
+                                  ⚠ Аркушів кілька — НАЗВА аркуша мовою
+                                  інтерфейсу, а не внутрішній код
+                                  (`S99819007`), який людині нічого не каже.
+                                  Код — лише запасний варіант (див.
+                                  `sheetLabels`). */}
                               {!isSingleSheet(document) && (
                                 <Text size="xs" c="dimmed">
-                                  {sheet}
+                                  {label}
                                 </Text>
                               )}
                               <StatusBadge kind="sheet" state={state} />
@@ -436,4 +435,37 @@ export function DocumentsPage(): JSX.Element {
  */
 function isSingleSheet(document: { sheetCount: number; sheetStates: Record<string, string> }): boolean {
   return document.sheetCount <= 1 && Object.keys(document.sheetStates).length === 1;
+}
+
+/** Аркуш у колонці «State»: код (ключ), підпис для людини, стан. */
+interface SheetLabel {
+  readonly code: string;
+  readonly label: string;
+  readonly state: string;
+}
+
+/**
+ * Аркуші документа для колонки «State» — у порядку аркушів і з назвою.
+ *
+ * ⚠ Джерело — `sheets` (сервер віддає їх у порядку `SheetDef.Ordinal`, з
+ * `nameL10n`). Поле адитивне й необов'язкове в контракті, тож без нього —
+ * старий шлях: словник `sheetStates`, підпис — код.
+ *
+ * ⚠ Назва порожня (не задана жодною мовою) — підпис знову КОД: «чий це стан»
+ * без підпису не прочитати, а порожній `<Text>` поруч із бейджем виглядав би
+ * як зламана клітинка.
+ */
+function sheetLabels(document: {
+  sheetStates: Record<string, string>;
+  sheets?: readonly { code: string; nameL10n: LocalizedText; state: string }[] | null;
+}): SheetLabel[] {
+  if (document.sheets !== undefined && document.sheets !== null && document.sheets.length > 0) {
+    return document.sheets.map((sheet) => {
+      const name = localized(sheet.nameL10n);
+
+      return { code: sheet.code, label: name.length > 0 ? name : sheet.code, state: sheet.state };
+    });
+  }
+
+  return Object.entries(document.sheetStates).map(([code, state]) => ({ code, label: code, state }));
 }

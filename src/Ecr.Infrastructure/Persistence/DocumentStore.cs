@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -76,12 +77,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .CountAsync(s => s.DocumentId == documentId && s.IsIncluded, ct)
             .ConfigureAwait(false);
 
-        var states = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
+        var sheets = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
         var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
-            states, document.NameL10n, HasLateEdits: late.Contains(documentId));
+            ToStateMap(sheets), document.NameL10n, HasLateEdits: late.Contains(documentId),
+            Sheets: sheets);
     }
 
     /// <inheritdoc />
@@ -165,17 +167,17 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
-            var states = statesByDocument.TryGetValue(d.Id, out var found)
+            IReadOnlyList<DocumentSheetState> sheets = statesByDocument.TryGetValue(d.Id, out var found)
                 ? found
-                : new Dictionary<string, string>(StringComparer.Ordinal);
+                : [];
 
             // ⛔ Немає підсумку — `null`, а не нуль: документ не перевіряли.
             var findings = findingsByDocument.GetValueOrDefault(d.Id);
 
             items.Add(new DocumentSummary(
-                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states, d.NameL10n,
+                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, ToStateMap(sheets), d.NameL10n,
                 d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
-                late.Contains(d.Id)));
+                late.Contains(d.Id), sheets));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -437,6 +439,11 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     ///
     /// ⚠ <c>PeriodKey</c> стоїть у предикаті партиційованої <c>wf.ApprovalState</c>
     /// (урок <c>WR-05</c>).
+    ///
+    /// ⚠ Назва й порядок аркуша (<c>SheetDef.NameL10n</c>, <c>Ordinal</c>) —
+    /// з ТОГО Ж з'єднання з <c>cfg.SheetDef</c>, що вже дає код: перелік
+    /// отримує назви без жодного додаткового запиту (<c>Q-167</c>). Сортування
+    /// — у SQL, до <c>Take</c>: стеля обрізає хвіст, а не випадкові аркуші.
     /// </remarks>
     private IQueryable<SheetStateRow> SheetStatesQuery(long[] documentIds, int periodKey)
         => db.DocumentSheets
@@ -446,10 +453,14 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 db.SheetDefs,
                 s => s.SheetDefId,
                 d => d.Id,
-                (s, d) => new { s.DocumentId, s.SheetDefId, d.Code })
+                (s, d) => new { s.DocumentId, s.SheetDefId, d.Code, d.NameL10n, d.Ordinal })
+            .OrderBy(s => s.DocumentId)
+            .ThenBy(s => s.Ordinal)
+            .ThenBy(s => s.Code)
             .Select(s => new SheetStateRow(
                 s.DocumentId,
                 s.Code,
+                s.NameL10n,
                 db.ApprovalStates
                     .Where(a => a.DocumentId == s.DocumentId
                                 && a.SheetDefId == s.SheetDefId
@@ -457,8 +468,19 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                     .Select(a => (DocumentStatus?)a.Status)
                     .FirstOrDefault()));
 
-    /// <summary>Аркуш складу і його стан; <c>null</c> — рядка стану ще немає.</summary>
-    private sealed record SheetStateRow(long DocumentId, string Code, DocumentStatus? Status);
+    /// <summary>Аркуш складу, його назва і стан; <c>null</c> — рядка стану ще немає.</summary>
+    private sealed record SheetStateRow(long DocumentId, string Code, LocalizedText NameL10n, DocumentStatus? Status);
+
+    /// <summary>Рядок запиту → аркуш контракту; аркуш без рядка стану — <c>Draft</c> (<c>U-03</c>).</summary>
+    private static DocumentSheetState ToSheet(SheetStateRow row)
+        => new(row.Code, row.NameL10n, (row.Status ?? DocumentStatus.Draft).ToString());
+
+    /// <summary>
+    /// Словник «код → стан» із тих самих аркушів — щоб <c>SheetStates</c> і
+    /// <c>Sheets</c> не могли розійтися: друге поле не має власного джерела.
+    /// </summary>
+    private static Dictionary<string, string> ToStateMap(IReadOnlyList<DocumentSheetState> sheets)
+        => sheets.ToDictionary(s => s.Code, s => s.State, StringComparer.Ordinal);
 
     /// <summary>Стан аркушів за період; порожньо, якщо період не вказано.</summary>
     /// <remarks>
@@ -472,12 +494,12 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// статусу подання/затвердження не оновлювався НІКОЛИ, попри те що сам
     /// запит `/submit`/`/approve` спрацьовував і стан у базі мінявся.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<string, string>> StatesAsync(
+    private async Task<IReadOnlyList<DocumentSheetState>> StatesAsync(
         long documentId, PeriodKeyFilter period, CancellationToken ct)
     {
         if (period.Value is not { } periodKey)
         {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
+            return [];
         }
 
         var states = await SheetStatesQuery([documentId], periodKey)
@@ -485,10 +507,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return states.ToDictionary(
-            s => s.Code,
-            s => (s.Status ?? DocumentStatus.Draft).ToString(),
-            StringComparer.Ordinal);
+        return [.. states.Select(ToSheet)];
     }
 
     /// <summary>Стан аркушів кількох документів ОДНИМ запитом; порожньо, якщо період не вказано.</summary>
@@ -503,12 +522,12 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// раніше. Рядка для нього тут узяти нізвідки: словник — «аркуш → стан»,
     /// а аркушів немає.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>> StatesBatchAsync(
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<DocumentSheetState>>> StatesBatchAsync(
         IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
     {
         if (period.Value is not { } periodKey || documentIds.Count == 0)
         {
-            return new Dictionary<long, IReadOnlyDictionary<string, string>>();
+            return new Dictionary<long, IReadOnlyList<DocumentSheetState>>();
         }
 
         // Масив, а не `IReadOnlyList`: `Contains` над масивом EF перекладає в
@@ -519,14 +538,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⚠ `GroupBy` на клієнті зберігає порядок рядків усередині групи —
+        // тобто порядок аркушів із SQL (`Ordinal`).
         return states
             .GroupBy(s => s.DocumentId)
             .ToDictionary(
                 g => g.Key,
-                IReadOnlyDictionary<string, string> (g) => g.ToDictionary(
-                    s => s.Code,
-                    s => (s.Status ?? DocumentStatus.Draft).ToString(),
-                    StringComparer.Ordinal));
+                IReadOnlyList<DocumentSheetState> (g) => [.. g.Select(ToSheet)]);
     }
 
     /// <summary>Лічильники ОСТАННЬОГО підсумку перевірки для сторінки документів — одним запитом.</summary>
