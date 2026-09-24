@@ -316,12 +316,18 @@ public sealed class ExcelExporter(
             worksheet.Range(headerRow, 1, headerRow, columns.Count).Style = headerStyleValue;
         }
 
-        // Порядок рядків — за описом шаблону, а динамічні — за ключем. Порядок
-        // «як прийшло з бази» змінювався б від запуску до запуску, і diff двох
-        // вивантажень показував би зміни там, де їх немає.
+        // Порядок рядків — за описом шаблону, а рядки без опису — у порядку
+        // появи (ідентифікатор рядка). Порядок «як прийшло з бази» змінювався б
+        // від запуску до запуску, і diff двох вивантажень показував би зміни там,
+        // де їх немає.
+        //
+        // ⛔ `V-10`: це ТЕ САМЕ правило, що в сітці (`GetTableSliceHandler`:
+        // `Ordinal`, потім `RowId`). Доти рядки без опису йшли за ключем
+        // ОРДИНАЛЬНО — `R1, R10, …, R18, R2` — і книга не збігалася з екраном, з
+        // якого її вивантажили.
         var keys = rowIds.Keys
             .OrderBy(k => snapshot.RowsByKey.TryGetValue((table.Id, k), out var def) ? def.Ordinal : int.MaxValue)
-            .ThenBy(k => k, StringComparer.Ordinal)
+            .ThenBy(k => rowIds[k])
             .ToList();
 
         var rowRefs = new List<ExcelRowRef>(keys.Count);
