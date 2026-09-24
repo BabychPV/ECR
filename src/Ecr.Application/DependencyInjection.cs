@@ -133,6 +133,11 @@ public static class DependencyInjection
         // Вирази, валідація і перерахунок (модулі 2.6–2.8)
         services.AddScoped<Validation.ValidationEngine>();
         services.AddScoped<Recalculation.RecalculationService>();
+
+        // ⚠ Той самий екземпляр у межах скоупу: подання мусить рахувати ТИМ
+        // САМИМ `EcrDbContext`, у транзакції якого воно тримає блокування.
+        services.AddScoped<Recalculation.ISubmitRecalculation>(
+            sp => sp.GetRequiredService<Recalculation.RecalculationService>());
         services.AddScoped<ValidateDocumentHandler>();
         services.AddScoped<GetValidationResultHandler>();
         services.AddScoped<Templates.PublishTemplateVersionHandler>();

@@ -37,7 +37,12 @@ public sealed class SubmitSheetHandler(
     IUnitOfWork uow,
     ICurrentUser currentUser,
     IClock clock,
-    ISheetEditGate sheetGate)
+    ISheetEditGate sheetGate,
+
+    // ⛔ Формули аркуша рахуються ТУТ, під винятковим блокуванням і до
+    // валідації та зрізу (`SubmitRecalculationRaceTests`): каскадна задача
+    // після правки стоїть у черзі й після подання поданий аркуш пропускає.
+    Recalculation.ISubmitRecalculation recalculation)
 {
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="documentId">Документ.</param>
@@ -141,6 +146,26 @@ public sealed class SubmitSheetHandler(
                     ["rowIds"] = orphaned,
                 });
         }
+
+        // ⛔ ПЕРЕРАХУНОК ФОРМУЛ АРКУША — до валідації й зрізу. Що було: правка
+        // входу комітилась і ставила каскадний перерахунок у ЧЕРГУ; «Подати»
+        // одразу після неї фіксувало в зрізі свіжий вхід і ЗАСТАРІЛЕ обчислене
+        // число, а задача з черги після подання поданий аркуш уже пропускає
+        // (ФВ-9.17) — тобто застаріле число лишалося назавжди, до Reopen.
+        //
+        // ⚠ Під ВИНЯТКОВИМ блокуванням цього аркуша: правки й інші перерахунки
+        // цього аркуша стоять, тож рахується рівно те, що потім подається.
+        // Спільного блокування цього аркуша прогін не бере (той самий власник).
+        //
+        // ⚠ Формула аркуша має право читати ІНШІ аркуші документа — вони
+        // читаються в останньому зафіксованому стані БЕЗ блокувань, і цього
+        // досить: зріз фіксує аркуш, порахований із того, що було правдою на
+        // момент подання, а пізніші зміни сусіда поданого аркуша не змінюють
+        // (ФВ-9.17). Блокувати сусідів, тримаючи виняткове, означало б дедлок
+        // двох подань, що читають одне одного (X(A)+S(B) проти X(B)+S(A)).
+        await recalculation
+            .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, key, ct)
+            .ConfigureAwait(false);
 
         var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
 

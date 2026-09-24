@@ -257,7 +257,7 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
             new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), clock, new SheetEditGate(db));
+            new UnitOfWork(db), User(), clock, new SheetEditGate(db), NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>());
     }
 
     /// <summary>Правка на реальних сховищах; <paramref name="afterAccessCheck"/> — точка перемикання.</summary>

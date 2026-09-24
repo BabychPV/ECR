@@ -45,6 +45,12 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// перерахунку (<c>IN</c> змінили, а каскадна задача ще в черзі — звичайний стан
 /// між збереженням і фоновим перерахунком). Формула <c>OUT = IN * 2</c> дає 42.
 ///
+/// ⚠ Подання саме перераховує свій аркуш під винятковим блокуванням
+/// (<c>ISubmitRecalculation</c>), тому другий інваріант — <b>подане OUT = подане
+/// IN × 2</b>. Щоб фоновий перерахунок у порядку «порахував до подання, пише
+/// після» ніс ІНШЕ число, ніж подане, між його обчисленням і поданням вхід
+/// змінює друга правка (IN = 30).
+///
 /// ⚠ Подання й перерахунок мають ВЛАСНІ <c>EcrDbContext</c> — інакше гонки не
 /// було б.
 /// </remarks>
@@ -61,6 +67,9 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
 
     /// <summary>Що порахує формула <c>[IN] * 2</c> з поточного входу.</summary>
     private const decimal FreshOutput = 42m;
+
+    /// <summary>Вхід після другої правки (порядок «порахував до подання, пише після»).</summary>
+    private const decimal SecondInput = 30m;
 
     /// <summary>Ідентифікатор формули в підставному знімку (у <c>cfg.*</c> її немає — і не треба).</summary>
     private const int FormulaId = 910_001;
@@ -96,8 +105,8 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value, CancellationToken.None));
         await submitInside.Task.WaitAsync(HookTimeout);
 
-        // Подання стоїть усередині своєї транзакції: зріз прочитано (OUT = 20),
-        // коміту ще немає. Перерахунок стартує саме тепер і має час або дописати
+        // Подання стоїть усередині своєї транзакції: аркуш перераховано й зріз
+        // прочитано, коміту ще немає. Перерахунок стартує саме тепер і має час або дописати
         // до кінця, або стати в чергу за поданням.
         var recalcTask = Task.Run(() => recalc.RecalculateAllAsync(
             doc.DocumentId, doc.PeriodKey, CancellationToken.None));
@@ -135,8 +144,14 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             doc.DocumentId, doc.PeriodKey, CancellationToken.None));
         await recalcComputed.Task.WaitAsync(HookTimeout);
 
-        // Перерахунок порахував OUT = 42 з даних ще не поданого аркуша; подання
-        // тепер проходить повністю, до коміту, і лише потім перерахунок пише.
+        // Перерахунок порахував OUT = 42 з IN = 21. Тепер вхід змінює ще одна
+        // зафіксована правка (IN = 30; її власна задача теж у черзі), і подання
+        // проходить повністю, до коміту, — сам рахує OUT = 60 і подає його. Лише
+        // потім перший перерахунок пише своє застаріле 42.
+        await ExecuteAsync(
+            $"UPDATE doc.CellValue SET ValueNumeric = {SecondInput.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
+            $"WHERE PeriodKey = {doc.PeriodKey.Value} AND TableRowId = {doc.RowIds[0]} AND ColumnDefId = {doc.ColumnDefIds[1]}");
+
         await submit.HandleAsync(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value, CancellationToken.None)
                     .WaitAsync(HookTimeout);
 
@@ -144,6 +159,35 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
         await recalcTask.WaitAsync(HookTimeout);
 
         await AssertSnapshotMatchesLiveAsync(doc);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task Подання_одразу_після_правки_входу_подає_обчислене_з_нового_входу()
+    {
+        // ⛔ Стан «правку входу зафіксовано, каскадна задача ще в черзі»:
+        // `PatchCellsHandler` сам не рахує, він ставить `FormulaRecalculationJob`
+        // ПІСЛЯ коміту, — тож у базі IN = 21 і застаріле OUT = 20. Людина одразу
+        // натискає «Подати». Жодного фонового перерахунку тут не запускається.
+        var doc = await ArrangeAsync();
+
+        await using var submitDb = CreateContext();
+        var submit = BuildSubmit(submitDb, doc, insideTransaction: null);
+
+        await submit.HandleAsync(doc.DocumentId, doc.SheetDefId, doc.PeriodKey.Value, CancellationToken.None)
+                    .WaitAsync(HookTimeout);
+
+        // До виправлення зріз фіксував OUT = 20 при IN = 21, і задача з черги
+        // після подання поданий аркуш уже пропускала — застаріле число навічно.
+        var (input, output) = await SubmittedAsync(doc);
+        Assert.Equal(InputValue, input);
+        Assert.True(
+            output == FreshOutput,
+            $"Зріз подання: IN = {input}, OUT = {output}; формула OUT = IN * 2 вимагає {FreshOutput}: " +
+            "подання заморозило обчислене число, пораховане зі старого входу.");
+        Assert.Equal(FreshOutput, await LiveOutputAsync(doc));
     }
 
     [Fact]
@@ -168,18 +212,7 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
     /// <summary>Сам інваріант — спільний для обох порядків.</summary>
     private async Task AssertSnapshotMatchesLiveAsync(TestDocument doc)
     {
-        var row = doc.RowIds[0];
-        var output = doc.ColumnDefIds[2];
-
-        var payload = await ScalarAsync<string>(
-            $"SELECT TOP (1) PayloadJson FROM calc.SubmissionSnapshot WHERE DocumentId = {doc.DocumentId} " +
-            $"AND SheetDefId = {doc.SheetDefId} AND PeriodKey = {doc.PeriodKey.Value} ORDER BY Id DESC");
-
-        var submitted = SubmissionPayload.Read(payload)
-            .Where(c => c.Row == row && c.Column == output && c.Value is not null)
-            .Select(c => (decimal?)decimal.Parse(c.Value!, System.Globalization.CultureInfo.InvariantCulture))
-            .SingleOrDefault();
-
+        var (input, submitted) = await SubmittedAsync(doc);
         var live = await LiveOutputAsync(doc);
         var status = await ScalarAsync<byte>(
             $"SELECT Status FROM wf.ApprovalState WHERE DocumentId = {doc.DocumentId} " +
@@ -192,6 +225,29 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             submitted == live,
             $"Зріз подання каже OUT = {submitted}, а жива обчислена комірка поданого аркуша — {live}: " +
             "перерахунок переписав подане число повз зріз.");
+
+        // ⚠ І сам зріз узгоджений із формулою: подане OUT пораховане з поданого IN.
+        Assert.True(
+            submitted == input * 2,
+            $"Зріз подання: IN = {input}, OUT = {submitted} — обчислене число не відповідає поданому входу.");
+    }
+
+    /// <summary>Вхід і обчислене значення рядка з останнього зрізу подання.</summary>
+    private async Task<(decimal? Input, decimal? Output)> SubmittedAsync(TestDocument doc)
+    {
+        var row = doc.RowIds[0];
+
+        var payload = await ScalarAsync<string>(
+            $"SELECT TOP (1) PayloadJson FROM calc.SubmissionSnapshot WHERE DocumentId = {doc.DocumentId} " +
+            $"AND SheetDefId = {doc.SheetDefId} AND PeriodKey = {doc.PeriodKey.Value} ORDER BY Id DESC");
+        var cells = SubmissionPayload.Read(payload).ToList();
+
+        decimal? ValueOf(int column) => cells
+            .Where(c => c.Row == row && c.Column == column && c.Value is not null)
+            .Select(c => (decimal?)decimal.Parse(c.Value!, System.Globalization.CultureInfo.InvariantCulture))
+            .SingleOrDefault();
+
+        return (ValueOf(doc.ColumnDefIds[1]), ValueOf(doc.ColumnDefIds[2]));
     }
 
     private async Task<decimal?> LiveOutputAsync(TestDocument doc)
@@ -304,7 +360,11 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
             new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), clock, new SheetEditGate(db));
+            new UnitOfWork(db), User(), clock, new SheetEditGate(db),
+
+            // ⛔ ТОЙ САМИЙ контекст, що й у подання: перерахунок має йти в його
+            // транзакції, під його винятковим блокуванням — як у DI-скоупі.
+            BuildRecalculation(db, doc, beforeWrite: null));
     }
 
     /// <summary>

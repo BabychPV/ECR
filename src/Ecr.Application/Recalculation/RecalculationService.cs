@@ -32,7 +32,7 @@ public sealed class RecalculationService(
     // (`SubmitRecalculationRaceTests`) — той самий механізм, що в
     // `PatchCellsHandler`. Без нього перерахунок, що перетинався з поданням,
     // переписував обчислені числа вже поданого аркуша повз зріз подання.
-    ISheetEditGate sheetGate)
+    ISheetEditGate sheetGate) : ISubmitRecalculation
 {
     /// <summary>Автор обчислених значень: їх ставить система, а не людина.</summary>
     /// <remarks>
@@ -230,8 +230,26 @@ public sealed class RecalculationService(
     /// навпаки, рахуються ОДРАЗУ — цей прогін уже фоновий, і відкласти
     /// означало б не порахувати ніколи.
     /// </remarks>
-    public async Task<int> RecalculateAllAsync(
+    public Task<int> RecalculateAllAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct, int? sheetDefId = null)
+        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: null, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий повний прогін, звужений до аркуша (<c>Q-331</c>), з однією
+    /// різницею: спільного блокування ЦЬОГО аркуша прогін не бере — викликач
+    /// (<c>SubmitSheetHandler</c>) уже тримає виняткове в тій самій транзакції
+    /// (<see cref="EnterSheetsAsync"/>). Стан аркуша теж не перевіряється:
+    /// подання саме переводить аркуш у <c>Submitted</c> і відмовить, якщо стан
+    /// не той (<c>ApprovalState.Submit</c>), — тоді відкотиться й цей запис.
+    /// </remarks>
+    public Task<int> RecalculateSheetUnderSubmitLockAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
+        => RecalculateDocumentAsync(documentId, periodKey, sheetDefId, heldSheetDefId: sheetDefId, ct);
+
+    /// <summary>Спільне тіло повного прогону документа (або одного аркуша).</summary>
+    private async Task<int> RecalculateDocumentAsync(
+        long documentId, PeriodKey periodKey, int? sheetDefId, int? heldSheetDefId, CancellationToken ct)
     {
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -249,7 +267,7 @@ public sealed class RecalculationService(
         var written = 0;
         foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
         {
-            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId).ConfigureAwait(false);
+            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId, heldSheetDefId).ConfigureAwait(false);
         }
 
         return written;
@@ -267,8 +285,13 @@ public sealed class RecalculationService(
     /// каскад за аркушем означало б не порахувати залежну формулу сусіднього
     /// аркуша, на яку саме каскад і розрахований.
     /// </param>
+    /// <param name="heldSheetDefId">
+    /// Аркуш, виняткове блокування якого ВЖЕ тримає викликач у цій самій
+    /// транзакції (подання); <c>null</c> — таких немає.
+    /// </param>
     private async Task<int> RunAsync(
-        TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null)
+        TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
+        int? heldSheetDefId = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -574,7 +597,7 @@ public sealed class RecalculationService(
             applied = 0;
 
             var writable = await EnterSheetsAsync(
-                instance.DocumentId, periodKey, sheetOfInstance.Values, token).ConfigureAwait(false);
+                instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token).ConfigureAwait(false);
 
             foreach (var (target, records) in byInstance.Where(pair => pair.Value.Count > 0))
             {
@@ -665,6 +688,10 @@ public sealed class RecalculationService(
     /// <param name="documentId">Документ прогону.</param>
     /// <param name="periodKey">Період прогону.</param>
     /// <param name="sheetDefIds">Аркуші екземплярів, у які прогін пише (з повторами).</param>
+    /// <param name="heldSheetDefId">
+    /// Аркуш, виняткове блокування якого вже тримає викликач (подання): не
+    /// блокується вдруге і вважається придатним до запису.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⛔ Що було. Перерахунок читав дані й писав <c>doc.CellValue</c> без
@@ -691,12 +718,21 @@ public sealed class RecalculationService(
     /// а не пише повз блокування.
     /// </remarks>
     private async Task<IReadOnlySet<int>> EnterSheetsAsync(
-        long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, CancellationToken ct)
+        long documentId, PeriodKey periodKey, IEnumerable<int> sheetDefIds, int? heldSheetDefId, CancellationToken ct)
     {
         var writable = new HashSet<int>();
 
         foreach (var sheetDefId in sheetDefIds.Distinct().Order())
         {
+            // ⛔ Аркуш, чиє ВИНЯТКОВЕ блокування вже тримає викликач (подання),
+            // повторно не блокується: це той самий власник, і стан аркуша під
+            // цим блокуванням змінює сам викликач.
+            if (sheetDefId == heldSheetDefId)
+            {
+                writable.Add(sheetDefId);
+                continue;
+            }
+
             var status = await sheetGate
                 .EnterEditAsync(documentId, sheetDefId, periodKey, ct)
                 .ConfigureAwait(false);

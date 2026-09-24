@@ -230,7 +230,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
             new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), new TestClock(Now), new SheetEditGate(db));
+            new UnitOfWork(db), User(), new TestClock(Now), new SheetEditGate(db), NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>());
     }
 
     private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)
