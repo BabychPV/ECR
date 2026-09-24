@@ -4,6 +4,7 @@ import { useStructureChanges, type StructureChangePage } from '@/features/audit/
 import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -22,11 +23,15 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
   const [changedBy, setChangedBy] = useUrlNumber('changedBy');
   const [cursor, setCursor] = useState<string | null>(null);
 
+  // ⛔ Набір у полях — у запит після паузи, як у журналі комірок (`AuditPage`).
+  const appliedEntityType = useDebouncedFilter(entityType);
+  const appliedChangedBy = useDebouncedFilter(changedBy);
+
   const changes = useStructureChanges({
     from,
     to,
-    entityType,
-    changedByUserId: changedBy,
+    entityType: appliedEntityType,
+    changedByUserId: appliedChangedBy,
     limit: 100,
     cursor,
   });

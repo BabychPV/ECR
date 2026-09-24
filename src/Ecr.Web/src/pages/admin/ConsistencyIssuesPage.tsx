@@ -15,6 +15,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -46,6 +47,9 @@ export function ConsistencyIssuesPage(): JSX.Element {
 
   const openOnly = showResolved !== '1';
   const rule = ruleCode ?? '';
+  // ⛔ Код правила набирається з клавіатури — у запит після паузи, а не на
+  // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
+  const appliedRule = useDebouncedFilter(rule);
 
   // ⚠ Дія «перевірити зараз» — лише з правом, яке вимагає сам ендпоінт
   // (`System.RunJob`), а не тим, яким відкрито екран: інакше кнопка обіцяла б
@@ -56,11 +60,11 @@ export function ConsistencyIssuesPage(): JSX.Element {
   const run = useConsistencyRun();
 
   const issues = useQuery({
-    queryKey: [...ConsistencyIssuesKey, rule, openOnly, cursor],
+    queryKey: [...ConsistencyIssuesKey, appliedRule, openOnly, cursor],
     queryFn: () =>
       apiFetch<ConsistencyIssuePage>(
         `/api/v1/consistency/issues?limit=100&openOnly=${String(openOnly)}` +
-          (rule.length === 0 ? '' : `&ruleCode=${encodeURIComponent(rule)}`) +
+          (appliedRule.length === 0 ? '' : `&ruleCode=${encodeURIComponent(appliedRule)}`) +
           (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
       ),
   });

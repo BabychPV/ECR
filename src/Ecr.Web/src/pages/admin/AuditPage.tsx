@@ -19,6 +19,7 @@ import { StructureExportButton } from '@/features/audit/StructureExportButton';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { PageHeader } from '@/shared/ui/PageHeader';
+import { useDebouncedFilter } from '@/shared/ui/useDebouncedFilter';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -65,13 +66,24 @@ export function AuditPage(): JSX.Element {
   const fromDate = from ?? isoDaysAgo(7);
   const toDate = to ?? isoDaysAgo(0);
 
+  /*
+   * ⛔ Поля, що набираються з клавіатури, йдуть у запит ПІСЛЯ паузи
+   * (`useDebouncedFilter`): набір `R12345` у «Row key» давав шість запитів
+   * по партиціонованому журналу замість одного. Поле й адреса — одразу.
+   * Дати, «Origin» і «Late only» — дискретний вибір, їм чекати нічого.
+   */
+  const appliedDocumentId = useDebouncedFilter(documentId);
+  const appliedRowKey = useDebouncedFilter(rowKey);
+  const appliedColumnDefId = useDebouncedFilter(columnDefId);
+  const appliedAuthor = useDebouncedFilter(author);
+
   const filter = {
     from: fromDate,
     to: toDate,
-    documentId,
-    rowKey,
-    columnDefId,
-    author,
+    documentId: appliedDocumentId,
+    rowKey: appliedRowKey,
+    columnDefId: appliedColumnDefId,
+    author: appliedAuthor,
     origin,
     lateOnly: lateOnly === 'true',
     limit: 100,
