@@ -349,6 +349,61 @@ public sealed record ColumnDefDto(
     int? UnitId);
 
 /// <summary>
+/// Повний склад однієї колонки — те саме, що приймає й повертає
+/// <c>PUT …/tables/{tableId}/columns/{code}</c> (X-02, четвертий раунд UX).
+/// </summary>
+/// <remarks>
+/// ⛔ Без цього читання форма правки будувала чернетку з бідного
+/// <see cref="Dto.TemplateColumnDto"/> структури (без точності, одиниці,
+/// довідника, фільтра, значення за замовчуванням і стилю), а <c>PUT</c> — це
+/// заміна цілком: повторне збереження колонки мовчки стирало все перелічене,
+/// і форма сама попереджала «Saving will clear them». Тепер форма правки
+/// відкривається з цією відповіддю, і незмінене поле їде назад незмінним.
+///
+/// ⚠ Право ПЕРЕГЛЯДУ, а не правки: це читання, і воно законне для будь-кого,
+/// хто бачить структуру версії.
+/// </remarks>
+public sealed class GetColumnDefHandler(
+    ITemplateVersionStore store,
+    IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
+{
+    /// <summary>Право на перегляд структури версії (`02-contracts.md` §9).</summary>
+    public const string Permission = "Template.View";
+
+    /// <summary>Читає колонку.</summary>
+    /// <param name="templateVersionId">Версія шаблону.</param>
+    /// <param name="tableDefId">Таблиця, якій належить колонка.</param>
+    /// <param name="code">Код колонки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Версії, таблиці або живої колонки немає.</exception>
+    public async Task<ColumnDefDto> HandleAsync(
+        int templateVersionId, int tableDefId, string code, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
+        var table = SaveColumnDefHandler.FindTable(version, tableDefId);
+
+        // ⚠ Лише жива колонка: видалена в структурі не показується, і форма
+        // правки для неї не відкривається.
+        var column = table.Columns.FirstOrDefault(
+                c => !c.IsDeleted && string.Equals(c.Code, code, StringComparison.Ordinal))
+            ?? throw new NotFoundException(
+                ErrorCodes.TemplateNotFound,
+                $"Колонки «{code}» у таблиці {tableDefId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.columnCode",
+                    ["columnCode"] = code,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+
+        return SaveColumnDefHandler.Map(column);
+    }
+}
+
+/// <summary>
 /// Прибирає колонку з таблиці версії-чернетки — м'яко (<c>ФВ-7.6</c>).
 /// </summary>
 /// <remarks>

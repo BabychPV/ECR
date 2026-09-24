@@ -74,6 +74,7 @@ public static class DependencyInjection
         // Третій і четвертий зрізи — колонка й рядок таблиці (ФВ-2.1..ФВ-2.5,
         // W5.2), за зразком аркуша й таблиці вище.
         services.AddScoped<SaveColumnDefHandler>();
+        services.AddScoped<GetColumnDefHandler>();
         services.AddScoped<DeleteColumnDefHandler>();
         services.AddScoped<SaveRowDefHandler>();
         services.AddScoped<DeleteRowDefHandler>();
@@ -101,6 +102,7 @@ public static class DependencyInjection
         // PeriodAccessRuleHandlers.cs).
         services.AddScoped<SaveValidationRuleHandler>();
         services.AddScoped<DeleteValidationRuleHandler>();
+        services.AddScoped<ListValidationRulesHandler>();
         services.AddScoped<CreatePeriodAccessRuleHandler>();
         services.AddScoped<SavePeriodAccessRuleHandler>();
         services.AddScoped<DeletePeriodAccessRuleHandler>();
@@ -213,6 +215,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.CreateRegistryHandler>();
         services.AddScoped<Registries.GetRegistryEntriesHandler>();
         services.AddScoped<Registries.UpsertRegistryEntryHandler>();
+        services.AddScoped<Registries.GetRegistryEntryHandler>();
         services.AddScoped<Registries.SetEntryValidityHandler>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();

@@ -3249,6 +3249,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/sheets/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
+| `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/header-fields` | `Template.View` | 8 |
@@ -3259,6 +3260,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |
+| `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
 | `POST` | `/api/v1/template-versions/{id}/period-access-rules` | `Template.Edit` | 7 |
@@ -3431,6 +3433,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
 | `GET` | `/api/v1/notifications/deliveries` | `System.ManageNotifications` | 7 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}` | `Registry.View` | 4 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |

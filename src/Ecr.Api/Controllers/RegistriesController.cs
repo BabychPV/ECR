@@ -15,6 +15,7 @@ public sealed class RegistriesController(
     CreateRegistryHandler createRegistry,
     GetRegistryEntriesHandler getEntries,
     UpsertRegistryEntryHandler upsert,
+    GetRegistryEntryHandler getEntry,
     SetEntryValidityHandler setValidity,
     SwitchRegistrySourceHandler switchSource,
     GetRegistryDefinitionHandler getDefinition,
@@ -301,6 +302,23 @@ public sealed class RegistriesController(
             .HandleAsync(code, content, file.Length, maxBytes, dryRun, ct)
             .ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// Один запис довідника цілком: назва всіма мовами й значення полів.
+    /// Право <c>Registry.View</c>.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="id">Запис.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ X-03/R-04: форма правки запису відкривається з цієї відповіді, а не з
+    /// рядка переліку, де назва лише однією мовою, а значень полів немає.
+    /// </remarks>
+    [HttpGet("{code}/entries/{id:long}")]
+    [ProducesResponseType<RegistryEntryDetailDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RegistryEntryDetailDto>> Entry(string code, long id, CancellationToken ct)
+        => Ok(await getEntry.HandleAsync(code, id, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Змінює вікно дії запису. Право <c>Registry.EditData</c>.

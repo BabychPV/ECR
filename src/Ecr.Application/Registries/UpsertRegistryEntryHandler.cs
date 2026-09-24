@@ -93,7 +93,13 @@ public sealed class UpsertRegistryEntryHandler(
             ? await LoadAsync(id, definition.Id, ct).ConfigureAwait(false)
             : await CreateAsync(definition.Id, code, dto, userId, ct).ConfigureAwait(false);
 
-        entry.Rename(dto.Display);
+        // ⛔ X-03: назва ЗЛИВАЄТЬСЯ з наявною, а не заміняється. Доти
+        // `Rename(dto.Display)` писав рівно те, що приїхало, — а форма правки
+        // (до фіксу клієнта) везла назву лише під `en`, і кожне збереження
+        // запису мовчки стирало російський і казахський переклади. Мова, якої
+        // в запиті немає, лишається як була; мова з порожнім текстом —
+        // свідомо прибирається (так клієнт каже «цей переклад видалено»).
+        entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
         entry.SetParent(dto.ParentEntryId);
 
         var changes = await ApplyValuesAsync(registries, definition, entry, dto.Values, ct).ConfigureAwait(false);
@@ -337,6 +343,34 @@ public sealed class UpsertRegistryEntryHandler(
         // виконання сюди дійде.
         _ => null,
     };
+
+    /// <summary>Наявна назва, поверх якої лягли мови з запиту (X-03).</summary>
+    /// <remarks>
+    /// ⚠ Порожній або пробільний текст мови в запиті — видалення цього
+    /// перекладу; мова, якої в запиті немає зовсім, — без змін.
+    /// </remarks>
+    internal static LocalizedText Merge(LocalizedText current, LocalizedText? incoming)
+    {
+        var merged = new Dictionary<string, string>(current.Values, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (language, text) in incoming?.Values ?? new Dictionary<string, string>())
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                merged.Remove(language);
+            }
+            else
+            {
+                merged[language] = text;
+            }
+        }
+
+        return new LocalizedText(merged);
+    }
+
+    /// <summary>Назва нового запису без порожніх мов.</summary>
+    private static LocalizedText WithoutEmpty(LocalizedText? display)
+        => Merge(new LocalizedText(), display);
 
     private async Task<RegistryEntry> LoadAsync(long id, int registryDefId, CancellationToken ct)
     {
