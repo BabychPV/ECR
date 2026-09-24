@@ -222,6 +222,11 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
             fk.DeleteBehavior = DeleteBehavior.Restrict;
         }
 
+        // `V-13`: моменти часу читаються з Kind=Utc і йдуть у JSON із «Z»;
+        // календарні дати (`ValueDate`) — ні. Класифікація й межа — у
+        // `UtcDateTimeColumns`.
+        UtcDateTimeColumns.Apply(modelBuilder);
+
         // Id для партиційованих таблиць беруться з SEQUENCE, а не з IDENTITY:
         // значення потрібне ДО вставки, щоб завантажити TableRow і CellValue
         // одним проходом SqlBulkCopy (B02 §2.3). CACHE 1000 — компроміс між
