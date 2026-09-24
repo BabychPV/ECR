@@ -1,6 +1,8 @@
 using System.Globalization;
+using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
+using Ecr.Application.Security;
 
 namespace Ecr.Infrastructure.Jobs;
 
@@ -13,8 +15,20 @@ namespace Ecr.Infrastructure.Jobs;
 /// а не окрема копія логіки. Задача лише переносить виклик у чергу; сам запис
 /// (і його правила — конфлікти версій, валідація, перерахунок) лишається
 /// одним місцем коду, як і в <see cref="ApplyImportHandler"/>.
+/// <para>
+/// ⛔ F-01 (UX-PASS, четвертий раунд): задача виконується ВІД ІМЕНІ автора
+/// (<see cref="ExcelImportTask.Actor"/>). Доти <c>PatchCellsHandler</c> бачив
+/// у фоні анонімного користувача — HTTP-запиту немає, — і кожен імпорт понад
+/// поріг падав на 10 % з <c>ECR-AUTH-0401</c>, не записавши нічого. Права
+/// перевіряються як для автора (його профіль, його гранти, його групи з
+/// токена на момент постановки), і журнал змін підписано ним.
+/// </para>
 /// </remarks>
-public sealed class ExcelImportJob(IExcelImporter importer) : IExcelImportJob
+public sealed class ExcelImportJob(
+    IExcelImporter importer,
+    JobActorScope actorScope,
+    IAccessDecisionService access,
+    ICurrentUser currentUser) : IExcelImportJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "excel-import-apply";
@@ -25,6 +39,18 @@ public sealed class ExcelImportJob(IExcelImporter importer) : IExcelImportJob
         ArgumentNullException.ThrowIfNull(progress);
 
         var task = ImportPayload.Parse(payload);
+
+        // ⚠ Завдання без автора (поставлене до F-01) лишається без нього — і
+        // відмовляє тією самою `ECR-AUTH-0401`, що й раніше, а не пише від
+        // імені системи: «хтось колись поставив» — не автор.
+        using var actor = task.Actor is { } author ? actorScope.Enter(author) : null;
+
+        // ⛔ Право — ще раз, у мить виконання, а не лише при постановці: між
+        // ними право могли відкликати, і задача не має писати від імені
+        // людини, яка вже не має права імпортувати.
+        _ = await PermissionCheck
+            .RequireAsync(access, currentUser, ApplyImportHandler.Permission, ct)
+            .ConfigureAwait(false);
 
         await progress.ReportKeyAsync(10, "jobs.importApplyingDiff", ct).ConfigureAwait(false);
 

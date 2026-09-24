@@ -65,8 +65,15 @@ builder.Services.AddHttpContextAccessor();
 // TemplateVersionsController), без цієї реєстрації просто не
 // створювалися б — і 500 отримували б усі їхні ендпоінти.
 builder.Services.AddScoped<CurrentUser>();
+// ⛔ F-01: за інтерфейсом — обгортка, що у фоновій задачі віддає її АВТОРА
+// (`JobActorScope`, встановлює задача), а в запиті — користувача cookie. Без
+// неї запис комірок із задачі бачив анонімного користувача (HTTP-запиту
+// немає) і великий імпорт не проходив ніколи.
+builder.Services.AddScoped<Ecr.Application.Common.JobActorScope>();
 builder.Services.AddScoped<Ecr.Application.Common.ICurrentUser>(
-    sp => sp.GetRequiredService<CurrentUser>());
+    sp => new Ecr.Application.Common.JobAwareCurrentUser(
+        sp.GetRequiredService<CurrentUser>(),
+        sp.GetRequiredService<Ecr.Application.Common.JobActorScope>()));
 // BE-08: кореляція запиту доїжджає до itg.JobProgress через планувальник.
 builder.Services.AddSingleton<Ecr.Application.Ports.ICorrelationIdAccessor,
     Ecr.Api.Middleware.HttpCorrelationIdAccessor>();
