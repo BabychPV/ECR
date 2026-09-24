@@ -55,7 +55,7 @@ describe('rejectionMarksOf — які відмови тримають правк
 
   it('5xx і мережа НЕ тримають: повтор має везти ті самі правки', () => {
     expect(rejectionMarksOf(problem(500, 'ECR-SYS-0500'), [bad])).toEqual([]);
-    expect(rejectionMarksOf(problem(429, 'ECR-SYS-0429'), [bad])).toEqual([]);
+    expect(rejectionMarksOf(problem(429, 'ECR-REQ-0429'), [bad])).toEqual([]);
     expect(rejectionMarksOf(new TypeError('Failed to fetch'), [bad])).toEqual([]);
   });
 
