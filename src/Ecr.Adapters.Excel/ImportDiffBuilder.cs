@@ -137,7 +137,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-4221",
                         "Комірка обчислюється системою: значення з файлу не застосовується.",
-                        table.Code, table.NameL10n));
+                        table.Code, table.NameL10n, ImportMessageKeys.Calculated));
 
                     continue;
                 }
@@ -147,7 +147,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ROW-0404",
                         "Рядка з таким ключем у документі немає: імпорт рядків не створює.",
-                        table.Code, table.NameL10n));
+                        table.Code, table.NameL10n, ImportMessageKeys.NoRow));
 
                     continue;
                 }
@@ -162,7 +162,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ACCS-0403",
                         decision.Detail ?? $"Змінювати комірку не дозволено: {decision.Reason}.",
-                        table.Code, table.NameL10n));
+                        table.Code, table.NameL10n, ImportMessageKeys.Denied(decision.Reason)));
 
                     continue;
                 }
@@ -179,7 +179,7 @@ public sealed class ImportDiffBuilder
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
                         $"Число має понад {CellValueReader.StorageIntegerDigits} розрядів до коми: сховище його не вмістить.",
-                        table.Code, table.NameL10n));
+                        table.Code, table.NameL10n, ImportMessageKeys.IntegerDigits));
 
                     continue;
                 }
@@ -390,3 +390,32 @@ public sealed record TableDiff(
     IReadOnlyList<ImportChange> Changes,
     IReadOnlyList<ImportRejection> Rejected,
     IReadOnlyDictionary<string, string> RowVersions);
+
+/// <summary>
+/// Ключі текстів відмов прев'ю імпорту в каталозі (D-95, `V-10`).
+/// </summary>
+/// <remarks>
+/// ⚠ Одне місце для обох класів адаптера (<see cref="ImportDiffBuilder"/> і
+/// <see cref="ExcelImporter"/>): рядок кожного ключа лежить у <c>09-seed.sql</c>,
+/// а клієнт перелічує їх літералами (<c>ImportPanel.rejectionText</c>).
+/// </remarks>
+public static class ImportMessageKeys
+{
+    /// <summary>Комірку рахує система, і користувач змінив її значення.</summary>
+    public const string Calculated = "err.ECR-CELL-4221.importCalculated";
+
+    /// <summary>Рядка з ключем із файлу в документі немає.</summary>
+    public const string NoRow = "err.ECR-ROW-0404.importNoRow";
+
+    /// <summary>Ціла частина числа не вміщується в сховище.</summary>
+    public const string IntegerDigits = "err.ECR-CELL-0422.importIntegerDigits";
+
+    /// <summary>Екземпляра таблиці з файлу немає в документі за цей період.</summary>
+    public const string InstanceMissing = "err.ECR-IMP-0422.importInstanceMissing";
+
+    /// <summary>Таблиці з файлу немає в чинній версії шаблону.</summary>
+    public const string TableMissing = "err.ECR-IMP-0422.importTableMissing";
+
+    /// <summary>Правка заборонена правами або станом — той самий текст, що в підказці сітки.</summary>
+    public static string Denied(EditDenyReason reason) => $"deny.{reason}";
+}

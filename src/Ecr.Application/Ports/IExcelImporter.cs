@@ -62,13 +62,21 @@ public sealed record ImportChange(
 /// <param name="RowKey">Рядок; <c>—</c> — причина не про рядок.</param>
 /// <param name="ColumnCode">Колонка; для відмови цілої таблиці — її код.</param>
 /// <param name="ReasonCode">Код причини (<c>ECR-…</c>).</param>
-/// <param name="Message">Текст причини.</param>
+/// <param name="Message">Діагностичний текст для журналу — НЕ для показу людині.</param>
 /// <param name="TableCode">Таблиця відмови (`V-10`, як і в <see cref="ImportChange"/>).</param>
 /// <param name="TableNameL10n">Назва таблиці мовами каталогу — для показу.</param>
+/// <param name="MessageKey">
+/// Ключ тексту причини в каталозі (D-95). ⛔ `V-10`: інтерфейс показує текст
+/// за цим ключем мовою користувача, а не <see cref="Message"/> — доти відмови
+/// приходили готовими українськими реченнями («Правило доступу: лише читання.»).
+/// Для відмови правами — <c>deny.&lt;EditDenyReason&gt;</c>, ті самі тексти, що
+/// в підказці сірої комірки сітки.
+/// </param>
 public sealed record ImportRejection(
     string RowKey,
     string ColumnCode,
     string ReasonCode,
     string Message,
     string? TableCode = null,
-    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null);
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
+    string? MessageKey = null);

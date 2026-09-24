@@ -92,4 +92,37 @@ describe('ImportPanel: перелік змін і відмов', () => {
 
     expect(within(screen.getByRole('table')).getByRole('cell', { name: 'T2' })).toBeTruthy();
   });
+
+  it('V-10: причина відмови — з каталогу за messageKey, а не серверне речення', async () => {
+    mockPreview({
+      previewToken: 'tok',
+      changes: [],
+      rejected: [
+        {
+          rowKey: 'RTOT',
+          columnCode: 'CRO',
+          reasonCode: 'ECR-CELL-4221',
+          message: 'Комірка обчислюється системою: значення з файлу не застосовується.',
+          messageKey: 'err.ECR-CELL-4221.importCalculated',
+          tableCode: 'FT1',
+        },
+        {
+          rowKey: 'RTOT',
+          columnCode: 'CDEC',
+          reasonCode: 'ECR-ACCS-0403',
+          message: 'Правило доступу: лише читання.',
+          messageKey: 'deny.RowReadOnly',
+          tableCode: 'FT1',
+        },
+      ],
+      conflicts: [],
+    });
+
+    await openPreview();
+
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('⟦err.ECR-CELL-4221.importCalculated⟧ (ECR-CELL-4221)')).toBeTruthy();
+    expect(within(table).getByText('⟦deny.RowReadOnly⟧ (ECR-ACCS-0403)')).toBeTruthy();
+    expect(within(table).queryByText(/Правило доступу|обчислюється системою/)).toBeNull();
+  });
 });

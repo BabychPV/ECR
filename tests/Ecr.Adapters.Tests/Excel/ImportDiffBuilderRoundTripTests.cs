@@ -69,7 +69,11 @@ public sealed class ImportDiffBuilderRoundTripTests
         var changed = Build(worksheet, table, column, existing);
 
         Assert.Empty(changed.Changes);
-        Assert.Equal("ECR-CELL-4221", Assert.Single(changed.Rejected).ReasonCode);
+        var rejection = Assert.Single(changed.Rejected);
+        Assert.Equal("ECR-CELL-4221", rejection.ReasonCode);
+
+        // ⛔ `V-10`: причина — ключем каталогу, а не лише українським реченням.
+        Assert.Equal(ImportMessageKeys.Calculated, rejection.MessageKey);
     }
 
     [Fact]
@@ -133,6 +137,7 @@ public sealed class ImportDiffBuilderRoundTripTests
 
         Assert.Equal(table.Code, rejection.TableCode);
         Assert.NotNull(rejection.TableNameL10n);
+        Assert.Equal(ImportMessageKeys.Calculated, rejection.MessageKey);
     }
 
     private static (TableDef Table, ColumnDef Column) Table(CellDataType type)

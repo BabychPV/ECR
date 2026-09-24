@@ -15586,8 +15586,14 @@ export interface components {
         ImportRejection: {
             /** @description Колонка; для відмови цілої таблиці — її код. */
             columnCode: string;
-            /** @description Текст причини. */
+            /** @description Діагностичний текст для журналу — НЕ для показу людині. */
             message: string;
+            /** @description Ключ тексту причини в каталозі (D-95). ⛔ `V-10`: інтерфейс показує текст
+             *     за цим ключем мовою користувача, а не string ImportRejection.Message — доти відмови
+             *     приходили готовими українськими реченнями («Правило доступу: лише читання.»).
+             *     Для відмови правами — `deny.&lt;EditDenyReason&gt;`, ті самі тексти, що
+             *     в підказці сірої комірки сітки. */
+            messageKey?: null | string;
             /** @description Код причини (`ECR-…`). */
             reasonCode: string;
             /** @description Рядок; `—` — причина не про рядок. */

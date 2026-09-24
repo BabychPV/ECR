@@ -2284,6 +2284,13 @@ USING (VALUES
     (N'import.reason',                   N'en', N'Reason', 1),
     (N'import.apply',                    N'en', N'Apply', 1),
     (N'import.applied',                  N'en', N'The import has been applied.', 1),
+    -- V-10: причини відмов прев'ю — мовою інтерфейсу, за messageKey відмови.
+    (N'import.rejectedCell',             N'en', N'This value cannot be imported.', 1),
+    (N'err.ECR-CELL-4221.importCalculated', N'en', N'The system calculates this cell, and the file changes its value: the value from the file is not applied.', 1),
+    (N'err.ECR-ROW-0404.importNoRow',    N'en', N'The document has no row with this key: import does not create rows.', 1),
+    (N'err.ECR-CELL-0422.importIntegerDigits', N'en', N'The number has more than 18 digits before the decimal point: storage cannot hold it.', 1),
+    (N'err.ECR-IMP-0422.importInstanceMissing', N'en', N'This table from the file is not in the document for this period: the structure was probably changed after export.', 1),
+    (N'err.ECR-IMP-0422.importTableMissing', N'en', N'This table from the file is not in the template version in force.', 1),
 
     (N'grid.addRow',                     N'en', N'Add row', 1),
 

@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { ImportApplyRequest, ImportChange, ImportPreview, ImportRejection } from '@/api/types';
+import { denyText } from '@/features/grid/permissions';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
@@ -187,7 +188,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                       <Table.Td>{rejection.rowKey}</Table.Td>
                       <Table.Td>{rejection.columnCode}</Table.Td>
                       <Table.Td>
-                        {rejection.message} ({rejection.reasonCode})
+                        {rejectionText(rejection)} ({rejection.reasonCode})
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -238,4 +239,35 @@ function tableOf(item: ImportChange | ImportRejection): string {
   const name = localized(item.tableNameL10n);
 
   return name !== '' ? name : (item.tableCode ?? '—');
+}
+
+/**
+ * Причина відмови мовою інтерфейсу — за `messageKey` відмови.
+ *
+ * ⛔ `V-10`: доти тут стояв `rejection.message` — готове українське речення
+ * сервера («Правило доступу: лише читання.») незалежно від мови інтерфейсу.
+ * `message` лишається діагностикою для журналу й тут більше не показується.
+ *
+ * ⚠ Літерали, а не `t(rejection.messageKey)`: сторож
+ * `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі`
+ * перевіряє лише ключі-літерали. Відмова правами (`deny.<причина>`) бере
+ * ТОЙ САМИЙ текст, що підказка сірої комірки сітки (`denyText`).
+ */
+function rejectionText(rejection: ImportRejection): string {
+  const key = rejection.messageKey ?? '';
+
+  switch (key) {
+    case 'err.ECR-CELL-4221.importCalculated':
+      return t('err.ECR-CELL-4221.importCalculated');
+    case 'err.ECR-ROW-0404.importNoRow':
+      return t('err.ECR-ROW-0404.importNoRow');
+    case 'err.ECR-CELL-0422.importIntegerDigits':
+      return t('err.ECR-CELL-0422.importIntegerDigits');
+    case 'err.ECR-IMP-0422.importInstanceMissing':
+      return t('err.ECR-IMP-0422.importInstanceMissing');
+    case 'err.ECR-IMP-0422.importTableMissing':
+      return t('err.ECR-IMP-0422.importTableMissing');
+    default:
+      return (key.startsWith('deny.') ? denyText(key.slice('deny.'.length)) : null) ?? t('import.rejectedCell');
+  }
 }

@@ -159,6 +159,19 @@ function reasonOf(permission: string): DenyReason | null {
   return permission in Hints ? (permission as DenyReason) : null;
 }
 
+/**
+ * Текст причини заборони за її серверною назвою — або `null` для невідомої.
+ *
+ * ⚠ Той самий текст, що в підказці сірої комірки: відмова прев'ю імпорту
+ * (`deny.<EditDenyReason>`, `V-10`) і сіра комірка сітки — одна й та сама
+ * причина, і двох формулювань в неї бути не повинно.
+ */
+export function denyText(reason: string): string | null {
+  const known = reasonOf(reason);
+
+  return known === null ? null : deny(known).hint;
+}
+
 function deny(reason: DenyReason): CellDecision {
   // ⚠ Текст береться в момент рішення, а не при завантаженні модуля: каталог
   // приходить із сервера пізніше за імпорти, і таблиця, обчислена наперед,
