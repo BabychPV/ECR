@@ -144,17 +144,39 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         var clonedFrom = source.Id;
         var (clone, links) = TemplateVersionCloner.Prepare(source, newVersion, userId, utcNow);
 
+        // ⛔ V-05: два збереження — одна транзакція. Формули посилаються на
+        // колонки й рядки ЧИСЛОМ, а не навігацією, тож EF не може вставити їх
+        // у тому самому пакеті, що й колонки (CK_Formula_Scope вимагає ключ
+        // одразу). Спершу структура без формул, потім формули з новими
+        // ключами. Без транзакції падіння другого кроку лишило б у базі
+        // чернетку-сироту без формул — тобто «успішний» клон, який тихо
+        // загубив обчислення.
+        if (db.Database.CurrentTransaction is not null)
+        {
+            await SaveCloneAsync(clone, links, clonedFrom, ct).ConfigureAwait(false);
+            return clone.Id;
+        }
+
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+            await SaveCloneAsync(clone, links, clonedFrom, ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+
+        return clone.Id;
+    }
+
+    private async Task SaveCloneAsync(
+        TemplateVersion clone, TemplateVersionCloner.CloneLinks links, int clonedFrom, CancellationToken ct)
+    {
         db.TemplateVersions.Add(clone);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // Формули посилаються на колонки і рядки ЧИСЛОМ, а не навігацією, тому
-        // EF їх не перев'язує: це доводиться робити після того, як база
-        // призначила нові ключі.
-        TemplateVersionCloner.Relink(clone, links);
+        db.FormulaDefs.AddRange(TemplateVersionCloner.Relink(links));
         SetClonedFrom(clone, clonedFrom);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-        return clone.Id;
     }
 
     /// <inheritdoc />
