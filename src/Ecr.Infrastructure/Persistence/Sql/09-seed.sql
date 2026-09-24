@@ -3977,7 +3977,25 @@ USING (VALUES
     -- перевірка показує саме ім'я, а не позначений ключ (`checkLabel`).
     (N'health.check.db',                     N'en', N'Database', 1),
     (N'health.check.jobs',                   N'en', N'Background jobs', 1),
-    (N'health.check.sources',                N'en', N'Collection sources', 1)
+    (N'health.check.sources',                N'en', N'Collection sources', 1),
+
+    -- ══ Імпорт і фонові задачі: четвертий раунд UX-PASS (лінія B2) ══
+    --
+    -- ⛔ F-06: відмова типу — у ПЕРЕГЛЯДІ, тим самим читачем, що й запис.
+    -- Колонка стоїть у рядку переліку окремо, тож ключі без `{columnCode}`.
+    (N'err.ECR-CELL-0422.importExpectsNumber',     N'en', N'The value is not a number.', 1),
+    (N'err.ECR-CELL-0422.importExpectsBoolean',    N'en', N'The value is not true or false.', 1),
+    (N'err.ECR-CELL-0422.importExpectsDate',       N'en', N'The value is not a date.', 1),
+    (N'err.ECR-CELL-0422.importExpectsIdentifier', N'en', N'No entry with this code in the column''s registry or list of units.', 1),
+    -- ⛔ F-24 і сусіди: відмови імпорту, що доти їхали українським реченням.
+    (N'err.ECR-IMP-0422.previewExpired',        N'en', N'The import preview has expired or was already applied. Load the file again.', 1),
+    (N'err.ECR-IMP-0422.previewUnreadable',     N'en', N'The saved import preview cannot be read. Load the file again.', 1),
+    (N'err.ECR-IMP-0422.previewOtherDocument',  N'en', N'This import preview was built for another document.', 1),
+    (N'err.ECR-IMP-0422.workbookOtherDocument', N'en', N'The workbook was exported from another document.', 1),
+    (N'err.ECR-IMP-0422.noMapSheet',            N'en', N'The workbook has no service sheet: only a file exported by this system can be imported.', 1),
+    (N'err.ECR-IMP-0422.mapBroken',             N'en', N'The service sheet of the workbook is empty or damaged. Export the document again.', 1),
+    -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
+    (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
