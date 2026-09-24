@@ -96,6 +96,12 @@ public sealed class DocumentDataExporter(
         long documentId, int periodKey, string format, bool includeFormulas, CancellationToken ct)
     {
         var key = new PeriodKey(periodKey);
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і вивантаження CSV/JSON відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
         var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
         if (instances.Count == 0)
         {

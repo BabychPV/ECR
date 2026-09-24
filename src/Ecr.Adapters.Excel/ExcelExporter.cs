@@ -55,6 +55,13 @@ public sealed class ExcelExporter(
 
         var periodKey = new PeriodKey(options.PeriodKey);
 
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і експорт відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
             .ConfigureAwait(false);

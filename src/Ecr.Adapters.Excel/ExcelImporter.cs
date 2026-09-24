@@ -102,6 +102,13 @@ public sealed class ExcelImporter(
         // належать цьому документу за цей період — блок книги з чужим
         // (чи вигаданим) `TableInstanceId` інакше пішов би прямо в пакетні
         // читання рядків/комірок нижче без жодної перевірки належності.
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і перегляд імпорту відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
+
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
 
         if (instances.Count == 0)
