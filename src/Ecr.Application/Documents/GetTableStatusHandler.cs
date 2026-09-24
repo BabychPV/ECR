@@ -156,6 +156,7 @@ public sealed class GetTableStatusHandler(
                     table.Id,
                     sheet.Code,
                     InputColumnCount: columns.Count(c => !c.IsComputed && !c.IsReadOnly),
+                    TemplateRowCount: table.Rows.Count(r => !r.IsDeleted),
                     IsClosed: Blocks(rules, profile, sheet.Id, table.Id, RowKind.Item, key),
                     ClosedRowDefCount: table.Rows.Count(
                         r => !r.IsDeleted
@@ -183,7 +184,14 @@ public sealed class GetTableStatusHandler(
         {
             var counted = countsByTable.GetValueOrDefault(shape.TableDefId);
 
-            var rowCount = counted?.RowCount ?? 0;
+            // ⛔ `R-13`. Рядки, яких у базі ЩЕ НЕМАЄ, теж треба заповнити. Документ,
+            // який за цей період ще не відкривали, має екземпляри таблиць, але
+            // рядки шаблону матеріалізуються лише при читанні зрізу — і тоді
+            // `RowCount = 0` давав `InputCells = 0` на КОЖНІЙ таблиці, а
+            // порожній документ показував «Tables filled completely: 92 of 92».
+            // Рядки, задані шаблоном, — нижня межа знаменника; динамічні
+            // рядки, додані людиною, рахуються понад неї з бази.
+            var rowCount = Math.Max(counted?.RowCount ?? 0, shape.TemplateRowCount);
 
             // ⚠ Опис рядка може існувати в шаблоні й не бути матеріалізованим
             // у цьому екземплярі — тоді віднімати його нема від чого.
@@ -304,6 +312,7 @@ public sealed class GetTableStatusHandler(
         int TableDefId,
         string SheetCode,
         int InputColumnCount,
+        int TemplateRowCount,
         bool IsClosed,
         int ClosedRowDefCount);
 

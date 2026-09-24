@@ -39,11 +39,20 @@ export function SheetFillSummary({ documentId, periodKey }: SheetFillSummaryProp
 
   const summary = summarize(status.data);
 
+  // ⚠ `R-13`: заповнювати нічого (усе формульне, закрите чи без рядків) —
+  // дріб «0 of 0» нічого не каже, і його не показано; крапка помилки, якщо
+  // вона є, лишається.
+  if (summary.total === 0 && summary.hasErrors !== true) {
+    return null;
+  }
+
   return (
     <Group gap="xs" data-testid="sheet-fill-summary">
-      <Text size="sm" fw={600} data-testid="sheet-fill-count">
-        {t('document.tablesFilled', { filled: summary.filled, total: summary.total })}
-      </Text>
+      {summary.total > 0 && (
+        <Text size="sm" fw={600} data-testid="sheet-fill-count">
+          {t('document.tablesFilled', { filled: summary.filled, total: summary.total })}
+        </Text>
+      )}
 
       {summary.hasErrors === true && (
         <Badge size="xs" circle color="statusError" data-testid="sheet-fill-error-dot">

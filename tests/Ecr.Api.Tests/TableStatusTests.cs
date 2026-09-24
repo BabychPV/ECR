@@ -9,6 +9,7 @@ using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Security;
 using Ecr.TestKit;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -127,6 +128,50 @@ public sealed class TableStatusTests(SqlServerFixture sql)
 
         Assert.Equal(0, closed.GetProperty("inputCells").GetInt32());
         Assert.Equal(0, closed.GetProperty("filledCells").GetInt32());
+    }
+
+    /// <summary>
+    /// Рядки шаблону, яких у базі ще немає, теж входять у знаменник (`R-13`).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Живцем на стенді: документ, якого за період ще не відкривали, має
+    /// екземпляри таблиць, але жодного рядка — рядки шаблону матеріалізуються
+    /// лише при читанні зрізу. Знаменник рахувався з рядків БАЗИ, тож кожна
+    /// таблиця давала <c>inputCells = 0</c>, і порожній документ показував
+    /// «Tables filled completely: 92 of 92».
+    ///
+    /// ⚠ Сценарій — той самий документ, у якого рядки прибрано з бази:
+    /// шаблон лишає два описи рядків × дві людські колонки = 4. Мутація
+    /// «рахувати лише рядки бази» дає 0 і валить саме цей рядок.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "R-13")]
+    public async Task Нематеріалізовані_рядки_шаблону_входять_у_InputCells()
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            await db.Database.ExecuteSqlAsync($"""
+                DELETE c FROM doc.CellValue AS c
+                  JOIN doc.TableRow AS r ON r.Id = c.TableRowId AND r.PeriodKey = c.PeriodKey
+                  JOIN doc.TableInstance AS i ON i.Id = r.TableInstanceId
+                 WHERE i.DocumentId = {scenario.DocumentId} AND c.PeriodKey = {scenario.PeriodKey};
+                DELETE r FROM doc.TableRow AS r
+                  JOIN doc.TableInstance AS i ON i.Id = r.TableInstanceId
+                 WHERE i.DocumentId = {scenario.DocumentId} AND r.PeriodKey = {scenario.PeriodKey};
+                """).ConfigureAwait(true);
+        }
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var table = Single(await ReadStatusAsync(app, client, scenario).ConfigureAwait(true), scenario.TableDefId);
+
+        Assert.Equal(4, table.GetProperty("inputCells").GetInt32());
+        Assert.Equal(0, table.GetProperty("filledCells").GetInt32());
     }
 
     /// <summary>

@@ -90,38 +90,64 @@ describe('SheetFillSummary', () => {
       const text = screen.getByTestId('sheet-fill-count').textContent ?? '';
 
       expect(text).toContain('document.tablesFilled');
-      expect(text).toContain('filled=2');
-      expect(text).toContain('total=3');
+      expect(text).toContain('filled=1');
+      expect(text).toContain('total=2');
     });
 
     // ⛔ І прямо: голого дробу «2 / 3» на екрані більше немає. Без цього
     // рядка тест лишився б зеленим, якби підпис приписали ПОРУЧ із дробом,
     // а сам дріб залишили — тобто вада «два показники, один без пояснення»
     // проїхала б.
-    expect(screen.getByTestId('sheet-fill-count').textContent?.trim()).not.toBe('2 / 3');
+    expect(screen.getByTestId('sheet-fill-count').textContent?.trim()).not.toBe('1 / 2');
   });
 
   it('рахує заповненими лише таблиці, у яких закриті всі вхідні комірки', async () => {
     respond([
       table({ tableDefId: 1, filledCells: 4, inputCells: 4 }),
       table({ tableDefId: 2, filledCells: 3, inputCells: 4 }),
-
-      // Таблиця без жодної вхідної комірки — усе формульне. Заповнювати
-      // нічого, тож вона заповнена: інакше документ ніколи не дійшов би до
-      // 100 %.
-      table({ tableDefId: 3, filledCells: 0, inputCells: 0 }),
     ]);
 
     show();
 
     await waitFor(() => {
       // ⚠ Числа читаються з параметрів підпису (`U-06`): каталог у тестах
-      // порожній, тож `t()` віддає `⟦ключ (filled=2, total=3)⟧`.
+      // порожній, тож `t()` віддає `⟦ключ (filled=1, total=2)⟧`.
       const text = screen.getByTestId('sheet-fill-count').textContent ?? '';
 
-      expect(text).toContain('filled=2');
-      expect(text).toContain('total=3');
+      expect(text).toContain('filled=1');
+      expect(text).toContain('total=2');
     });
+  });
+
+  /**
+   * ⛔ `R-13`. Тут стояло протилежне твердження — «таблиця без жодної вхідної
+   * комірки заповнена, інакше документ ніколи не дійде до 100 %» — і саме воно
+   * давало «92 of 92» на ПОРОЖНЬОМУ документі живого стенда: кожна таблиця,
+   * у якої сервер не нарахував вхідних комірок, ішла в чисельник. Тепер вона
+   * не йде ні в чисельник, ні в знаменник; 100 % досяжні так само — коли
+   * заповнено все, що є заповнювати.
+   */
+  it('таблиця без вхідних комірок не рахується НІ заповненою, НІ взагалі', () => {
+    const summary = summarize([
+      table({ tableDefId: 1, filledCells: 4, inputCells: 4 }),
+      table({ tableDefId: 2, filledCells: 0, inputCells: 0 }),
+      table({ tableDefId: 3, filledCells: 0, inputCells: 0 }),
+    ]);
+
+    expect(summary.filled).toBe(1);
+    expect(summary.total).toBe(1);
+  });
+
+  it('документ, де нічого заповнювати, не показує «0 of 0»', async () => {
+    respond([table({ tableDefId: 1, filledCells: 0, inputCells: 0 })]);
+
+    show();
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByTestId('sheet-fill-count')).toBeNull();
   });
 
   it('не показує крапку помилки, доки документ не перевіряли', async () => {
