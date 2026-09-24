@@ -792,6 +792,19 @@ public sealed class RecalculationService(
                 continue;
             }
 
+            // ⛔ V-04: формула рядка без явної колонки розкривається на ВСІ
+            // колонки рядка — і до цього писала число в String/Date/Bool/
+            // Lookup/Unit (`ValueNumeric = 15` у колонці дати). Колонка, тип
+            // якої результату не приймає, пропускається ДО контексту: інакше
+            // залежна формула прочитала б із неї число, якого в базі немає.
+            if (formula.Scope == Domain.Enums.FormulaScope.Row
+                && formula.ColumnDefId is null
+                && !FormulaTargetTypes.Accepts(
+                    table.Columns.FirstOrDefault(c => c.Id == columnDefId)?.DataType, result.Value.Type))
+            {
+                continue;
+            }
+
             var key = new CellKey(0, table.Id, rowKey, columnDefId);
 
             // ⚠ Значення контексту оновлюється ЗАВЖДИ, навіть коли запису не
