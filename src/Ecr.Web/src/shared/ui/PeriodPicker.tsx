@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 import { ActionIcon, Group, NumberInput, type MantineSize } from '@mantine/core';
 import { formatDate } from '@/shared/format';
 import { t } from '@/shared/i18n';
@@ -32,6 +32,9 @@ import { t } from '@/shared/i18n';
 const YearMultiplier = 100;
 const FirstMonth = 1;
 const LastMonth = 12;
+/** Межі року — ті самі, що в `PeriodKey.IsValid` на сервері (`Ecr.Domain/ValueObjects/PeriodKey.cs`). */
+const FirstYear = 1900;
+const LastYear = 9999;
 
 interface ParsedPeriod {
   readonly year: number;
@@ -48,6 +51,24 @@ function parsePeriodKey(value: number): ParsedPeriod | null {
   if (month < FirstMonth || month > LastMonth) return null;
 
   return { year, month };
+}
+
+/**
+ * Чи є набране значення ПОВНИМ дійсним `periodKey`: ціле, рік `1900..9999`
+ * (тобто рівно шість цифр), місяць `01..12`.
+ *
+ * ⛔ Лише таке значення йде в `onChange`. Раніше туди йшла кожна проміжна
+ * цифра: набір `202608` давав `2`, `20`, `202`, `2026`, `20260` — і кожна
+ * ставала `?periodKey=` в адресі й запитом до сервера, на який той чесно
+ * відповідав `422` (`PeriodKey.Parse`). Живий стенд: 5 × `422` на `/` і
+ * 5 × `422` на `/admin/campaign` на один набір.
+ */
+export function isCompletePeriodKey(value: number): boolean {
+  if (!Number.isInteger(value)) return false;
+
+  const parsed = parsePeriodKey(value);
+
+  return parsed !== null && parsed.year >= FirstYear && parsed.year <= LastYear;
 }
 
 function toPeriodKey(period: ParsedPeriod): number {
@@ -97,7 +118,9 @@ export interface PeriodPickerProps {
   /** `periodKey` (`YYYYMM`), як в адресі (`ФВ-14.29`); `null` — період не обрано. */
   readonly value: number | null;
   /**
-   * `null` — поле очищено/значення не число. Кожен виклик сам вирішує, що
+   * Кличеться лише з ПОВНИМ дійсним `periodKey` (`isCompletePeriodKey`) або
+   * з `null`, коли поле очищено; проміжні цифри набору сюди не доходять.
+   * Кожен виклик сам вирішує, що
    * робити з `null` (звузити фільтр до «без періоду», чи лишити попередній
    * `periodKey`) — `PeriodPicker` цього рішення не нав'язує.
    */
@@ -124,9 +147,39 @@ export function PeriodPicker({
   disabled = false,
   id,
 }: PeriodPickerProps): JSX.Element {
+  /*
+   * ⛔ Незавершений набір живе ЛИШЕ тут, у полі, і не йде в `onChange`: див.
+   * `isCompletePeriodKey`. Чернетка прив'язана до `value`, для якого її
+   * набрано (`forValue`): щойно `value` змінився ззовні (стрілка, адреса,
+   * автопідбір періоду), вона застаріла й поле знову показує `value` — без
+   * ефекту синхронізації.
+   */
+  const [draft, setDraft] = useState<{ text: string | number; forValue: number | null } | null>(
+    null,
+  );
+  const typed = draft !== null && draft.forValue === value ? draft.text : null;
+  const typing = typed !== null;
+
   const prevValue = value === null ? null : shiftPeriod(value, -1);
   const nextValue = value === null ? null : shiftPeriod(value, 1);
-  const caption = value === null ? undefined : periodCaption(value);
+  // ⚠ Поки набір неповний, підпис попереднього періоду під полем брехав би
+  // («2026» над «September 2026») — тому підпису немає, як і для `null`.
+  const caption = value === null || typing ? undefined : periodCaption(value);
+
+  const commit = (next: number | null): void => {
+    setDraft(null);
+    onChange(next);
+  };
+
+  const handleInput = (next: string | number): void => {
+    if (next === '') {
+      commit(null);
+    } else if (typeof next === 'number' && isCompletePeriodKey(next)) {
+      commit(next);
+    } else {
+      setDraft({ text: next, forValue: value });
+    }
+  };
 
   return (
     <Group gap="xs" align="end" wrap="nowrap">
@@ -135,7 +188,7 @@ export function PeriodPicker({
         size={size}
         aria-label={t('period.previous')}
         disabled={disabled || prevValue === null}
-        onClick={() => onChange(prevValue)}
+        onClick={() => commit(prevValue)}
       >
         ‹
       </ActionIcon>
@@ -147,8 +200,11 @@ export function PeriodPicker({
         label={label ?? t('documents.period')}
         description={caption}
         disabled={disabled}
-        value={value ?? ''}
-        onChange={(next) => onChange(typeof next === 'number' ? next : null)}
+        value={typed ?? value ?? ''}
+        onChange={handleInput}
+        // ⚠ Незавершений набір, покинутий фокусом, повертає поле до чинного
+        // періоду: інакше поле показувало б «2026», а список — інший період.
+        onBlur={() => setDraft(null)}
       />
 
       <ActionIcon
@@ -156,7 +212,7 @@ export function PeriodPicker({
         size={size}
         aria-label={t('period.next')}
         disabled={disabled || nextValue === null}
-        onClick={() => onChange(nextValue)}
+        onClick={() => commit(nextValue)}
       >
         ›
       </ActionIcon>
