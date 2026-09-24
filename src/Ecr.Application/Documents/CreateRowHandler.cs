@@ -164,8 +164,9 @@ public sealed class CreateRowHandler(
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                    // ⛔ B-06: без `detail` — він дублював стандартний член
+                    // `problem+json` українським реченням (див. `PatchCellsHandler`).
                     ["reason"] = decision.Reason.ToString(),
-                    ["detail"] = decision.Detail
                 });
         }
 

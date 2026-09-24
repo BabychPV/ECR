@@ -832,8 +832,13 @@ public sealed class PatchCellsHandler(
                     // а НЕ `detail`: подробиця рішення сама буває готовим
                     // українським реченням, і підставити її означало б лише
                     // перенести двомовність усередину локалізованого тексту.
+                    //
+                    // ⛔ B-06: і в подробицях ключа `detail` теж НЕМАЄ. Він
+                    // лягав у `problem+json` другим `detail` поруч зі
+                    // стандартним, і клієнт читав саме його — українське
+                    // речення `first.Detail` замість локалізованого тексту.
+                    // Речення лишається в журналі сервера через `.Message`.
                     ["reason"] = first.Reason.ToString(),
-                    ["detail"] = first.Detail
                 });
         }
     }
@@ -1571,8 +1576,9 @@ public sealed class PatchCellsHandler(
             {
                 ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
                 ["deniedCount"] = denied.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                // ⛔ B-06: `["detail"] = null` тут давав у `problem+json`
+                // другий `detail: null`, який перекривав локалізований.
                 ["reason"] = reason.ToString(),
-                ["detail"] = null,
             });
     }
 
