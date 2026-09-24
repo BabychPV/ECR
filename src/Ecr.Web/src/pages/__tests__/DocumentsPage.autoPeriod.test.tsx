@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -150,12 +151,12 @@ function LocationProbe(): JSX.Element {
   return <span data-search={search} />;
 }
 
-function show(): void {
+function show(path = '/'): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   render(
     <MantineProvider theme={testTheme}>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={[path]}>
         <QueryClientProvider client={client}>
           <DocumentsPage />
           <LocationProbe />
@@ -260,5 +261,73 @@ describe('DocumentsPage: автовибір поточного періоду (U
 
     // І календаря ніхто не питав — запиту, який нічого не вирішує, немає.
     expect(requested.some((url) => /\/api\/v1\/projects\/\d+\/periods/.test(url))).toBe(false);
+  });
+});
+
+/**
+ * ⛔ Автовибір — лише при ВХОДІ без періоду, не на кожне спорожніле поле.
+ *
+ * Живий стенд (2026-09-24, `drop-repro.mjs`, звичайний процесор, 5 з 5):
+ * Ctrl+A, Delete у «Period» на `/?periodKey=202609` і набір `202608` давали в
+ * полі `202608202609` — автовибір дописував поточний період у щойно очищене
+ * поле, в якому людина вже друкувала.
+ *
+ * ⛔ Мутаційний доказ (перевірено): у `DocumentsPage.tsx` прибрати
+ * `!autoPick ||` з ефекту й `autoPick &&` з `enabled` календаря (тобто
+ * автовибір щоразу, коли `periodKey === null`) — червоніють обидва випадки
+ * нижче: адреса знову отримує `202609`, а поле після blur показує його ж.
+ */
+describe('DocumentsPage: очищене людиною поле «Period» автовибір не заповнює', () => {
+  const periodsAsked = (): boolean =>
+    requested.some((url) => /\/api\/v1\/projects\/\d+\/periods/.test(url));
+
+  it('вхід із періодом → очистити поле: адреса й поле лишаються порожніми, набір дає рівно набране', async () => {
+    serve([project]);
+    const user = userEvent.setup();
+
+    show('/?periodKey=202609');
+
+    const input = await screen.findByRole<HTMLInputElement>('textbox', {
+      name: '⟦documents.period⟧',
+    });
+    await screen.findByText('DOC-000001');
+
+    await user.clear(input);
+    expect(new URLSearchParams(search).get('periodKey')).toBeNull();
+
+    // Дати автовибору всі шанси: проєкти відповіли, запити розв'язались.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(periodsAsked()).toBe(false);
+    expect(new URLSearchParams(search).get('periodKey')).toBeNull();
+    expect(input.value).toBe('');
+
+    // Людина відвернулась (blur) — порожнє поле так і лишається порожнім.
+    fireEvent.blur(input);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(input.value).toBe('');
+
+    await user.type(input, '202608');
+    expect(input.value).toBe('202608');
+    await waitFor(() => expect(new URLSearchParams(search).get('periodKey')).toBe('202608'));
+  });
+
+  it('вхід БЕЗ періоду → автовибір 202609 → очистити: другого автовибору немає', async () => {
+    serve([project]);
+    const user = userEvent.setup();
+
+    show('/');
+
+    await waitFor(() => expect(new URLSearchParams(search).get('periodKey')).toBe('202609'));
+    const input = await screen.findByRole<HTMLInputElement>('textbox', {
+      name: '⟦documents.period⟧',
+    });
+    await waitFor(() => expect(input.value).toBe('202609'));
+
+    await user.clear(input);
+    fireEvent.blur(input);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    expect(new URLSearchParams(search).get('periodKey')).toBeNull();
+    expect(input.value).toBe('');
   });
 });

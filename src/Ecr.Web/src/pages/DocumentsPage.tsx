@@ -111,18 +111,27 @@ export function DocumentsPage(): JSX.Element {
    * ⚠ Запит робиться ЛИШЕ доки періоду в адресі немає: `enabled` знімає його,
    * щойно вибір є, тож звичайне відкриття сторінки з посилання зайвого
    * звернення не робить.
+   *
+   * ⛔ Автовибір — лише при ВХОДІ на сторінку без періоду в адресі, а не
+   * щоразу, коли `periodKey` став `null`. Живий стенд (2026-09-24,
+   * `drop-repro.mjs`): людина очищала поле (Ctrl+A, Delete), щоб набрати
+   * інший період, — `periodKey` зникав з адреси, автовибір за ~100 мс
+   * дописував `202609` у поле, в якому вона вже друкувала (курсор лишався на
+   * початку), і набір `202608` давав у полі `202608202609` (5 з 5 спроб).
+   * Очищене руками поле — рішення людини, а не «період не обрано».
    */
+  const [autoPick, setAutoPick] = useState(() => periodKey === null);
   const onlyProject = projects.data?.items.length === 1 ? projects.data.items[0] : undefined;
 
   const calendar = useQuery({
     queryKey: ['periods', onlyProject?.id ?? null],
     queryFn: () =>
       apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(onlyProject?.id ?? 0)}/periods`),
-    enabled: periodKey === null && onlyProject !== undefined,
+    enabled: autoPick && periodKey === null && onlyProject !== undefined,
   });
 
   useEffect(() => {
-    if (periodKey !== null) return;
+    if (!autoPick || periodKey !== null) return;
 
     const periods = calendar.data?.periods;
     if (periods === undefined) return;
@@ -135,8 +144,11 @@ export function DocumentsPage(): JSX.Element {
     const open = periods.filter((period) => period.state === 'Open');
     const pick = current ?? (open.length === 1 ? open[0] : undefined);
 
+    // ⚠ Рішення при вході ухвалено — з вибором чи без (календар
+    // неоднозначний): далі період змінює лише людина.
+    setAutoPick(false);
     if (pick !== undefined) setUrlParams({ periodKey: pick.periodKey, cursor: null });
-  }, [periodKey, calendar.data, setUrlParams]);
+  }, [autoPick, periodKey, calendar.data, setUrlParams]);
 
   /**
    * ⛔ Директива D15 §0, правило L10. Тут стояло
@@ -195,6 +207,8 @@ export function DocumentsPage(): JSX.Element {
               miw={120}
               value={periodKey}
               onChange={(value) => {
+                // ⛔ Людина обрала сама — автовибір більше не втручається.
+                setAutoPick(false);
                 // ⚠ Період прибрано — прибирається й фільтр стану: без періоду
                 // він однаково не діє, а повернення періоду не має мовчки
                 // відновлювати звуження, якого на екрані вже не видно.
