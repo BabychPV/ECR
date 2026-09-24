@@ -219,6 +219,66 @@ public static class MethodologyPublishChecks
     }
 
     /// <summary>
+    /// Відмовляє, якщо формула посилається на константу <c>CST.X</c>, якої у
+    /// версії немає (V-18, третій раунд UX).
+    /// </summary>
+    /// <param name="formulas">Формули версії з розібраними деревами.</param>
+    /// <param name="constants">Усі константи версії.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0422</c> — знайдено невідомі константи; перелік усіх.
+    /// </exception>
+    /// <remarks>
+    /// ⛔ Доти <see cref="ConstantsInExpression"/> мовчки пропускав невідомий
+    /// код (<c>continue</c>), хоча невідомий <c>@ARG</c> відмову давав. У
+    /// рантаймі така константа — <c>#REF</c> на кожному рядку
+    /// (<c>MethodologyEvaluationContext.GetConstant</c>), тобто методологію
+    /// опубліковано налаштованою не до кінця.
+    /// ⚠ Окремий метод, а не рядок у загальному переліку <see cref="Check"/>:
+    /// загальна відмова каже лише «N проблем», а тут у методолога рівно одна
+    /// дія — завести константу або виправити описку, і назвати її треба
+    /// поіменно.
+    /// </remarks>
+    public static void CheckUnknownConstants(
+        IReadOnlyList<ParsedFormula> formulas,
+        IReadOnlyList<MethodologyConstant> constants)
+    {
+        ArgumentNullException.ThrowIfNull(formulas);
+        ArgumentNullException.ThrowIfNull(constants);
+
+        var known = new HashSet<string>(constants.Select(c => c.Code), StringComparer.OrdinalIgnoreCase);
+        var unknown = new List<string>();
+
+        foreach (var formula in formulas.Where(f => f.Root is not null))
+        {
+            var referenced = new List<string>();
+            Walk(formula.Root!, isArithmetic: false, referenced, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+            unknown.AddRange(referenced
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(code => !known.Contains(code))
+                .Select(code => $"{formula.Code}: CST.{code}"));
+        }
+
+        if (unknown.Count == 0)
+        {
+            return;
+        }
+
+        var list = string.Join("; ", unknown);
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Формули посилаються на константи, яких у версії немає ({unknown.Count}): {list}. "
+            + "У розрахунку кожна з них дасть #REF.",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.unknownConstants",
+                ["constants"] = list,
+                ["count"] = unknown.Count.ToString(CultureInfo.InvariantCulture),
+            });
+    }
+
+    /// <summary>
     /// Звіряє аргументи, які формули версії РЕАЛЬНО вживають, з кодами колонок
     /// таблиць, куди <c>CalculationBinding</c> цю методологію прив'язує
     /// (директива «структурна перевірка аргументів методології при

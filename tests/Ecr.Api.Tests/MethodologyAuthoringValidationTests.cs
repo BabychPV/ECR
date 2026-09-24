@@ -127,6 +127,174 @@ public sealed class MethodologyAuthoringValidationTests(SqlServerFixture sql)
             $"{response.StatusCode}: {await response.Content.ReadAsStringAsync().ConfigureAwait(true)}");
     }
 
+    // ── V-18: збереження правила ──────────────────────────────────────────
+
+    /// <remarks>
+    /// Мутація: прибрати <c>MethodologyRuleChecks.RequireValidPredicate</c> у
+    /// <c>SaveMethodologyRuleHandler</c> — рядки <c>{not json</c> і
+    /// <c>[1,2]</c> дають <c>200</c>, порожній рядок — <c>200</c> (новому
+    /// правилу домен його не перевіряє).
+    /// </remarks>
+    [Theory]
+    [InlineData("{not json", "err.ECR-CALC-0422.ruleMatchInvalid")]
+    [InlineData("[1,2]", "err.ECR-CALC-0422.ruleMatchInvalid")]
+    [InlineData("{\"KIND\":{\"a\":1}}", "err.ECR-CALC-0422.ruleMatchInvalid")]
+    [InlineData("", "err.ECR-CALC-0422.ruleNoPredicate")]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Правило_з_битим_предикатом_не_зберігається(string matchJson, string messageKey)
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync().ConfigureAwait(true);
+
+        var response = await SaveRuleAsync(client, stand, "R_BAD", matchJson, 5).ConfigureAwait(true);
+
+        var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
+        Assert.Equal(messageKey, problem.GetProperty("messageKey").GetString());
+        Assert.Equal(0, await RuleCountAsync(stand.VersionId).ConfigureAwait(true));
+    }
+
+    /// <remarks>
+    /// Мутація: прибрати <c>RequireConsistentSet</c> у
+    /// <c>SaveMethodologyRuleHandler</c> — друге збереження дає <c>200</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Два_активні_правила_з_однаковим_пріоритетом_не_зберігаються()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync().ConfigureAwait(true);
+
+        await OkAsync(await SaveRuleAsync(client, stand, "R_GAS", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true))
+            .ConfigureAwait(true);
+
+        var response = await SaveRuleAsync(client, stand, "R_LIQ", "{\"KIND\":\"LIQ\"}", 10).ConfigureAwait(true);
+
+        var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
+        Assert.Equal("err.ECR-CALC-0422.rulePriorityDuplicate", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("R_GAS, R_LIQ", problem.GetProperty("rules").GetString());
+
+        // Повторне збереження ТОГО САМОГО правила з тим самим пріоритетом —
+        // не дублікат самого себе.
+        await OkAsync(await SaveRuleAsync(client, stand, "R_GAS", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true))
+            .ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Уся_таблиця_попереду_конкретного_правила_не_зберігається()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync().ConfigureAwait(true);
+
+        await OkAsync(await SaveRuleAsync(client, stand, "R_ALL", "{}", 1).ConfigureAwait(true))
+            .ConfigureAwait(true);
+
+        var response = await SaveRuleAsync(client, stand, "R_SPEC", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true);
+
+        var problem = await ProblemAsync(response, HttpStatusCode.UnprocessableEntity).ConfigureAwait(true);
+        Assert.Equal("err.ECR-CALC-0422.ruleCatchAllNotLast", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("R_ALL", problem.GetProperty("rule").GetString());
+        Assert.Equal("R_SPEC", problem.GetProperty("shadowed").GetString());
+
+        // ⚠ Той самий набір у правильному порядку — законний (підказка екрана).
+        await OkAsync(await SaveRuleAsync(client, stand, "R_ALL", "{}", 100).ConfigureAwait(true))
+            .ConfigureAwait(true);
+        await OkAsync(await SaveRuleAsync(client, stand, "R_SPEC", "{\"KIND\":\"GAS\"}", 10).ConfigureAwait(true))
+            .ConfigureAwait(true);
+    }
+
+    // ── V-18: публікація ──────────────────────────────────────────────────
+
+    /// <remarks>
+    /// Правило пишеться в базу ПОВЗ обробник — так, як лежать збережені до
+    /// виправлення (<c>R_BAD</c> на стенді). Мутація: прибрати
+    /// <c>CheckRulesAsync</c> у <c>PublishMethodologyHandler</c> — відмова
+    /// приходить уже не про правило (золотий набір порожній).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Публікація_з_битим_правилом_відхиляється_з_назвою_правила()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync(rules: [("R_BAD", "{not json", 5), ("R_ALL", "{}", 100)])
+            .ConfigureAwait(true);
+
+        var problem = await PublishExpecting422Async(client, stand).ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-CALC-0422.ruleMatchInvalid", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("R_BAD", problem.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Публікація_з_однаковими_пріоритетами_відхиляється()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync(rules: [("R_A", "{\"K\":\"A\"}", 10), ("R_B", "{\"K\":\"B\"}", 10)])
+            .ConfigureAwait(true);
+
+        var problem = await PublishExpecting422Async(client, stand).ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-CALC-0422.rulePriorityDuplicate", problem.GetProperty("messageKey").GetString());
+    }
+
+    /// <remarks>
+    /// Мутація: прибрати виклик <c>CheckUnknownConstants</c> у
+    /// <c>PublishMethodologyHandler</c> — відмова приходить про порожній
+    /// золотий набір, про <c>CST.NOPE</c> — ні слова.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Публікація_з_невідомою_константою_відхиляється_поіменно()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync(formulas: [("F_BAD3", "CST.NOPE * 2"), ("F_OK", "CST.EF_CO2 * 2")])
+            .ConfigureAwait(true);
+
+        var problem = await PublishExpecting422Async(client, stand).ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-CALC-0422.unknownConstants", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("F_BAD3: CST.NOPE", problem.GetProperty("constants").GetString());
+        Assert.Contains("F_BAD3: CST.NOPE", problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// Мутація: повернути <c>cycleLength = CyclePath.Count</c> — <c>"3"</c>
+    /// замість <c>"2"</c>; прибрати <c>cyclePath</c> — у тексті немає назв.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Цикл_двох_формул_названо_поіменно_і_з_чесною_кількістю()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+        var stand = await StandAsync(formulas: [("F_A", "!F_B + 1"), ("F_B", "!F_A + 1")])
+            .ConfigureAwait(true);
+
+        var problem = await PublishExpecting422Async(client, stand).ConfigureAwait(true);
+
+        Assert.Equal("ECR-TMPL-4221", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("2", problem.GetProperty("cycleLength").GetString());
+
+        var detail = problem.GetProperty("detail").GetString()!;
+        Assert.Contains("F_A", detail, StringComparison.Ordinal);
+        Assert.Contains("F_B", detail, StringComparison.Ordinal);
+        Assert.Contains("(2 formula(s))", detail, StringComparison.Ordinal);
+    }
+
     // ── Опора ─────────────────────────────────────────────────────────────
 
     private static string VersionUrl(Stand stand)

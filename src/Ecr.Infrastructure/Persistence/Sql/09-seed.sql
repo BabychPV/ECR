@@ -405,7 +405,10 @@ UPDATE t
     (N'err.ECR-REG-0409.entryReferenced', N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.',
                                                 N'Entry "{code}" cannot be deleted: it is still referenced {referenceCount} time(s) — by document cells, other registry entries or methodology constants. Close it with an end date instead: history stays readable and new periods will not offer it.'),
     (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.',
-                                                N'Cells store the entry id, so the code can change. An entry that anything still references cannot be removed — close it with an end date instead.')
+                                                N'Cells store the entry id, so the code can change. An entry that anything still references cannot be removed — close it with an end date instead.'),
+    -- V-18: цикл формул — поіменно і з чесною кількістю.
+    (N'err.ECR-TMPL-4221.formulaCycle',   N'en', N'The formulas form a dependency cycle ({cycleLength} formula(s) involved).',
+                                                N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1198,12 +1201,17 @@ USING (VALUES
     (N'err.ECR-CALC-0422.formulaNoExpression',  N'en', N'Formula "{code}" needs an expression: an empty one would silently yield zero.', 1),
     (N'err.ECR-CALC-0422.textFormulaUnit',      N'en', N'Formula "{code}" returns text, so it cannot have a result unit.', 1),
     (N'err.ECR-CALC-0422.ruleNoPredicate',      N'en', N'Rule "{code}" needs a predicate; to match the whole table, use an empty JSON object.', 1),
+    -- V-18: правила відбору рядків методології — при збереженні й публікації.
+    (N'err.ECR-CALC-0422.ruleMatchInvalid',       N'en', N'The predicate of rule "{code}" is not a flat JSON object of column–value pairs; such a predicate matches no row. To match the whole table, use an empty JSON object.', 1),
+    (N'err.ECR-CALC-0422.rulePriorityDuplicate',  N'en', N'Rules {rules} share priority {priority}: which one matches first would depend on storage order. Give each active rule its own priority.', 1),
+    (N'err.ECR-CALC-0422.ruleCatchAllNotLast',    N'en', N'Rule "{rule}" (empty predicate — the whole table) has priority {priority}, higher than the specific rules {shadowed}: they would never apply. An empty predicate needs the lowest priority (the largest number).', 1),
+    (N'err.ECR-CALC-0422.unknownConstants',       N'en', N'The formulas reference constants that this version does not define ({count}): {constants}. Each of them would evaluate to #REF.', 1),
     (N'err.ECR-CALC-0422.selfDependency',       N'en', N'A methodology cannot depend on itself.', 1),
     (N'err.ECR-CALC-0422.selfImport',           N'en', N'A methodology cannot import itself: its own formulas are already visible.', 1),
     (N'err.ECR-CALC-0432.undeclaredArguments',  N'en', N'The formula expression uses {undeclaredCount} token(s) missing from its declared argument list.', 1),
     (N'err.ECR-CALC-0433.legacyExtensionFunction', N'en', N'The version uses {functionCount} function(s) not available in Legacy mode: switch it to Strict mode from a new effective date.', 1),
     (N'err.ECR-CALC-0438.missingColumns',       N'en', N'A formula argument has no matching column in {tableCount} bound table(s).', 1),
-    (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle ({cycleLength} formula(s) involved).', 1),
+    (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).', 1),
 
     -- ⛔ `RoleAndUserHandlers.cs` (23 кидки, найбільший файл боргу локалізації
     -- на замір 254/74): ролі, користувачі, межі чинності призначення

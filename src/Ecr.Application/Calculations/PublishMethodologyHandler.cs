@@ -91,6 +91,13 @@ public sealed class PublishMethodologyHandler(
                 });
         }
 
+        // ⛔ V-18: правила відбору рядків — ДО золотого набору. Версія, чиї
+        // правила не збігаються ні з чим або збігаються не в тому порядку,
+        // проходила б публікацію з зеленим тестом: тест рахує формули, а не те,
+        // ЯКІ рядки документа до них дійдуть. Тут ловиться й те, що збережено
+        // до появи перевірки при збереженні.
+        await CheckRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
         // що була чинною, і порівнювати стало б нема з чим.
         var previous = methodology.VersionOn(from.AddDays(-1));
@@ -249,6 +256,9 @@ public sealed class PublishMethodologyHandler(
         // має побачити їх у ту саму мить, а не знайти через тиждень у логах.
         var warnings = new List<string>();
 
+        // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
+        MethodologyPublishChecks.CheckUnknownConstants(parsed, constants);
+
         problems.AddRange(MethodologyPublishChecks.Check(
             parsed,
             constants,
@@ -262,18 +272,25 @@ public sealed class PublishMethodologyHandler(
         if (!ordering.IsSuccess)
         {
             var byId = formulas.ToDictionary(f => f.Id, f => f.Code);
-            var cycleLength = ordering.CyclePath?.Count ?? 0;
+            string NameOf(int id) => byId.TryGetValue(id, out var code)
+                ? code
+                : id.ToString(CultureInfo.InvariantCulture);
+
+            // ⛔ V-18: шлях циклу ЗАМКНЕНИЙ — `[A, B, A]` (`TopologicalSorter`),
+            // і `Count` рахував перший вузол двічі: «3 formula(s) involved» на
+            // цикл із двох. Рахуються РІЗНІ формули, а шлях іде в текст
+            // поіменно — інакше методолог шукає цикл сам.
+            var path = ordering.CyclePath ?? [];
+            var cycleLength = path.Distinct().Count();
 
             throw new BusinessRuleException(
                 "ECR-TMPL-4221",
-                Ecr.Expressions.Graph.CycleDescription.Describe(
-                    ordering.CyclePath,
-                    id => byId.TryGetValue(id, out var code) ? code : id.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture)),
+                Ecr.Expressions.Graph.CycleDescription.Describe(ordering.CyclePath, NameOf),
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-TMPL-4221.formulaCycle",
                     ["cycleLength"] = cycleLength.ToString(CultureInfo.InvariantCulture),
+                    ["cyclePath"] = string.Join(" → ", path.Select(NameOf)),
                 });
         }
 
@@ -446,6 +463,20 @@ public sealed class PublishMethodologyHandler(
                     ["count"] = problems.Count,
                 });
         }
+    }
+
+    /// <summary>Предикати й узгодженість активних правил версії (V-18).</summary>
+    private async Task CheckRulesAsync(int methodologyVersionId, CancellationToken ct)
+    {
+        var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        foreach (var rule in rules)
+        {
+            MethodologyRuleChecks.RequireValidPredicate(rule.Code, rule.MatchJson);
+        }
+
+        MethodologyRuleChecks.RequireConsistentSet(
+            [.. rules.Select(r => new MethodologyRuleChecks.RuleSpec(r.Code, r.MatchJson, r.Priority))]);
     }
 
     /// <summary>Проблеми, що випливають із природи методології (поправка 6).</summary>

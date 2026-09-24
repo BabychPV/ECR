@@ -381,6 +381,25 @@ public sealed class SaveMethodologyRuleHandler(
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ V-18: предикат і узгодженість набору перевіряються ДО зміни
+        // сутності. Доти зберігалося будь-що — `{not json`, `[1,2]`, однакові
+        // пріоритети, `{}` попереду конкретних правил, — і публікація теж це
+        // пропускала (`MethodologyRuleChecks`).
+        MethodologyRuleChecks.RequireValidPredicate(ruleCode.Value, matchJson);
+
+        if (isActive)
+        {
+            var others = await drafts.GetAllRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+            MethodologyRuleChecks.RequireConsistentSet(
+            [
+                .. others
+                    .Where(r => r.IsActive && !string.Equals(r.Code, ruleCode.Value, StringComparison.OrdinalIgnoreCase))
+                    .Select(r => new MethodologyRuleChecks.RuleSpec(r.Code, r.MatchJson, r.Priority)),
+                new MethodologyRuleChecks.RuleSpec(ruleCode.Value, matchJson, priority),
+            ]);
+        }
+
         var existing = await drafts
             .FindRuleAsync(methodologyVersionId, ruleCode.Value, ct)
             .ConfigureAwait(false);
