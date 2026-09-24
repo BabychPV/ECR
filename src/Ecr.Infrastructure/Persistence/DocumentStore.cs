@@ -281,6 +281,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// звичайне, неконкурентне створення документа отримує той самий
     /// впізнаваний номер, що й до цієї правки. Дірки в нумерації з'являються
     /// лише там, де без них був би <c>500</c> або відмова.
+    ///
+    /// ⛔ `R-17`. Номер рахувався як <c>COUNT + 1</c> — і ключ ВИДАЛЕНОГО
+    /// документа видавався знову: видалили <c>P5-V3-0005</c>, наступний
+    /// створений — знову <c>P5-V3-0005</c>. Той самий ключ в аудиті, у назвах
+    /// експортів і в листуванні означав тепер два різні документи. Тепер
+    /// номер лише зростає: від НАЙБІЛЬШОГО виданого (<see cref="HighestIssuedNumberAsync"/>),
+    /// а не від кількості живих.
     /// </remarks>
     public async Task<string> NextBusinessKeyAsync(
         int projectId, int templateVersionId, CancellationToken ct)
@@ -288,10 +295,18 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // ⚠ Ключ будується з проєкту і порядкового номера, а не з GUID:
         // BusinessKey потрапляє в аудит і в назви експортів, і людина мусить
         // упізнавати його з першого погляду.
-        var used = await db.Documents
+        var count = await db.Documents
             .AsNoTracking()
             .CountAsync(d => d.ProjectId == projectId, ct)
             .ConfigureAwait(false);
+
+        // ⚠ `Max`, а не саме лише найбільший номер: ключі, задані людиною
+        // (`ChangeDocumentKeyHandler`), шаблону не мають і в номер не
+        // рахуються, але й не мають зсунути нумерацію НАЗАД — кількість
+        // документів лишається нижньою межею, як і було.
+        var used = Math.Max(
+            count,
+            await HighestIssuedNumberAsync(projectId, ct).ConfigureAwait(false));
 
         // ⚠ Розкид на повторі — від ОДИНИЦІ, не від нуля: нульовий зсув
         // повернув би рівно той номер, на якому запит щойно програв, тобто
@@ -320,6 +335,108 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         throw new Application.Errors.BusinessRuleException(
             "ECR-DOC-0409", "Не вдалося підібрати вільний бізнес-ключ документа.");
     }
+
+    /// <summary>
+    /// Найбільший порядковий номер, який проєкт УЖЕ видавав документу, —
+    /// живому, видаленому чи перейменованому (`R-17`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без міграції схеми, і це свідомо: окремий лічильник означав би нову
+    /// таблицю чи колонку, а слід кожного виданого номера вже є. Живі
+    /// документи несуть його в <c>BusinessKey</c>; видалені й перейменовані —
+    /// у журналі безпеки (<c>aud.SecurityEvent</c>, події
+    /// <c>DocumentDeleted</c> з <c>businessKey</c> і <c>DocumentKeyChanged</c>
+    /// з <c>oldKey</c> — `DeleteDocumentHandler`, `ChangeDocumentKeyHandler`).
+    ///
+    /// ⚠ Межа, названа вголос: журнал пишеться ПІСЛЯ коміту видалення, і
+    /// архівація (`ArchiveJob`) з часом переносить старі події з
+    /// <c>aud.SecurityEvent</c>. Номер, чий слід уже заархівовано або не
+    /// записався через збій журналу, знову стає вільним. Повністю закрити це
+    /// може лише власний лічильник — тобто міграція, якої ця правка не додає.
+    ///
+    /// ⚠ Подій такого роду — одиниці (видалення чернетки й зміна ключа —
+    /// рідкісні ручні дії), тож читання без предиката <c>ChangedAt</c> по всіх
+    /// партиціях журналу коштує мало, а обмежити його вікном означало б знову
+    /// видавати номер, видалений давніше за вікно.
+    /// </remarks>
+    private async Task<int> HighestIssuedNumberAsync(int projectId, CancellationToken ct)
+    {
+        var prefix = string.Create(CultureInfo.InvariantCulture, $"P{projectId}-V");
+
+        var live = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.ProjectId == projectId && d.BusinessKey.StartsWith(prefix))
+            .Select(d => d.BusinessKey)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var project = projectId.ToString(CultureInfo.InvariantCulture);
+
+        var released = await db.Database
+            .SqlQuery<string>($"""
+                SELECT JSON_VALUE(e.DetailsJson, '$.businessKey') AS [Value]
+                  FROM aud.SecurityEvent AS e
+                 WHERE e.EventType = {DeletedEventType}
+                   AND JSON_VALUE(e.DetailsJson, '$.projectId') = {project}
+                UNION ALL
+                SELECT JSON_VALUE(e.DetailsJson, '$.oldKey') AS [Value]
+                  FROM aud.SecurityEvent AS e
+                 WHERE e.EventType = {KeyChangedEventType}
+                   AND JSON_VALUE(e.DetailsJson, '$.projectId') = {project}
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var highest = 0;
+
+        foreach (var key in live.Concat(released))
+        {
+            if (NumberOf(key, prefix) is { } number && number > highest)
+            {
+                highest = number;
+            }
+        }
+
+        return highest;
+    }
+
+    /// <summary>
+    /// Порядковий номер із ключа <c>P{проєкт}-V{версія}-{номер}</c>; <c>null</c> —
+    /// ключ іншого вигляду (заданий людиною) або чужого проєкту.
+    /// </summary>
+    public static int? NumberOf(string? businessKey, string prefix)
+    {
+        if (businessKey is null || !businessKey.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var dash = businessKey.IndexOf('-', prefix.Length);
+        if (dash <= prefix.Length || dash == businessKey.Length - 1)
+        {
+            return null;
+        }
+
+        // ⚠ Між `V` і дефісом — лише цифри версії: `P5-V3x-0007` — не наш ключ.
+        for (var i = prefix.Length; i < dash; i++)
+        {
+            if (!char.IsAsciiDigit(businessKey[i]))
+            {
+                return null;
+            }
+        }
+
+        return int.TryParse(
+            businessKey.AsSpan(dash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+            ? number
+            : null;
+    }
+
+    /// <summary>Подія журналу про видалення документа — `DeleteDocumentHandler.DeletedEventType`.</summary>
+    private const string DeletedEventType = Application.Documents.DeleteDocumentHandler.DeletedEventType;
+
+    /// <summary>Подія журналу про зміну ключа — `ChangeDocumentKeyHandler.EventType`.</summary>
+    private const string KeyChangedEventType = Application.Documents.ChangeDocumentKeyHandler.EventType;
 
     /// <inheritdoc />
     public async Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct)
