@@ -127,6 +127,40 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
     }
 
     /// <remarks>
+    /// ⛔ UX-прохід 2026-09-24. `ListProjectsHandler` брав сторінку з N перших
+    /// проєктів БАЗИ і лише потім відсіював ті, на які немає гранта. Користувач
+    /// із грантом на проєкт поза першою сторінкою бачив порожній перелік — і
+    /// S-12 вище почав падати, щойно в спільній тестовій базі стало більше
+    /// проєктів, ніж уміщує сторінка. `limit=1` робить це детермінованим: у базі
+    /// завжди є проєкт старший за щойно створений, і без фільтра в запиті він
+    /// займає єдине місце на сторінці.
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    [Trait("Scenario", "S-12")]
+    public async Task Перелік_проєктів_фільтрує_грант_до_сторінки_а_не_після()
+    {
+        using var app = new EcrApiFactory(sql);
+        var owner = await Provisioning.AdministratorAsync(app, "S12bOwner", ["Project.Manage", "Document.View", "Template.Edit"]);
+        _ = await CreateProjectAsync(owner.Client, "S12bA", "Asia/Almaty");
+        var granted = await CreateProjectAsync(owner.Client, "S12bB", "Asia/Almaty");
+
+        var operatorAdmin = await Provisioning.AdministratorAsync(app, "S12bOp", ["Document.View"]);
+        await Provisioning.GrantAsync(app, operatorAdmin.RoleId, "Project", granted, "Read");
+        operatorAdmin = await Provisioning.ReauthenticateAsync(app, operatorAdmin);
+
+        var response = await operatorAdmin.Client.GetAsync(new Uri("/api/v1/projects?limit=1", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var ids = body.GetProperty("items").EnumerateArray().Select(p => p.GetProperty("id").GetInt32()).ToList();
+
+        // Рівно один видимий проєкт — і саме той, на який є грант.
+        Assert.Equal([granted], ids);
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("nextCursor").ValueKind);
+    }
+
+    /// <remarks>
     /// ⛔ Q-246 (аудит хвилі 3, авторизація) — той самий клас дефекту, що й
     /// Q-179/Q-238 поруч, на КАЛЕНДАРНОМУ маршруті. `GetPeriodCalendarHandler`
     /// і `BuildPeriodCalendarHandler` перевіряли лише загальне `Document.View`,

@@ -74,17 +74,33 @@ public sealed class ListProjectsHandler(
                 });
         }
 
-        var all = await projects.ListAsync(page, ct).ConfigureAwait(false);
-
-        // ⚠ Фільтр за грантами робиться ТУТ, а не запитом: гранти вже
-        // розгорнуті в профілі, і другий похід у базу за тим самим нічого не
-        // додав би. Але фільтр обов'язковий: перелік проєктів, до яких немає
-        // доступу, — це вже розвідка структури підприємства.
-        var visible = all.Items
-            .Where(p => profile.LevelFor(ResourceKind.Project, p.Id) >= GrantLevel.Read)
+        // ⛔ Фільтр за грантами — У ЗАПИТІ, не після сторінки (UX-прохід
+        // 2026-09-24). До цього `ListAsync` брав N перших проєктів БАЗИ, а
+        // грант перевірявся вже над ними: користувач із грантом лише на
+        // (N+1)-й проєкт бачив порожній перелік і курсор «є ще», тобто екран
+        // «немає проєктів» при наявному доступі. Гранти вже розгорнуті в
+        // профілі, тож множина id береться звідти, а не другим походом у базу.
+        // Перелік проєктів без доступу — розвідка структури підприємства,
+        // тому фільтр обов'язковий.
+        var visibleIds = profile.Grants.Keys
+            .Select(ProjectIdOf)
+            .OfType<int>()
+            .Where(id => profile.LevelFor(ResourceKind.Project, id) >= GrantLevel.Read)
             .ToList();
 
-        return new PagedResult<ProjectSummary>(visible, all.NextCursor, all.TotalCount);
+        return await projects.ListAsync(page, visibleIds, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Id проєкту з ключа гранта <c>"Project:{id}"</c>; інший ресурс — <c>null</c>.</summary>
+    private static int? ProjectIdOf(string grantKey)
+    {
+        const string prefix = nameof(ResourceKind.Project) + ":";
+
+        return grantKey.StartsWith(prefix, StringComparison.Ordinal)
+               && int.TryParse(grantKey.AsSpan(prefix.Length), System.Globalization.NumberStyles.None,
+                   System.Globalization.CultureInfo.InvariantCulture, out var id)
+            ? id
+            : null;
     }
 }
 
