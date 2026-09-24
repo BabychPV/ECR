@@ -156,7 +156,15 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
     // ⚠ Порожнє не стає `false`: «не заповнювали» і «ні» — різні стани.
     if (normalized.length === 0) return null;
 
-    return normalized === 'true' || normalized === '1' || normalized === 'так';
+    if (BoolTrue.has(normalized)) return true;
+    if (BoolFalse.has(normalized)) return false;
+
+    // ⛔ `V-07`: тут стояло `normalized === 'true' || …`, тобто БУДЬ-ЯКИЙ
+    // нерозпізнаний текст ставав `false`: `maybe` мовчки перезаписував `True`
+    // (`aud.CellChange` id 75). Тепер — те саме правило, що й для числа вище:
+    // нерозпізнане їде ТЕКСТОМ, сервер відповідає `ECR-CELL-0422` з назвою
+    // колонки, і комірка лишається позначеною з причиною (`V-01`).
+    return raw;
   }
 
   // ⛔ Директива registry-lookup, PR A4: комірка `Lookup` тримає
@@ -175,3 +183,13 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
 
   return raw;
 }
+
+/**
+ * Написи логічного значення, які вважаються відповіддю «так»/«ні» (`V-07`).
+ *
+ * ⚠ Закритий перелік, а не «усе, що не так, — ні»: мови продукту (en/uk/ru/kk),
+ * `1`/`0` з Excel і `true`/`false`, які віддає Ctrl+C цієї ж сітки (`cellText`).
+ * Усе інше — не відповідь, а помилка введення, і вирішує її людина.
+ */
+const BoolTrue: ReadonlySet<string> = new Set(['true', '1', 'yes', 'y', 'так', 'да', 'иә']);
+const BoolFalse: ReadonlySet<string> = new Set(['false', '0', 'no', 'n', 'ні', 'нет', 'жоқ']);

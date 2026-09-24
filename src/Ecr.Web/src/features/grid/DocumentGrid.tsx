@@ -14,6 +14,7 @@ import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay } from './LookupCellEditor';
+import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
@@ -1695,6 +1696,15 @@ export function gridColumns(
         : {
             cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
           }),
+
+      // ⛔ `V-07`: логічна комірка — перелік «так / ні / порожньо», а не
+      // текстове поле, у якому `maybe` мовчки ставав `false`.
+      ...(column.dataType === 'Bool'
+        ? {
+            editor: createBoolCellEditor(),
+            cellTemplate: (_h, props: { value?: unknown }) => boolCellDisplay(props.value),
+          }
+        : {}),
 
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
       // «сюди не вставиться» мають відповідати одним правилом.
