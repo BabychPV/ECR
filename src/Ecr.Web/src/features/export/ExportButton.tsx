@@ -28,6 +28,26 @@ export interface ExportButtonProps {
 type ExportFormat = 'xlsx' | 'csv' | 'json';
 
 /**
+ * Підпис посилання на готовий файл — ЗА ФОРМАТОМ, у якому його будували.
+ *
+ * ⛔ `V-10`: посилання на ZIP-архів CSV і на JSON підписувалося «Download the
+ * workbook» — людина чекала книгу Excel і отримувала архів.
+ *
+ * ⚠ Літерали, а не ключ, складений із формату: сторож
+ * `EndpointCoverageTests` перевіряє в каталозі лише ключі-літерали.
+ */
+function exportReadyLabel(format: ExportFormat): string {
+  switch (format) {
+    case 'csv':
+      return t('document.exportReadyCsv');
+    case 'json':
+      return t('document.exportReadyJson');
+    default:
+      return t('document.exportReady');
+  }
+}
+
+/**
  * Підписи перемикача формату — самі значення, а не переклад лейблів, беруться
  * з каталогу (`t()`), щоб не заводити четвертий літерал в UI поруч із трьома
  * дозволеними значеннями контракту.
@@ -86,6 +106,11 @@ export function ExportButton({
   // заради перемикача, який мало хто чіпає частіше, ніж раз на сесію.
   const [format, setFormat] = useState<ExportFormat>('xlsx');
 
+  // ⚠ Формат ЗАПУЩЕНОЇ побудови — окремо від перемикача: людина може
+  // перемкнути формат, доки файл будується, а підпис посилання має
+  // відповідати файлу, який вона отримає, а не поточному положенню перемикача.
+  const [startedFormat, setStartedFormat] = useState<ExportFormat>('xlsx');
+
   const start = useMutation({
     mutationFn: () =>
       apiEnqueue(`/api/v1/documents/${documentId}/export`, {
@@ -95,7 +120,10 @@ export function ExportButton({
         language,
         periodKey,
       } satisfies ExportRequest),
-    onSuccess: (job) => setJobId(job.jobId),
+    onSuccess: (job) => {
+      setStartedFormat(format);
+      setJobId(job.jobId);
+    },
     onError: showApiError,
   });
 
@@ -154,7 +182,7 @@ export function ExportButton({
               href={`/api/v1/documents/${documentId}/export/${encodeURIComponent(exportKey)}`}
               download
             >
-              {t('document.exportReady')}
+              {exportReadyLabel(startedFormat)}
             </Anchor>
           ),
         });
@@ -171,7 +199,7 @@ export function ExportButton({
         message: job.data?.error ?? t('document.exportFailed'),
       });
     }
-  }, [jobId, outcome, job.data?.error, job.data?.message, documentId]);
+  }, [jobId, outcome, job.data?.error, job.data?.message, documentId, startedFormat]);
 
   return (
     /*

@@ -1453,6 +1453,9 @@ USING (VALUES
     (N'document.exportFormatJson',       N'en', N'JSON', 1),
     (N'document.exportBuilding',         N'en', N'Building...', 1),
     (N'document.exportReady',            N'en', N'Download the workbook', 1),
+    -- V-10: підпис посилання — за форматом побудованого файлу.
+    (N'document.exportReadyCsv',         N'en', N'Download the CSV archive', 1),
+    (N'document.exportReadyJson',        N'en', N'Download the JSON file', 1),
     (N'document.exportFailed',           N'en', N'Export failed.', 1),
     -- Меню рідкісних і небезпечних дій документа (зміна ключа, видалення):
     -- поза рядком щоденних кнопок, праворуч.
@@ -1967,6 +1970,8 @@ USING (VALUES
     (N'jobs.id',                         N'en', N'Job id', 1),
     (N'jobs.watch',                      N'en', N'Watch', 1),
     (N'jobs.recentEmpty',                N'en', N'No jobs yet', 1),
+    -- V-10: результат задачі буває книгою, ZIP-архівом CSV і JSON.
+    (N'jobs.resultDownload',             N'en', N'Download the file', 1),
     -- Шухляда «My tasks» у шапці (BE-08): власні фонові задачі, усім ролям.
     (N'jobs.myTasks',                    N'en', N'My tasks', 1),
     (N'jobs.myTasksClose',               N'en', N'Close my tasks', 1),

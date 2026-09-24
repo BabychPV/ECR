@@ -157,6 +157,27 @@ describe('ExportButton: стеження за задачею побудови к
     expect(link.getAttribute('href')).toContain('export-key-abc');
   });
 
+  it.each([
+    ['⟦document.exportFormatCsv⟧', '⟦document.exportReadyCsv⟧'],
+    ['⟦document.exportFormatJson⟧', '⟦document.exportReadyJson⟧'],
+  ])('V-10: посилання на файл формату %s підписане за форматом, а не «книга»', async (option, label) => {
+    mockFetch({ jobId: 'job-1', state: 'Succeeded', percent: 100, message: 'export-key-abc', error: null });
+
+    const user = userEvent.setup();
+    show();
+
+    await user.click(screen.getByRole('radio', { name: option }));
+    await user.click(screen.getByRole('button'));
+
+    await waitFor(() => expect(notifications.show).toHaveBeenCalled());
+
+    const call = vi.mocked(notifications.show).mock.calls[0]?.[0] as { message: ReactNode };
+    render(<MantineProvider theme={testTheme}>{call.message}</MantineProvider>);
+
+    expect(screen.getByRole('link', { name: label })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: '⟦document.exportReady⟧' })).toBeNull();
+  });
+
   it('провалену задачу — показує ПРИЧИНУ (`error`), а не застарілий прогрес (`message`)', async () => {
     mockFetch({
       jobId: 'job-1',

@@ -215,7 +215,7 @@ describe('«Повторити» і посилання на результат (
      * чи з `documentId` — і `href` перестане збігатися з тим, що віддав
      * сервер: посилання поведе на неіснуючий файл.
      */
-    const link = screen.getByRole('link', { name: '⟦document.exportReady⟧' });
+    const link = screen.getByRole('link', { name: '⟦jobs.resultDownload⟧' });
     expect(link.getAttribute('href')).toBe('/api/v1/documents/42/export/abc-123');
   });
 
@@ -223,6 +223,6 @@ describe('«Повторити» і посилання на результат (
     show([row({ jobId: 'z', state: 'Succeeded', resultUrl: null })]);
 
     expect(document.querySelector('[data-job-result]')).toBeNull();
-    expect(screen.queryByRole('link', { name: '⟦document.exportReady⟧' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '⟦jobs.resultDownload⟧' })).toBeNull();
   });
 });
