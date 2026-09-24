@@ -3,6 +3,7 @@ import { Alert, Button, Group, Stack, Text } from '@mantine/core';
 import { t } from '@/shared/i18n';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
 import type { ExpressionPlacement } from '@/features/expressions/api';
+import type { TemplateStructureDto } from '@/api/types';
 import { type FormulaBlocker, type FormulaDraft, whyCannotSaveFormula } from './formula';
 
 /**
@@ -27,6 +28,7 @@ import { type FormulaBlocker, type FormulaDraft, whyCannotSaveFormula } from './
 export function FormulaEditor({
   draft,
   templateVersionId,
+  structure,
   disabled,
   saving,
   onChange,
@@ -35,6 +37,8 @@ export function FormulaEditor({
 }: {
   draft: FormulaDraft;
   templateVersionId: number;
+  /** Структура версії — для підказок колонок і рядків після `[`. */
+  structure?: TemplateStructureDto | undefined;
   disabled: boolean;
   saving: boolean;
   onChange: (next: FormulaDraft) => void;
@@ -80,6 +84,7 @@ export function FormulaEditor({
         onChange={(expression) => onChange({ ...draft, expression })}
         dialect="Template"
         placement={placement}
+        structure={structure}
         ariaLabel={t('formulas.expression')}
         height="140px"
       />

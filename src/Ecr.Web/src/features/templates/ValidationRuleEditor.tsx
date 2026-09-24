@@ -1,6 +1,8 @@
-import type { JSX } from 'react';
-import { Alert, Button, Group, NativeSelect, NumberInput, Stack, Switch, Textarea, TextInput } from '@mantine/core';
-import type { ValidationSeverity } from '@/api/types';
+import { useMemo, type JSX } from 'react';
+import { Alert, Button, Group, Input, NativeSelect, NumberInput, Stack, Switch, TextInput } from '@mantine/core';
+import type { TemplateStructureDto, ValidationSeverity } from '@/api/types';
+import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
+import type { ExpressionPlacement } from '@/features/expressions/api';
 import { t } from '@/shared/i18n';
 import { LocalizedInput } from '@/shared/ui/LocalizedInput';
 import {
@@ -20,6 +22,9 @@ import {
  */
 export function ValidationRuleEditor({
   draft,
+  templateVersionId,
+  tableDefId,
+  structure,
   disabled,
   saving,
   onChange,
@@ -27,6 +32,10 @@ export function ValidationRuleEditor({
   onCancel,
 }: {
   draft: ValidationRuleDraft;
+  /** Версія і таблиця правила — контекст перевірки й підказок виразу. */
+  templateVersionId: number;
+  tableDefId: number;
+  structure?: TemplateStructureDto | undefined;
   disabled: boolean;
   saving: boolean;
   onChange: (next: ValidationRuleDraft) => void;
@@ -34,6 +43,18 @@ export function ValidationRuleEditor({
   onCancel: () => void;
 }): JSX.Element {
   const blocker = whyCannotSaveValidationRule(draft);
+
+  // ⚠ Мемоізовано: редактор перезапитує склад мови й перевірку на кожну зміну
+  // розміщення ЗА ПОСИЛАННЯМ (`FormulaEditor.placementIdentity.test.tsx`).
+  const { columnDefId } = draft;
+  const placement = useMemo<ExpressionPlacement>(
+    () => ({
+      templateVersionId,
+      tableDefId,
+      ...(columnDefId === null ? {} : { columnDefId }),
+    }),
+    [templateVersionId, tableDefId, columnDefId],
+  );
 
   const severities: readonly ValidationSeverity[] = ['Info', 'Warning', 'Error'];
 
@@ -77,15 +98,31 @@ export function ValidationRuleEditor({
         }
       />
 
-      <Textarea
+      {/*
+        ⛔ Той самий редактор виразів, що й у формул (`ФВ-9.15a`), а не голе
+        текстове поле: предикат правила пишеться тією самою мовою шаблону, і
+        без редактора в ньому не було ні підказок колонок після `[`, ні
+        підкреслення помилки до збереження.
+
+        ⚠ `labelElement="div"`: поле Monaco не є міткованим елементом форми,
+        його доступна назва — `ariaLabel` самого редактора.
+      */}
+      <Input.Wrapper
         label={t('validationRules.expression')}
         description={t('validationRules.expressionHint')}
-        autosize
-        minRows={2}
-        disabled={disabled}
-        value={draft.expression}
-        onChange={(event) => onChange({ ...draft, expression: event.currentTarget.value })}
-      />
+        labelElement="div"
+      >
+        <ExpressionEditor
+          value={draft.expression}
+          onChange={(expression) => onChange({ ...draft, expression })}
+          dialect="Template"
+          placement={placement}
+          structure={structure}
+          readOnly={disabled}
+          ariaLabel={t('validationRules.expression')}
+          height="80px"
+        />
+      </Input.Wrapper>
 
       <LocalizedInput
         label={t('validationRules.message')}

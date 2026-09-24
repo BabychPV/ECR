@@ -446,6 +446,24 @@ public sealed partial class EndpointCoverageTests
             ["registries.code", "registries.name"],
             "Перелік бракуючих полів форми нового довідника."),
 
+        // ⚠ Опис функції в підказці редактора виразів (`hasText(key) ? t(key) : —`):
+        // функцію без рядка підказка показує самою сигнатурою, тож перелік — лише
+        // ті, що вже мають текст у сіді (діалекти Template і Methodology, `02b` §7–§8).
+        new("features/expressions/describe.ts", "key", 1, "features/expressions/describe.ts",
+            [
+                "expressions.fn.abs", "expressions.fn.average", "expressions.fn.convert",
+                "expressions.fn.count", "expressions.fn.if", "expressions.fn.iferror", "expressions.fn.max",
+                "expressions.fn.min", "expressions.fn.product", "expressions.fn.regfield",
+                "expressions.fn.round", "expressions.fn.sum", "expressions.fn.sumif", "expressions.fn.acos",
+                "expressions.fn.asin", "expressions.fn.atan", "expressions.fn.ceiling", "expressions.fn.cos",
+                "expressions.fn.exp", "expressions.fn.floor", "expressions.fn.ieeeremainder",
+                "expressions.fn.ln", "expressions.fn.log", "expressions.fn.log10", "expressions.fn.pow",
+                "expressions.fn.sign", "expressions.fn.sin", "expressions.fn.sqrt", "expressions.fn.tan",
+                "expressions.fn.truncate", "expressions.fn.substance", "expressions.fn.ifs",
+                "expressions.fn.in",
+            ],
+            "Короткий опис функції в переліку доповнення й при наведенні."),
+
         new("pages/admin/SnapshotsPage.tsx", "blockedReason", 1, "pages/admin/SnapshotsPage.tsx",
             ["snapshots.parametersUnknown", "snapshots.parametersBlocked"],
             "Причина, чому зріз не можна замовити."),

@@ -1458,6 +1458,7 @@ export function TemplateVersionPage(): JSX.Element {
                 <FormulaEditor
                   draft={draft}
                   templateVersionId={id}
+                  structure={structure.data}
                   disabled={!canEditSheets}
                   saving={saveFormulaMutation.isPending}
                   onChange={setDraft}
@@ -1492,6 +1493,9 @@ export function TemplateVersionPage(): JSX.Element {
                 <Suspense fallback={null}>
                   <ValidationRuleEditor
                     draft={draft}
+                    templateVersionId={id}
+                    tableDefId={validationRuleTable}
+                    structure={structure.data}
                     disabled={!canEditSheets}
                     saving={saveValidationRuleMutation.isPending}
                     onChange={setDraft}

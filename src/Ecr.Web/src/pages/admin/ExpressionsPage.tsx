@@ -8,6 +8,7 @@ import type {
   ExpressionValidationDto,
   MethodologyDto,
   TemplatePage,
+  TemplateStructureDto,
   TemplateVersionPage,
 } from '@/api/types';
 import { ExpressionEditor } from '@/features/expressions/ExpressionEditor';
@@ -71,6 +72,19 @@ export function ExpressionsPage(): JSX.Element {
     enabled: firstTemplateId !== undefined,
   });
 
+  // ⛔ Структура обраної версії — джерело підказок після `[` (колонки, рядки,
+  // таблиці). Той самий ключ, що й на сторінці версії
+  // (`queryKeys.templates.version`): повернувшись звідти, запит не йде вдруге.
+  const selectedTemplateVersion = numberOrUndefined(templateVersionId);
+  const structure = useQuery({
+    queryKey: queryKeys.templates.version(selectedTemplateVersion ?? 0),
+    queryFn: () =>
+      apiFetch<TemplateStructureDto>(
+        `/api/v1/template-versions/${String(selectedTemplateVersion)}/structure`,
+      ),
+    enabled: dialect === 'Template' && selectedTemplateVersion !== undefined,
+  });
+
   // Яку саме версію методології обрано — потрібні обидва ідентифікатори:
   // симуляція адресується методологією, а набір тестів належить версії.
   const selectedMethodology = useMemo(() => {
@@ -100,7 +114,8 @@ export function ExpressionsPage(): JSX.Element {
    * `selectedMethodology` не з'являється `TestCaseRunner`, тобто мовчки
    * зникає єдиний спосіб прогнати золотий набір.
    */
-  const sourceError = templates.error ?? versions.error ?? methodologies.error ?? null;
+  const sourceError =
+    templates.error ?? versions.error ?? methodologies.error ?? structure.error ?? null;
 
   // ⚠ Перечитується лише те, що справді відмовило: `refetch()` на вимкненому
   // запиті версій сходив би по `/templates/undefined/versions`.
@@ -108,6 +123,7 @@ export function ExpressionsPage(): JSX.Element {
     if (templates.error !== null) void templates.refetch();
     if (versions.error !== null) void versions.refetch();
     if (methodologies.error !== null) void methodologies.refetch();
+    if (structure.error !== null) void structure.refetch();
   };
 
   // ⚠ Саме `firstTemplateId !== undefined`, а не голий `isPending`: без
@@ -202,6 +218,7 @@ export function ExpressionsPage(): JSX.Element {
         onChange={setExpression}
         dialect={dialect}
         placement={placement}
+        structure={dialect === 'Template' ? structure.data : undefined}
         ariaLabel={t('expressions.editorLabel')}
         onValidated={setResult}
       />
