@@ -70,6 +70,17 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
              .AnyAsync(id => id == templateVersionId, ct);
 
     /// <inheritdoc />
+    /// <remarks>Той самий шлях через проєкт, що <see cref="HasDocumentsAsync"/>.</remarks>
+    public Task<int> CountDocumentsAsync(int templateVersionId, CancellationToken ct)
+        => db.Documents
+             .AsNoTracking()
+             .Join(db.Projects.AsNoTracking(),
+                   d => d.ProjectId,
+                   p => p.Id,
+                   (d, p) => p.TemplateVersionId)
+             .CountAsync(id => id == templateVersionId, ct);
+
+    /// <inheritdoc />
     public async Task<int> CreateDraftAsync(
         int templateId, string versionNumber, int userId, DateTime utcNow, CancellationToken ct)
     {
