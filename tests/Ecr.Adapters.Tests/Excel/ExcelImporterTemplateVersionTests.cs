@@ -187,7 +187,7 @@ public sealed class ExcelImporterTemplateVersionTests
             // тобто до транзакції не доходять; саб віддає працюючу заглушку,
             // щоб причина падіння в майбутньому тесті не виглядала як дефект
             // продукту.
-            FakeUnitOfWork.Passthrough(), Substitute.For<IBackgroundJobScheduler>());
+            FakeUnitOfWork.Passthrough(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<ISheetEditGate>());
     }
 
     /// <summary>Саб <see cref="IUnitOfWork"/>, чия «транзакція» просто виконує тіло.</summary>

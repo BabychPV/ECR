@@ -30,7 +30,11 @@ public sealed class ExcelImporter(
     ICellStore cellStore,
     IRowStore rowStore,
     IUnitOfWork uow,
-    IBackgroundJobScheduler jobs) : IExcelImporter
+    IBackgroundJobScheduler jobs,
+
+    // ⛔ Спільні блокування аркушів книги беруться ЗАЗДАЛЕГІДЬ і в стабільному
+    // порядку (`ExcelImportSheetLockOrderTests`) — див. `ApplyAsync`.
+    ISheetEditGate sheetGate) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -267,9 +271,31 @@ public sealed class ExcelImporter(
         var seeds = new List<RecalculationSeed>();
         long seedTableInstanceId = 0;
 
+        var period = new PeriodKey(plan.PeriodKey);
+        var sheets = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
+
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                // ⛔ Першою дією транзакції — спільні блокування ВСІХ аркушів
+                // книги в порядку ключа «документ × аркуш × період» (у межах
+                // книги — `SheetDefId` за зростанням), той самий порядок, що в
+                // `RecalculationService`. Доти їх брав кожен
+                // `PatchCellsHandler` сам — у порядку ТАБЛИЦЬ КНИГИ: черга
+                // блокувань FIFO, спільний запит стає за винятковим (подання),
+                // що вже чекає, і імпорт (B, потім A) проти перерахунку
+                // (A, потім B) з двома поданнями в черзі давав цикл. Повторне
+                // спільне блокування того самого аркуша в обробнику — той самий
+                // власник, воно видається одразу.
+                //
+                // ⚠ Стан аркуша тут не перевіряється: це робить
+                // `PatchCellsHandler` під тим самим блокуванням і своєю відмовою
+                // (`ECR-ACCS-0403`), тож двох правд про «подано» не з'являється.
+                foreach (var sheetDefId in sheets)
+                {
+                    _ = await sheetGate.EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                }
+
                 // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із
                 // оголошенням: <c>ExecuteInTransactionAsync</c> віддає тіло
                 // стратегії повторів EF (<c>EnableRetryOnFailure</c>), яка має
@@ -353,6 +379,47 @@ public sealed class ExcelImporter(
         await previews.RemoveAsync(previewToken, ct).ConfigureAwait(false);
 
         return new PatchCellsResponse(applied, versions, validation);
+    }
+
+    /// <summary>
+    /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому
+    /// береться їхнє блокування (<c>SheetDefId</c> за зростанням).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Читається ДО транзакції: це структура (екземпляр → таблиця → аркуш),
+    /// яка між переглядом і застосуванням не змінюється. Екземпляр, якого вже
+    /// немає в документі, сюди не потрапляє — його відхилить сам
+    /// <c>PatchCellsHandler</c> своєю відмовою.
+    /// </remarks>
+    private async Task<IReadOnlyList<int>> SheetsInLockOrderAsync(
+        long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
+    {
+        var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
+        if (changed.Count == 0)
+        {
+            return [];
+        }
+
+        var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
+        var sheets = new SortedSet<int>();
+
+        foreach (var group in instances.Where(i => changed.Contains(i.TableInstanceId)).GroupBy(i => i.TemplateVersionId))
+        {
+            var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
+            var sheetOfTable = snapshot.Sheets
+                .SelectMany(s => s.Tables)
+                .ToDictionary(t => t.Id, t => t.SheetDefId);
+
+            foreach (var instance in group)
+            {
+                if (sheetOfTable.TryGetValue(instance.TableDefId, out var sheetDefId))
+                {
+                    sheets.Add(sheetDefId);
+                }
+            }
+        }
+
+        return [.. sheets];
     }
 
     /// <summary>

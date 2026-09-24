@@ -213,7 +213,7 @@ public sealed class ExcelImporterAtomicApplyTests
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
                 _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>()),
-            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs);
+            new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, Substitute.For<ISheetEditGate>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
