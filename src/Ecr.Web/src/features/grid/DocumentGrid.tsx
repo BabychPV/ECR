@@ -1706,6 +1706,11 @@ export function gridColumns(
           }
         : {}),
 
+      // ⚠ Дата — форматом продукту, без години опівночі сховища (`cellDisplay`).
+      ...(column.dataType === 'Date'
+        ? { cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column) }
+        : {}),
+
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і
       // «сюди не вставиться» мають відповідати одним правилом.
       //

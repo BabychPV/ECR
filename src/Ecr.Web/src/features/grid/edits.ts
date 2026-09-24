@@ -1,5 +1,5 @@
 import type { RowDto, TableSliceDto } from '@/api/types';
-import { sameCellValue } from './cellValue';
+import { sameCellValue, sameDateValue } from './cellValue';
 import { parseNumber } from './clipboard';
 import { decide } from './permissions';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
@@ -75,7 +75,8 @@ export function captureEdit(
   // ⛔ Порівняння саме ЗНАЧЕННЯ (`sameCellValue`), не тексту: `'5'` і
   // `'5.0000000000'` — той самий `decimal`, а текстове порівняння назвало б їх
   // різними й лишило б комірку брудною назавжди.
-  if (sameCellValue(after, before)) return null;
+  const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
+  if (same) return null;
 
   return {
     pending: {

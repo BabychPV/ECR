@@ -1,5 +1,5 @@
 import type { ColumnDto } from '@/api/types';
-import { normalizeDecimal } from '@/shared/format';
+import { formatDate, normalizeDecimal } from '@/shared/format';
 // ⚠ Глибокий імпорт рівно на одну функцію, і це названо, а не сховано:
 // `formatDecimal` з'явився в `shared/format/number.ts` цією ж роботою, а
 // дописати його в бар'єл (`shared/format/index.ts`) не можна — файл поза
@@ -127,6 +127,10 @@ export function cellText(value: unknown): string {
  * «не змінилося», і PATCH не йде.
  */
 export function editorValueOf(value: unknown, column: ColumnDto): unknown {
+  // ⚠ Дата — без години опівночі сховища: поле редактора з
+  // `2026-09-15T00:00:00` читається як дата-і-час, а колонка — лише дата.
+  if (column.dataType === 'Date') return dateOnlyOf(value) ?? value;
+
   if (!isNumericColumn(column) || typeof value !== 'string') return value;
 
   return normalizeDecimal(value) ?? value;
@@ -203,6 +207,16 @@ export function isNumericColumn(column: ColumnDto): boolean {
  */
 export function cellDisplay(value: unknown, column: ColumnDto): string {
   if (value === null || value === undefined) return '';
+
+  // ⛔ Дата після перезавантаження показувалась як `2026-09-15T00:00:00` —
+  // сирий запис сховища. Тепер — `formatDate` (`shared/format`), тим самим
+  // форматом, що й решта продукту. Нерозпізнаний текст — як є.
+  if (column.dataType === 'Date') {
+    const date = dateOnlyOf(value);
+
+    return date === null ? String(value) : formatDate(date);
+  }
+
   if (!isNumericColumn(column)) return String(value);
 
   const scale = displayScaleOf(column);
@@ -225,4 +239,35 @@ function displayScaleOf(column: ColumnDto): number | null {
   const scale = column.scale;
 
   return typeof scale === 'number' && Number.isInteger(scale) && scale >= 0 ? scale : null;
+}
+
+/**
+ * Календарна дата `yyyy-MM-dd` із запису комірки `Date`; `null` — не дата або
+ * дата з НЕнульовим часом (її не спрощуємо: це вже інше значення).
+ *
+ * ⚠ Сервер віддає `DateTime` опівночі (`2026-09-15T00:00:00`), клієнт шле
+ * `2026-09-15`; обидва — та сама дата.
+ */
+export function dateOnlyOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const match = DateOnlyPattern.exec(value.trim());
+
+  return match === null ? null : (match[1] ?? null);
+}
+
+const DateOnlyPattern = /^(\d{4}-\d{2}-\d{2})(?:[T ]00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:00)?)?$/;
+
+/**
+ * Чи два значення комірки `Date` — та сама дата.
+ *
+ * ⛔ Без цього вихід із редактора без змін (`2026-09-15` проти
+ * `2026-09-15T00:00:00` у зрізі) ставав би «правкою» і позначав комірку
+ * незбереженою — той самий клас, що й `5` проти `5.0000000000`.
+ */
+export function sameDateValue(left: unknown, right: unknown): boolean {
+  const a = dateOnlyOf(left);
+  const b = dateOnlyOf(right);
+
+  return a !== null && b !== null ? a === b : sameCellValue(left, right);
 }
