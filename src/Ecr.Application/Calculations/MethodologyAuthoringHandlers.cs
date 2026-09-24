@@ -157,6 +157,7 @@ public sealed class ListMethodologyConstantsHandler(
 /// </remarks>
 public sealed class SaveMethodologyConstantHandler(
     IMethodologyDraftStore drafts,
+    IRegistryStore registries,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -201,6 +202,27 @@ public sealed class SaveMethodologyConstantHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ V-17(b): неіснуюча речовина доходила до бази і падала на
+        // `FK_MC_Substance` — 500 «зверніться до адміністратора» на описку в
+        // номері. Видалений логічно запис — теж «немає»: звужувати константу
+        // записом поза обігом означає звузити її до нічого.
+        if (request.SubstanceEntryId is { } substanceEntryId)
+        {
+            var substance = await registries.FindEntryAsync(substanceEntryId, ct).ConfigureAwait(false);
+            if (substance is null || substance.IsDeleted)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0422",
+                    $"Константа «{constantCode.Value}»: речовини (запису довідника) {substanceEntryId} не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.constantSubstanceNotFound",
+                        ["constantCode"] = constantCode.Value,
+                        ["substanceEntryId"] = substanceEntryId.ToString(CultureInfo.InvariantCulture),
+                    });
+            }
+        }
 
         var candidates = await drafts
             .GetConstantsByCodeAsync(methodologyVersionId, constantCode.Value, ct)

@@ -654,6 +654,10 @@ USING (VALUES
     (N'err.ECR-INT-0502.credentialsRefused',    N'en', N'The SQL source "{dataSource}" refused the service credentials. This is not a temporary outage: the collection will not retry.', 1),
     (N'err.ECR-CALC-0422.constantNoValue',   N'en', N'A numeric constant needs a value: an empty number is not "zero by default" — it is a decision nobody made.', 1),
     (N'err.ECR-CALC-0422.constantNoUnit',    N'en', N'A numeric constant needs a unit: the dimension check cannot run without it.', 1),
+    -- V-17(b): речовина константи — живий запис довідника.
+    (N'err.ECR-CALC-0422.constantSubstanceNotFound', N'en', N'Constant "{constantCode}": substance (registry entry) {substanceEntryId} does not exist.', 1),
+    -- V-17(c): симуляція читає ключ періоду як місяць.
+    (N'err.ECR-CALC-0422.simulatePeriodInvalid', N'en', N'Period key {periodKey} is not a month: expected YYYYMM, for example 202609.', 1),
     -- D-52a: опис звіту керує побудовою зрізу, тож колонка, якої джерело не
     -- має, відмовляє вже при створенні версії опису.
     (N'err.ECR-RPT-0422.unknownColumn',      N'en', N'Row source "{rowSource}" has no column "{columnCode}".', 1),

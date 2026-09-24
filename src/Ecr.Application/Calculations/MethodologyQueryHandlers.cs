@@ -4,6 +4,7 @@ using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Calculations;
 
@@ -168,6 +169,12 @@ public sealed class SimulateMethodologyHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
+        // ⛔ V-17(c): ключ періоду перевіряється ДО будь-чого іншого. Доти `0`
+        // падав у `new DateOnly(0, …)` — 500, — а `202613` мовчки ставав
+        // груднем (`Math.Clamp`), тобто симуляція порівнювала з версією,
+        // чинною не на той період, про який питали.
+        var periodDate = PeriodDate(periodKey);
+
         var methodology = await methodologies
             .FindByVersionAsync(methodologyVersionId, ct)
             .ConfigureAwait(false)
@@ -190,7 +197,7 @@ public sealed class SimulateMethodologyHandler(
 
         // Порівнюємо з версією, чинною на дату періоду, а не з «останньою»:
         // саме її числа зараз у звітах (ФВ-9.3).
-        var published = methodology.VersionOn(PeriodDate(periodKey));
+        var published = methodology.VersionOn(periodDate);
 
         foreach (var testCase in testCases)
         {
@@ -292,12 +299,33 @@ public sealed class SimulateMethodologyHandler(
             trace);
 
     /// <summary>Останній день періоду — дата, на яку резолвиться версія.</summary>
+    /// <param name="periodKey">Ключ періоду з запиту.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0422</c> — ключ не є місяцем <c>РРРРММ</c>.
+    /// </exception>
+    /// <remarks>
+    /// ⚠ Симуляція читає ключ як МІСЯЦЬ (так було й до виправлення — інакше
+    /// останнього дня не вивести без календаря проєкту, а симуляція проєкту не
+    /// має). Тому номер поза 1..12 — відмова з назвою формату, а не тихе
+    /// «приведення» до грудня.
+    /// </remarks>
     private static DateOnly PeriodDate(int periodKey)
     {
         // PeriodKey = Year*100 + Sequence (R-A6).
-        var year = periodKey / 100;
-        var sequence = Math.Clamp(periodKey % 100, 1, 12);
+        var key = new PeriodKey(periodKey);
 
-        return new DateOnly(year, sequence, DateTime.DaysInMonth(year, sequence));
+        if (!key.IsValid || key.Sequence > 12)
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Ключ періоду {periodKey} не є місяцем: очікується РРРРММ, напр. 202609.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.simulatePeriodInvalid",
+                    ["periodKey"] = periodKey.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        return new DateOnly(key.Year, key.Sequence, DateTime.DaysInMonth(key.Year, key.Sequence));
     }
 }

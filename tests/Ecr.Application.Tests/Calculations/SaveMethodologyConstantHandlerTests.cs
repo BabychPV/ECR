@@ -25,6 +25,7 @@ public sealed class SaveMethodologyConstantHandlerTests
     private static readonly DateTime Now = new(2026, 5, 1, 9, 0, 0, DateTimeKind.Utc);
 
     private readonly IMethodologyDraftStore _drafts = Substitute.For<IMethodologyDraftStore>();
+    private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
@@ -44,7 +45,7 @@ public sealed class SaveMethodologyConstantHandlerTests
             .Returns((IReadOnlyList<MethodologyConstant>)[]);
     }
 
-    private SaveMethodologyConstantHandler Handler() => new(_drafts, _uow, _access, _user);
+    private SaveMethodologyConstantHandler Handler() => new(_drafts, _registries, _uow, _access, _user);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
