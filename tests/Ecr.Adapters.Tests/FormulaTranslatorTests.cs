@@ -111,4 +111,39 @@ public sealed class FormulaTranslatorTests
         Assert.Null(new FormulaTranslator().FromExcel(
                 "=VLOOKUP(A1,B:C,2,0)", new Dictionary<string, (string, string, string)>()));
     }
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "V-10")]
+    public void Посилання_без_таблиці_й_рядка_розвязуються_контекстом_комірки()
+    {
+        // ⛔ `V-10`: саме так пишуться формули шаблону — `[CDEC] * 2` (колонка
+        // свого рядка) і `[R1].[CDEC]` (рядок своєї таблиці). Без контексту
+        // обидва ставали `#REF!`, і книга показувала `=(#REF!*2)`.
+        var coordinates = new Dictionary<(string, string, string), string>
+        {
+            [("FT1", "R1", "CDEC")] = "'Main'!A3",
+            [("FT1", "R2", "CDEC")] = "'Main'!A4",
+        };
+        var translator = new FormulaTranslator();
+
+        var own = translator.ToExcel("[CDEC] * 2", coordinates, new FormulaContext("FT1", "R2"));
+        var rows = translator.ToExcel("[R1].[CDEC] + [R2].[CDEC]", coordinates, new FormulaContext("FT1", "RTOT"));
+
+        Assert.Equal("=('Main'!A4*2)", own);
+        Assert.Equal("=('Main'!A3+'Main'!A4)", rows);
+        Assert.False(FormulaTranslator.IsBroken(own));
+        Assert.False(FormulaTranslator.IsBroken(rows));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "V-10")]
+    public void Заперечення_пишеться_функцією_NOT_а_не_знаком_оклику()
+    {
+        var excel = new FormulaTranslator().ToExcel(
+            "NOT [T1].[R10].[C1] > 1", Coordinates(), new FormulaContext("T1", "R10"));
+
+        Assert.DoesNotContain("!(", excel, StringComparison.Ordinal);
+        Assert.Contains("NOT(", excel, StringComparison.Ordinal);
+    }
 }
