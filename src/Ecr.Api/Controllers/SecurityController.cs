@@ -1,6 +1,10 @@
+using System.Globalization;
+using System.Security.Claims;
+using Ecr.Api.Auth;
 using Ecr.Application.Common;
 using Ecr.Application.Security;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -31,7 +35,8 @@ public sealed class SecurityController(
     Ecr.Application.Security.GetAccessDiagnosticsHandler accessDiagnostics,
     Ecr.Application.Security.ResetUserPasswordHandler resetPassword,
     Ecr.Application.Security.SetUserLockHandler setLock,
-    Ecr.Domain.Abstractions.IClock clock) : ControllerBase
+    Ecr.Domain.Abstractions.IClock clock,
+    ICurrentUser currentUser) : ControllerBase
 {
     /// <summary>
     /// Звідки взялися (або не взялися) ролі ВЛАСНОГО запису. Права не потребує.
@@ -388,6 +393,11 @@ public sealed class SecurityController(
             .HandleAsync(request.SubjectUserId, request.Reason, ct)
             .ConfigureAwait(false);
 
+        // ⛔ V-06: сеанс прив'язується до ЦЬОГО входу — claim у cookie. Без
+        // нього сеанс лише писався в журнал, а наступний же запит (і `/me`)
+        // будував профіль адміністратора з усіма правами.
+        await ReissueCookieAsync(sessionId).ConfigureAwait(false);
+
         // ⚠ Клієнт зобов'язаний показувати банер увесь сеанс — саме тому
         // відповідь несе і суб'єкта, і прапорець, а не лише ідентифікатор.
         return Created(
@@ -396,15 +406,62 @@ public sealed class SecurityController(
     }
 
     /// <summary>Завершує власний сеанс симуляції.</summary>
-    /// <param name="sessionId">Сеанс.</param>
+    /// <param name="sessionId">Сеанс; не задано — сеанс цього входу.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpDelete("security/simulation")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public async Task<IActionResult> EndSimulation([FromQuery] long sessionId, CancellationToken ct)
+    public async Task<IActionResult> EndSimulation([FromQuery] long? sessionId, CancellationToken ct)
     {
-        // Чужий сеанс — 403 з обробника: обрив чужого сеансу псує чужий аудит.
-        await endSimulation.HandleAsync(sessionId, ct).ConfigureAwait(false);
+        var own = currentUser.SimulationSessionId;
+        var target = sessionId ?? own
+            ?? throw new Ecr.Application.Errors.NotFoundException(
+                "ECR-SIM-0422", "Активного сеансу симуляції не знайдено.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SIM-0422.noSession" });
+
+        try
+        {
+            // Чужий сеанс — 403 з обробника: обрив чужого сеансу псує чужий аудит.
+            await endSimulation.HandleAsync(target, ct).ConfigureAwait(false);
+        }
+        catch (Ecr.Application.Errors.NotFoundException) when (target == own)
+        {
+            // ⚠ Сеанс цього входу вже закритий (наприклад, в іншій вкладці до
+            // того, як ця отримала нову cookie): прибрати слід із cookie — і
+            // це й є завершення, а не помилка.
+        }
+
+        if (target == own)
+        {
+            await ReissueCookieAsync(sessionId: null).ConfigureAwait(false);
+        }
+
         return NoContent();
+    }
+
+    /// <summary>
+    /// Перевидає cookie цього входу з сеансом симуляції або без нього (V-06).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Решта заявок — ті самі: штамп, групи, разовий пароль. Той самий прийом,
+    /// що й у <c>SecurityStampMiddleware</c>, який, побачивши вже записану
+    /// cookie, сам її не перевидає.
+    /// </remarks>
+    private Task ReissueCookieAsync(long? sessionId)
+    {
+        var claims = User.Claims
+            .Where(c => c.Type != AuthenticationSetup.SimulationSessionClaim)
+            .Select(c => new Claim(c.Type, c.Value))
+            .ToList();
+
+        if (sessionId is { } id)
+        {
+            claims.Add(new Claim(
+                AuthenticationSetup.SimulationSessionClaim, id.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        return HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
     }
 
     /// <summary>Зміна власного пароля.</summary>

@@ -34,4 +34,15 @@ public interface ICurrentUser
     /// </para>
     /// </remarks>
     public IReadOnlyList<string> GroupSids { get; }
+
+    /// <summary>
+    /// Відкритий сеанс симуляції «очима користувача» цього входу (<c>ФВ-6.16a</c>);
+    /// <c>null</c> — симуляції немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Члена з тілом за замовчуванням навмисно: симуляцію знає лише HTTP-вхід
+    /// (cookie), а фонові задачі й тестові двійники її не мають і не повинні
+    /// вдавати, що мають (V-06).
+    /// </remarks>
+    public long? SimulationSessionId => null;
 }

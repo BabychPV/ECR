@@ -2453,6 +2453,21 @@
               "integer"
             ]
           },
+          "simulatedForUserName": {
+            "description": "Ім'я того, кого симулюють, — для банера «Viewing as …» (V-06).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "simulationSessionId": {
+            "description": "Сеанс симуляції цього входу — щоб завершити його з будь-якої вкладки.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "userId": {
             "description": "Ідентифікатор.",
             "format": "int32",
@@ -25286,7 +25301,7 @@
       "delete": {
         "parameters": [
           {
-            "description": "Сеанс.",
+            "description": "Сеанс; не задано — сеанс цього входу.",
             "in": "query",
             "name": "sessionId",
             "schema": {

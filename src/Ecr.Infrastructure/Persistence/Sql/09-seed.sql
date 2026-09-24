@@ -1062,6 +1062,9 @@ USING (VALUES
     (N'err.ECR-AUTH-0401.invalidCredentials',   N'en', N'The user name or password is incorrect.', 0),
     (N'err.ECR-AUTH-0401.accountMissing',       N'en', N'Your account no longer exists: sign in again.', 1),
     (N'err.ECR-AUTH-0401.currentPasswordWrong', N'en', N'The current password is incorrect.', 1),
+    -- V-06: сеанс симуляції «очима користувача» — лише читання.
+    (N'err.ECR-SIM-0403.readOnly',              N'en', N'You are viewing as another user: nothing can be changed. Stop viewing to make changes.', 1),
+    (N'err.ECR-SIM-0422.noSession',             N'en', N'There is no active viewing session to stop.', 1),
     (N'err.ECR-AUTH-0403.domainPassword',       N'en', N'The password of a domain account is changed in the domain, not here.', 1),
     (N'err.ECR-AUTH-0423.lockedAfterFailures',  N'en', N'The account is temporarily locked after failed sign-in attempts. Try again later.', 0),
     (N'err.ECR-AUTH-0423.lockedByAdministrator', N'en', N'The account has been locked by an administrator. Contact your administrator.', 0),

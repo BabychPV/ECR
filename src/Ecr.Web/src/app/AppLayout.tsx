@@ -324,14 +324,15 @@ export function AppLayout(): JSX.Element {
               {me.isSimulation && (
                 <>
                   <Badge color="statusWarning" variant="filled">
-                    {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
+                    {/* ⚠ Ім'я, а не номер (V-06): «Viewing as 17» нічого не каже. */}
+                    {t('app.simulating', { user: me.simulatedForUserName ?? me.simulatedForUserId ?? '—' })}
                   </Badge>
 
                   {/* ⛔ Вихід стоїть ПОРУЧ із баджем. Саме тут користувач
                       помічає, що дивиться чужими правами, і саме тут має
                       бути вихід: інакше єдиним способом завершити сеанс
                       лишався б вихід із системи. */}
-                  <EndSimulationButton />
+                  <EndSimulationButton sessionId={me.simulationSessionId ?? null} />
                 </>
               )}
               {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}

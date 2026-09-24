@@ -88,21 +88,22 @@ public sealed class ContractIntegrityTests
     /// <c>Guarded</c>-зміна відхиляється як структурна правка опублікованої
     /// версії (ФВ-7.1, <c>ECR-TMPL-0409</c>). Код чекає на свою операцію, а не
     /// на дозвіл.</item>
-    /// <item><c>ECR-CELL-4222</c>, <c>ECR-SIM-0403</c> — сценарій живий, але
-    /// доїжджає іншим кодом: межі довідника перевіряє
-    /// <c>ColumnDef.ValidateValue</c> (<c>ECR-CELL-0422</c>), а вихід за вікно
-    /// дозволу і запис у симуляції — <c>ECR-ACCS-0403</c> з
-    /// <c>EditDenyReason</c>. Це кандидати на вилучення з контракту.</item>
+    /// <item><c>ECR-CELL-4222</c> — сценарій живий, але доїжджає іншим кодом:
+    /// межі довідника перевіряє <c>ColumnDef.ValidateValue</c>
+    /// (<c>ECR-CELL-0422</c>). Кандидат на вилучення з контракту.</item>
     /// <item><c>ECR-UOM-4221</c> — заборона тримається побудовою таблиці
     /// конверсій, а не перевіркою в C#.</item>
     /// </list>
+    ///
+    /// ⚠ <c>ECR-SIM-0403</c> зі списку ПІШОВ (V-06): запис під симуляцією тепер
+    /// відхиляє <c>SimulationReadOnlyMiddleware</c> саме цим кодом, до обробника.
     ///
     /// ⚠ <c>ECR-SCHM-0409</c> зі списку ПІШОВ: ФВ-7.4 доведена до відмови
     /// операції в <c>PatchPresentationHandler</c>. Саме так цей список і має
     /// коротшати — не правкою «щоб зелене», а виконаною вимогою.
     /// </remarks>
     private static readonly string[] ReservedCodes =
-        ["ECR-CELL-4222", "ECR-SCHM-0422", "ECR-SIM-0403", "ECR-UOM-4221"];
+        ["ECR-CELL-4222", "ECR-SCHM-0422", "ECR-UOM-4221"];
 
     /// <summary>Шлях каталогу констант відносно кореня репозиторію.</summary>
     private const string CatalogFile = "src/Ecr.Domain/Errors/ErrorCodes.cs";

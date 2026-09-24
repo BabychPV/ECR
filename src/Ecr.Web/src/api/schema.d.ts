@@ -9762,7 +9762,7 @@ export interface paths {
         delete: {
             parameters: {
                 query?: {
-                    /** @description Сеанс. */
+                    /** @description Сеанс; не задано — сеанс цього входу. */
                     sessionId?: number;
                 };
                 header?: never;
@@ -14900,6 +14900,13 @@ export interface components {
              * @description Кого симулюють; `null` — не симуляція.
              */
             simulatedForUserId: null | number;
+            /** @description Ім'я того, кого симулюють, — для банера «Viewing as …» (V-06). */
+            simulatedForUserName?: null | string;
+            /**
+             * Format: int64
+             * @description Сеанс симуляції цього входу — щоб завершити його з будь-якої вкладки.
+             */
+            simulationSessionId?: null | number;
             /**
              * Format: int32
              * @description Ідентифікатор.

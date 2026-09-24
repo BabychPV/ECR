@@ -501,9 +501,10 @@ public static class ErrorCodes
     /// Спроба запису в сеансі симуляції (<c>SimulationReadOnly</c>, ФВ-6.16a).
     /// </summary>
     /// <remarks>
-    /// ⚠ Заброньований: заборона доїжджає до клієнта як
-    /// <see cref="AccessDenied"/> з <c>EditDenyReason.SimulationReadOnly</c> —
-    /// однією відмовою доступу з причиною, а не окремим кодом.
+    /// ⚠ Кидає <c>SimulationReadOnlyMiddleware</c> на будь-який небезпечний
+    /// метод під сеансом (V-06), до обробника. Запис комірок, що якимось чином
+    /// дійшов би до обробника, і далі відхиляє <c>EditRules</c> як
+    /// <see cref="AccessDenied"/> з <c>EditDenyReason.SimulationReadOnly</c>.
     /// </remarks>
     public const string SimulationReadOnly = "ECR-SIM-0403";
 

@@ -241,6 +241,7 @@ app.UseStaticFiles(staticFileOptions);
 app.UseAuthentication();
 app.UseMiddleware<SecurityStampMiddleware>();   // після автентифікації, до авторизації
 app.UseMiddleware<PasswordChangeMiddleware>();   // разовий пароль закриває все, крім його зміни
+app.UseMiddleware<SimulationReadOnlyMiddleware>(); // симуляція «очима користувача» — лише читання (V-06)
 app.UseAuthorization();
 
 // ⚠ Обмежувач — ПІСЛЯ автентифікації й авторизації: межа пошуку (BE-19)
