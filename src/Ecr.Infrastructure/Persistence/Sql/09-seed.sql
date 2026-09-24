@@ -396,7 +396,10 @@ UPDATE t
     (N'documents.empty',                 N'en', N'No documents for this period.', N'No documents for this period'),
     -- V-09: роль у маршруті погодження чи правилі доступу до періоду теж «зайнята».
     (N'err.ECR-SEC-0409.roleInUse',      N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s). Remove them first.',
-                                                N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s), {approvalSteps} approval route step(s), {periodAccessRules} period access rule(s). Remove them first.')
+                                                N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s), {approvalSteps} approval route step(s), {periodAccessRules} period access rule(s). Remove them first.'),
+    -- V-16: сервер перевіряє лише довжину (`ChangePasswordHandler`,
+    -- `PasswordPolicy.MinLength`); прапорці складності не вмикаються (`P-1`).
+    (N'password.policy',                 N'en', N'At least 12 characters, with upper case, lower case and a digit.', N'At least 12 characters.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1555,7 +1558,7 @@ USING (VALUES
     (N'password.repeat',                 N'en', N'Repeat the new password', 1),
     (N'password.submit',                 N'en', N'Change password', 1),
     (N'password.mismatch',               N'en', N'The two entries do not match.', 1),
-    (N'password.policy',                 N'en', N'At least 12 characters, with upper case, lower case and a digit.', 1),
+    (N'password.policy',                 N'en', N'At least 12 characters.', 1),
     (N'templates.title',                 N'en', N'Templates', 1),
     (N'templates.code',                  N'en', N'Code', 1),
     (N'templates.versions',              N'en', N'Versions', 1),

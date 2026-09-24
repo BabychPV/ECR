@@ -140,6 +140,30 @@ async function loginReasonOf(response: Response): Promise<LoginReason | undefine
   }
 }
 
+/**
+ * Чи `401` — це відповідь ФОРМИ, а не кінець сеансу.
+ *
+ * ⛔ V-16 (UX-прохід, третій раунд): хибний ПОТОЧНИЙ пароль на
+ * `/change-password` сервер відмовляє `401` («The current password is
+ * incorrect.»), і транспорт виводив із системи з «session has ended» — хоча
+ * сеанс живий, а помилився користувач у полі форми. Сеанс, що справді
+ * скінчився, на тому самому ендпоінті дає інший ключ (`signInRequired`), і
+ * його перенаправлення лишається.
+ *
+ * ⚠ Розрізнення — за `messageKey`, а не за текстом: текст локалізований.
+ */
+async function isFormAnswer401(path: string, response: Response): Promise<boolean> {
+  if (path === '/api/v1/login/local' || path === '/api/v1/login/windows') return true;
+  if (path !== '/api/v1/auth/change-password') return false;
+
+  try {
+    const body = (await response.clone().json()) as { messageKey?: unknown };
+    return body.messageKey === 'err.ECR-AUTH-0401.currentPasswordWrong';
+  } catch {
+    return false;
+  }
+}
+
 /** Підміняє поведінку при 401 — для тестів і для роутера. */
 export function setLoginRedirect(handler: (from: string, reason?: LoginReason) => void): void {
   redirectToLogin = handler;
@@ -292,7 +316,7 @@ async function apiFetchRaw(
   // код, що вже правильно ловить і показує помилку, просто ніколи не
   // отримував шансу спрацювати до навігації). Ендпоінти входу відповідають
   // за власний `401` самі — тут перенаправляти нема куди й нема чого.
-  if (response.status === 401 && path !== '/api/v1/login/local' && path !== '/api/v1/login/windows') {
+  if (response.status === 401 && !(await isFormAnswer401(path, response))) {
     const from = typeof window === 'undefined' ? path : window.location.pathname;
     runBeforeLoginRedirect(from);
     redirectToLogin(from, await loginReasonOf(response));

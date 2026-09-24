@@ -2,7 +2,7 @@ import { useState, type JSX } from 'react';
 import { Button, Card, Center, PasswordInput, Stack, Text } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
+import { EcrApiError, apiFetch } from '@/api/client';
 import type { ChangePasswordRequest } from '@/api/types';
 import { isPasswordTooShort } from '@/features/security/UserAdminActions';
 import { MeQueryKey } from '@/shared/session/useSession';
@@ -46,6 +46,21 @@ import { t } from '@/shared/i18n';
  * `shared/i18n`.
  */
 const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+
+/**
+ * Відмова «поточний пароль не підходить» (V-16).
+ *
+ * ⚠ Сервер відповідає `401`, але сеанс живий: транспорт не виводить із системи
+ * саме на цьому ключі (`api/client.ts`, `isFormAnswer401`), а тут відмова йде
+ * під поле поточного пароля — туди, де помилка й зроблена.
+ */
+export function isCurrentPasswordWrong(error: unknown): boolean {
+  return (
+    error instanceof EcrApiError
+    && error.problem.errorCode === 'ECR-AUTH-0401'
+    && error.problem.extensions2?.['messageKey'] === 'err.ECR-AUTH-0401.currentPasswordWrong'
+  );
+}
 export function ChangePasswordPage(): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -66,6 +81,8 @@ export function ChangePasswordPage(): JSX.Element {
   // помилки й `messageKey`, а не текст, під полем, а не в загальному банері.
   const tooShort = isPasswordTooShort(error);
   const tooShortText = tooShort ? (problemText(error).detail ?? problemText(error).title) : null;
+  const currentWrong = isCurrentPasswordWrong(error);
+  const currentWrongText = currentWrong ? (problemText(error).detail ?? problemText(error).title) : null;
 
   async function submit(): Promise<void> {
     setBusy(true);
@@ -100,6 +117,7 @@ export function ChangePasswordPage(): JSX.Element {
             label={t('password.current')}
             value={current}
             onChange={(event) => setCurrent(event.currentTarget.value)}
+            error={currentWrongText ?? undefined}
             autoComplete="current-password"
             visibilityToggleButtonProps={passwordToggleProps}
           />
@@ -124,8 +142,8 @@ export function ChangePasswordPage(): JSX.Element {
             {t('password.submit')}
           </Button>
 
-          {/* Решта відмов — банером; `tooShort` уже під полем нового пароля. */}
-          {!tooShort && <ErrorAlert error={error} />}
+          {/* Решта відмов — банером; `tooShort` і хибний поточний пароль уже під своїми полями. */}
+          {!tooShort && !currentWrong && <ErrorAlert error={error} />}
 
           {/* ⚠ Вимоги до пароля показуються ДО спроби: правила, видимі лише у
               відповіді про помилку, змушують вгадувати. */}
