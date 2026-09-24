@@ -101,7 +101,9 @@ describe('/admin/audit — журнал змін комірок', () => {
     '«Row key»: набір R12345 — один запит, а не шість',
     async () => {
       const seen = count('/api/v1/audit/cells', 'rowKey');
-      show(<AuditPage />, '/admin/audit');
+      // ⚠ З документом: без нього ключ рядка в запит не йде зовсім
+      // (`AuditPage.cellNeedsDocument.test.tsx`).
+      show(<AuditPage />, '/admin/audit?documentId=7');
 
       await typeAndCount('⟦audit.rowKey⟧', 'R12345', seen);
     },
@@ -134,7 +136,7 @@ describe('/admin/audit — журнал змін комірок', () => {
     '«Column» (число): набір 12345 — один запит',
     async () => {
       const seen = count('/api/v1/audit/cells', 'columnDefId');
-      show(<AuditPage />, '/admin/audit');
+      show(<AuditPage />, '/admin/audit?documentId=7');
 
       await typeAndCount('⟦audit.columnDefId⟧', '12345', seen);
     },

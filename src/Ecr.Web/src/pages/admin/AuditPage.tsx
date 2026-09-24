@@ -77,12 +77,23 @@ export function AuditPage(): JSX.Element {
   const appliedColumnDefId = useDebouncedFilter(columnDefId);
   const appliedAuthor = useDebouncedFilter(author);
 
+  /*
+   * ⛔ «Row key»/«Column» без «Document» у запит НЕ йдуть: сервер на такий
+   * запит гарантовано відповідає `422 ECR-REQ-0422` (ключ рядка унікальний
+   * лише в межах документа). Поля лишаються активними — людина може набрати
+   * їх раніше за документ, і значення з адреси не ховається, — а причину
+   * показує виділене пояснення `audit.cellHint` під рядом фільтрів.
+   */
+  const cellNeedsDocument = appliedDocumentId === null;
+  const cellWithoutDocument =
+    documentId === null && ((rowKey !== null && rowKey.length > 0) || columnDefId !== null);
+
   const filter = {
     from: fromDate,
     to: toDate,
     documentId: appliedDocumentId,
-    rowKey: appliedRowKey,
-    columnDefId: appliedColumnDefId,
+    rowKey: cellNeedsDocument ? null : appliedRowKey,
+    columnDefId: cellNeedsDocument ? null : appliedColumnDefId,
     author: appliedAuthor,
     origin,
     lateOnly: lateOnly === 'true',
@@ -266,7 +277,10 @@ export function AuditPage(): JSX.Element {
           полів із поясненням і без нього стоять на різній висоті. Пояснення
           до «Document» теж тут: поле живе в шапці поруч із датами, і його
           `description` зсував так само вже ряд шапки. */}
-      <FilterHints texts={[t('audit.documentHint'), t('audit.authorHint'), t('audit.cellHint')]} />
+      <FilterHints
+        texts={[t('audit.documentHint'), t('audit.authorHint'), t('audit.cellHint')]}
+        active={cellWithoutDocument ? t('audit.cellHint') : null}
+      />
 
       <AsyncBoundary<CellChangePage>
         isPending={changes.isPending}

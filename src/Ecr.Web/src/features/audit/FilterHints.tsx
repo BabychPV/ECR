@@ -27,16 +27,33 @@ import { Stack, Text } from '@mantine/core';
  * ⚠ `c="dimmed"` — токен теми, а не зашитий колір: однаково читається в обох
  * темах (гейти `a11y (dark)`/`a11y (light)`).
  */
-export function FilterHints({ texts }: { readonly texts: readonly string[] }): JSX.Element | null {
+export function FilterHints({
+  texts,
+  active,
+}: {
+  readonly texts: readonly string[];
+  /**
+   * Пояснення, яке ЗАРАЗ пояснює, чому набране в полі не застосовано до
+   * запиту. Воно виділяється (звичайний колір і жирність замість `dimmed`),
+   * але не червоним: це не помилка людини, а підказка, чого бракує.
+   */
+  readonly active?: string | null;
+}): JSX.Element | null {
   if (texts.length === 0) return null;
 
   return (
     <Stack gap="xs" mb="md" aria-hidden="true" data-filter-hints="true">
-      {texts.map((text) => (
-        <Text key={text} size="xs" c="dimmed">
-          {text}
-        </Text>
-      ))}
+      {texts.map((text) =>
+        text === active ? (
+          <Text key={text} size="xs" fw={600} data-filter-hint-active="true">
+            {text}
+          </Text>
+        ) : (
+          <Text key={text} size="xs" c="dimmed">
+            {text}
+          </Text>
+        ),
+      )}
     </Stack>
   );
 }
