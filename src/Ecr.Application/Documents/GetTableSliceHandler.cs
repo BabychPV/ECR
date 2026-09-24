@@ -1,4 +1,4 @@
-﻿using Ecr.Application.Documents.Dto;
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Calculations;
@@ -72,18 +72,9 @@ public sealed class GetTableSliceHandler(
         // ЯКИМИ. Без другої перевірки ресурсна модель — включно з `IsDeny`
         // (`ФВ-6.6`) — не діяла на читанні зовсім: `CanReadDocumentAsync`
         // існувала і не мала жодного виклику.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 

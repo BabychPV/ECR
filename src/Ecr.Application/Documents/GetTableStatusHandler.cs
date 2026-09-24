@@ -85,26 +85,9 @@ public sealed class GetTableStatusHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            // ⚠ `messageKey` — НАЯВНИЙ загальний ключ каталогу
-            // (`err.ECR-AUTH-0403`, «You do not have permission for this
-            // action.»), а не новий. Сусіди (`GetDocumentTablesHandler`,
-            // `GetValidationResultHandler`) кидають цю саму відмову без ключа
-            // й числяться в `contracts/localization-debt.md`; новий кидок
-            // борг не збільшує.
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403",
-                $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403",
-                    ["documentId"] = documentId.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var key = PeriodKey.Parse(periodKey);
 

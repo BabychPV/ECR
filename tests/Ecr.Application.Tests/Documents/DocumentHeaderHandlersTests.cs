@@ -128,7 +128,9 @@ public sealed class DocumentHeaderHandlersTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        await Assert.ThrowsAsync<AccessDeniedException>(() => Get().HandleAsync(DocumentId, CancellationToken.None));
+        // ⛔ B-08: невидимий документ — 404, як і відсутній, а не 403.
+        var notFound = await Assert.ThrowsAsync<NotFoundException>(() => Get().HandleAsync(DocumentId, CancellationToken.None));
+        Assert.Equal("ECR-DOC-0404", notFound.ErrorCode);
     }
 
     [Fact]

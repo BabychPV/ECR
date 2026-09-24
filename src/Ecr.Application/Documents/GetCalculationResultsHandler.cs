@@ -59,18 +59,9 @@ public sealed class GetCalculationResultsHandler(
         // визначає грант на проєкт, так само як для читання самого документа.
         // Без цієї перевірки будь-хто з `Calculation.View` бачив показники
         // викидів чужого проєкту.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var rows = await results.ReadCurrentAsync(documentId, periodKey, ct).ConfigureAwait(false);
 

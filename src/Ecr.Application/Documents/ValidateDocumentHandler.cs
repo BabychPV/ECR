@@ -35,18 +35,9 @@ public sealed class ValidateDocumentHandler(
             .RequireAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⚠ Екземпляри таблиць беруться ОДНИМ запитом, а не по аркушах:
         // бюджет — 3 с p95 на весь документ, і похід у базу на кожну з

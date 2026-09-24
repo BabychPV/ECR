@@ -76,18 +76,9 @@ public sealed class RecalculateDocumentHandler(
         // ЦЬОГО документа». Без цієї перевірки користувач із
         // `Calculation.Recalculate` на власний проєкт міг поставити в чергу
         // перезапис обчислених значень чужого документа.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⛔ Q-331: аркуш мусить входити в СКЛАД документа — той самий гейт,
         // що вже стоїть перед `SubmitSheetHandler` (`ФВ-3.2`). Без нього

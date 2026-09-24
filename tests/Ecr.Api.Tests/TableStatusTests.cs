@@ -255,7 +255,8 @@ public sealed class TableStatusTests(SqlServerFixture sql)
                 UriKind.Relative))
             .ConfigureAwait(true);
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        // ⛔ B-08: невидимий документ — 404, як на `GET /documents/{id}`, а не 403.
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     /// <summary>
