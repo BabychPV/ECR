@@ -523,7 +523,16 @@ public static class ErrorCodes
     public const string MethodologyArgumentColumnMissing = "ECR-CALC-0438";
 
     // Робочий процес
-    /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>
+    /// <summary>
+    /// <c>Submit</c> неможливий: рядки <c>IsOrphaned</c> (ФВ-8.13), незакриті
+    /// помилки валідації аркуша, або застарілі результати прив'язаних
+    /// методологій (F-05 — <c>messageKey</c> = <c>staleMethodologyResults</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один код на три причини, той самий прийом, що
+    /// <see cref="MethodologyConflict"/>: суб'єкт відмови той самий —
+    /// «Подання неможливе», а ЯКА саме причина, каже <c>messageKey</c>.
+    /// </remarks>
     public const string SubmitBlockedByOrphans = "ECR-SUB-4221";
 
     // Безпека: симуляція і зміна пароля

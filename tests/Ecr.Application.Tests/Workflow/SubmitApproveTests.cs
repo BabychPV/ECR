@@ -35,6 +35,7 @@ public sealed class SubmitApproveTests
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
     private readonly IWorkflowStore _workflow = Substitute.For<IWorkflowStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -89,6 +90,14 @@ public sealed class SubmitApproveTests
 
         _rows.GetOrphanFlagsAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
+
+        // ⚠ За замовчуванням — жодного прогону розрахунку взагалі
+        // (`CalculatedAt = null`), тобто `IsStale = false`: більшість тестів
+        // цього файлу не про методології, і застосовувати їм застарілість
+        // навмисно не потрібно. Тест на застарілість підставляє інше значення
+        // сам (`WithStaleMethodologyResults`).
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(null, null));
 
         // ⚠ Екземпляри таблиць і знімок структури: подання кличе валідацію
         // (`ФВ-5.4`, `W8`), а вона питає обидва. Порожній набір правил тут
@@ -217,7 +226,9 @@ public sealed class SubmitApproveTests
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _headers,
-               Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>());
+               Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
+               NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+               _methodologies);
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -524,6 +535,55 @@ public sealed class SubmitApproveTests
             Snapshot(new Ecr.Domain.Entities.Configuration.ValidationRule(
                 tableDefId: 3, EcrCode.Create("CAP"), severity, scope: 1, expression,
                 new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume is over the cap" }))));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_із_застарілими_результатами_методологій_відхиляється()
+    {
+        // ⛔ F-05 дає `IsStale` (входи документа змінилися ПІСЛЯ прогону, що
+        // дав актуальні числа) — доти ЛИШЕ візуальну позначку в сітці й
+        // експорті. Подання само методологічну застарілість не перевіряло
+        // (`SubmitSheetHandler` не мав жодної згадки `IsStale`), тож аркуш із
+        // застарілим прив'язаним числом методології подавався так само, як і
+        // свіжий. Прогін формул аркуша (`ISubmitRecalculation`) цього не
+        // закриває — інший механізм (D-69).
+        var calculatedAt = Now.AddHours(-2);
+        var inputsChangedAt = Now.AddHours(-1);
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(calculatedAt, inputsChangedAt));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+
+        // ⚠ Ні зрізу, ні зміни стану: відмова зупиняє подання ДО того, як
+        // з'явиться будь-який слід — той самий інваріант, що й для орфанів і
+        // блокувальної валідації вище.
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_з_актуальними_результатами_методологій_проходить()
+    {
+        // ⚠ Контрольний випадок до теста вище: прогін БУВ (`CalculatedAt` не
+        // null — на відміну від дефолту фікстури, де методологій не рахували
+        // взагалі), але входи після нього НЕ мінялися (`InputsChangedAt =
+        // null`) — числа актуальні, і подання не має відмовляти.
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(Now.AddHours(-2), null));
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]

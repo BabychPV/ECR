@@ -234,12 +234,21 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<string, ExpressionValue>());
 
+        // ⚠ Предмет цього класу — межа коміту (`DAT-06`), не F-05: жодного
+        // прогону розрахунку методологій тут немає, тож свіжість завжди
+        // «числа актуальні» (`CalculatedAt = null` → `IsStale = false`).
+        var methodologies = Substitute.For<IMethodologyStore>();
+        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new CalculationFreshness(null, null));
+
         return new SubmitSheetHandler(
             cells, rows, new WorkflowStore(db), documents, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
             new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), new TestClock(Now), new SheetEditGate(db), NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>());
+            new UnitOfWork(db), User(), new TestClock(Now), new SheetEditGate(db),
+            NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+            methodologies);
     }
 
     private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)

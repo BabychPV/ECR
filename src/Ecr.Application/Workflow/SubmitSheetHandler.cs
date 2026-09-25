@@ -42,7 +42,17 @@ public sealed class SubmitSheetHandler(
     // ⛔ Формули аркуша рахуються ТУТ, під винятковим блокуванням і до
     // валідації та зрізу (`SubmitRecalculationRaceTests`): каскадна задача
     // після правки стоїть у черзі й після подання поданий аркуш пропускає.
-    Recalculation.ISubmitRecalculation recalculation)
+    Recalculation.ISubmitRecalculation recalculation,
+
+    // ⛔ Застарілість результатів методологій (F-02/F-05, коміт `c98c90a8`).
+    // Доти `IsStale` був ЛИШЕ візуальною позначкою в сітці й експорті:
+    // `SubmitSheetHandler`/`ApproveSheetHandler` про неї не знали, і аркуш із
+    // застарілим прив'язаним числом методології подавався й погоджувався так
+    // само, як і свіжий. Перерахунок формул аркуша (`recalculation` вище) її
+    // не закриває — це інший механізм (ФОРМУЛИ ШАБЛОНУ), методологічних
+    // прив'язок (`calc.CalculationResult`, `cfg.CalculationBinding`) він не
+    // чіпає (`D-69`).
+    IMethodologyStore methodologies)
 {
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="documentId">Документ.</param>
@@ -51,7 +61,9 @@ public sealed class SubmitSheetHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Аркуша немає в складі документа.</exception>
     /// <exception cref="AccessDeniedException">Немає рівня <c>Submit</c>.</exception>
-    /// <exception cref="BusinessRuleException">Валідація або осиротілі рядки.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Валідація, осиротілі рядки або застарілі результати методологій.
+    /// </exception>
     public async Task HandleAsync(long documentId, int sheetDefId, int periodKey, CancellationToken ct)
     {
         var userId = currentUser.UserId
@@ -151,6 +163,53 @@ public sealed class SubmitSheetHandler(
                     ["messageKey"] = "err.ECR-SUB-4221.orphanedRows",
                     ["rowCount"] = orphaned.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["rowIds"] = orphaned,
+                });
+        }
+
+        // ⛔ ЗАСТАРІЛІСТЬ РЕЗУЛЬТАТІВ МЕТОДОЛОГІЙ (F-02/F-05, пряме інженерне
+        // рішення). Факт: `IsStale` — стан, що НЕ минає сам. Його дає
+        // `GetCalculationFreshnessAsync`: чи є після початку поточного
+        // («Current») прогону запис у `aud.CellChange` для цього документа й
+        // періоду. Прогін стає «Current» лише через явний запуск розрахунку
+        // (`RunCalculationHandler`/`RecalculateDocumentHandler`, право
+        // `Calculation.Recalculate`) — жодної фонової задачі, що сама б це
+        // зняла, у системі немає. Отже, застаріле число лишається застарілим,
+        // доки хтось не перерахує вручну, — точнісінько той клас стану, для
+        // якого директива вимагає БЛОКУВАННЯ, а не попередження.
+        //
+        // ⚠ Гранулярність — ДОКУМЕНТ × ПЕРІОД, а не аркуш: сам порт
+        // (`IMethodologyStore.GetCalculationFreshnessAsync`) іншої не дає, і
+        // це не новий компроміс цього фікса — та сама гранулярність уже
+        // сьогодні йде на дисплей (`GetCalculationResultsHandler`, F-05):
+        // кожне число на панелі документа несе ОДИН прапорець свіжості на
+        // весь документ+період, не по аркушу. Наслідок чесно називаю: подання
+        // аркуша БЕЗ жодної прив'язки методології може заблокуватися через
+        // застарілість чужого прив'язаного результату в СУСІДНЬОМУ аркуші
+        // того самого документа+періоду. Звузити до таблиць САМЕ цього аркуша
+        // можна було б через `GetMethodologyIdsBoundToTableAsync` по кожній
+        // таблиці — свідомо не роблю цього зараз (scope цієї підзадачі), і
+        // точність порту — за оркестратором/наступною ітерацією.
+        //
+        // ⚠ Результат методології НЕ входить у зріз подання (`D-69`,
+        // `SnapshotPayloadAsync` нижче копіює лише клітинки), тобто застаріле
+        // число лишалося б видимим на поданому й навіть ЗАТВЕРДЖЕНОМУ аркуші
+        // назавжди (посилання живе, а не копія) — і це вирішальний аргумент
+        // за блокуванням, а не попередженням: попередження на екрані «Подати»
+        // ніхто не побачить УДРУГЕ на екрані «Погоджено».
+        var freshness = await methodologies
+            .GetCalculationFreshnessAsync(documentId, periodKey, ct)
+            .ConfigureAwait(false);
+        if (freshness.IsStale)
+        {
+            throw new BusinessRuleException(
+                "ECR-SUB-4221",
+                "Подання неможливе: результати методологій застаріли — "
+                + "входи документа змінилися після прогону розрахунку.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SUB-4221.staleMethodologyResults",
+                    ["calculatedAt"] = freshness.CalculatedAt,
+                    ["inputsChangedAt"] = freshness.InputsChangedAt,
                 });
         }
 

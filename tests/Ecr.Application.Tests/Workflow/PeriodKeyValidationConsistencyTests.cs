@@ -53,7 +53,8 @@ public sealed class PeriodKeyValidationConsistencyTests
             User(),
             Substitute.For<IClock>(),
             Substitute.For<ISheetEditGate>(),
-            Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>());
+            Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+            Substitute.For<IMethodologyStore>());
 
         var error = await Assert.ThrowsAsync<DomainException>(
             () => handler.HandleAsync(documentId: 1, sheetDefId: 1, InvalidPeriodKey, CancellationToken.None));

@@ -356,6 +356,13 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
         headers.GetValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<int, DocumentHeaderValueData>());
 
+        // F-05: предмет цього класу — гонитва перерахунку формул проти
+        // подання, не свіжість методологій; прогону розрахунку тут немає,
+        // тож `IsStale` завжди `false`.
+        var methodologies = Substitute.For<IMethodologyStore>();
+        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new CalculationFreshness(null, null));
+
         return new SubmitSheetHandler(
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new WorkflowStore(db), documents,
             Metadata(doc), access,
@@ -366,7 +373,8 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
 
             // ⛔ ТОЙ САМИЙ контекст, що й у подання: перерахунок має йти в його
             // транзакції, під його винятковим блокуванням — як у DI-скоупі.
-            BuildRecalculation(db, doc, beforeWrite: null));
+            BuildRecalculation(db, doc, beforeWrite: null),
+            methodologies);
     }
 
     /// <summary>

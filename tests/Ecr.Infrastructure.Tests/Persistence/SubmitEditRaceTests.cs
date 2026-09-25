@@ -253,13 +253,22 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
         headers.GetValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<int, DocumentHeaderValueData>());
 
+        // F-05: предмет цього класу — гонитва подання проти правки комірки,
+        // не свіжість методологій; прогону розрахунку тут немає, тож
+        // `IsStale` завжди `false`.
+        var methodologies = Substitute.For<IMethodologyStore>();
+        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new CalculationFreshness(null, null));
+
         return new SubmitSheetHandler(
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new WorkflowStore(db), documents,
             Metadata(doc), access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
             new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), clock, new SheetEditGate(db), NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>());
+            new UnitOfWork(db), User(), clock, new SheetEditGate(db),
+            NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+            methodologies);
     }
 
     /// <summary>Правка на реальних сховищах; <paramref name="afterAccessCheck"/> — точка перемикання.</summary>

@@ -1231,6 +1231,8 @@ USING (VALUES
     (N'err.ECR-ACCS-0403.addRowDenied',         N'en', N'A row cannot be added to this table: {reason}.', 1),
     (N'err.ECR-SUB-4221.orphanedRows',          N'en', N'The sheet cannot be submitted: {rowCount} row(s) lost their registry entry.', 1),
     (N'err.ECR-SUB-4221.validationBlocked',     N'en', N'The sheet cannot be submitted: {messageCount} blocking validation error(s).', 1),
+    -- F-02/F-05 follow-up: a bound methodology result is stale (inputs changed after the calculation run) — submission is blocked until a recalculation.
+    (N'err.ECR-SUB-4221.staleMethodologyResults', N'en', N'The sheet cannot be submitted: methodology results are stale — document inputs changed after the calculation run. Recalculate before submitting.', 1),
     (N'err.ECR-PRD-4223.reopenPeriodFirst',     N'en', N'Period {periodKey} is closed: reopen the period first, then the sheet.', 1),
     (N'err.ECR-DOC-0409.reopenWrongState',      N'en', N'Only a submitted or approved sheet can be returned to work; the sheet is {status}.', 1),
     (N'err.ECR-DOC-0409.submitWrongState',      N'en', N'Only a draft or rejected sheet can be submitted; the sheet is {status}.', 1),
