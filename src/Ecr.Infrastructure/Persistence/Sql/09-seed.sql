@@ -4168,7 +4168,15 @@ USING (VALUES
     (N'methodologies.publicationChanges', N'en', N'Changed values on the golden set', 1),
 
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
-    (N'common.technicalDetails', N'en', N'Technical details', 1)
+    (N'common.technicalDetails', N'en', N'Technical details', 1),
+    -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
+    -- бо 502 буває й на сторінці входу.
+    (N'err.http.notFound', N'en', N'The page or record you asked for does not exist.', 0),
+    (N'err.http.forbidden', N'en', N'You do not have permission for this action.', 0),
+    (N'err.http.timeout', N'en', N'The server took too long to answer. Try again.', 0),
+    (N'err.http.unavailable', N'en', N'The server is not reachable right now. Try again in a minute.', 0),
+    (N'err.http.serverError', N'en', N'The server could not complete the request.', 0),
+    (N'err.http.requestFailed', N'en', N'The request could not be completed.', 0)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

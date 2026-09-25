@@ -133,6 +133,17 @@ export interface RouteHandle {
    *  крихта — просто статичний `t(labelKey)`, без резолву й без ін'єкції
    *  логічних предків. */
   crumb?: RouteCrumbConfig;
+
+  /**
+   * Параметри шляху, що мусять бути цілим числом (`R-19`/`X-09`).
+   *
+   * ⛔ React Router 7 не звужує сегмент регуляркою: `/documents/abc` зіставлявся
+   * з `/documents/:id`, сторінка робила `Number('abc')` і йшла трьома запитами
+   * на `…/NaN`, а людина бачила «HTTP 404 · HTTP-404». Такий шлях — просто
+   * неіснуюча сторінка, і `AppLayout` показує на ньому «Сторінку не знайдено»,
+   * не монтуючи сторінку (тобто без жодного запиту).
+   */
+  numericParams?: readonly string[];
 }
 
 /** Один запис дерева маршрутів. */
@@ -440,7 +451,7 @@ export const routes = {
     // Резолв динамічного сегмента (`:id` → бізнес-ключ із кешу запиту) —
     // задача breadcrumbs-резолвера (`PR #3`), не цієї картки.
     path: '/documents/:id',
-    handle: { labelKey: 'documents.title' },
+    handle: { labelKey: 'documents.title', numericParams: ['id'] },
   },
 } as const satisfies Record<string, RouteEntry>;
 

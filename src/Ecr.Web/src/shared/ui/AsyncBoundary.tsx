@@ -1,6 +1,6 @@
-﻿import { lazy, Suspense, type JSX, type ReactNode } from 'react';
+import { lazy, Suspense, type JSX, type ReactNode } from 'react';
 import { Center, Code, Skeleton, Stack, Text, Title, VisuallyHidden } from '@mantine/core';
-import { EcrApiError } from '@/api/client';
+import { EcrApiError, isTransportErrorCode } from '@/api/client';
 import { ErrorAlert } from './ErrorAlert';
 import { logSuppressedDetail, problemText } from './problemText';
 import { t } from '@/shared/i18n';
@@ -271,7 +271,9 @@ export function ForbiddenState({ error }: { readonly error: EcrApiError }): JSX.
   // понад заголовок — показувати «HTTP 403» ДРУГИЙ раз рядком нижче не має
   // сенсу, тому пояснення тут просто немає (як `ErrorAlert`, де `hint`
   // необов'язковий).
-  const isRawFallback = error.problem.title === `HTTP ${String(error.problem.status)}`;
+  // ✎ `R-19`: заголовок без тіла тепер приходить ключем (`err.http.forbidden`),
+  // а не `HTTP 403`, тож ознака «тіла не було» — код, складений транспортом.
+  const isRawFallback = isTransportErrorCode(error.problem.errorCode);
   const shown = problemText(error);
 
   // ⚠ `shown.title`, а не `error.problem.title`: заголовок може прийти

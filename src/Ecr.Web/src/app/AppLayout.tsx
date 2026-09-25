@@ -1,4 +1,4 @@
-﻿import {
+import {
   Suspense,
   useEffect,
   useState,
@@ -23,6 +23,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
+import { NotFoundPage } from './NotFoundPage';
 import { canAccessRoute } from './routeAccess';
 import { navRoutes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
@@ -176,6 +177,11 @@ export function AppLayout(): JSX.Element {
    * проміжного рендера безпечно.
    */
   const transitionRef = useRouteTransitionFocus(MainContentId);
+
+  // ⛔ `R-19`/`X-09`: `/documents/abc` — неіснуюча сторінка, а не документ,
+  // що «не знайшовся» на сервері. Сторінку не монтуємо зовсім — інакше вона
+  // встигає піти запитами на `…/NaN`. Хук — до ранніх `return` (правила хуків).
+  const malformedPath = hasMalformedParam(useMatches());
 
   // Перемальовує каркас і сторінку, коли приватний каталог доїхав.
   useCatalog();
@@ -424,7 +430,7 @@ export function AppLayout(): JSX.Element {
            */}
           <div ref={transitionRef} className={routeTransitionClassName}>
             <Suspense fallback={<RouteFallback />}>
-              <Outlet />
+              {malformedPath ? <NotFoundPage /> : <Outlet />}
             </Suspense>
           </div>
         </AppShell.Main>
@@ -459,6 +465,22 @@ function RouteFallback(): JSX.Element {
   if (shape === 'dashboard') return <DashboardRouteSkeleton />;
 
   return <GenericRouteSkeleton />;
+}
+
+/** Ціле додатне число без знаків і пробілів — єдина форма ідентифікатора в адресі. */
+const NumericSegment = /^\d+$/;
+
+/**
+ * Чи має найглибший збіг параметр, що мусить бути числом, а ним не є
+ * (`routes.ts` → `handle.numericParams`).
+ */
+function hasMalformedParam(matches: ReturnType<typeof useMatches>): boolean {
+  const leaf = matches[matches.length - 1];
+  if (leaf === undefined || !isRouteHandle(leaf.handle)) return false;
+
+  return (leaf.handle.numericParams ?? []).some(
+    (name) => !NumericSegment.test(leaf.params[name] ?? ''),
+  );
 }
 
 /**

@@ -1,6 +1,7 @@
 import { createElement, type ComponentType, type ReactNode } from 'react';
 import { Button, Group, Text, type ButtonProps, type GroupProps, type TextProps } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
+import { isTransportErrorCode } from '@/api/client';
 import { logSuppressedDetail, problemText } from './problemText';
 
 /*
@@ -77,9 +78,14 @@ export function showApiError(error: unknown): void {
 
   logSuppressedDetail(shown);
 
+  // ⚠ `R-19`: код, складений транспортом (`HTTP-404`), не додається —
+  // «Not found · HTTP-404» повторює назву числом протоколу. Код сервера
+  // (`ECR-…`) лишається: він і є зачіпка для підтримки.
+  const code = shown.code === null || isTransportErrorCode(shown.code) ? null : shown.code;
+
   notifications.show({
     color: 'statusError',
-    message: shown.detail ?? (shown.code === null ? shown.title : `${shown.title} · ${shown.code}`),
+    message: shown.detail ?? (code === null ? shown.title : `${shown.title} · ${code}`),
     closeButtonProps: notificationCloseButtonProps,
   });
 }

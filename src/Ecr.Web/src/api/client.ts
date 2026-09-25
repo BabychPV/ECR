@@ -1,4 +1,4 @@
-﻿import type { paths } from './schema';
+import type { paths } from './schema';
 
 /**
  * Шляхи OpenAPI — основа типізованого клієнта.
@@ -454,9 +454,40 @@ function retryAfterOf(response: Response): number | undefined {
   return Number.isSafeInteger(seconds) ? seconds : undefined;
 }
 
+/**
+ * Заголовок відповіді БЕЗ тіла `problem+json` — ключем каталогу (`R-19`/`X-09`).
+ *
+ * ⛔ Тут стояв `HTTP ${status}`: будь-яка відповідь без тіла (проксі, шлюз,
+ * статичний сервер, неіснуючий маршрут) показувала людині «HTTP 502» чи
+ * «HTTP 404 · HTTP-404» — число протоколу замість пояснення.
+ *
+ * ⚠ Ключ, а не текст, — з тієї самої причини, що й `401` вище: виклик `t()`
+ * звідси замкнув би цикл модулів із `shared/i18n`. Розв'язує ключ шар показу
+ * (`problemText`, `CatalogKey`). Ключі — у ПУБЛІЧНІЙ області каталогу: шлюз
+ * може відповісти 502 і на сторінці входу.
+ *
+ * ⚠ Групи, а не кожен статус: людині важить, ЩО робити (повторити за
+ * хвилину, перевірити адресу, звернутися по доступ), а не номер статусу —
+ * він і так лишається в `errorCode` (`HTTP-502`) для підтримки.
+ */
+function transportTitleKey(status: number): string {
+  if (status === 404 || status === 410) return 'err.http.notFound';
+  if (status === 403) return 'err.http.forbidden';
+  if (status === 408 || status === 504) return 'err.http.timeout';
+  if (status === 502 || status === 503) return 'err.http.unavailable';
+  if (status >= 500) return 'err.http.serverError';
+
+  return 'err.http.requestFailed';
+}
+
+/** Чи код склав транспорт (`HTTP-502`), а не сервер ECR із каталогу. */
+export function isTransportErrorCode(code: string): boolean {
+  return code.startsWith('HTTP-');
+}
+
 async function problemBodyOf(response: Response, correlationId: string): Promise<EcrProblem> {
   const fallback: EcrProblem = {
-    title: `HTTP ${response.status}`,
+    title: transportTitleKey(response.status),
     status: response.status,
     errorCode: `HTTP-${response.status}`,
     correlationId: response.headers.get(CORRELATION_HEADER) ?? correlationId,
