@@ -424,6 +424,54 @@ describe('StatusBadge: підпис не стискається нижче вл�
     expect(root.getAttribute('data-variant')).toBe('transparent');
     expect(root.style.minWidth).toBe('fit-content');
   });
+
+  /*
+   * ⛔ **Двослівний підпис, не односкладовий.** Тест вище ловив би регрес на
+   * `miw` і лишався б зеленим, навіть якби фікс на довшому тексті знову
+   * зламався — `min-width: fit-content` для «Scheduled» (без пробілу)
+   * правильний завжди, тому що для нього `min-content == max-content` (див.
+   * коментар над `w="max-content"` у `StatusBadge.tsx`). Дефект жив саме на
+   * ДВОСЛІВНИХ підписах («Grace period», «Not open yet»), де `min-content`
+   * (найдовше слово) менше за `max-content` (увесь текст) — тож перевірка
+   * мусить брати саме такий рядок, інакше вона не ловить того самого
+   * дефекту, який знайшов живий вимір на `/admin/periods`.
+   *
+   * ⛔ jsdom не рахує розкладку (`scrollWidth`/`clientWidth` там завжди 0),
+   * тож пряме порівняння цих чисел тут було б вигаданим доказом — той самий
+   * принцип, що й у сусідньому наборі вище. Перевіряється структурно: САМЕ
+   * `width` кореня дорівнює `max-content` (а не лишається на самій лише
+   * `min-width: fit-content`, якої для двослівного тексту недостатньо —
+   * див. коментар над фіксом).
+   *
+   * ⚠ Мутаційний доказ (зроблено вручну, не лишається в тесті): прибрати
+   * `w="max-content"` з `StatusBadge.tsx`, лишивши тільки
+   * `miw="fit-content"`, — цей тест червоніє (`root.style.width` порожній).
+   * Повернути проп — тест знову зелений.
+   */
+  it.each(expected)(
+    '%s/%s — width: max-content на корені бейджа',
+    (kind, state) => {
+      const root = badge(show(<StatusBadge kind={kind} state={state} />), state);
+
+      expect(root.style.width, `${kind}/${state}`).toBe('max-content');
+    },
+  );
+
+  /*
+   * ⛔ Контроль, що перелік вище справді містить довгі, БАГАТОСЛІВНІ підписи
+   * — інакше параметризований тест над усіма 36 парами міг би пройти зелено
+   * випадково, не торкнувшись жодного разу того самого випадку, який зламав
+   * дефект (`min-content < max-content` через пробіл). Джерело — сам
+   * `09-seed.sql`, не вигадка тут: усі підписи довші за одне слово,
+   * присутні в каталозі станів компонента.
+   */
+  it('перелік вище справді ловить багатослівні підписи — не лише односкладові', () => {
+    const multiWord = expected.filter(([kind, state]) => /\s/.test(t(statusKey(kind, state))));
+
+    // «Grace period», «Not open yet», «Unknown job», «Scheduler unavailable»,
+    // «Completed with warnings» — щонайменше ці п'ять.
+    expect(multiWord.length).toBeGreaterThanOrEqual(5);
+  });
 });
 
 describe('StatusBadge: один словник на різновид', () => {
