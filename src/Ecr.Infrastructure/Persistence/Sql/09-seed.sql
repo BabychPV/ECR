@@ -1753,6 +1753,7 @@ USING (VALUES
     (N'deny.BusinessRule',               N'en', N'A domain rule blocks this change.', 1),
     (N'deny.SimulationReadOnly',         N'en', N'Permission simulation: writing is disabled regardless of permissions.', 1),
     (N'deny.OutsidePermitWindow',        N'en', N'Outside the permit validity window: the permit did not cover this month.', 1),
+    (N'deny.InsufficientGrantLevel',     N'en', N'Your grant level is too low for this action: ask for a higher grant level, not a new grant.', 1),
     (N'deny.Unknown',                    N'en', N'Editing is blocked: {reason}.', 1),
     (N'password.title',                  N'en', N'Change password', 1),
     (N'password.current',                N'en', N'Current password', 1),
