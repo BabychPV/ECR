@@ -15,7 +15,7 @@ import type {
   UnitRef,
 } from '@/api/types';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
-import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
+import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
@@ -340,6 +340,28 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     hint: string;
   } | null>(null);
 
+  /**
+   * Комірки, чий PATCH зараз У ДОРОЗІ — з тим самим значенням, яке летить.
+   *
+   * ⛔ `keyboardPath.spec.ts` (`ФВ-14.16`), крок 6: Ctrl+V шле патч НЕГАЙНО
+   * (`saveThroughStore`), а рефлекторний Ctrl+S одразу за ним (`ФВ-4.1`) кличе
+   * `save([...pending.values()])` — той самий `onKeyDown`, який навмисно НЕ
+   * дивиться на `isPending` (`DocumentGrid.concurrentSave.test.tsx`, §10.2).
+   * Обидва читають версію рядка з ОДНОГО й того самого кешу зрізу
+   * (`withKnownVersions`), який підніме лише відповідь ПЕРШОГО запиту, — тобто
+   * другий патч везе ті самі щойно вставлені комірки й ту саму, вже застарілу
+   * версію. Перший доходить, рядок отримує нову версію; другий доходить услід
+   * і застає чужу-собі стару — `409` на власних, щойно надісланих значеннях.
+   *
+   * ⚠ Гейт `isPending` на Ctrl+S зняв би це, але й зняв би сценарій §10.2:
+   * там ДВА одночасні запити — навмисна й перевірена поведінка, лише рядки в
+   * них різні. Тут інакше: та сама комірка з тим самим значенням. Тому фікс —
+   * не заборона другого шляху, а дедуплікація САМЕ такого збігу: другий запит
+   * не додає серверу нічого нового, і не слати його дешевше й безпечніше, ніж
+   * ловити його ж таки `409`.
+   */
+  const inFlightEdits = useRef<Map<string, PendingEdit>>(new Map());
+
   const save = useCallback(
     async (requested: PendingEdit[], versionOverrides?: ReadonlyMap<string, string>) => {
       if (requested.length === 0) return;
@@ -347,11 +369,30 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       // ⛔ `B-09`: версія рядка — у мить НАДСИЛАННЯ, а не введення. Правка, що
       // чекала повтору, інакше їхала б зі старою версією й діставала `409` на
       // власних змінах — при кожному повторі, вічно (`withKnownVersions`).
-      const edits = withKnownVersions(
+      const allEdits = withKnownVersions(
         requested,
         queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey)),
         versionOverrides,
       );
+
+      // ⛔ Комірка з тим самим значенням, що вже летить, — не дублюється (див.
+      // коментар `inFlightEdits` вище). Інше значення тієї самої комірки (людина
+      // встигла виправити, доки перший патч летів) дублюванням не вважається —
+      // це вже нова правка, і саме її сервер має побачити.
+      const inFlight = inFlightEdits.current;
+      const edits = allEdits.filter((edit) => {
+        const already = inFlight.get(pendingCellKey(edit));
+
+        return (
+          already === undefined ||
+          already.isEmpty !== edit.isEmpty ||
+          !sameCellValue(already.value, edit.value)
+        );
+      });
+
+      if (edits.length === 0) return;
+
+      for (const edit of edits) inFlight.set(pendingCellKey(edit), edit);
 
       // ⚠ Рядки ЦЬОГО патчу — саме їх обов'язкові-вхідні позначки заміняються
       // нижче. Позначки інших рядків (з попереднього, ще не повтореного
@@ -457,6 +498,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // вище вже показує причину користувачеві; повторний `throw` тут
         // давав ЛИШЕ необроблене знеструмлення проміса в консолі (саме
         // симптом, який документує Stage 1), без жодного адресата.
+      } finally {
+        // ⚠ Знімається ЛИШЕ свій запис: поки цей патч летів, та сама комірка
+        // могла дістати ІНШЕ значення й полетіти окремим, новішим патчем
+        // (легальний випадок, не дедуплікований вище) — його запис у
+        // `inFlightEdits` чужий цьому виклику, і знімати його тут не можна.
+        for (const edit of edits) {
+          const key = pendingCellKey(edit);
+          if (inFlight.get(key) === edit) inFlight.delete(key);
+        }
       }
     },
     [patch, periodKey, tableInstanceId, queryClient],
