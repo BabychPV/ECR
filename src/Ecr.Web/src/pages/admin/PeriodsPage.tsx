@@ -41,8 +41,7 @@ import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
-import { Timestamp } from '@/shared/ui/Timestamp';
-import { formatDateTime } from '@/shared/format';
+import { formatDate, formatDateTime } from '@/shared/format';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
 import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
@@ -118,6 +117,85 @@ function zoneOffsetMs(instant: number, timeZoneId: string): number {
   const wall = Date.UTC(at('year'), at('month') - 1, at('day'), at('hour') % 24, at('minute'), at('second'));
 
   return wall - instant;
+}
+
+/**
+ * Пояс, яким `Intl` справді вміє форматувати; інакше — UTC (`X-34`).
+ *
+ * ⚠ Та сама причина, що й `try` у `zoneClock`: `timeZoneId` приходить із
+ * сервера, і невідома `Intl` зона кинула б `RangeError` посеред рендера.
+ */
+function formattableZone(timeZoneId: string): string {
+  return zoneClock(timeZoneId).resolvedOptions().timeZone;
+}
+
+/**
+ * Момент у поясі МАЙДАНЧИКА — для екрана (`X-34`/`F-20`).
+ *
+ * ⛔ Тут стояв `<Timestamp>`, тобто пояс БРАУЗЕРА. Межі періоду — моменти
+ * майданчика (`D-68`): 202601 проєкту на `Asia/Aqtau` (+05:00) відкривається
+ * 1 січня 00:00 за Актау, тобто 31 грудня 19:00 UTC, — і адміністратор у UTC
+ * бачив «Dec 31, 2025» як початок січня. «Grace until: Feb 14, 9:00 PM» при
+ * справжньому 15.02 00:00 +05 — та сама розбіжність, на годину, що вирішує
+ * «встиг чи ні».
+ *
+ * ⚠ Точний момент лишається в `dateTime`/`title` — як у `Timestamp`.
+ */
+function SiteTime({
+  value,
+  zone,
+  dateOnly = false,
+  inclusiveEnd = false,
+}: {
+  readonly value: string | null | undefined;
+  readonly zone: string;
+  readonly dateOnly?: boolean;
+  /**
+   * Межа ВИКЛЮЧНА (`endsAt` — «після цього моменту закрито»), а показати
+   * треба останній ДЕНЬ, коли ще можна: північ 17 березня — це «до 16
+   * березня включно», а не «17 березня».
+   */
+  readonly inclusiveEnd?: boolean;
+}): JSX.Element {
+  if (value === null || value === undefined || value === '') return <span data-timestamp="none">—</span>;
+
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return <span data-timestamp="unparsed">{value}</span>;
+
+  const shown = new Date(inclusiveEnd ? at - 1 : at);
+  const timeZone = formattableZone(zone);
+  const text = dateOnly
+    ? formatDate(shown, { dateStyle: 'medium', timeZone })
+    : formatDateTime(shown, { dateStyle: 'medium', timeStyle: 'short', timeZone });
+
+  return (
+    <time dateTime={value} title={value} data-timestamp="ok" data-zone={timeZone}>
+      {text}
+    </time>
+  );
+}
+
+/**
+ * Який календарний відрізок покриває період (`X-34`): «January 2026»,
+ * «Q4 2025», «2026».
+ *
+ * ⛔ `Sequence` — порядковий номер, а не місяць (`R-A6`): у квартальному
+ * проєкті 202504 — четвертий КВАРТАЛ 2025, а не квітень. Підпис без
+ * періодичності проєкту вгадував би саме місяць.
+ */
+export function periodCaption(year: number, sequence: number, kind: string): string {
+  if (kind === 'Monthly' && sequence >= 1 && sequence <= 12) {
+    return formatDate(new Date(Date.UTC(year, sequence - 1, 1)), {
+      year: 'numeric',
+      month: 'long',
+      timeZone: 'UTC',
+    });
+  }
+
+  if (kind === 'Quarterly') return t('periods.quarterOf', { quarter: sequence, year });
+  if (kind === 'Yearly') return String(year);
+
+  return t('periods.customOf', { sequence, year });
 }
 
 /**
@@ -761,6 +839,11 @@ export function PeriodsPage(): JSX.Element {
               <Table.Tr key={period.periodKey}>
                 <Table.Td>
                   {period.periodKey}
+                  {/* ⚠ `X-34`: що саме покриває період — за періодичністю
+                      проєкту, а не з `periodKey` арифметикою (`R-A6`). */}
+                  <Text span size="xs" c="dimmed" ml="xs" data-period-caption="">
+                    {periodCaption(period.year, period.sequence, calendar.periodKind)}
+                  </Text>
                   {period.isCurrent && (
                     <Badge ml="xs" size="xs" variant="light">
                       {t('periods.current')}
@@ -788,8 +871,12 @@ export function PeriodsPage(): JSX.Element {
                       2026, 11:59 PM» відповідає на нього гірше за
                       «Sep 1 — Sep 30». Точний момент нікуди не дівається: він
                       у `dateTime` кожного з двох `<time>`. */}
-                  <Timestamp value={period.startsAt} dateOnly /> —{' '}
-                  <Timestamp value={period.endsAt} dateOnly />
+                  {/* ✎ `X-34`/`F-20`: пояс МАЙДАНЧИКА (`SiteTime`), а права
+                      межа — останній день, коли дані ще приймаються:
+                      `endsAt` — виключне жорстке закриття, а не кінець
+                      місяця, і підпис колонки тепер каже саме це. */}
+                  <SiteTime value={period.startsAt} zone={calendar.timeZoneId} dateOnly /> —{' '}
+                  <SiteTime value={period.endsAt} zone={calendar.timeZoneId} dateOnly inclusiveEnd />
                 </Table.Td>
                 <Table.Td>
                   {/* ⛔ UI-аудит, lane 8 (рішення НЕ скасоване, лише переїхало):
@@ -819,7 +906,11 @@ export function PeriodsPage(): JSX.Element {
                           КРАЙНІЙ СТРОК, і «до 30 вересня» без години не
                           відповідає на питання «чи встигну ще сьогодні». */}
                       {t('periods.reopenedUntil', {
-                        until: formatDateTime(period.reopenedUntil),
+                        until: formatDateTime(period.reopenedUntil, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                          timeZone: formattableZone(calendar.timeZoneId),
+                        }),
                       })}
                     </Badge>
                   )}
@@ -829,7 +920,7 @@ export function PeriodsPage(): JSX.Element {
                     позначиться в аудиті як пізня (`D-70`). Тире для «немає»
                     тепер дає сам `Timestamp`, а не `?? '—'` на місці. */}
                 <Table.Td>
-                  <Timestamp value={period.graceEndsAt} />
+                  <SiteTime value={period.graceEndsAt} zone={calendar.timeZoneId} />
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">

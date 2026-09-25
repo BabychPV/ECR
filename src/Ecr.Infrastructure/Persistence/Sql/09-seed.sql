@@ -427,7 +427,16 @@ UPDATE t
     -- F-22: обчислювану комірку рахує або формула шаблону, або методологія —
     -- «відкрийте версію шаблону» для колонки методології хибне.
     (N'grid.formulaBarNoExpression',     N'en', N'The expression is not sent with the table: open the template version to read it',
-                                                N'Calculated by the system — by a template formula or by the methodology bound to this column. The expression is not sent with the table.')
+                                                N'Calculated by the system — by a template formula or by the methodology bound to this column. The expression is not sent with the table.'),
+    -- X-34/F-20 (четвертий раунд UX, лінія E2): права межа — останній день перед
+    -- жорстким закриттям, а не «кінець діапазону»; «Grace until» насправді
+    -- ПОЧАТОК пільгового вікна.
+    (N'periods.range',                   N'en', N'Range', N'Accepts data'),
+    (N'periods.rangeHint',               N'en', N'Start = period start + Open offset ({open} d). End = period end + Hard-close offset ({hardClose} d, policy {code}): the period is fully Closed after this moment, and even late edits are no longer accepted.',
+                                                N'From = period start + Open offset ({open} d). To = the last day before the hard close, period end + Hard-close offset ({hardClose} d, policy {code}): after it the period is Closed and even late edits are refused. Dates are in the site time zone.'),
+    (N'periods.grace',                   N'en', N'Grace until', N'Late edits from'),
+    (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}). It stays in Grace until the end of Range (Hard-close, +{hardClose} d).',
+                                                N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}), in the site time zone. It stays in Grace until the hard close (+{hardClose} d).')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2023,17 +2032,17 @@ USING (VALUES
     (N'periods.project',                 N'en', N'Project', 1),
     (N'periods.key',                     N'en', N'Period', 1),
     (N'periods.sequence',                N'en', N'Sequence', 1),
-    (N'periods.range',                   N'en', N'Range', 1),
+    (N'periods.range',                   N'en', N'Accepts data', 1),
     -- ⛔ Q-337, lane 2 UI-аудиту: сторінка показувала «Range»/«Grace until»
     -- без жодного пояснення, а мітка політики `+15/45` (форма створення
     -- проєкту) показує лише два з чотирьох чисел і не на цій сторінці.
     -- Тултипи нижче пояснюють похідну формулу в термінах РЕАЛЬНИХ чисел
     -- політики проєкту (`{open}`/`{grace}`/`{hardClose}`/`{code}` —
     -- підставляються з `PeriodCalendarDto.Policy`, а не вигадані).
-    (N'periods.rangeHint',               N'en', N'Start = period start + Open offset ({open} d). End = period end + Hard-close offset ({hardClose} d, policy {code}): the period is fully Closed after this moment, and even late edits are no longer accepted.', 1),
+    (N'periods.rangeHint',               N'en', N'From = period start + Open offset ({open} d). To = the last day before the hard close, period end + Hard-close offset ({hardClose} d, policy {code}): after it the period is Closed and even late edits are refused. Dates are in the site time zone.', 1),
     (N'periods.state',                   N'en', N'State', 1),
-    (N'periods.grace',                   N'en', N'Grace until', 1),
-    (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}). It stays in Grace until the end of Range (Hard-close, +{hardClose} d).', 1),
+    (N'periods.grace',                   N'en', N'Late edits from', 1),
+    (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}), in the site time zone. It stays in Grace until the hard close (+{hardClose} d).', 1),
     (N'periods.activate',                N'en', N'Activate project', 1),
     (N'periods.activated',               N'en', N'The project is active: periods now follow their dates.', 1),
     (N'periods.draftHint',               N'en', N'The project is a draft: periods stay closed until it is activated.', 1),
@@ -4182,7 +4191,10 @@ USING (VALUES
     (N'common.togglePasswordVisibility', N'en', N'Show or hide the password', 0),
     (N'common.undo', N'en', N'Undo', 1),
     (N'nav.skipToContent', N'en', N'Skip to main content', 1),
-    (N'nav.showAllCrumbs', N'en', N'Show the whole path', 1)
+    (N'nav.showAllCrumbs', N'en', N'Show the whole path', 1),
+    -- X-34: що покриває період за періодичністю проєкту (Sequence — номер, не місяць).
+    (N'periods.quarterOf', N'en', N'Q{quarter} {year}', 1),
+    (N'periods.customOf', N'en', N'{year}, period {sequence}', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

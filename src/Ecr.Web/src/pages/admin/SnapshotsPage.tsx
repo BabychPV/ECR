@@ -115,6 +115,9 @@ export function SnapshotsPage(): JSX.Element {
   const projectCodeOf = (projectId: number): string =>
     projects.data?.items.find((project) => project.id === projectId)?.code ?? String(projectId);
 
+  // `X-34`: періодичність обраного проєкту — для підпису й кроку вибору періоду.
+  const selectedProjectKind = projects.data?.items.find((project) => project.id === projectId)?.periodKind;
+
   // ⛔ Перелік описів звітів, а не поле для набору коду руками (`W7`). До
   // цього єдиним способом вказати звіт було ВГАДАТИ його код: описів у базі
   // не створювало ніщо, тож будь-який набраний код відмовляв `ECR-RPT-0404`, і
@@ -314,7 +317,15 @@ export function SnapshotsPage(): JSX.Element {
                 періоду», запит до `/api/v1/reports/snapshots` тоді йде без
                 параметра); `setPeriodKey` уже приймає `number | null`, тож
                 підставляється напряму, без обгортки `typeof`. */}
-            <PeriodPicker size="xs" miw={110} value={periodKey} onChange={setPeriodKey} />
+            {/* ⚠ `X-34`: періодичність обраного проєкту — квартал 202504 підписано
+                «Q4 2025», а не «April 2025». */}
+            <PeriodPicker
+              size="xs"
+              miw={110}
+              value={periodKey}
+              onChange={setPeriodKey}
+              periodKind={selectedProjectKind}
+            />
 
             {/* ⛔ Вікно описів на відмові показало б «описів немає» — і запросило б
                 завести дублікат. Вимкнено, доки перелік не приїде. */}
@@ -506,6 +517,7 @@ export function SnapshotsPage(): JSX.Element {
           <PeriodPicker
             value={buildPeriod}
             onChange={(value) => setBuildPeriod(value ?? buildPeriod)}
+            periodKind={selectedProjectKind}
           />
         </Box>
 

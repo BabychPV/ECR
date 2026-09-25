@@ -102,10 +102,50 @@ function shiftPeriod(value: number, delta: -1 | 1): number | null {
   return toPeriodKey({ year, month });
 }
 
+/**
+ * Скільки періодів у році за періодичністю проєкту (`X-34`).
+ *
+ * ⛔ `PeriodKey = Year*100 + Sequence` (`R-A6`): у квартальному проєкті 202504 —
+ * ЧЕТВЕРТИЙ КВАРТАЛ, а підпис «April 2025» і крок ›  з 202504 на 202505
+ * (неіснуючий період) брехали б рівно про те, що людина обирає.
+ */
+function periodsPerYear(kind: string | undefined): number {
+  if (kind === 'Quarterly') return 4;
+  if (kind === 'Yearly') return 1;
+
+  return LastMonth;
+}
+
+/** Сусідній період для НЕмісячної періодичності: номер крутиться в межах року. */
+function shiftSequence(value: number, delta: -1 | 1, perYear: number): number | null {
+  const parsed = parsePeriodKey(value);
+  if (parsed === null || parsed.month > perYear) return null;
+
+  let { year, month } = parsed;
+  month += delta;
+
+  if (month > perYear) {
+    month = 1;
+    year += 1;
+  } else if (month < 1) {
+    month = perYear;
+    year -= 1;
+  }
+
+  return toPeriodKey({ year, month });
+}
+
 /** Підпис періоду мовою інтерфейсу («Вересень 2026»), чи `undefined` для невалідного значення. */
-function periodCaption(value: number): string | undefined {
+function periodCaption(value: number, kind?: string): string | undefined {
   const parsed = parsePeriodKey(value);
   if (parsed === null) return undefined;
+
+  // ⚠ `X-34`: квартал і рік — за періодичністю, не як місяць.
+  if (kind === 'Quarterly') {
+    return parsed.month <= 4 ? t('periods.quarterOf', { quarter: parsed.month, year: parsed.year }) : undefined;
+  }
+  if (kind === 'Yearly') return parsed.month === 1 ? String(parsed.year) : undefined;
+  if (kind === 'Custom') return t('periods.customOf', { sequence: parsed.month, year: parsed.year });
 
   const formatted = formatDate(new Date(parsed.year, parsed.month - 1, 1), {
     year: 'numeric',
@@ -132,6 +172,14 @@ export interface PeriodPickerProps {
   readonly miw?: number | string;
   readonly disabled?: boolean;
   readonly id?: string;
+  /**
+   * Періодичність проєкту (`PeriodKind`: `Monthly`/`Quarterly`/`Yearly`/`Custom`).
+   *
+   * ⚠ Необов'язкова й додана, а не змінена (`X-34`): без неї поведінка — та
+   * сама, що й була (місячна). Виклик, який знає проєкт, передає її — і
+   * підпис та крок стрілок ідуть за кварталами чи роками.
+   */
+  readonly periodKind?: string | undefined;
 }
 
 /**
@@ -147,6 +195,7 @@ export function PeriodPicker({
   miw = 130,
   disabled = false,
   id,
+  periodKind,
 }: PeriodPickerProps): JSX.Element {
   /*
    * ⛔ Незавершений набір живе ЛИШЕ тут, у полі, і не йде в `onChange`: див.
@@ -167,11 +216,16 @@ export function PeriodPicker({
   // ⚠ Стрілки крокують від набраного, лише коли воно повне; від неповного —
   // від ЧИННОГО періоду, як і раніше.
   const current = complete ? local : value;
-  const prevValue = current === null ? null : shiftPeriod(current, -1);
-  const nextValue = current === null ? null : shiftPeriod(current, 1);
+  const perYear = periodsPerYear(periodKind);
+  // ⚠ Місячна (і невідома) періодичність — той самий календарний крок, що й
+  // був; решта — номер у межах року (`X-34`).
+  const step = (from: number, delta: -1 | 1): number | null =>
+    perYear === LastMonth ? shiftPeriod(from, delta) : shiftSequence(from, delta, perYear);
+  const prevValue = current === null ? null : step(current, -1);
+  const nextValue = current === null ? null : step(current, 1);
   // ⚠ Поки набір неповний, підпис попереднього періоду під полем брехав би
   // («2026» над «September 2026») — тому підпису немає, як і для порожнього.
-  const caption = complete ? periodCaption(local) : undefined;
+  const caption = complete ? periodCaption(local, periodKind) : undefined;
 
   const commit = (next: number | null): void => {
     field.setValue(next ?? '');
