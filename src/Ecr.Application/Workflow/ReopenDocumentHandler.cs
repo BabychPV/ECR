@@ -42,7 +42,10 @@ public sealed class ReopenDocumentHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може відкривати аркуші.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16: спільний валідатор зовнішнього ключа періоду (`PeriodKey.Parse`),
+        // а не первинний конструктор — той нічого не перевіряє (він же матеріалізує
+        // збережені значення), і `periodKey=0` доходив би далі як «звичайний період».
+        var key = PeriodKey.Parse(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         // Право небезпечне і тому перевіряється окремо від грантів: воно дає

@@ -97,7 +97,11 @@ public sealed class DocumentDataExporter(
     public async Task<byte[]> ExportAsync(
         long documentId, int periodKey, string format, bool includeFormulas, CancellationToken ct)
     {
-        var key = new PeriodKey(periodKey);
+        // B-16: спільний валідатор зовнішнього ключа періоду (`PeriodKey.Parse`),
+        // не первинний конструктор — інші читання того самого документа
+        // (`GetDocumentTablesHandler`) вже відмовляють на невірному
+        // `periodKey`, а вивантаження CSV/JSON мовчки приймало його.
+        var key = PeriodKey.Parse(periodKey);
         // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
         // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
         // відкритий, їх не має, і вивантаження CSV/JSON відмовляв «документа не існує або він

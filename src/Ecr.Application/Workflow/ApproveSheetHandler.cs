@@ -33,7 +33,10 @@ public sealed class ApproveSheetHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може затверджувати.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16: спільний валідатор (`PeriodKey.Parse`), не первинний
+        // конструктор — той не перевіряє нічого, і невірний період доходив
+        // би до затвердження мовчки.
+        var key = PeriodKey.Parse(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         var decision = await access.CanApproveAsync(profile, documentId, sheetDefId, key, ct)

@@ -59,7 +59,14 @@ public sealed class SubmitSheetHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може подавати аркуші.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16 (UX-аудит, четвертий раунд): було `new PeriodKey(periodKey)` —
+        // первинний конструктор нічого не перевіряє (він же матеріалізує
+        // збережені значення), тож `periodKey=0` чи від'ємний проходив далі,
+        // не 422. `Parse` — той самий спільний валідатор зовнішнього ключа
+        // періоду, що вже стоїть у `CanRecallAsync` того самого модуля
+        // (`RecallSheetHandler`) і в `GetDocumentTablesHandler`/
+        // `GetWorkflowHistoryHandler`.
+        var key = PeriodKey.Parse(periodKey);
 
         // ⛔ Аркуш мусить входити в СКЛАД документа. Без цієї перевірки
         // `POST …/submit` на довільний `sheetDefId` — навіть той, якого в
