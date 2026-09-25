@@ -1,5 +1,15 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Button, Checkbox, Group, Select, Skeleton, Stack, Table, Text } from '@mantine/core';
+import {
+  Button,
+  Checkbox,
+  Group,
+  ScrollArea,
+  Select,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+} from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   getNotificationRules,
@@ -244,99 +254,107 @@ export function RulesMatrixPanel(): JSX.Element {
        * рве `AsyncBoundary`, і саме через це її тут немає. Заголовок екрана
        * ставить сторінка.
        */}
-      <Table striped withTableBorder aria-label={t('notifications.rules')} className="ecr-sticky-head">
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>{t('notifications.event')}</Table.Th>
-            {channelList.map((channel) => (
-              <Table.Th key={channel.id}>{channel.name}</Table.Th>
-            ))}
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {/*
-           * ⛔ Рядки — `eventKinds` СЕРВЕРА, а не події, на які правило вже є.
-           * Матриця з самих лише заповнених рядків не давала б завести перше
-           * правило на подію: «правила немає» виглядало б як «події не існує»
-           * (саме це й сказано в контракті `NotificationRuleMatrix`).
-           */}
-          {matrix.eventKinds.map((eventKind) => {
-            const eventLabel = t(`notifications.event.${eventKind}`);
+      {/* ⛔ `X-19`: колонка на КОЖЕН канал (прапорець + `Select` 120 px) —
+          матриця ширша за сторінку вже при трьох каналах при 1280 px, і
+          сторінка скролилась ГОРИЗОНТАЛЬНО ЦІЛКОМ разом із заголовками блоків
+          над нею. `KIT.md` §6.5: сторінка не скролиться горизонтально, широке
+          — у власному `overflow:auto` (той самий прийом, що й `ChannelsPanel`/
+          `DeliveriesPanel` поруч і `SecurityPage`/`PeriodsPage`). */}
+      <ScrollArea type="auto" offsetScrollbars>
+        <Table striped withTableBorder aria-label={t('notifications.rules')} className="ecr-sticky-head">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>{t('notifications.event')}</Table.Th>
+              {channelList.map((channel) => (
+                <Table.Th key={channel.id}>{channel.name}</Table.Th>
+              ))}
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {/*
+             * ⛔ Рядки — `eventKinds` СЕРВЕРА, а не події, на які правило вже є.
+             * Матриця з самих лише заповнених рядків не давала б завести перше
+             * правило на подію: «правила немає» виглядало б як «події не існує»
+             * (саме це й сказано в контракті `NotificationRuleMatrix`).
+             */}
+            {matrix.eventKinds.map((eventKind) => {
+              const eventLabel = t(`notifications.event.${eventKind}`);
 
-            return (
-              <Table.Tr key={eventKind}>
-                <Table.Th scope="row">{eventLabel}</Table.Th>
+              return (
+                <Table.Tr key={eventKind}>
+                  <Table.Th scope="row">{eventLabel}</Table.Th>
 
-                {channelList.map((channel) => {
-                  const cell = draft.get(cellKey(eventKind, channel.id)) ?? {
-                    isEnabled: false,
-                    minSeverity: DefaultSeverity,
-                  };
+                  {channelList.map((channel) => {
+                    const cell = draft.get(cellKey(eventKind, channel.id)) ?? {
+                      isEnabled: false,
+                      minSeverity: DefaultSeverity,
+                    };
 
-                  return (
-                    <Table.Td key={channel.id}>
-                      <Group gap="xs" wrap="nowrap">
-                        {/*
-                         * ⚠ Підпис — `aria-label`, і він називає ОБИДВІ
-                         * координати клітинки. Читалка не пов'язує `<th>`
-                         * рядка й стовпця з полем усередині `<td>`: без імені
-                         * користувач чує «прапорець» стільки разів, скільки в
-                         * матриці клітинок, і жодного разу не дізнається, який
-                         * із них який.
-                         */}
-                        <Checkbox
-                          size="xs"
-                          aria-label={`${eventLabel} · ${channel.name}`}
-                          checked={cell.isEnabled}
-                          onChange={(event) =>
-                            setCell(eventKind, channel.id, {
-                              ...cell,
-                              isEnabled: event.currentTarget.checked,
-                            })
-                          }
-                        />
+                    return (
+                      <Table.Td key={channel.id}>
+                        <Group gap="xs" wrap="nowrap">
+                          {/*
+                           * ⚠ Підпис — `aria-label`, і він називає ОБИДВІ
+                           * координати клітинки. Читалка не пов'язує `<th>`
+                           * рядка й стовпця з полем усередині `<td>`: без імені
+                           * користувач чує «прапорець» стільки разів, скільки в
+                           * матриці клітинок, і жодного разу не дізнається, який
+                           * із них який.
+                           */}
+                          <Checkbox
+                            size="xs"
+                            aria-label={`${eventLabel} · ${channel.name}`}
+                            checked={cell.isEnabled}
+                            onChange={(event) =>
+                              setCell(eventKind, channel.id, {
+                                ...cell,
+                                isEnabled: event.currentTarget.checked,
+                              })
+                            }
+                          />
 
-                        {/*
-                         * ⛔ Підписи варіантів — `t(statusKey('severity', …))`,
-                         * а не самі коди: `Info`/`Warning`/`Error` — члени
-                         * переліку сервера, вони не перекладаються й не несуть
-                         * тону (директива №15 §2, той самий ключ, яким малює
-                         * `StatusBadge`).
-                         *
-                         * ⚠ Межа недоступна, доки клітинка вимкнена: правило,
-                         * якого не буде в матриці, не має межі — а поле, що
-                         * приймає значення й мовчки його викидає, обіцяє
-                         * більше, ніж робить.
-                         */}
-                        <Select
-                          size="xs"
-                          miw={120}
-                          aria-label={`${t('notifications.minSeverity')} · ${eventLabel} · ${channel.name}`}
-                          data={Severities.map((value) => ({
-                            value,
-                            label: t(statusKey('severity', value)),
-                          }))}
-                          value={cell.minSeverity}
-                          disabled={!cell.isEnabled}
-                          allowDeselect={false}
-                          onChange={(value) => {
-                            if (value === null) return;
+                          {/*
+                           * ⛔ Підписи варіантів — `t(statusKey('severity', …))`,
+                           * а не самі коди: `Info`/`Warning`/`Error` — члени
+                           * переліку сервера, вони не перекладаються й не несуть
+                           * тону (директива №15 §2, той самий ключ, яким малює
+                           * `StatusBadge`).
+                           *
+                           * ⚠ Межа недоступна, доки клітинка вимкнена: правило,
+                           * якого не буде в матриці, не має межі — а поле, що
+                           * приймає значення й мовчки його викидає, обіцяє
+                           * більше, ніж робить.
+                           */}
+                          <Select
+                            size="xs"
+                            miw={120}
+                            aria-label={`${t('notifications.minSeverity')} · ${eventLabel} · ${channel.name}`}
+                            data={Severities.map((value) => ({
+                              value,
+                              label: t(statusKey('severity', value)),
+                            }))}
+                            value={cell.minSeverity}
+                            disabled={!cell.isEnabled}
+                            allowDeselect={false}
+                            onChange={(value) => {
+                              if (value === null) return;
 
-                            setCell(eventKind, channel.id, {
-                              ...cell,
-                              minSeverity: value as Severity,
-                            });
-                          }}
-                        />
-                      </Group>
-                    </Table.Td>
-                  );
-                })}
-              </Table.Tr>
-            );
-          })}
-        </Table.Tbody>
-      </Table>
+                              setCell(eventKind, channel.id, {
+                                ...cell,
+                                minSeverity: value as Severity,
+                              });
+                            }}
+                          />
+                        </Group>
+                      </Table.Td>
+                    );
+                  })}
+                </Table.Tr>
+              );
+            })}
+          </Table.Tbody>
+        </Table>
+      </ScrollArea>
 
       <Group gap="xs">
         <Button loading={save.isPending} onClick={() => save.mutate(enabledRules())}>

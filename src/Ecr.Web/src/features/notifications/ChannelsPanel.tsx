@@ -4,6 +4,7 @@ import {
   Button,
   Group,
   Modal,
+  ScrollArea,
   Select,
   Skeleton,
   Stack,
@@ -171,107 +172,115 @@ export function ChannelsPanel(): JSX.Element {
       )}
 
       {channels.error === null && !channels.isPending && channels.data.length > 0 && (
-        <Table striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>{t('notifications.channelName')}</Table.Th>
-              <Table.Th>{t('notifications.channelKind')}</Table.Th>
-              <Table.Th>{t('notifications.enabled')}</Table.Th>
-              <Table.Th>{t('notifications.webhookUrl')}</Table.Th>
-              <Table.Th>{t('notifications.modified')}</Table.Th>
-              <Table.Th />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {channels.data.map((channel) => (
-              <Table.Tr key={channel.id}>
-                <Table.Td>{channel.name}</Table.Td>
-                <Table.Td>
-                  <Stack gap="xs" align="flex-start">
-                    <Text size="sm">{t(`notifications.kind.${channel.kind}`)}</Text>
-                    <TransportSource channel={channel} />
-                  </Stack>
-                </Table.Td>
-                <Table.Td>
-                  {channel.isEnabled ? t('notifications.enabledYes') : t('notifications.enabledNo')}
-                </Table.Td>
-                <Table.Td>
-                  {/*
-                    ⛔ Секрет каналу читає РІВНО ОДИН відправник — `TeamsWebhookSender`,
-                    і для нього це сама адреса вебхука (без неї він відмовляє:
-                    «адресу вебхука не задано»). `SmtpChannelSender` секрету
-                    каналу не торкається взагалі — пароль бере транспорт процесу.
-                    Тому для пошти тут не «немає секрету» (це читалося б як
-                    незавершене налаштування), а «не застосовується».
+        // ⛔ `X-19`: п'ять колонок + чотири кнопки дій робили рядок ширшим за
+        // сторінку при 1280 px, і вона скролилась ГОРИЗОНТАЛЬНО ЦІЛКОМ — разом
+        // із заголовком і кнопкою «Add channel» над таблицею. `KIT.md` §6.5:
+        // сторінка не скролиться горизонтально, широке — у власному
+        // `overflow:auto` (той самий прийом, що й `SecurityPage`/`RoleMatrix`,
+        // `PeriodsPage` — аудит-пас 5).
+        <ScrollArea type="auto" offsetScrollbars>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>{t('notifications.channelName')}</Table.Th>
+                <Table.Th>{t('notifications.channelKind')}</Table.Th>
+                <Table.Th>{t('notifications.enabled')}</Table.Th>
+                <Table.Th>{t('notifications.webhookUrl')}</Table.Th>
+                <Table.Th>{t('notifications.modified')}</Table.Th>
+                <Table.Th />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {channels.data.map((channel) => (
+                <Table.Tr key={channel.id}>
+                  <Table.Td>{channel.name}</Table.Td>
+                  <Table.Td>
+                    <Stack gap="xs" align="flex-start">
+                      <Text size="sm">{t(`notifications.kind.${channel.kind}`)}</Text>
+                      <TransportSource channel={channel} />
+                    </Stack>
+                  </Table.Td>
+                  <Table.Td>
+                    {channel.isEnabled ? t('notifications.enabledYes') : t('notifications.enabledNo')}
+                  </Table.Td>
+                  <Table.Td>
+                    {/*
+                      ⛔ Секрет каналу читає РІВНО ОДИН відправник — `TeamsWebhookSender`,
+                      і для нього це сама адреса вебхука (без неї він відмовляє:
+                      «адресу вебхука не задано»). `SmtpChannelSender` секрету
+                      каналу не торкається взагалі — пароль бере транспорт процесу.
+                      Тому для пошти тут не «немає секрету» (це читалося б як
+                      незавершене налаштування), а «не застосовується».
 
-                    ⚠ Для Teams навпаки: відсутня адреса — саме попередження.
-                    Канал ввімкнений і не доставить нічого, а дізнаються про це
-                    тоді, коли сповіщення були потрібні.
-                  */}
-                  {channel.kind !== 'TeamsWebhook' ? (
-                    <Hint label={t('notifications.secretNotUsedSmtp')} focusable>
-                      <Text size="sm" c="dimmed">
-                        {t('notifications.notApplicable')}
-                      </Text>
-                    </Hint>
-                  ) : channel.hasSecret ? (
-                    <Text size="sm">{t('notifications.webhookSet')}</Text>
-                  ) : (
-                    <Badge color="statusWarning" variant="light">
-                      {t('notifications.webhookMissing')}
-                    </Badge>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Timestamp value={channel.modifiedAt} />
-                </Table.Td>
-                <Table.Td>
-                  <Group gap="xs" justify="flex-end">
-                    {/* ⚠ `notifications.editChannel`, а не спільний
-                        `common.edit`: такого ключа в каталозі немає, і
-                        заводити спільний рядок заради одного екрана означало б
-                        вирішувати за всі інші, як у них зветься ця дія. */}
-                    <Button size="compact-xs" variant="subtle" onClick={() => setDraft(draftOf(channel))}>
-                      {t('notifications.editChannel')}
-                    </Button>
-                    {/* ⚠ Дія є лише там, де секрет справді читають: для пошти
-                        збережене значення нікуди не піде, а кнопка обіцяла б
-                        налаштування. */}
-                    {channel.kind === 'TeamsWebhook' && (
+                      ⚠ Для Teams навпаки: відсутня адреса — саме попередження.
+                      Канал ввімкнений і не доставить нічого, а дізнаються про це
+                      тоді, коли сповіщення були потрібні.
+                    */}
+                    {channel.kind !== 'TeamsWebhook' ? (
+                      <Hint label={t('notifications.secretNotUsedSmtp')} focusable>
+                        <Text size="sm" c="dimmed">
+                          {t('notifications.notApplicable')}
+                        </Text>
+                      </Hint>
+                    ) : channel.hasSecret ? (
+                      <Text size="sm">{t('notifications.webhookSet')}</Text>
+                    ) : (
+                      <Badge color="statusWarning" variant="light">
+                        {t('notifications.webhookMissing')}
+                      </Badge>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Timestamp value={channel.modifiedAt} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" justify="flex-end">
+                      {/* ⚠ `notifications.editChannel`, а не спільний
+                          `common.edit`: такого ключа в каталозі немає, і
+                          заводити спільний рядок заради одного екрана означало б
+                          вирішувати за всі інші, як у них зветься ця дія. */}
+                      <Button size="compact-xs" variant="subtle" onClick={() => setDraft(draftOf(channel))}>
+                        {t('notifications.editChannel')}
+                      </Button>
+                      {/* ⚠ Дія є лише там, де секрет справді читають: для пошти
+                          збережене значення нікуди не піде, а кнопка обіцяла б
+                          налаштування. */}
+                      {channel.kind === 'TeamsWebhook' && (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() => {
+                            setSecretFor(channel);
+                            setSecret('');
+                          }}
+                        >
+                          {t('notifications.setWebhook')}
+                        </Button>
+                      )}
                       <Button
                         size="compact-xs"
                         variant="subtle"
-                        onClick={() => {
-                          setSecretFor(channel);
-                          setSecret('');
-                        }}
+                        loading={test.isPending && test.variables === channel.id}
+                        onClick={() => test.mutate(channel.id)}
                       >
-                        {t('notifications.setWebhook')}
+                        {t('notifications.testChannel')}
                       </Button>
-                    )}
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      loading={test.isPending && test.variables === channel.id}
-                      onClick={() => test.mutate(channel.id)}
-                    >
-                      {t('notifications.testChannel')}
-                    </Button>
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      color="statusError"
-                      loading={remove.isPending && remove.variables === channel.id}
-                      onClick={() => setRemoving(channel)}
-                    >
-                      {t('common.delete')}
-                    </Button>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color="statusError"
+                        loading={remove.isPending && remove.variables === channel.id}
+                        onClick={() => setRemoving(channel)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </ScrollArea>
       )}
 
       <Modal
