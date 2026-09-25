@@ -21,8 +21,12 @@ namespace Ecr.Infrastructure.Persistence;
 /// Ці числа і є критерієм гейта Етапу 0: якщо не проходить після індексів і
 /// стиснення — вибірково по таблицях вмикається гібрид, а не глобально.
 /// </remarks>
-public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
+public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader? archive = null) : ICellStore
 {
+    // ⚠ F-13. `archive` необов'язковий — той самий компроміс, що й у
+    // `RowStore` (див. коментар там): десятки тестів конструюють
+    // `NormalizedCellStore(db)` одним аргументом поза списком файлів цього
+    // фіксу. `null` вимикає архівний фолбек, не ламає виклик.
     /// <summary>
     /// Скільки адрес іде в один запит там, де кожна несе власні параметри.
     /// </summary>
@@ -220,6 +224,17 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                 cell.IsEmpty,
             }).ToListAsync(ct).ConfigureAwait(false);
 
+        if (rows.Count == 0 && archive is not null)
+        {
+            // ⚠ F-13. Гарячий джойн повернув нуль рядків — це і «зрізу
+            // немає взагалі», і «період заархівований» (`arc.usp_ArchiveYear`
+            // truncate'ить `doc.TableInstance`/`doc.TableRow`/`doc.CellValue`
+            // разом, тож сам `TableInstance` теж зникає з гарячої схеми, і
+            // подальший join у нього вже не потрапляє). Різницю видає лише
+            // запит до `arc.*`.
+            return await archive.ReadArchivedSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
+        }
+
         // Порожніх комірок у базі не існує взагалі — клієнт бере
         // ColumnDef.DefaultValue (ФВ-3.8). Явна порожнеча — це рядок із
         // IsEmpty = 1, і він повертається (R-B4).
@@ -275,6 +290,15 @@ public sealed class NormalizedCellStore(EcrDbContext db) : ICellStore
                 cell.IsCalculated,
                 cell.IsEmpty,
             }).ToListAsync(ct).ConfigureAwait(false);
+
+        if (rows.Count == 0 && archive is not null)
+        {
+            // ⚠ F-13. Той самий слід архівації, що й у ReadSliceAsync поруч
+            // — і той самий фолбек: перевіряємо ВСІ запитані екземпляри
+            // разом, а не кожен окремо, бо порожній гарячий результат тут
+            // типово означає «весь батч з одного документа/періоду».
+            return await archive.ReadArchivedSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
+        }
 
         return rows
             .GroupBy(r => r.Id)

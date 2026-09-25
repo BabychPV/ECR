@@ -66,6 +66,10 @@ public static class DependencyInjection
                     errorNumbersToAdd: null);
             }));
 
+        // F-13. Читач архіву, від якого залежать і NormalizedCellStore, і
+        // RowStore (фолбек «гаряча схема порожня → перевір arc.*»); Scoped,
+        // бо тримає EcrDbContext, а той теж Scoped.
+        services.AddScoped<ArchiveAwareCellReader>();
         services.AddScoped<ICellStore, NormalizedCellStore>();
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();

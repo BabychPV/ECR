@@ -17,9 +17,19 @@ namespace Ecr.Infrastructure.Persistence;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1: порт уведений `Q-032`,
 /// реалізація — `Q-050`.
 /// </remarks>
-public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock)
+public sealed class RowStore(
+    EcrDbContext db, BulkCellLoader bulk, Domain.Abstractions.IClock clock, ArchiveAwareCellReader? archive = null)
     : IRowStore
 {
+    // ⚠ F-13. `archive` — необов'язковий параметр, а не звичайна залежність:
+    // десятки тестів у Ecr.Infrastructure.Tests/Ecr.Adapters.Tests
+    // конструюють `RowStore` напряму трьома аргументами (db, bulk, clock), і
+    // жоден із них не входить у список файлів цього фіксу — робити параметр
+    // обов'язковим означало б правити їх усі заради архівного фолбеку, якого
+    // ці тести не перевіряють. У DI (`DependencyInjection.cs`) реєстрація
+    // звичайна, `archive` завжди резолвиться. `null` тут означає «викликач
+    // свідомо не дає архівного читача» — фолбек тоді просто вимкнений
+    // (поведінка та сама, що й до цього фіксу), а не падіння з NRE.
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ <c>WR-05</c>, названо й НЕ зроблено. Запит іде до партиціонованої
@@ -73,7 +83,19 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .Select(r => new { r.RowKeyValue, r.RowVersion })
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return rows.ToDictionary(r => r.RowKeyValue, r => Convert.ToBase64String(r.RowVersion), StringComparer.Ordinal);
+        if (rows.Count > 0 || archive is null)
+        {
+            return rows.ToDictionary(
+                r => r.RowKeyValue, r => Convert.ToBase64String(r.RowVersion), StringComparer.Ordinal);
+        }
+
+        // Гарячий запит порожній — період міг бути заархівований
+        // (`arc.usp_ArchiveYear` truncate'ить партицію `doc.TableRow`
+        // цілком, F-13). `archive is null` — виклик поза DI (тести); там
+        // фолбек не потрібен (перевірено вище).
+        var archived = await archive.ReadArchivedRowVersionsAsync(tableInstanceId, periodKey, ct)
+            .ConfigureAwait(false);
+        return archived.ToDictionary(r => r.RowKey, r => r.RowVersion, StringComparer.Ordinal);
     }
 
     /// <inheritdoc />
@@ -84,7 +106,14 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .Select(r => new { r.RowKeyValue, r.Id })
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return rows.ToDictionary(r => r.RowKeyValue, r => r.Id, StringComparer.Ordinal);
+        if (rows.Count > 0 || archive is null)
+        {
+            return rows.ToDictionary(r => r.RowKeyValue, r => r.Id, StringComparer.Ordinal);
+        }
+
+        // Гарячий запит порожній — той самий слід архівації, що й вище.
+        var archived = await archive.ReadArchivedRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        return archived.ToDictionary(r => r.RowKey, r => r.Id, StringComparer.Ordinal);
     }
 
     /// <summary>Живі рядки одного екземпляра таблиці в його періоді.</summary>
@@ -143,12 +172,34 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .Select(r => new { r.TableInstanceId, r.RowKeyValue, r.Id })
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return rows
-            .GroupBy(r => r.TableInstanceId)
-            .ToDictionary(
-                g => g.Key,
-                IReadOnlyDictionary<string, long> (g) =>
-                    g.ToDictionary(r => r.RowKeyValue, r => r.Id, StringComparer.Ordinal));
+        if (rows.Count > 0 || archive is null)
+        {
+            return rows
+                .GroupBy(r => r.TableInstanceId)
+                .ToDictionary(
+                    g => g.Key,
+                    IReadOnlyDictionary<string, long> (g) =>
+                        g.ToDictionary(r => r.RowKeyValue, r => r.Id, StringComparer.Ordinal));
+        }
+
+        // Гарячий запит порожній для ВСІХ переданих екземплярів — типовий
+        // слід заархівованого періоду (F-13). Батч тут не найгарячіший шлях
+        // (перегляд/експорт заархівованого документа, не PATCH), а його
+        // розмір обмежений кількістю таблиць одного документа (~90,
+        // `RowStore.MaxTableInstances`), тому цикл по екземплярах прийнятний
+        // — і не дублює SQL, уже написаний у ReadArchivedRowIdsAsync.
+        var result = new Dictionary<long, IReadOnlyDictionary<string, long>>();
+        foreach (var tableInstanceId in tableInstanceIds)
+        {
+            var archived = await archive.ReadArchivedRowIdsAsync(tableInstanceId, periodKey, ct)
+                .ConfigureAwait(false);
+            if (archived.Count > 0)
+            {
+                result[tableInstanceId] = archived.ToDictionary(r => r.RowKey, r => r.Id, StringComparer.Ordinal);
+            }
+        }
+
+        return result;
     }
 
     /// <inheritdoc />
@@ -164,13 +215,30 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .Select(r => new { r.TableInstanceId, r.RowKeyValue, r.RowVersion })
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return rows
-            .GroupBy(r => r.TableInstanceId)
-            .ToDictionary(
-                g => g.Key,
-                IReadOnlyDictionary<string, string> (g) =>
-                    g.ToDictionary(
-                        r => r.RowKeyValue, r => Convert.ToBase64String(r.RowVersion), StringComparer.Ordinal));
+        if (rows.Count > 0 || archive is null)
+        {
+            return rows
+                .GroupBy(r => r.TableInstanceId)
+                .ToDictionary(
+                    g => g.Key,
+                    IReadOnlyDictionary<string, string> (g) =>
+                        g.ToDictionary(
+                            r => r.RowKeyValue, r => Convert.ToBase64String(r.RowVersion), StringComparer.Ordinal));
+        }
+
+        // Той самий слід архівації, що й у GetRowIdsBatchAsync поруч.
+        var result = new Dictionary<long, IReadOnlyDictionary<string, string>>();
+        foreach (var tableInstanceId in tableInstanceIds)
+        {
+            var archived = await archive.ReadArchivedRowVersionsAsync(tableInstanceId, periodKey, ct)
+                .ConfigureAwait(false);
+            if (archived.Count > 0)
+            {
+                result[tableInstanceId] = archived.ToDictionary(r => r.RowKey, r => r.RowVersion, StringComparer.Ordinal);
+            }
+        }
+
+        return result;
     }
 
     /// <inheritdoc />
@@ -367,13 +435,29 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .Select(r => new { r.Id, r.IsOrphaned })
             .ToListAsync(ct).ConfigureAwait(false);
 
-        return rows.ToDictionary(r => r.Id, r => r.IsOrphaned);
+        if (rows.Count > 0 || archive is null)
+        {
+            return rows.ToDictionary(r => r.Id, r => r.IsOrphaned);
+        }
+
+        // Гарячий запит порожній — той самий слід архівації (F-13). Значення
+        // завжди `false`: `OrphanScanJob` архіву не торкається.
+        var archived = await archive.ReadArchivedOrphanFlagsAsync(tableInstanceId, periodKey, ct)
+            .ConfigureAwait(false);
+        return archived.ToDictionary(r => r.Id, r => r.IsOrphaned);
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ F-13. Якщо гарячий запит повернув порожній список — фолбек на
+    /// <c>arc.TableInstance</c>: період міг бути заархівований
+    /// (`arc.usp_ArchiveYear` truncate'ить `doc.TableInstance` разом із
+    /// рештою партиції), а не просто «документ ще не відкривали».
+    /// </remarks>
     public async Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesAsync(
         long documentId, PeriodKey periodKey, CancellationToken ct)
-        => await TableInstancesQuery(db, documentId, periodKey)
+    {
+        var hot = await TableInstancesQuery(db, documentId, periodKey)
             .OrderBy(t => t.Id)
             .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { t, d.ProjectId })
             .Join(db.Projects, x => x.ProjectId, p => p.Id,
@@ -382,6 +466,14 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .Take(MaxTableInstances)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        if (hot.Count > 0 || archive is null)
+        {
+            return hot;
+        }
+
+        return await archive.ReadArchivedTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public async Task<int> EnsureTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
@@ -412,6 +504,19 @@ public sealed class RowStore(EcrDbContext db, BulkCellLoader bulk, Domain.Abstra
             .Select(t => t.TableDefId)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // ⚠ F-13. `existing` порожній має ДВА зовсім різних читання: «період
+        // ще не відкривали» (тоді нижче треба матеріалізувати) і «період
+        // заархівовано» (`arc.usp_ArchiveYear` truncate'ить
+        // `doc.TableInstance` разом із рештою партиції — і без цієї
+        // перевірки метод мовчки фабрикував би НОВІ порожні екземпляри з
+        // НОВИМИ Id замість архівних даних, ГОЛОВНИЙ баг F-13). Різницю
+        // видає лише запит до `arc.*`.
+        if (existing.Count == 0 && tableDefIds.Count > 0 && archive is not null
+            && await archive.HasArchivedTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false))
+        {
+            return 0;
+        }
 
         var missing = tableDefIds.Except(existing).Order().ToList();
         if (missing.Count == 0)
