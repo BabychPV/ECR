@@ -4015,6 +4015,7 @@ USING (VALUES
     (N'err.ECR-CELL-0422.importExpectsBoolean',    N'en', N'The value is not true or false.', 1),
     (N'err.ECR-CELL-0422.importExpectsDate',       N'en', N'The value is not a date.', 1),
     (N'err.ECR-CELL-0422.importExpectsIdentifier', N'en', N'No entry with this code in the column''s registry or list of units.', 1),
+    (N'err.ECR-CELL-0422.importExpectsUnit',       N'en', N'No unit of measure with this code.', 1),
     -- ⛔ F-24 і сусіди: відмови імпорту, що доти їхали українським реченням.
     (N'err.ECR-IMP-0422.previewExpired',        N'en', N'The import preview has expired or was already applied. Load the file again.', 1),
     (N'err.ECR-IMP-0422.previewUnreadable',     N'en', N'The saved import preview cannot be read. Load the file again.', 1),

@@ -481,6 +481,9 @@ public static class ImportMessageKeys
     /// <summary>Код із книги не знайдено серед записів довідника (або одиниць) колонки.</summary>
     public const string ExpectsIdentifier = "err.ECR-CELL-0422.importExpectsIdentifier";
 
+    /// <summary>Код із книги не знайдено серед одиниць виміру (колонка Unit).</summary>
+    public const string ExpectsUnit = "err.ECR-CELL-0422.importExpectsUnit";
+
     /// <summary>Імпортний ключ для відмови читача запису за ключем самого читача.</summary>
     /// <param name="readerKey"><c>messageKey</c> відмови <c>CellValueReader</c>.</param>
     /// <remarks>
@@ -494,6 +497,7 @@ public static class ImportMessageKeys
         "err.ECR-CELL-0422.expectsBoolean" => ExpectsBoolean,
         "err.ECR-CELL-0422.expectsDate" => ExpectsDate,
         "err.ECR-CELL-0422.expectsIdentifier" => ExpectsIdentifier,
+        "err.ECR-CELL-0422.expectsUnitIdentifier" => ExpectsUnit,
         "err.ECR-CELL-0422.tooManyIntegerDigits" => IntegerDigits,
         _ => readerKey,
     };

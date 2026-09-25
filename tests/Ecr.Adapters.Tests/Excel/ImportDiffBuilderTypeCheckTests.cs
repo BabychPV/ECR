@@ -31,7 +31,7 @@ public sealed class ImportDiffBuilderTypeCheckTests
     [InlineData(CellDataType.Int, "abc", ImportMessageKeys.ExpectsNumber)]
     [InlineData(CellDataType.Bool, "maybe", ImportMessageKeys.ExpectsBoolean)]
     [InlineData(CellDataType.Date, "not a date", ImportMessageKeys.ExpectsDate)]
-    [InlineData(CellDataType.Unit, "kg?", ImportMessageKeys.ExpectsIdentifier)]
+    [InlineData(CellDataType.Unit, "kg?", ImportMessageKeys.ExpectsUnit)]
     public void Значення_не_свого_типу_відхиляється_в_перегляді_а_не_на_застосуванні(
         CellDataType type, string text, string expectedKey)
     {
