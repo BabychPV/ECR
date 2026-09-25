@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { CellStyleDto } from '@/api/types';
 import { AA, contrast } from '@/shared/theme/contrast';
+import { themeSurface } from '@/shared/theme/theme';
 
 /**
  * Оформлення колонки в живій сітці — директива
@@ -86,23 +87,26 @@ export function cellAppearanceClassOf(style: CellStyleDto | null | undefined): s
 
 /**
  * Поверхня сітки в світлій і темній темі — те, на чому стоїть текст комірки
- * без заливки.
- *
- * ⚠ Числа — ВИМІРЯНІ на живій сітці (`X-10`: `#242424` у темній), і це ті
- * самі значення, що дає тема: `--mantine-color-body` світлої — `#fff`,
- * темної — `dark[7]`.
+ * без заливки. Значення — з теми (`themeSurface`), а не свої: у темній це
+ * рівно `#242424`, виміряний на живій сітці (`X-10`).
  */
-export const LightSurface = '#ffffff';
-export const DarkSurface = '#242424';
+export const LightSurface = themeSurface.light.body;
+export const DarkSurface = themeSurface.dark.body;
 
 /** Колір, якщо він читається на `surface` (`AA.text`); інакше `null`. */
 function readableOn(color: string, surface: string): string | null {
   return contrast(color, surface) >= AA.text ? color : null;
 }
 
-/** Чорний чи білий — що дає більший контраст із заливкою. */
+/**
+ * Текст теми — світлої (темний) чи темної (світлий), — що дає більший
+ * контраст із заливкою автора.
+ */
 function bestTextOn(fill: string): string {
-  return contrast('#000000', fill) >= contrast('#ffffff', fill) ? '#000000' : '#ffffff';
+  const dark = themeSurface.light.text;
+  const light = themeSurface.light.body;
+
+  return contrast(dark, fill) >= contrast(light, fill) ? dark : light;
 }
 
 /** `0` Left, `1` Center, `2` Right, `3` Justify — той самий код, що `StyleMapper.Horizontal`. */
