@@ -203,6 +203,32 @@ public interface IRegistryStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<RegistryLinkKindStat>> ListLinkKindsAsync(
         int registryDefId, CancellationToken ct);
+
+    /// <summary>
+    /// Записи довідника за набором бізнес-кодів — пакетом, а не по одному
+    /// (<c>B-10</c>, імпорт CSV).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ З відстеженням, як <see cref="FindEntryByCodeAsync"/>, який цей метод
+    /// замінює в циклі: імпорт змінює знайдені записи й зберігає їх.
+    /// Порівняння кодів — колацією бази (регістронезалежне), тобто тим самим,
+    /// що й у <see cref="FindEntryByCodeAsync"/>. Видалені логічно записи
+    /// теж повертаються — рішення про них за викликачем.
+    /// </remarks>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="codes">Коди; дублікати й порожній набір допустимі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryEntry>> FindEntriesByCodesAsync(
+        int registryDefId, IReadOnlyCollection<string> codes, CancellationToken ct);
+
+    /// <summary>
+    /// Значення полів набору записів — пакетом (<c>B-10</c>), з відстеженням,
+    /// як <see cref="ListValuesAsync"/>.
+    /// </summary>
+    /// <param name="registryEntryIds">Записи.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryValue>> ListValuesForEntriesAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
 }
 
 /// <summary>Вид зв'язку M:N і скільки таких зв'язків у довіднику.</summary>

@@ -25,6 +25,9 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     /// <summary>Стеля вибірки зв'язків каскаду.</summary>
     private const int MaxLinks = 200_000;
 
+    /// <summary>Скільки кодів чи ідентифікаторів іде в один пакетний запит.</summary>
+    private const int LookupChunkSize = 1000;
+
     /// <summary>
     /// Мітка SQL-запиту «чи є комірки з посиланням на довідник» (<c>R-05</c>).
     /// </summary>
@@ -419,6 +422,50 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             select new RegistryLinkKindStat(kinds.Key, kinds.Count());
 
         return await query.ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Набір ріжеться на шматки <see cref="LookupChunkSize"/>: імпорт на
+    /// 1 МБ — це десятки тисяч кодів, а параметрів у запиті не більше 2100.
+    /// На звичайному файлі (до тисячі рядків) це рівно один запит.
+    /// </remarks>
+    public async Task<IReadOnlyList<RegistryEntry>> FindEntriesByCodesAsync(
+        int registryDefId, IReadOnlyCollection<string> codes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+
+        var found = new List<RegistryEntry>();
+        foreach (var chunk in codes.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(LookupChunkSize))
+        {
+            var wanted = chunk.ToList();
+            found.AddRange(await db.RegistryEntries
+                .Where(e => e.RegistryDefId == registryDefId && wanted.Contains(e.Code))
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return found;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryValue>> ListValuesForEntriesAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+
+        var found = new List<RegistryValue>();
+        foreach (var chunk in registryEntryIds.Distinct().Chunk(LookupChunkSize))
+        {
+            var wanted = chunk.ToList();
+            found.AddRange(await db.RegistryValues
+                .Where(v => wanted.Contains(v.RegistryEntryId))
+                .OrderBy(v => v.Id)
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
+        }
+
+        return found;
     }
 
     /// <summary>Проміжний рядок пошуку посилань на визначення довідника.</summary>

@@ -102,7 +102,7 @@ public sealed class UpsertRegistryEntryHandler(
         entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
         entry.SetParent(dto.ParentEntryId);
 
-        var changes = await ApplyValuesAsync(registries, definition, entry, dto.Values, ct).ConfigureAwait(false);
+        var changes = await ApplyValuesAsync(registries, definition, entry, dto.Values, prefetch: null, ct).ConfigureAwait(false);
 
         // ⛔ Вікно дії сюди НЕ приймається, хоча воно є полем запису: його
         // зміна тягне перерахунок IsOrphaned (ФВ-8.13a), і зроблена мимохідь
@@ -175,11 +175,23 @@ public sealed class UpsertRegistryEntryHandler(
     /// входу — тотожність.
     /// </para>
     /// </remarks>
+    /// <param name="registries">Сховище довідників.</param>
+    /// <param name="definition">Опис довідника.</param>
+    /// <param name="entry">Запис, якому застосовуються значення.</param>
+    /// <param name="values">Значення за кодами полів.</param>
+    /// <param name="prefetch">
+    /// Прочитане пакетом наперед (<c>B-10</c>, імпорт CSV): наявні значення
+    /// цього запису й цілі <c>Lookup</c>-посилань. <c>null</c> — читати з
+    /// бази поштучно, як ручний upsert. Правила ті самі в обох випадках —
+    /// змінюється лише ДЖЕРЕЛО тих самих рядків.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     internal static async Task<IReadOnlyList<RegistryValueFieldChange>> ApplyValuesAsync(
         IRegistryStore registries,
         Domain.Entities.Configuration.RegistryDef definition,
         RegistryEntry entry,
         IReadOnlyDictionary<string, object?> values,
+        RegistryValuesPrefetch? prefetch,
         CancellationToken ct)
     {
         if (values is null || values.Count == 0)
@@ -207,7 +219,8 @@ public sealed class UpsertRegistryEntryHandler(
         }
 
         var existing = entry.IsPersisted
-            ? (await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false))
+            ? (prefetch?.ExistingValues
+               ?? await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false))
                 .ToDictionary(v => v.RegistryFieldDefId)
             : [];
 
@@ -236,7 +249,7 @@ public sealed class UpsertRegistryEntryHandler(
 
             if (field.DataType == CellDataType.Lookup && value.ValueRefEntryId is { } target)
             {
-                await RequireLookupTargetAsync(registries, field, target, ct).ConfigureAwait(false);
+                await RequireLookupTargetAsync(registries, field, target, prefetch?.LookupTargets, ct).ConfigureAwait(false);
             }
 
             if (!Equals(oldValue, newValue))
@@ -280,12 +293,24 @@ public sealed class UpsertRegistryEntryHandler(
     /// показували чуже.
     /// ⚠ Видалений логічно запис — теж «не знайдено»: він поза обігом, і нове
     /// посилання на нього не має з'являтися.
+    /// <para>
+    /// ⚠ <paramref name="knownTargets"/> — записи, уже прочитані пакетом
+    /// (імпорт CSV резолвить код посилання в Id саме з них, <c>B-10</c>):
+    /// повторний <c>FindEntryAsync</c> на кожне значення дав би N+1 з тим самим
+    /// рядком. Той самий відстежуваний об'єкт — ті самі перевірки нижче.
+    /// </para>
     /// </remarks>
     private static async Task RequireLookupTargetAsync(
-        IRegistryStore registries, RegistryFieldDef field, long target, CancellationToken ct)
+        IRegistryStore registries,
+        RegistryFieldDef field,
+        long target,
+        IReadOnlyDictionary<long, RegistryEntry>? knownTargets,
+        CancellationToken ct)
     {
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
-        var entry = await registries.FindEntryAsync(target, ct).ConfigureAwait(false);
+        var entry = knownTargets is not null && knownTargets.TryGetValue(target, out var known)
+            ? known
+            : await registries.FindEntryAsync(target, ct).ConfigureAwait(false);
 
         if (entry is null || entry.IsDeleted)
         {
