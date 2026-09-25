@@ -424,7 +424,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/CreateTemplateVersionHandler.cs` | 2 |
 | `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
 | `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
@@ -454,7 +453,7 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/PeriodStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/RowStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/TemplateVersionStore.cs` | 8 |
+| `src/Ecr.Infrastructure/Persistence/TemplateVersionStore.cs` | 6 |
 | `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` | 2 |
 | `src/Ecr.Infrastructure/Persistence/WorkflowStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Security/AccessDecisionService.cs` | 1 |
