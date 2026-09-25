@@ -1,7 +1,7 @@
 import { useMemo, type JSX } from 'react';
 import { Button, Group, Stack } from '@mantine/core';
 import { EcrApiError, newCorrelationId } from '@/api/client';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { ErrorAlert, TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { isStaleVersion } from './staleVersion';
 
 /**
@@ -45,14 +45,14 @@ export const StaleChunkErrorCode = 'ECR-WEB-CHUNK-STALE';
 /**
  * Перетворює будь-що кинуте на `EcrApiError` — форму, яку вміє `ErrorAlert`.
  *
- * ⚠ Технічний текст помилки НЕ ховається: без нього і користувач, і
- * підтримка бачать лише «щось зламалося», а саме це `07-checkpoints`
- * (Етап 6) і забороняє. Він іде ПІСЛЯ пояснення, а не замість нього.
+ * ✎ `X-27`: технічний текст (`TypeError: …`) більше НЕ частина пояснення.
+ * Він стояв у тому самому реченні, що й «навігація працює», тобто людина
+ * читала `Cannot read properties of undefined (reading 'map')` як відповідь
+ * на «що сталося». Тепер він — під розгортанням «Technical details» нижче:
+ * не зник (підтримці він потрібен дослівно, `07-checkpoints`, Етап 6), але й
+ * не заступає пояснення.
  */
 function renderProblem(error: unknown): EcrApiError {
-  const technical =
-    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? 'unknown');
-
   return new EcrApiError({
     title: 'This screen could not be displayed',
     status: 0,
@@ -60,8 +60,13 @@ function renderProblem(error: unknown): EcrApiError {
     correlationId: newCorrelationId(),
     detail:
       'The application hit an internal error while drawing this screen. Navigation still works: ' +
-      `you can reload the page or go back to the document list. Technical detail: ${technical}`,
+      'you can reload the page or go back to the document list.',
   });
+}
+
+/** Технічний текст кинутого — для розгортання, не для пояснення. */
+function technicalOf(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? 'unknown');
 }
 
 /**
@@ -96,6 +101,11 @@ export function RenderErrorScreen({ error }: { error: unknown }): JSX.Element {
   return (
     <Stack gap="md" data-testid="render-error-screen">
       <ErrorAlert error={problem} />
+
+      {/* ⚠ Напис — ЛІТЕРАЛ з тієї самої причини, що й решта екрана (коментар
+          угорі файлу): каталог може бути саме тим, що зламалося. Застарілій
+          збірці технічних подробиць немає — причина там названа повністю. */}
+      {!outdated && <TechnicalDetails label="Technical details">{technicalOf(error)}</TechnicalDetails>}
 
       {/*
        * ⛔ Тупикових екранів не буває (`ФВ-14.24`). Дві дії, названі
