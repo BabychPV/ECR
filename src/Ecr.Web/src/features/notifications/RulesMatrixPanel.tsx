@@ -195,12 +195,19 @@ export function RulesMatrixPanel(): JSX.Element {
   // ⛔ Крок 3 — ПОРОЖНЬО, і це успішна відповідь, а не збій: каналів справді
   // жодного. Вісь матриці порожня, тож таблиці немає — але причина названа
   // словами, а не відсутністю колонок.
+  //
+  // ⚠ Власний ключ (`notifications.rulesNoChannels`/`…Hint`), НЕ
+  // `notifications.noChannels`/`notifications.noChannelsHint` із `ChannelsPanel`
+  // над цим блоком: той каже «каналів немає», цей — «правил немає, бо каналів
+  // немає». Однаковий текст під різними заголовками читався б як зламаний
+  // рендер, що надрукував один блок двічі (перевірено живим переглядом
+  // `/admin/notifications` на порожньому стенді).
   if (channelList.length === 0) {
     return (
       <Stack gap="xs">
-        <Text>{t('notifications.noChannels')}</Text>
+        <Text>{t('notifications.rulesNoChannels')}</Text>
         <Text size="sm" c="dimmed">
-          {t('notifications.noChannelsHint')}
+          {t('notifications.rulesNoChannelsHint')}
         </Text>
       </Stack>
     );
