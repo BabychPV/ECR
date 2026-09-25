@@ -51,8 +51,11 @@ export const StaleChunkErrorCode = 'ECR-WEB-CHUNK-STALE';
  * на «що сталося». Тепер він — під розгортанням «Technical details» нижче:
  * не зник (підтримці він потрібен дослівно, `07-checkpoints`, Етап 6), але й
  * не заступає пояснення.
+ *
+ * ⚠ Параметр лишається (`_error`): нова помилка — нова кореляція (`useMemo`
+ * нижче перераховує саме за нею), хоча в текст вона вже не йде.
  */
-function renderProblem(error: unknown): EcrApiError {
+function renderProblem(_error: unknown): EcrApiError {
   return new EcrApiError({
     title: 'This screen could not be displayed',
     status: 0,
