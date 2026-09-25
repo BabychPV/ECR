@@ -154,4 +154,74 @@ public sealed class ListTemplateVersionsHandler(
 
         return versions;
     }
+
+    /// <summary>Ліміт версій на ОДИН шаблон у пакетній відповіді (`HandleBatchAsync`).</summary>
+    /// <remarks>Той самий одноразовий ліміт, що клієнт раніше передавав окремо кожному запиту.</remarks>
+    private const int PerTemplateVersionLimit = 100;
+
+    /// <summary>
+    /// Версії ДЕКІЛЬКОХ шаблонів ОДНИМ HTTP-зверненням (`BR-07`). Право <c>Template.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Уникає N+1 на РІВНІ HTTP-запитів клієнта: перелік шаблонів
+    /// (`/admin/templates`) до цього бив по одному запиту версій на КОЖЕН
+    /// рядок переліку (`TemplatesPage.tsx`, `useQueries`) — підтверджений
+    /// 2026-09-25 пробіл продуктивності.
+    ///
+    /// ⚠ Порт (<see cref="ITemplateVersionStore"/>) свідомо БЕЗ нового методу:
+    /// цикл нижче й далі робить по одному виклику <see cref="ITemplateVersionStore.
+    /// ListVersionsAsync"/> НА ШАБЛОН — тобто на рівні SQL це й далі N запитів,
+    /// просто в межах ОДНОГО HTTP-виклику, а не N. Справжній `WHERE TemplateId IN
+    /// (...)` одним SQL-запитом вимагає нового методу порту й EF-реалізації
+    /// (`Ecr.Infrastructure`) — свідомо залишено як борг (межа файлів задачі не
+    /// охоплює <c>Ecr.Application/Ports</c> і <c>Ecr.Infrastructure</c>).
+    ///
+    /// ⚠ Виклики — ПОСЛІДОВНІ, не `Task.WhenAll`: <c>EcrDbContext</c> не є
+    /// потокобезпечним для одночасних операцій у межах одного scoped-екземпляра,
+    /// і паралельні виклики впали б винятком «A second operation was started on
+    /// this context before a previous operation completed».
+    ///
+    /// ⛔ На відміну від <see cref="HandleAsync"/>, невідомий <paramref
+    /// name="templateIds"/> НЕ дає `404`: пакетний запит адресує МНОЖИНУ
+    /// шаблонів, і семантика «чого немає — те просто відсутнє в результаті»
+    /// той самий патерн, що вже в <c>ListMethodologiesHandler</c>
+    /// (`GET /api/v1/methodologies?ids=`, `RD-06`). Повтори в
+    /// <paramref name="templateIds"/> звужуються до одного виклику на
+    /// шаблон.
+    /// </remarks>
+    /// <param name="templateIds">Шаблони, чиї версії цікавлять.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<TemplateVersionsForTemplate>> HandleBatchAsync(
+        IReadOnlyList<int> templateIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(templateIds);
+
+        await ListTemplatesHandler
+            .RequireAsync(access, currentUser, ListTemplatesHandler.Permission, ct)
+            .ConfigureAwait(false);
+
+        var result = new List<TemplateVersionsForTemplate>(templateIds.Count);
+        var seen = new HashSet<int>();
+
+        foreach (var templateId in templateIds)
+        {
+            if (!seen.Add(templateId))
+            {
+                continue;
+            }
+
+            var page = await templates
+                .ListVersionsAsync(templateId, new CursorRequest(PerTemplateVersionLimit), ct)
+                .ConfigureAwait(false);
+
+            result.Add(new TemplateVersionsForTemplate(templateId, page.Items));
+        }
+
+        return result;
+    }
 }
+
+/// <summary>Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`).</summary>
+/// <param name="TemplateId">Шаблон, якому належать версії.</param>
+/// <param name="Versions">Версії шаблону, у тому самому порядку, що й <see cref="ListTemplateVersionsHandler.HandleAsync"/>.</param>
+public sealed record TemplateVersionsForTemplate(int TemplateId, IReadOnlyList<TemplateVersionSummary> Versions);

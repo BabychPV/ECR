@@ -3234,6 +3234,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/templates/{id}/restore` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/{id}/versions` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates/{id}/versions` | `Template.Edit` | 1 |
+| `GET` | `/api/v1/templates/versions` | `Template.View` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/clone` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/publish` | `Template.Publish` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/deprecate` | `Template.Publish` | 1 |
