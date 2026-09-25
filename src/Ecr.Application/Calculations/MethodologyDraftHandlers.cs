@@ -257,6 +257,7 @@ public sealed class ListMethodologyFormulasHandler(
 /// </remarks>
 public sealed class SaveMethodologyFormulaHandler(
     IMethodologyDraftStore drafts,
+    IUnitCatalog units,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -313,6 +314,10 @@ public sealed class SaveMethodologyFormulaHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ B-01: неіснуюча одиниця — 422 з ключем, а не 500 на `FK_MF_Unit`.
+        await MethodologyUnitChecks.RequireKnownAsync(units, outputUnitId, formulaCode.Value, ct)
+            .ConfigureAwait(false);
 
         var existing = await drafts
             .FindFormulaAsync(methodologyVersionId, formulaCode.Value, ct)

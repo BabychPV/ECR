@@ -99,15 +99,65 @@ public sealed class MethodologyPublishTests
     {
         _user.UserId.Returns(Author);
 
-        var error = await Assert.ThrowsAsync<DomainException>(
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(VersionId, "Уточнено коефіцієнт", From, CancellationToken.None));
 
         // ⛔ Той, хто писав формулу, дивиться на неї як автор і саме тому не
         // бачить у ній того, що побачить інший. Правило тримається системно —
         // і в базі теж (CK_MV_FourEyes), а не інструкцією (D-40).
         Assert.Equal("ECR-CALC-0409", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0409.authorCannotPublish", error.Details!["messageKey"]);
+
+        // ⛔ F-14 (четвертий раунд UX): «чотири ока» — ПЕРШОЮ відмовою. Золотий
+        // набір автора не проганяється взагалі: доти він біг раніше і відповідав
+        // «Period not found», а про справжню причину автор дізнавався останнім.
+        // Мутація: прибрати `RejectAuthor` з обробника — відмова приходить від
+        // домену (`DomainException`) уже ПІСЛЯ прогону модуля, тест червоний.
+        await _module.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, default);
         Assert.False(_version.IsPublished);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <remarks>
+    /// B-13 (четвертий раунд UX): тест із <c>periodKey: 0</c> давав 422 з кодом
+    /// <c>ECR-PRD-0404</c> і текстом «Періоду 0 для документа 0 не існує…».
+    /// Мутація: прибрати <c>RequireTestPeriods</c> — модуль отримує нуль-період.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Тест_без_періоду_відхиляється_з_назвою_тесту_до_прогону()
+    {
+        var broken = TestCases()[0] with
+        {
+            Code = "NO_PERIOD",
+            Input = TestCases()[0].Input with { PeriodKey = new PeriodKey(0), DocumentId = 0 },
+        };
+        _store.GetTestCasesAsync(VersionId, Arg.Any<CancellationToken>()).Returns([broken]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.goldenTestNoPeriod", error.Details!["messageKey"]);
+        Assert.Equal("NO_PERIOD", error.Details!["test"]);
+        await _module.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, default);
+    }
+
+    /// <remarks>
+    /// B-13: ключ правильної форми, якого в документі тесту немає, — та сама
+    /// людська відмова, а не <c>ECR-PRD-0404</c> модуля. Мутація: прибрати
+    /// <c>catch</c> у <c>RunTestAsync</c> — летить <c>DomainException</c>.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Тест_з_періодом_якого_немає_відхиляється_тією_самою_відмовою()
+    {
+        _module.ExecuteAsync(Arg.Any<CalculationInput>(), Arg.Any<CancellationToken>())
+               .Returns<CalculationOutput>(_ => throw new DomainException("ECR-PRD-0404", "Періоду 202601 немає."));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-0422.goldenTestNoPeriod", error.Details!["messageKey"]);
+        Assert.Equal("golden-7001001", error.Details!["test"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -421,6 +471,12 @@ public sealed class MethodologyPublishTests
 
         Assert.Equal("ECR-CALC-0422", error.ErrorCode);
         Assert.Equal("err.ECR-CALC-0422.goldenSetDiverged", error.Details!["messageKey"]);
+
+        // ⛔ F-15/B-12: число — РЯДКОМ (підстановка каталогу бере лише рядки, і
+        // `int` лишав у тексті сире `{count}`), і відмова називає тест, що
+        // розійшовся. Мутація: повернути `["count"] = divergences.Count` — червоне.
+        Assert.Equal("1", error.Details!["count"]);
+        Assert.Equal("golden-7001001", error.Details!["tests"]);
 
         // ⚠ Відмова називає РЕЧОВИНУ, вихід і обидва числа. Сама лічба
         // («знайдено проблем — 1») відправила б методолога перебирати всі

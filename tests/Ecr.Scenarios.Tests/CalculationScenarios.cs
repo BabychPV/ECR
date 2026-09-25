@@ -376,6 +376,17 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         var structure = await ArrangeStructureAsync(app, admin.Client, "S23");
         var methodologyId = await CreateMethodologyAsync(app, admin.Client, "S23");
 
+        // ⚠ F-09 (четвертий раунд UX): прив'язка приймається лише для виходу,
+        // оголошеного хоч однією версією методології — інакше вона чекала б
+        // числа, якого ніхто не порахує. Тож вихід EMISSION заводиться першим.
+        var units = await admin.Client.GetAsync(new Uri("/api/v1/units", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, units.StatusCode);
+        var unitId = (await units.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray()
+            .First(u => string.Equals(u.GetProperty("code").GetString(), "t", StringComparison.Ordinal))
+            .GetProperty("id").GetInt32();
+        var versionId = await CreateDraftVersionAsync(app, admin.Client, methodologyId, "1.0.0");
+        await SaveOutputAsync(app, admin.Client, methodologyId, versionId, "EMISSION", unitId);
+
         var address =
             $"/api/v1/methodologies/{methodologyId}/bindings/{structure.ResultColumnId}/EMISSION";
 

@@ -42,6 +42,7 @@ public sealed class SaveCalculationBindingTests
 
     private readonly ICalculationBindingStore _bindings = Substitute.For<ICalculationBindingStore>();
     private readonly IMethodologyDraftStore _drafts = Substitute.For<IMethodologyDraftStore>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
@@ -69,9 +70,63 @@ public sealed class SaveCalculationBindingTests
 
         _bindings.FindAsync(ColumnDefId, MethodologyId, "OUT1", Arg.Any<CancellationToken>())
             .Returns((CalculationBinding?)null);
+
+        // Єдина версія методології оголошує рівно вихід OUT1 (F-09).
+        var version = new MethodologyVersion(
+            MethodologyId, "1.0", CalculationLevel.Configuration, 9,
+            new DateTime(2026, 5, 1, 9, 0, 0, DateTimeKind.Utc));
+        typeof(Entity<int>).GetProperty(nameof(Entity<int>.Id))!.SetValue(version, 70);
+        _drafts.GetAllVersionsAsync(MethodologyId, Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<MethodologyVersion>)[version]);
+        _methodologies.GetOutputsAsync(70, Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<MethodologyOutput>)[new MethodologyOutput(70, EcrCode.Create("OUT1"), 5)]);
     }
 
-    private SaveCalculationBindingHandler Handler() => new(_bindings, _drafts, _uow, _access, _user, _audit, _clock);
+    private SaveCalculationBindingHandler Handler() => new(_bindings, _drafts, _methodologies, _uow, _access, _user, _audit, _clock);
+
+    /// <remarks>
+    /// F-09 (четвертий раунд UX): <c>"not json"</c> зберігався з <c>200</c>, а
+    /// <c>MethodologyRuleMatcher</c> вважає битий предикат таким, що не
+    /// збігається ні з чим. Мутація: прибрати <c>RequireValidBindingPredicate</c>
+    /// — прив'язка йде на збереження.
+    /// </remarks>
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[1,2]")]
+    [InlineData("{\"42\":{\"nested\":1}}")]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Зламаний_предикат_відхиляється_ключем(string matchJson)
+    {
+        Column(CellDataType.Calculated);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                MethodologyId, ColumnDefId, "OUT1", matchJson, isActive: true, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-0422.bindingMatchInvalid", error.Details!["messageKey"]);
+        Assert.Equal("OUT1", error.Details!["outputCode"]);
+        _bindings.DidNotReceiveWithAnyArgs().Add(null!);
+    }
+
+    /// <remarks>
+    /// F-09: неіснуючий вихід <c>NO_SUCH_OUT</c> приймався з <c>200</c>.
+    /// Мутація: прибрати <c>RequireDeclaredOutputAsync</c> — прив'язка йде на
+    /// збереження.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    public async Task Неоголошений_вихід_відхиляється_ключем()
+    {
+        Column(CellDataType.Calculated);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                MethodologyId, ColumnDefId, "NO_SUCH_OUT", "{}", isActive: true, CancellationToken.None));
+
+        Assert.Equal("err.ECR-CALC-0422.bindingUnknownOutput", error.Details!["messageKey"]);
+        Assert.Equal("NO_SUCH_OUT", error.Details!["outputCode"]);
+        _bindings.DidNotReceiveWithAnyArgs().Add(null!);
+    }
 
     private void Column(CellDataType dataType)
         => _bindings.FindColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())

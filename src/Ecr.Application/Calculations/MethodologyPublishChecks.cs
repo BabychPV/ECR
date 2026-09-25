@@ -91,7 +91,7 @@ public static class MethodologyPublishChecks
     /// <c>ECR-CALC-0432</c> — у виразі є токен, якого немає в оголошеному
     /// списку аргументів формули.
     /// </exception>
-    public static IReadOnlyList<string> Check(
+    public static IReadOnlyList<PublishProblem> Check(
         IReadOnlyList<ParsedFormula> formulas,
         IReadOnlyList<MethodologyConstant> constants,
         IReadOnlyList<MethodologyOutput> outputs,
@@ -109,7 +109,7 @@ public static class MethodologyPublishChecks
         // рахуватиметься. Спершу треба звести їх до одного.
         Audit(formulas, contextualArguments ?? DefaultContextualArguments, warnings);
 
-        var problems = new List<string>();
+        var problems = new List<PublishProblem>();
         var byCode = new Dictionary<string, MethodologyConstant>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var constant in constants)
@@ -398,22 +398,28 @@ public static class MethodologyPublishChecks
     /// <c>k22_HSE30X_Int_FG_ = ''</c> (5). Мовчазний нуль дав би 25 формул із
     /// правдоподібними і неправильними числами.
     /// </remarks>
-    private static IEnumerable<string> UnresolvedConstants(IReadOnlyList<MethodologyConstant> constants)
+    private static IEnumerable<PublishProblem> UnresolvedConstants(IReadOnlyList<MethodologyConstant> constants)
     {
         foreach (var constant in constants.Where(c => !c.IsResolved))
         {
             // ⚠ TODO: потрібен окремий код `ECR-CALC-0434` («значення константи
             // не є ані числом, ані текстом»). Поки — найближчий наявний.
             yield return constant.Kind == ConstantKind.Numeric
-                ? $"Константа «{constant.Code}» оголошена числовою, але значення "
-                  + $"«{constant.TextValue ?? "—"}» не є числом: потрібне рішення методолога, "
-                  + "а не нуль за замовчуванням."
-                : $"Константа «{constant.Code}» виду {constant.Kind} не має тексту.";
+                ? PublishProblem.Of(
+                    "publish.problem.constantNotNumber",
+                    $"Константа «{constant.Code}» оголошена числовою, але значення "
+                    + $"«{constant.TextValue ?? "—"}» не є числом: потрібне рішення методолога, "
+                    + "а не нуль за замовчуванням.",
+                    ("code", constant.Code), ("value", constant.TextValue ?? "—"))
+                : PublishProblem.Of(
+                    "publish.problem.constantNoText",
+                    $"Константа «{constant.Code}» виду {constant.Kind} не має тексту.",
+                    ("code", constant.Code), ("kind", constant.Kind.ToString()));
         }
     }
 
     /// <summary>Мітки категорій і текст у арифметиці — по одному виразу.</summary>
-    private static IEnumerable<string> ConstantsInExpression(
+    private static IEnumerable<PublishProblem> ConstantsInExpression(
         ParsedFormula formula, Dictionary<string, MethodologyConstant> byCode)
     {
         var referenced = new List<string>();
@@ -432,8 +438,11 @@ public static class MethodologyPublishChecks
             // ⚠ TODO: потрібен окремий код `ECR-CALC-0434`.
             if (!constant.IsAllowedInExpression)
             {
-                yield return $"Формула «{formula.Code}» посилається на «CST.{code}» — "
-                    + "це мітка категорії, а не значення: у виразах вона не бере участі.";
+                yield return PublishProblem.Of(
+                    "publish.problem.categoryLabelInExpression",
+                    $"Формула «{formula.Code}» посилається на «CST.{code}» — "
+                    + "це мітка категорії, а не значення: у виразах вона не бере участі.",
+                    ("formula", formula.Code), ("code", code));
                 continue;
             }
 
@@ -442,8 +451,11 @@ public static class MethodologyPublishChecks
             // числом, і виявиться під час нічного прогону.
             if (constant.Kind == ConstantKind.Text && inArithmetic.Contains(code))
             {
-                yield return $"Формула «{formula.Code}»: текстова константа «CST.{code}» "
-                    + $"(«{constant.TextValue}») стоїть в арифметичній позиції.";
+                yield return PublishProblem.Of(
+                    "publish.problem.textConstantInArithmetic",
+                    $"Формула «{formula.Code}»: текстова константа «CST.{code}» "
+                    + $"(«{constant.TextValue}») стоїть в арифметичній позиції.",
+                    ("formula", formula.Code), ("code", code), ("value", constant.TextValue ?? string.Empty));
             }
         }
     }
@@ -454,7 +466,7 @@ public static class MethodologyPublishChecks
     /// падає конверсією або обнуляється, а число, оголошене текстом, тихо
     /// проходить у звіт рядком і ламає сортування й підсумки.
     /// </remarks>
-    private static IEnumerable<string> ResultTypeProblems(
+    private static IEnumerable<PublishProblem> ResultTypeProblems(
         ParsedFormula formula,
         Dictionary<string, MethodologyConstant> byCode,
         HashSet<string> outputCodes)
@@ -466,12 +478,18 @@ public static class MethodologyPublishChecks
         // не відповідає колонці-приймачу»).
         if (formula.ResultType == FormulaResultType.Number && textOnly)
         {
-            yield return $"Формула «{formula.Code}» оголошена числовою, але повертає лише текст.";
+            yield return PublishProblem.Of(
+                "publish.problem.numberReturnsText",
+                $"Формула «{formula.Code}» оголошена числовою, але повертає лише текст.",
+                ("formula", formula.Code));
         }
 
         if (formula.ResultType == FormulaResultType.Text && surelyNumber)
         {
-            yield return $"Формула «{formula.Code}» оголошена текстовою, але повертає число.";
+            yield return PublishProblem.Of(
+                "publish.problem.textReturnsNumber",
+                $"Формула «{formula.Code}» оголошена текстовою, але повертає число.",
+                ("formula", formula.Code));
         }
 
         // ⛔ Оголошений вихід лягає в `calc.CalculationResult.Value
@@ -480,8 +498,11 @@ public static class MethodologyPublishChecks
         // і мовчазна спроба записати його дала б нуль у звіті.
         if (formula.ResultType == FormulaResultType.Text && outputCodes.Contains(formula.Code))
         {
-            yield return $"Формула «{formula.Code}» повертає текст і оголошена виходом методології: "
-                + "результат зберігається в числовій колонці calc.CalculationResult.Value.";
+            yield return PublishProblem.Of(
+                "publish.problem.textOutput",
+                $"Формула «{formula.Code}» повертає текст і оголошена виходом методології: "
+                + "результат зберігається в числовій колонці calc.CalculationResult.Value.",
+                ("formula", formula.Code));
         }
     }
 
@@ -606,7 +627,7 @@ public static class MethodologyPublishChecks
     /// <param name="problems">Перелік проблем.</param>
     /// <returns>Рядок, придатний для повідомлення користувачеві.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="problems"/> — <c>null</c>.</exception>
-    public static string Describe(IReadOnlyList<string> problems)
+    public static string Describe(IReadOnlyList<PublishProblem> problems)
     {
         ArgumentNullException.ThrowIfNull(problems);
 
@@ -614,8 +635,43 @@ public static class MethodologyPublishChecks
             CultureInfo.InvariantCulture,
             "Перевірка типів версії не пройдена ({0}): {1}",
             problems.Count,
-            string.Join(" | ", problems));
+            string.Join(" | ", problems.Select(p => p.Text)));
     }
+}
+
+/// <summary>
+/// Одна проблема перевірки публікації — ключем каталогу з підстановками, а не
+/// готовим реченням (F-15/B-12, четвертий раунд UX).
+/// </summary>
+/// <param name="MessageKey">Ключ <c>publish.problem.*</c> у <c>sys.UiString</c>.</param>
+/// <param name="Args">Підстановки <c>{ім'я}</c> — лише рядки (так їх читає клієнтський <c>t()</c>).</param>
+/// <param name="Text">Запасне речення сервера — для журналу і повідомлення винятку.</param>
+/// <remarks>
+/// ⛔ Доти перелік проблем їхав у <c>detail</c> одним українським реченням, а
+/// клієнт мовою інтерфейсу бачив лише «N problems» — без жодної назви формули чи
+/// константи. Тепер перелік іде в <c>problems</c> відповіді, і клієнт
+/// перекладає кожен пункт сам.
+/// </remarks>
+public sealed record PublishProblem(
+    string MessageKey, IReadOnlyDictionary<string, string> Args, string Text)
+{
+    /// <summary>Складає проблему з ключа, запасного тексту й підстановок.</summary>
+    /// <param name="messageKey">Ключ каталогу.</param>
+    /// <param name="text">Запасне речення.</param>
+    /// <param name="args">Пари «ім'я → значення».</param>
+    /// <returns>Проблема перевірки.</returns>
+    public static PublishProblem Of(string messageKey, string text, params (string Name, string Value)[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return new PublishProblem(
+            messageKey,
+            args.ToDictionary(a => a.Name, a => a.Value, StringComparer.Ordinal),
+            text);
+    }
+
+    /// <inheritdoc />
+    public override string ToString() => Text;
 }
 
 /// <summary>Формула разом із розібраним деревом — вхід перевірок публікації.</summary>

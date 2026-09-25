@@ -532,6 +532,18 @@ public sealed partial class EndpointCoverageTests
         new("features/registries/RegistryImportPanel.tsx", "error.messageKey", 1, null, [],
             "messageKey рядка звіту імпорту записів довідника (BE-24, RegistryEntryImportError) — "
             + "реюзить відкритий набір ключів валідації UpsertRegistryEntryHandler, клієнт його не перелічує."),
+
+        // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
+        // закритий набір, що його породжує сервер (MethodologyPublishChecks).
+        new("features/methodologies/publishError.ts", "key", 1, "features/methodologies/publishError.ts",
+            [
+                "publish.problem.constantNotNumber", "publish.problem.constantNoText",
+                "publish.problem.categoryLabelInExpression", "publish.problem.textConstantInArithmetic",
+                "publish.problem.numberReturnsText", "publish.problem.textReturnsNumber",
+                "publish.problem.textOutput", "publish.problem.importNoVersion",
+                "publish.problem.libraryHasRules", "publish.problem.ambiguousReference",
+            ],
+            "Пункт переліку проблем публікації (PublishProblemKeys)."),
     ];
 
     // ⚠ Властивості, а не поля: `DynamicKeySites` вище ініціалізується раніше

@@ -419,7 +419,11 @@ UPDATE t
     (N'grid.conflictItem', N'en', N'Row {row}, column {column}: their value {value} — {user}, {time}',
                                                 N'Row {row}, column {column}: yours {yours}, theirs {value} — {user}, {time}'),
     -- B-02: тим самим кодом тепер відмовляє й неіснуюча одиниця в колонці `Unit`.
-    (N'err.ECR-CELL-4223',               N'en', N'Reference to a missing registry entry', N'Reference to a missing registry entry or unit')
+    (N'err.ECR-CELL-4223',               N'en', N'Reference to a missing registry entry', N'Reference to a missing registry entry or unit'),
+    -- F-15/B-12 (четвертий раунд UX, лінія B1): відмова золотого набору
+    -- називає тести, що розійшлися.
+    (N'err.ECR-CALC-0422.goldenSetDiverged', N'en', N'Version {version} cannot be published: {count} values diverged on the golden set.',
+                                                N'Version {version} cannot be published: {count} value(s) diverged on the golden set (tests: {tests}).')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1216,7 +1220,7 @@ USING (VALUES
     (N'err.ECR-CALC-0422.publishChecksFailed',  N'en', N'The version failed pre-publication checks ({count} problems).', 1),
     (N'err.ECR-CALC-0422.formulasNotSaved',     N'en', N'Save the formulas of the version before publishing it.', 1),
     (N'err.ECR-CALC-0422.goldenSetEmpty',       N'en', N'Version {version} cannot be published: its golden set has no cases, so nothing was checked.', 1),
-    (N'err.ECR-CALC-0422.goldenSetDiverged',    N'en', N'Version {version} cannot be published: {count} values diverged on the golden set.', 1),
+    (N'err.ECR-CALC-0422.goldenSetDiverged',    N'en', N'Version {version} cannot be published: {count} value(s) diverged on the golden set (tests: {tests}).', 1),
     (N'err.ECR-CALC-0422.deprecateNotPublished', N'en', N'Version {version} is not published, so there is nothing to withdraw.', 1),
     (N'err.ECR-CALC-0422.versionNotInMethodology', N'en', N'Version {version} does not belong to methodology {code}.', 1),
     (N'err.ECR-CALC-0422.noEffectiveVersion',   N'en', N'The methodology has no version in effect on {date}.', 1),
@@ -4126,7 +4130,24 @@ USING (VALUES
     (N'document.lock.projectArchived', N'en', N'This project is archived: its documents are read-only.', 1),
     (N'document.lock.periodClosed', N'en', N'Period {period} is closed: its data can no longer be edited, imported, submitted or recalculated. Ask a period manager to reopen it.', 1),
     (N'document.lock.periodNotOpen', N'en', N'Period {period} is not open yet: data entry starts when it opens.', 1),
-    (N'document.lock.sheetApproved', N'en', N'This sheet has been approved; editing is closed until it is returned for edits.', 1)
+    (N'document.lock.sheetApproved', N'en', N'This sheet has been approved; editing is closed until it is returned for edits.', 1),
+
+    -- ── Четвертий раунд UX, лінія B1 (методологія → документ) ──────────
+    (N'err.ECR-CALC-0422.unknownUnit', N'en', N'{code}: unit {unitId} does not exist in the unit catalog.', 1),
+    (N'err.ECR-CALC-0422.bindingMatchInvalid', N'en', N'The match condition for output {outputCode} is not a flat JSON object of "column → value" pairs, so it would match no row.', 1),
+    (N'err.ECR-CALC-0422.bindingUnknownOutput', N'en', N'No version of this methodology declares output {outputCode}: nothing would ever be calculated for this binding.', 1),
+    (N'err.ECR-CALC-0422.goldenTestNoPeriod', N'en', N'Golden test {test} has no period: set a document and an existing period in its input (periodKey is year × 100 + number, e.g. 202601).', 1),
+    (N'publish.problemsTitle', N'en', N'What to fix before publishing', 1),
+    (N'publish.problem.constantNotNumber', N'en', N'Constant {code} is declared numeric, but its value "{value}" is not a number: decide on a value, zero is not a default.', 1),
+    (N'publish.problem.constantNoText', N'en', N'Constant {code} ({kind}) has no text.', 1),
+    (N'publish.problem.categoryLabelInExpression', N'en', N'Formula {formula} refers to CST.{code}, which is a category label, not a value.', 1),
+    (N'publish.problem.textConstantInArithmetic', N'en', N'Formula {formula} uses text constant CST.{code} ("{value}") in arithmetic.', 1),
+    (N'publish.problem.numberReturnsText', N'en', N'Formula {formula} is declared numeric but returns only text.', 1),
+    (N'publish.problem.textReturnsNumber', N'en', N'Formula {formula} is declared as text but returns a number.', 1),
+    (N'publish.problem.textOutput', N'en', N'Formula {formula} returns text but is declared a methodology output: results are stored as numbers.', 1),
+    (N'publish.problem.importNoVersion', N'en', N'Imported methodology {code} has no version in effect on {date}: its formulas are not visible.', 1),
+    (N'publish.problem.libraryHasRules', N'en', N'Methodology {code} is a library but has {count} active rules: a library does not calculate for any document.', 1),
+    (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

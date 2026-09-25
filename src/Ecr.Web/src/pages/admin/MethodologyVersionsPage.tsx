@@ -43,6 +43,7 @@ import {
 } from '@/features/methodologies/draft';
 import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAction';
 import { VersionDiffModal } from '@/features/methodologies/VersionDiffModal';
+import { showPublishError } from '@/features/methodologies/publishError';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -304,7 +305,8 @@ export function MethodologyVersionsPage(): JSX.Element {
     // `ECR-CALC-0409`). `showApiError` показує ТЕКСТ відмови сервера, а не
     // узагальнене «не вдалося»: саме цей клас багів (проковтнута відповідь
     // сервера) уже знайдено в іншому місці цього аудиту.
-    onError: showApiError,
+    // ⚠ F-15/B-12: під назвою — перелік проблем із поля `problems`.
+    onError: showPublishError,
   });
 
   const placement = useMemo<ExpressionPlacement>(

@@ -159,6 +159,7 @@ public sealed class ListMethodologyConstantsHandler(
 public sealed class SaveMethodologyConstantHandler(
     IMethodologyDraftStore drafts,
     IRegistryStore registries,
+    IUnitCatalog units,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -224,6 +225,10 @@ public sealed class SaveMethodologyConstantHandler(
                     });
             }
         }
+
+        // ⛔ B-01: неіснуюча одиниця — 422 з ключем, а не 500 на `FK_MC_Unit`.
+        await MethodologyUnitChecks.RequireKnownAsync(units, request.UnitId, constantCode.Value, ct)
+            .ConfigureAwait(false);
 
         var candidates = await drafts
             .GetConstantsByCodeAsync(methodologyVersionId, constantCode.Value, ct)
@@ -620,6 +625,7 @@ public sealed class ListMethodologyOutputsHandler(
 /// </remarks>
 public sealed class SaveMethodologyOutputHandler(
     IMethodologyDraftStore drafts,
+    IUnitCatalog units,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -661,6 +667,10 @@ public sealed class SaveMethodologyOutputHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ B-01: неіснуюча одиниця — 422 з ключем, а не 500 на `FK_MO_Unit`.
+        await MethodologyUnitChecks.RequireKnownAsync(units, unitId, outputCode.Value, ct)
+            .ConfigureAwait(false);
 
         var existing = await drafts
             .FindOutputAsync(methodologyVersionId, outputCode.Value, ct)
@@ -924,6 +934,7 @@ public sealed class ListCalculationBindingsHandler(
 public sealed class SaveCalculationBindingHandler(
     ICalculationBindingStore bindings,
     IMethodologyDraftStore drafts,
+    IMethodologyStore methodologies,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser,
@@ -991,9 +1002,24 @@ public sealed class SaveCalculationBindingHandler(
 
         var tableDefId = column.TableDefId;
 
+        // ⛔ F-09 (четвертий раунд UX): предикат перевіряється тим самим правилом,
+        // що й предикат правила відбору (`MethodologyRuleChecks`). Доти `"not json"`
+        // зберігався з `200`, а `MethodologyRuleMatcher` вважає битий предикат
+        // таким, що не збігається НІ З ЧИМ — колонка лишалася порожньою мовчки.
+        RequireValidBindingPredicate(code.Value, matchJson);
+
         var existing = await bindings
             .FindAsync(columnDefId, methodologyId, code.Value, ct)
             .ConfigureAwait(false);
+
+        // ⛔ F-09: вихід мусить бути оголошений хоч однією версією методології.
+        // `NO_SUCH_OUT` приймався з `200`, і прив'язка чекала числа, якого жодна
+        // версія не дасть. ⚠ Вимкнути наявну прив'язку дозволено й тоді, коли
+        // виходу вже немає: інакше осиротілу прив'язку неможливо прибрати з прогону.
+        if (existing is null || isActive)
+        {
+            await RequireDeclaredOutputAsync(methodologyId, code.Value, ct).ConfigureAwait(false);
+        }
 
         CalculationBinding binding;
 
@@ -1073,6 +1099,78 @@ public sealed class SaveCalculationBindingHandler(
         }, ct).ConfigureAwait(false);
 
         return MethodologyAuthoringMap.Binding(binding);
+    }
+
+    /// <summary>Предикат прив'язки — плаский JSON-об'єкт «колонка → значення».</summary>
+    /// <param name="outputCode">Вихід — для повідомлення.</param>
+    /// <param name="matchJson">Предикат.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>, <c>bindingMatchInvalid</c>.</exception>
+    /// <remarks>
+    /// ⚠ Порожній рядок лишається справою домену (<c>CalculationBinding.Update</c>,
+    /// <c>ECR-CFG-0422</c>) — тут лише той предикат, який домен пропускав.
+    /// </remarks>
+    private static void RequireValidBindingPredicate(string outputCode, string matchJson)
+    {
+        if (string.IsNullOrWhiteSpace(matchJson) || IsFlatObject(matchJson))
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Предикат прив'язки виходу «{outputCode}» не є пласким JSON-об'єктом «колонка → значення»: "
+            + "такий предикат не збігається з жодним рядком, і колонка лишилася б порожньою.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.bindingMatchInvalid",
+                ["outputCode"] = outputCode,
+            });
+    }
+
+    /// <summary>Чи є рядок пласким JSON-об'єктом зі скалярними значеннями.</summary>
+    private static bool IsFlatObject(string json)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && document.RootElement.EnumerateObject().All(p =>
+                       p.Value.ValueKind is not (System.Text.Json.JsonValueKind.Object
+                           or System.Text.Json.JsonValueKind.Array));
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Вихід оголошено хоч однією версією методології.</summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="outputCode">Код виходу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>, <c>bindingUnknownOutput</c>.</exception>
+    private async Task RequireDeclaredOutputAsync(int methodologyId, string outputCode, CancellationToken ct)
+    {
+        var versions = await drafts.GetAllVersionsAsync(methodologyId, ct).ConfigureAwait(false);
+
+        foreach (var version in versions)
+        {
+            var outputs = await methodologies.GetOutputsAsync(version.Id, ct).ConfigureAwait(false);
+            if (outputs.Any(o => string.Equals(o.Code, outputCode, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Методологія {methodologyId.ToString(CultureInfo.InvariantCulture)} не оголошує виходу «{outputCode}» "
+            + "у жодній версії: прив'язка чекала б числа, якого ніхто не порахує.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.bindingUnknownOutput",
+                ["outputCode"] = outputCode,
+            });
     }
 
     /// <summary>
