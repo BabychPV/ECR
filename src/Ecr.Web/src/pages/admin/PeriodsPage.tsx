@@ -48,6 +48,7 @@ import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/u
 import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { fetchAllProjects } from '@/features/projects/allProjects';
 
 /**
  * Поле дати — за `import()`, і не заради стилю.
@@ -291,7 +292,8 @@ export function PeriodsPage(): JSX.Element {
   // відкриються періоди взагалі (`A7-25`).
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
+    queryFn: fetchAllProjects,
   });
 
   const periods = useQuery({

@@ -8,7 +8,7 @@ import {
   Table,
   Text,
 } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type {
   PermissionCatalogItem,
@@ -30,6 +30,9 @@ import { showApiError } from '@/shared/ui/notify';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+
+/** Скільки користувачів за один запит (X-07): сторінка, а не стеля переліку. */
+const UsersPageSize = 200;
 
 /** Без адреси алерти нікуди надсилати — перемикач вимкнено з названою причиною (`D-125`). */
 function noEmail(user: UserView): boolean {
@@ -134,11 +137,35 @@ export function SecurityPage(): JSX.Element {
     queryFn: () => apiFetch<RoleView[]>('/api/v1/roles'),
   });
 
-  const users = useQuery({
-    queryKey: ['users'],
-    queryFn: () => apiFetch<UserPage>('/api/v1/users?limit=200'),
+  // ⛔ `X-07`: перелік мовчки обрізався на 200 (`?limit=200` і жодного слова
+  // про решту). Відповідь курсорна — сторінки довантажуються кнопкою під
+  // таблицею, і скільки показано з усіх, видно поруч.
+  //
+  // ⚠ Ключ `['users', 'list']`, а не `['users']`: під `['users']` лежить
+  // звичайна сторінка `UserPage` (`RegistryConstructorPage`), а тут —
+  // сторінки нескінченного запиту. Інвалідація `['users']` зачіпає обидва.
+  const users = useInfiniteQuery({
+    queryKey: ['users', 'list'],
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      apiFetch<UserPage>(
+        `/api/v1/users?limit=${String(UsersPageSize)}`
+          + (pageParam === null ? '' : `&cursor=${encodeURIComponent(pageParam)}`),
+      ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last: UserPage) => last.nextCursor ?? undefined,
     enabled: tab === 'users',
   });
+
+  const usersPage = useMemo<UserPage | undefined>(() => {
+    const pages = users.data?.pages;
+    if (pages === undefined || pages.length === 0) return undefined;
+
+    return {
+      items: pages.flatMap((page) => page.items),
+      nextCursor: pages[pages.length - 1]?.nextCursor ?? null,
+      totalCount: pages[0]?.totalCount ?? null,
+    };
+  }, [users.data]);
 
   /**
    * ПОВНИЙ каталог прав (директива №11, T2) — а не перетин того, що вже
@@ -253,7 +280,7 @@ export function SecurityPage(): JSX.Element {
         <AsyncBoundary<UserPage>
           isPending={users.isPending}
           error={users.error}
-          data={users.data}
+          data={usersPage}
           isEmpty={(page) => page.items.length === 0}
           emptyTitle={t('security.noUsers')}
           emptyHint={t('security.noUsersHint')}
@@ -261,6 +288,7 @@ export function SecurityPage(): JSX.Element {
           onRetry={() => void users.refetch()}
         >
           {(page) => (
+          <>
           <Table striped className="ecr-sticky-head">
             <Table.Thead>
               <Table.Tr>
@@ -275,7 +303,10 @@ export function SecurityPage(): JSX.Element {
             </Table.Thead>
             <Table.Tbody>
               {page.items.map((user) => (
-                <Table.Tr key={user.id} opacity={user.isActive ? 1 : 0.5}>
+                // ⛔ `X-06`: без `opacity` на рядку. Прозорість гасила й КНОПКИ
+                // рядка — контраст тексту й дій падав нижче AA, а неактивність і
+                // так позначена бейджем поруч із логіном.
+                <Table.Tr key={user.id} data-inactive={user.isActive ? undefined : ''}>
                   <Table.Td>
                     {user.userName}
                     {/* ⛔ Той самий дефект, що й у таблиці ролей: `opacity={0.5}`
@@ -394,6 +425,26 @@ export function SecurityPage(): JSX.Element {
               ))}
             </Table.Tbody>
           </Table>
+
+          {/* ⛔ `X-07`: скільки показано — і дія, щоб побачити решту. */}
+          {page.nextCursor !== null && (
+            <Group gap="sm" mt="md" data-users-more="">
+              <Text size="sm" c="dimmed">
+                {page.totalCount === null || page.totalCount === undefined
+                  ? t('common.shownSoFar', { shown: page.items.length })
+                  : t('common.shownOf', { shown: page.items.length, total: page.totalCount })}
+              </Text>
+              <Button
+                size="xs"
+                variant="default"
+                loading={users.isFetchingNextPage}
+                onClick={() => void users.fetchNextPage()}
+              >
+                {t('documents.more')}
+              </Button>
+            </Group>
+          )}
+          </>
           )}
         </AsyncBoundary>
       )}

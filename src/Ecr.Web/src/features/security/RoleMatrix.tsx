@@ -45,7 +45,9 @@ export const RoleMatrix = memo(function RoleMatrix({ roles, permissions, canMana
         </Table.Thead>
         <Table.Tbody>
           {roles.map((role) => (
-            <Table.Tr key={role.id} opacity={role.isActive ? 1 : 0.5}>
+            // ⛔ `X-06`: без `opacity` — прозорість гасила разом із рядком і
+            // кнопки дій (контраст нижче AA); неактивність позначає бейдж.
+            <Table.Tr key={role.id} data-inactive={role.isActive ? undefined : ''}>
               <Table.Td>
                 {role.code}
                 {/* ⛔ `opacity` невидима читалці — бейдж дає той самий факт

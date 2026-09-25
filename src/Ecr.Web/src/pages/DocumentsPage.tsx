@@ -1,9 +1,9 @@
-﻿import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
 import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { PagedProjects, PeriodCalendarDto } from '@/api/types';
+import type { PeriodCalendarDto } from '@/api/types';
 import { listDocuments, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
@@ -20,6 +20,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { fetchAllProjects } from '@/features/projects/allProjects';
 
 /**
  * Діалог створення документа — за `import()` (`D-132`), як і решта
@@ -79,7 +80,8 @@ export function DocumentsPage(): JSX.Element {
   // кліком поруч (`CreateDocumentModal`).
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
+    queryFn: fetchAllProjects,
   });
 
   /*

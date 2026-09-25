@@ -4211,7 +4211,10 @@ USING (VALUES
     (N'audit.authorAny', N'en', N'Anyone', 1),
     (N'audit.userGone', N'en', N'User #{id} (no longer exists)', 1),
     (N'audit.documentGone', N'en', N'Document #{id} (deleted)', 1),
-    (N'audit.columnGone', N'en', N'Column #{id} (deleted)', 1)
+    (N'audit.columnGone', N'en', N'Column #{id} (deleted)', 1),
+    -- X-07: перелік, що не вмістився в одну сторінку, про це каже.
+    (N'common.shownOf', N'en', N'Showing {shown} of {total}', 1),
+    (N'common.shownSoFar', N'en', N'Showing the first {shown}; there are more', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
