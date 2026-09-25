@@ -94,6 +94,13 @@ const MethodologyTestsPanel = lazyPanel('MethodologyTestsPanel');
  * `lazyPanel` тримає сім попередніх. Спільного модуля вона не потребує —
  * ні станів, ні чернеток панелей змісту вона не читає.
  */
+/** Журнал публікацій (F-16) — власний чанк, як і матриця покриття. */
+const MethodologyPublicationsPanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/MethodologyPublicationsPanel');
+
+  return { default: loaded.MethodologyPublicationsPanel };
+});
+
 const MethodologyRuleCoveragePanel = lazy(async () => {
   const loaded = await import('@/features/methodologies/RuleCoveragePanel');
 
@@ -637,6 +644,9 @@ export function MethodologyVersionsPage(): JSX.Element {
             methodologyId={methodologyId}
             versionId={selected.id}
           />
+
+          {/* ⚠ F-16: журнал публікацій належить МЕТОДОЛОГІЇ, не версії. */}
+          <MethodologyPublicationsPanel methodologyId={methodologyId} />
 
           {/* ⚠ Покриття «виходи → колонки» — ПІСЛЯ матриці покриття правил, а
               не перед нею: обидві лише ПОКАЗУЮТЬ наслідки того, що складено

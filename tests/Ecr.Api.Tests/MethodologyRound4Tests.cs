@@ -132,6 +132,47 @@ public sealed class MethodologyRound4Tests(SqlServerFixture sql)
         Assert.Equal("1", item.GetProperty("args").GetProperty("count").GetString());
     }
 
+    // ── F-16 ──────────────────────────────────────────────────────────────
+
+    /// <remarks>
+    /// Журнал публікацій доходить до клієнта з ІМЕНЕМ того, хто публікував, і
+    /// номером версії. Мутація: прибрати <c>LEFT JOIN sec.[User]</c> з
+    /// <c>MethodologyStore.ListPublicationsAsync</c> (ім'я — <c>NULL</c>) —
+    /// червоне; прибрати фільтр <c>v.MethodologyId</c> — видно чужі публікації.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Журнал_публікацій_віддає_версію_причину_й_ім_я()
+    {
+        using var app = new EcrApiFactory(sql);
+        var signedIn = await SignedInAsync(app).ConfigureAwait(true);
+        using var client = signedIn.Client;
+        var stand = await StandAsync(authorUserId: 1).ConfigureAwait(true);
+        var other = await StandAsync(authorUserId: 1).ConfigureAwait(true);
+
+        await using (var db = new EcrDbContext(Options()))
+        {
+            foreach (var (versionId, reason) in new[] { (stand.VersionId, "R4M: own"), (other.VersionId, "R4M: other") })
+            {
+                await db.Database.ExecuteSqlAsync($$"""
+                    INSERT INTO aud.PublicationEvent (ChangedAt, EntityType, EntityId, ResultDiffJson, ChangeReason, ChangedByUserId)
+                    VALUES (SYSUTCDATETIME(), N'calc.MethodologyVersion', {{versionId}}, N'{"Changes":[{},{}]}', {{reason}}, {{signedIn.UserId}})
+                    """).ConfigureAwait(true);
+            }
+        }
+
+        var response = await client.GetAsync(
+            new Uri($"/api/v1/methodologies/{stand.MethodologyId}/publications", UriKind.Relative)).ConfigureAwait(true);
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{response.StatusCode}: {body}");
+
+        var entry = Assert.Single(JsonDocument.Parse(body).RootElement.EnumerateArray().ToList());
+        Assert.Equal("1.0", entry.GetProperty("version").GetString());
+        Assert.Equal("R4M: own", entry.GetProperty("changeReason").GetString());
+        Assert.False(string.IsNullOrEmpty(entry.GetProperty("changedByName").GetString()));
+    }
+
     // ── Опора ─────────────────────────────────────────────────────────────
 
     private static string VersionUrl(Stand stand)

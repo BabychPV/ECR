@@ -3352,6 +3352,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-results` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/simulate` | `Calculation.View` | 4 |

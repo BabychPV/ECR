@@ -251,6 +251,7 @@ public static class DependencyInjection
         services.AddScoped<Calculations.PublishMethodologyHandler>();
         services.AddScoped<Calculations.SimulateMethodologyHandler>();
         services.AddScoped<Calculations.ListMethodologyVersionsHandler>();
+        services.AddScoped<Calculations.ListMethodologyPublicationsHandler>();
         services.AddScoped<Calculations.CreateMethodologyVersionHandler>();
         services.AddScoped<Calculations.ListMethodologyFormulasHandler>();
         services.AddScoped<Calculations.SaveMethodologyFormulaHandler>();

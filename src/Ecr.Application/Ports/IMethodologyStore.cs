@@ -139,6 +139,13 @@ public interface IMethodologyStore
     public Task<IReadOnlyDictionary<int, MethodologyVersionLabel>> GetVersionLabelsAsync(
         IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct);
 
+    /// <summary>Журнал публікацій версій методології, найновіші першими (F-16).</summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Записи журналу.</returns>
+    public Task<IReadOnlyList<MethodologyPublicationEntry>> ListPublicationsAsync(
+        int methodologyId, CancellationToken ct);
+
     /// <summary>
     /// Методологія-контейнер разом з усіма своїми версіями; <c>null</c> — версії немає.
     /// </summary>
@@ -282,3 +289,22 @@ public sealed record CalculationFreshness(DateTime? CalculatedAt, DateTime? Inpu
 /// <param name="MethodologyCode">Код методології.</param>
 /// <param name="Version">Номер версії («1.2.0»).</param>
 public sealed record MethodologyVersionLabel(int MethodologyVersionId, string MethodologyCode, string Version);
+
+/// <summary>Одна публікація версії методології з журналу <c>aud.PublicationEvent</c> (F-16).</summary>
+/// <param name="Id">Запис журналу.</param>
+/// <param name="ChangedAt">Коли опубліковано (UTC).</param>
+/// <param name="MethodologyVersionId">Опублікована версія.</param>
+/// <param name="Version">Номер версії.</param>
+/// <param name="ChangeReason">Причина зміни (ФВ-14.7).</param>
+/// <param name="ChangedByUserId">Хто опублікував.</param>
+/// <param name="ChangedByName">Ім'я того, хто опублікував; <c>null</c> — облікового запису вже немає.</param>
+/// <param name="ResultDiffJson">Diff результатів на золотому наборі (ФВ-9.6), як записано.</param>
+public sealed record MethodologyPublicationEntry(
+    long Id,
+    DateTime ChangedAt,
+    int MethodologyVersionId,
+    string Version,
+    string? ChangeReason,
+    int ChangedByUserId,
+    string? ChangedByName,
+    string? ResultDiffJson);

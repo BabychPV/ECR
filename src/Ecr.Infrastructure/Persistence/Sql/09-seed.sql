@@ -4151,7 +4151,13 @@ USING (VALUES
     (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1),
     (N'methodologies.columnNotFound', N'en', N'No column matches. Search by column code or by part of its header.', 1),
     (N'documents.calculationResultsStale', N'en', N'These results are out of date', 1),
-    (N'documents.calculationResultsStaleHint', N'en', N'The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.', 1)
+    (N'documents.calculationResultsStaleHint', N'en', N'The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.', 1),
+    (N'methodologies.publications', N'en', N'Publication log', 1),
+    (N'methodologies.publicationsEmpty', N'en', N'No version of this methodology has been published yet.', 1),
+    (N'methodologies.publishedAt', N'en', N'Published', 1),
+    (N'methodologies.publishedBy', N'en', N'Published by', 1),
+    (N'methodologies.publicationReason', N'en', N'Reason for the change', 1),
+    (N'methodologies.publicationChanges', N'en', N'Changed values on the golden set', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

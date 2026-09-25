@@ -438,6 +438,31 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
         return labels.ToDictionary(l => l.Id, l => new MethodologyVersionLabel(l.Id, l.Code, l.Version));
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Журнал спільний для шаблонів і методологій (<c>EntityType</c>), і
+    /// <c>EntityId</c> — версія, а не методологія: звужується через
+    /// <c>calc.MethodologyVersion</c>. Ім'я — з <c>sec.User</c> (F-16: «By user»
+    /// числом не читається).
+    /// </remarks>
+    public async Task<IReadOnlyList<MethodologyPublicationEntry>> ListPublicationsAsync(
+        int methodologyId, CancellationToken ct)
+        => await db.Database
+            .SqlQuery<MethodologyPublicationEntry>($"""
+                SELECT TOP (500)
+                       e.Id, e.ChangedAt, v.Id AS MethodologyVersionId, v.Version, e.ChangeReason,
+                       e.ChangedByUserId, COALESCE(NULLIF(u.DisplayName, N''), u.UserName) AS ChangedByName,
+                       e.ResultDiffJson
+                  FROM aud.PublicationEvent AS e
+                  JOIN calc.MethodologyVersion AS v ON v.Id = e.EntityId
+                  LEFT JOIN sec.[User] AS u ON u.Id = e.ChangedByUserId
+                 WHERE e.EntityType = N'calc.MethodologyVersion'
+                   AND v.MethodologyId = {methodologyId}
+                 ORDER BY e.ChangedAt DESC, e.Id DESC
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
     /// <summary>Рядок запиту свіжості.</summary>
     public sealed record FreshnessRow(DateTime? CalculatedAt, DateTime? InputsChangedAt);
 
