@@ -361,6 +361,10 @@ export function LoginPage(): JSX.Element {
             {bootstrap.windowsSignInEnabled && (
               <Button
                 type="button"
+                // ⚠ `X-29`: одна заповнена кнопка на екрані. Коли поруч є форма
+                // локального входу, основна — її «Sign in» (його запускає
+                // Enter), а доменний вхід — поруч, контурною.
+                variant={bootstrap.localSignInEnabled ? 'default' : 'filled'}
                 onClick={() => void submit('/api/v1/login/windows')}
                 loading={busy}
               >
@@ -389,7 +393,10 @@ export function LoginPage(): JSX.Element {
                   visibilityToggleButtonProps={passwordToggleProps()}
                 />
 
-                <Button type="submit" variant="default" loading={busy}>
+                {/* ⛔ `X-29`: основна дія екрана — заповнена кнопка. Тут стояв
+                    `variant="default"`: «Sign in» виглядав сірим, як
+                    другорядна дія, хоча саме його запускає Enter у полі. */}
+                <Button type="submit" variant="filled" loading={busy}>
                   {t('login.submit')}
                 </Button>
               </>

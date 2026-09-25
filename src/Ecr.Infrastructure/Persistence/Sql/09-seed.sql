@@ -4194,7 +4194,13 @@ USING (VALUES
     (N'nav.showAllCrumbs', N'en', N'Show the whole path', 1),
     -- X-34: що покриває період за періодичністю проєкту (Sequence — номер, не місяць).
     (N'periods.quarterOf', N'en', N'Q{quarter} {year}', 1),
-    (N'periods.customOf', N'en', N'{year}, period {sequence}', 1)
+    (N'periods.customOf', N'en', N'{year}, period {sequence}', 1),
+    -- X-25/X-29: підтвердження важких дій проєкту; назва колонки дій для читалки.
+    (N'common.actions', N'en', N'Actions', 1),
+    (N'periods.activateTitle', N'en', N'Activate project {code}?', 1),
+    (N'periods.activateConfirm', N'en', N'Periods start opening and closing by the calendar, and documents can be created in them. An active project cannot go back to draft, and its time zone can no longer be changed.', 1),
+    (N'periods.recalcTitle', N'en', N'Recalculate the whole project {code}?', 1),
+    (N'periods.recalcConfirm', N'en', N'Every document of every period of this project is recalculated in the background. This can take a while, and figures in open documents may change when it finishes.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   Textarea,
+  VisuallyHidden,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,6 +37,7 @@ import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -278,6 +280,11 @@ export function PeriodsPage(): JSX.Element {
   // діалог підтвердження, той самий патерн, що вже несуть `cloning`/
   // `changingTimeZone` на цій сторінці, а не `ReasonModal`.
   const [archiving, setArchiving] = useState(false);
+
+  // ⛔ `X-25`: активація проєкту й перерахунок УСЬОГО проєкту йшли одним
+  // кліком. Обидві дії важкі (перша незворотна, друга ставить у чергу всі
+  // документи всіх періодів) — тепер через підтвердження; `null` — закрито.
+  const [confirming, setConfirming] = useState<'activate' | 'recalculate' | null>(null);
 
   // ⛔ Проєкти ВИБИРАЮТЬСЯ зі списку, а не вводяться номером. Це не про
   // зручність: без переліку не видно СТАНУ проєкту, а саме він визначає, чи
@@ -679,11 +686,14 @@ export function PeriodsPage(): JSX.Element {
                 задача станів до нього не доходить, періоди лишаються
                 `Scheduled`, і система відмовляє в кожній комірці з причиною
                 «період ще не відкрито» — неправдивою (`A7-25`). */}
+            {/* ⛔ `X-25`: активація — незворотна (`Draft → Active`, назад
+                шляху немає: календар починає відкривати й закривати періоди),
+                і йшла одним кліком. Тепер — через підтвердження нижче. */}
             {selected?.status === 'Draft' && manages && (
               <Button
                 size="xs"
                 loading={activate.isPending}
-                onClick={() => activate.mutate(selected.id)}
+                onClick={() => setConfirming('activate')}
               >
                 {t('periods.activate')}
               </Button>
@@ -713,7 +723,7 @@ export function PeriodsPage(): JSX.Element {
                 size="xs"
                 variant="default"
                 loading={recalculate.isPending || recalcRunning}
-                onClick={() => recalculate.mutate(selected.id)}
+                onClick={() => setConfirming('recalculate')}
               >
                 {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
               </Button>
@@ -721,10 +731,14 @@ export function PeriodsPage(): JSX.Element {
 
             {/* ⚠ Архівація пропонується лише активному проєкту: чернетку
                 архівувати нема від чого, а вже заархівований — кінцевий стан. */}
+            {/* ⛔ `X-29`: `variant="default"` разом із `color="statusError"` —
+                Mantine малює `default` сірим, і колір просто губився: кінцева,
+                незворотна дія виглядала як «Clone» поруч. `outline` лишає
+                кнопку вторинною, але червоною. */}
             {selected?.status === 'Active' && manages && (
               <Button
                 size="xs"
-                variant="default"
+                variant="outline"
                 color="statusError"
                 loading={archive.isPending}
                 onClick={() => setArchiving(true)}
@@ -831,7 +845,10 @@ export function PeriodsPage(): JSX.Element {
                   </Text>
                 </Hint>
               </Table.Th>
-              <Table.Th />
+              {/* ⚠ `X-29`: колонка дій — з назвою для читалки, а не порожня. */}
+              <Table.Th>
+                <VisuallyHidden>{t('common.actions')}</VisuallyHidden>
+              </Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -1159,6 +1176,37 @@ export function PeriodsPage(): JSX.Element {
           </Group>
         </Stack>
       </Modal>
+
+      {/* ⛔ `X-25`: підтвердження ПЕРЕД дією, фокус на «Cancel» (`L6`,
+          `ConfirmModal`). Не `danger`: жодна з двох дій не знищує даних, але
+          обидві — важкі, і клік повз них не має їх запускати. */}
+      <ConfirmModal
+        opened={confirming === 'activate' && selected !== undefined}
+        title={t('periods.activateTitle', { code: selected?.code ?? '' })}
+        text={t('periods.activateConfirm')}
+        verb={t('periods.activate')}
+        danger={false}
+        isPending={activate.isPending}
+        onConfirm={() => {
+          if (selected !== undefined) activate.mutate(selected.id);
+          setConfirming(null);
+        }}
+        onClose={() => setConfirming(null)}
+      />
+
+      <ConfirmModal
+        opened={confirming === 'recalculate' && selected !== undefined}
+        title={t('periods.recalcTitle', { code: selected?.code ?? '' })}
+        text={t('periods.recalcConfirm')}
+        verb={t('workflow.recalculate')}
+        danger={false}
+        isPending={recalculate.isPending}
+        onConfirm={() => {
+          if (selected !== undefined) recalculate.mutate(selected.id);
+          setConfirming(null);
+        }}
+        onClose={() => setConfirming(null)}
+      />
 
       <ReasonModal
         opened={pinning !== null}

@@ -132,6 +132,9 @@ describe('LoginPage: публічні дані екрана входу (BE-07)',
 
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeDefined();
 
+    // ⛔ `X-29`: основна дія екрана — заповнена кнопка, а не сіра `default`.
+    expect(screen.getByRole('button', { name: 'Sign in' }).getAttribute('data-variant')).toBe('filled');
+
     // Розділювач «or» теж зникає: розділяти лишилося нічого.
     expect(screen.queryByText('or')).toBeNull();
   });
