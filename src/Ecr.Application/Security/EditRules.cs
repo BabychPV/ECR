@@ -179,9 +179,21 @@ public static class EditRules
 
         // ⚠ Подання потребує рівня Submit, а не Write: право заповнювати і
         // право відповідати за подане — різні повноваження (02c A11).
-        if (Effective(profile, context) < GrantLevel.Submit)
+        //
+        // ⛔ Грант ВІДСУТНІЙ (None) і грант Є, але закороткий, — дві різні
+        // причини відмовити, і до цього обидві поверталися як NoGrant.
+        // Користувачеві з рівнем View/Write це читалося як «у вас немає
+        // жодного доступу», хоча насправді доступ є — бракує саме рівня
+        // Submit, і дія користувача інша: просити підвищення гранта, а не
+        // грант із нуля.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Submit)
         {
-            return EditDecision.Deny(EditDenyReason.NoGrant);
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для подання потрібен {GrantLevel.Submit}.");
         }
 
         return hasBlockingErrors
@@ -239,9 +251,20 @@ public static class EditRules
                 $"Крок маршруту погодження вимагає ролі {roleId}; зараз черга не ваша.");
         }
 
-        return Effective(profile, context) >= GrantLevel.Approve
-            ? EditDecision.Allow()
-            : EditDecision.Deny(EditDenyReason.NoGrant);
+        // ⛔ Та сама різниця причин, що в CanSubmit вище: грант ВІДСУТНІЙ і
+        // грант Є, але нижчий за Approve, — не одне й те саме для
+        // користувача, який читає відмову.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Approve)
+        {
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для затвердження потрібен {GrantLevel.Approve}.");
+        }
+
+        return EditDecision.Allow();
     }
 
     /// <summary>Чи можна повернути поданий/затверджений аркуш у <c>Draft</c>.</summary>
