@@ -440,7 +440,9 @@ UPDATE t
     -- F-19: перелік проєктів звужено грантами — «ще немає» було неправдою.
     (N'periods.noProjects',              N'en', N'No projects yet', N'No projects available to you'),
     (N'periods.noProjectsHint',          N'en', N'A project defines the reporting calendar: without one there are no periods.',
-                                                N'The list shows only projects you have been granted access to. If a project should be here, ask an administrator for access.')
+                                                N'The list shows only projects you have been granted access to. If a project should be here, ask an administrator for access.'),
+    -- R-18: автор журналу обирається за іменем, а не набирається номером.
+    (N'audit.authorHint',                N'en', N'User id; leave empty for everyone.', N'Who made the change; leave empty for everyone.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2936,7 +2938,7 @@ USING (VALUES
     -- і «що було з ЦІЄЮ коміркою» можна було поставити лише читаючи сторінки
     -- очима — тобто ніяк, бо сторінок за тиждень тисячі.
     (N'audit.author',                    N'en', N'By user', 1),
-    (N'audit.authorHint',                N'en', N'User id; leave empty for everyone.', 1),
+    (N'audit.authorHint',                N'en', N'Who made the change; leave empty for everyone.', 1),
     (N'audit.originAny',                 N'en', N'Any origin', 1),
     (N'audit.lateOnly',                  N'en', N'Late edits only', 1),
     (N'audit.rowKey',                    N'en', N'Row key', 1),
@@ -4204,7 +4206,12 @@ USING (VALUES
     (N'periods.activateTitle', N'en', N'Activate project {code}?', 1),
     (N'periods.activateConfirm', N'en', N'Periods start opening and closing by the calendar, and documents can be created in them. An active project cannot go back to draft, and its time zone can no longer be changed.', 1),
     (N'periods.recalcTitle', N'en', N'Recalculate the whole project {code}?', 1),
-    (N'periods.recalcConfirm', N'en', N'Every document of every period of this project is recalculated in the background. This can take a while, and figures in open documents may change when it finishes.', 1)
+    (N'periods.recalcConfirm', N'en', N'Every document of every period of this project is recalculated in the background. This can take a while, and figures in open documents may change when it finishes.', 1),
+    -- R-18/X-35: журнал змін називає людей, документи й колонки, а не номери.
+    (N'audit.authorAny', N'en', N'Anyone', 1),
+    (N'audit.userGone', N'en', N'User #{id} (no longer exists)', 1),
+    (N'audit.documentGone', N'en', N'Document #{id} (deleted)', 1),
+    (N'audit.columnGone', N'en', N'Column #{id} (deleted)', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

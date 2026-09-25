@@ -13,6 +13,21 @@ namespace Ecr.Application.Ports;
 /// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
 /// <param name="Origin">Звідки зміна: правка, імпорт, перерахунок, міграція.</param>
 /// <param name="IsLateEdit">Зміна в <c>Grace</c> або після <c>Reopen</c> (D-70).</param>
+/// <param name="ChangedByDisplayName">
+/// Ім'я автора (<c>sec.User.DisplayName</c>); <c>null</c> — запису користувача
+/// вже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено
+/// (R-A2, D-86). Журнал показував «By user 3» — число, з яким аудитор нічого
+/// не зробить.
+/// </param>
+/// <param name="DocumentBusinessKey">Бізнес-ключ документа; <c>null</c> — документа вже немає.</param>
+/// <param name="DocumentNameL10n">Людська назва документа, якщо її задано.</param>
+/// <param name="ColumnCode">Код колонки; <c>null</c> — колонки вже немає.</param>
+/// <param name="ColumnHeaderL10n">Заголовок колонки мовами каталогу.</param>
+/// <param name="ColumnDataType">
+/// Тип колонки (<c>Decimal</c>, <c>Date</c>…) — щоб клієнт показав значення
+/// за правилом показу (U-05/U-24), а не у форматі сховища
+/// (<c>53.1771000000000000</c>).
+/// </param>
 public sealed record CellChangeView(
     DateTime ChangedAt,
     int PeriodKey,
@@ -23,7 +38,13 @@ public sealed record CellChangeView(
     string? NewValue,
     int ChangedByUserId,
     string Origin,
-    bool IsLateEdit);
+    bool IsLateEdit,
+    string? ChangedByDisplayName = null,
+    string? DocumentBusinessKey = null,
+    Ecr.Domain.ValueObjects.LocalizedText? DocumentNameL10n = null,
+    string? ColumnCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? ColumnHeaderL10n = null,
+    string? ColumnDataType = null);
 
 /// <summary>Структурна зміна в журналі, як її бачить читач.</summary>
 /// <param name="ChangedAt">Момент зміни в UTC.</param>
@@ -34,6 +55,7 @@ public sealed record CellChangeView(
 /// <param name="NewJson">Стан після зміни.</param>
 /// <param name="ChangeReason">Причина, якщо її вимагала операція.</param>
 /// <param name="ChangedByUserId">Автор — <b>UserId</b>, не SID (R-A2, D-86).</param>
+/// <param name="ChangedByDisplayName">Ім'я автора (`R-18`); <c>null</c> — запису користувача вже немає.</param>
 public sealed record StructureChangeView(
     DateTime ChangedAt,
     string EntityType,
@@ -42,7 +64,8 @@ public sealed record StructureChangeView(
     string? OldJson,
     string? NewJson,
     string? ChangeReason,
-    int ChangedByUserId);
+    int ChangedByUserId,
+    string? ChangedByDisplayName = null);
 
 /// <summary>Фільтр журналу змін комірок.</summary>
 /// <remarks>

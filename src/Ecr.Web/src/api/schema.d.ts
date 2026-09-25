@@ -14501,21 +14501,36 @@ export interface components {
              * @description Момент зміни в UTC.
              */
             changedAt: string;
+            /** @description Ім'я автора (`sec.User.DisplayName`); `null` — запису користувача
+             *     вже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено
+             *     (R-A2, D-86). Журнал показував «By user 3» — число, з яким аудитор нічого
+             *     не зробить. */
+            changedByDisplayName?: null | string;
             /**
              * Format: int32
              * @description Автор — <b>UserId</b>, не SID (R-A2, D-86).
              */
             changedByUserId: number;
+            /** @description Код колонки; `null` — колонки вже немає. */
+            columnCode?: null | string;
+            /** @description Тип колонки (`Decimal`, `Date`…) — щоб клієнт показав значення
+             *     за правилом показу (U-05/U-24), а не у форматі сховища
+             *     (`53.1771000000000000`). */
+            columnDataType?: null | string;
             /**
              * Format: int32
              * @description Колонка.
              */
             columnDefId: number;
+            columnHeaderL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Бізнес-ключ документа; `null` — документа вже немає. */
+            documentBusinessKey?: null | string;
             /**
              * Format: int64
              * @description Документ.
              */
             documentId: number;
+            documentNameL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Зміна в `Grace` або після `Reopen` (D-70). */
             isLateEdit: boolean;
             /** @description Нове значення. */
@@ -19042,6 +19057,8 @@ export interface components {
              * @description Момент зміни в UTC.
              */
             changedAt: string;
+            /** @description Ім'я автора (`R-18`); `null` — запису користувача вже немає. */
+            changedByDisplayName?: null | string;
             /**
              * Format: int32
              * @description Автор — <b>UserId</b>, не SID (R-A2, D-86).

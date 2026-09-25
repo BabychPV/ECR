@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
-import { Button, Group, NumberInput, Table, Text, TextInput } from '@mantine/core';
+import { Button, Group, Select, Table, Text, TextInput } from '@mantine/core';
 import { structureChangesQuery, useStructureChanges, type StructureChangePage } from '@/features/audit/api';
+import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
 import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -29,7 +30,6 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
   // ⛔ Поля показують ВЛАСНЕ значення, не адресу (`useFieldDraft`; той самий
   // дефект втрати символів, що в «Row key» журналу комірок).
   const entityTypeField = useFieldDraft(entityType ?? '');
-  const changedByField = useFieldDraft<string | number>(changedBy ?? '');
 
   const applied = {
     from,
@@ -42,6 +42,7 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
   const [cursor, setCursor] = useFilterCursor(structureChangesQuery(applied));
 
   const changes = useStructureChanges({ ...applied, cursor });
+  const authorOptions = useAuthorOptions(changes.data?.items, changedBy);
 
   return (
     <>
@@ -58,18 +59,20 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
             setEntityType(event.currentTarget.value);
           }}
         />
-        <NumberInput
+        {/* ⛔ `R-18`: автор — вибором за іменем, а не номером `UserId`. */}
+        <Select
           size="xs"
-          miw={140}
+          miw={180}
+          searchable
+          clearable
           label={t('audit.author')}
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
-          value={changedByField.value}
-          onFocus={changedByField.onFocus}
-          onBlur={changedByField.onBlur}
+          placeholder={t('audit.authorAny')}
+          data={authorOptions}
+          value={changedBy === null ? null : String(changedBy)}
           onChange={(value) => {
-            changedByField.setValue(value);
-            setChangedBy(typeof value === 'number' ? value : null);
+            setChangedBy(value === null ? null : Number(value));
           }}
         />
       </Group>
@@ -113,7 +116,8 @@ export function StructureChangesPanel({ from, to }: { from: string; to: string }
                     <Table.Td>
                       <Timestamp value={change.changedAt} />
                     </Table.Td>
-                    <Table.Td>{change.changedByUserId}</Table.Td>
+                    {/* ⛔ `R-18`: ім'я з сервера; номер — у підказці. */}
+                    <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
                     <Table.Td>
                       <Text size="xs">
                         {change.entityType} · {change.entityId}

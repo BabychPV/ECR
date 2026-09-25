@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { memo, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -12,6 +12,7 @@ import {
   TextInput,
 } from '@mantine/core';
 import type { CellChangePage } from '@/api/types';
+import { authorName, useAuthorOptions } from '@/features/audit/authorOptions';
 import { cellChangeOrigins, cellChangesQuery, isSingleCell, useCellChanges } from '@/features/audit/api';
 import { FilterHints, readerOnlyDescription } from '@/features/audit/FilterHints';
 import { StructureChangesPanel } from '@/features/audit/StructureChangesPanel';
@@ -23,6 +24,8 @@ import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFil
 import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
+import { formatDate, formatDecimal } from '@/shared/format';
 
 /**
  * Журнал змін комірок (`ФВ-6.13`).
@@ -78,7 +81,6 @@ export function AuditPage(): JSX.Element {
   const fromField = useFieldDraft(fromDate);
   const toField = useFieldDraft(toDate);
   const documentField = useFieldDraft<string | number>(documentId ?? '');
-  const authorField = useFieldDraft<string | number>(author ?? '');
   const rowKeyField = useFieldDraft(rowKey ?? '');
   const columnField = useFieldDraft<string | number>(columnDefId ?? '');
 
@@ -135,6 +137,8 @@ export function AuditPage(): JSX.Element {
    * результатів, і це читалося б як «нічого не знайдено».
    */
   const single = isSingleCell(filter);
+
+  const authorOptions = useAuthorOptions(changes.data?.items, author);
 
   return (
     <>
@@ -210,18 +214,21 @@ export function AuditPage(): JSX.Element {
       {/* ⚠ Фільтри ОКРЕМИМ рядком, а не в шапці: їх шість, і в шапці вони
           витіснили б заголовок за край на ноутбучній ширині. */}
       <Group gap="xs" align="end" mb="xs" wrap="wrap" data-audit-filter-row="cells">
-        <NumberInput
+        {/* ⛔ `R-18`: автор — ВИБОРОМ за іменем (`useAuthorOptions`), а не
+            номером `UserId`, якого людина не знає. */}
+        <Select
           size="xs"
-          miw={140}
+          miw={180}
+          searchable
+          clearable
           label={t('audit.author')}
           description={t('audit.authorHint')}
           styles={readerOnlyDescription}
-          value={authorField.value}
-          onFocus={authorField.onFocus}
-          onBlur={authorField.onBlur}
+          placeholder={t('audit.authorAny')}
+          data={authorOptions}
+          value={author === null ? null : String(author)}
           onChange={(value) => {
-            authorField.setValue(value);
-            setAuthor(typeof value === 'number' ? value : null);
+            setAuthor(value === null ? null : Number(value));
           }}
         />
         <Select
@@ -324,63 +331,12 @@ export function AuditPage(): JSX.Element {
       >
         {(page) => (
           <>
-            <Table striped className="ecr-sticky-head">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>{t('audit.when')}</Table.Th>
-                  <Table.Th>{t('audit.who')}</Table.Th>
-                  <Table.Th>{t('audit.document')}</Table.Th>
-                  <Table.Th>{t('documents.period')}</Table.Th>
-                  <Table.Th>{t('audit.cell')}</Table.Th>
-                  <Table.Th>{t('import.was')}</Table.Th>
-                  <Table.Th>{t('import.becomes')}</Table.Th>
-                  <Table.Th>{t('audit.origin')}</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {page.items.map((change, index) => (
-                  <Table.Tr key={`${change.documentId}:${change.rowKey}:${change.columnDefId}:${index}`}>
-                    <Table.Td>
-                      {/* ⛔ Саме `Timestamp`, а не сирий рядок, і аргумент
-                          «журнал — доказ, доказ мусить бути однозначним»
-                          цьому НЕ суперечить: точне значення нікуди не
-                          дівається, воно лишається в `dateTime`/`title`
-                          (`<time datetime="2026-09-19T18:51:58.275Z">`).
-                          Читабельним стає лише те, що бачить око — а саме цю
-                          колонку оператор читає рядок за рядком, шукаючи «хто
-                          і коли», не звіряючи мілісекунди. */}
-                      <Timestamp value={change.changedAt} />
-                      {/* ⚠ Пізня правка — та, що зроблена в пільговому строку
-                          після кінця періоду (`D-70`). В аудиті вона виглядає
-                          інакше саме тому, що пояснювати доводиться саме її. */}
-                      {change.isLateEdit && (
-                        <Badge ml="xs" size="xs" color="statusWarning" variant="light">
-                          {t('audit.late')}
-                        </Badge>
-                      )}
-                    </Table.Td>
-                    <Table.Td>{change.changedByUserId}</Table.Td>
-                    <Table.Td>{change.documentId}</Table.Td>
-                    <Table.Td>{change.periodKey}</Table.Td>
-                    <Table.Td>
-                      <Text size="xs">
-                        {change.rowKey} · {change.columnDefId}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>{change.oldValue ?? '—'}</Table.Td>
-                    <Table.Td>{change.newValue ?? '—'}</Table.Td>
-                    <Table.Td>
-                      {/* ⚠ Походження відрізняє руку людини від збору з
-                          джерела: «звідки це число» — питання, з якого
-                          починається кожне розслідування розбіжності. */}
-                      <Badge size="sm" variant="light">
-                        {change.origin}
-                      </Badge>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+            {/* ⛔ Окремий `memo`-компонент: набір у полях фільтра перемальовує
+                сторінку на кожну клавішу, і 100 рядків таблиці разом із нею
+                давали затримку друку до 117 мс (`R-18`). Сторінка відповіді
+                від React Query стабільна за посиланням — таблиця малюється
+                лише тоді, коли приходять нові дані. */}
+            <CellChangesTable items={page.items} />
 
             {/* ⚠ Курсорна пагінація: журнал за рік — мільйони рядків, і
                 `OFFSET` на сторінці 200 сканував би все, що до неї. */}
@@ -397,6 +353,122 @@ export function AuditPage(): JSX.Element {
     </>
   );
 }
+
+type CellChange = CellChangePage['items'][number];
+
+/** Типи колонок, чиє значення — число (`U-05`: одне правило подачі числа). */
+const NumericTypes: readonly string[] = ['Decimal', 'Int', 'Formula', 'Calculated'];
+
+/**
+ * Значення журналу — за правилом показу, а не у форматі сховища (`X-35`).
+ *
+ * ⛔ Журнал показував «Was 53.1771000000000000»: `aud.CellChange` зберігає
+ * число з повним масштабом колонки сховища (`decimal(34,16)`, `D-148`).
+ * Людина набирала `53.1771` і шукає в журналі саме його. Хвостові нулі
+ * прибирає той самий `formatDecimal`, що й сітка (`U-05`/`U-24`), розряди —
+ * мовою інтерфейсу.
+ *
+ * ⚠ Нерозібране значення показується ЯК Є: журнал — доказ, і сховати дивне
+ * значення за «—» означало б сховати саму розбіжність.
+ */
+export function auditValueText(value: string | null | undefined, dataType: string | null | undefined): string {
+  if (value === null || value === undefined) return '—';
+  if (dataType === null || dataType === undefined) return value;
+
+  if (NumericTypes.includes(dataType)) return formatDecimal(value) ?? value;
+
+  if (dataType === 'Date') {
+    const day = /^\d{4}-\d{2}-\d{2}/.exec(value)?.[0];
+    const shown = day === undefined ? '' : formatDate(day);
+
+    return shown.length > 0 ? shown : value;
+  }
+
+  return value;
+}
+
+/** Документ: людська назва → бізнес-ключ → номер (документа вже немає). */
+function documentText(change: CellChange): string {
+  const name = localized(change.documentNameL10n);
+
+  if (name.length > 0) return name;
+  if (change.documentBusinessKey !== null && change.documentBusinessKey !== undefined) {
+    return change.documentBusinessKey;
+  }
+
+  return t('audit.documentGone', { id: change.documentId });
+}
+
+/** Колонка: заголовок мовою інтерфейсу, код — поруч; без запису — номер. */
+function columnText(change: CellChange): string {
+  const header = localized(change.columnHeaderL10n);
+  const code = change.columnCode ?? null;
+
+  if (header.length > 0) return code === null ? header : `${header} (${code})`;
+
+  return code ?? t('audit.columnGone', { id: change.columnDefId });
+}
+
+const CellChangesTable = memo(function CellChangesTable({
+  items,
+}: {
+  readonly items: readonly CellChange[];
+}): JSX.Element {
+  return (
+    <Table striped className="ecr-sticky-head">
+      <Table.Thead>
+        <Table.Tr>
+          <Table.Th>{t('audit.when')}</Table.Th>
+          <Table.Th>{t('audit.who')}</Table.Th>
+          <Table.Th>{t('audit.document')}</Table.Th>
+          <Table.Th>{t('documents.period')}</Table.Th>
+          <Table.Th>{t('audit.cell')}</Table.Th>
+          <Table.Th>{t('import.was')}</Table.Th>
+          <Table.Th>{t('import.becomes')}</Table.Th>
+          <Table.Th>{t('audit.origin')}</Table.Th>
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
+        {items.map((change, index) => (
+          <Table.Tr key={`${change.documentId}:${change.rowKey}:${change.columnDefId}:${index}`}>
+            <Table.Td>
+              {/* ⛔ Саме `Timestamp`, а не сирий рядок: точне значення
+                  лишається в `dateTime`/`title`, читабельним стає лише те,
+                  що бачить око. */}
+              <Timestamp value={change.changedAt} />
+              {/* ⚠ Пізня правка — у пільговому строку після кінця періоду
+                  (`D-70`); пояснювати доводиться саме її. */}
+              {change.isLateEdit && (
+                <Badge ml="xs" size="xs" color="statusWarning" variant="light">
+                  {t('audit.late')}
+                </Badge>
+              )}
+            </Table.Td>
+            {/* ⛔ `R-18`: імена з сервера, а не «user 3 · Document 1 · 2».
+                Номер лишається підказкою (`title`) — фільтри журналу
+                стоять саме на ньому. */}
+            <Table.Td title={`#${String(change.changedByUserId)}`}>{authorName(change)}</Table.Td>
+            <Table.Td title={`#${String(change.documentId)}`}>{documentText(change)}</Table.Td>
+            <Table.Td>{change.periodKey}</Table.Td>
+            <Table.Td>
+              <Text size="xs" title={`#${String(change.columnDefId)}`}>
+                {change.rowKey} · {columnText(change)}
+              </Text>
+            </Table.Td>
+            <Table.Td>{auditValueText(change.oldValue, change.columnDataType)}</Table.Td>
+            <Table.Td>{auditValueText(change.newValue, change.columnDataType)}</Table.Td>
+            <Table.Td>
+              {/* ⚠ Походження відрізняє руку людини від збору з джерела. */}
+              <Badge size="sm" variant="light">
+                {change.origin}
+              </Badge>
+            </Table.Td>
+          </Table.Tr>
+        ))}
+      </Table.Tbody>
+    </Table>
+  );
+});
 
 /**
  * Дата у форматі `YYYY-MM-DD` за N днів до сьогодні.

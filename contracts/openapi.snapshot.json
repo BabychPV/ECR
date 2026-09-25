@@ -845,20 +845,70 @@
             "format": "date-time",
             "type": "string"
           },
+          "changedByDisplayName": {
+            "description": "Ім'я автора (`sec.User.DisplayName`); `null` — запису користувача\nвже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено\n(R-A2, D-86). Журнал показував «By user 3» — число, з яким аудитор нічого\nне зробить.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "changedByUserId": {
             "description": "Автор — <b>UserId</b>, не SID (R-A2, D-86).",
             "format": "int32",
             "type": "integer"
+          },
+          "columnCode": {
+            "description": "Код колонки; `null` — колонки вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDataType": {
+            "description": "Тип колонки (`Decimal`, `Date`…) — щоб клієнт показав значення\nза правилом показу (U-05/U-24), а не у форматі сховища\n(`53.1771000000000000`).",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "columnDefId": {
             "description": "Колонка.",
             "format": "int32",
             "type": "integer"
           },
+          "columnHeaderL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Заголовок колонки мовами каталогу."
+              }
+            ]
+          },
+          "documentBusinessKey": {
+            "description": "Бізнес-ключ документа; `null` — документа вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "documentId": {
             "description": "Документ.",
             "format": "int64",
             "type": "integer"
+          },
+          "documentNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Людська назва документа, якщо її задано."
+              }
+            ]
           },
           "isLateEdit": {
             "description": "Зміна в `Grace` або після `Reopen` (D-70).",
@@ -10727,6 +10777,13 @@
             "description": "Момент зміни в UTC.",
             "format": "date-time",
             "type": "string"
+          },
+          "changedByDisplayName": {
+            "description": "Ім'я автора (`R-18`); `null` — запису користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "changedByUserId": {
             "description": "Автор — <b>UserId</b>, не SID (R-A2, D-86).",
