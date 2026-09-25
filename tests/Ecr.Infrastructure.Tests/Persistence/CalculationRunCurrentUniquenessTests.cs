@@ -1,5 +1,9 @@
 // tests/Ecr.Infrastructure.Tests/Persistence/CalculationRunCurrentUniquenessTests.cs
+using System.Globalization;
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
@@ -127,6 +131,110 @@ public sealed class CalculationRunCurrentUniquenessTests(SqlServerFixture sql)
         Assert.True(february.IsCurrent);
         Assert.True(annual.IsCurrent);
         Assert.Equal(CalculationRun.SupersededStatus, superseded.Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "CalcRunDocumentScope")]
+    public async Task Перерахунок_одного_документа_не_ховає_результати_сусіднього()
+    {
+        // ⛔ Третя хвиля UX-PASS R4, «CalculationRun ховає результати сусідніх
+        // документів»: документ A і документ B того самого проєкту й періоду,
+        // перераховані ПОСЛІДОВНО — кожен своїм прогоном
+        // (`RecalculateDocumentHandler`, `DocumentId` задано). До фіксу
+        // `SwitchCurrentRunAsync` документа B знімав актуальність із прогону
+        // документа A (обидва мали той самий `(ProjectId, PeriodKey)`), і
+        // результати A зникали з `ReadCurrentAsync`, хоча в документі A
+        // нічого не змінювалося.
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var documentA = await chain.BuildAsync();
+        var periodKey = documentA.PeriodKey.Value;
+
+        await using var db = chain.CreateContext();
+
+        // Документ B — той самий проєкт і період, інший документ.
+        var documentB = new Document(documentA.ProjectId, $"DOC-B-{Guid.NewGuid():N}"[..20], 1, Now);
+        db.Documents.Add(documentB);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var methodology = new Methodology(
+            EcrCode.Create($"MDOC_{Guid.NewGuid():N}"[..14]),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var methodologyVersion = new MethodologyVersion(
+            methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+        db.MethodologyVersions.Add(methodologyVersion);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var unit = await db.Units.AsNoTracking().OrderBy(u => u.Id).FirstAsync(CancellationToken.None);
+        var store = new CalculationResultStore(db, new TestClock(Now));
+
+        // Документ A перераховується ПЕРШИМ — власний документний прогін.
+        var runA = new CalculationRun(
+            documentA.ProjectId, periodKey, triggeredByUserId: null, Now, documentId: documentA.DocumentId);
+        db.CalculationRuns.Add(runA);
+        await db.SaveChangesAsync(CancellationToken.None);
+        await InsertResultAsync(db, runA.Id, methodologyVersion.Id, periodKey, documentA.DocumentId, unit.Id, "E_CO2", 100m);
+        await store.SwitchCurrentRunAsync(runA.Id, "{}", CancellationToken.None);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        // Документ B перераховується ДРУГИМ — окремий документний прогін
+        // того самого проєкту й періоду.
+        var runB = new CalculationRun(
+            documentA.ProjectId, periodKey, triggeredByUserId: null, Now, documentId: documentB.Id);
+        db.CalculationRuns.Add(runB);
+        await db.SaveChangesAsync(CancellationToken.None);
+        await InsertResultAsync(db, runB.Id, methodologyVersion.Id, periodKey, documentB.Id, unit.Id, "E_NOX", 50m);
+        await store.SwitchCurrentRunAsync(runB.Id, "{}", CancellationToken.None);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        // ⛔ Головна перевірка: прогін документа B НЕ зняв актуальність із
+        // прогону документа A — обидва лишаються `Current` одночасно.
+        await using var check = chain.CreateContext();
+        var statusA = await check.CalculationRuns.AsNoTracking()
+            .Where(r => r.Id == runA.Id).Select(r => r.Status).SingleAsync(CancellationToken.None);
+        var statusB = await check.CalculationRuns.AsNoTracking()
+            .Where(r => r.Id == runB.Id).Select(r => r.Status).SingleAsync(CancellationToken.None);
+
+        Assert.Equal(CalculationRun.CurrentStatus, statusA);
+        Assert.Equal(CalculationRun.CurrentStatus, statusB);
+
+        // ⛔ І користувацький симптом: результати документа A досі видно —
+        // перерахунок B їх більше не ховає.
+        var readStore = new CalculationResultStore(check, new TestClock(Now));
+        var resultsA = await readStore.ReadCurrentAsync(documentA.DocumentId, periodKey, CancellationToken.None);
+        var resultsB = await readStore.ReadCurrentAsync(documentB.Id, periodKey, CancellationToken.None);
+
+        var rowA = Assert.Single(resultsA);
+        Assert.Equal("E_CO2", rowA.OutputCode);
+        Assert.Equal(100m, rowA.Value);
+
+        var rowB = Assert.Single(resultsB);
+        Assert.Equal("E_NOX", rowB.OutputCode);
+        Assert.Equal(50m, rowB.Value);
+    }
+
+    /// <summary>
+    /// Вставляє один рядок <c>calc.CalculationResult</c> сирим SQL: `Id`
+    /// береться з послідовності ДО вставки (як і в <c>CalculationResultStore</c>),
+    /// EF його сам не видає.
+    /// </summary>
+    private static async Task InsertResultAsync(
+        EcrDbContext db, long runId, int methodologyVersionId, int periodKey, long documentId,
+        int unitId, string outputCode, decimal value)
+    {
+        var text = value.ToString(CultureInfo.InvariantCulture);
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO calc.CalculationResult
+                (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId)
+            VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {runId}, {methodologyVersionId},
+                    {periodKey}, {documentId}, N'row-1', {outputCode},
+                    CAST({text} AS decimal(34,16)), {unitId})
+            """);
     }
 
     private static CalculationRun Current(EcrDbContext db, int projectId, int? periodKey)
