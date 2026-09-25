@@ -630,6 +630,12 @@ USING (VALUES
     (N'err.ECR-SEC-0404.userNotFound', N'en', N'User {userId} does not exist.', 1),
     (N'err.ECR-SEC-0409.cannotTargetSelf', N'en', N'You cannot lock your own account or reset its password here. Change your own password from your profile.', 1),
     (N'err.ECR-SEC-0409.lastAdministrator', N'en', N'"{userName}" is the last active administrator: nobody would be left to manage users.', 1),
+    -- 2026-09-25: код виправлено з `ECR-ROW-0409` (родина рядка таблиці
+    -- документа) на `ECR-SEC-0409` (родина безпеки) — окрема задача, не
+    -- локалізація; messageKey лишився той самий
+    -- (`.resourceGrantDuplicate`). Див. `contracts/localization-debt.md`,
+    -- запис 2026-09-25 «Security-кластер (B-14)».
+    (N'err.ECR-SEC-0409.resourceGrantDuplicate', N'en', N'Resource {resourceKind} {resourceId} is listed twice in the set.', 1),
     (N'err.ECR-USR-0422.domainPasswordReset', N'en', N'"{userName}" is a domain account: its password is managed in the domain, not here.', 1),
     (N'err.ECR-USR-0422.lockReasonRequired', N'en', N'A reason of up to {max} characters is required: it is recorded in the security journal.', 1),
     -- B-15 (UX-аудит, четвертий раунд): наскрізний ключ, не прив'язаний до
@@ -1224,11 +1230,6 @@ USING (VALUES
     (N'err.ECR-ROW-0409.rowsFromTemplate',      N'en', N'Table "{tableCode}" has RowMode = {rowMode}: its rows come from the template, so rows cannot be added.', 1),
     (N'err.ECR-ROW-0409.rowLimitReached',       N'en', N'Table "{tableCode}" has reached its dynamic-row limit: {max}.', 1),
     (N'err.ECR-ROW-0409.rowKeyExists',          N'en', N'A row with key "{rowKey}" already exists in this table.', 1),
-    -- B-14 (security cluster): ResourceGrantHandlers.ReplaceResourceGrantsHandler
-    -- — дублікат ресурсу в наборі грантів ролі. Код лишено `ECR-ROW-0409`, як
-    -- у джерелі (той самий код, що й дублікати ключів рядка таблиці вище, —
-    -- це не той самий факт, але зміна коду поза обсягом B-14).
-    (N'err.ECR-ROW-0409.resourceGrantDuplicate', N'en', N'Resource {resourceKind} {resourceId} is listed twice in the set.', 1),
     (N'err.ECR-PRJ-0404.project',               N'en', N'Project {projectId} was not found.', 1),
     (N'err.ECR-PRJ-0404.projectOfPeriod',       N'en', N'The project of period {periodId} was not found.', 1),
     (N'err.ECR-PRD-0404.period',                N'en', N'Period {periodId} was not found.', 1),

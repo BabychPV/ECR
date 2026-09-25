@@ -178,12 +178,18 @@ public sealed class ReplaceResourceGrantsHandler(
 
         if (duplicate is not null)
         {
+            // ⛔ Родина SEC, а не ROW (`P-25`, рядок 3, той самий прецедент,
+            // що й `UserDuplicate` вище в `ErrorCodes.cs`): суб'єкт конфлікту —
+            // запис каталогу безпеки (роль/грант), а не рядок таблиці
+            // документа. `ROW` тут раніше маршрутизував на клієнті в
+            // обробник помилок сітки документа (`DocumentGrid.tsx`), де
+            // сторінки грантів ролі немає взагалі.
             throw new BusinessRuleException(
-                "ECR-ROW-0409",
+                ErrorCodes.SecurityConflict,
                 $"Ресурс {duplicate.Key.ResourceKind} {duplicate.Key.ResourceId} названо в наборі двічі.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-ROW-0409.resourceGrantDuplicate",
+                    ["messageKey"] = "err.ECR-SEC-0409.resourceGrantDuplicate",
                     ["resourceKind"] = duplicate.Key.ResourceKind.ToString(),
                     ["resourceId"] = duplicate.Key.ResourceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
