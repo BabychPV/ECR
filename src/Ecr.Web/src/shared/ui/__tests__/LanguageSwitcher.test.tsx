@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, type JSX } from 'react';
-import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
+import { LanguageSwitcher, resetLanguageCoverage } from '@/shared/ui/LanguageSwitcher';
 import { useCatalog } from '@/shared/i18n/useCatalog';
 import { loadCatalog, setLanguage, t } from '@/shared/i18n';
 
@@ -81,6 +81,7 @@ function show(): void {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetLanguageCoverage();
   localStorage.clear();
   // ⚠ Каталог живе в модулі й переживає тест (як у `catalog.test.tsx`):
   // повертаємо мову за замовчуванням, щоб один тест не впливав на інший.
@@ -101,6 +102,59 @@ describe('Перемикач мови інтерфейсу', () => {
 
     expect(labels).toEqual(['English', 'Русский', 'Қазақша']);
     expect(labels).not.toContain('Українська');
+  });
+
+  it('R-16: мова без жодного власного перекладу не пропонується', async () => {
+    routes({
+      '/api/v1/languages': Languages,
+      '/api/v1/ui-strings/en': {
+        languageCode: 'en',
+        revision: 1,
+        strings: { 'nav.documents': 'Documents', 'test.marker': 'en-loaded' },
+      },
+      // ⚠ `ru` — рівно те, що віддає сервер без перекладів: англійський текст
+      // під чужою мовою (`UiStringResolver.Compose`).
+      '/api/v1/ui-strings/ru': {
+        languageCode: 'ru',
+        revision: 1,
+        strings: { 'nav.documents': 'Documents', 'test.marker': 'en-loaded' },
+      },
+      '/api/v1/ui-strings/kz': {
+        languageCode: 'kz',
+        revision: 1,
+        strings: { 'nav.documents': 'Құжаттар (тест)', 'test.marker': 'en-loaded' },
+      },
+    });
+
+    show();
+
+    // ⛔ Мутація «повернути `languages.data` без фільтра» лишає «Русский» — і
+    // перелік тут червоніє.
+    await waitFor(async () => {
+      const select = (await screen.findByLabelText('⟦profile.language⟧')) as HTMLSelectElement;
+      expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+        'English',
+        'Қазақша',
+      ]);
+    });
+  });
+
+  it('R-16: лише мова за замовчуванням перекладена — перемикача немає зовсім', async () => {
+    routes({
+      '/api/v1/languages': Languages,
+      '/api/v1/ui-strings/': {
+        languageCode: 'en',
+        revision: 1,
+        strings: { 'nav.documents': 'Documents', 'test.marker': 'en-loaded' },
+      },
+    });
+
+    show();
+
+    expect(await screen.findByText('en-loaded')).toBeDefined();
+    // Дати зрізам мов доїхати, перш ніж стверджувати відсутність.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByLabelText('⟦profile.language⟧')).toBeNull();
   });
 
   it('ФВ-14.9/T9: перемикання мови показує каталог іншої мови, не лишається на старому', async () => {

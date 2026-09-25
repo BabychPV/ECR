@@ -29,6 +29,7 @@ import {
 import { safeReturnPath } from '@/shared/safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { passwordToggleProps } from '@/shared/ui/a11yLabels';
+import { useTranslatedLanguages } from '@/shared/ui/LanguageSwitcher';
 import {
   isCatalogFailed,
   isCatalogResolved,
@@ -156,6 +157,9 @@ export function LoginPage(): JSX.Element {
   // і хук після `if (…) return` — це помилка, яка проявляється лише в момент,
   // коли гілка змінюється.
   const bootstrap = usePublicBootstrap();
+
+  // ✎ `R-16`: лише мови з перекладом (публічний зріз — до входу іншого немає).
+  const offeredLanguages = useTranslatedLanguages(bootstrap.languages, 'public');
 
   // Публічний каталог рядків тягнеться ДО входу: сторінка входу не може
   // показувати ключі замість написів (D-114).
@@ -407,13 +411,13 @@ export function LoginPage(): JSX.Element {
               *
               * ⚠ Ховається на одній мові: вибір з одного пункту не є вибором.
               */}
-            {bootstrap.languages.length > 1 && (
+            {offeredLanguages.length > 1 && (
               <NativeSelect
                 size="xs"
                 variant="unstyled"
                 aria-label={LANGUAGE_LABEL}
                 value={preferredLanguage()}
-                data={bootstrap.languages.map((item) => ({
+                data={offeredLanguages.map((item) => ({
                   value: item.code,
                   label: item.nameNative,
                 }))}

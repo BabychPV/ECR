@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import type { JSX } from 'react';
 import { LoginPage } from '@/pages/LoginPage';
+import { resetLanguageCoverage } from '@/shared/ui/LanguageSwitcher';
 import type { PublicBootstrap } from '@/features/public/api';
 
 /**
@@ -43,6 +44,19 @@ const STRINGS: Record<string, string> = {
 function stubFetch(lang: string, bootstrap: PublicBootstrap | 'fail'): ReturnType<typeof vi.fn> {
   const calls = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+
+    // ⚠ `kz` — з власним перекладом заголовка: мова без жодного перекладу на
+    // екрані входу більше не пропонується (`R-16`).
+    if (url.includes('/ui-strings/kz')) {
+      return new Response(
+        JSON.stringify({
+          languageCode: 'kz',
+          revision: 1,
+          strings: { ...STRINGS, 'login.title': 'Экологиялық есептілік' },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
 
     if (url.includes('/ui-strings/')) {
       return new Response(JSON.stringify({ languageCode: lang, revision: 1, strings: STRINGS }), {
@@ -90,6 +104,7 @@ function bootstrapOf(overrides: Partial<PublicBootstrap>): PublicBootstrap {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetLanguageCoverage();
   localStorage.clear();
 });
 
@@ -187,10 +202,38 @@ describe('LoginPage: публічні дані екрана входу (BE-07)',
     // ⛔ Пункти беруться з відповіді сервера, а не з константи бандла
     // (`ФВ-14.9`): список у коді зробив би вимогу «додавання мови — запис у
     // реєстр» невиконуваною саме на тому екрані, де мову й обирають.
-    const picker = screen.getByRole('combobox', { name: 'Interface language' });
+    const picker = await screen.findByRole('combobox', { name: 'Interface language' });
     const options = Array.from(picker.querySelectorAll('option')).map((o) => o.textContent);
 
     expect(options).toEqual(['English', 'Қазақша']);
+  });
+
+  it('R-16: мова без жодного перекладу на екрані входу не пропонується', async () => {
+    localStorage.setItem('uiLanguage', 'be07-f');
+    stubFetch(
+      'be07-f',
+      bootstrapOf({
+        productVersion: '2.4.2',
+        languages: [
+          { code: 'be07-f', nameNative: 'English', isDefault: true },
+          // ⚠ Той самий зріз, що й у мови за замовчуванням: перекладу немає.
+          { code: 'ru', nameNative: 'Русский', isDefault: false },
+        ],
+      }),
+    );
+
+    render(
+      <Shell>
+        <LoginPage />
+      </Shell>,
+    );
+
+    expect(await screen.findByText('2.4.2')).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // ⛔ Мутація «повернути `bootstrap.languages`» показує перемикач із
+    // «Русский», за яким той самий англійський інтерфейс.
+    expect(screen.queryByRole('combobox', { name: 'Interface language' })).toBeNull();
   });
 
   it('на анонімну адресу не їде ні імені користувача, ні пароля', async () => {
