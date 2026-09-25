@@ -632,6 +632,11 @@ USING (VALUES
     (N'err.ECR-SEC-0409.lastAdministrator', N'en', N'"{userName}" is the last active administrator: nobody would be left to manage users.', 1),
     (N'err.ECR-USR-0422.domainPasswordReset', N'en', N'"{userName}" is a domain account: its password is managed in the domain, not here.', 1),
     (N'err.ECR-USR-0422.lockReasonRequired', N'en', N'A reason of up to {max} characters is required: it is recorded in the security journal.', 1),
+    -- B-15 (UX-аудит, четвертий раунд): наскрізний ключ, не прив'язаний до
+    -- жодного контролера — ApiBehaviorOptions.InvalidModelStateResponseFactory
+    -- (Program.cs) кидає його на будь-якому невалідному JSON-тілі чи типі, що
+    -- не зв'язується, незалежно від ендпоінта.
+    (N'err.ECR-REQ-0422.malformedRequest', N'en', N'The request does not match the expected shape: check field types and JSON syntax.', 1),
     (N'err.ECR-REQ-0422.principalNotResolved', N'en', N'Group "{principal}" was not found in the directory. Check the name or enter its SID.', 1),
     (N'err.ECR-REQ-0422.principalSidMalformed', N'en', N'"{principal}" is not a valid SID.', 1),
     (N'err.ECR-REQ-0422.validityOrder', N'en', N'The start of the validity window is later than its end.', 1),

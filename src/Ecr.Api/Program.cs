@@ -101,6 +101,31 @@ builder.Services
     // кожному розійшлася б непомітно.
     .AddJsonOptions(options => Ecr.Api.Startup.EcrJsonSerialization.Configure(options.JsonSerializerOptions));
 
+// ⛔ B-15 (UX-аудит, четвертий раунд): БЕЗ цього виклику невалідний JSON-body
+// чи тип, що не зв'язується (наприклад, рядок у полі int), відповідає
+// `[ApiController]` САМ, ДО того, як запит дійде до дії контролера — типовим
+// `ValidationProblemDetails`, у якому немає ні `errorCode`, ні `messageKey`.
+// Клієнт (`problemOf`, `src/Ecr.Web/src/api/client.ts`) розрізняє відмови
+// лише за `errorCode`; без нього ця відмова виглядає як `ControllerErrorContractTests`
+// уже ловить для контролерів — «HTTP 400» і нічого більше, хоча причина тут
+// на клієнта, а не на сервер.
+//
+// ⚠ Кидок, а не власноруч зібраний `IActionResult`: `InvalidModelStateResponseFactory`
+// викликається зсередини конвеєра дій MVC, тобто ВСЕРЕДИНІ `next(context)`
+// `ExceptionHandlingMiddleware` — виняток доїжджає до НЬОГО так само, як і з
+// будь-якого обробника, і дістає ту саму локалізацію (`Title` з каталогу,
+// `Detail` за `messageKey`), а не окрему копію того самого коду.
+//
+// ⚠ Код — наявний `ECR-REQ-0422` («параметр самого запиту не проходить
+// перевірку», §7), не новий: причина та сама, що й для розміру сторінки чи
+// вікна аудиту — сам запит, а не дані, які він мав повернути.
+builder.Services.Configure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+    options.InvalidModelStateResponseFactory = _ =>
+        throw new Ecr.Application.Errors.BusinessRuleException(
+            Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
+            "Запит не відповідає очікуваній формі: перевірте типи полів і синтаксис JSON.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.malformedRequest" }));
+
 // ⚠ Ті самі налаштування — і для генератора OpenAPI. Він читає JSON-опції
 // мінімальних API (`Microsoft.AspNetCore.Http.Json`), а не MVC: без цього
 // рядка сервер віддавав би імена, а схема описувала б числа — і згенерований
