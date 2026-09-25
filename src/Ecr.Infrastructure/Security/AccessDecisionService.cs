@@ -49,7 +49,8 @@ public sealed class AccessDecisionService(
             // виглядав би як звичайний користувач без грантів, а це різні речі
             // і в UI, і в журналі.
             throw new AccessDeniedException(
-                "ECR-AUTH-0401", "Обліковий запис не існує або вимкнений.");
+                "ECR-AUTH-0401", "Обліковий запис не існує або вимкнений.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.accountDisabled" });
         }
 
         // Ключ кешу — користувач + штамп + відбиток груп: зміна ролей крутить

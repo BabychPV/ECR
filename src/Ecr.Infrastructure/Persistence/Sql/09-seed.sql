@@ -1157,10 +1157,21 @@ USING (VALUES
     -- той» — інакше форма входу перелічує чужі облікові записи (ФВ-6.11).
     (N'err.ECR-AUTH-0401.invalidCredentials',   N'en', N'The user name or password is incorrect.', 0),
     (N'err.ECR-AUTH-0401.accountMissing',       N'en', N'Your account no longer exists: sign in again.', 1),
+    -- B-14 (security cluster): вимкнений/неіснуючий обліковий запис —
+    -- окремий факт від «сеансу нема»/«акаунта нема» вище (AccessDecisionService).
+    (N'err.ECR-AUTH-0401.accountDisabled',      N'en', N'Your account does not exist or has been deactivated.', 1),
     (N'err.ECR-AUTH-0401.currentPasswordWrong', N'en', N'The current password is incorrect.', 1),
     -- V-06: сеанс симуляції «очима користувача» — лише читання.
     (N'err.ECR-SIM-0403.readOnly',              N'en', N'You are viewing as another user: nothing can be changed. Stop viewing to make changes.', 1),
     (N'err.ECR-SIM-0422.noSession',             N'en', N'There is no active viewing session to stop.', 1),
+    -- B-14 (security cluster): EndSimulationHandler/StartSimulationHandler/
+    -- SimulationService — той самий носій (симуляція «очима користувача»),
+    -- три різні факти на трьох різних кодах ексепшена (виняток лишено як є,
+    -- локалізується лише подробиця).
+    (N'err.ECR-AUTH-0403.simulationSessionNotFound', N'en', N'There is no active simulation session to end.', 1),
+    (N'err.ECR-AUTH-0403.simulationNotYours',   N'en', N'You can only end your own simulation session.', 1),
+    (N'err.ECR-SIM-0422.selfSimulation',        N'en', N'Simulating yourself has no purpose.', 1),
+    (N'err.ECR-SIM-0422.reasonRequired',        N'en', N'A reason for the simulation is required: without it the audit log answers nothing.', 1),
     (N'err.ECR-AUTH-0403.domainPassword',       N'en', N'The password of a domain account is changed in the domain, not here.', 1),
     (N'err.ECR-AUTH-0423.lockedAfterFailures',  N'en', N'The account is temporarily locked after failed sign-in attempts. Try again later.', 0),
     (N'err.ECR-AUTH-0423.lockedByAdministrator', N'en', N'The account has been locked by an administrator. Contact your administrator.', 0),
@@ -1213,6 +1224,11 @@ USING (VALUES
     (N'err.ECR-ROW-0409.rowsFromTemplate',      N'en', N'Table "{tableCode}" has RowMode = {rowMode}: its rows come from the template, so rows cannot be added.', 1),
     (N'err.ECR-ROW-0409.rowLimitReached',       N'en', N'Table "{tableCode}" has reached its dynamic-row limit: {max}.', 1),
     (N'err.ECR-ROW-0409.rowKeyExists',          N'en', N'A row with key "{rowKey}" already exists in this table.', 1),
+    -- B-14 (security cluster): ResourceGrantHandlers.ReplaceResourceGrantsHandler
+    -- — дублікат ресурсу в наборі грантів ролі. Код лишено `ECR-ROW-0409`, як
+    -- у джерелі (той самий код, що й дублікати ключів рядка таблиці вище, —
+    -- це не той самий факт, але зміна коду поза обсягом B-14).
+    (N'err.ECR-ROW-0409.resourceGrantDuplicate', N'en', N'Resource {resourceKind} {resourceId} is listed twice in the set.', 1),
     (N'err.ECR-PRJ-0404.project',               N'en', N'Project {projectId} was not found.', 1),
     (N'err.ECR-PRJ-0404.projectOfPeriod',       N'en', N'The project of period {periodId} was not found.', 1),
     (N'err.ECR-PRD-0404.period',                N'en', N'Period {periodId} was not found.', 1),

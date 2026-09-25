@@ -129,7 +129,8 @@ public sealed class SimulationService(
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             throw new Application.Errors.NotFoundException(
-                "ECR-SIM-0422", $"Активного сеансу симуляції {sessionId} не існує.");
+                "ECR-SIM-0422", $"Активного сеансу симуляції {sessionId} не існує.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SIM-0422.noSession" });
         }
 
         return (reader.GetInt32(0), reader.GetInt32(1));

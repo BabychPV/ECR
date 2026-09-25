@@ -500,6 +500,77 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
 увесь `Ecr.Adapters.PiAf`. Замір після цього проходу: 111 у 54 файлах
 (було 146 у 62 на старті раунду).
 
+## ✎ 2026-09-25: Security-кластер (B-14) — 18 кидків, 8 файлів, закрито повністю
+
+`AccessDiagnostics.cs` (2), `EndSimulationHandler.cs` (3),
+`PermissionCheck.cs` (1), `ResourceGrantHandlers.cs` (4),
+`StartSimulationHandler.cs` (4), `AccessDecisionService.cs` (1),
+`SimulationService.cs` (1), `UserStore.cs` (2) закрито повністю, 18 кидків;
+111 у 54 файлах → **93 у 46 файлах**.
+
+- `err.ECR-AUTH-0401.signInRequired` — наявний ключ, перевикористаний для
+  «Потрібна автентифікація.» (`AccessDiagnostics.GetAccessDiagnosticsHandler`,
+  `ResourceGrantHandlers.RequireAsync`): той самий факт, що вже несе
+  `PermissionCheck.RequireAnyAsync`.
+- `err.ECR-SEC-0404.userNotFound` {userId} — наявний ключ (`BE-12`),
+  перевикористаний для трьох однакових кидків «користувача не існує»
+  (`AccessDiagnostics`, `UserStore.ReplaceRolesAsync`) — той самий факт, що
+  вже несуть `RoleAndUserHandlers`/`ResourceGrantHandlers`.
+- `err.ECR-SEC-0404.roleNotFound` {roleId} — наявний ключ, перевикористаний
+  для другого однакового кидка «ролі не існує» в
+  `ResourceGrantHandlers.ReplaceResourceGrantsHandler` (перший, у
+  `ListResourceGrantsHandler`, уже мав ключ до цього проходу).
+- `err.ECR-SEC-0404.rolesUnknown` {roles} — наявний ключ (`RoleAndUserHandlers`),
+  перевикористаний у `UserStore.ReplaceRolesAsync`: невідомі коди ролей рядком
+  через кому, той самий факт.
+- `err.ECR-SIM-0422.noSession` — наявний ключ (уже вжитий у
+  `SecurityController`), перевикористаний у `SimulationService.ReadPrincipalsAsync`
+  для того самого факту «активного сеансу симуляції не існує» — там, де код
+  ексепшена справді `ECR-SIM-0422`.
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  «Анонімний запит не може відкривати/завершувати симуляцію.»
+  (`StartSimulationHandler`, `EndSimulationHandler`): старт і завершення
+  сеансу симуляції — дії, що пишуть рядок в `aud.SimulationSession`, той
+  самий клас факту, що й «анонім не може змінювати дані».
+- `err.ECR-AUTH-0403.permission` — наявний ключ (`Requires permission
+  {permission}`), перевикористаний у `ResourceGrantHandlers.RequireAsync` і
+  `StartSimulationHandler` — той самий шаблон перевірки права, що вже
+  локалізують RoleAndUserHandlers/DocumentQueryHandlers/тощо.
+  ⚠ **Той самий ключ додано і в `PermissionCheck.RequireAnyAsync`**, де
+  раніше messageKey свідомо НЕ було: запис 2026-09-20 пояснював це тим, що
+  `ExceptionHandlingMiddleware.LocalizedDetailAsync` уже локалізує
+  `ECR-AUTH-0403` зі `Details["permission"]` старшим точковим шляхом
+  (`RequiresPermissionKey`), і той шлях і досі живий. Але перевірка всіх
+  дев'яти інших викликів того самого факту показала, що кожен із них УЖЕ ніс
+  явний `err.ECR-AUTH-0403.permission` поверх того самого точкового шляху —
+  тобто застосунок фактично вже перейшов на явний ключ як конвенцію, а
+  `PermissionCheck` (найстаріший виклик, з якого решта скопійовані) лишився
+  єдиним винятком. Запис 2026-09-20 застарів: не рішення, а недогляд.
+  Функціонально це no-op (точковий шлях і так резолвив той самий текст), але
+  тепер `PermissionCheck` явно рахується як пройдений, а не «звільнений».
+- Нові ключі: `err.ECR-AUTH-0403.simulationSessionNotFound` — «Активного
+  сеансу симуляції не знайдено.» в `EndSimulationHandler` (код лишено
+  `ECR-AUTH-0403`, як у джерелі — не 404, хоча виняток `NotFoundException`;
+  зміна коду поза обсягом B-14); `err.ECR-AUTH-0403.simulationNotYours` —
+  «Завершити можна лише власний сеанс симуляції.»;
+  `err.ECR-SIM-0422.selfSimulation` — «Симуляція самого себе не має сенсу.»;
+  `err.ECR-SIM-0422.reasonRequired` — «Причина симуляції обов'язкова: без
+  неї журнал не відповідає ні на що.» (обидва — `StartSimulationHandler`);
+  `err.ECR-AUTH-0401.accountDisabled` — «Обліковий запис не існує або
+  вимкнений.» (`AccessDecisionService.BuildProfileAsync`, окремий факт від
+  `.accountMissing`/`.signInRequired` — тут акаунт існував і його вимкнули
+  чи стерли, а не сесія скінчилась); `err.ECR-ROW-0409.resourceGrantDuplicate`
+  {resourceKind, resourceId} — «Ресурс … названо в наборі двічі.»
+  (`ResourceGrantHandlers.ReplaceResourceGrantsHandler`).
+  ⚠ Код `ECR-ROW-0409` для дублікату ГРАНТА (Project/Sheet/Table/Column), а
+  не рядка таблиці документа, — той самий код, що й `rowKeyExists` вище, але
+  ІНШИЙ факт; заголовок `ECR-ROW-0409` («Row key conflict») тепер трохи
+  вводить в оману для цього конкретного кидка. Зміна коду — окремий PR (поза
+  B-14, чисто локалізацією); залишено як спостереження.
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`/`ECR-AUTH-0403`/
+  `ECR-SEC-0404`/`ECR-SIM-0422` уже були нейтральними; `ECR-ROW-0409` теж не
+  чіпався (лишень де і чому він тепер трохи вводить в оману — див. вище).
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
@@ -516,11 +587,6 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 3 |
-| `src/Ecr.Application/Security/AccessDiagnostics.cs` | 2 |
-| `src/Ecr.Application/Security/EndSimulationHandler.cs` | 3 |
-| `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
-| `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
-| `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
 | `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
 | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
@@ -550,6 +616,3 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
 | `src/Ecr.Infrastructure/Persistence/RowStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` | 2 |
 | `src/Ecr.Infrastructure/Persistence/WorkflowStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Security/AccessDecisionService.cs` | 1 |
-| `src/Ecr.Infrastructure/Security/SimulationService.cs` | 1 |
-| `src/Ecr.Infrastructure/Security/UserStore.cs` | 2 |

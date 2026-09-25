@@ -18,12 +18,15 @@ public sealed class EndSimulationHandler(
     {
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може завершувати симуляцію.");
+                         "ECR-AUTH-0401", "Анонімний запит не може завершувати симуляцію.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var actor = await simulation.GetActorAsync(sessionId, ct).ConfigureAwait(false);
         if (actor is null)
         {
-            throw new NotFoundException("ECR-AUTH-0403", "Активного сеансу симуляції не знайдено.");
+            throw new NotFoundException(
+                "ECR-AUTH-0403", "Активного сеансу симуляції не знайдено.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0403.simulationSessionNotFound" });
         }
 
         // ⚠ Завершити можна ЛИШЕ власний сеанс. Інакше один адміністратор
@@ -32,7 +35,8 @@ public sealed class EndSimulationHandler(
         if (actor != userId)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", "Завершити можна лише власний сеанс симуляції.");
+                "ECR-AUTH-0403", "Завершити можна лише власний сеанс симуляції.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0403.simulationNotYours" });
         }
 
         // Проставляється EndedAt; запис не видаляється (D-25). Повернення до

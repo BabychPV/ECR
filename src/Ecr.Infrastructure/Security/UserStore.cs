@@ -138,7 +138,13 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         ArgumentNullException.ThrowIfNull(roleCodes);
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false)
-                   ?? throw new Application.Errors.NotFoundException("ECR-SEC-0404", $"Користувача {userId} не знайдено.");
+                   ?? throw new Application.Errors.NotFoundException(
+                       "ECR-SEC-0404", $"Користувача {userId} не знайдено.",
+                       new Dictionary<string, object?>
+                       {
+                           ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                           ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                       });
 
         // ⛔ Коди розв'язуються ДО будь-якої зміни: невідома роль у наборі
         // означає помилку в переліку, і призначити «те, що знайшлося» гірше
@@ -158,7 +164,12 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         if (unknown.Count > 0)
         {
             throw new Application.Errors.NotFoundException(
-                "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.");
+                "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.rolesUnknown",
+                    ["roles"] = string.Join(", ", unknown),
+                });
         }
 
         // ⚠ Кожна роль набору йде в одну з двох груп (`#48`, ФВ-6.16): якщо

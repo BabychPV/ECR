@@ -97,7 +97,9 @@ public sealed class ListResourceGrantsHandler(
         IAccessDecisionService access, ICurrentUser currentUser, CancellationToken ct)
     {
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
@@ -105,7 +107,11 @@ public sealed class ListResourceGrantsHandler(
             ? userId
             : throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
     }
 }
 
@@ -155,7 +161,13 @@ public sealed class ReplaceResourceGrantsHandler(
             // ⛔ Родина SEC, а не ROW (`P-25`, рядок 2): суб'єкт відмови —
             // запис каталогу безпеки, а `ROW` маршрутизує на клієнті в
             // обробник помилок рядка таблиці документа.
-            ?? throw new NotFoundException(ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.");
+            ?? throw new NotFoundException(
+                ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                    ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Дублікат ловиться ТУТ, а не унікальним індексом: `UQ_ResourceGrant`
         // дав би 500 «внутрішня помилка» замість пояснення, який саме ресурс
@@ -168,7 +180,13 @@ public sealed class ReplaceResourceGrantsHandler(
         {
             throw new BusinessRuleException(
                 "ECR-ROW-0409",
-                $"Ресурс {duplicate.Key.ResourceKind} {duplicate.Key.ResourceId} названо в наборі двічі.");
+                $"Ресурс {duplicate.Key.ResourceKind} {duplicate.Key.ResourceId} названо в наборі двічі.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.resourceGrantDuplicate",
+                    ["resourceKind"] = duplicate.Key.ResourceKind.ToString(),
+                    ["resourceId"] = duplicate.Key.ResourceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         await users.ReplaceGrantsAsync(roleId, grants, ct).ConfigureAwait(false);
