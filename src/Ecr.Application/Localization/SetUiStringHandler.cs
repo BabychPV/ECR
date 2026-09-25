@@ -20,6 +20,14 @@ public sealed class SetUiStringHandler(
     /// <summary>Право, без якого каталог не змінюється.</summary>
     public const string Permission = "System.ManageLocalization";
 
+    /// <summary>
+    /// Стеля довжини тексту (<c>sys_ecr.UiString.Value nvarchar(1000)</c>,
+    /// <c>08-system-tables.sql</c>). Той самий ключ каталогу, що й CSV-імпорт
+    /// (<c>UiStringCsvHandlers</c>) — той самий факт «довше за N символів»,
+    /// незалежно від того, яким шляхом текст дійшов до сервера.
+    /// </summary>
+    private const int MaxValueLength = 1000;
+
     /// <summary>Записує рядок і повертає нову версію каталогу.</summary>
     /// <param name="key">Ключ.</param>
     /// <param name="languageCode">Мова.</param>
@@ -53,6 +61,37 @@ public sealed class SetUiStringHandler(
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
                 new Dictionary<string, object?> { ["permission"] = Permission });
+        }
+
+        // ⛔ Без цих двох перевірок обидва випадки доїжджали до бази: задовге
+        // значення на `Value nvarchar(1000)` давало `String or binary data
+        // would be truncated`, а невідома мова — порушення `FK_UiString_Lang`.
+        // Обидва — необроблений `SqlException`, тобто гола 500-ка замість
+        // пояснення, яке поле і чому (B-03).
+        if (value.Length > MaxValueLength)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Текст перекладу {key} ({languageCode}) довший за {MaxValueLength} символів.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    // Той самий ключ, що й CSV-імпорт того самого поля.
+                    ["messageKey"] = "err.ECR-REQ-0422.uiStringTooLong",
+                    ["key"] = key,
+                    ["maxLength"] = MaxValueLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        if (!await catalog.LanguageExistsAsync(languageCode, ct).ConfigureAwait(false))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                $"Мови {languageCode} немає в довіднику.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.uiStringUnknownLanguage",
+                    ["lang"] = languageCode,
+                });
         }
 
         await RequireSamePlaceholdersAsync(key, languageCode, value, ct).ConfigureAwait(false);

@@ -846,6 +846,10 @@ USING (VALUES
     (N'err.ECR-REQ-0422.uiStringEmptyValue',   N'en', N'The translation is empty.', 1),
     (N'err.ECR-REQ-0422.uiStringTooLong',      N'en', N'The translation is longer than 1000 characters.', 1),
     (N'err.ECR-REQ-0422.uiStringDuplicateKey', N'en', N'This key already appears earlier in the file.', 1),
+    -- B-03: PUT /ui-strings/{lang}/{key} — та сама пара перевірок, що й CSV-імпорт вище,
+    -- лише напряму на одному рядку: раніше обидва випадки доїжджали до бази як гола 500-ка
+    -- (`String or binary data would be truncated`, порушення `FK_UiString_Lang`).
+    (N'err.ECR-REQ-0422.uiStringUnknownLanguage', N'en', N'"{lang}" is not a known language: add it to the language registry first.', 1),
     -- BE-33: канали сповіщень. У відмові вебхука немає ні URL, ні хоста — URL є секретом.
     (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs at least one recipient.', 1),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
@@ -1193,7 +1197,7 @@ USING (VALUES
     -- Борг локалізації (ProjectQueryHandlers.cs): перелік, створення й
     -- перехід стану проєкту, CRUD політик періодів.
     (N'err.ECR-PRD-4091.code',                  N'en', N'A period policy with code "{code}" already exists.', 1),
-    (N'err.ECR-TMPL-0404.versionRequired',      N'en', N'A project cannot be created without a template version.', 1),
+    (N'err.ECR-TMPL-0422.versionRequired',      N'en', N'A project cannot be created without a template version.', 1),
     (N'err.ECR-PRD-0422.periodPolicyRequired',  N'en', N'A project cannot be created without a period policy.', 1),
     (N'err.ECR-PRJ-0422.notDraft',              N'en', N'Only a draft can be activated; the project is in state {status}.', 1),
     (N'err.ECR-PRJ-0422.noPeriods',             N'en', N'The calendar of project {projectId} produced no period: check the period kind, the reporting year and the offset policy.', 1),
