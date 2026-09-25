@@ -234,4 +234,58 @@ public sealed class PeriodStateCalculatorTests
             PeriodState.Grace => [PeriodState.Open, PeriodState.Grace],
             _ => [PeriodState.Open, PeriodState.Grace, PeriodState.Closed],
         };
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-08")]
+    public void Ефективний_стан_перевідкритого_періоду_після_until_Closed_без_задачі()
+    {
+        var period = January();
+        period.AdvanceTo(PeriodState.Closed, SiteMidnight(2026, 2, 21));
+
+        var until = SiteMidnight(2026, 3, 1);
+        period.Reopen(until, "correction", SiteMidnight(2026, 2, 25));
+
+        // Збережений стан — `Grace` доти, доки задача не прогнана.
+        Assert.Equal(PeriodState.Grace, period.State);
+
+        Assert.Equal(PeriodState.Grace, Calculator.Effective(period, until.AddSeconds(-1)));
+
+        // ⛔ Мутація: `Effective` віддає `period.State` — тут `Grace`.
+        Assert.Equal(PeriodState.Closed, Calculator.Effective(period, until.AddSeconds(18)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-08")]
+    public void Ефективний_стан_не_відкриває_закритого_і_не_йде_назад()
+    {
+        // Закритий достроково: за датами ще `Open`, але назад — лише Reopen.
+        var closed = January();
+        closed.AdvanceTo(PeriodState.Closed, SiteMidnight(2026, 1, 10));
+        Assert.Equal(PeriodState.Closed, Calculator.Effective(closed, SiteMidnight(2026, 1, 15)));
+
+        // Збережений `Grace` раніше за дати — лишається `Grace`, не `Open`.
+        var grace = January();
+        grace.AdvanceTo(PeriodState.Grace, SiteMidnight(2026, 1, 10));
+        Assert.Equal(PeriodState.Grace, Calculator.Effective(grace, SiteMidnight(2026, 1, 15)));
+
+        // А відстала задача не заважає просунути вперед: `Scheduled` після
+        // відкриття — вже `Open`.
+        Assert.Equal(PeriodState.Open, Calculator.Effective(January(), SiteMidnight(2026, 1, 15)));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-08")]
+    public void Без_порахованих_меж_ефективний_стан_збережений()
+    {
+        // ⚠ Нульові межі дали б `Closed` будь-якому періоду.
+        var period = new Period(
+            projectId: 1, new PeriodKey(202601), sequence: 1,
+            new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 31));
+        period.AdvanceTo(PeriodState.Open, SiteMidnight(2026, 1, 1));
+
+        Assert.Equal(PeriodState.Open, Calculator.Effective(period, SiteMidnight(2026, 9, 1)));
+    }
 }
