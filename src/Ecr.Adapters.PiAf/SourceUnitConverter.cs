@@ -64,8 +64,9 @@ public sealed class SourceUnitConverter(UnitConverter converter, IUnitCatalog ca
             + $"а в мапінгу оголошено одиницю {declared}. Збір зупинено.",
             new Dictionary<string, object?>
             {
+                ["messageKey"] = "err.ECR-INT-0422.sourceUnitMismatch",
                 ["sourcePath"] = sourcePath,
-                ["declaredUnitId"] = declared,
+                ["declaredUnitId"] = declared.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["actualUnitCode"] = actualSourceUnitCode,
             });
     }
@@ -138,7 +139,11 @@ public sealed class SourceUnitConverter(UnitConverter converter, IUnitCatalog ca
                    ?? throw new BusinessRuleException(
                        UnitChangedCode,
                        $"Одиниці {unitId} немає в довіднику: конверсія на межі неможлива.",
-                       new Dictionary<string, object?> { ["unitId"] = unitId });
+                       new Dictionary<string, object?>
+                       {
+                           ["messageKey"] = "err.ECR-INT-0422.unitMissingFromSnapshot",
+                           ["unitId"] = unitId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                       });
 
         return new UnitSpec(unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase);
     }

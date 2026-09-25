@@ -245,7 +245,13 @@ public sealed class PiWebApiDataSource(
                  ?? throw new BusinessRuleException(
                      SourceUnavailable,
                      $"Джерело {dataSourceId} не існує або вимкнене.",
-                     new Dictionary<string, object?> { ["dataSourceId"] = dataSourceId });
+                     new Dictionary<string, object?>
+                     {
+                         // Той самий ключ, що SqlDataSource.cs/CollectionRunner.cs/
+                         // PiAfCatalogReader.cs/PiSqlClientDataSource.cs.
+                         ["messageKey"] = "err.ECR-INT-0503.sourceMissing",
+                         ["dataSourceId"] = dataSourceId.ToString(CultureInfo.InvariantCulture),
+                     });
 
         return cached;
     }
@@ -288,7 +294,12 @@ public sealed class PiWebApiDataSource(
                             AuthenticationRefused,
                             $"PI Web API відповів {(int)response.StatusCode} на {path}: "
                             + "джерело не приймає облікові дані.",
-                            new Dictionary<string, object?> { ["status"] = (int)response.StatusCode });
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-INT-0502.piWebApiUnauthorized",
+                                ["status"] = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture),
+                                ["path"] = path,
+                            });
                     }
 
                     if (attempt >= MaxAttempts || !Retryable(response.StatusCode))
@@ -296,7 +307,12 @@ public sealed class PiWebApiDataSource(
                         throw new BusinessRuleException(
                             SourceUnavailable,
                             $"PI Web API відповів {(int)response.StatusCode} на {path}.",
-                            new Dictionary<string, object?> { ["status"] = (int)response.StatusCode });
+                            new Dictionary<string, object?>
+                            {
+                                ["messageKey"] = "err.ECR-INT-0503.piWebApiErrorStatus",
+                                ["status"] = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture),
+                                ["path"] = path,
+                            });
                     }
                 }
                 else
@@ -339,8 +355,9 @@ public sealed class PiWebApiDataSource(
                     $"PI Web API не відповів на {path} за {MaxAttempts} спроб: тайм-аут запиту.",
                     new Dictionary<string, object?>
                     {
+                        ["messageKey"] = "err.ECR-INT-0503.piWebApiTimeout",
                         ["path"] = path,
-                        ["attempts"] = MaxAttempts,
+                        ["attempts"] = MaxAttempts.ToString(CultureInfo.InvariantCulture),
                         ["reason"] = "timeout",
                     });
             }

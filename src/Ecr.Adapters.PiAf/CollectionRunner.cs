@@ -88,18 +88,26 @@ public sealed class CollectionRunner(
         var entity = await store.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(
                          $"Сутність джерела {sourceEntityId} не існує або вимкнена: збирати нічого.",
-                         sourceEntityId);
+                         sourceEntityId,
+                         "err.ECR-INT-0503.sourceEntityUnavailable");
 
         var dataSource = await store.FindDataSourceAsync(entity.DataSourceId, ct).ConfigureAwait(false)
                          ?? throw Unavailable(
-                             $"Джерело {entity.DataSourceId} не існує або вимкнене.", sourceEntityId);
+                             $"Джерело {entity.DataSourceId} не існує або вимкнене.",
+                             sourceEntityId,
+                             // Той самий ключ і те саме речення, що SqlDataSource.cs: той самий факт.
+                             "err.ECR-INT-0503.sourceMissing",
+                             ("dataSourceId", entity.DataSourceId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 
         // ⚠ Транспорт — це НАЛАШТУВАННЯ, а не гілка коду (ФВ-11.2). Адаптер
         // обирається за Transport джерела; додати третій транспорт означає
         // зареєструвати ще одну реалізацію, а не правити цей метод.
         var adapter = sources.FirstOrDefault(s => s.Transport == dataSource.Transport)
                       ?? throw Unavailable(
-                          $"Транспорт {dataSource.Transport} не зареєстровано.", sourceEntityId);
+                          $"Транспорт {dataSource.Transport} не зареєстровано.",
+                          sourceEntityId,
+                          "err.ECR-INT-0503.transportNotRegistered",
+                          ("transport", dataSource.Transport.ToString()));
 
         var maps = await store.GetFieldMapsAsync(sourceEntityId, ct).ConfigureAwait(false);
         var units = await unitConverter.UnitsAsync(ct).ConfigureAwait(false);
@@ -342,7 +350,13 @@ public sealed class CollectionRunner(
             message,
             new Dictionary<string, object?>
             {
-                ["sourceEntityId"] = sourceEntityId,
+                // ⚠ Лише Details несе ключ — саме `message` (вище) лишається
+                // МАРКЕРНИМ текстом: CollectionFailure.IsAuthenticationRefusal
+                // читає його з itg.CollectionRun.ErrorMessage за підрядком
+                // AuthenticationMarker, і messageKey впливає лише на Detail
+                // http-відповіді (ResolveGenericMessageAsync), не на ex.Message.
+                ["messageKey"] = "err.ECR-INT-0502.authenticationRefused",
+                ["sourceEntityId"] = sourceEntityId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["sourceCode"] = sourceCode,
             });
     }
@@ -515,11 +529,27 @@ public sealed class CollectionRunner(
     private static int Percent(int done, int total)
         => total <= 0 ? 100 : Math.Clamp(done * 100 / total, 0, 99);
 
-    private static BusinessRuleException Unavailable(string message, int sourceEntityId)
-        => new(
-            SourceUnavailable,
-            message,
-            new Dictionary<string, object?> { ["sourceEntityId"] = sourceEntityId });
+    /// <summary>Джерело недоступне з однієї з трьох причин — кожна свій <c>messageKey</c>.</summary>
+    /// <param name="message">Запасне речення сервера (журнал; резолвер підміняє його клієнту).</param>
+    /// <param name="sourceEntityId">Сутність джерела, що запустила прогін.</param>
+    /// <param name="messageKey">Ключ каталогу — той самий факт незалежно від того, ЩО саме недоступне.</param>
+    /// <param name="extra">Додаткова підстановка (`dataSourceId`/`transport`) — сирим рядком.</param>
+    private static BusinessRuleException Unavailable(
+        string message, int sourceEntityId, string messageKey, (string Key, string Value)? extra = null)
+    {
+        var details = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["messageKey"] = messageKey,
+            ["sourceEntityId"] = sourceEntityId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        };
+
+        if (extra is { } pair)
+        {
+            details[pair.Key] = pair.Value;
+        }
+
+        return new(SourceUnavailable, message, details);
+    }
 
     /// <summary>Результат однієї спроби читання.</summary>
     /// <param name="Collected">Прочитане; <c>null</c> — джерело відмовило.</param>

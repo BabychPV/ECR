@@ -466,13 +466,42 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 - Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0409`/
   `ECR-TMPL-0422` уже були нейтральними.
 
+PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
+`PiSqlClientDataSource.cs` 5, `PiWebApiDataSource.cs` 4,
+`SourceUnitConverter.cs` 2 — 15 разом) закрито повністю; 126 у 59 файлах →
+111 у 54 файлах. Четвертий, останній кластер лінії C (B-14) — увесь `Ecr.Adapters.PiAf`.
+- `err.ECR-INT-0503.sourceMissing` {dataSourceId} — наявний ключ
+  (`SqlDataSource.cs`), перевикористаний у ЧОТИРЬОХ місцях (`CollectionRunner`,
+  `PiAfCatalogReader`, `PiSqlClientDataSource` ×2, `PiWebApiDataSource`):
+  той самий факт «джерела немає або воно вимкнене», той самий текст.
+- `err.ECR-INT-0503.connectionStringBroken`, `err.ECR-INT-0503.connectFailed`,
+  `err.ECR-INT-0502.credentialsRefused` — наявні ключі (`SqlDataSource.cs`),
+  перевикористані в `PiSqlClientDataSource.cs`: майже дослівно той самий код
+  (ODBC-з'єднання), той самий факт кожен.
+- `err.ECR-INT-0503.transportNotRegistered` — заведений у `CollectionRunner.cs`,
+  одразу перевикористаний у `PiAfCatalogReader.cs` (той самий кидок, дослівно).
+- Решта нових ключів — по одному на факт, кожен унікальний для свого адаптера:
+  `err.ECR-INT-0503.sourceEntityUnavailable` {sourceEntityId}; `.controlCharacterInName`
+  (RTQP-літерал з керівним символом); `err.ECR-INT-0502.authenticationRefused`
+  {sourceCode} (PI AF, не ODBC — окремий від `.credentialsRefused`, бо
+  адаптер інший і поле інше: `sourceCode`, не `dataSource`);
+  `err.ECR-INT-0502.piWebApiUnauthorized`/`err.ECR-INT-0503.piWebApiErrorStatus`
+  {status, path} — 401/403 і решта не-2xx статусів PI Web API, різні коди
+  (0502 не повторюється, 0503 повторюється до стелі спроб);
+  `err.ECR-INT-0503.piWebApiTimeout` {path, attempts}; `err.ECR-INT-0422.sourceUnitMismatch`
+  {sourcePath, declaredUnitId, actualUnitCode} і `.unitMissingFromSnapshot`
+  {unitId} — обидва під тим самим кодом `ECR-INT-0422`
+  (`SourceUnitConverter.UnitChangedCode`), різні messageKey за причиною.
+- Заголовки кодів не змінювались — `ECR-INT-0502`/`ECR-INT-0503`/
+  `ECR-INT-0422` уже були нейтральними.
+
+**Лінія C (B-14) завершена для всіх чотирьох названих у задачі кластерів**:
+`FormulaDefHandlers.cs`, `RowDefHandlers.cs`, `TemplateVersionStore.cs`,
+увесь `Ecr.Adapters.PiAf`. Замір після цього проходу: 111 у 54 файлах
+(було 146 у 62 на старті раунду).
+
 | Файл | Місць |
 |---|---|
-| `src/Ecr.Adapters.PiAf/CollectionRunner.cs` | 2 |
-| `src/Ecr.Adapters.PiAf/PiAfCatalogReader.cs` | 2 |
-| `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs` | 5 |
-| `src/Ecr.Adapters.PiAf/PiWebApiDataSource.cs` | 4 |
-| `src/Ecr.Adapters.PiAf/SourceUnitConverter.cs` | 2 |
 | `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
 | `src/Ecr.Api/Controllers/CellsController.cs` | 1 |
 | `src/Ecr.Api/Controllers/TemplateVersionsController.cs` | 2 |
