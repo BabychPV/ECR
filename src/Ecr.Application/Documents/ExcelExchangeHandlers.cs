@@ -55,18 +55,8 @@ public sealed class ExportDocumentHandler(
         // користувач узагалі вивантажує документи»; грант каже, ЯКІ. Без
         // другої перевірки право `Document.Export`, видане роллю `DataEntry`,
         // відкривало б будь-який проєкт.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
         // сховища не може дорівнювати jobId: той повертає черга вже після
@@ -126,18 +116,8 @@ public sealed class PreviewImportHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⚠ Синхронно, попри розмір файлу: користувач стоїть над результатом і
         // без нього не може зробити наступний крок. Перегляд у фоні означав би
@@ -199,18 +179,8 @@ public sealed class ApplyImportHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var pendingCount = await importer.CountPendingChangesAsync(previewToken, ct).ConfigureAwait(false);
 

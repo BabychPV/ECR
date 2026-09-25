@@ -37,7 +37,7 @@ public sealed class InvisibleDocumentNotFoundTests(SqlServerFixture sql)
 
         // Функціональні права є, ГРАНТА на проєкт — немає.
         using var client = await SystemHealthControllerTests.SignedInAsync(
-            sql, app, "Document.View", "Calculation.View", "Calculation.Recalculate").ConfigureAwait(true);
+            sql, app, "Document.View", "Calculation.View", "Calculation.Recalculate", "Document.Export", "Document.Import").ConfigureAwait(true);
 
         foreach (var (method, route, body) in Routes(document.TableInstanceId, period))
         {
@@ -73,15 +73,24 @@ public sealed class InvisibleDocumentNotFoundTests(SqlServerFixture sql)
         yield return ("POST", id => $"/api/v1/documents/{id}/validate", new { periodKey = period });
         yield return ("POST", id => $"/api/v1/documents/{id}/recalculate", new { periodKey = period });
         yield return ("GET", id => $"/api/v1/documents/{id}/tables/{tableInstanceId}", null);
+        yield return ("POST", id => $"/api/v1/documents/{id}/export", new { includeFormulas = false, includeStyles = false, language = "en", periodKey = period });
+        yield return ("MULTIPART", id => $"/api/v1/documents/{id}/import/preview", null);
+        yield return ("POST", id => $"/api/v1/documents/{id}/import/apply", new { previewToken = "b08-token" });
     }
 
     private static async Task<(HttpStatusCode Status, string Body)> SendAsync(
         HttpClient client, string method, string url, object? body)
     {
         var uri = new Uri(url, UriKind.Relative);
-        using var response = method == "GET"
-            ? await client.GetAsync(uri).ConfigureAwait(false)
-            : await client.PostAsJsonAsync(uri, body).ConfigureAwait(false);
+        using var file = new ByteArrayContent([0x50, 0x4B, 0x03, 0x04]);
+        using var form = new MultipartFormDataContent { { file, "file", "book.xlsx" } };
+        using var response = method switch
+        {
+            "GET" => await client.GetAsync(uri).ConfigureAwait(false),
+            // ⚠ Вміст файлу байдужий: видимість перевіряється ДО читання книги.
+            "MULTIPART" => await client.PostAsync(uri, form).ConfigureAwait(false),
+            _ => await client.PostAsJsonAsync(uri, body).ConfigureAwait(false),
+        };
 
         return (response.StatusCode, await response.Content.ReadAsStringAsync().ConfigureAwait(false));
     }
