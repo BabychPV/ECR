@@ -402,7 +402,7 @@ public sealed partial class EndpointCoverageTests
                 "deny.NoGrant", "deny.PeriodNotOpenYet", "deny.PeriodClosed", "deny.OutOfAccessWindow",
                 "deny.DocumentSubmitted", "deny.DocumentApproved", "deny.ColumnReadOnly", "deny.RowReadOnly",
                 "deny.CalculatedCell", "deny.ProjectArchived", "deny.ArchivingInProgress", "deny.BusinessRule",
-                "deny.SimulationReadOnly", "deny.OutsidePermitWindow",
+                "deny.SimulationReadOnly", "deny.OutsidePermitWindow", "deny.InsufficientGrantLevel",
             ],
             "Підказка сірої комірки за причиною заборони."),
 

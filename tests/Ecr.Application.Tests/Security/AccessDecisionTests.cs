@@ -146,12 +146,29 @@ public sealed class AccessDecisionTests
         var cell = AccessBuilder.Cell();
 
         // Право заповнювати і право відповідати за подане — різні повноваження.
+        // ⚠ Грант Є (Write), просто закороткий для Submit: причина —
+        // InsufficientGrantLevel, а не NoGrant (окрема перевірка A11a нижче
+        // доводить, що NoGrant лишається для СПРАВЖНЬОЇ відсутності гранта).
         Assert.False(EditRules.CanSubmit(writer, cell, hasBlockingErrors: false).IsAllowed);
-        Assert.Equal(EditDenyReason.NoGrant, EditRules.CanSubmit(writer, cell, false).Reason);
+        Assert.Equal(EditDenyReason.InsufficientGrantLevel, EditRules.CanSubmit(writer, cell, false).Reason);
         Assert.True(EditRules.CanSubmit(submitter, cell, hasBlockingErrors: false).IsAllowed);
 
         // …і подання з незакритими помилками валідації не проходить нікому.
         Assert.False(EditRules.CanSubmit(submitter, cell, hasBlockingErrors: true).IsAllowed);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A11a_подання_без_будь_якого_гранта_дає_причину_NoGrant_а_не_InsufficientGrantLevel()
+    {
+        // ⛔ Mutation-proof пара до A11: якщо перевірку на GrantLevel.None
+        // прибрати (чи переплутати з <), цей тест і зловить — профіль без
+        // жодного гранта на проєкт мусить лишитися на NoGrant.
+        var stranger = new AccessBuilder { UserId = 99 }.Build();
+
+        var decision = EditRules.CanSubmit(stranger, AccessBuilder.Cell(), hasBlockingErrors: false);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.NoGrant, decision.Reason);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -165,10 +182,27 @@ public sealed class AccessDecisionTests
         var submitted = AccessBuilder.Cell(sheet: DocumentStatus.Submitted);
 
         Assert.True(EditRules.CanApprove(approver, submitted).IsAllowed);
-        Assert.False(EditRules.CanApprove(submitter, submitted).IsAllowed);
+
+        // ⚠ Грант Є (Submit), просто закороткий для Approve —
+        // InsufficientGrantLevel, не NoGrant (той самий розподіл причин, що
+        // в CanSubmit, A11/A11a).
+        var deniedApprove = EditRules.CanApprove(submitter, submitted);
+        Assert.False(deniedApprove.IsAllowed);
+        Assert.Equal(EditDenyReason.InsufficientGrantLevel, deniedApprove.Reason);
 
         // Затвердження чернетки означало б, що ніхто не заявив її готовою.
         Assert.False(EditRules.CanApprove(approver, AccessBuilder.Cell()).IsAllowed);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A12a_затвердження_без_будь_якого_гранта_дає_причину_NoGrant()
+    {
+        var stranger = new AccessBuilder { UserId = 99 }.Build();
+
+        var decision = EditRules.CanApprove(stranger, AccessBuilder.Cell(sheet: DocumentStatus.Submitted));
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.NoGrant, decision.Reason);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

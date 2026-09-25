@@ -292,6 +292,14 @@ public sealed class ContractIntegrityTests
             // незакритими помилками (ФВ-5.19).
             EditRules.CanSubmit(profile, AccessBuilder.Cell(), hasBlockingErrors: true).Reason,
 
+            // ⚠ InsufficientGrantLevel: грант Є (Write), але нижчий за Submit
+            // — окрема причина від NoGrant (справжньої відсутності гранта,
+            // уже покрита вище через `stranger`).
+            EditRules.CanSubmit(
+                new AccessBuilder().Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Write).Build(),
+                AccessBuilder.Cell(),
+                hasBlockingErrors: false).Reason,
+
             // ⛔ OutsidePermitWindow приходить з ІНШОГО рушія — правил доступу
             // до періоду (`ФВ-5.20`). Перелічити його тут константою означало б
             // довести лише те, що я вмію писати назву причини; сценарій нижче
