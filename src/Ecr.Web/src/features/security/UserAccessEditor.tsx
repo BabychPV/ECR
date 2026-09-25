@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Combobox, Group, Modal, MultiSelect, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EcrApiError, apiFetch } from '@/api/client';
+import { apiFetch } from '@/api/client';
 import type { AffectedRolesResponse, RoleView, UserView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
+import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 
 /**
@@ -142,6 +143,7 @@ export function UserAccessEditor({
         notifications.show({
           color: 'statusWarning',
           message: `${t('security.accessSaved', { count: error.savedRoles })} · ${messageOf(error.cause)}`,
+          closeButtonProps: notificationCloseButtonProps,
         });
 
         return;
@@ -347,12 +349,16 @@ class PartialAccessSaveError extends Error {
 }
 
 /**
- * Текст відмови так, як його назвав сервер.
+ * Текст відмови — тим самим розбором, що й `showApiError` (`problemText`).
  *
- * ⚠ Той самий вибір, що в `showApiError` (`notify.ts`): `error.message` для
- * `EcrApiError` — це `detail ?? title`, тобто змістовна причина, а не «щось
- * пішло не так».
+ * ⛔ `X-08`: тут стояв `error.message` (`detail ?? title` без розбору мови) —
+ * сирий `detail` сервера українською або `TypeError: …` для мережі. Тепер:
+ * локалізована подробиця, а без неї — каталожна назва проблеми.
  */
 function messageOf(error: unknown): string {
-  return error instanceof EcrApiError ? error.message : String(error);
+  const shown = problemText(error);
+
+  logSuppressedDetail(shown);
+
+  return shown.detail ?? shown.title;
 }

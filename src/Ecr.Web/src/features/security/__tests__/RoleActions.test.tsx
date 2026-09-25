@@ -145,6 +145,40 @@ describe('RoleActions (BE-14)', () => {
     expect(screen.queryByText(/Period access rules/)).toBeNull();
   });
 
+  it.each([
+    ['без messageKey — сире речення сервера не показується', false],
+    ['з messageKey — локалізована подробиця показується', true],
+  ])('X-08: відмова видалення, %s', async (_name, localized) => {
+    stubFetch(() =>
+      json(
+        {
+          title: 'Role conflict',
+          status: 409,
+          detail: 'Роль «Reviewers» використовується: 2 призначення.',
+          errorCode: 'ECR-SEC-0409',
+          correlationId: 'c-3',
+          assignments: '2',
+          grants: '0',
+          ...(localized ? { messageKey: 'err.ECR-SEC-0409.roleInUse' } : {}),
+        },
+        409,
+        'application/problem+json',
+      ),
+    );
+    await renderActions(role());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await screen.findByRole('dialog');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Remove' }).at(-1) as HTMLElement);
+
+    await screen.findByText('The role cannot be deleted');
+
+    // ⛔ Мутація «повернути `remove.error.message`» показує сире речення й
+    // без `messageKey` — перший випадок червоніє.
+    const raw = screen.queryByText('Роль «Reviewers» використовується: 2 призначення.');
+    expect(raw === null).toBe(!localized);
+  });
+
   it('клон надсилає новий код на /roles/{id}/clone', async () => {
     const fetchSpy = stubFetch(() => json({ roleId: 8 }, 201));
     await renderActions(role());

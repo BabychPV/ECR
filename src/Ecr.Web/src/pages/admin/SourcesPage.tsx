@@ -1,8 +1,8 @@
-﻿import type { JSX } from 'react';
+import type { JSX } from 'react';
 import { Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import { apiEnqueue, apiFetch } from '@/api/client';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
 import { DataSourcesTable } from '@/features/integration/DataSourcesTable';
 import { listDataSources } from '@/features/integration/dataSourceApi';
@@ -93,14 +93,11 @@ export function SourcesPage(): JSX.Element {
       // ⚠ 202 з jobId: збір ходить по мережі до чужої системи, і його
       // тривалість визначає не наш код.
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у тості, сам `jobId` — не.
-      notifications.show({ message: t('sources.queued', { job: humanizeJobId(job.jobId) }) });
+      showDone(t('sources.queued', { job: humanizeJobId(job.jobId) }));
     },
-    onError: (error) => {
-      notifications.show({
-        color: 'statusError',
-        message: error instanceof EcrApiError ? error.message : String(error),
-      });
-    },
+    // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
+    // (українською без `messageKey`). Той самий розбір, що й скрізь.
+    onError: showApiError,
   });
 
   return (

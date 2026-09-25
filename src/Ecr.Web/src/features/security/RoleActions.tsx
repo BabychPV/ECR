@@ -5,6 +5,7 @@ import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { RoleIdResponse, RoleView } from '@/api/types';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 
 // ⚠ Прямо зі схеми: `api/types.ts` — спільний файл поза межами цієї підзадачі.
@@ -163,7 +164,12 @@ export function RoleActions({ role }: { role: RoleView }): JSX.Element {
           <Text size="sm">{t('security.deleteRoleConfirm', { code: role.code })}</Text>
         ) : (
           <Alert color="statusWarning" title={t('security.roleDeleteRefused')}>
-            <Text size="sm">{remove.error.message}</Text>
+            {/* ⛔ `X-08`: тут стояв `remove.error.message` — сирий `detail`
+                сервера. Тепер лише локалізований (`problemText`); без нього
+                заголовок відмови й бейджі нижче вже кажуть, що заважає. */}
+            {problemText(remove.error).detail !== null && (
+              <Text size="sm">{problemText(remove.error).detail}</Text>
+            )}
             {usage !== null && (
               <Group gap="xs" mt="xs">
                 <Badge color="statusWarning">
