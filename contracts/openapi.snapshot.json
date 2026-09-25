@@ -11699,6 +11699,28 @@
         ],
         "type": "object"
       },
+      "TemplateVersionsForTemplate": {
+        "description": "Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`).",
+        "properties": {
+          "templateId": {
+            "description": "Шаблон, якому належать версії.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Версії шаблону, у тому самому порядку, що й Task&lt;PagedResult&lt;TemplateVersionSummary&gt;&gt; ListTemplateVersionsHandler.HandleAsync(int templateId, CursorRequest page, CancellationToken ct).",
+            "items": {
+              "$ref": "#/components/schemas/TemplateVersionSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templateId",
+          "versions"
+        ],
+        "type": "object"
+      },
       "TestCaseMismatch": {
         "description": "Одна розбіжність: очікували одне, отримали інше.",
         "properties": {
@@ -29255,6 +29277,60 @@
           }
         },
         "summary": "Створює шаблон. Право `Template.Edit`.",
+        "tags": [
+          "Templates"
+        ]
+      }
+    },
+    "/api/v1/templates/versions": {
+      "get": {
+        "description": "⛔ BR-07: перелік шаблонів (`/admin/templates`) читав версії ОКРЕМИМ\nзапитом на КОЖЕН рядок (N+1 на клієнті) — підтверджений 2026-09-25\nпробіл продуктивності. Тут — один запит на весь видимий перелік.\n\n⚠ Повторювані `ids=`, а не через кому — той самий патерн, що вже\nв `GET /api/v1/methodologies?ids=` (`RD-06`, стандартний біндинг\nASP.NET для масиву в query-рядку). Маршрут — літерал `versions`,\nа не `{id:int}`, тож неоднозначності з Task&lt;IActionResult&gt; TemplatesController.ListVersions(int id, int limit, string? cursor, CancellationToken ct)\nпоруч немає.",
+        "parameters": [
+          {
+            "description": "Шаблони, чиї версії цікавлять.",
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "items": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Версії ДЕКІЛЬКОХ шаблонів ОДНИМ зверненням — не по одному на шаблон.\nПраво `Template.View`.",
         "tags": [
           "Templates"
         ]

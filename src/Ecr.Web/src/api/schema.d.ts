@@ -12289,6 +12289,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Версії ДЕКІЛЬКОХ шаблонів ОДНИМ зверненням — не по одному на шаблон.
+         *     Право `Template.View`.
+         * @description ⛔ BR-07: перелік шаблонів (`/admin/templates`) читав версії ОКРЕМИМ
+         *     запитом на КОЖЕН рядок (N+1 на клієнті) — підтверджений 2026-09-25
+         *     пробіл продуктивності. Тут — один запит на весь видимий перелік.
+         *
+         *     ⚠ Повторювані `ids=`, а не через кому — той самий патерн, що вже
+         *     в `GET /api/v1/methodologies?ids=` (`RD-06`, стандартний біндинг
+         *     ASP.NET для масиву в query-рядку). Маршрут — літерал `versions`,
+         *     а не `{id:int}`, тож неоднозначності з Task&lt;IActionResult&gt; TemplatesController.ListVersions(int id, int limit, string? cursor, CancellationToken ct)
+         *     поруч немає.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Шаблони, чиї версії цікавлять. */
+                    ids?: number[];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateVersionsForTemplate"][];
+                        "text/json": components["schemas"]["TemplateVersionsForTemplate"][];
+                        "text/plain": components["schemas"]["TemplateVersionsForTemplate"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/templates/{id}": {
         parameters: {
             query?: never;
@@ -19507,6 +19560,16 @@ export interface components {
             status: components["schemas"]["TemplateVersionStatus"];
             /** @description Номер версії. */
             version: string;
+        };
+        /** @description Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`). */
+        TemplateVersionsForTemplate: {
+            /**
+             * Format: int32
+             * @description Шаблон, якому належать версії.
+             */
+            templateId: number;
+            /** @description Версії шаблону, у тому самому порядку, що й Task&lt;PagedResult&lt;TemplateVersionSummary&gt;&gt; ListTemplateVersionsHandler.HandleAsync(int templateId, CursorRequest page, CancellationToken ct). */
+            versions: components["schemas"]["TemplateVersionSummary"][];
         };
         /** @description Одна розбіжність: очікували одне, отримали інше. */
         TestCaseMismatch: {
