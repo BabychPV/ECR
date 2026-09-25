@@ -1441,6 +1441,7 @@ USING (VALUES
     (N'err.ECR-TMPL-4225',  N'en', N'A required column is not covered', 1),
     (N'err.ECR-TMPL-4226',  N'en', N'Computed column without a source', 1),
     (N'err.ECR-TMPL-4227',  N'en', N'Computation on a manual-entry column', 1),
+    (N'err.ECR-TMPL-4228',  N'en', N'Fixed table without rows', 1),
     (N'err.ECR-SCHM-0409',  N'en', N'Breaking change in a version with documents', 1),
     (N'err.ECR-SCHM-0422',  N'en', N'A migration strategy is required', 1),
 
