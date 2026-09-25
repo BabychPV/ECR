@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Group, List, Modal, Select, Stack, Text } from '@mantine/core';
+import { Badge, Button, Group, List, Select, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
@@ -20,6 +20,7 @@ import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -508,74 +509,64 @@ export function RegistriesPage(): JSX.Element {
        * запис посилаються N комірок» — це два стани однієї розмови, і людина
        * не має шукати причину в плашці, що з'їхала кудись у куток.
        */}
-      <Modal
+      {/*
+       * ⛔ X-23: тут стояв голий `<Modal>` із заголовком «Remove» без назви
+       * запису й фокусом на хрестику. Тепер — `ConfirmModal`: назва запису в
+       * заголовку, фокус на «Cancel». Стан «заблоковано» — той самий діалог
+       * із недоступним підтвердженням і дією, яка справді можлива.
+       */}
+      <ConfirmModal
         opened={deleting !== null}
+        title={t('registries.deleteEntryTitle', { code: deleting?.code ?? '' })}
+        text={blocked === null ? deleting?.display : undefined}
+        verb={t('common.delete')}
+        confirmDisabled={blocked !== null}
+        isPending={remove.isPending}
+        onConfirm={() => {
+          if (deleting !== null) {
+            remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
+          }
+        }}
         onClose={() => setDeleting(null)}
-        title={t('common.delete')}
       >
-        <Stack gap="sm">
-          <Text size="sm">
-            {deleting?.code} — {deleting?.display}
-          </Text>
+        {blocked !== null && (
+          <Stack gap="sm">
+            {/* ⚠ Текст відмови — СЕРВЕРНИЙ: він уже локалізований каталогом
+                і називає причину словами. Поруч — саме число посилань, бо
+                воно і є мірою наслідку. */}
+            <Group gap="xs">
+              <Badge color="statusWarning">{blocked}</Badge>
+              <Text size="sm">{remove.error?.message}</Text>
+            </Group>
 
-          {blocked === null ? (
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => setDeleting(null)}>
-                {t('common.cancel')}
-              </Button>
+            {/* ⛔ V-08: розклад посилань за видами — куди йти виправляти. */}
+            {blockedBy.length > 0 && (
+              <List size="sm" aria-label={t('registries.referencedBy')}>
+                {blockedBy.map(({ kind, count }) => (
+                  <List.Item key={kind}>
+                    {t(`registries.referenceKind.${kind}`)}: {count}
+                  </List.Item>
+                ))}
+              </List>
+            )}
+
+            {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
+                треба не запит, а намір — запис виводять з обігу датою
+                (`ФВ-8.5`), і тоді історичні документи лишаються читабельними. */}
+            <Group justify="flex-start">
               <Button
-                color="statusError"
-                loading={remove.isPending}
+                variant="light"
                 onClick={() => {
-                  if (deleting !== null) {
-                    remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
-                  }
+                  setValidity(deleting);
+                  setDeleting(null);
                 }}
               >
-                {t('common.delete')}
+                {t('registries.validity')}
               </Button>
             </Group>
-          ) : (
-            <>
-              {/* ⚠ Текст відмови — СЕРВЕРНИЙ: він уже локалізований каталогом
-                  і називає причину словами. Поруч — саме число посилань, бо
-                  воно і є мірою наслідку. */}
-              <Group gap="xs">
-                <Badge color="statusWarning">{blocked}</Badge>
-                <Text size="sm">{remove.error?.message}</Text>
-              </Group>
-
-              {/* ⛔ V-08: розклад посилань за видами — куди йти виправляти. */}
-              {blockedBy.length > 0 && (
-                <List size="sm" aria-label={t('registries.referencedBy')}>
-                  {blockedBy.map(({ kind, count }) => (
-                    <List.Item key={kind}>
-                      {t(`registries.referenceKind.${kind}`)}: {count}
-                    </List.Item>
-                  ))}
-                </List>
-              )}
-
-              {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
-                  треба не запит, а намір — запис виводять з обігу датою
-                  (`ФВ-8.5`), і тоді історичні документи лишаються читабельними. */}
-              <Group justify="flex-end">
-                <Button variant="default" onClick={() => setDeleting(null)}>
-                  {t('common.cancel')}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setValidity(deleting);
-                    setDeleting(null);
-                  }}
-                >
-                  {t('registries.validity')}
-                </Button>
-              </Group>
-            </>
-          )}
-        </Stack>
-      </Modal>
+          </Stack>
+        )}
+      </ConfirmModal>
 
       {/* ⛔ U-18: діалог винесено в `CreateRegistryModal` — той самий
           контракт, що й «New project» (зірочки, «Still needed», Cancel/Save). */}

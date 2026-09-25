@@ -1,8 +1,9 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, Stack, TextInput } from '@mantine/core';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Button, Group, Modal, Skeleton, Stack, TextInput } from '@mantine/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import type { components } from '@/api/schema';
 import type {
   AffectedRowsResponse,
   RegistryDefDto,
@@ -11,9 +12,85 @@ import type {
   RegistryEntryUpsertDto,
   SetValidityRequest,
 } from '@/api/types';
+import { dataTypeLabel } from '@/features/templates/enumLabels';
+import { localized } from '@/shared/i18n/localized';
+import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+
+type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
+
+/** Ключ `GET …/entries/{id}` — під префіксом `entries(code)`, тож інвалідується з переліком. */
+export function registryEntryKey(
+  code: string,
+  entryId: number,
+): readonly ['registries', 'entries', string, 'detail', number] {
+  return ['registries', 'entries', code, 'detail', entryId] as const;
+}
+
+/** Стан форми запису. */
+export interface EntryFormState {
+  readonly code: string;
+  readonly display: LocalizedValue;
+  readonly values: Readonly<Record<string, string>>;
+}
+
+const EmptyForm: EntryFormState = { code: '', display: {}, values: {} };
+
+/** Стан форми з повного запису (X-03, R-04). */
+export function entryFormOf(detail: RegistryEntryDetailDto): EntryFormState {
+  const values: Record<string, string> = {};
+
+  for (const [field, value] of Object.entries(detail.values)) {
+    // ⚠ `null` з сервера — поле не заповнене; у формі це порожній рядок.
+    values[field] = (value as string | null) ?? '';
+  }
+
+  return { code: detail.code, display: { ...(detail.displayL10n.values ?? {}) }, values };
+}
+
+/**
+ * Тіло запису: лише ЗМІНЕНЕ відносно того, з чим форму відкрили.
+ *
+ * ⛔ X-03/R-04: назва везе всі мови форми, а мову, яку людина СВІДОМО стерла,
+ * — порожнім рядком (сервер зливає назву з наявною: відсутня мова лишається,
+ * порожня — прибирається). Значення полів — лише ті, що змінилися; стерте
+ * поле — `null` («очистити»). Незмінене не їде зовсім, тож не перезаписується.
+ */
+export function entryBody(
+  registry: RegistryDefDto,
+  entry: RegistryEntryDto | null,
+  initial: EntryFormState,
+  current: EntryFormState,
+): RegistryEntryUpsertDto {
+  const display: Record<string, string> = { ...current.display };
+
+  for (const language of Object.keys(initial.display)) {
+    if (!(language in current.display)) display[language] = '';
+  }
+
+  const values: Record<string, string | null> = {};
+
+  for (const field of registry.fields) {
+    const before = initial.values[field.code] ?? '';
+    const after = current.values[field.code] ?? '';
+
+    if (after !== before) values[field.code] = after.trim().length === 0 ? null : after;
+  }
+
+  return {
+    // ⛔ `id: null` означає СТВОРЕННЯ. Той самий ендпоінт і на створення, і
+    // на правку: розділяти їх означало б два шляхи до одного інваріанта
+    // унікальності коду.
+    id: entry?.id ?? null,
+    registryDefId: registry.id,
+    code: current.code.trim(),
+    display: { values: display },
+    parentEntryId: entry?.parentEntryId ?? null,
+    values,
+  } as RegistryEntryUpsertDto;
+}
 
 /**
  * Заведення і правка запису довідника (`ФВ-8.12`).
@@ -23,9 +100,15 @@ import { t } from '@/shared/i18n';
  * що посилаються колонки типу `Lookup`; без жодного запису такі колонки не
  * пропонують нічого, і документ заповнити неможливо.
  *
- * ⛔ Запис **не видаляється** ніколи: у комірках зберігається його `Id`, і
- * видалення зробило б історичні документи нечитабельними. Замість видалення —
- * вікно чинності (`ФВ-8.5`), і воно редагується окремою дією.
+ * ⛔ X-03/R-04 (четвертий раунд UX, critical): правка відкривалася з РЯДКА
+ * ПЕРЕЛІКУ — там назва однією мовою і немає значень полів. Форма підставляла
+ * назву під `en`, поля лишала порожніми, і збереження стирало переклади назви.
+ * Тепер правка чекає `GET …/entries/{id}` (усі мови й значення) і шле лише
+ * змінене (`entryBody`).
+ *
+ * ⚠ Стан форми живе у внутрішньому `EntryForm`, який монтується лише поки
+ * діалог відкритий: повторне відкриття (зокрема «New entry» після збереження)
+ * завжди починає з чистого стану, без ручного скидання.
  */
 export function RegistryEntryEditor({
   registry,
@@ -38,46 +121,70 @@ export function RegistryEntryEditor({
   opened: boolean;
   onClose: () => void;
 }): JSX.Element {
-  const queryClient = useQueryClient();
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={entry === null ? t('registries.newEntry') : t('registries.editEntry')}
+    >
+      {opened &&
+        (entry === null ? (
+          <EntryForm registry={registry} entry={null} initial={EmptyForm} onClose={onClose} />
+        ) : (
+          <ExistingEntry registry={registry} entry={entry} onClose={onClose} />
+        ))}
+    </Modal>
+  );
+}
 
-  const [code, setCode] = useState('');
-  const [display, setDisplay] = useState<LocalizedValue>({});
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [loadedFor, setLoadedFor] = useState<number | null | undefined>(undefined);
+/** Завантажує запис цілком і лише тоді віддає форму. */
+function ExistingEntry({
+  registry,
+  entry,
+  onClose,
+}: {
+  registry: RegistryDefDto;
+  entry: RegistryEntryDto;
+  onClose: () => void;
+}): JSX.Element {
+  const detail = useQuery({
+    queryKey: registryEntryKey(registry.code, entry.id),
+    queryFn: () =>
+      apiFetch<RegistryEntryDetailDto>(
+        `/api/v1/registries/${encodeURIComponent(registry.code)}/entries/${String(entry.id)}`,
+      ),
+    // ⚠ Форма бере стан із відповіді один раз при монтуванні — кешована з
+    // минулого відкриття відповідь підставила б те, чого вже немає.
+    gcTime: 0,
+  });
 
-  // ⚠ Стан наповнюється при зміні запису, а не в ефекті: ефект дав би зайвий
-  // рендер із порожніми полями, і діалог блимав би порожнім щоразу.
-  const key = entry?.id ?? null;
-  if (opened && loadedFor !== key) {
-    setLoadedFor(key);
-    setCode(entry?.code ?? '');
-
-    // ⚠ Перелік віддає `display` вже вибраною мовою — об'єкта з усіма мовами
-    // в ньому немає. Тому при правці показуємо те, що є, під мовою за
-    // замовчуванням: підставити порожнечу означало б мовчки стерти назву.
-    setDisplay(entry === null ? {} : { en: entry.display });
-    setValues({});
+  if (detail.error !== null) {
+    return <ErrorAlert error={detail.error} onRetry={() => void detail.refetch()} />;
   }
 
-  /**
-   * ⛔ Обгортка над переданим `onClose`, а не сам `onClose` напряму. Скидає
-   * `loadedFor` ДО делегування: без цього друге відкриття «New entry»
-   * (`entry` знову `null`, `key` знову `null`) бачило `loadedFor === null` із
-   * попереднього відкриття, умова скиду вище не спрацьовувала, і стара форма
-   * лишалася заповненою — новий ввід у `TextInput` з `data-autofocus`
-   * (курсор у кінці наявного тексту) дописувався до старого, а не заміняв
-   * його. Після скиду `loadedFor` стає `undefined`, і наступне відкриття
-   * бачить `undefined !== null` — умова знову істинна.
-   *
-   * ⚠ Усі шляхи закриття модалки мають йти через цю функцію: сам
-   * `Modal.onClose` (він же Escape і клік поза модалкою — Mantine `Modal`
-   * викликає той самий `onClose` для обох), кнопка «Скасувати» і виклик з
-   * `upsert.onSuccess`.
-   */
-  const handleClose = (): void => {
-    setLoadedFor(undefined);
-    onClose();
-  };
+  if (detail.isPending) {
+    return <Skeleton height={160} radius="sm" data-registry-entry="pending" />;
+  }
+
+  return <EntryForm registry={registry} entry={entry} initial={entryFormOf(detail.data)} onClose={onClose} />;
+}
+
+function EntryForm({
+  registry,
+  entry,
+  initial,
+  onClose,
+}: {
+  registry: RegistryDefDto;
+  entry: RegistryEntryDto | null;
+  initial: EntryFormState;
+  onClose: () => void;
+}): JSX.Element {
+  const queryClient = useQueryClient();
+
+  const [code, setCode] = useState(initial.code);
+  const [display, setDisplay] = useState<LocalizedValue>(initial.display);
+  const [values, setValues] = useState<Record<string, string>>({ ...initial.values });
 
   const upsert = useMutation({
     mutationFn: () =>
@@ -85,33 +192,19 @@ export function RegistryEntryEditor({
         `/api/v1/registries/${encodeURIComponent(registry.code)}/entries`,
         {
           method: 'POST',
-          body: JSON.stringify({
-            // ⛔ `id: null` означає СТВОРЕННЯ. Той самий ендпоінт і на
-            // створення, і на правку: розділяти їх означало б два шляхи до
-            // одного інваріанта унікальності коду.
-            id: entry?.id ?? null,
-            registryDefId: registry.id,
-            code: code.trim(),
-            display: { values: display },
-            parentEntryId: entry?.parentEntryId ?? null,
-            values,
-          } satisfies RegistryEntryUpsertDto),
+          body: JSON.stringify(entryBody(registry, entry, initial, { code, display, values })),
         },
       ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.registries.entries(registry.code) });
-      handleClose();
+      onClose();
       showDone(entry === null ? t('registries.entryCreated') : t('registries.entrySaved'));
     },
     onError: showApiError,
   });
 
   return (
-    <Modal
-      opened={opened}
-      onClose={handleClose}
-      title={entry === null ? t('registries.newEntry') : t('registries.editEntry')}
-    >
+    <>
       <TextInput
         label={t('registries.code')}
         description={t('registries.entryCodeHint')}
@@ -131,8 +224,9 @@ export function RegistryEntryEditor({
           {registry.fields.map((field) => (
             <TextInput
               key={field.id}
-              label={`${field.code}${field.isRequired ? ' *' : ''}`}
-              description={field.dataType}
+              // ⛔ X-16: підписом стояв код поля, описом — сирий тип (`Decimal`).
+              label={`${localized(field.nameL10n) || field.code}${field.isRequired ? ' *' : ''}`}
+              description={`${field.code} · ${dataTypeLabel(field.dataType)}`}
               value={values[field.code] ?? ''}
               onChange={(event) => {
                 // ⛔ Той самий клас дефекту, що `CreateDocumentModal.tsx`:
@@ -152,7 +246,7 @@ export function RegistryEntryEditor({
       )}
 
       <Group justify="flex-end" mt="md">
-        <Button variant="default" onClick={handleClose}>
+        <Button variant="default" onClick={onClose}>
           {t('common.cancel')}
         </Button>
         <Button
@@ -163,7 +257,7 @@ export function RegistryEntryEditor({
           {t('common.save')}
         </Button>
       </Group>
-    </Modal>
+    </>
   );
 }
 

@@ -292,7 +292,11 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             total++;
             if (items.Count < take)
             {
-                items.Add(new UsageItemDto(UsageKinds.Data, "doc.CellValue", "doc.CellValue", null));
+                // ⛔ X-11: тут стояло ім'я таблиці сховища (`doc.CellValue`) і як
+                // ідентифікатор, і як підпис — людина читала «STORED DATA ·
+                // doc.CellValue». Вид `data` клієнт підписує сам; підпис тут —
+                // лише людський запасний текст для інших споживачів відповіді.
+                items.Add(new UsageItemDto(UsageKinds.Data, "cells", "Values in document cells", null));
             }
         }
 
