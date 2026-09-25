@@ -8327,7 +8327,50 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Один запис довідника цілком: назва всіма мовами й значення полів.
+         *     Право `Registry.View`.
+         * @description ⛔ X-03/R-04: форма правки запису відкривається з цієї відповіді, а не з
+         *     рядка переліку, де назва лише однією мовою, а значень полів немає.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                    /** @description Запис. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryEntryDetailDto"];
+                        "text/json": components["schemas"]["RegistryEntryDetailDto"];
+                        "text/plain": components["schemas"]["RegistryEntryDetailDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         put?: never;
         post?: never;
         /**
@@ -11501,7 +11544,54 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Повний склад однієї колонки — те, що приймає й повертає `PUT` нижче.
+         *     Право `Template.View`.
+         * @description ⛔ X-02: форма правки колонки відкривається з цієї відповіді, а не з
+         *     бідного опису колонки в `GET …/structure`. Інакше `PUT` (заміна
+         *     цілком) стирав точність, одиницю, довідник, значення за замовчуванням і
+         *     стиль колонки при кожному повторному збереженні.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                    /** @description Таблиця, якій належить колонка. */
+                    tableId: number;
+                    /** @description Код колонки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ColumnDefDto"];
+                        "text/json": components["schemas"]["ColumnDefDto"];
+                        "text/plain": components["schemas"]["ColumnDefDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         /**
          * Записує колонку таблиці чернетки. Право `Template.Edit`.
          * @description ⛔ Другий вертикальний зріз авторства структури шаблону через API
@@ -11767,6 +11857,64 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Правила валідації таблиці. Право `Template.View`.
+         * @description ⛔ X-15: без цього переліку діалог видаляв правило введеним з пам'яті
+         *     кодом, якого екран ніде не показував.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                    /** @description Таблиця. */
+                    tableId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationRuleDto"][];
+                        "text/json": components["schemas"]["ValidationRuleDto"][];
+                        "text/plain": components["schemas"]["ValidationRuleDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -17107,6 +17255,39 @@ export interface components {
              */
             definitionVersion: number;
         };
+        /** @description Один запис довідника цілком — для форми правки (X-03, R-04). */
+        RegistryEntryDetailDto: {
+            /** @description Стабільний код. */
+            code: string;
+            /** @description Назва ВСІМА мовами каталогу. ⛔ Саме цього бракувало формі: перелік несе
+             *     назву однією мовою, і збереження з нього стирало переклади. */
+            displayL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int64
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /**
+             * Format: int64
+             * @description Батьківський запис; `null` — корінь.
+             */
+            parentEntryId: null | number;
+            /**
+             * Format: date
+             * @description Початок вікна чинності.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Кінець вікна чинності.
+             */
+            validTo: null | string;
+            /** @description Значення полів: код поля → текст в інваріантному форматі, який приймає
+             *     `POST …/entries`; `null` — поле не заповнене. */
+            values: {
+                [key: string]: string;
+            };
+        };
         /** @description Запис довідника для UI і резолвінгу. У комірці зберігається
          *     long RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому
          *     перейменування не змінює історичні дані. */
@@ -18953,11 +19134,22 @@ export interface components {
         TemplateDiffDto: {
             /**
              * Format: int32
-             * @description Скільки документів прив'язано до вихідної версії.
+             * @description Скільки документів прив'язано до вихідної (старшої) версії.
              */
             affectedDocumentCount: number;
             /** @description Зміни з класифікацією за ризиком (`ФВ-7.3`). */
             changes: components["schemas"]["TemplateChangeDto"][];
+            /**
+             * Format: int32
+             * @description Вихідна версія — СТАРША з двох, незалежно від того, з якої відкрили
+             *     порівняння (R-08).
+             */
+            fromVersionId: number;
+            /**
+             * Format: int32
+             * @description Цільова версія — новіша з двох.
+             */
+            toVersionId: number;
         };
         /** @description Створений шаблон. */
         TemplateIdResponse: {

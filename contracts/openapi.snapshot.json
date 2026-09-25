@@ -7188,6 +7188,65 @@
         ],
         "type": "object"
       },
+      "RegistryEntryDetailDto": {
+        "description": "Один запис довідника цілком — для форми правки (X-03, R-04).",
+        "properties": {
+          "code": {
+            "description": "Стабільний код.",
+            "type": "string"
+          },
+          "displayL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва ВСІМА мовами каталогу. ⛔ Саме цього бракувало формі: перелік несе\nназву однією мовою, і збереження з нього стирало переклади."
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentEntryId": {
+            "description": "Батьківський запис; `null` — корінь.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "validFrom": {
+            "description": "Початок вікна чинності.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець вікна чинності.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Значення полів: код поля → текст в інваріантному форматі, який приймає\n`POST …/entries`; `null` — поле не заповнене.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "displayL10n",
+          "parentEntryId",
+          "validFrom",
+          "validTo",
+          "values"
+        ],
+        "type": "object"
+      },
       "RegistryEntryDto": {
         "description": "Запис довідника для UI і резолвінгу. У комірці зберігається\nlong RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому\nперейменування не змінює історичні дані.",
         "properties": {
@@ -11241,7 +11300,7 @@
         "description": "Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,\n`RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б\n«змінено все».",
         "properties": {
           "affectedDocumentCount": {
-            "description": "Скільки документів прив'язано до вихідної версії.",
+            "description": "Скільки документів прив'язано до вихідної (старшої) версії.",
             "format": "int32",
             "type": "integer"
           },
@@ -11251,11 +11310,23 @@
               "$ref": "#/components/schemas/TemplateChangeDto"
             },
             "type": "array"
+          },
+          "fromVersionId": {
+            "description": "Вихідна версія — СТАРША з двох, незалежно від того, з якої відкрили\nпорівняння (R-08).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "toVersionId": {
+            "description": "Цільова версія — новіша з двох.",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
           "changes",
-          "affectedDocumentCount"
+          "affectedDocumentCount",
+          "fromVersionId",
+          "toVersionId"
         ],
         "type": "object"
       },
@@ -23741,6 +23812,77 @@
         "tags": [
           "Registries"
         ]
+      },
+      "get": {
+        "description": "⛔ X-03/R-04: форма правки запису відкривається з цієї відповіді, а не з\nрядка переліку, де назва лише однією мовою, а значень полів немає.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Запис.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Один запис довідника цілком: назва всіма мовами й значення полів.\nПраво `Registry.View`.",
+        "tags": [
+          "Registries"
+        ]
       }
     },
     "/api/v1/registries/{code}/entries/{id}/validity": {
@@ -27829,6 +27971,88 @@
           "TemplateVersions"
         ]
       },
+      "get": {
+        "description": "⛔ X-02: форма правки колонки відкривається з цієї відповіді, а не з\nбідного опису колонки в `GET …/structure`. Інакше `PUT` (заміна\nцілком) стирав точність, одиницю, довідник, значення за замовчуванням і\nстиль колонки при кожному повторному збереженні.",
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить колонка.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код колонки.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Повний склад однієї колонки — те, що приймає й повертає `PUT` нижче.\nПраво `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
       "put": {
         "description": "⛔ Другий вертикальний зріз авторства структури шаблону через API\n(`W5.2`, за зразком `sheets/{code}` вище, `W5.0`).\n\n⚠ Таблиця адресується числовим `tableId`, а не парою кодів\nаркуша й таблиці — та сама форма, що й `SaveTableRelationRequest`\nвище (`SourceTableDefId`/`TargetTableDefId`): клієнт уже має\n`TableDto.Id` з попереднього `GET …/structure`.",
         "parameters": [
@@ -28197,6 +28421,90 @@
           }
         },
         "summary": "Записує рядок фіксованої таблиці чернетки. Право `Template.Edit`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
+    "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules": {
+      "get": {
+        "description": "⛔ X-15: без цього переліку діалог видаляв правило введеним з пам'яті\nкодом, якого екран ніде не показував.",
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Правила валідації таблиці. Право `Template.View`.",
         "tags": [
           "TemplateVersions"
         ]
