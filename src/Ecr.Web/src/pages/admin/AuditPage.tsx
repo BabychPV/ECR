@@ -1,4 +1,4 @@
-import { memo, type JSX } from 'react';
+import { memo, useRef, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -129,6 +129,12 @@ export function AuditPage(): JSX.Element {
   // на ній НЕ запитується: зайвий запит по партиціях заради невидимої таблиці.
   const structure = view === 'structure';
   const changes = useCellChanges(filter, !structure);
+
+  // ⛔ `R-18`: попередня сторінка лишається на екрані, доки їде нова. Раніше кожен
+  // застосований debounce фільтра клав скелет на місце таблиці й будував її
+  // наново — саме ці кадри й давали затримку друку до 117 мс. Відмова й перше
+  // завантаження показуються як і досі.
+  const shownChanges = useLastData(changes.data, changes.error === null);
 
   /**
    * ⚠ Курсор скидається на КОЖНУ зміну фільтра — він позначає позицію в
@@ -320,9 +326,9 @@ export function AuditPage(): JSX.Element {
       />
 
       <AsyncBoundary<CellChangePage>
-        isPending={changes.isPending}
+        isPending={changes.isPending && shownChanges === undefined}
         error={changes.error}
-        data={changes.data}
+        data={shownChanges}
         isEmpty={(page) => page.items.length === 0}
         emptyTitle={t('audit.empty')}
         emptyHint={t('audit.emptyHint')}
@@ -355,6 +361,16 @@ export function AuditPage(): JSX.Element {
 }
 
 type CellChange = CellChangePage['items'][number];
+
+/** Останні отримані дані — поки нові ще в дорозі; відмова скидає запам'ятоване. */
+function useLastData<T>(data: T | undefined, healthy: boolean): T | undefined {
+  const last = useRef<T | undefined>(undefined);
+
+  if (!healthy) last.current = undefined;
+  else if (data !== undefined) last.current = data;
+
+  return data ?? last.current;
+}
 
 /** Типи колонок, чиє значення — число (`U-05`: одне правило подачі числа). */
 const NumericTypes: readonly string[] = ['Decimal', 'Int', 'Formula', 'Calculated'];
