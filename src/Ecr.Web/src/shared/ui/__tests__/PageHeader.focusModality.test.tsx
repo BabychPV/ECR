@@ -50,3 +50,39 @@ describe('PageHeader: видимість програмного фокуса з�
     expect(mountAndCaptureFocus()).toEqual({ focusVisible: true });
   });
 });
+
+describe('PageHeader: рамка програмного фокуса знімається й там, де браузер ігнорує focusVisible', () => {
+  it('після миші — заголовок без рамки, доки не втратить фокус', () => {
+    fireEvent.pointerDown(document.body);
+
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <PageHeader title="Jobs" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    const heading = document.querySelector('h3') as HTMLElement;
+
+    // ⛔ Мутація «без `quietFocus`» лишає outline браузера (живцем — Chromium).
+    expect(heading.style.outline).toBe('none');
+
+    fireEvent.blur(heading);
+    expect(heading.style.outline).toBe('');
+  });
+
+  it('після клавіатури — власний стиль рамки не знімає', () => {
+    fireEvent.keyDown(document.body, { key: 'Tab' });
+
+    render(
+      <MantineProvider>
+        <MemoryRouter>
+          <PageHeader title="Jobs" />
+        </MemoryRouter>
+      </MantineProvider>,
+    );
+
+    expect((document.querySelector('h3') as HTMLElement).style.outline).toBe('');
+  });
+});

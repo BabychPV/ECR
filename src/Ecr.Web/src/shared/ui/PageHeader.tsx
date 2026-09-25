@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, type JSX, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 import { Anchor, Group, Stack, Text, Title } from '@mantine/core';
 import { Link } from 'react-router-dom';
 import { announceRoute } from './RouteAnnouncer';
@@ -155,6 +155,13 @@ export function PageHeader({
   const heading = useRef<HTMLHeadingElement>(null);
   const focused = useRef(false);
 
+  // ⚠ `X-37`: живцем Chromium ігнорує `focusVisible: false` і все одно малює
+  // `:focus-visible` після програмного фокуса. Тому, коли фокус переніс САМ
+  // застосунок не після клавіатури, рамку знімає ще й власний стиль — до першого
+  // `blur`: людина, що далі йде табом, отримує звичайне кільце на наступному
+  // елементі, а сам заголовок — не кнопка й не поле.
+  const [quietFocus, setQuietFocus] = useState(false);
+
   useEffect(() => {
     // ⛔ Рівно ОДИН раз за монтування. Заголовок сторінки документа
     // уточнюється після завантаження даних, і фокус за кожною зміною назви
@@ -163,6 +170,7 @@ export function PageHeader({
 
     focused.current = true;
     // ⚠ `focusVisible` — див. `keyboardModality` вище (`X-37`).
+    if (!keyboardModality) setQuietFocus(true);
     heading.current?.focus({ focusVisible: keyboardModality } as FocusOptions);
   }, []);
 
@@ -176,7 +184,15 @@ export function PageHeader({
      * зупинкою при обході табом. Інакше кожен екран додавав би користувачеві
      * зайве натискання на шляху до першого поля.
      */
-    <Title order={3} ref={heading} tabIndex={-1} className={RouteHeadingClass}>
+    <Title
+      order={3}
+      ref={heading}
+      tabIndex={-1}
+      className={RouteHeadingClass}
+      style={quietFocus ? { outline: 'none' } : undefined}
+      data-quiet-focus={quietFocus ? '' : undefined}
+      onBlur={() => setQuietFocus(false)}
+    >
       {title}
     </Title>
   );
