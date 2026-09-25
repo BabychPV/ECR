@@ -447,7 +447,13 @@ public sealed class GenericCalculationModule(
             ?? throw new Domain.Abstractions.DomainException(
                 "ECR-PRD-0404",
                 $"Періоду {periodKey.Value} для документа {documentId} не існує: "
-                + "тривалість обчислити нема з чого.");
+                + "тривалість обчислити нема з чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0404.periodForDocument",
+                    ["periodKey"] = periodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // Sequence — порядковий номер періоду в році, і саме він, а не місяць:
         // у квартальному проєкті їх чотири (R-A6, D-108).

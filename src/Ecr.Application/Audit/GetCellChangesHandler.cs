@@ -73,7 +73,9 @@ public sealed class GetCellChangesHandler(
         ArgumentNullException.ThrowIfNull(page);
 
         var userId = currentUser.UserId
-                     ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Потрібна автентифікація.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
@@ -91,7 +93,11 @@ public sealed class GetCellChangesHandler(
 
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {required}.",
-                new Dictionary<string, object?> { ["permission"] = required });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = required,
+                });
         }
 
         // ⛔ `RowKey` унікальний у межах екземпляра таблиці, а не системи:
@@ -137,7 +143,12 @@ public sealed class GetCellChangesHandler(
         if (!page.IsValid)
         {
             throw new BusinessRuleException(
-                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.");
+                ErrorCodes.RequestInvalid, $"Розмір сторінки поза межами 1..{CursorRequest.MaxLimit}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REQ-0422.pageSizeOutOfRange",
+                    ["max"] = CursorRequest.MaxLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ Грант на проєкт (Q-177, аудит фази 2) — лише коли `documentId`
@@ -163,7 +174,13 @@ public sealed class GetCellChangesHandler(
             if (!read.IsAllowed)
             {
                 throw new AccessDeniedException(
-                    "ECR-AUTH-0403", $"Немає доступу до документа {id}: {read.Reason}.");
+                    "ECR-AUTH-0403", $"Немає доступу до документа {id}: {read.Reason}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
+                        ["documentId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["reason"] = read.Reason.ToString(),
+                    });
             }
         }
 

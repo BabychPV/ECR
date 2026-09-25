@@ -1243,6 +1243,9 @@ USING (VALUES
     (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),
+    -- B-14 (Calculations + Workflow + Audit): ReplaceApprovalRouteHandler —
+    -- two consecutive steps of a project's approval route share the same role.
+    (N'err.ECR-DOC-0422.approvalRouteConsecutiveRole', N'en', N'Steps {stepA} and {stepB} share the same role {roleId}: the second one would be passed by the same person right after the first, so it adds no approval.', 1),
     -- Sheet lock (SheetEditGate) not acquired in time: the other action is still running.
     (N'err.ECR-DOC-4091.sheetBeingSubmitted',   N'en', N'This sheet is being submitted right now. Your changes were not saved; try again in a moment.', 1),
     (N'err.ECR-DOC-4091.sheetBeingEdited',      N'en', N'This sheet is being saved or recalculated right now. The sheet was not submitted; try again in a moment.', 1),
@@ -1252,6 +1255,11 @@ USING (VALUES
     (N'err.ECR-PRJ-0404.project',               N'en', N'Project {projectId} was not found.', 1),
     (N'err.ECR-PRJ-0404.projectOfPeriod',       N'en', N'The project of period {periodId} was not found.', 1),
     (N'err.ECR-PRD-0404.period',                N'en', N'Period {periodId} was not found.', 1),
+    -- B-14 (Calculations + Workflow + Audit): calculation-run entry points
+    -- resolve a period by (documentId, periodKey) or (projectId, periodKey),
+    -- not by the surrogate id `.period` above — different facts, same code.
+    (N'err.ECR-PRD-0404.periodForProject',      N'en', N'Period {periodKey} does not exist in project {projectId}.', 1),
+    (N'err.ECR-PRD-0404.periodForDocument',     N'en', N'Period {periodKey} does not exist for document {documentId}.', 1),
     (N'err.ECR-PRD-0409.projectArchived',      N'en', N'Project "{projectCode}" is archived: its periods cannot be reopened.', 1),
     (N'err.ECR-PRD-0409.transitionNotAllowed',  N'en', N'Period {periodKey} cannot go from {from} to {to}.', 1),
     (N'err.ECR-PRD-0409.reopenOnlyClosed',      N'en', N'Only a closed period can be reopened; the period is {state}.', 1),
@@ -1335,6 +1343,9 @@ USING (VALUES
     (N'err.ECR-CALC-0433.legacyExtensionFunction', N'en', N'The version uses {functionCount} function(s) not available in Legacy mode: switch it to Strict mode from a new effective date.', 1),
     (N'err.ECR-CALC-0438.missingColumns',       N'en', N'A formula argument has no matching column in {tableCount} bound table(s).', 1),
     (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).', 1),
+    -- B-14 (Calculations + Workflow + Audit): a batch of the calculation
+    -- schedule has a methodology dependency cycle (CalculationPlan.Build).
+    (N'err.ECR-TMPL-4221.methodologyCycle',     N'en', N'The methodologies form a dependency cycle ({cycleLength} involved).', 1),
 
     -- ⛔ `RoleAndUserHandlers.cs` (23 кидки, найбільший файл боргу локалізації
     -- на замір 254/74): ролі, користувачі, межі чинності призначення

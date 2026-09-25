@@ -652,27 +652,80 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
   `ECR-TMPL-0422`/`ECR-SCHM-0409`/`ECR-CFG-0422`/`ECR-AUTH-0401`/
   `ECR-AUTH-0403`/`ECR-REQ-0422` уже були нейтральними.
 
+## ✎ 2026-09-25: Calculations + Workflow + Audit (B-14) — 15 кидків, 7 файлів, закрито повністю
+
+⚠ **Розбіжність, що передувала цьому проходу, а не внесена ним.** Запис вище
+(«Templates + доменна конфігурація») стверджує «66 у 37 файлах», але
+таблиця, яку той прохід лишив, підсумовувалась на **53 у 34 файлах** —
+розбіжність між прозою й таблицею, яку `MessageKeyRatchetTests` не ловить
+(сторож звіряє число в РЯДКУ з фактичним заміром файлу, а не суму таблиці з
+прозою вище). Перед стартом цього проходу `dotnet test` на чистому
+`origin/dev/integration` був зелений (132/133, і той один провал — рівно ці
+7 файлів). Таблиця, а не проза, є джерелом істини, яке стереже сторож.
+Наступне порівняння — від 53/34, не від 66/37.
+
+`CalculationPlan.cs` (1), `RunCalculationHandler.cs` (3),
+`RecalculationService.cs` (1), `CalculationOrchestrator.cs` (1),
+`GenericCalculationModule.cs` (1), `ApprovalRouteHandlers.cs` (4),
+`GetCellChangesHandler.cs` (4) закрито повністю, 15 кидків; 53 у 34 файлах →
+**38 у 27 файлах**.
+
+- `err.ECR-AUTH-0403.noProjectGrant`, `err.ECR-AUTH-0403.noProjectManageGrant`,
+  `err.ECR-AUTH-0401.anonymousWrite`, `err.ECR-AUTH-0401.signInRequired`,
+  `err.ECR-AUTH-0403.permission`, `err.ECR-AUTH-0403.noDocumentAccess`,
+  `err.ECR-REQ-0422.pageSizeOutOfRange`, `err.ECR-SEC-0404.roleNotFound` —
+  наявні ключі, перевикористані для тих самих фактів («немає гранта [Manage]
+  на проєкт», «анонім не пише», «увійдіть», «бракує права X», «немає доступу
+  до документа: причина», «розмір сторінки поза межами», «ролі не існує»),
+  що вже несуть `RoleAndUserHandlers`/`ListProjectsHandler`/
+  `DocumentQueryHandlers`/`ResourceGrantHandlers`/`StartSimulationHandler`
+  тощо з попередніх раундів.
+- `RunCalculationHandler.HandleAsync`: `ECR-CALC-4221`/`ECR-CALC-0409` у
+  цьому файлі вже мали `messageKey` з проходу 2026-09-22 («відмови
+  перерахунку») — вони й тримали лік файлу на 5 → 3 до цього проходу; решта
+  три кидки (грант на проєкт, анонім, період поза проєктом) — окремий шлях,
+  до `RecalculationWritePolicy` не причетний.
+- Нові ключі: `err.ECR-TMPL-4221.methodologyCycle` {cycleLength} —
+  `CalculationPlan.Build`, цикл залежностей МЕТОДОЛОГІЙ у розкладі пакетів
+  прогону; ІНШИЙ факт, ніж наявний `err.ECR-TMPL-4221.formulaCycle` (цикл
+  ФОРМУЛ шаблону) під тим самим кодом — код обрано розробником спільним для
+  обох, назву коду не змінено (поза обсягом B-14). Перелік
+  `methodologyVersionIds` лишається в `Details` окремим полем для клієнта, у
+  тексті — лише кількість (той самий прийом, що `periodKeys`).
+  `err.ECR-PRD-0404.periodForProject` {periodKey, projectId} —
+  `RunCalculationHandler`: період не існує в межах запиту ПРОЄКТУ (на
+  відміну від наявного `err.ECR-PRD-0404.period` {periodId} — той адресує
+  період за сурогатним Id, інший факт).
+  `err.ECR-PRD-0404.periodForDocument` {periodKey, documentId} — спільний
+  ключ для ТРЬОХ файлів (`RecalculationService.PeriodOf`,
+  `CalculationOrchestrator.PeriodDateAsync`,
+  `GenericCalculationModule.PeriodAsync`): той самий факт «періоду немає для
+  документа», хоч українське речення-запасне в кожному місці й далі називає
+  свою причину (календарний контекст / дата резолвінгу методології /
+  тривалість) — текст каталогу спільний, нейтральний.
+  `err.ECR-DOC-0422.approvalRouteConsecutiveRole` {stepA, stepB, roleId} —
+  `ReplaceApprovalRouteHandler`: два кроки маршруту погодження поспіль з
+  однією роллю.
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`/`ECR-AUTH-0403`/
+  `ECR-SEC-0404`/`ECR-REQ-0422`/`ECR-PRD-0404`/`ECR-DOC-0422` уже були
+  нейтральними; `ECR-TMPL-4221` не чіпався (лишається специфічним до
+  «formula graph» — трохи вводить в оману для методологічного циклу,
+  спостереження, не фікс, поза обсягом B-14).
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
 | `src/Ecr.Api/Controllers/CellsController.cs` | 1 |
 | `src/Ecr.Api/Controllers/TemplateVersionsController.cs` | 2 |
-| `src/Ecr.Application/Audit/GetCellChangesHandler.cs` | 4 |
-| `src/Ecr.Application/Calculations/CalculationPlan.cs` | 1 |
-| `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 3 |
 | `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
 | `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
 | `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
-| `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 3 |
 | `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Units/CreateUnitHandler.cs` | 1 |
-| `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
-| `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
-| `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |
 | `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |

@@ -1,4 +1,5 @@
 // src/Ecr.Application/Calculations/RunCalculationHandler.cs
+using System.Globalization;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
@@ -71,11 +72,18 @@ public sealed class RunCalculationHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectGrant",
+                    ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Анонімний запит не запускає розрахунок.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Анонімний запит не запускає розрахунок.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var targets = await periods
             .GetPeriodStatesAsync(projectId, periodKey, ct)
@@ -84,7 +92,13 @@ public sealed class RunCalculationHandler(
         if (targets.Count == 0)
         {
             throw new NotFoundException(
-                "ECR-PRD-0404", $"Періоду {periodKey} у проєкті {projectId} немає.");
+                "ECR-PRD-0404", $"Періоду {periodKey} у проєкті {projectId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0404.periodForProject",
+                    ["periodKey"] = periodKey?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ ЗАКРИТІ ПЕРІОДИ автоматично не перераховуються НІКОЛИ (ФВ-9.7).

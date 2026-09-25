@@ -1078,7 +1078,13 @@ public sealed class RecalculationService(
             ?? throw new Domain.Abstractions.DomainException(
                 "ECR-PRD-0404",
                 $"Періоду {periodKey.Value} для документа {documentId} не існує: "
-                + "календарний контекст обчислити нема з чого.");
+                + "календарний контекст обчислити нема з чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0404.periodForDocument",
+                    ["periodKey"] = periodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         return new Ecr.Expressions.PeriodContext(
             bounds.PeriodStart,
