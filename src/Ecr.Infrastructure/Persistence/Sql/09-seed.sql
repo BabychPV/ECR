@@ -1128,6 +1128,8 @@ USING (VALUES
     (N'err.ECR-AUTH-0403.noProjectManageGrant', N'en', N'You have no Manage grant on project {projectId}.', 1),
     (N'err.ECR-ACCS-0403.submitDenied',         N'en', N'Sheet {sheetDefId} cannot be submitted: {reason}.', 1),
     (N'err.ECR-ACCS-0403.approveDenied',        N'en', N'Sheet {sheetDefId} cannot be approved or rejected: {reason}.', 1),
+    -- F-25: the same person cannot both submit and approve a sheet (four-eyes rule).
+    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'en', N'Sheet {sheetDefId} cannot be approved by the same person who submitted it.', 1),
     (N'err.ECR-ACCS-0403.reopenDenied',         N'en', N'Sheet {sheetDefId} cannot be returned to work: {reason}.', 1),
     (N'err.ECR-ACCS-0403.addRowDenied',         N'en', N'A row cannot be added to this table: {reason}.', 1),
     (N'err.ECR-SUB-4221.orphanedRows',          N'en', N'The sheet cannot be submitted: {rowCount} row(s) lost their registry entry.', 1),
