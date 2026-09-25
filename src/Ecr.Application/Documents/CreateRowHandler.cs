@@ -72,8 +72,18 @@ public sealed class CreateRowHandler(
         var table = snapshot.Sheets
             .SelectMany(sh => sh.Tables)
             .FirstOrDefault(t => t.Id == instance.TableDefId)
+            // ⚠ Той самий факт, що й `ColumnDefHandlers.FindTable`/
+            // `ValidationRuleHandlers` (2026-09-23): «таблиці з таким Id немає
+            // в цій версії», незалежно від того, звідки до нього дійшли —
+            // тому наявний ключ, а не новий.
             ?? throw new Errors.NotFoundException(
-                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.");
+                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.table",
+                    ["tableDefId"] = instance.TableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = instance.TemplateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // 1. Рядок можна додати лише туди, де це дозволяє режим. У Fixed склад
         //    рядків заданий шаблоном, і поява «зайвого» зламала б і формули з

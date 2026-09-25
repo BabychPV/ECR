@@ -652,6 +652,57 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
   `ECR-TMPL-0422`/`ECR-SCHM-0409`/`ECR-CFG-0422`/`ECR-AUTH-0401`/
   `ECR-AUTH-0403`/`ECR-REQ-0422` уже були нейтральними.
 
+## ✎ 2026-09-25: Documents + Reporting + Projects + Units + Localization (B-14) — 14 кидків, 9 файлів, закрито повністю
+
+`CreateRowHandler.cs` (1), `GetTableSliceHandler.cs` (1),
+`PatchCellsHandler.cs` (1), `ReportSnapshotHandlers.cs` (3),
+`CloneProjectHandler.cs` (3), `ConvertUnitHandler.cs` (1),
+`CreateUnitHandler.cs` (1), `GetUiStringsHandler.cs` (1),
+`SetUiStringHandler.cs` (2) закрито повністю, 14 кидків; 66 у 37 файлах →
+**52 у 28 файлах**.
+
+- `err.ECR-AUTH-0401.anonymousWrite`, `err.ECR-AUTH-0403.permission`,
+  `err.ECR-AUTH-0401.signInRequired`, `err.ECR-AUTH-0403.noProjectManageGrant`,
+  `err.ECR-PRJ-0404.project`, `err.ECR-AUTH-0403.noProjectGrant` — наявні
+  ключі, перевикористані для тих самих фактів («сесія без користувача»,
+  «бракує права X», «увійдіть», «немає гранта Manage/грант на проєкт»,
+  «проєкту не існує»), що вже несуть `RoleAndUserHandlers`/
+  `ListProjectsHandler`/сусідні обробники `CloneProjectHandler.cs`
+  (`ActivateProjectHandler` та ін., 2026-09-23).
+- `ReportSnapshotHandlers.cs`: `err.ECR-RPT-0404.snapshot` — наявний ключ
+  (`GetSnapshotRowsHandler.NotFound`), перевикористаний у ДРУГІЙ, доти
+  беззмістовній фабриці `VerifyReportSnapshotHandler.NotFound(snapshotId)`
+  (той самий текст «Зрізу N немає.» — запис 2026-09-23 «сито бачить фабрики»
+  вже називав цю пару); новий `err.ECR-RPT-0404.code` {code} —
+  `BuildReportSnapshotHandler`: код звіту не існує АБО в нього немає чинної
+  версії, одне повідомлення на обидва випадки (`FindCurrentVersionAsync` їх
+  не розрізняє), окремий факт від id-based `.def`/`.version` вище.
+- `ConvertUnitHandler.cs`: новий `err.ECR-UOM-0404.code` {code} — пошук
+  одиниці за КОДОМ (тіло запиту конверсії), окремий від `.unitId` (числовий
+  Id, `Repository`/`Unit` заміри) — той самий прийом, що `.tableByCode`/
+  `.columnCode` у шаблонах.
+- `CreateUnitHandler.cs`: новий `err.ECR-UOM-4041.dimensionId`
+  {dimensionId} — розмірності з таким Id немає (код `ECR-UOM-4041`, ІНШИЙ
+  від `ECR-UOM-0404` «одиниці немає», хоч обидва суть «немає в довіднику»).
+- **`CreateRowHandler.cs`/`GetTableSliceHandler.cs`/`PatchCellsHandler.cs`:
+  перегляд рішення 2026-09-18.** Той запис (вище в цьому файлі) пояснював,
+  чому `PatchCellsHandler`'s `ECR-TMPL-0404` («Таблиці X немає в структурі
+  версії Y») лишається без ключа — «неможливо потрапити діями оператора,
+  адресований тому, хто читає журнал сервера» — але на той момент
+  відповідного ключа каталогу не існувало взагалі. Відтоді (2026-09-23)
+  `err.ECR-TMPL-0404.table` {tableDefId, versionId} заведений і показується
+  ОПЕРАТОРОВІ в аналогічних ситуаціях (`ColumnDefHandlers.FindTable`,
+  `ValidationRuleHandlers`) — той самий факт, дослівно той самий текст.
+  Тримати саме ці три структурно ідентичні кидки без ключа означало б
+  порушення правила 2 рецепту («той самий факт → один спільний ключ»): та
+  сама фраза локалізована в одних обробниках і ні — у структурно ідентичних
+  сусідніх. Ключ заведено для всіх трьох (той самий, наявний
+  `err.ECR-TMPL-0404.table`); коментар у `PatchCellsHandler.cs` оновлено з
+  прямим поясненням цього перегляду (не мовчазна відміна).
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`/`ECR-AUTH-0403`/
+  `ECR-PRJ-0404`/`ECR-RPT-0404`/`ECR-UOM-0404`/`ECR-UOM-4041`/
+  `ECR-TMPL-0404` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
@@ -660,16 +711,7 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
 | `src/Ecr.Application/Audit/GetCellChangesHandler.cs` | 4 |
 | `src/Ecr.Application/Calculations/CalculationPlan.cs` | 1 |
 | `src/Ecr.Application/Calculations/RunCalculationHandler.cs` | 3 |
-| `src/Ecr.Application/Documents/CreateRowHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/GetTableSliceHandler.cs` | 1 |
-| `src/Ecr.Application/Documents/PatchCellsHandler.cs` | 1 |
-| `src/Ecr.Application/Localization/GetUiStringsHandler.cs` | 1 |
-| `src/Ecr.Application/Localization/SetUiStringHandler.cs` | 2 |
-| `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
-| `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 3 |
-| `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
-| `src/Ecr.Application/Units/CreateUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
 | `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
 | `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
