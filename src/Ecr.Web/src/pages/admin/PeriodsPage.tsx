@@ -628,7 +628,16 @@ export function PeriodsPage(): JSX.Element {
   };
 
   const manages = can(session.data, 'Project.Manage');
-  const configures = can(session.data, 'Period.Configure');
+
+  // ⛔ `F-19`: право каже, ЩО можна, а грант — НАД ЧИМ. Сервер для кожної дії
+  // над КОНКРЕТНИМ проєктом (активація, пояс, клон, архів, маршрут погодження,
+  // поточний період) вимагає ще й гранта Manage на нього
+  // (`ActivateProjectHandler`, `SetCurrentPeriodHandler`, …). З грантом Read
+  // «Make current» стояв на кожному рядку й давав 403.
+  const managesSelected =
+    projectId !== null && hasProjectGrant(session.data ?? undefined, projectId, 'Manage');
+  const managesProject = manages && managesSelected;
+  const configures = can(session.data, 'Period.Configure') && managesSelected;
   // ⛔ Право `Period.Reopen` не каже, ЧИЇ періоди: сервер вимагає ще й гранта
   // Manage на проєкт (`ReopenPeriodHandler`). Без цієї умови кнопка обіцяла б
   // дію, яка завершиться 403.
@@ -668,7 +677,7 @@ export function PeriodsPage(): JSX.Element {
             {/* ⛔ Маршрут погодження (`ФВ-5.17`). Дві таблиці існували від
                 Етапу 3 і не мали жодного способу наповнення — багатоетапне
                 затвердження було конфігурацією, якої неможливо створити. */}
-            {selected !== undefined && manages && (
+            {selected !== undefined && managesProject && (
               <ApprovalRouteEditor projectId={selected.id} />
             )}
 
@@ -689,7 +698,7 @@ export function PeriodsPage(): JSX.Element {
             {/* ⛔ `X-25`: активація — незворотна (`Draft → Active`, назад
                 шляху немає: календар починає відкривати й закривати періоди),
                 і йшла одним кліком. Тепер — через підтвердження нижче. */}
-            {selected?.status === 'Draft' && manages && (
+            {selected?.status === 'Draft' && managesProject && (
               <Button
                 size="xs"
                 loading={activate.isPending}
@@ -703,13 +712,13 @@ export function PeriodsPage(): JSX.Element {
                 зі `Scheduled`, зміна безпечна (ФВ-1.1a); сервер перевіряє це
                 насправді через `Project.ChangeTimeZone`, кнопка — лише
                 видимий проксі. */}
-            {selected?.status === 'Draft' && manages && (
+            {selected?.status === 'Draft' && managesProject && (
               <Button size="xs" variant="default" onClick={() => setChangingTimeZone(true)}>
                 {t('periods.timezoneChange')}
               </Button>
             )}
 
-            {selected !== undefined && manages && (
+            {selected !== undefined && managesProject && (
               <Button size="xs" variant="default" onClick={() => setCloning(true)}>
                 {t('periods.clone')}
               </Button>
@@ -735,7 +744,7 @@ export function PeriodsPage(): JSX.Element {
                 Mantine малює `default` сірим, і колір просто губився: кінцева,
                 незворотна дія виглядала як «Clone» поруч. `outline` лишає
                 кнопку вторинною, але червоною. */}
-            {selected?.status === 'Active' && manages && (
+            {selected?.status === 'Active' && managesProject && (
               <Button
                 size="xs"
                 variant="outline"

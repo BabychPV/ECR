@@ -436,7 +436,11 @@ UPDATE t
                                                 N'From = period start + Open offset ({open} d). To = the last day before the hard close, period end + Hard-close offset ({hardClose} d, policy {code}): after it the period is Closed and even late edits are refused. Dates are in the site time zone.'),
     (N'periods.grace',                   N'en', N'Grace until', N'Late edits from'),
     (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}). It stays in Grace until the end of Range (Hard-close, +{hardClose} d).',
-                                                N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}), in the site time zone. It stays in Grace until the hard close (+{hardClose} d).')
+                                                N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}), in the site time zone. It stays in Grace until the hard close (+{hardClose} d).'),
+    -- F-19: перелік проєктів звужено грантами — «ще немає» було неправдою.
+    (N'periods.noProjects',              N'en', N'No projects yet', N'No projects available to you'),
+    (N'periods.noProjectsHint',          N'en', N'A project defines the reporting calendar: without one there are no periods.',
+                                                N'The list shows only projects you have been granted access to. If a project should be here, ask an administrator for access.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2155,8 +2159,8 @@ USING (VALUES
     (N'security.noUsersHint',            N'en', N'Domain users appear after their first sign-in; local accounts are created here.', 1),
     (N'grants.empty',                    N'en', N'This role has no grants', 1),
     (N'grants.emptyHint',                N'en', N'Permissions say what a person can do; grants say to which projects. Without a grant the role opens nothing.', 1),
-    (N'periods.noProjects',              N'en', N'No projects yet', 1),
-    (N'periods.noProjectsHint',          N'en', N'A project defines the reporting calendar: without one there are no periods.', 1),
+    (N'periods.noProjects',              N'en', N'No projects available to you', 1),
+    (N'periods.noProjectsHint',          N'en', N'The list shows only projects you have been granted access to. If a project should be here, ask an administrator for access.', 1),
     (N'periods.noPeriods',               N'en', N'This project has no periods', 1),
     (N'periods.noPeriodsHint',           N'en', N'Periods are generated from the project calendar; a draft project has none until it is activated.', 1),
     (N'sources.empty',                   N'en', N'No collection sources configured', 1),

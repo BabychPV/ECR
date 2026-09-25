@@ -55,7 +55,8 @@ function respond(): { calls: string[]; archiveCalls: number } {
         return new Response(
           JSON.stringify({
             denies: [],
-            grants: {},
+            // F-19: дії над конкретним проєктом вимагають гранта Manage на нього.
+          grants: { 'Project:7': 'Manage' },
             isSimulation: false,
             language: 'en',
             mustChangePassword: false,

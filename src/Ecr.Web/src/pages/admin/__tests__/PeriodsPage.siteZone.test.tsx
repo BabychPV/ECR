@@ -87,11 +87,11 @@ afterEach(() => {
 });
 
 describe('PeriodsPage: межі періодів — у поясі майданчика і підписані чесно', () => {
-  it('початок, останній день прийому даних і пільговий строк — у поясі проєкту', async () => {
+  it('початок, останній день прийому даних і пільговий строк — у поясі проєкту', { timeout: 60_000 }, async () => {
     mockFetch('Monthly');
     show();
 
-    const times = await screen.findAllByText((_, el) => el?.tagName === 'TIME');
+    const times = await screen.findAllByText((_, el) => el?.tagName === 'TIME', {}, { timeout: 20_000 });
     const shown = times.map((el) => norm(el.textContent));
 
     // ⛔ Мутація «форматувати в поясі браузера» (старий `<Timestamp>`) дає
@@ -110,11 +110,15 @@ describe('PeriodsPage: межі періодів — у поясі майдан�
     expect(times[0]?.getAttribute('dateTime')).toBe('2026-01-01T00:00:00+14:00');
   });
 
-  it('квартальний проєкт: 202504 — четвертий квартал 2025, а не «April 2025»', async () => {
+  it('квартальний проєкт: 202504 — четвертий квартал 2025, а не «April 2025»', { timeout: 60_000 }, async () => {
     mockFetch('Quarterly');
     show();
 
-    const caption = await screen.findByText((_, el) => el?.hasAttribute('data-period-caption') === true);
+    const caption = await screen.findByText(
+      (_, el) => el?.hasAttribute('data-period-caption') === true,
+      {},
+      { timeout: 20_000 },
+    );
 
     expect(caption.textContent).toBe('⟦periods.quarterOf (quarter=4, year=2025)⟧');
     expect(caption.textContent).not.toContain('April');

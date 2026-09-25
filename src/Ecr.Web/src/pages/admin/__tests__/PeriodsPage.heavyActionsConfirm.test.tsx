@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { configure, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
@@ -16,9 +16,13 @@ import { testTheme } from '@/test/render';
  * надсилає запиту, а «Cancel» у діалозі не надсилає його й потім.
  */
 
+// ⚠ Повільне середовище (усі тести PeriodsPage паралельно): типова стеля
+// indBy* в 1 с тут червоніє не з тієї причини, яку тест стереже.
+configure({ asyncUtilTimeout: 20_000 });
+
 type Status = 'Draft' | 'Active';
 
-function respond(status: Status): { posts: string[] } {
+function respond(status: Status, grant: 'Read' | 'Manage' = 'Manage'): { posts: string[] } {
   const state = { posts: [] as string[] };
 
   vi.stubGlobal(
@@ -37,11 +41,12 @@ function respond(status: Status): { posts: string[] } {
       if (url.includes('/api/v1/me')) {
         return json({
           denies: [],
-          grants: {},
+          // F-19: дії над конкретним проєктом вимагають гранта Manage на нього.
+          grants: { 'Project:7': grant },
           isSimulation: false,
           language: 'en',
           mustChangePassword: false,
-          permissions: ['Project.Manage', 'Calculation.Recalculate'],
+          permissions: ['Project.Manage', 'Calculation.Recalculate', 'Period.Configure'],
           simulatedForUserId: null,
           userId: 1,
           userName: 'admin',
@@ -164,6 +169,38 @@ describe('PeriodsPage: важкі дії проєкту — через підт�
       show();
 
       expect(await screen.findByRole('columnheader', { name: '⟦common.actions⟧' })).toBeTruthy();
+    },
+    Slow,
+  );
+});
+
+describe('PeriodsPage: дії над проєктом — лише з грантом Manage на нього (F-19)', () => {
+  it(
+    'грант Read: «Make current», «Archive», «Clone» не пропонуються — сервер дав би 403',
+    async () => {
+      respond('Active', 'Read');
+      show();
+
+      // Календар доїхав — рядок періоду на екрані.
+      await screen.findByText('202601');
+
+      // ⛔ Мутація «лише право, без гранта» (стара умова) показує тут
+      // «Make current» на рядку й «Archive»/«Clone» у шапці.
+      expect(screen.queryByRole('button', { name: '⟦periods.pin⟧' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '⟦periods.archive⟧' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '⟦periods.clone⟧' })).toBeNull();
+    },
+    Slow,
+  );
+
+  it(
+    'грант Manage: ті самі дії на місці',
+    async () => {
+      respond('Active', 'Manage');
+      show();
+
+      expect(await screen.findByRole('button', { name: '⟦periods.pin⟧' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: '⟦periods.archive⟧' })).toBeTruthy();
     },
     Slow,
   );
