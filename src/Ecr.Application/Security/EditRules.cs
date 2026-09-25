@@ -46,6 +46,12 @@ public readonly record struct CellAccessContext(
 /// функція дозволяє прогнати всі п'ятнадцять сценаріїв <c>02c §6</c> і
 /// <c>tz/07</c> §7.6 за мілісекунди й без бази. Служба лишає собі те, що вміє
 /// лише вона: дістати дані.
+///
+/// ⚠ Перевірка <c>ProjectStatus.Archived</c>/<c>IsArchiving</c> — спільна для
+/// ВСІХ чотирьох рішень (<see cref="CanEdit"/>, <see cref="CanSubmit"/>,
+/// <see cref="CanApprove"/>, <see cref="CanReopen"/>), одразу після
+/// симуляції: архівація — термінальний стан проєкту, і робочий процес має
+/// зупинятись так само, як і редагування (<c>tz/07</c> §7.4).
 /// </remarks>
 public static class EditRules
 {
@@ -148,6 +154,16 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
         }
 
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
+        }
+
         if (context.PeriodState == PeriodState.Closed)
         {
             return EditDecision.Deny(EditDenyReason.PeriodClosed);
@@ -188,6 +204,16 @@ public static class EditRules
         if (profile.IsSimulation)
         {
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
+        }
+
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
         }
 
         // Затверджувати можна лише подане: затвердження чернетки означало б,
@@ -234,6 +260,16 @@ public static class EditRules
         if (profile.IsSimulation)
         {
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
+        }
+
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
         }
 
         if (context.SheetStatus is not (DocumentStatus.Submitted or DocumentStatus.Approved))

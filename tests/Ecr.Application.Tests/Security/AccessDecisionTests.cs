@@ -208,6 +208,84 @@ public sealed class AccessDecisionTests
         Assert.True(EditRules.CanApprove(stepRole, submitted).IsAllowed);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A13_подання_архівованого_проєкту_блокується_причиною_ProjectArchived()
+    {
+        var submitter = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Submit).Build();
+
+        var decision = EditRules.CanSubmit(
+            submitter, AccessBuilder.Cell(project: ProjectStatus.Archived), hasBlockingErrors: false);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.ProjectArchived, decision.Reason);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A14_подання_під_час_архівації_блокується_причиною_ArchivingInProgress()
+    {
+        var submitter = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Submit).Build();
+
+        var decision = EditRules.CanSubmit(
+            submitter, AccessBuilder.Cell(archiving: true), hasBlockingErrors: false);
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.ArchivingInProgress, decision.Reason);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A15_затвердження_архівованого_проєкту_блокується_причиною_ProjectArchived()
+    {
+        var approver = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Approve).Build();
+
+        var decision = EditRules.CanApprove(
+            approver, AccessBuilder.Cell(sheet: DocumentStatus.Submitted, project: ProjectStatus.Archived));
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.ProjectArchived, decision.Reason);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A16_затвердження_під_час_архівації_блокується_причиною_ArchivingInProgress()
+    {
+        var approver = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Approve).Build();
+
+        var decision = EditRules.CanApprove(
+            approver, AccessBuilder.Cell(sheet: DocumentStatus.Submitted, archiving: true));
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.ArchivingInProgress, decision.Reason);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A17_повернення_у_Draft_архівованого_проєкту_блокується_причиною_ProjectArchived()
+    {
+        var approver = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Approve).Build();
+
+        var decision = EditRules.CanReopen(
+            approver, AccessBuilder.Cell(sheet: DocumentStatus.Submitted, project: ProjectStatus.Archived));
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.ProjectArchived, decision.Reason);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A18_повернення_у_Draft_під_час_архівації_блокується_причиною_ArchivingInProgress()
+    {
+        var approver = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Approve).Build();
+
+        var decision = EditRules.CanReopen(
+            approver, AccessBuilder.Cell(sheet: DocumentStatus.Submitted, archiving: true));
+
+        Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.ArchivingInProgress, decision.Reason);
+    }
+
     // ——— Додаткові з tz/07 §7.6 ———
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
