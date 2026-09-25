@@ -48,7 +48,8 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
+import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
@@ -275,16 +276,19 @@ export function SnapshotsPage(): JSX.Element {
       void queryClient.invalidateQueries({ queryKey: ['snapshots'] });
       showDone(t('snapshots.built'));
     } else if (outcome === 'failed') {
+      // ⛔ `X-04`: причина — за КОДОМ з каталогу, а не сирий `error`
+      // (`ex.Message` сервера — українською чи мовою СУБД).
       notifications.show({
         color: 'statusError',
-        message: job.data?.error ?? t('snapshots.buildFailed'),
+        message: errorCodeText(job.data?.errorCode, t('snapshots.buildFailed')),
+        closeButtonProps: notificationCloseButtonProps,
       });
     }
 
     // ⛔ `unknown` (стан прочитати не вдалося, брак `System.ViewHealth`) —
     // навмисно без тосту, той самий прецедент, що й `ExportButton.tsx`:
     // причина — брак права на читання задачі, а не збій побудови.
-  }, [jobId, outcome, job.data?.error, queryClient]);
+  }, [jobId, outcome, job.data?.errorCode, queryClient]);
 
   return (
     <>

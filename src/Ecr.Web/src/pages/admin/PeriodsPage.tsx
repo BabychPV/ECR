@@ -43,7 +43,8 @@ import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { formatDateTime } from '@/shared/format';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
+import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -495,17 +496,17 @@ export function PeriodsPage(): JSX.Element {
       return;
     }
 
-    // ⛔ Q-234: `error`, а не `message`. `JobStatus.Message` несе останній
-    // прогрес (`IJobProgress.ReportAsync`) — на відмові він лишається тим,
-    // яким був до неї (часто порожній або застаріле «Виконується»), а причину
-    // відмови несе `Error` (`FinishAsync(..., errorMessage: ex.Message, ...)`,
-    // `QuartzJobAdapter.cs`). Досі показувався порожній чи нерелевантний текст
-    // саме тоді, коли оператору найпотрібніша причина.
+    // ⛔ Q-234: не `message` — це останній прогрес, на відмові застарілий.
+    // ⛔ `X-04`: і не `error` — той несе `ex.Message` сервера
+    // (`FinishAsync(..., errorMessage: ex.Message, ...)`): українське речення
+    // розробника чи «Violation of PRIMARY KEY…» на англійському екрані.
+    // Причина — за КОДОМ із каталогу, невідомий код — загальний текст.
     notifications.show({
       color: 'statusError',
-      message: recalcJob.data?.error ?? t('workflow.recalcFailed'),
+      message: errorCodeText(recalcJob.data?.errorCode, t('workflow.recalcFailed')),
+      closeButtonProps: notificationCloseButtonProps,
     });
-  }, [recalcJobId, recalcOutcome, recalcJob.data?.error, queryClient]);
+  }, [recalcJobId, recalcOutcome, recalcJob.data?.errorCode, queryClient]);
 
   /*
    * ⚠ Пояс МАЙДАНЧИКА, а не той, у якому сидить адміністратор: строк

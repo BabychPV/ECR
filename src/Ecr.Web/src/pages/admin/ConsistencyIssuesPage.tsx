@@ -11,7 +11,7 @@ import {
 } from '@/features/jobs/useConsistencyRun';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { ErrorAlert, TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -256,7 +256,14 @@ function RunStatus({ run }: { run: ConsistencyRun }): JSX.Element | null {
           {t('consistency.runJoined')}
         </Text>
       )}
-      {run.failure !== null && <Text size="sm">{run.failure}</Text>}
+      {/* ⛔ `X-04`: `failure` — сирий `ex.Message` задачі (українською чи
+          мовою СУБД), і стояв тут видимим рядком поруч із локалізованим
+          «Check failed». Коду помилки хук не віддає, тож людині — бейдж, а
+          сирий текст лише згорнутим: екран адміністративний, і саме
+          адміністратор його розгортає, розбираючи збій. */}
+      {run.failure !== null && run.failure !== '' && (
+        <TechnicalDetails label={t('common.technicalDetails')}>{run.failure}</TechnicalDetails>
+      )}
     </Group>
   );
 }

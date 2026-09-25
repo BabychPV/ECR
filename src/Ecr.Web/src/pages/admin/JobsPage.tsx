@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { DataTable } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -199,12 +200,17 @@ export function JobsPage(): JSX.Element {
               correlationId={status.correlationId}
             />
 
-            {/* ⛔ Текст помилки — без стека (ФВ-6.11): стек виносить назовні
-                шляхи, імена і подекуди значення. */}
-            {status.error !== null && (
-              <Text size="sm" c="statusError">
-                {status.error}
-              </Text>
+            {/* ⛔ `X-04`: сирий `error` задачі — `ex.Message` сервера
+                (українське речення розробника чи «Violation of PRIMARY KEY…»)
+                — стояв тут видимим рядком ПІД локалізованою причиною
+                `JobFailure`, тобто англійський екран показував одну відмову
+                двічі, і вдруге — чужою мовою. Причину людині каже
+                `JobFailure` (код → каталог); сирий текст лишається лише
+                згорнутим — екран і так відкривається тільки з
+                `System.ViewHealth`, тобто адміністраторові, що розбирає збій.
+                Без стека (ФВ-6.11): його сервер сюди не кладе. */}
+            {status.error !== null && status.error !== undefined && status.error !== '' && (
+              <TechnicalDetails label={t('common.technicalDetails')}>{status.error}</TechnicalDetails>
             )}
 
             {/* ⛔ Лише для Failed: перезапускати задачу, що виконується чи вже

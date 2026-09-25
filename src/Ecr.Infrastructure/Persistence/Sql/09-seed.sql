@@ -4165,7 +4165,10 @@ USING (VALUES
     (N'methodologies.publishedAt', N'en', N'Published', 1),
     (N'methodologies.publishedBy', N'en', N'Published by', 1),
     (N'methodologies.publicationReason', N'en', N'Reason for the change', 1),
-    (N'methodologies.publicationChanges', N'en', N'Changed values on the golden set', 1)
+    (N'methodologies.publicationChanges', N'en', N'Changed values on the golden set', 1),
+
+    -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
+    (N'common.technicalDetails', N'en', N'Technical details', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

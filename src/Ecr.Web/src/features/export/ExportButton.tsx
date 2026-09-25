@@ -5,7 +5,8 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { ExportRequest, JobStatus } from '@/api/types';
 import { outcomeOf, pollInterval } from '@/features/workflow/jobFollow';
-import { showApiError } from '@/shared/ui/notify';
+import { notificationCloseButtonProps, showApiError } from '@/shared/ui/notify';
+import { errorCodeText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
 
 /** Що і за який період експортувати. */
@@ -176,6 +177,7 @@ export function ExportButton({
           id: `export-ready-${jobId}`,
           color: 'statusSuccess',
           autoClose: false,
+          closeButtonProps: notificationCloseButtonProps,
           message: (
             <Anchor
               size="sm"
@@ -190,16 +192,18 @@ export function ExportButton({
     }
 
     if (outcome === 'failed') {
-      // ⛔ `error`, а не `message`: перше несе причину відмови
-      // (`FinishAsync(..., errorMessage: ex.Message, ...)`), друге — останній
-      // прогрес (`IJobProgress.ReportAsync`), який на відмові лишається тим,
-      // яким був до неї, — часто порожнім або застарілим текстом «Виконується».
+      // ⛔ `X-04`: причина — за КОДОМ з каталогу, а не `error`. `error` —
+      // `ex.Message` сервера (`FinishAsync(..., errorMessage: ex.Message)`):
+      // українське речення розробника або текст СУБД, і в тості англійського
+      // екрана він був єдиним, що людина бачила. `message` тим паче не годиться
+      // — це останній прогрес, на відмові застарілий.
       notifications.show({
         color: 'statusError',
-        message: job.data?.error ?? t('document.exportFailed'),
+        message: errorCodeText(job.data?.errorCode, t('document.exportFailed')),
+        closeButtonProps: notificationCloseButtonProps,
       });
     }
-  }, [jobId, outcome, job.data?.error, job.data?.message, documentId, startedFormat]);
+  }, [jobId, outcome, job.data?.errorCode, job.data?.message, documentId, startedFormat]);
 
   return (
     /*
