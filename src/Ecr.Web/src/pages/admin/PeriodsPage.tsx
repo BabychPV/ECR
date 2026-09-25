@@ -144,6 +144,34 @@ function formattableZone(timeZoneId: string): string {
  *
  * ⚠ Точний момент лишається в `dateTime`/`title` — як у `Timestamp`.
  */
+/** Момент зі зсувом: складники настінного часу майданчика — групи 1…6. */
+const WallClock = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?[+-]\d{2}:\d{2}$/;
+
+/** Текст моменту майданчика; `null` — рядок не розібрався (показується як є). */
+export function siteMomentText(value: string, zone: string, dateOnly = false, inclusiveEnd = false): string | null {
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return null;
+
+  /*
+   * ⛔ Спершу — НАСТІННИЙ час із самого рядка (`2025-01-01T00:00:00+06:00` →
+   * 1 січня 00:00), і лише без зсуву в рядку — пояс проєкту через `Intl`.
+   * Причина зміряна живцем: сервер рахує межі своєю базою поясів, браузер —
+   * своєю, і вони розходяться (`Asia/Almaty` у свіжому ICU — уже +05:00, у
+   * базі Windows — ще +06:00). Через `Intl` межа 202501 показувалася б
+   * «Dec 31, 2024». Зсув у відповіді — те, як межу порахував САМ сервер, і
+   * саме за ним вона застосовується.
+   */
+  const wall = WallClock.exec(value);
+  const wallAt = wall === null
+    ? null
+    : Date.UTC(Number(wall[1]), Number(wall[2]) - 1, Number(wall[3]), Number(wall[4]), Number(wall[5]), Number(wall[6] ?? '0'));
+  const shown = new Date((wallAt ?? at) - (inclusiveEnd ? 1 : 0));
+  const timeZone = wallAt === null ? formattableZone(zone) : 'UTC';
+  return dateOnly
+    ? formatDate(shown, { dateStyle: 'medium', timeZone })
+    : formatDateTime(shown, { dateStyle: 'medium', timeStyle: 'short', timeZone });
+}
+
 function SiteTime({
   value,
   zone,
@@ -162,17 +190,11 @@ function SiteTime({
 }): JSX.Element {
   if (value === null || value === undefined || value === '') return <span data-timestamp="none">—</span>;
 
-  const at = Date.parse(value);
-  if (Number.isNaN(at)) return <span data-timestamp="unparsed">{value}</span>;
-
-  const shown = new Date(inclusiveEnd ? at - 1 : at);
-  const timeZone = formattableZone(zone);
-  const text = dateOnly
-    ? formatDate(shown, { dateStyle: 'medium', timeZone })
-    : formatDateTime(shown, { dateStyle: 'medium', timeStyle: 'short', timeZone });
+  const text = siteMomentText(value, zone, dateOnly, inclusiveEnd);
+  if (text === null) return <span data-timestamp="unparsed">{value}</span>;
 
   return (
-    <time dateTime={value} title={value} data-timestamp="ok" data-zone={timeZone}>
+    <time dateTime={value} title={value} data-timestamp="ok">
       {text}
     </time>
   );
@@ -934,11 +956,8 @@ export function PeriodsPage(): JSX.Element {
                           КРАЙНІЙ СТРОК, і «до 30 вересня» без години не
                           відповідає на питання «чи встигну ще сьогодні». */}
                       {t('periods.reopenedUntil', {
-                        until: formatDateTime(period.reopenedUntil, {
-                          dateStyle: 'medium',
-                          timeStyle: 'short',
-                          timeZone: formattableZone(calendar.timeZoneId),
-                        }),
+                        until:
+                          siteMomentText(period.reopenedUntil, calendar.timeZoneId) ?? period.reopenedUntil,
                       })}
                     </Badge>
                   )}

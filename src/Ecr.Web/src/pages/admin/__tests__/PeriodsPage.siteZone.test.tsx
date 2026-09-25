@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PeriodsPage, periodCaption } from '@/pages/admin/PeriodsPage';
+import { PeriodsPage, periodCaption, siteMomentText } from '@/pages/admin/PeriodsPage';
 import { testTheme } from '@/test/render';
 
 /**
@@ -128,5 +128,23 @@ describe('PeriodsPage: межі періодів — у поясі майдан�
     expect(periodCaption(2026, 1, 'Monthly')).toBe('January 2026');
     expect(periodCaption(2026, 12, 'Monthly')).toBe('December 2026');
     expect(periodCaption(2026, 1, 'Yearly')).toBe('2026');
+  });
+});
+
+describe('siteMomentText: настінний час — за зсувом, який порахував сервер', () => {
+  it('база поясів браузера й сервера розходиться — межа однаково 1 січня', () => {
+    /*
+     * ⛔ Зміряно живцем: `Asia/Almaty` у свіжому ICU — +05:00, у базі поясів
+     * Windows (сервер) — +06:00. Мутація «форматувати через `Intl` у поясі
+     * проєкту» дає тут «Dec 31, 2024».
+     */
+    expect(siteMomentText('2025-01-01T00:00:00+06:00', 'Asia/Almaty', true)).toBe('Jan 1, 2025');
+    expect(siteMomentText('2025-05-15T00:00:00+06:00', 'Asia/Almaty', true, true)).toBe('May 14, 2025');
+    expect(norm(siteMomentText('2025-04-15T00:00:00+06:00', 'Asia/Almaty'))).toBe('Apr 15, 2025, 12:00 AM');
+  });
+
+  it('без зсуву в рядку — пояс проєкту; нерозібране — null', () => {
+    expect(siteMomentText('2026-01-01T00:00:00Z', 'Pacific/Kiritimati', true)).toBe('Jan 1, 2026');
+    expect(siteMomentText('не дата', 'UTC')).toBeNull();
   });
 });
