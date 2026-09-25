@@ -431,6 +431,26 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 - Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
   `ECR-AUTH-0401` уже були нейтральними.
 
+`RowDefHandlers.cs` (7) закрито повністю; 139 у 61 файлі → 132 у 60 файлах.
+Другий кластер лінії C (B-14).
+- `err.ECR-TMPL-0404.row` {rowKey, tableDefId} — наявний ключ, заведений
+  щойно у `FormulaDefHandlers.cs`, перевикористаний у `DeleteRowDefHandler`:
+  той самий факт «рядка з таким RowKey немає в таблиці».
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  обох кидків «сесія не містить користувача» (Save/Delete).
+- Нові ключі: `err.ECR-TMPL-0422.rowKeyTakenByDeleted` {rowKey, tableDefId}
+  — дзеркало до `.columnCodeTakenByDeleted`/`.tableCodeTakenByDeleted`
+  (2026-09-23): ключ рядка зайнятий м'яко видаленим рядком;
+  `.rowKindImmutable` {rowKey, oldRowKind, newRowKind} — дзеркало до
+  `.columnDataTypeImmutable`: роль рядка незмінна після створення;
+  `.rowSelfParent` {rowKey} — рядок не може бути батьком самому собі;
+  `.parentRowNotFound` {parentRowKey, tableDefId} — посилання на
+  батьківський рядок, якого немає в таблиці (код лишається `0422`: домен
+  трактує це як помилку введення, не «не знайдено» — код НЕ змінювався,
+  заведено лише ключ).
+- Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
+  `ECR-AUTH-0401` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.PiAf/CollectionRunner.cs` | 2 |
@@ -459,7 +479,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
 | `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
 | `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |

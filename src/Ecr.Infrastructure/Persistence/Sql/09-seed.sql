@@ -1028,6 +1028,11 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.formulaScopeInvalid',       N'en', N'Formula scope {scope} is not accepted here: only Column or Row (Cell combines both addresses and has no single address).', 1),
     (N'err.ECR-TMPL-0404.row',                       N'en', N'Row "{rowKey}" does not exist in table {tableDefId}.', 1),
     (N'err.ECR-TMPL-0404.formula',                   N'en', N'There is no formula on {scope} "{target}" in table {tableDefId}.', 1),
+    -- B-14: RowDefHandlers.cs.
+    (N'err.ECR-TMPL-0422.rowKeyTakenByDeleted',      N'en', N'Row key "{rowKey}" in table {tableDefId} is taken by a deleted row: cells still reference it by key, so it cannot be reused in this version. Use a different key or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.rowKindImmutable',          N'en', N'The kind of row "{rowKey}" cannot change after creation ({oldRowKind} -> {newRowKind}). Create a new row or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.rowSelfParent',             N'en', N'Row "{rowKey}" cannot be its own parent.', 1),
+    (N'err.ECR-TMPL-0422.parentRowNotFound',         N'en', N'Parent row "{parentRowKey}" does not exist in table {tableDefId}.', 1),
     (N'err.ECR-TMPL-0409.columnCodeTaken',           N'en', N'A column with code "{columnCode}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.rowKeyTaken',               N'en', N'A row with key "{rowKey}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.headerFieldCodeTaken',      N'en', N'A header field with code "{headerFieldCode}" already exists in this template version.', 1),
