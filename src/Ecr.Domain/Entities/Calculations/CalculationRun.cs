@@ -19,15 +19,29 @@ namespace Ecr.Domain.Entities.Calculations;
 /// Окреме поле режиму дозволило б запис «повний прогін одного періоду», який
 /// нічого не означає.
 /// </remarks>
+/// <remarks>
+/// ⛔ Третя вісь, той самий прийом: <see cref="DocumentId"/> нульове
+/// (<c>null</c>) — прогін УСЬОГО проєкту й періоду (як і до цього поля),
+/// значення задано — прогін ОДНОГО документа (<c>RecalculateDocumentHandler</c>).
+/// Без цієї осі прогін одного документа й прогін усього проєкту того самого
+/// <c>(ProjectId, PeriodKey)</c> змагалися за ту саму «актуальність»
+/// (`UX_CalculationRun_Current`) — перерахунок документа A знімав
+/// актуальність із прогону документа B, хоча в документі B нічого не
+/// змінювалося («CalculationRun ховає результати сусідніх документів»,
+/// третя хвиля UX-PASS R4). Дивись <c>CalculationResultStore.SwitchCurrentRunAsync</c>
+/// і <c>ReadCurrentAsync</c> — саме там ця вісь використовується.
+/// </remarks>
 public sealed class CalculationRun : Entity<long>
 {
     private CalculationRun() { }
 
-    public CalculationRun(int projectId, int? periodKey, int? triggeredByUserId, DateTime utcNow)
+    public CalculationRun(
+        int projectId, int? periodKey, int? triggeredByUserId, DateTime utcNow, long? documentId = null)
     {
         ProjectId = projectId;
         PeriodKey = periodKey;
         TriggeredByUserId = triggeredByUserId;
+        DocumentId = documentId;
         StartedAt = utcNow;
         Status = "Running";
     }
@@ -39,6 +53,12 @@ public sealed class CalculationRun : Entity<long>
 
     /// <summary><c>null</c> — запуск за розкладом, не людиною.</summary>
     public int? TriggeredByUserId { get; private set; }
+
+    /// <summary>
+    /// <c>null</c> — прогін усього проєкту й періоду (усі документи разом);
+    /// задано — прогін ЛИШЕ цього документа (<c>RecalculateDocumentHandler</c>).
+    /// </summary>
+    public long? DocumentId { get; private set; }
 
     /// <summary>Рядок, а не enum — за DDL (`nvarchar(32)`).</summary>
     public string Status { get; private set; } = null!;

@@ -4,6 +4,7 @@ using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Ecr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(EcrDbContext))]
-    partial class EcrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260925060946_CalculationRunDocumentScope")]
+    partial class CalculationRunDocumentScope
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -815,12 +818,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasAlternateKey("TableDefId", "Id")
                         .HasName("UQ_ColumnDef_ForFk");
-
-                    b.HasIndex("LookupRegistryDefId")
-                        .HasDatabaseName("IX_ColumnDef_LookupRegistryDefId");
-
-                    b.HasIndex("UnitId")
-                        .HasDatabaseName("IX_ColumnDef_UnitId");
 
                     b.HasIndex("TableDefId", "Code")
                         .IsUnique()
@@ -1965,14 +1962,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("PeriodKeyValue", "TableRowId", "ColumnDefId");
 
-                    b.HasIndex("ValueRegistryEntryId")
-                        .HasDatabaseName("IX_CellValue_RegistryEntry")
-                        .HasFilter("[ValueRegistryEntryId] IS NOT NULL");
-
-                    b.HasIndex("ValueUnitId")
-                        .HasDatabaseName("IX_CellValue_Unit")
-                        .HasFilter("[ValueUnitId] IS NOT NULL");
-
                     b.HasIndex("PeriodKeyValue", "TableRowId", "ColumnDefId")
                         .HasDatabaseName("IX_CellValue_Fill")
                         .HasFilter("[IsCalculated] = 0");
@@ -2424,12 +2413,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("PeriodKeyValue", "Id");
-
-                    b.HasIndex("PeriodKeyValue", "TableInstanceId")
-                        .HasDatabaseName("IX_TableRow_Live")
-                        .HasFilter("[IsDeleted] = 0");
-
-                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PeriodKeyValue", "TableInstanceId"), new[] { "RowKeyValue" });
 
                     b.HasIndex("PeriodKeyValue", "TableInstanceId", "RowKeyValue")
                         .IsUnique()
