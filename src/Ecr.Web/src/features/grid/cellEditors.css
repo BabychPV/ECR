@@ -1,0 +1,91 @@
+/*
+ * Редактори-списки й поле дати в комірці сітки (`X-13`, `R-01`, `R-02`).
+ *
+ * ⚠ Вузол-носій займає рівно комірку (так його розміщує `revogr-edit`), а
+ * перелік виходить ПІД неї поверх сусідніх рядків — як випадний список Excel.
+ * Кольори — лише змінні теми Mantine: обидві схеми, жодного власного
+ * кольору, який довелося б перевіряти на контраст окремо.
+ */
+.ecr-list-editor,
+.ecr-date-editor {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.ecr-list-editor-input,
+.ecr-date-editor-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 0 6px;
+  border: 0;
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+  font: inherit;
+}
+
+.ecr-date-editor-input {
+  color-scheme: light dark;
+}
+
+.ecr-list-editor-list {
+  /* ⚠ `position: fixed` і координати ставить `mountListEditor`: перелік живе в
+     `document.body`, поверх модальних вікон Mantine (z-index 200). */
+  position: fixed;
+  z-index: 400;
+  box-sizing: border-box;
+  max-width: 420px;
+  max-height: 260px;
+  margin: 0;
+  padding: 2px 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 4px;
+  background: var(--mantine-color-body);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+.ecr-list-editor-option {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--mantine-color-text);
+  white-space: nowrap;
+}
+
+.ecr-list-editor-option:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+/*
+ * ⚠ Активний варіант — ЗАЛИВКОЮ основного кольору з текстом, що має на ній
+ * гарантований контраст (`filled` + `contrast-color`), а не блідим тлом:
+ * позначка, куди прийде Enter, мусить бути видна з першого погляду.
+ */
+.ecr-list-editor-option.ecr-list-editor-active {
+  background: var(--mantine-primary-color-filled);
+  color: var(--mantine-primary-color-contrast);
+}
+
+.ecr-list-editor-hint {
+  color: var(--mantine-color-dimmed);
+  font-size: 0.85em;
+}
+
+.ecr-list-editor-active .ecr-list-editor-hint {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.ecr-list-editor-note {
+  padding: 4px 8px;
+  color: var(--mantine-color-dimmed);
+  font-style: italic;
+  white-space: normal;
+}

@@ -12,6 +12,7 @@ import type {
   RegistryDefDto,
   RegistryEntryDto,
   TableSliceDto,
+  UnitRef,
 } from '@/api/types';
 import { cellAppearanceOf } from './cellAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
@@ -21,8 +22,10 @@ import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictP
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
 import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
-import { createLookupCellEditor, lookupCellDisplay } from './LookupCellEditor';
+import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
 import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
+import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
+import { createDateCellEditor } from './DateCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
 import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './permissions';
 import { UndoStack, type CellEdit } from './undo';
@@ -68,6 +71,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError } from '@/shared/ui/notify';
 import { useRowHeight } from '@/shared/theme/preferences';
 import { t } from '@/shared/i18n';
+import './cellEditors.css';
 
 /**
  * Остання календарна дата періоду (`periodKey` — `YYYYMM`, той самий формат,
@@ -752,6 +756,38 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   }, [lookupRegistryCodes, lookupEntriesQueries]);
 
   /*
+   * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує
+   * «завантаження», а не порожній перелік: порожній список оператор читає як
+   * «довідник не наповнили» (коментар над `lookupError` нижче).
+   */
+  const lookupPending = useMemo(() => {
+    const pendingIds = new Set<number>();
+    if (registriesList.isPending) {
+      for (const id of lookupRegistryDefIds) pendingIds.add(id);
+    }
+
+    lookupRegistryCodes.forEach(({ id }, index) => {
+      if (lookupEntriesQueries[index]?.isPending === true) pendingIds.add(id);
+    });
+
+    return pendingIds;
+  }, [lookupRegistryDefIds, lookupRegistryCodes, lookupEntriesQueries, registriesList.isPending]);
+
+  /*
+   * ⛔ `R-01`: одиниці — для колонок `Unit`. Доти комірка одиниці була
+   * текстовим полем, у яке `kg` набрати можна, а зберегти — ні: сервер чекає
+   * ідентифікатор. Запит той самий, що й у решти екранів (`['units']`), тож
+   * кеш спільний, і лише там, де колонка `Unit` справді є.
+   */
+  const hasUnitColumns = (data?.columns ?? []).some((column) => column.dataType === 'Unit');
+  const units = useQuery({
+    queryKey: ['units'],
+    queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
+    enabled: hasUnitColumns,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  /*
    * ⛔ Відмова довідника — НЕ те саме, що «довідник ще їде» і не те саме, що
    * «колонку налаштовано без довідника». Коментар нижче (`gridColumns`) каже
    * правильну річ: редактор деградує до порожнього переліку, а не падає — і це
@@ -807,6 +843,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             saveErrorByCell,
             lookupEntriesByRegistryId,
             totals,
+            lookupPending,
+            units.data ?? null,
           ),
     [
       data,
@@ -817,6 +855,8 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       saveErrorByCell,
       lookupEntriesByRegistryId,
       totals,
+      lookupPending,
+      units.data,
     ],
   );
 
@@ -875,6 +915,37 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     [data, totals],
   );
 
+  /**
+   * Код одиниці чи запису довідника з буфера → ідентифікатор (`R-01`).
+   *
+   * ⛔ У аркуші Excel у колонці одиниці стоїть `kg`, а в колонці довідника —
+   * `KZ` чи «Казахстан», а не внутрішні номери, яких людина не знає. Без цього
+   * кожна така вставка діставала б `422` «expects the identifier». Збіг —
+   * лише ТОЧНИЙ; інакше текст їде як є і відхиляється з поясненням.
+   */
+  const pastedIdentifierOf = useCallback(
+    (text: string, column: ColumnDto | undefined): string => {
+      if (column === undefined || text.trim().length === 0 || Number.isFinite(Number(text.trim()))) {
+        return text;
+      }
+
+      if (column.dataType === 'Unit') {
+        const id = unitIdOfCode(text, units.data ?? []);
+
+        return id === null ? text : String(id);
+      }
+
+      if (column.dataType === 'Lookup' && column.lookupRegistryDefId !== null) {
+        const id = lookupIdOfText(text, lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? []);
+
+        return id === null ? text : String(id);
+      }
+
+      return text;
+    },
+    [units.data, lookupEntriesByRegistryId],
+  );
+
   /** Ctrl+V: розкладає буфер по сітці і відхиляє батч цілком, якщо є заборонені. */
   const onPaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -926,7 +997,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
 
       const edits: PendingEdit[] = plan.targets.map((target) => {
         const column = byCode.get(target.columnCode);
-        const value = coerce(target.value, column?.dataType);
+        const value = coerce(pastedIdentifierOf(target.value, column), column?.dataType);
 
         if (column !== undefined) {
           // ⛔ Сюди йде СИРИЙ текст буфера, а не `coerce`-нуте число:
@@ -989,7 +1060,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
       touchHistory();
       saveThroughStore(edits);
     },
-    [data, readOnly, saveThroughStore, touchHistory],
+    [data, readOnly, saveThroughStore, touchHistory, pastedIdentifierOf],
   );
 
   /**
@@ -1741,6 +1812,12 @@ export function gridColumns(
   // «скільки значень її склало» читається як підсумок по ВСІХ рядках колонки,
   // хоч би скільки з них були порожні.
   totals: ReadonlyMap<string, ColumnTotal> = new Map(),
+
+  // ⚠ `X-13`: довідники, що ще їдуть, — редактор показує «завантаження».
+  lookupPending: ReadonlySet<number> = new Set(),
+
+  // ⛔ `R-01`: перелік одиниць для колонок `Unit`; `null` — ще не приїхав.
+  units: readonly UnitRef[] | null = null,
 ): ColumnRegular[] {
   // ⚠ Тип оголошений ЯВНО, а не виведений із `map`. Без нього лямбди
   // всередині (`readonly`, `cellProperties`, `cellTemplate`) втрачають
@@ -1790,6 +1867,16 @@ export function gridColumns(
         ? (lookupEntriesByRegistryId.get(column.lookupRegistryDefId) ?? [])
         : null;
 
+    // ⚠ Для РЕДАКТОРА «ще їде» і «порожньо» — різні стани (`X-13`); для
+    // показу обидва дають сирий ідентифікатор, тож там розрізняти нічого.
+    const lookupEditorEntries =
+      lookupEntries !== null &&
+      column.lookupRegistryDefId !== null &&
+      lookupPending.has(column.lookupRegistryDefId) &&
+      !lookupEntriesByRegistryId.has(column.lookupRegistryDefId)
+        ? null
+        : lookupEntries;
+
     return {
       prop: column.code,
 
@@ -1826,7 +1913,7 @@ export function gridColumns(
       ...(lookupEntries === null
         ? {}
         : {
-            editor: createLookupCellEditor(lookupEntries),
+            editor: createLookupCellEditor(lookupEditorEntries),
             cellTemplate: (_h, props: { value?: unknown }) =>
               lookupCellDisplay(props.value, lookupEntries),
           }),
@@ -1867,8 +1954,21 @@ export function gridColumns(
         : {}),
 
       // ⚠ Дата — форматом продукту, без години опівночі сховища (`cellDisplay`).
+      // ⛔ `R-02`: і поле дати з календарем, а не текст у форматі сховища.
       ...(column.dataType === 'Date'
-        ? { cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column) }
+        ? {
+            editor: createDateCellEditor(),
+            cellTemplate: (_h, props: { value?: unknown }) => cellDisplay(props.value, column),
+          }
+        : {}),
+
+      // ⛔ `R-01`: одиниця — перелік одиниць із кодом, а не номер у текстовому
+      // полі, і показ коду (`kg`), а не ідентифікатора.
+      ...(column.dataType === 'Unit'
+        ? {
+            editor: createUnitCellEditor(units),
+            cellTemplate: (_h, props: { value?: unknown }) => unitCellDisplay(props.value, units ?? []),
+          }
         : {}),
 
       // ⚠ Право читається з рішення, а не з типу колонки: сіра комірка і

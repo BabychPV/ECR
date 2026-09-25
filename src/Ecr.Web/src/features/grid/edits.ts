@@ -236,7 +236,16 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
   // вибір), або рядкове представлення `entry.Id`, обраного зі списку, — той
   // самий шлях, що й `Int`/`Decimal` вище: нерозпізнане значення лишається
   // текстом, і сервер відповість `ECR-CELL-0422`, а не мовчазний нуль.
-  if (dataType === 'Lookup') {
+  // ⛔ `R-02`: порожнє поле дати — «не заповнено», а не порожній рядок. Поле
+  // дати віддає `''`, коли дату стерли чи не обирали; такий рядок сервер
+  // відхиляв (`422`), а вихід із редактора без вибору ставав «правкою».
+  if (dataType === 'Date') {
+    return raw.trim().length === 0 ? null : raw;
+  }
+
+  // ⛔ `R-01`: `Unit` тримає `ValueUnitId` — той самий ідентифікатор числом,
+  // що й `Lookup`; редактор одиниці шле рядок ідентифікатора.
+  if (dataType === 'Lookup' || dataType === 'Unit') {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return null;
 

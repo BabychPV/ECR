@@ -91,6 +91,12 @@ interface Sent {
 
 const sent: Sent[] = [];
 
+/** Одиниці — фікстура `GET /api/v1/units` (`UnitRef`). */
+const UnitsFixture = [
+  { id: 21, code: 'kg', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1', offsetToBase: '0' },
+  { id: 22, code: 't', dimensionCode: 'Mass', dimensionId: 1, factorToBase: '1000', offsetToBase: '0' },
+];
+
 /** Кожен GET `…/entries`: код довідника і сирий рядок запиту (без `?`). */
 interface EntriesRequest {
   code: string;
@@ -159,6 +165,14 @@ function mockServer(
         const code = decodeURIComponent(entriesMatch[1] ?? '');
         entriesRequests.push({ code, query: entriesQuery ?? null });
         return new Response(JSON.stringify(registries?.entries[code] ?? []), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // ⚠ `R-01`: перелік одиниць для полів `Unit`.
+      if (url.endsWith('/api/v1/units') && method === 'GET') {
+        return new Response(JSON.stringify(UnitsFixture), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -572,5 +586,29 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     // надсилати) — цей рядок почервоніє: query-параметр зникне або
     // з'явиться для нетемпорального тесту вище.
     expect(request?.query).toBe(expected);
+  });
+});
+
+describe('DocumentHeaderPanel: поле Unit (R-01)', () => {
+  /**
+   * ⛔ Живцем на стенді: поле одиниці шапки було текстовим полем — `kg`
+   * набрати можна, а сервер відмовляв «expects the identifier». Тепер це
+   * вибір зі списку одиниць за кодом, а в PATCH іде ідентифікатор.
+   */
+  it('показує код обраної одиниці і шле в PATCH її ідентифікатор, а не код', async () => {
+    show({
+      fields: [field({ code: 'HUNIT', dataType: 'Unit', value: 21, label: { values: { en: 'Header unit' } } })],
+    });
+
+    const select = await screen.findByLabelText('Header unit');
+    await waitFor(() => expect(select.hasAttribute('disabled')).toBe(false));
+    expect((select as HTMLInputElement).value).toBe('kg · Mass');
+
+    fireEvent.click(select);
+    fireEvent.click(await screen.findByRole('option', { name: 't · Mass' }));
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(sent[0]?.body).toEqual({ fields: [{ code: 'HUNIT', isEmpty: false, value: 22 }] });
   });
 });

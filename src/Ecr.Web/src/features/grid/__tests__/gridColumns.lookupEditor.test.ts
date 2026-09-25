@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { h } from '@revolist/revogrid';
-import type { ColumnDataSchemaModel, EditorBase, EditorCtrCallable, VNode } from '@revolist/revogrid';
+import type { ColumnDataSchemaModel, EditCell, EditorBase, EditorCtrCallable, VNode } from '@revolist/revogrid';
 import type { ColumnDto, RegistryEntryDto, TableSliceDto } from '@/api/types';
 import { gridColumns } from '../DocumentGrid';
 import { NoLocalFlags } from '../cellState';
+import { coerce } from '../edits';
 
 /** `EditorBase.render` типізовано СОЮЗОМ (`VNode | VNode[] | string | void`) — редактор тут завжди повертає рівно `VNode`, тож тест звужує це один раз тут, а не в кожному виклику. */
 function renderOf(instance: EditorBase): VNode {
@@ -70,11 +71,48 @@ function entry(overrides: Partial<RegistryEntryDto> = {}): RegistryEntryDto {
 
 const noRequiredInput = { blocked: new Map<string, string>(), warning: new Map<string, string>() };
 
+/** Відкриває редактор так, як це робить RevoGrid: `render` → `element` → `componentDidRender`. */
+function openEditor(editor: EditorCtrCallable, value: unknown, save: (value?: unknown, preventFocus?: boolean) => void): HTMLElement {
+  const instance = editor(
+    { prop: 'C1', model: { __rowKey: 'R1' }, value } as unknown as ColumnDataSchemaModel,
+    save,
+    vi.fn(),
+  );
+  const node = document.createElement('div');
+  node.className = 'ecr-test-host';
+  document.body.append(node);
+
+  instance.editCell = { val: value } as unknown as EditCell;
+  renderOf(instance);
+  instance.element = node;
+  instance.componentDidRender?.();
+
+  return node;
+}
+
+function optionValues(_host: HTMLElement): (string | null)[] {
+  return [...document.querySelectorAll('[role="option"]')].map((item) => item.getAttribute('data-value'));
+}
+
+function optionLabels(_host: HTMLElement): (string | null | undefined)[] {
+  return [...document.querySelectorAll('[role="option"]')].map((item) => item.firstElementChild?.textContent);
+}
+
+function press(node: HTMLElement, key: string): void {
+  node.querySelector('input')?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+}
+
+
 function lookupColumnOf(columns: ReturnType<typeof gridColumns>) {
   const found = columns.find((c) => c.prop === 'C1');
   if (found === undefined) throw new Error('Немає колонки C1');
   return found;
 }
+
+/** Перелік редактора живе в `document.body` (`listCellEditor.ts`) — прибрати між тестами. */
+afterEach(() => {
+  for (const node of document.querySelectorAll('.ecr-list-editor-list, .ecr-test-host')) node.remove();
+});
 
 describe('gridColumns — Lookup-колонка: dropdown записів довідника (директива registry-lookup, PR A4)', () => {
   it('звичайна (не-Lookup) колонка не отримує ані editor, ані cellTemplate', () => {
@@ -112,99 +150,69 @@ describe('gridColumns — Lookup-колонка: dropdown записів дов�
     expect(found.cellTemplate).toBeTypeOf('function');
   });
 
-  it('редактор рендерить <select> з порожньою опцією і по одній опції на запис', () => {
+  /*
+   * ✎ `X-13`: редактор більше не `<select>` зі збереженням на `onChange`, а
+   * редактор-список (`listCellEditor.ts`) — поле пошуку й перелік, змонтовані
+   * в `componentDidRender`. Тести нижче відкривають його так само, як
+   * RevoGrid: `render` → `element` → `componentDidRender`.
+   */
+  it('редактор показує «очистити» і по одному варіанту на запис', () => {
     const entries = [entry({ id: 1, display: 'Казахстан' }), entry({ id: 2, code: 'UZ', display: 'Узбекистан' })];
     const withLookup = slice({ columns: [column({ dataType: 'Lookup', lookupRegistryDefId: 7 })] });
     const columns = gridColumns(
       withLookup, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map([[7, entries]]),
     );
-    const found = lookupColumnOf(columns);
 
-    const editor = found.editor as EditorCtrCallable;
-    const save = vi.fn();
-    const close = vi.fn();
-    const instance = editor(
-      { prop: 'C1', model: { __rowKey: 'R1' }, value: undefined } as unknown as ColumnDataSchemaModel,
-      save,
-      close,
-    );
+    const node = openEditor(lookupColumnOf(columns).editor as EditorCtrCallable, undefined, vi.fn());
 
-    const vnode = renderOf(instance);
-    expect(vnode.$tag$).toBe('select');
-
-    // Порожня опція (плейсхолдер, "готово коли": "комірка без вибору
-    // показує порожній плейсхолдер, не помилку") + по одній на запис.
-    expect(vnode.$children$).toHaveLength(3);
-    expect(vnode.$children$[0]?.$attrs$?.value).toBe('');
-    expect(vnode.$children$[1]?.$attrs$?.value).toBe('1');
-    expect(vnode.$children$[1]?.$children$?.[0]?.$text$).toBe('Казахстан');
-    expect(vnode.$children$[2]?.$attrs$?.value).toBe('2');
-    expect(vnode.$children$[2]?.$children$?.[0]?.$text$).toBe('Узбекистан');
+    expect(optionValues(node)).toEqual(['', '1', '2']);
+    expect(optionLabels(node)).toEqual(['⟦grid.listClear⟧', 'Казахстан', 'Узбекистан']);
   });
 
-  it('вибір опції шле в save() ЧИСЛО entryId, не текст показу', () => {
+  it('вибір запису шле в save() ідентифікатор запису, не текст показу', () => {
     const entries = [entry({ id: 5, display: 'Казахстан' })];
     const withLookup = slice({ columns: [column({ dataType: 'Lookup', lookupRegistryDefId: 7 })] });
     const columns = gridColumns(
       withLookup, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map([[7, entries]]),
     );
-    const found = lookupColumnOf(columns);
-    const editor = found.editor as EditorCtrCallable;
     const save = vi.fn();
+    const node = openEditor(lookupColumnOf(columns).editor as EditorCtrCallable, undefined, save);
 
-    const instance = editor(
-      { prop: 'C1', model: { __rowKey: 'R1' }, value: undefined } as unknown as ColumnDataSchemaModel,
-      save,
-      vi.fn(),
-    );
-    const vnode = renderOf(instance);
-    const onChange = vnode.$attrs$?.onChange as (event: Event) => void;
+    press(node, 'ArrowDown');
+    press(node, 'Enter');
 
-    onChange({ target: { value: '5' } } as unknown as Event);
-
-    expect(save).toHaveBeenCalledWith(5);
-    expect(save).not.toHaveBeenCalledWith('Казахстан');
-    expect(save).not.toHaveBeenCalledWith('5');
+    // ⚠ Рядок ідентифікатора: числом його робить `coerce(raw, 'Lookup')`.
+    expect(save).toHaveBeenCalledWith('5', false);
+    expect(save).not.toHaveBeenCalledWith('Казахстан', false);
+    expect(coerce('5', 'Lookup')).toBe(5);
   });
 
-  it('вибір порожньої опції шле save(null) — прибрати вибір, а не "нічого не сталося"', () => {
+  it('«очистити» шле порожній рядок — прибрати вибір, а не «нічого не сталося»', () => {
     const entries = [entry({ id: 5 })];
     const withLookup = slice({ columns: [column({ dataType: 'Lookup', lookupRegistryDefId: 7 })] });
     const columns = gridColumns(
       withLookup, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map([[7, entries]]),
     );
-    const editor = lookupColumnOf(columns).editor as EditorCtrCallable;
     const save = vi.fn();
+    const node = openEditor(lookupColumnOf(columns).editor as EditorCtrCallable, 5, save);
 
-    const instance = editor(
-      { prop: 'C1', model: { __rowKey: 'R1' }, value: 5 } as unknown as ColumnDataSchemaModel,
-      save,
-      vi.fn(),
-    );
-    const onChange = renderOf(instance).$attrs$?.onChange as (event: Event) => void;
+    press(node, 'ArrowUp');
+    press(node, 'Enter');
 
-    onChange({ target: { value: '' } } as unknown as Event);
-
-    expect(save).toHaveBeenCalledWith(null);
+    expect(save).toHaveBeenCalledWith('', false);
+    expect(coerce('', 'Lookup')).toBeNull();
   });
 
-  it('поточне значення комірки позначає відповідну опцію обраною', () => {
+  it('поточне значення комірки — виділений варіант', () => {
     const entries = [entry({ id: 1, display: 'Казахстан' }), entry({ id: 2, code: 'UZ', display: 'Узбекистан' })];
     const withLookup = slice({ columns: [column({ dataType: 'Lookup', lookupRegistryDefId: 7 })] });
     const editor = lookupColumnOf(
       gridColumns(withLookup, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map([[7, entries]])),
     ).editor as EditorCtrCallable;
 
-    const instance = editor(
-      { prop: 'C1', model: { __rowKey: 'R1' }, value: 2 } as unknown as ColumnDataSchemaModel,
-      vi.fn(),
-      vi.fn(),
-    );
-    const vnode = renderOf(instance);
+    openEditor(editor, 2, vi.fn());
 
-    expect(vnode.$children$[0]?.$attrs$?.selected).toBe(false);
-    expect(vnode.$children$[1]?.$attrs$?.selected).toBe(false);
-    expect(vnode.$children$[2]?.$attrs$?.selected).toBe(true);
+    expect(document.querySelector('[aria-selected="true"]')?.getAttribute('data-value')).toBe('2');
   });
 
   it('cellTemplate показує entry.Display, не сирий ValueRegistryEntryId', () => {
@@ -220,23 +228,31 @@ describe('gridColumns — Lookup-колонка: dropdown записів дов�
     expect(template(h, { value: undefined })).toBe('');
   });
 
-  it('колонка налаштована на Lookup, але перелік записів ще не завантажився — редактор не падає, показує лише плейсхолдер', () => {
+  it('перелік записів ще їде — редактор каже «завантаження», а не «порожньо», і не падає', () => {
     const withLookup = slice({ columns: [column({ dataType: 'Lookup', lookupRegistryDefId: 7 })] });
-    // ⚠ Мапа БЕЗ ключа 7: те, що бачить перший рендер `DocumentGrid`, доки
-    // `useQueries` для записів довідника ще в польоті.
+    // ⚠ Мапа БЕЗ ключа 7 і довідник у переліку тих, що ще їдуть: те, що бачить
+    // перший рендер `DocumentGrid`, доки `useQueries` для записів у польоті.
     const found = lookupColumnOf(
-      gridColumns(withLookup, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map()),
+      gridColumns(
+        withLookup, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map(), new Map(), new Set([7]),
+      ),
     );
-    const editor = found.editor as EditorCtrCallable;
 
-    const instance = editor(
-      { prop: 'C1', model: { __rowKey: 'R1' }, value: undefined } as unknown as ColumnDataSchemaModel,
-      vi.fn(),
-      vi.fn(),
-    );
-    const vnode = renderOf(instance);
+    openEditor(found.editor as EditorCtrCallable, undefined, vi.fn());
 
-    expect(vnode.$children$).toHaveLength(1);
+    expect(document.body.textContent).toContain('grid.listLoading');
     expect((found.cellTemplate as (h: unknown, props: { value?: unknown }) => unknown)(h, { value: undefined })).toBe('');
+  });
+
+  it('довідник приїхав порожнім — «нічого не знайдено», а не «завантаження»', () => {
+    const withLookup = slice({ columns: [column({ dataType: 'Lookup', lookupRegistryDefId: 7 })] });
+    const found = lookupColumnOf(
+      gridColumns(withLookup, false, NoLocalFlags, {}, noRequiredInput, new Map(), new Map([[7, []]])),
+    );
+
+    const node = openEditor(found.editor as EditorCtrCallable, undefined, vi.fn());
+
+    expect(document.body.textContent).not.toContain('grid.listLoading');
+    expect(optionValues(node)).toEqual(['']);
   });
 });

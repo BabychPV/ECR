@@ -4082,7 +4082,20 @@ USING (VALUES
     -- B-09: конфлікт версії має вихід — «Keep mine» / «Discard mine».
     (N'grid.conflictKeepMine', N'en', N'Keep mine', 1),
     (N'grid.conflictDiscardMine', N'en', N'Discard mine', 1),
-    (N'grid.conflictRowGone', N'en', N'Row {row} no longer exists: your changes to it cannot be saved.', 1)
+    (N'grid.conflictRowGone', N'en', N'Row {row} no longer exists: your changes to it cannot be saved.', 1),
+
+    -- X-13, R-01, R-02: редактори комірок — пошук і вибір зі списку (Lookup, Bool, Unit), поле дати.
+    (N'grid.listSearchPlaceholder', N'en', N'Type to search', 1),
+    (N'grid.listLoading', N'en', N'Loading options...', 1),
+    (N'grid.listNothingFound', N'en', N'Nothing matches', 1),
+    (N'grid.listMore', N'en', N'{count} more: type to narrow the list', 1),
+    (N'grid.listClear', N'en', N'(clear the cell)', 1),
+    (N'grid.lookupEditorLabel', N'en', N'Choose a registry entry', 1),
+    (N'grid.boolEditorLabel', N'en', N'Choose yes or no', 1),
+    (N'grid.unitEditorLabel', N'en', N'Choose a unit', 1),
+    (N'grid.dateEditorLabel', N'en', N'Choose a date', 1),
+    (N'grid.boolYes', N'en', N'Yes', 1),
+    (N'grid.boolNo', N'en', N'No', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
