@@ -16,7 +16,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   CalculationBindingDto,
-  ColumnDefSearchResultDto,
   MethodologyConstantDto,
   MethodologyDraftVersionDto,
   MethodologyOutputDto,
@@ -29,7 +28,6 @@ import type {
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import { normalizeDecimal } from '@/shared/format';
-import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -51,58 +49,8 @@ import {
   saveMethodologyRule,
   saveMethodologyTestCase,
 } from './api';
+import { ColumnDefPicker } from './ColumnDefPicker';
 import { MethodologyConstantUsage } from './ConstantUsage';
-
-/**
- * Список колонок для пошуку за назвою (директива "пошук колонки за назвою
- * замість голого ColumnDefId") — той самий прийом, що вибір довідника в
- * `ColumnEditor.tsx` (`Select searchable`, лейбл `Назва (КОД)`, наповнений
- * ОДНИМ запитом без живого пошуку по мережі на кожне натискання).
- *
- * ⚠ Пошук наскрізний по всіх версіях шаблонів одразу (`limit=200`): прив'язка
- * методології не обмежена ОДНІЄЮ таблицею — `TableDefId` виводиться із самої
- * колонки (`SaveCalculationBindingHandler`), тому й колонку для вибору
- * потрібно шукати серед усіх, а не лише в межах контексту цього екрана.
- */
-interface ColumnDefChoices {
-  /**
-   * Пункти `Select`.
-   *
-   * ⛔ Порожньо тут означає РІВНО ОДНЕ — колонок справді немає. Доки запит їде
-   * або відмовив, викликач не малює `Select` узагалі (`error`/`isPending`
-   * нижче), тож порожній перелік більше не є трьома різними станами одразу.
-   */
-  readonly options: { value: string; label: string }[];
-
-  /** Відмова читання; `null` — запит удався. */
-  readonly error: unknown;
-
-  /** Чи перелік іще їде. */
-  readonly isPending: boolean;
-
-  /** Повторити читання. */
-  readonly refetch: () => void;
-}
-
-function useColumnDefOptions(): ColumnDefChoices {
-  const columns = useQuery({
-    queryKey: ['column-defs-search'],
-    queryFn: () => apiFetch<ColumnDefSearchResultDto[]>('/api/v1/column-defs/search?limit=200'),
-    staleTime: 60 * 1000,
-  });
-
-  return {
-    options: (columns.data ?? []).map((column) => ({
-      value: String(column.id),
-      label: `${localized(column.headerL10n) || column.code} (${column.code}) · ${column.sheetCode}/${column.tableCode}`,
-    })),
-    error: columns.error,
-    isPending: columns.isPending,
-    refetch: () => {
-      void columns.refetch();
-    },
-  };
-}
 
 /**
  * Вибір із допоміжного довідника, який МОЖЕ не приїхати (директива №15, §0,
@@ -808,7 +756,6 @@ export function MethodologyRequiredInputsPanel({
 }: PanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<RequiredInputDraft | null>(null);
-  const columns = useColumnDefOptions();
 
   const requiredInputs = useQuery({
     queryKey: queryKeys.methodologies.requiredInputs(versionId),
@@ -942,28 +889,13 @@ export function MethodologyRequiredInputsPanel({
                 читає це як факт («такої колонки в шаблонах немає») і йде
                 перевіряти, чи опублікована версія шаблону, — замість
                 повторити запит. */}
-            <ChoiceField
-              error={columns.error}
-              isPending={columns.isPending}
-              onRetry={columns.refetch}
-            >
-              {(disabled) => (
-                <Select
-                  label={t('methodologies.columnDefId')}
-                  description={t('methodologies.requiredInputColumnHint')}
-                  searchable
-                  disabled={!editing.isNew || disabled}
-                  value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
-                  data={columns.options}
-                  onChange={(value) =>
-                    setEditing({
-                      ...editing,
-                      columnDefId: value === null ? 0 : Number(value),
-                    })
-                  }
-                />
-              )}
-            </ChoiceField>
+            <ColumnDefPicker
+              label={t('methodologies.columnDefId')}
+              description={t('methodologies.requiredInputColumnHint')}
+              disabled={!editing.isNew}
+              value={editing.columnDefId}
+              onChange={(columnDefId) => setEditing({ ...editing, columnDefId })}
+            />
 
             <Select
               label={t('methodologies.severity')}
@@ -1410,7 +1342,6 @@ export function MethodologyBindingsPanel({
 }): JSX.Element {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<BindingDraft | null>(null);
-  const columns = useColumnDefOptions();
 
   const bindings = useQuery({
     queryKey: queryKeys.methodologies.bindings(methodologyId),
@@ -1529,28 +1460,13 @@ export function MethodologyBindingsPanel({
                 саме тому обидва споживачі полагоджені разом: полагодити один
                 означало б лишити другий екран із тією самою мовчазною
                 порожнечею. */}
-            <ChoiceField
-              error={columns.error}
-              isPending={columns.isPending}
-              onRetry={columns.refetch}
-            >
-              {(disabled) => (
-                <Select
-                  label={t('methodologies.columnDefId')}
-                  description={t('methodologies.columnDefIdHint')}
-                  searchable
-                  disabled={!editing.isNew || disabled}
-                  value={editing.columnDefId === 0 ? null : String(editing.columnDefId)}
-                  data={columns.options}
-                  onChange={(value) =>
-                    setEditing({
-                      ...editing,
-                      columnDefId: value === null ? 0 : Number(value),
-                    })
-                  }
-                />
-              )}
-            </ChoiceField>
+            <ColumnDefPicker
+              label={t('methodologies.columnDefId')}
+              description={t('methodologies.columnDefIdHint')}
+              disabled={!editing.isNew}
+              value={editing.columnDefId}
+              onChange={(columnDefId) => setEditing({ ...editing, columnDefId })}
+            />
 
             <TextInput
               label={t('methodologies.outputCode')}

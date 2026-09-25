@@ -4148,7 +4148,8 @@ USING (VALUES
     (N'publish.problem.textOutput', N'en', N'Formula {formula} returns text but is declared a methodology output: results are stored as numbers.', 1),
     (N'publish.problem.importNoVersion', N'en', N'Imported methodology {code} has no version in effect on {date}: its formulas are not visible.', 1),
     (N'publish.problem.libraryHasRules', N'en', N'Methodology {code} is a library but has {count} active rules: a library does not calculate for any document.', 1),
-    (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1)
+    (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1),
+    (N'methodologies.columnNotFound', N'en', N'No column matches. Search by column code or by part of its header.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
