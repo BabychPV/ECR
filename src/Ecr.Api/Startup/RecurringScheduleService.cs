@@ -85,9 +85,15 @@ public sealed partial class RecurringScheduleService(
     /// Ставить постійні розклади.
     /// </summary>
     /// <remarks>
-    /// ⛔ <c>ArchiveJob</c> сюди НЕ входить свідомо. Архівація року — свідомий
-    /// крок людини, який змінює фізичне розміщення даних; задача, що робить це
-    /// «за розкладом», рано чи пізно заархівує рік, який ще правлять.
+    /// ✎ F-13 (UX-PASS, четвертий раунд): <c>ArchiveJob</c> тепер ТУТ, нічним
+    /// проходом. Доти рядок нижче стверджував, що розклад «рано чи пізно
+    /// заархівує рік, який ще правлять», — і задачу не запускав ніхто взагалі:
+    /// маршруту немає, а кнопка «Archive» лише ставила статус, тож
+    /// <c>arc.CellValue</c> лишався порожнім назавжди. Застереження зняте
+    /// самою задачею: вона переносить ЛИШЕ проєкти, які людина вже позначила
+    /// заархівованими (дані там і так лише для читання), лише після річного
+    /// грейсу і лише рік, якого не ділить жоден живий проєкт. Свідомим кроком
+    /// людини лишається кнопка — розклад лише виконує її рішення вночі.
     /// </remarks>
     private async Task ScheduleAsync()
     {
@@ -104,6 +110,12 @@ public sealed partial class RecurringScheduleService(
 
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.OrphanScanJob>(NightlyCron, null, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        // ⛔ F-13: без цього рядка архівація проєкту ніколи не переносила
+        // даних у `arc.*` — див. ✎ у коментарі методу.
+        await scheduler
+            .ScheduleAsync<Infrastructure.Jobs.ArchiveJob>(NightlyCron, null, CancellationToken.None)
             .ConfigureAwait(false);
 
         // ⛔ Q-2xx (аудит фази 3, звітність). Без цього рядка задача існувала

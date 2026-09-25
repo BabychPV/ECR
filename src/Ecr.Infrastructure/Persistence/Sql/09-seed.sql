@@ -3995,7 +3995,9 @@ USING (VALUES
     (N'err.ECR-IMP-0422.noMapSheet',            N'en', N'The workbook has no service sheet: only a file exported by this system can be imported.', 1),
     (N'err.ECR-IMP-0422.mapBroken',             N'en', N'The service sheet of the workbook is empty or damaged. Export the document again.', 1),
     -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
-    (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1)
+    (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
+    -- ⛔ F-13: нічний прохід архівації (`ArchiveJob.SweepAsync`).
+    (N'jobs.archiveSweepDone',                  N'en', N'Years moved to the archive: {archived}; skipped: {skipped}; failed: {failed}.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

@@ -360,6 +360,116 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
             () => ArchiveRange.ForYear(2026, PeriodKind.Custom));
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F-13")]
+    public async Task Нічний_прохід_переносить_рік_заархівованого_проєкту_і_дані_читаються()
+    {
+        // ⛔ F-13: задачу не запускав ніхто — архівація проєкту лише ставила
+        // статус, і `arc.CellValue` лишався порожнім. Тут — той самий виклик,
+        // що робить нічний розклад: порожнє завдання (`"null"` з
+        // `QuartzJobScheduler`), без проєкту й року.
+        var doc = await DocumentAsync(202709);
+        await CellAsync(doc, 91.5m);
+
+        // Рік ділять лише заархівовані проєкти: інакше процедура відмовила б
+        // `50012`, а прохід чесно пропустив би рік.
+        await MarkYearArchivedAsync(202701, 202712);
+
+        var before = await CountAsync("doc.CellValue", doc.PeriodKey.Value);
+        Assert.True(before > 0);
+
+        progressMessages.Clear();
+        await RunJobAsync("null", DateTime.UtcNow);
+
+        // ⛔ Мутація: прибрати `ArchiveRangeAsync` з `SweepAsync` — тут
+        // гаряча схема лишається повною, архів порожнім.
+        Assert.Equal(0, await CountAsync("doc.CellValue", doc.PeriodKey.Value));
+        Assert.True(await CountAsync("arc.CellValue", doc.PeriodKey.Value) >= before);
+
+        // І читаються: той самий прозорий шлях, що й до перенесення.
+        await using var db = sql.CreateContext();
+        var reader = new Ecr.Infrastructure.Persistence.ArchiveAwareCellReader(db);
+        Assert.True(await reader.IsArchivedAsync(doc.ProjectId, doc.PeriodKey, default));
+        var cells = await reader.ReadAsync(doc.ProjectId, doc.TableInstanceId, doc.PeriodKey, default);
+        Assert.Equal(91.5m, Assert.Single(cells).Value.ValueNumeric);
+
+        Assert.Contains(progressMessages, m => m.Contains("jobs.archiveSweepDone", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "F-13")]
+    public async Task Прохід_не_чіпає_проєкт_у_річному_грейсі()
+    {
+        var doc = await DocumentAsync(202710);
+        await CellAsync(doc, 3m);
+        await MarkYearArchivedAsync(202701, 202712);
+
+        // Щойно заархівований: грейс (45 днів за політикою) ще триває.
+        await ExecuteAsync(
+            $"UPDATE doc.Project SET ClosedAt = SYSUTCDATETIME(), YearGraceOffsetDays = 45 WHERE Id = {doc.ProjectId}");
+
+        var before = await CountAsync("doc.CellValue", doc.PeriodKey.Value);
+
+        await RunJobAsync(
+            System.Text.Json.JsonSerializer.Serialize(new { projectId = doc.ProjectId }), DateTime.UtcNow);
+
+        Assert.Equal(before, await CountAsync("doc.CellValue", doc.PeriodKey.Value));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "F-13")]
+    public void Порожнє_завдання_розклад_а_не_відмова_розбору()
+    {
+        Assert.Null(ArchiveRequest.ParseOrNull(null));
+        Assert.Null(ArchiveRequest.ParseOrNull("null"));
+        Assert.Equal(new ArchiveRequest(7, 2026), ArchiveRequest.ParseOrNull("""{"projectId":7,"year":2026}"""));
+        Assert.Null(ArchiveRequest.ParseOrNull("""{"projectId":7}""")!.Year);
+    }
+
+    private readonly List<string> progressMessages = [];
+
+    /// <summary>Виконує задачу так, як її виконує адаптер Quartz: payload — рядок JSON.</summary>
+    private async Task RunJobAsync(string payload, DateTime now)
+    {
+        await using var db = sql.CreateContext();
+
+        var capabilities = NSubstitute.Substitute.For<Ecr.Application.Ports.ISqlCapabilities>();
+        NSubstitute.SubstituteExtensions.Returns(capabilities.ArchiveBatchSize, 500_000);
+
+        var clock = NSubstitute.Substitute.For<Ecr.Domain.Abstractions.IClock>();
+        NSubstitute.SubstituteExtensions.Returns(clock.UtcNow, now);
+
+        await new ArchiveJob(db, capabilities, clock)
+            .ExecuteAsync(payload, new RecordingProgress(progressMessages), CancellationToken.None);
+    }
+
+    /// <summary>Позначає заархівованими всі проєкти, що мають періоди в діапазоні (як `ArchiveAsync`).</summary>
+    private Task MarkYearArchivedAsync(int from, int to)
+        => ExecuteAsync(
+            $"""
+            UPDATE doc.Project SET Status = 4
+             WHERE Id IN (SELECT DISTINCT ProjectId FROM doc.Period
+                           WHERE PeriodKey BETWEEN {from} AND {to});
+            """);
+
+    private sealed class RecordingProgress(List<string> messages) : Ecr.Application.Ports.IJobProgress
+    {
+        public Task ReportAsync(int percent, string? message, CancellationToken ct)
+        {
+            if (message is not null)
+            {
+                messages.Add(message);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
     /// <summary>Ланцюг «шаблон → документ → рядки» для періоду.</summary>
     private async Task<TestDocument> DocumentAsync(int periodKey)
     {

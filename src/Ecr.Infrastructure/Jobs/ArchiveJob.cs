@@ -52,11 +52,30 @@ public sealed class ArchiveJob(
     public const int CommandTimeoutSeconds = 4 * 60 * 60;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ F-13 (UX-PASS, четвертий раунд). Задачу не запускав НІХТО: маршруту
+    /// немає, у розкладі її не було (<c>RecurringScheduleService</c>), і
+    /// архівація проєкту лише ставила статус — <c>arc.CellValue</c> лишався
+    /// порожнім. Тепер вона стоїть у НІЧНОМУ розкладі з порожнім завданням і
+    /// сама знаходить, що переносити (<see cref="SweepAsync"/>).
+    /// <para>
+    /// ⚠ Задум (<c>ФВ-1.9</c>, коментарі нижче) не змінено: переноситься лише
+    /// проєкт, УЖЕ позначений заархівованим людиною, і лише після річного
+    /// грейсу. Розклад не вирішує «що архівувати» — він виконує рішення, яке
+    /// людина вже ухвалила кнопкою «Archive», у вікні низької активності.
+    /// </para>
+    /// </remarks>
     public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(progress);
 
-        var request = ArchiveRequest.Parse(payload);
+        var request = ArchiveRequest.ParseOrNull(payload);
+
+        if (request?.Year is not { } year)
+        {
+            await SweepAsync(request?.ProjectId, progress, ct).ConfigureAwait(false);
+            return;
+        }
 
         var project = await db.Projects
             .AsNoTracking()
@@ -89,7 +108,7 @@ public sealed class ArchiveJob(
                 + "архівація передчасна.");
         }
 
-        var range = ArchiveRange.ForYear(request.Year, project.PeriodKind);
+        var range = ArchiveRange.ForYear(year, project.PeriodKind);
 
         await progress
             .ReportKeyAsync(
@@ -103,34 +122,7 @@ public sealed class ArchiveJob(
                 ct)
             .ConfigureAwait(false);
 
-        // ⚠ Таймаут ставиться на КОНТЕКСТ і повертається назад. Контекст задачі
-        // scoped (QuartzJobAdapter створює scope на прогін), тож чужого запиту
-        // ця стеля не зачепить; але лишити її на решту запитів САМОЇ задачі
-        // означало б сховати за чотирма годинами зависання читання нижче —
-        // читання журналу прогонів мусить далі падати швидко.
-        var previousTimeout = db.Database.GetCommandTimeout();
-        db.Database.SetCommandTimeout(CommandTimeoutSeconds);
-
-        try
-        {
-            // ⚠ Викликається ПРОЦЕДУРА. Копіювання, звірка сум і звільнення
-            // партицій — усе там, під окремим principal (D-66). Спроба зробити
-            // те саме з застосунку впала б на правах, і — гірше — зробила б
-            // половину.
-            await db.Database.ExecuteSqlRawAsync(
-                "EXEC arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey, @BatchSize",
-                [
-                    new SqlParameter("@ProjectId", request.ProjectId),
-                    new SqlParameter("@FromPeriodKey", range.From),
-                    new SqlParameter("@ToPeriodKey", range.To),
-                    new SqlParameter("@BatchSize", capabilities.ArchiveBatchSize),
-                ],
-                ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            db.Database.SetCommandTimeout(previousTimeout);
-        }
+        await ArchiveRangeAsync(request.ProjectId, range, ct).ConfigureAwait(false);
 
         var run = await db.ArchiveRuns
             .AsNoTracking()
@@ -160,6 +152,166 @@ public sealed class ArchiveJob(
                         })),
                 ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Нічний прохід: переносить у <c>arc.*</c> кожен рік кожного
+    /// заархівованого проєкту, у якого сплив річний грейс і який ще не
+    /// перенесено (F-13).
+    /// </summary>
+    /// <param name="projectId">Лише цей проєкт; <c>null</c> — усі.</param>
+    /// <param name="progress">Прогрес.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Рік ПРОПУСКАЄТЬСЯ, а не валить прохід, коли його партиції ділить
+    /// незаархівований проєкт. Партиція йде по періоду, а не по проєкту
+    /// (<c>D-117</c>), і процедура в такому разі відмовить <c>50012</c> —
+    /// правильно, але щоночі. Пропущений рік дочекається, доки заархівують
+    /// сусіда, і перенесеться тієї ж ночі, без втручання людини.
+    /// <para>
+    /// ⚠ Провал одного року не зупиняє решту: зламаний проєкт не має тримати
+    /// архів усіх інших. Але й не ковтається — прохід закінчується відмовою з
+    /// переліком, і задача в журналі <c>Failed</c>, а не «успішно».
+    /// </para>
+    /// </remarks>
+    private async Task SweepAsync(int? projectId, IJobProgress progress, CancellationToken ct)
+    {
+        var now = clock.UtcNow;
+
+        var projects = await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Status == ProjectStatus.Archived && p.ClosedAt != null)
+            .Where(p => projectId == null || p.Id == projectId)
+            .Select(p => new { p.Id, p.ClosedAt, p.YearGraceOffsetDays, p.PeriodKind })
+            .OrderBy(p => p.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var archived = 0;
+        var skipped = 0;
+        var failures = new List<string>();
+        Exception? firstFailure = null;
+
+        foreach (var project in projects)
+        {
+            // ⚠ Грейс і Custom — пропуск, а не відмова: це не збій, а «ще не
+            // час» і «діапазону року не існує» (`ArchiveRange.PeriodsInYear`).
+            if (project.ClosedAt!.Value.AddDays(project.YearGraceOffsetDays) > now
+                || project.PeriodKind == PeriodKind.Custom)
+            {
+                skipped++;
+                continue;
+            }
+
+            var years = await db.Periods
+                .AsNoTracking()
+                .Where(p => p.ProjectId == project.Id)
+                .Select(p => p.PeriodKeyValue / 100)
+                .Distinct()
+                .OrderBy(y => y)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            foreach (var year in years)
+            {
+                var range = ArchiveRange.ForYear(year, project.PeriodKind);
+
+                if (await IsArchivedAsync(project.Id, range, ct).ConfigureAwait(false)
+                    || await SharedWithLiveProjectAsync(range, ct).ConfigureAwait(false))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                try
+                {
+                    await ArchiveRangeAsync(project.Id, range, ct).ConfigureAwait(false);
+                    archived++;
+                }
+                catch (SqlException ex)
+                {
+                    firstFailure ??= ex;
+                    failures.Add(string.Create(CultureInfo.InvariantCulture, $"{project.Id}:{year}"));
+                }
+            }
+        }
+
+        await progress
+            .ReportKeyAsync(
+                100,
+                "jobs.archiveSweepDone",
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["archived"] = archived.ToString(CultureInfo.InvariantCulture),
+                    ["skipped"] = skipped.ToString(CultureInfo.InvariantCulture),
+                    ["failed"] = failures.Count.ToString(CultureInfo.InvariantCulture),
+                },
+                ct)
+            .ConfigureAwait(false);
+
+        if (firstFailure is not null)
+        {
+            throw new InvalidOperationException(
+                $"Архівація не вдалася для проєкт:рік — {string.Join(", ", failures)}.", firstFailure);
+        }
+    }
+
+    /// <summary>Чи останній завершений прогін проєкту, що покрив увесь діапазон, — у архів.</summary>
+    private async Task<bool> IsArchivedAsync(int projectId, (int From, int To) range, CancellationToken ct)
+    {
+        var direction = await db.ArchiveRuns
+            .AsNoTracking()
+            .Where(r => r.ProjectId == projectId
+                        && r.Status == "Completed"
+                        && r.FromPeriodKey <= range.From
+                        && r.ToPeriodKey >= range.To)
+            .OrderByDescending(r => r.StartedAt)
+            .Select(r => r.Direction)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return direction == Domain.Entities.Integration.ArchiveRun.ToArchive;
+    }
+
+    /// <summary>Чи діапазон ділить хоч один незаархівований проєкт (процедура відмовила б <c>50012</c>).</summary>
+    private Task<bool> SharedWithLiveProjectAsync((int From, int To) range, CancellationToken ct)
+        => db.Periods
+            .AsNoTracking()
+            .Where(p => p.PeriodKeyValue >= range.From && p.PeriodKeyValue <= range.To)
+            .Join(db.Projects.AsNoTracking(), p => p.ProjectId, x => x.Id, (_, x) => x.Status)
+            .AnyAsync(status => status != ProjectStatus.Archived, ct);
+
+    /// <summary>Викликає процедуру архівації діапазону під власним таймаутом.</summary>
+    private async Task ArchiveRangeAsync(int projectId, (int From, int To) range, CancellationToken ct)
+    {
+        // ⚠ Таймаут ставиться на КОНТЕКСТ і повертається назад. Контекст задачі
+        // scoped (QuartzJobAdapter створює scope на прогін), тож чужого запиту
+        // ця стеля не зачепить; але лишити її на решту запитів САМОЇ задачі
+        // означало б сховати за чотирма годинами зависання читання нижче —
+        // читання журналу прогонів мусить далі падати швидко.
+        var previousTimeout = db.Database.GetCommandTimeout();
+        db.Database.SetCommandTimeout(CommandTimeoutSeconds);
+
+        try
+        {
+            // ⚠ Викликається ПРОЦЕДУРА. Копіювання, звірка сум і звільнення
+            // партицій — усе там, під окремим principal (D-66). Спроба зробити
+            // те саме з застосунку впала б на правах, і — гірше — зробила б
+            // половину.
+            await db.Database.ExecuteSqlRawAsync(
+                "EXEC arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey, @BatchSize",
+                [
+                    new SqlParameter("@ProjectId", projectId),
+                    new SqlParameter("@FromPeriodKey", range.From),
+                    new SqlParameter("@ToPeriodKey", range.To),
+                    new SqlParameter("@BatchSize", capabilities.ArchiveBatchSize),
+                ],
+                ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            db.Database.SetCommandTimeout(previousTimeout);
+        }
     }
 
     /// <summary>Рядок прогону архівації.</summary>
@@ -208,12 +360,24 @@ public static class ArchiveRange
 
 /// <summary>Завдання на архівацію.</summary>
 /// <param name="ProjectId">Проєкт.</param>
-/// <param name="Year">Рік, який архівують.</param>
-public sealed record ArchiveRequest(int ProjectId, int Year)
+/// <param name="Year">Рік, який архівують; <c>null</c> — усі належні роки проєкту (F-13).</param>
+public sealed record ArchiveRequest(int ProjectId, int? Year = null)
 {
     /// <summary>Налаштування розбору; спільні на всі виклики.</summary>
     private static readonly System.Text.Json.JsonSerializerOptions Options =
         new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Розбирає завдання черги; <c>null</c> — завдання порожнє (нічний
+    /// прохід по всіх проєктах).
+    /// </summary>
+    /// <param name="payload">Завдання: типізоване, JSON або порожнє.</param>
+    /// <remarks>
+    /// ⚠ Розклад кладе порожнє завдання РЯДКОМ <c>"null"</c>
+    /// (<c>QuartzJobScheduler</c> серіалізує payload), тож перевіряється і він.
+    /// </remarks>
+    public static ArchiveRequest? ParseOrNull(object? payload)
+        => payload is null or "" or "null" ? null : Parse(payload);
 
     /// <summary>Розбирає завдання черги.</summary>
     /// <param name="payload">Завдання: типізоване або JSON.</param>
