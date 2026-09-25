@@ -89,3 +89,35 @@
   font-style: italic;
   white-space: normal;
 }
+
+/*
+ * ── Оформлення колонки автора шаблону: колір тексту й заливка (`X-10`) ──
+ *
+ * ⛔ Живцем на стенді: колір тексту автора (`rgb(26,26,26)`, підібраний під
+ * світлий Excel) стояв inline-стилем і в темній темі лишався тим самим — на
+ * поверхні `#242424` текст був невидимий; заливки автора не було видно
+ * зовсім. Тепер `cellAppearanceOf` рахує колір під КОЖНУ тему окремо
+ * (нечитабельний — не задає, і діє колір тексту теми), а заливку правило
+ * нижче кладе лише на комірку без стану: фон стану (незбережена, лише
+ * читання, обчислена…) важливіший за оформлення, і ховати його не можна.
+ *
+ * ⚠ Специфічність — та сама схема, що в `cell-states.css`: `:root` + `[theme]`
+ * + класи, щоб вигравати в стилів пакета незалежно від порядку вставки.
+ */
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell-styled {
+  color: var(--ecr-cell-fg-light, var(--ecr-grid-text));
+}
+
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-data .rgCell.ecr-cell-styled {
+  color: var(--ecr-cell-fg-dark, var(--ecr-grid-text));
+}
+
+:root revo-grid[theme] revogr-data .rgCell.ecr-cell-filled:not([data-cell-state]) {
+  background-color: var(--ecr-cell-fill);
+  color: var(--ecr-cell-fill-fg);
+}
+
+:root[data-mantine-color-scheme='dark'] revo-grid[theme] revogr-data .rgCell.ecr-cell-filled:not([data-cell-state]) {
+  background-color: var(--ecr-cell-fill);
+  color: var(--ecr-cell-fill-fg);
+}

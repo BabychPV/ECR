@@ -14,7 +14,7 @@ import type {
   TableSliceDto,
   UnitRef,
 } from '@/api/types';
-import { cellAppearanceOf } from './cellAppearance';
+import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
@@ -2035,6 +2035,10 @@ export function gridColumns(
         // фарбувалась би, лише щойно комірку зроблено `dirty`.
         const appearance = cellAppearanceOf(column.style);
 
+        // ⛔ `X-10`: колір і заливка автора — змінними й класами, які читає
+        // `cellEditors.css`, а не inline-кольором (коментар `cellAppearanceOf`).
+        const appearanceClass = cellAppearanceClassOf(column.style);
+
         /*
          * ⛔ `U-05`: повне значення має бути ДОСТУПНЕ, навіть коли воно
          * ширше за комірку. Заміряно в браузері: `scrollWidth 176px` проти
@@ -2090,6 +2094,7 @@ export function gridColumns(
             requiredInputClass,
             saveErrorClass,
             numericClass,
+            appearanceClass,
           ]
             .filter((part): part is string => part !== null)
             .join(' '),
@@ -2108,10 +2113,9 @@ export function gridColumns(
               : { title: fullValueHint }
             : { title: hint }),
 
-          // ⚠ `backgroundColor`/`verticalAlign` НЕМАЄ серед перенесених полів
-          // — див. коментар `cellAppearanceOf` (`cellAppearance.ts`): перший
-          // ховав би індикатор стану під кольором автора, другий не робить
-          // нічого на звичайному `<div>`.
+          // ⚠ Колір і заливка тут — ЗМІННІ (`--ecr-cell-*`), не inline `color`/
+          // `backgroundColor`: заливку застосовує лише комірка без стану, а
+          // колір — під поточну тему (`cellEditors.css`, `X-10`).
           ...(appearance === undefined ? {} : { style: appearance }),
         };
       },
