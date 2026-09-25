@@ -52,6 +52,10 @@ public sealed class SubmitSheetHandler(
     // не закриває — це інший механізм (ФОРМУЛИ ШАБЛОНУ), методологічних
     // прив'язок (`calc.CalculationResult`, `cfg.CalculationBinding`) він не
     // чіпає (`D-69`).
+    //
+    // ✎ Той самий порт тепер дає й `GetMethodologyIdsBoundToTableAsync` —
+    // звуження перевірки `IsStale` до аркушів, що мають хоч одну методологічну
+    // прив'язку (див. коментар над перевіркою нижче).
     IMethodologyStore methodologies)
 {
     /// <summary>Подає аркуш на погодження.</summary>
@@ -166,6 +170,20 @@ public sealed class SubmitSheetHandler(
                 });
         }
 
+        // ⛔ Структура АРКУША, який подають, потрібна вже тут — до перевірки
+        // застарілості методологій нижче, — щоб звузити ту перевірку до
+        // таблиць САМЕ цього аркуша. Раніше цей блок (`templateVersionId` /
+        // `snapshot` / `tables`) рахувався лише перед валідацією (див. нижче
+        // за текстом); тепер рахується один раз тут і використовується в
+        // обох місцях.
+        var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
+        var templateVersionId = await TemplateVersionOfAsync(documentId, instances, ct).ConfigureAwait(false);
+        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
+
+        var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
+        var tables = sheet?.Tables.Where(t => !t.IsDeleted).ToDictionary(t => t.Id)
+                     ?? new Dictionary<int, Domain.Entities.Configuration.TableDef>();
+
         // ⛔ ЗАСТАРІЛІСТЬ РЕЗУЛЬТАТІВ МЕТОДОЛОГІЙ (F-02/F-05, пряме інженерне
         // рішення). Факт: `IsStale` — стан, що НЕ минає сам. Його дає
         // `GetCalculationFreshnessAsync`: чи є після початку поточного
@@ -177,18 +195,26 @@ public sealed class SubmitSheetHandler(
         // доки хтось не перерахує вручну, — точнісінько той клас стану, для
         // якого директива вимагає БЛОКУВАННЯ, а не попередження.
         //
-        // ⚠ Гранулярність — ДОКУМЕНТ × ПЕРІОД, а не аркуш: сам порт
-        // (`IMethodologyStore.GetCalculationFreshnessAsync`) іншої не дає, і
-        // це не новий компроміс цього фікса — та сама гранулярність уже
-        // сьогодні йде на дисплей (`GetCalculationResultsHandler`, F-05):
-        // кожне число на панелі документа несе ОДИН прапорець свіжості на
-        // весь документ+період, не по аркушу. Наслідок чесно називаю: подання
-        // аркуша БЕЗ жодної прив'язки методології може заблокуватися через
-        // застарілість чужого прив'язаного результату в СУСІДНЬОМУ аркуші
-        // того самого документа+періоду. Звузити до таблиць САМЕ цього аркуша
-        // можна було б через `GetMethodologyIdsBoundToTableAsync` по кожній
-        // таблиці — свідомо не роблю цього зараз (scope цієї підзадачі), і
-        // точність порту — за оркестратором/наступною ітерацією.
+        // ✎ ЗВУЖЕННЯ (мінімальне, наступний крок над початковим фіксом):
+        // перевірку `IsStale` пропускаємо ЦІЛКОМ, якщо в АРКУШІ, що подають,
+        // немає ЖОДНОЇ таблиці з методологічною прив'язкою
+        // (`IMethodologyStore.GetMethodologyIdsBoundToTableAsync` по кожній
+        // таблиці аркуша — таблиць в аркуші мало, це не масовий скан).
+        // Аркуш, до жодної методології не причетний, більше не блокується
+        // застарілістю ЧУЖОГО прив'язаного результату в сусідньому аркуші
+        // того самого документа+періоду.
+        //
+        // ⚠ ЗАЛИШКОВИЙ РИЗИК і далі реальний для аркуша, що МАЄ хоч одну
+        // прив'язку: гранулярність перевірки нижче — ДОКУМЕНТ × ПЕРІОД, не
+        // таблиця й не аркуш, бо сам порт
+        // (`IMethodologyStore.GetCalculationFreshnessAsync`) іншої не дає.
+        // Застарілість БУДЬ-ЯКОЇ прив'язаної таблиці документа+періоду
+        // (навіть у тому самому аркуші, іншій таблиці, до якої ця конкретна
+        // прив'язка не стосується) і далі блокує весь аркуш із прив'язкою.
+        // Це та сама гранулярність, що вже сьогодні йде на дисплей
+        // (`GetCalculationResultsHandler`, F-05). Повне звуження до
+        // застарілості САМЕ прив'язок цього аркуша вимагає зміни сигнатури
+        // порту — за оркестратором/наступною ітерацією.
         //
         // ⚠ Результат методології НЕ входить у зріз подання (`D-69`,
         // `SnapshotPayloadAsync` нижче копіює лише клітинки), тобто застаріле
@@ -196,21 +222,37 @@ public sealed class SubmitSheetHandler(
         // назавжди (посилання живе, а не копія) — і це вирішальний аргумент
         // за блокуванням, а не попередженням: попередження на екрані «Подати»
         // ніхто не побачить УДРУГЕ на екрані «Погоджено».
-        var freshness = await methodologies
-            .GetCalculationFreshnessAsync(documentId, periodKey, ct)
-            .ConfigureAwait(false);
-        if (freshness.IsStale)
+        var sheetHasMethodologyBinding = false;
+        foreach (var tableDefId in tables.Keys)
         {
-            throw new BusinessRuleException(
-                "ECR-SUB-4221",
-                "Подання неможливе: результати методологій застаріли — "
-                + "входи документа змінилися після прогону розрахунку.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-SUB-4221.staleMethodologyResults",
-                    ["calculatedAt"] = freshness.CalculatedAt,
-                    ["inputsChangedAt"] = freshness.InputsChangedAt,
-                });
+            var boundMethodologyIds = await methodologies
+                .GetMethodologyIdsBoundToTableAsync(tableDefId, ct)
+                .ConfigureAwait(false);
+            if (boundMethodologyIds is { Count: > 0 })
+            {
+                sheetHasMethodologyBinding = true;
+                break;
+            }
+        }
+
+        if (sheetHasMethodologyBinding)
+        {
+            var freshness = await methodologies
+                .GetCalculationFreshnessAsync(documentId, periodKey, ct)
+                .ConfigureAwait(false);
+            if (freshness.IsStale)
+            {
+                throw new BusinessRuleException(
+                    "ECR-SUB-4221",
+                    "Подання неможливе: результати методологій застаріли — "
+                    + "входи документа змінилися після прогону розрахунку.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SUB-4221.staleMethodologyResults",
+                        ["calculatedAt"] = freshness.CalculatedAt,
+                        ["inputsChangedAt"] = freshness.InputsChangedAt,
+                    });
+            }
         }
 
         // ⛔ ПЕРЕРАХУНОК ФОРМУЛ АРКУША — до валідації й зрізу. Що було: правка
@@ -233,8 +275,6 @@ public sealed class SubmitSheetHandler(
             .RecalculateSheetUnderSubmitLockAsync(documentId, sheetDefId, key, ct)
             .ConfigureAwait(false);
 
-        var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
-
         // ⛔ ВАЛІДАЦІЯ АРКУША, який подають (`ФВ-5.4`, директива №09 `W8` п.5).
         // Це те, чого тут не було зовсім: подання перевіряло лише осиротілі
         // рядки, тобто аркуш із блокувальними помилками подавався кодом `204`
@@ -251,12 +291,9 @@ public sealed class SubmitSheetHandler(
         // гранулярність робочого процесу — `аркуш × період` (`D-38`), і
         // блокувати подання одного аркуша помилкою сусіднього означало б
         // зробити багатоаркушевий документ неподаваним по частинах.
-        var templateVersionId = await TemplateVersionOfAsync(documentId, instances, ct).ConfigureAwait(false);
-        var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);
-
-        var sheet = snapshot.Sheets.FirstOrDefault(s => s.Id == sheetDefId);
-        var tables = sheet?.Tables.Where(t => !t.IsDeleted).ToDictionary(t => t.Id)
-                     ?? new Dictionary<int, Domain.Entities.Configuration.TableDef>();
+        //
+        // ⚠ `templateVersionId`/`snapshot`/`tables` уже прочитані вище (для
+        // звуження перевірки застарілості) — тут вони лише використовуються.
 
         // ⛔ Шапка документа читається РЕАЛЬНО — той самий дефект, що й у
         // ValidateDocumentHandler/PatchCellsHandler: подання зобов'язане

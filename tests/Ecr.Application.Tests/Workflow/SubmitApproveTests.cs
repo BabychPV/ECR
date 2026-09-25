@@ -99,6 +99,15 @@ public sealed class SubmitApproveTests
         _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
              .Returns(new CalculationFreshness(null, null));
 
+        // ⚠ Звуження застарілості до аркуша з прив'язкою (наступний крок над
+        // F-05): перевірка `IsStale` в `SubmitSheetHandler` тепер узагалі не
+        // йде, якщо жодна таблиця аркуша не прив'язана до методології. За
+        // замовчуванням тут — прив'язка Є (будь-яка таблиця), щоб наявні
+        // тести на застарілість нижче лишались чинними без змін. Тест на
+        // аркуш БЕЗ прив'язки підставляє порожній список сам.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int> { 1 });
+
         // ⚠ Екземпляри таблиць і знімок структури: подання кличе валідацію
         // (`ФВ-5.4`, `W8`), а вона питає обидва. Порожній набір правил тут
         // навмисний — предмет цих тестів робочий процес, а не валідація;
@@ -583,6 +592,37 @@ public sealed class SubmitApproveTests
 
         Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
         Assert.Single(_snapshots);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_без_привязки_методології_ігнорує_застарілість_чужого_аркуша()
+    {
+        // ⛔ Аркуш Water (таблиця 3) у цьому тесті НЕ має жодної методологічної
+        // прив'язки — на відміну від дефолту фікстури (конструктор), де
+        // `GetMethodologyIdsBoundToTableAsync` повертає непорожній список для
+        // БУДЬ-якої таблиці. Це і є сценарій звуження: сусідній аркуш того
+        // самого документа+періоду застарілий, а ЦЕЙ аркуш до жодної
+        // методології взагалі не причетний — застарілість чужого не повинна
+        // його блокувати.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int>());
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))); // IsStale = true
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+
+        // ⚠ Мутаційний доказ, сильніший за «не заблокував»: запит на
+        // свіжість геть НЕ пішов. Застарілість чужого прив'язаного результату
+        // цього непричетного аркуша не стосується, тож і питати про неї
+        // не потрібно (реалізація мусить пропускати виклик, а не лише
+        // ігнорувати його результат).
+        await _methodologies.DidNotReceive()
+            .GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>());
     }
 
     [Fact]
