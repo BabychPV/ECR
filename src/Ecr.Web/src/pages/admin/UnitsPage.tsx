@@ -6,7 +6,7 @@ import type { ConvertUnitRequest, ConvertUnitResponse, UnitRef } from '@/api/typ
 import { createUnit, deleteUnit, unitReferences, unitUsage } from '@/features/units/api';
 import { UnitEditModal } from '@/features/units/UnitEditModal';
 import { UsageKindLabel } from '@/features/usage/UsageKindLabel';
-import { decimalEquals, normalizeDecimal } from '@/shared/format';
+import { decimalEquals, formatDecimal, normalizeDecimal } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
@@ -312,8 +312,17 @@ export function UnitsPage(): JSX.Element {
             </Button>
 
             {result !== null && (
+              // ⛔ `X-36`: результат конверсії йшов на екран СИРИМ рядком
+              // сервера (`decimal(28,16)`, наприклад «0.4535923700000000»)
+              // — без розділювача тисяч і без зрізання хвостових нулів,
+              // тоді як довідник поруч (`factorToBase`/`offsetToBase`,
+              // колонки нижче) і решта продукту (`DataTable`,
+              // `SnapshotRowsModal`) показують те саме подання лише через
+              // канонічний `formatDecimal`. `?? result.value` — деградація
+              // в бік показу: не-десяткове значення (не мало б статись,
+              // сервер віддає `decimal`) лишається видним, а не зникає.
               <Text size="sm" fw={600}>
-                {result.value} {result.unit}
+                {formatDecimal(result.value) ?? result.value} {result.unit}
               </Text>
             )}
 
