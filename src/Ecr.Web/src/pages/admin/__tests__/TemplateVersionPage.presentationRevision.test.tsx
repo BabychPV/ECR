@@ -20,6 +20,7 @@ import { TemplateVersionPage } from '@/pages/admin/TemplateVersionPage';
 
 const SeededStrings: Record<string, string> = {
   'version.title': 'Template version',
+  'version.titleOf': 'Template version {version}',
   'version.presentationRevision': 'Appearance revision {revision}',
 };
 
@@ -50,7 +51,20 @@ function stubFetch(): void {
       return json({ isEditable: true, presentationRevision: 3, groupRules: [], templateVersionId: 1, sheets: [] });
     }
     if (url.includes('/versions?limit=')) {
-      return json({ items: [], nextCursor: null, totalCount: null });
+      return json({
+        items: [
+          {
+            id: 1,
+            version: '2.3',
+            status: 'Draft',
+            presentationRevision: 3,
+            clonedFromVersionId: null,
+            publishedAt: null,
+          },
+        ],
+        nextCursor: null,
+        totalCount: null,
+      });
     }
 
     return json([]);
@@ -100,7 +114,8 @@ describe('TemplateVersionPage — ревізія презентаційного 
     const label = await screen.findByText('Appearance revision 3');
 
     // Стоїть у шапці сторінки, поруч із заголовком версії.
-    const heading = screen.getByRole('heading', { name: /Template version 1/ });
+    // ⛔ X-17: у заголовку — НОМЕР версії (`2.3`), а не її ідентифікатор (`1`).
+    const heading = await screen.findByRole('heading', { name: 'Template version 2.3' });
     const header = heading.closest('header') ?? heading.parentElement?.parentElement?.parentElement;
     expect(header?.contains(label)).toBe(true);
 

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import type { TemplateColumnDto } from '@/api/types';
 import {
   columnDraftOf,
   columnBody,
+  columnTakesUnit,
   EditableColumnDataTypes,
   EditableDataTypes,
   emptyColumnDraft,
@@ -120,67 +120,93 @@ describe('whyCannotSaveColumn (ColumnDraft)', () => {
 });
 
 /**
- * Живий перегляд (Етап 3, лана "Documents core" — прогін уже готового PR
- * B1, не окрема лана) знайшов реальну шорсткість: `TemplateColumnDto`
- * (`GET …/structure`) НЕ несе `styleId` — той самий клас обмеження, що вже
- * мали `precision`/`lookup`/`unit` (`D-137`, `hasFullData`). Відкриття
- * форми колонки БЕЗ кешу цього сеансу (прямий перехід на сторінку версії)
- * тому завжди бачить чернетку без стилю, і збереження такої форми стерло б
- * наявний стиль колонки мовчки — якби не попередження `hasFullData`, яке
- * вже покриває цей самий клас дефекту для інших полів.
+ * X-02 (четвертий раунд UX, critical): повторне збереження колонки стирало
+ * одиницю, точність, довідник, фільтр, значення за замовчуванням і стиль —
+ * чернетку наявної колонки будував бідний `TemplateColumnDto` структури
+ * (`unitId: null`, `precision: null`…), а `PUT` — заміна цілком.
+ *
+ * ⛔ Тепер чернетка береться з повної відповіді `GET …/columns/{code}`, і тіло
+ * `PUT` без правок у формі — рівно те, що сервер уже зберігає. Мутаційний
+ * доказ: повернути в `columnBody` `lookupFilter: null` (як доти) або скинути
+ * `unitId` у `columnDraftOf` — і тест нижче червоніє на відповідному полі.
  */
-describe('columnDraftOf: styleId — той самий клас "неповних даних", що precision/lookup', () => {
-  const templateColumn: TemplateColumnDto = {
+describe('columnDraftOf → columnBody: збереження без правок нічого не стирає (X-02)', () => {
+  const full: ColumnDefDto = {
     id: 1,
-    code: 'C1',
-    headerL10n: { values: { en: 'Column 1' } },
+    code: 'LIMIT',
+    headerL10n: { values: { en: 'Limit', ru: 'Лимит', kz: 'Шек' } },
+    ordinal: 3,
     dataType: 'Decimal',
-    ordinal: 0,
-    isRequired: false,
+    isRequired: true,
     isReadOnly: false,
     isHidden: false,
-    displayFormat: null,
-    unitSymbol: null,
-    formulaExpression: null,
-    formulaDialect: null,
-  };
-
-  const fullColumn: ColumnDefDto = {
-    id: 1,
-    code: 'C1',
-    headerL10n: { values: { en: 'Column 1' } },
-    ordinal: 0,
-    dataType: 'Decimal',
-    isRequired: false,
-    isReadOnly: false,
-    isHidden: false,
-    precision: null,
-    scale: null,
-    defaultValue: null,
-    displayFormat: null,
+    precision: 18,
+    scale: 4,
+    defaultValue: '0',
+    displayFormat: 'N2',
     styleId: 42,
     lookupRegistryDefId: null,
     lookupFilter: null,
-    unitId: null,
+    unitId: 12,
   };
 
-  it('без кешу сеансу (лише TemplateColumnDto) — styleId завжди null, hasFullData: false', () => {
-    const draft = columnDraftOf(templateColumn);
+  it('кожне розширене поле їде назад незмінним', () => {
+    const body = columnBody(columnDraftOf(full));
 
-    expect(draft.styleId).toBeNull();
-    expect(draft.hasFullData).toBe(false);
+    expect(body).toMatchObject({
+      headerL10n: { en: 'Limit', ru: 'Лимит', kz: 'Шек' },
+      ordinal: 3,
+      dataType: 'Decimal',
+      isRequired: true,
+      precision: 18,
+      scale: 4,
+      defaultValue: '0',
+      displayFormat: 'N2',
+      styleId: 42,
+      unitId: 12,
+    });
   });
 
-  it('з кешем сеансу (ColumnDefDto щойно збереженого PUT) — styleId зберігається', () => {
-    const draft = columnDraftOf(templateColumn, fullColumn);
+  it('довідник і його фільтр колонки Lookup теж не губляться', () => {
+    const body = columnBody(
+      columnDraftOf({
+        ...full,
+        dataType: 'Lookup',
+        precision: null,
+        scale: null,
+        unitId: null,
+        lookupRegistryDefId: 5,
+        lookupFilter: 'kind=gas',
+      }),
+    );
 
-    expect(draft.styleId).toBe(42);
-    expect(draft.hasFullData).toBe(true);
+    expect(body.lookupRegistryDefId).toBe(5);
+    expect(body.lookupFilter).toBe('kind=gas');
   });
 
-  it('мутаційний доказ: збереження чернетки БЕЗ кешу шле styleId: null — саме тому попередження hasFullData обов\'язкове', () => {
-    const draft = columnDraftOf(templateColumn);
+  it('чернетка наявної колонки — не нова: код і тип не редагуються', () => {
+    expect(columnDraftOf(full).isNew).toBe(false);
+  });
+});
 
-    expect(columnBody(draft).styleId).toBeNull();
+/**
+ * R-07: одиниця колонки — лише для числових типів; `Unit` несе одиницю на
+ * рядок, і сервер відхиляє одиницю колонки такого типу.
+ */
+describe('columnTakesUnit (R-07)', () => {
+  it('числові типи приймають одиницю колонки', () => {
+    for (const type of ['Decimal', 'Int', 'Formula', 'Calculated'] as const) {
+      expect(columnTakesUnit(type)).toBe(true);
+    }
+  });
+
+  it('Unit, текст, дата, довідник — ні', () => {
+    for (const type of ['Unit', 'String', 'Date', 'Lookup', 'Bool'] as const) {
+      expect(columnTakesUnit(type)).toBe(false);
+    }
+  });
+
+  it('тип без одиниці не везе її в PUT', () => {
+    expect(columnBody({ ...emptyColumnDraft(0), dataType: 'String', unitId: 7 }).unitId).toBeNull();
   });
 });

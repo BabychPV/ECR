@@ -352,13 +352,11 @@ UPDATE t
     (N'state.errorUnknown',              N'en', N'An unexpected error occurred. Retry; if it repeats, quote the code below to support.',
                                                 N'An unexpected error occurred. Retry; if it repeats, contact support and describe what you were doing.'),
     (N'version.diffOtherHint',           N'en', N'The other version to compare against; take the id from the template list.',
-                                                N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).'),
+                                                N'Another version of this template. Changes are always shown from the older version to the newer one.'),
     (N'columns.lookupRegistryDefIdHint', N'en', N'Identifier of the registry this column looks values up from.',
                                                 N'The registry this column looks values up from.'),
     (N'workflow.recalculateHint',        N'en', N'Recalculates every sheet of this document for the shown period, not only this one.',
                                                 N'Recalculates this sheet. Formulas may still read data from other sheets of the same document.'),
-    (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.',
-                                                N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.'),
     (N'err.ECR-PRJ-0409',                N'en', N'A project with code "{code}" already exists.', N'Project code already in use'),
     (N'err.ECR-CFG-0422',                N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.',
                                                 N'Invalid code'),
@@ -408,7 +406,13 @@ UPDATE t
                                                 N'Cells store the entry id, so the code can change. An entry that anything still references cannot be removed — close it with an end date instead.'),
     -- V-18: цикл формул — поіменно і з чесною кількістю.
     (N'err.ECR-TMPL-4221.formulaCycle',   N'en', N'The formulas form a dependency cycle ({cycleLength} formula(s) involved).',
-                                                N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).')
+                                                N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).'),
+    -- R-09/R-10 (четвертий раунд UX): друга версія порівняння вибирається зі
+    -- списку версій свого шаблону, а не вводиться ідентифікатором.
+    (N'version.diffOther',               N'en', N'Compare with version id', N'Compare with version'),
+    (N'version.diffOtherHint',           N'en', N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).',
+                                                N'Another version of this template. Changes are always shown from the older version to the newer one.'),
+    (N'version.diffPick',                N'en', N'Enter the other version', N'Pick the other version')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -449,7 +453,12 @@ DELETE t
     (N'periods.stillNeeded',                       N'en', N'Still needed: {fields}'),
     -- Відмова типу поля шапки: один ключ з `{expected}` підставляв українське
     -- слово в англійське речення; замінено на `err.ECR-HDR-0422.expects*`.
-    (N'err.ECR-HDR-0422.typeMismatch',             N'en', N'Header field "{headerFieldCode}" expects a {expected}.')
+    (N'err.ECR-HDR-0422.typeMismatch',             N'en', N'Header field "{headerFieldCode}" expects a {expected}.'),
+    -- X-02 (четвертий раунд UX): форма колонки більше не відкривається на
+    -- неповних даних — попереджати «збереження зітре» нема про що. Обидва
+    -- тексти, що побували в базах.
+    (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.'),
+    (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2397,12 +2406,12 @@ USING (VALUES
 
     (N'version.clone',                   N'en', N'Clone version', 1),
     (N'version.diff',                    N'en', N'Compare versions', 1),
-    (N'version.diffOther',               N'en', N'Compare with version id', 1),
+    (N'version.diffOther',               N'en', N'Compare with version', 1),
     -- ⛔ Аудит-пас 5: старий текст надсилав до переліку шаблонів по ідентифікатор
     -- версії, а той список показує лише номер версії (`1.0.0.0`), не id —
     -- ідентифікатор видно ЛИШЕ в адресному рядку відкритої версії.
-    (N'version.diffOtherHint',           N'en', N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).', 1),
-    (N'version.diffPick',                N'en', N'Enter the other version', 1),
+    (N'version.diffOtherHint',           N'en', N'Another version of this template. Changes are always shown from the older version to the newer one.', 1),
+    (N'version.diffPick',                N'en', N'Pick the other version', 1),
     (N'version.diffSame',                N'en', N'The versions are structurally identical', 1),
     (N'version.diffSameHint',            N'en', N'Nothing to migrate: documents can move between them freely.', 1),
     (N'version.diffElement',             N'en', N'Element', 1),
@@ -3358,7 +3367,6 @@ USING (VALUES
     -- до того самого класу полів, що `precision`/`lookup`/`unit` уже мали —
     -- `TemplateColumnDto` (GET …/structure) його теж не несе (`D-137`), тож
     -- редагування колонки без кешу цього сеансу так само стерло б стиль.
-    (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.', 1),
     (N'columns.errCode',                 N'en', N'Give the column a code: it is how the column is addressed.', 1),
     -- ⛔ Q-338: та сама причина, що `tableDef.errCodeInvalid` (Q-336).
     (N'columns.errCodeInvalid',          N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
@@ -3997,7 +4005,67 @@ USING (VALUES
     -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
     (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
     -- ⛔ F-27: у «My tasks» замість ідентифікатора файлу експорту.
-    (N'jobs.exportReady',                       N'en', N'The file is ready to download.', 1)
+    (N'jobs.exportReady',                       N'en', N'The file is ready to download.', 1),
+    -- ══ Четвертий раунд UX, лінія D: шаблони й довідники ══
+    (N'common.close', N'en', N'Close', 0),
+    (N'columns.unit', N'en', N'Unit', 1),
+    (N'columns.unitHint', N'en', N'The unit values of this column are stored in. Once set, it can be changed but not cleared.', 1),
+    (N'columns.unitEmpty', N'en', N'No units found', 1),
+    (N'columns.usageDraftNote', N'en', N'This version is a draft: template formulas that read this column are recorded when the version is published, so they are not listed yet.', 1),
+    (N'columns.deleteTitle', N'en', N'Remove column "{name}"?', 1),
+    (N'sheets.deleteTitle', N'en', N'Remove sheet "{name}"?', 1),
+    (N'tableDef.deleteTitle', N'en', N'Remove table "{name}"?', 1),
+    (N'rows.deleteTitle', N'en', N'Remove row "{name}"?', 1),
+    (N'structure.deleteText', N'en', N'It is removed from this draft version. Formulas, rules and relations that refer to it must be fixed before the version can be published.', 1),
+    (N'validationRules.existing', N'en', N'Existing rules', 1),
+    (N'validationRules.empty', N'en', N'This table has no validation rules yet.', 1),
+    (N'validationRules.inactive', N'en', N'Inactive', 1),
+    (N'validationRules.deleteNamed', N'en', N'Remove rule {code}', 1),
+    (N'validationRules.deleteTitle', N'en', N'Remove rule "{code}"?', 1),
+    (N'validationRules.deleteText', N'en', N'The rule stops checking this table. This cannot be undone: to bring it back, create it again.', 1),
+    (N'version.titleOf', N'en', N'Template version {version}', 1),
+    (N'version.diffDirection', N'en', N'From v{from} to v{to}', 1),
+    (N'version.diffNoOther', N'en', N'This template has no other versions', 1),
+    (N'periodRules.sheet', N'en', N'Sheet', 1),
+    (N'periodRules.table', N'en', N'Table', 1),
+    (N'periodRules.role', N'en', N'Role', 1),
+    (N'periodRules.sourceColumn', N'en', N'Source column', 1),
+    (N'periodRules.sourceColumnEmpty', N'en', N'This version has no lookup columns', 1),
+    (N'periodRules.deleteTitle', N'en', N'Remove period access rule {id}?', 1),
+    (N'periodRules.deleteText', N'en', N'Cells it locked become editable again according to the remaining rules.', 1),
+    (N'err.ECR-TMPL-0422.diffOtherTemplate', N'en', N'Only versions of the same template can be compared.', 1),
+    (N'enum.dataType.String', N'en', N'Text', 1),
+    (N'enum.dataType.Int', N'en', N'Whole number', 1),
+    (N'enum.dataType.Decimal', N'en', N'Number', 1),
+    (N'enum.dataType.Bool', N'en', N'Yes / no', 1),
+    (N'enum.dataType.Date', N'en', N'Date', 1),
+    (N'enum.dataType.Lookup', N'en', N'Registry value', 1),
+    (N'enum.dataType.Unit', N'en', N'Unit per row', 1),
+    (N'enum.dataType.Formula', N'en', N'Formula', 1),
+    (N'enum.dataType.Calculated', N'en', N'Methodology result', 1),
+    (N'enum.rowKind.Group', N'en', N'Group', 1),
+    (N'enum.rowKind.Item', N'en', N'Item', 1),
+    (N'enum.rowKind.Balance', N'en', N'Balance', 1),
+    (N'enum.rowKind.Note', N'en', N'Note', 1),
+    (N'enum.rowKind.Header', N'en', N'Header', 1),
+    (N'enum.diffKind.Added', N'en', N'Added', 1),
+    (N'enum.diffKind.Removed', N'en', N'Removed', 1),
+    (N'enum.diffKind.Modified', N'en', N'Changed', 1),
+    (N'enum.diffKind.Presentation', N'en', N'Appearance', 1),
+    (N'enum.changeClass.Safe', N'en', N'Safe', 1),
+    (N'enum.changeClass.Presentation', N'en', N'Appearance only', 1),
+    (N'enum.changeClass.Guarded', N'en', N'Needs a migration', 1),
+    (N'enum.changeClass.Breaking', N'en', N'Breaking', 1),
+    (N'enum.periodRuleKind.AlwaysReadOnly', N'en', N'Always read-only', 1),
+    (N'enum.periodRuleKind.HeaderRows', N'en', N'Header rows', 1),
+    (N'enum.periodRuleKind.EditablePeriodOnly', N'en', N'Editable in a period range', 1),
+    (N'enum.periodRuleKind.RelativeWindow', N'en', N'Window around the current period', 1),
+    (N'enum.periodRuleKind.SourceWindow', N'en', N'Window from a source column', 1),
+    (N'enum.periodRuleKind.Expression', N'en', N'Expression', 1),
+    (N'enum.outOfWindow.ReadOnly', N'en', N'Read-only', 1),
+    (N'enum.outOfWindow.Warn', N'en', N'Warn', 1),
+    (N'enum.outOfWindow.AllowWithConfirmation', N'en', N'Allow with confirmation', 1),
+    (N'enum.outOfWindow.Hide', N'en', N'Hide', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
