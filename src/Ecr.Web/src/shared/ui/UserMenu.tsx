@@ -9,20 +9,30 @@ import {
   Text,
   useMantineColorScheme,
 } from '@mantine/core';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
+import { routes } from '@/app/routes';
 import { t } from '@/shared/i18n';
 import { applyDensity, setDensity, useDensity, type Density } from '@/shared/theme/preferences';
 import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
 
 /**
- * Профіль користувача: тема, мова, щільність, вихід
+ * Профіль користувача: тема, мова, щільність, зміна пароля, вихід
  * (`ФВ-14.14`, `ФВ-14.15`, `ФВ-14.9`, `D-131`).
  *
  * ⚠ Усі перемикачі — тут, а не в «Налаштуваннях»: окремої сторінки
  * налаштувань у системі немає, і заводити її заради жменьки перемикачів
  * означало б ще один пункт меню, який відкривають двічі за весь час роботи.
+ *
+ * ✎ `R-14`: сторінка `/change-password` (`routes.changePassword`) до цього
+ * була доступна лише примусовим редиректом на `mustChangePassword` — людина,
+ * що хотіла змінити пароль добровільно, шляху на екран не мала взагалі.
+ * Напис — `password.title` (той самий ключ, що й заголовок сторінки): нового
+ * рядка каталогу заводити не треба, а текст на пункті меню й на сторінці, яку
+ * він відкриває, — той самий.
  */
 export function UserMenu({ userName }: { userName: string }): JSX.Element {
+  const navigate = useNavigate();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   // ⚠ Підписка (`shared/theme/preferences.ts`), а не власний `useState`:
   // компонент сам перечитує щільність, що прийшла ЗВІДКИ ЗАВГОДНО (клік
@@ -101,6 +111,10 @@ export function UserMenu({ userName }: { userName: string }): JSX.Element {
         </Stack>
 
         <Divider />
+
+        <Menu.Item onClick={() => navigate(routes.changePassword.path)}>
+          {t('password.title')}
+        </Menu.Item>
 
         <Menu.Item onClick={signOut}>
           <Group justify="space-between">{t('profile.logout')}</Group>
