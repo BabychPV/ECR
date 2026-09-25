@@ -22,6 +22,44 @@ import { RouteHeadingClass } from '@/shared/theme/routeHeading';
 const PageHeaderActions = lazy(() => import('./PageHeaderActions'));
 
 /**
+ * Чи остання взаємодія людини була з клавіатури (`X-37`).
+ *
+ * ⛔ Заголовок отримує фокус ПРОГРАМНО (нижче), і Chromium малює йому
+ * `:focus-visible` щоразу, коли до цього клавіатурного фокуса не було взагалі
+ * — тобто після відкриття адреси, оновлення сторінки, переходу з закладки.
+ * На живому стенді рамка стояла навколо назви кожного екрана після переходу
+ * МИШЕЮ, і читалася як виділений, «активний» елемент, яким вона не є.
+ *
+ * ⚠ Тому видимість фокуса тепер вирішує НАШ облік модальності, а не
+ * евристика браузера: `focus({ focusVisible })` (FocusOptions). Прийшла
+ * людина клавіатурою — кільце лишається (тихе, `motion.css`), і вона бачить,
+ * звідки продовжиться `Tab`; мишею чи з адреси — фокус переїжджає так само
+ * (читалка оголошує екран), але без рамки.
+ *
+ * ⚠ Модульний стан, а не React: це властивість сеансу вкладки, а не
+ * компонента; слухачі стоять у фазі перехоплення, щоб побачити подію раніше
+ * за будь-який `stopPropagation`.
+ */
+let keyboardModality = false;
+
+if (typeof document !== 'undefined') {
+  document.addEventListener(
+    'keydown',
+    (event) => {
+      if (!event.metaKey && !event.ctrlKey && !event.altKey) keyboardModality = true;
+    },
+    true,
+  );
+  document.addEventListener(
+    'pointerdown',
+    () => {
+      keyboardModality = false;
+    },
+    true,
+  );
+}
+
+/**
  * Дія в шапці сторінки (`KIT.md` §6.4: `{label, icon, onClick|href, id}`).
  *
  * ⛔ Саме ОПИС дії, а не готовий вузол. Готовий `ReactNode` не можна перекласти
@@ -124,7 +162,8 @@ export function PageHeader({
     if (focused.current) return;
 
     focused.current = true;
-    heading.current?.focus();
+    // ⚠ `focusVisible` — див. `keyboardModality` вище (`X-37`).
+    heading.current?.focus({ focusVisible: keyboardModality } as FocusOptions);
   }, []);
 
   useEffect(() => {
