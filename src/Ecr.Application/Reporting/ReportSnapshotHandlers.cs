@@ -153,7 +153,14 @@ public sealed class BuildReportSnapshotHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до проєкту {projectId}: зріз за ним не будується.");
+                "ECR-AUTH-0403", $"Немає доступу до проєкту {projectId}: зріз за ним не будується.",
+                new Dictionary<string, object?>
+                {
+                    // Наявний ключ: те саме «гранта на проєкт немає взагалі»,
+                    // що вже несе решта перевірок рівня Read.
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectGrant",
+                    ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+                });
         }
 
         // ⚠ Версія резолвиться ТУТ, а не в задачі. Невідомий код звіту має
@@ -163,7 +170,12 @@ public sealed class BuildReportSnapshotHandler(
         var version = await definitions.FindCurrentVersionAsync(code, ct).ConfigureAwait(false)
                       ?? throw new NotFoundException(
                           ErrorCodes.ReportNotFound,
-                          $"Звіту «{code}» немає або в нього немає чинної версії.");
+                          $"Звіту «{code}» немає або в нього немає чинної версії.",
+                          new Dictionary<string, object?>
+                          {
+                              ["messageKey"] = "err.ECR-RPT-0404.code",
+                              ["code"] = code,
+                          });
 
         // ⛔ R6: значення параметрів зводяться з оголошеннями ТУТ, а не в задачі.
         // Невідоме ім'я чи відсутній обов'язковий параметр — це помилка ЗАПИТУ, і
@@ -266,7 +278,16 @@ public sealed class VerifyReportSnapshotHandler(
     }
 
     private static NotFoundException NotFound(long snapshotId)
-        => new(ErrorCodes.ReportNotFound, $"Зрізу {snapshotId} немає.");
+        // Наявний ключ (`GetSnapshotRowsHandler.NotFound` нижче): дослівно
+        // той самий текст, той самий факт «зрізу немає», лише інший
+        // споживач rpt.* (перевірка незмінності проти сторінки рядків).
+        => new(
+            ErrorCodes.ReportNotFound, $"Зрізу {snapshotId} немає.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-RPT-0404.snapshot",
+                ["snapshotId"] = snapshotId.ToString(CultureInfo.InvariantCulture),
+            });
 }
 
 /// <summary>

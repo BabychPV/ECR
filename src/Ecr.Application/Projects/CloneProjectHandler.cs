@@ -46,7 +46,13 @@ public sealed class CloneProjectHandler(
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може створювати проєкти.");
+                         "ECR-AUTH-0401", "Анонімний запит не може створювати проєкти.",
+                         new Dictionary<string, object?>
+                         {
+                             // Наявний ключ: той самий факт «сесія без користувача»,
+                             // що вже несе решта дій запису.
+                             ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite",
+                         });
 
         // ⛔ `ECR-PRJ-0404`: клонується ПРОЄКТ, і його відсутність не має нічого
         // спільного з «період поза межами проєкту». Старий код до того ж казав
@@ -57,7 +63,15 @@ public sealed class CloneProjectHandler(
         // за помилковим `403`.
         var source = await periods.FindProjectAsync(sourceProjectId, ct).ConfigureAwait(false)
                      ?? throw new NotFoundException(
-                         ErrorCodes.ProjectNotFound, $"Проєкт {sourceProjectId} не знайдено.");
+                         ErrorCodes.ProjectNotFound, $"Проєкт {sourceProjectId} не знайдено.",
+                         new Dictionary<string, object?>
+                         {
+                             // Наявний ключ: той самий факт «проєкту не існує»,
+                             // що вже несуть ActivateProjectHandler/ArchiveProjectHandler/
+                             // ChangeProjectTimeZoneHandler (2026-09-23).
+                             ["messageKey"] = "err.ECR-PRJ-0404.project",
+                             ["projectId"] = sourceProjectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                         });
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на проєкт-ДЖЕРЕЛО, не
         // лише глобальне `Project.Manage` — рішення людини. Клонування читає
@@ -67,7 +81,15 @@ public sealed class CloneProjectHandler(
             < Ecr.Domain.Enums.GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {sourceProjectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {sourceProjectId}.",
+                new Dictionary<string, object?>
+                {
+                    // Наявний ключ: той самий факт «немає гранта Manage на
+                    // проєкт», що вже несуть ті самі три обробники, що й
+                    // .project вище.
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = sourceProjectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // Рік зсувається на один: клон робиться заради наступного звітного

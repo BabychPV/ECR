@@ -50,7 +50,12 @@ public sealed class SetUiStringHandler(
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може змінювати каталог.");
+                         "ECR-AUTH-0401", "Анонімний запит не може змінювати каталог.",
+                         new Dictionary<string, object?>
+                         {
+                             // Наявний ключ: той самий факт «сесія без користувача».
+                             ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite",
+                         });
 
         // Право перевіряється ТУТ, а не лише політикою на контролері: публічна
         // область каталогу віддається анонімно, тому чужий текст у ній — це текст
@@ -60,7 +65,14 @@ public sealed class SetUiStringHandler(
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    // Наявний ключ: той самий шаблон перевірки права, що вже
+                    // несуть RoleAndUserHandlers/DocumentQueryHandlers/тощо
+                    // (2026-09-22/25).
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         // ⛔ Без цих двох перевірок обидва випадки доїжджали до бази: задовге

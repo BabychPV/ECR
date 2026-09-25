@@ -664,6 +664,14 @@ USING (VALUES
     (N'err.ECR-UOM-4091',  N'en', N'Unit code already in use', 1),
     (N'err.ECR-UOM-4091.unitCodeTaken', N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
     (N'err.ECR-UOM-0404.unitId', N'en', N'There is no unit with Id {id}.', 1),
+    -- Борг локалізації (B-14, Units): конверсія одиниць шукає за КОДОМ, не
+    -- за Id — окремий ключ на той самий код помилки, той самий прийом, що
+    -- `.tableByCode`/`.columnCode` у шаблонах (2026-09-23).
+    (N'err.ECR-UOM-0404.code', N'en', N'There is no unit with code "{code}" in the catalog.', 1),
+    -- Борг локалізації (B-14, Units): заведення одиниці посилається на
+    -- розмірність, якої немає в `uom.Dimension` — окремий код (`ECR-UOM-4041`)
+    -- від «одиниці немає» вище, і власний ключ під нього.
+    (N'err.ECR-UOM-4041.dimensionId', N'en', N'There is no dimension with Id {dimensionId} in the catalog.', 1),
     (N'err.ECR-UOM-0409',  N'en', N'Unit is in use', 1),
     (N'err.ECR-UOM-0409.unitInUse', N'en', N'Unit "{code}" cannot be removed: it is referenced in {total} place(s).', 1),
     -- BE-15: зміна одиниці (`PUT /api/v1/units/{id}`).
@@ -762,6 +770,11 @@ USING (VALUES
     (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
     (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
     (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
+    -- Борг локалізації (B-14, Reporting): побудова зрізу за КОДОМ звіту —
+    -- окремий факт від `.def`/`.version` вище (id-based): тут одне повідомлення
+    -- покриває і «коду немає», і «код є, чинної версії немає», бо
+    -- `FindCurrentVersionAsync` не розрізняє їх на цьому рівні.
+    (N'err.ECR-RPT-0404.code',               N'en', N'Report "{code}" does not exist or has no current version.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
