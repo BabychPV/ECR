@@ -680,6 +680,19 @@ public sealed class ArchiveProjectHandler(
                 });
         }
 
+        // ⛔ F-08: стан — на `clock.UtcNow`, а не збережений годинною задачею.
+        // Перевідкритий період, чий `ReopenedUntil` минув, ще до години
+        // блокував архівацію «незакритим періодом». Переходи, що вже мали
+        // статися, фіксуються тут же — інакше в архівному проєкті (його
+        // `PeriodStateJob` не обробляє) період назавжди лишився б `Grace`.
+        var now = clock.UtcNow;
+        var states = new Domain.Services.PeriodStateCalculator();
+
+        foreach (var period in project.Periods)
+        {
+            period.AdvanceTo(states.Effective(period, now), now);
+        }
+
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
         // текстом: людині треба знати, які саме періоди закрити, а не що
         // «щось відкрите».
@@ -702,7 +715,7 @@ public sealed class ArchiveProjectHandler(
                 });
         }
 
-        project.Archive(clock.UtcNow);
+        project.Archive(now);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
