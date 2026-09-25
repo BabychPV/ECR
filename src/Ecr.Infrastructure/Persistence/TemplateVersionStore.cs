@@ -50,7 +50,16 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
 
         var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return result is null or DBNull
-            ? throw new NotFoundException("ECR-TMPL-0404", $"Версії шаблону {templateVersionId} не існує.")
+            ? throw new NotFoundException(
+                "ECR-TMPL-0404",
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    // Той самий ключ, що Repository<T,TId>.GetAsync/CreateDocumentHandler/
+                    // TableRelationHandlers та решта: той самий факт «версії немає».
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                })
             : (int)result;
     }
 
@@ -127,7 +136,13 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
                .FirstOrDefaultAsync(v => v.Id == templateVersionId, ct)
                .ConfigureAwait(false)
            ?? throw new NotFoundException(
-               "ECR-TMPL-0404", $"Версії шаблону {templateVersionId} не існує.");
+               "ECR-TMPL-0404",
+               $"Версії шаблону {templateVersionId} не існує.",
+               new Dictionary<string, object?>
+               {
+                   ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                   ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+               });
 
     /// <inheritdoc />
     public async Task<int> CloneAsync(
@@ -150,7 +165,14 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             .AsSplitQuery()
             .FirstOrDefaultAsync(v => v.Id == sourceVersionId, ct)
             .ConfigureAwait(false)
-            ?? throw new NotFoundException("ECR-TMPL-0404", $"Версії шаблону {sourceVersionId} не існує.");
+            ?? throw new NotFoundException(
+                "ECR-TMPL-0404",
+                $"Версії шаблону {sourceVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = sourceVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ X-30 (UX-прохід, четвертий раунд): номер, що вже є в шаблоні, —
         // `409` з ключем, а не `UQ_TemplateVersion` → голий `500`. Цей шлях
@@ -267,7 +289,13 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
         if (await db.Templates.AnyAsync(t => t.Code == code, ct).ConfigureAwait(false))
         {
             throw new Application.Errors.BusinessRuleException(
-                "ECR-TMPL-0409", $"Шаблон з кодом «{code}» уже існує.");
+                "ECR-TMPL-0409",
+                $"Шаблон з кодом «{code}» уже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.templateCodeTaken",
+                    ["code"] = code,
+                });
         }
 
         var template = new Template(
@@ -545,7 +573,13 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             {
                 throw new BusinessRuleException(
                     "ECR-TMPL-0422",
-                    $"Поле {change.EntityType}.{change.Field} не належить презентаційному шару.");
+                    $"Поле {change.EntityType}.{change.Field} не належить презентаційному шару.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0422.presentationFieldUnknown",
+                        ["entityType"] = change.EntityType,
+                        ["field"] = change.Field,
+                    });
             }
 
             await using var command = connection.CreateCommand();
@@ -568,7 +602,14 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
             {
                 throw new NotFoundException(
                     "ECR-TMPL-0404",
-                    $"{change.EntityType} {change.EntityId} не належить версії {templateVersionId}.");
+                    $"{change.EntityType} {change.EntityId} не належить версії {templateVersionId}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-0404.presentationTarget",
+                        ["entityType"] = change.EntityType,
+                        ["entityId"] = change.EntityId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
 
             affected += rows;

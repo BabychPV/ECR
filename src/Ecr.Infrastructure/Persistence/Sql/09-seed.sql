@@ -984,6 +984,10 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.versionNumberFormat',     N'en', N'Version number "{version}" does not match the form Major.Minor.Patch.Build.', 1),
     (N'err.ECR-TMPL-0422.cloneSourceOtherTemplate', N'en', N'Version {sourceVersionId} belongs to another template: a version can only be cloned within its own template ({templateId}).', 1),
     (N'err.ECR-TMPL-0409.versionNumberTaken',      N'en', N'Version {version} already exists in this template.', 1),
+    -- B-14: TemplateVersionStore.cs.
+    (N'err.ECR-TMPL-0409.templateCodeTaken',       N'en', N'A template with code "{code}" already exists.', 1),
+    (N'err.ECR-TMPL-0422.presentationFieldUnknown', N'en', N'Field {entityType}.{field} does not belong to the presentation layer.', 1),
+    (N'err.ECR-TMPL-0404.presentationTarget',      N'en', N'{entityType} {entityId} does not belong to version {versionId}.', 1),
 
     -- Борг локалізації: правила доступу до періоду й зв'язки між таблицями
     -- (`PeriodAccessRuleHandlers`/`PeriodAccessRuleDef`,

@@ -451,6 +451,21 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 - Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
   `ECR-AUTH-0401` уже були нейтральними.
 
+`TemplateVersionStore.cs` (6) закрито повністю; 132 у 60 файлах → 126 у
+59 файлах. Третій кластер лінії C (B-14).
+- `err.ECR-TMPL-0404.templateVersion` {versionId} — наявний ключ
+  (`Repository<T,TId>.GetAsync`, 2026-09-18), перевикористаний для трьох
+  однакових кидків «версії шаблону не існує»
+  (`IncrementPresentationRevisionAsync`, `GetWithStructureAsync`,
+  `CloneAsync`).
+- Нові ключі: `err.ECR-TMPL-0409.templateCodeTaken` {code} — код шаблону вже
+  зайнято (`CreateTemplateAsync`); `err.ECR-TMPL-0422.presentationFieldUnknown`
+  {entityType, field} — патч презентації посилається на поле поза білим
+  списком; `err.ECR-TMPL-0404.presentationTarget` {entityType, entityId,
+  versionId} — сутність патчу презентації не належить цій версії.
+- Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0409`/
+  `ECR-TMPL-0422` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.PiAf/CollectionRunner.cs` | 2 |
@@ -504,7 +519,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/PeriodStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Persistence/RowStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/TemplateVersionStore.cs` | 6 |
 | `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` | 2 |
 | `src/Ecr.Infrastructure/Persistence/WorkflowStore.cs` | 1 |
 | `src/Ecr.Infrastructure/Security/AccessDecisionService.cs` | 1 |
