@@ -35,19 +35,6 @@ const SlowEnvTimeout = 400_000;
 const json = (body: unknown): Response =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
-const cellRow = {
-  changedAt: '2026-01-05T10:00:00Z',
-  changedByUserId: 41,
-  columnDefId: 11,
-  documentId: 7,
-  isLateEdit: false,
-  newValue: '2',
-  oldValue: '1',
-  origin: 'Import',
-  periodKey: 202601,
-  rowKey: 'R1',
-};
-
 const structureRow = {
   changedAt: '2026-01-05T10:00:00Z',
   changedByUserId: 41,
