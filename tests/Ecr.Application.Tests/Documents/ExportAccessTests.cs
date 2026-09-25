@@ -55,10 +55,11 @@ public sealed class ExportAccessTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`), а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => Handler().HandleAsync(DocumentId, Options(), CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
 
         // ⚠ І задача НЕ поставлена. Відмова, після якої робота однаково
         // йде у фон, — це відмова лише на вигляд: файл усе одно з'явиться в

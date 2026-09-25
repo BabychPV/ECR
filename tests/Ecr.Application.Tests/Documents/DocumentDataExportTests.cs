@@ -219,10 +219,11 @@ public sealed class DocumentDataExportTests
     {
         var (handler, jobs) = Handler(allowed: false);
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`), а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => handler.HandleAsync(DocumentId, Options(), CancellationToken.None, "csv"));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
         await jobs.DidNotReceiveWithAnyArgs().EnqueueAsync<IExcelExportJob>(null, CancellationToken.None);
     }
 
