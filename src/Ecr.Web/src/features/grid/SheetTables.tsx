@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
-import { Skeleton, Stack, Text } from '@mantine/core';
+import { Box, Skeleton, Stack, Text } from '@mantine/core';
 import type { DocumentTableDto } from '@/api/types';
 import { localized } from '@/shared/i18n/localized';
+import { t } from '@/shared/i18n';
 import { DocumentGrid } from './DocumentGrid';
 
 /**
@@ -258,11 +259,38 @@ export function SheetTables({
                 maxDynamicRows={table.maxDynamicRows}
               />
             ) : (
-              <Skeleton height="60vh" radius="sm" />
+              <LazyTablePlaceholder />
             )}
           </Stack>
         );
       })}
     </>
+  );
+}
+
+/**
+ * Заглушка таблиці, яку ще не змонтовано (`X-39`).
+ *
+ * ⛔ Живцем на стенді: документ показував ~90 однакових смуг-скелетів, що
+ * мерехтіли без жодного слова, — і читалися як «сторінка зависла на
+ * завантаженні», хоча нічого не вантажилось: таблиця просто ще не в полі зору.
+ * Тепер смуга НЕРУХОМА (анімація скелета каже «чекай», а чекати нема на що) і
+ * несе підпис, що саме станеться: таблиця завантажиться, коли до неї
+ * прогорнуть.
+ *
+ * ⚠ Висота — та сама `60vh`: від неї залежить сам механізм лінивого монтування
+ * (коментар `TableSlotMinHeight`), і компактніша заглушка вмістила б у екран
+ * більше слотів, ніж таблиць, — тобто змонтувала б їх усі одразу.
+ */
+export function LazyTablePlaceholder(): JSX.Element {
+  return (
+    <Box pos="relative" data-testid="lazy-table-placeholder">
+      <Skeleton height="60vh" radius="sm" animate={false} />
+      {/* ⚠ Колір тексту теми, не `dimmed`: блідий на сірій смузі скелета не
+          дотягував би до AA. */}
+      <Text size="sm" pos="absolute" top="var(--mantine-spacing-md)" left="var(--mantine-spacing-md)">
+        {t('grid.tableLoadsOnScroll')}
+      </Text>
+    </Box>
   );
 }

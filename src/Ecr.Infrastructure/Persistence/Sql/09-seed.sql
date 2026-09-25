@@ -4095,7 +4095,10 @@ USING (VALUES
     (N'grid.unitEditorLabel', N'en', N'Choose a unit', 1),
     (N'grid.dateEditorLabel', N'en', N'Choose a date', 1),
     (N'grid.boolYes', N'en', N'Yes', 1),
-    (N'grid.boolNo', N'en', N'No', 1)
+    (N'grid.boolNo', N'en', N'No', 1),
+
+    -- X-39: заглушка таблиці, яку ще не прогорнули.
+    (N'grid.tableLoadsOnScroll', N'en', N'This table loads when you scroll to it.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
