@@ -4098,7 +4098,16 @@ USING (VALUES
     (N'grid.boolNo', N'en', N'No', 1),
 
     -- X-39: заглушка таблиці, яку ще не прогорнули.
-    (N'grid.tableLoadsOnScroll', N'en', N'This table loads when you scroll to it.', 1)
+    (N'grid.tableLoadsOnScroll', N'en', N'This table loads when you scroll to it.', 1),
+
+    -- F-17, F-18, X-25: пояснення рівня для подання, причина закритого документа, підтвердження затвердження.
+    (N'workflow.submitNeedsGrant', N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.', 1),
+    (N'workflow.approveTitle', N'en', N'Approve this sheet?', 1),
+    (N'workflow.approveHint', N'en', N'Approved figures become final for this period and go into regulatory reports. To change them later, the sheet has to be returned for edits.', 1),
+    (N'document.lock.projectArchived', N'en', N'This project is archived: its documents are read-only.', 1),
+    (N'document.lock.periodClosed', N'en', N'Period {period} is closed: its data can no longer be edited, imported, submitted or recalculated. Ask a period manager to reopen it.', 1),
+    (N'document.lock.periodNotOpen', N'en', N'Period {period} is not open yet: data entry starts when it opens.', 1),
+    (N'document.lock.sheetApproved', N'en', N'This sheet has been approved; editing is closed until it is returned for edits.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

@@ -8,6 +8,8 @@ import type {
   DocumentPeriodRequest,
   DocumentSummary,
   DocumentTableDto,
+  PagedProjects,
+  PeriodCalendarDto,
   ValidationResultResponse,
 } from '@/api/types';
 import {
@@ -19,6 +21,8 @@ import {
   useDeleteDocumentAction,
 } from '@/features/documents/DeleteDocumentAction';
 import { ActionGroup, DocumentToolbar } from '@/features/documents/DocumentToolbar';
+import { DocumentLockBanner } from '@/features/documents/DocumentLockBanner';
+import { documentLockOf, locksDataActions } from '@/features/documents/documentLock';
 import { SheetFillSummary } from '@/features/documents/SheetFillSummary';
 import { ValidationPanel } from '@/features/documents/ValidationPanel';
 import { useDocumentPending } from '@/features/grid/autosave';
@@ -345,7 +349,38 @@ export function DocumentPage(): JSX.Element {
   // рядків тут. Порівняння на місці — це друга копія машини станів домену, і
   // розійшлася б вона мовчки: `Rejected` виглядає як «не Draft», але
   // редагувати відхилений аркуш і треба, інакше виправити зауваження нічим.
-  const readOnly = !isEditable(state);
+  /*
+   * ⛔ `F-18`: стан проєкту й періоду. Доти екран знав лише стан АРКУША — і в
+   * закритому періоді чи архівному проєкті показував «Submit», «Import» і
+   * «Recalculate» активними, без жодного банера, а сервер на кожну відмовляв.
+   *
+   * ⚠ Обидва запити — з тими самими ключами й адресами, що й перелік
+   * документів (`DocumentsPage`: `['projects']`, `['periods', id]`), тож кеш
+   * спільний, і перехід із переліку в документ нового запиту не робить.
+   * Доки відповіді немає — причини немає: закрити дії через невідомість
+   * означало б сховати їх на кожному відкритті на час запиту.
+   */
+  const projectId = summary.data?.projectId ?? null;
+
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    enabled: projectId !== null,
+  });
+
+  const calendar = useQuery({
+    queryKey: ['periods', projectId],
+    queryFn: () => apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(projectId ?? 0)}/periods`),
+    enabled: projectId !== null,
+  });
+
+  const lock = documentLockOf({
+    projectStatus: projects.data?.items?.find((project) => project.id === projectId)?.status,
+    periodState: calendar.data?.periods?.find((period) => period.periodKey === periodKey)?.state,
+    sheetState: state,
+  });
+
+  const readOnly = !isEditable(state) || locksDataActions(lock);
 
   // ⚠ Викликається БЕЗУМОВНО і до будь-якого розгалуження показу: правило
   // хуків не знає про `AsyncBoundary` нижче.
@@ -477,10 +512,15 @@ export function DocumentPage(): JSX.Element {
               sheetDefId={active.sheetDefId}
               periodKey={periodKey}
               state={state}
+              lock={lock}
             />
           </ActionGroup>
         )}
       </DocumentToolbar>
+
+      {/* ⛔ `F-18`: ЧОМУ тут нічого не змінити — одразу під рядком дій, до
+          будь-якої сітки: сірі комірки без пояснення читаються як збій. */}
+      <DocumentLockBanner lock={lock} periodKey={periodKey} />
 
       {businessKeyChange.dialog}
 

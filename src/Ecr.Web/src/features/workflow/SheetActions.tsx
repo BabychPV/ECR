@@ -11,8 +11,11 @@ import type {
   ReopenDocumentRequest,
   SheetWorkflowRequest,
 } from '@/api/types';
+import { locksDataActions, type DocumentLock } from '@/features/documents/documentLock';
 import { invalidateSlices } from '@/features/grid/sliceCache';
+import { JobFailure } from '@/features/jobs/JobFacts';
 import { can, useSession, type MeDto } from '@/shared/session/useSession';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { Hint } from '@/shared/ui/Hint';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -32,6 +35,12 @@ export interface SheetActionsProps {
   periodKey: number;
   /** Поточний стан аркуша за цей період. */
   state: string;
+
+  /**
+   * Чому документ за цей період не змінити (`F-18`): архівний проєкт, закритий
+   * чи ще не відкритий період. `null`/не задано — нічого не заважає.
+   */
+  lock?: DocumentLock | null | undefined;
 }
 
 /**
@@ -161,12 +170,13 @@ export function SheetActions({
   sheetDefId,
   periodKey,
   state,
+  lock = null,
 }: SheetActionsProps): JSX.Element {
   const queryClient = useQueryClient();
   const session = useSession();
 
   // Яка дія чекає на причину; `null` — діалог закритий.
-  const [asking, setAsking] = useState<'reject' | 'reopen' | 'recall' | null>(null);
+  const [asking, setAsking] = useState<'approve' | 'reject' | 'reopen' | 'recall' | null>(null);
 
   /** Перечитує стан документа після кожної зміни робочого процесу. */
   const refresh = async (): Promise<void> => {
@@ -426,11 +436,21 @@ export function SheetActions({
     // `PeriodsPage`/`ExportButton`. `Message` — останній прогрес
     // (`IJobProgress.ReportAsync`), на відмові він лишається тим, яким був
     // до неї; причину відмови несе `Error` (`FinishAsync`, `QuartzJobAdapter.cs`).
+    // ⛔ `X-04`: тут ішов сирий `error` задачі — українське речення сервера чи
+    // текст винятку SQL на англійському екрані. Людині — причина КОДОМ через
+    // каталог (`JobFailure`: `err.<errorCode>`) і кореляція для підтримки.
     notifications.show({
       color: 'statusError',
-      message: recalcJob.data?.error ?? t('workflow.recalcFailed'),
+      title: t('workflow.recalcFailed'),
+      message: (
+        <JobFailure
+          state="Failed"
+          errorCode={recalcJob.data?.errorCode}
+          correlationId={recalcJob.data?.correlationId}
+        />
+      ),
     });
-  }, [recalc, outcome, recalcJob.data?.error, queryClient]);
+  }, [recalc, outcome, recalcJob.data?.errorCode, recalcJob.data?.correlationId, queryClient]);
 
   const me = session.data;
 
@@ -467,7 +487,26 @@ export function SheetActions({
   const mayWorkflow = (action: 'submit' | 'approve' | 'reject'): boolean =>
     me !== undefined && !me.isSimulation && meetsGrant(grant, RequiredGrant[action]);
 
-  const canSubmit = isAllowed('submit', state) && mayWorkflow('submit');
+  // ⛔ `F-18`: архівний проєкт, закритий чи ще не відкритий період — подання й
+  // перерахунок сервер однаково відхилить. Кнопка, яка гарантовано дасть
+  // відмову, — це обіцянка, якої система не виконає; причину каже банер.
+  const dataLocked = locksDataActions(lock);
+
+  const canSubmit = !dataLocked && isAllowed('submit', state) && mayWorkflow('submit');
+
+  /*
+   * ⛔ `F-17`: оператор із грантом Write на чернетці не бачив «Submit» узагалі
+   * — і не мав звідки дізнатися чому: кнопка просто зникала. Тепер вона є,
+   * вимкнена, з поясненням, якого рівня бракує. Лише для Write: хто не має
+   * навіть права заповнювати, подавати й не збирався.
+   */
+  const submitNeedsGrant =
+    !dataLocked &&
+    isAllowed('submit', state) &&
+    me !== undefined &&
+    !me.isSimulation &&
+    meetsGrant(grant, 'Write') &&
+    !meetsGrant(grant, 'Submit');
   const canApprove = isAllowed('approve', state) && mayWorkflow('approve');
   const canReject = isAllowed('reject', state) && mayWorkflow('reject');
 
@@ -487,9 +526,12 @@ export function SheetActions({
   // (Recalculate/Submit/Approve/Reject/Reopen, останні три вже кольорові:
   // green/statusError) — те саме розділення класів ризику, що директива вже
   // застосувала для лан 1-7.
+  const canRecalculate = !dataLocked && can(me, 'Calculation.Recalculate');
+
   const hasAnyAction =
-    can(me, 'Calculation.Recalculate') ||
+    canRecalculate ||
     canSubmit ||
+    submitNeedsGrant ||
     canApprove ||
     canReject ||
     canRecall ||
@@ -516,7 +558,7 @@ export function SheetActions({
        * лише в цей аркуш. Підпис кнопки лишається нейтральним «Recalculate»
        * (той самий, що й на екрані проєкту, `PeriodsPage.tsx`).
        */}
-      {can(me, 'Calculation.Recalculate') && (
+      {canRecalculate && (
         // ⚠ `Hint`, а не `Tooltip`: кнопка фокусується, але `Tooltip` не
         // давав `aria-describedby`, тож читач не чув нюансу про сусідні аркуші.
         <Hint label={t('workflow.recalculateHint')}>
@@ -545,16 +587,39 @@ export function SheetActions({
         </Button>
       )}
 
+      {submitNeedsGrant && (
+        // ⚠ `data-disabled`, а не `disabled`: вимкнена кнопка не отримує ні
+        // фокуса, ні наведення, і пояснення не прочитав би ніхто — саме те,
+        // заради чого вона тут стоїть.
+        <Hint label={t('workflow.submitNeedsGrant', { level: grant })}>
+          <Button
+            size="xs"
+            data-disabled
+            aria-disabled="true"
+            data-testid="submit-needs-grant"
+            onClick={(event) => event.preventDefault()}
+          >
+            {t('document.submit')}
+          </Button>
+        </Hint>
+      )}
+
       {/* ⛔ Затвердження і відхилення — пара, і показуються разом. Кнопка
           «Затвердити» без «Відхилити» перетворює погодження на формальність:
           єдиний спосіб не затвердити — не натиснути нічого, і аркуш висить
           у `Submitted` без жодного сліду причини. */}
+      {/* ⛔ `X-05`: `color="green"` давав білий текст на заливці з
+          контрастом 2.4:1 — токен `statusSuccess` підібрано під `primaryShade`
+          цієї теми до AA 4.5:1 (`theme.ts`, `contrast.test.ts`).
+          ⛔ `X-25`: затвердження йшло одним кліком без підтвердження, хоча
+          «Reject» і «Return for edits» питають. Затверджені дані йдуть у
+          звітність регулятору — це та сама вага рішення. */}
       {canApprove && (
         <Button
           size="xs"
-          color="green"
+          color="statusSuccess"
           loading={decide.isPending}
-          onClick={() => decide.mutate({ approved: true, reason: null })}
+          onClick={() => setAsking('approve')}
         >
           {t('workflow.approve')}
         </Button>
@@ -589,6 +654,17 @@ export function SheetActions({
           {t('workflow.recall')}
         </Button>
       )}
+
+      <ConfirmModal
+        opened={asking === 'approve'}
+        title={t('workflow.approveTitle')}
+        text={t('workflow.approveHint')}
+        verb={t('workflow.approve')}
+        danger={false}
+        isPending={decide.isPending}
+        onConfirm={() => decide.mutate({ approved: true, reason: null })}
+        onClose={() => setAsking(null)}
+      />
 
       <ReasonModal
         opened={asking === 'recall'}
