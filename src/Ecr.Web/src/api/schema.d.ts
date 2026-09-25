@@ -4639,6 +4639,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Публікації версій методології, найновіші першими. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyPublicationEntry"][];
+                        "text/json": components["schemas"]["MethodologyPublicationEntry"][];
+                        "text/plain": components["schemas"]["MethodologyPublicationEntry"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/simulate": {
         parameters: {
             query?: never;
@@ -14208,6 +14249,8 @@ export interface components {
         };
         /** @description Прив'язка виходу методології до колонки документа (`D-69`). */
         CalculationBindingDto: {
+            /** @description Код колонки-приймача (F-21); як і код таблиці — лише в переліку. */
+            columnCode?: null | string;
             /**
              * Format: int32
              * @description Колонка-приймач.
@@ -14246,6 +14289,26 @@ export interface components {
         CalculationLevel: "Configuration" | "Module";
         /** @description Число, яке дав актуальний прогін розрахунку на документі. */
         CalculationResultDto: {
+            /**
+             * Format: date-time
+             * @description Коли завершився прогін (UTC).
+             */
+            calculatedAt?: null | string;
+            /**
+             * Format: date-time
+             * @description Остання зміна входів після прогону (UTC); `null` — не змінювались.
+             */
+            inputsChangedAt?: null | string;
+            /**
+             * @description Входи документа змінилися після прогону, що дав це число (F-05): число
+             *     вже не відповідає даним, потрібен перерахунок.
+             * @default false
+             */
+            isStale: boolean;
+            /** @description Код методології — підпис числа (F-21). */
+            methodologyCode?: null | string;
+            /** @description Номер версії методології («1.2.0»), а не її ідентифікатор (F-21). */
+            methodologyVersion?: null | string;
             /**
              * Format: int32
              * @description Версія, що дала число.
@@ -16391,9 +16454,42 @@ export interface components {
              *     показане (№05 §7): оголошений і невжитий аргумент. */
             warnings?: null | string[];
         };
+        /** @description Одна публікація версії методології з журналу `aud.PublicationEvent` (F-16). */
+        MethodologyPublicationEntry: {
+            /** @description Причина зміни (ФВ-14.7). */
+            changeReason: null | string;
+            /**
+             * Format: date-time
+             * @description Коли опубліковано (UTC).
+             */
+            changedAt: string;
+            /** @description Ім'я того, хто опублікував; `null` — облікового запису вже немає. */
+            changedByName: null | string;
+            /**
+             * Format: int32
+             * @description Хто опублікував.
+             */
+            changedByUserId: number;
+            /**
+             * Format: int64
+             * @description Запис журналу.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Опублікована версія.
+             */
+            methodologyVersionId: number;
+            /** @description Diff результатів на золотому наборі (ФВ-9.6), як записано. */
+            resultDiffJson: null | string;
+            /** @description Номер версії. */
+            version: string;
+        };
         /** @description Обов'язкова вхідна колонка методології — gate перед збереженням клітинки
          *     (директива «обов'язкові вхідні колонки методології»). */
         MethodologyRequiredInputDto: {
+            /** @description Код колонки — підпис замість голого `ColumnDefId` (F-21); лише в переліку. */
+            columnCode?: null | string;
             /**
              * Format: int32
              * @description Колонка документа, обов'язкова як вхід.

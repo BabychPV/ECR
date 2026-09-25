@@ -432,6 +432,13 @@
       "CalculationBindingDto": {
         "description": "Прив'язка виходу методології до колонки документа (`D-69`).",
         "properties": {
+          "columnCode": {
+            "description": "Код колонки-приймача (F-21); як і код таблиці — лише в переліку.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "columnDefId": {
             "description": "Колонка-приймач.",
             "format": "int32",
@@ -504,6 +511,41 @@
       "CalculationResultDto": {
         "description": "Число, яке дав актуальний прогін розрахунку на документі.",
         "properties": {
+          "calculatedAt": {
+            "description": "Коли завершився прогін (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "inputsChangedAt": {
+            "description": "Остання зміна входів після прогону (UTC); `null` — не змінювались.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isStale": {
+            "default": false,
+            "description": "Входи документа змінилися після прогону, що дав це число (F-05): число\nвже не відповідає даним, потрібен перерахунок.",
+            "type": "boolean"
+          },
+          "methodologyCode": {
+            "description": "Код методології — підпис числа (F-21).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "methodologyVersion": {
+            "description": "Номер версії методології («1.2.0»), а не її ідентифікатор (F-21).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "methodologyVersionId": {
             "description": "Версія, що дала число.",
             "format": "int32",
@@ -5138,9 +5180,77 @@
         ],
         "type": "object"
       },
+      "MethodologyPublicationEntry": {
+        "description": "Одна публікація версії методології з журналу `aud.PublicationEvent` (F-16).",
+        "properties": {
+          "changeReason": {
+            "description": "Причина зміни (ФВ-14.7).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedAt": {
+            "description": "Коли опубліковано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedByName": {
+            "description": "Ім'я того, хто опублікував; `null` — облікового запису вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedByUserId": {
+            "description": "Хто опублікував.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Запис журналу.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "methodologyVersionId": {
+            "description": "Опублікована версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "resultDiffJson": {
+            "description": "Diff результатів на золотому наборі (ФВ-9.6), як записано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "changedAt",
+          "methodologyVersionId",
+          "version",
+          "changeReason",
+          "changedByUserId",
+          "changedByName",
+          "resultDiffJson"
+        ],
+        "type": "object"
+      },
       "MethodologyRequiredInputDto": {
         "description": "Обов'язкова вхідна колонка методології — gate перед збереженням клітинки\n(директива «обов'язкові вхідні колонки методології»).",
         "properties": {
+          "columnCode": {
+            "description": "Код колонки — підпис замість голого `ColumnDefId` (F-21); лише в переліку.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "columnDefId": {
             "description": "Колонка документа, обов'язкова як вхід.",
             "format": "int32",
@@ -18676,6 +18786,58 @@
         ]
       }
     },
+    "/api/v1/methodologies/{id}/publications": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Публікації версій методології, найновіші першими. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyPublications"
+        ]
+      }
+    },
     "/api/v1/methodologies/{id}/simulate": {
       "post": {
         "description": "Показує, що вийде, якщо опублікувати (ФВ-13.5). Нічого не зберігає:\nсаме тому доступний із правом на перегляд, а не на публікацію.",
@@ -31263,6 +31425,9 @@
     },
     {
       "name": "Methodologies"
+    },
+    {
+      "name": "MethodologyPublications"
     },
     {
       "name": "MethodologyVersions"
