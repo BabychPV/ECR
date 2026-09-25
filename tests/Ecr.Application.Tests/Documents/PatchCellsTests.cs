@@ -171,7 +171,7 @@ public sealed class PatchCellsTests
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
-               Substitute.For<ISheetEditGate>());
+               Substitute.For<ISheetEditGate>(), Units());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -762,6 +762,19 @@ public sealed class PatchCellsTests
         // Той самий блок, що й комірковий Error (R-B3): нічого не записано.
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Довідник одиниць, у якому є одиниця <c>7</c> — та, яку пишуть тести
+    /// цього файлу (B-02: неіснуюча одиниця тепер відхиляється до запису).
+    /// </summary>
+    private static IUnitCatalog Units()
+    {
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
+            new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase) { ["kg"] = new(7, "kg", 1) },
+            new Dictionary<string, int>(StringComparer.Ordinal)));
+        return units;
     }
 
     [Theory]

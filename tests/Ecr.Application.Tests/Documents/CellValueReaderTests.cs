@@ -131,6 +131,26 @@ public sealed class CellValueReaderTests
         Assert.Equal(7, data.ValueUnitId);
     }
 
+    /// <summary>
+    /// X-31: не-ідентифікатор у колонці одиниць відхиляється ВЛАСНИМ ключем —
+    /// «очікує ідентифікатор одиниці», а не «запису довідника».
+    /// </summary>
+    [Theory]
+    [InlineData(CellDataType.Unit, "err.ECR-CELL-0422.expectsUnitIdentifier", "UnitIdentifier")]
+    [InlineData(CellDataType.Lookup, "err.ECR-CELL-0422.expectsIdentifier", "Identifier")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "X-31")]
+    public void Не_ідентифікатор_у_колонці_Unit_і_Lookup_відхиляється_кожен_своїм_ключем(
+        CellDataType type, string messageKey, string expected)
+    {
+        var error = Assert.Throws<BusinessRuleException>(
+            () => CellValueReader.Read(FromWire("kg"), Column(type)));
+
+        Assert.Equal("ECR-CELL-0422", error.ErrorCode);
+        Assert.Equal(messageKey, error.Details!["messageKey"]);
+        Assert.Equal(expected, error.Details["expected"]);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-6.11")]

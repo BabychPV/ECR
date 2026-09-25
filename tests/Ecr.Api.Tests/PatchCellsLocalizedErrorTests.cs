@@ -128,7 +128,7 @@ public sealed class PatchCellsLocalizedErrorTests
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
-               Substitute.For<ISheetEditGate>());
+               Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {

@@ -71,14 +71,76 @@ public sealed class PatchCellsRegistryLookupTests(SqlServerFixture sql)
         Assert.Null(written);
     }
 
+    /// <summary>
+    /// B-02: неіснуюча одиниця в комірці <c>Unit</c> — та сама чиста відмова
+    /// <c>ECR-CELL-4223</c>, що й для <c>Lookup</c>, але з ВЛАСНИМ ключем тексту,
+    /// а не сире <c>FK_CellValue_Unit</c> (<c>500</c>); наявна одиниця пишеться.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Довідник одиниць тут СПРАВЖНІЙ (<see cref="UnitCatalog"/>): предмет
+    /// тесту — саме відповідь бази на питання «чи існує одиниця», і підміна
+    /// довела б лише, що обробник читає свою ж заглушку.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "B-02")]
+    public async Task Патч_Unit_комірки_з_неіснуючою_одиницею_дає_чисту_помилку_а_наявна_пишеться()
+    {
+        var doc = await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(columnCount: 3, ct: CancellationToken.None);
+        var realRowKey = await FirstRowKeyAsync(doc);
+        var baseVersion = await RowVersionBase64Async(doc, realRowKey);
+
+        await using var db = CreateContext();
+        var clock = new FixedClock(new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc));
+        var bulk = new BulkCellLoader(sql.ConnectionString, 1000);
+
+        var handler = BuildHandler(
+            new NormalizedCellStore(db), new RowStore(db, bulk, clock), new DocumentStore(db),
+            new AuditWriter(db), new UnitOfWork(db), new RegistryStore(db), clock, doc,
+            CellDataType.Unit, new UnitCatalog(db));
+
+        const int nonExistentUnitId = 999_999;
+        var refused = new PatchCellsRequest(doc.TableInstanceId, doc.PeriodKey.Value, "UserEdit",
+            [new PatchRow(realRowKey, baseVersion, [new PatchCell(CodeOf(doc, 3), nonExistentUnitId)])]);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(refused, CancellationToken.None));
+
+        Assert.Equal("ECR-CELL-4223", error.ErrorCode);
+        Assert.Equal("err.ECR-CELL-4223.missingUnit", error.Details!["messageKey"]);
+        Assert.Equal("1", error.Details["cellCount"]);
+
+        var cellSql =
+            $"SELECT ValueUnitId FROM doc.CellValue WHERE PeriodKey = {doc.PeriodKey.Value} " +
+            $"AND TableRowId = (SELECT TOP 1 Id FROM doc.TableRow WHERE TableInstanceId = {doc.TableInstanceId} " +
+            $"AND RowKey = '{realRowKey}') AND ColumnDefId = {doc.ColumnDefIds[2]}";
+        Assert.Null(await ScalarOrNullAsync<int?>(cellSql));
+
+        // Контроль: наявна одиниця проходить і лягає в базу — відмова вище не
+        // від того, що колонку `Unit` цей шлях не пише зовсім.
+        var unitId = await db.Units.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
+        await handler.HandleAsync(
+            new PatchCellsRequest(doc.TableInstanceId, doc.PeriodKey.Value, "UserEdit",
+                [new PatchRow(realRowKey, baseVersion, [new PatchCell(CodeOf(doc, 3), unitId)])]),
+            CancellationToken.None);
+
+        Assert.Equal(unitId, await ScalarOrNullAsync<int?>(cellSql));
+    }
+
     private PatchCellsHandler BuildHandler(
         ICellStore cells, IRowStore rows, IDocumentStore documents, IAuditWriter audit, IUnitOfWork uow,
-        IRegistryStore registries, IClock clock, TestDocument doc)
+        IRegistryStore registries, IClock clock, TestDocument doc,
+        CellDataType thirdColumnType = CellDataType.Lookup, IUnitCatalog? units = null)
     {
         var column1 = ColumnDefFor(doc, 1, CellDataType.String);
         var column2 = ColumnDefFor(doc, 2, CellDataType.Decimal);
-        var lookupColumn = ColumnDefFor(doc, 3, CellDataType.Lookup);
-        lookupColumn.SetLookup(registryDefId: 1);
+        var lookupColumn = ColumnDefFor(doc, 3, thirdColumnType);
+        if (thirdColumnType == CellDataType.Lookup)
+        {
+            lookupColumn.SetLookup(registryDefId: 1);
+        }
 
         var sheet = new SheetDef(doc.TemplateVersionId, EcrCode.Create($"SH{doc.SheetDefId}"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Sheet" }), 1);
@@ -149,7 +211,7 @@ public sealed class PatchCellsRegistryLookupTests(SqlServerFixture sql)
             cells, rows, documents, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             methodologies, registries, headers, audit, Substitute.For<IAuditReader>(),
-            jobs, uow, user, clock, Substitute.For<ISheetEditGate>());
+            jobs, uow, user, clock, Substitute.For<ISheetEditGate>(), units ?? Substitute.For<IUnitCatalog>());
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

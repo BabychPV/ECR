@@ -417,7 +417,9 @@ UPDATE t
     (N'grid.conflictHint', N'en', N'{count} cell(s) were changed by another user. Review them before saving again.',
                                                 N'{count} cell(s) were changed by someone else after this table was loaded. Keep your values to overwrite theirs, or discard yours to see theirs.'),
     (N'grid.conflictItem', N'en', N'Row {row}, column {column}: their value {value} — {user}, {time}',
-                                                N'Row {row}, column {column}: yours {yours}, theirs {value} — {user}, {time}')
+                                                N'Row {row}, column {column}: yours {yours}, theirs {value} — {user}, {time}'),
+    -- B-02: тим самим кодом тепер відмовляє й неіснуюча одиниця в колонці `Unit`.
+    (N'err.ECR-CELL-4223',               N'en', N'Reference to a missing registry entry', N'Reference to a missing registry entry or unit')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -746,6 +748,8 @@ USING (VALUES
     (N'err.ECR-CELL-0422.expectsBoolean',    N'en', N'Column "{columnCode}" expects true or false.', 1),
     (N'err.ECR-CELL-0422.expectsDate',       N'en', N'Column "{columnCode}" expects a date.', 1),
     (N'err.ECR-CELL-0422.expectsIdentifier', N'en', N'Column "{columnCode}" expects the identifier of a registry entry.', 1),
+    -- X-31: колонка одиниць очікує ідентифікатор ОДИНИЦІ, а не запису довідника.
+    (N'err.ECR-CELL-0422.expectsUnitIdentifier', N'en', N'Column "{columnCode}" expects the identifier of a unit of measure.', 1),
     -- ⛔ `U-23`: число з більшою кількістю знаків після коми, ніж тримає
     -- сховище (`decimal(34,16)`), доти приймалося й мовчки округлювалося на
     -- клієнті SqlClient, а запит закінчувався «Saved». Тепер — відмова тим
@@ -755,6 +759,8 @@ USING (VALUES
     (N'err.ECR-CELL-0422.tooManyIntegerDigits', N'en', N'Column "{columnCode}" keeps at most {maxIntegerDigits} digits before the decimal point.', 1),
     (N'err.ECR-CALC-0437.requiredInputs',    N'en', N'Required methodology input columns are empty: {rowCount} row(s) with an error.', 1),
     (N'err.ECR-CELL-4223.missingEntry',      N'en', N'Reference to a registry entry that does not exist: {cellCount} cell(s).', 1),
+    -- B-02: той самий код для колонки `Unit`, власне речення.
+    (N'err.ECR-CELL-4223.missingUnit',       N'en', N'Reference to a unit of measure that does not exist: {cellCount} cell(s).', 1),
     -- ⛔ `Q-341`, другий зріз: УСІ кидки `ECR-DOC-0404` — «документа/аркуша/
     -- екземпляра таблиці немає». Це найчастіший 404 продукту: код лежить на
     -- шляху відкриття сітки (`GetTableSliceHandler`, `RowStore`,
@@ -1304,7 +1310,7 @@ USING (VALUES
     (N'err.ECR-CELL-0422',  N'en', N'Invalid cell value', 1),
     (N'err.ECR-CELL-4221',  N'en', N'The cell is computed', 1),
     (N'err.ECR-CELL-4222',  N'en', N'Value out of range', 1),
-    (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry', 1),
+    (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry or unit', 1),
     (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
     (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
     (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),

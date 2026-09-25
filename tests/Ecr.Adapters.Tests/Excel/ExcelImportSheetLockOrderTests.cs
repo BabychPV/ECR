@@ -153,7 +153,7 @@ public sealed class ExcelImportSheetLockOrderTests
                 _cells, _rows, Substitute.For<IDocumentStore>(), Substitute.For<IPeriodStore>(), _metadata, _access,
                 new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, Substitute.For<IAuditWriter>(), Substitute.For<IAuditReader>(),
-                _jobs, _uow, _user, _clock, _gate),
+                _jobs, _uow, _user, _clock, _gate, NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
             new ImportDiffBuilder(), _cells, _rows, _uow, _jobs, _gate);
 
     private static AccessProfile Profile() => new()

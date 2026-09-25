@@ -202,7 +202,7 @@ public sealed class RecalculationJobIdTests
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
-                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>())
+                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>())
             .HandleAsync(
                 new PatchCellsRequest(
                     TableInstance, Period, "UserEdit",

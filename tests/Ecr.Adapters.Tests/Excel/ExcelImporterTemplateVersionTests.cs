@@ -182,7 +182,7 @@ public sealed class ExcelImporterTemplateVersionTests
                 methodologies, patchRegistries, patchHeaders,
                 Substitute.For<IAuditWriter>(), Substitute.For<IAuditReader>(),
                 Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
-                Substitute.For<ICurrentUser>(), Substitute.For<IClock>(), Substitute.For<ISheetEditGate>()),
+                Substitute.For<ICurrentUser>(), Substitute.For<IClock>(), Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
             new ImportDiffBuilder(), _cellStore, _rowStore,
             // ⚠ `DAT-05`: імпортер тепер сам відкриває транзакцію на всю книгу
             // і сам ставить задачу перерахунку. Ці тести — про `PreviewAsync`,

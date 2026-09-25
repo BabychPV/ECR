@@ -43,7 +43,11 @@ public sealed class PatchCellsHandler(
     // повторна перевірка стану під ним (`SubmitEditRaceTests`). Перевірка прав
     // нижче (`EnsureAccessAsync`) іде ПОЗА транзакцією, і сама по собі вона не
     // бачить подання, яке ще не зафіксоване.
-    ISheetEditGate sheetGate)
+    ISheetEditGate sheetGate,
+
+    // ⛔ B-02: довідник одиниць — щоб неіснуюча одиниця в комірці `Unit`
+    // відхилялася ДО запису, а не сирим `FK_CellValue_Unit` (`500`).
+    IUnitCatalog units)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -54,8 +58,8 @@ public sealed class PatchCellsHandler(
     /// </exception>
     /// <exception cref="BusinessRuleException">
     /// Комірковий <c>Error</c> валідації — <c>ECR-CELL-0422</c>; посилання
-    /// <c>Lookup</c>-комірки на неіснуючий запис довідника —
-    /// <c>ECR-CELL-4223</c>.
+    /// <c>Lookup</c>-комірки на неіснуючий запис довідника або <c>Unit</c>-комірки
+    /// на неіснуючу одиницю — <c>ECR-CELL-4223</c>.
     /// </exception>
     /// <param name="request">Батч.</param>
     /// <param name="ct">Скасування.</param>
@@ -126,6 +130,7 @@ public sealed class PatchCellsHandler(
             .ConfigureAwait(false);
         var messages = EnsureValidationPasses(context, request, changes, requiredInputMessages, headerValues);
         await EnsureRegistryReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
+        await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
@@ -1304,6 +1309,67 @@ public sealed class PatchCellsHandler(
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-CELL-4223.missingEntry",
+                ["cellCount"] = missing.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["cells"] = missing,
+            });
+    }
+
+    /// <summary>
+    /// Комірка <c>Unit</c> не може посилатися на одиницю, якої немає в
+    /// довіднику (B-02, UX-прохід, четвертий раунд).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дзеркало <see cref="EnsureRegistryReferencesExistAsync"/>: для
+    /// <c>Lookup</c> неіснуючий запис давно дає <c>422 ECR-CELL-4223</c>, а для
+    /// <c>Unit</c> те саме значення доходило до сховища й падало на
+    /// <c>FK_CellValue_Unit</c> (<c>NormalizedCellStore</c>) — голий <c>500</c>.
+    /// Код той самий, ключ тексту — ОКРЕМИЙ: «запис довідника» про одиницю був
+    /// би неправдою, і користувач шукав би не той довідник.
+    ///
+    /// ⚠ Довідник одиниць читається лише коли в батчі Є комірка <c>Unit</c>:
+    /// звичайний батч чисел не платить за нього нічого. Сам довідник — десятки
+    /// рядків одним запитом (<see cref="IUnitCatalog"/>).
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-CELL-4223</c>.</exception>
+    private async Task EnsureUnitReferencesExistAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var unitCells = changes.Upserts
+            .Where(record => context.Snapshot.ColumnsById.TryGetValue(
+                record.Address.ColumnDefId, out var column) && column.DataType == CellDataType.Unit)
+            .Where(record => record.Value.ValueUnitId is not null)
+            .ToList();
+
+        if (unitCells.Count == 0)
+        {
+            return;
+        }
+
+        var catalog = await units.GetAsync(ct).ConfigureAwait(false);
+        var known = catalog.Units.Values.Select(u => u.Id).ToHashSet();
+
+        var byRowId = context.RowIds.ToDictionary(p => p.Value, p => p.Key);
+        var missing = unitCells
+            .Where(record => !known.Contains(record.Value.ValueUnitId!.Value))
+            .Select(record => new
+            {
+                RowKey = byRowId.GetValueOrDefault(record.Address.TableRowId),
+                ColumnCode = context.Snapshot.ColumnsById[record.Address.ColumnDefId].Code,
+                UnitId = record.Value.ValueUnitId!.Value,
+            })
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.CellRegistryEntryMissing,
+            $"Посилання на неіснуючу одиницю виміру: комірок — {missing.Count}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CELL-4223.missingUnit",
                 ["cellCount"] = missing.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["cells"] = missing,
             });

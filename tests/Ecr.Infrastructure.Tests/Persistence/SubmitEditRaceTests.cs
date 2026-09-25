@@ -332,7 +332,7 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
             Metadata(doc), access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             methodologies, registries, headers, new AuditWriter(db), new AuditReader(db),
-            Substitute.For<IBackgroundJobScheduler>(), new UnitOfWork(db), User(), clock, new SheetEditGate(db));
+            Substitute.For<IBackgroundJobScheduler>(), new UnitOfWork(db), User(), clock, new SheetEditGate(db), new Ecr.Infrastructure.Persistence.UnitCatalog(db));
     }
 
     /// <summary>

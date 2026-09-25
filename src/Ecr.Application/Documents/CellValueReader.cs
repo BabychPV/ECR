@@ -143,8 +143,18 @@ public static class CellValueReader
             // (R-A4). Код запису в неї не кладеться: його резолвить той, хто
             // будує запит, — імпорт робить це явно, і саме тому там є доступ
             // до довідника, а тут його немає.
-            CellDataType.Lookup => new CellValueData { ValueRegistryEntryId = Identifier(value, column) },
-            CellDataType.Unit => new CellValueData { ValueUnitId = Identifier(value, column) },
+            CellDataType.Lookup => new CellValueData
+            {
+                ValueRegistryEntryId = Identifier(value, column, ExpectedType.Identifier),
+            },
+
+            // ⛔ X-31: власне очікування, а не спільне з `Lookup`. Відмова
+            // казала «очікує ідентифікатор запису довідника» про колонку
+            // одиниць — і людина шукала запис у довіднику, якого тут немає.
+            CellDataType.Unit => new CellValueData
+            {
+                ValueUnitId = Identifier(value, column, ExpectedType.UnitIdentifier),
+            },
 
             _ => new CellValueData { ValueString = Text(value) },
         };
@@ -242,7 +252,7 @@ public static class CellValueReader
     };
 
     /// <summary>Ідентифікатор запису довідника або одиниці.</summary>
-    private static int Identifier(object value, ColumnDef column) => value switch
+    private static int Identifier(object value, ColumnDef column, ExpectedType expected) => value switch
     {
         int identifier => identifier,
         long identifier when identifier is >= int.MinValue and <= int.MaxValue => (int)identifier,
@@ -251,7 +261,7 @@ public static class CellValueReader
             => (int)identifier,
         string text when int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
-        _ => throw Mismatch(column, value, ExpectedType.Identifier),
+        _ => throw Mismatch(column, value, expected),
     };
 
     private static string Text(object value) => value switch
@@ -294,6 +304,9 @@ public static class CellValueReader
 
         public static readonly ExpectedType Identifier =
             new("Identifier", "err.ECR-CELL-0422.expectsIdentifier", "ідентифікатор");
+
+        public static readonly ExpectedType UnitIdentifier =
+            new("UnitIdentifier", "err.ECR-CELL-0422.expectsUnitIdentifier", "ідентифікатор одиниці");
     }
 
     /// <summary>
