@@ -25,7 +25,7 @@ import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
 import { NotFoundPage } from './NotFoundPage';
 import { canAccessRoute } from './routeAccess';
-import { navRoutes, type RouteHandle } from './routes';
+import { navRoutes, routes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
@@ -348,7 +348,7 @@ export function AppLayout(): JSX.Element {
                   тих, заради кого він існує. У статичному бандлі — лише кнопка
                   й лічильник; шухляда — динамічним `import()`, як палітра. */}
               <MyTasksLauncher />
-              <UserMenu userName={me.userName ?? '—'} />
+              <UserMenu userName={me.userName ?? '—'} changePasswordPath={routes.changePassword.path} />
             </Group>
           </Group>
         </AppShell.Header>

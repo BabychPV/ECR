@@ -11,7 +11,6 @@ import {
 } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import { routes } from '@/app/routes';
 import { t } from '@/shared/i18n';
 import { applyDensity, setDensity, useDensity, type Density } from '@/shared/theme/preferences';
 import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
@@ -24,14 +23,25 @@ import { LanguageSwitcher } from '@/shared/ui/LanguageSwitcher';
  * налаштувань у системі немає, і заводити її заради жменьки перемикачів
  * означало б ще один пункт меню, який відкривають двічі за весь час роботи.
  *
- * ✎ `R-14`: сторінка `/change-password` (`routes.changePassword`) до цього
- * була доступна лише примусовим редиректом на `mustChangePassword` — людина,
- * що хотіла змінити пароль добровільно, шляху на екран не мала взагалі.
- * Напис — `password.title` (той самий ключ, що й заголовок сторінки): нового
- * рядка каталогу заводити не треба, а текст на пункті меню й на сторінці, яку
- * він відкриває, — той самий.
+ * ✎ `R-14`: сторінка зміни пароля до цього була доступна лише примусовим
+ * редиректом на `mustChangePassword` — людина, що хотіла змінити пароль
+ * добровільно, шляху на екран не мала взагалі. Напис — `password.title` (той
+ * самий ключ, що й заголовок сторінки): нового рядка каталогу заводити не
+ * треба, а текст на пункті меню й на сторінці, яку він відкриває, — той самий.
+ *
+ * ⛔ Шлях приходить ПРОПОМ (`changePasswordPath`), а не з `@/app/routes`
+ * напряму: `shared/ui` лежить НИЖЧЕ `app` у дозволених напрямках імпорту
+ * (`ClientLayerRulesTests.Шари_клієнта_імпортують_лише_вниз`), і прямий
+ * імпорт `routes` звідси — саме те порушення, яке цей сторож ловить.
+ * `AppLayout.tsx` (шар `app`) передає `routes.changePassword.path`.
  */
-export function UserMenu({ userName }: { userName: string }): JSX.Element {
+export function UserMenu({
+  userName,
+  changePasswordPath,
+}: {
+  userName: string;
+  changePasswordPath: string;
+}): JSX.Element {
   const navigate = useNavigate();
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   // ⚠ Підписка (`shared/theme/preferences.ts`), а не власний `useState`:
@@ -112,9 +122,7 @@ export function UserMenu({ userName }: { userName: string }): JSX.Element {
 
         <Divider />
 
-        <Menu.Item onClick={() => navigate(routes.changePassword.path)}>
-          {t('password.title')}
-        </Menu.Item>
+        <Menu.Item onClick={() => navigate(changePasswordPath)}>{t('password.title')}</Menu.Item>
 
         <Menu.Item onClick={signOut}>
           <Group justify="space-between">{t('profile.logout')}</Group>
