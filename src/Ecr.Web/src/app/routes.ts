@@ -187,7 +187,11 @@ export const routes = {
   adminTemplates: {
     id: 'admin-templates',
     path: '/admin/templates',
-    handle: { labelKey: 'nav.templates', permission: 'Template.Edit', icon: 'templates' },
+    // ⛔ `X-38`: перелік читається з `Template.View` (`ListTemplatesHandler`), як і
+    // решта сторінок шаблонів нижче. Тут стояло `Template.Edit`: оператор із правом
+    // перегляду бачив картку шаблону й версії, а сам перелік — «Requires Template.Edit».
+    // Створення й нова версія на сторінці і так ховаються за `Template.Edit`.
+    handle: { labelKey: 'nav.templates', permission: 'Template.View', icon: 'templates' },
     showInNav: true,
   },
   // ⚠ Вузол вкладеності (`PR #2`, `TemplateVersionLayout`): `router.tsx`
