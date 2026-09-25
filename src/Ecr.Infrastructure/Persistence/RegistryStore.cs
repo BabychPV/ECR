@@ -25,6 +25,15 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     /// <summary>Стеля вибірки зв'язків каскаду.</summary>
     private const int MaxLinks = 200_000;
 
+    /// <summary>
+    /// Мітка SQL-запиту «чи є комірки з посиланням на довідник» (<c>R-05</c>).
+    /// </summary>
+    /// <remarks>
+    /// Коментар у тексті запиту: за ним тест знаходить план у кеші й перевіряє,
+    /// що комірки читаються індексом, а не сканом.
+    /// </remarks>
+    public const string WhereUsedCellsTag = "R-05 registry where-used: cells";
+
     /// <inheritdoc />
     public Task<RegistryDef?> FindDefinitionAsync(string code, CancellationToken ct)
         => db.RegistryDefs
@@ -279,11 +288,25 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
             .ConfigureAwait(false);
 
         // Дані: один рядок на таблицю, без підрахунку (див. порт).
-        var inCells = await db.CellValues
+        //
+        // ⛔ R-05: запит іде ВІД записів довідника до комірок, а не навпаки, і
+        // `IS NOT NULL` стоїть явно. Доти EXISTS по doc.CellValue з корельованим
+        // підзапитом до записів оптимізатор виконував як скан усіх комірок із
+        // пошуком запису на кожну: на стенді (2.06 млн комірок) — 7.4 с і 3 млн
+        // читань dic.RegistryEntry, навіть для довідника, на який не посилається
+        // ніхто. Тепер вартість обмежена записами ЦЬОГО довідника, а кожен
+        // пошук комірки — seek по IX_CellValue_RegistryEntry (фільтр
+        // `IS NOT NULL`: явний предикат гарантує, що фільтрований індекс
+        // зіставиться за будь-якої форми плану). PeriodKey не додається — див.
+        // CountReferencesAsync: питання глобальне за змістом.
+        var inCells = await db.RegistryEntries
+            .AsNoTracking()
+            .TagWith(WhereUsedCellsTag)
             .AnyAsync(
-                cell => db.RegistryEntries.Any(
-                    entry => entry.RegistryDefId == registryDefId
-                             && entry.Id == cell.ValueRegistryEntryId),
+                entry => entry.RegistryDefId == registryDefId
+                         && db.CellValues.Any(
+                             cell => cell.ValueRegistryEntryId != null
+                                     && cell.ValueRegistryEntryId == entry.Id),
                 ct)
             .ConfigureAwait(false);
 
