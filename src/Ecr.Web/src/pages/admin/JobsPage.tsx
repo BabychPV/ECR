@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import {
+  Box,
   Button,
   Card,
   Checkbox,
@@ -365,7 +366,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
               </Stack>
             ),
             sortValue: (job) => jobKindLabel(job.jobCode),
-            minWidth: 180,
+            minWidth: 130,
           },
           {
             key: 'state',
@@ -380,11 +381,15 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                 {/* ⚠ BE-08+: `JobSummary` тепер несе те саме `maxAttempts`, що й
                     `JobStatus` картки — «спроба N з M», коли обидва відомі. */}
                 <JobAttempt attempt={job.attempt} maxAttempts={job.maxAttempts} />
-                <JobFailure
-                  state={job.state}
-                  errorCode={job.errorCode}
-                  correlationId={job.correlationId}
-                />
+                {/* ⚠ `X-22`: ідентифікатор кореляції (32 знаки без пробілів) разом із
+                    кнопкою копіювання робив колонку стану ~360 px — переноситься. */}
+                <Box maw={240} className="ecr-wrap-anywhere" data-job-failure-cell="">
+                  <JobFailure
+                    state={job.state}
+                    errorCode={job.errorCode}
+                    correlationId={job.correlationId}
+                  />
+                </Box>
               </Stack>
             ),
           },
@@ -394,7 +399,18 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             key: 'message',
             label: t('jobs.recentMessage'),
             sortable: false,
-            render: (job) => job.message ?? '',
+            // ⛔ `X-22`: при 1280 таблиця була ширша за екран, і «Started»/«Watch»
+            // стояли за правим краєм. Найширше тут — повідомлення (ключ експорту
+            // на 32 шістнадцяткові знаки): тепер воно обрізається з повним
+            // текстом у `title`, а не розсуває таблицю.
+            render: (job) =>
+              job.message === null || job.message === undefined || job.message === '' ? (
+                ''
+              ) : (
+                <Text size="sm" className="ecr-ellipsis" maw={160} title={job.message} data-job-message="">
+                  {job.message}
+                </Text>
+              ),
           },
           {
             key: 'createdByDisplayName',
@@ -438,7 +454,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                 {/* ⚠ `wrap="nowrap"`: дії в одному рядку таблиці не мають
                     переносити одна одну на другий рядок і рвати висоту рядків. */}
                 <Group gap="xs" wrap="nowrap">
-                  <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
+                  <Button variant="subtle" size="compact-xs" onClick={() => onPick(job.jobId)}>
                     {t('jobs.recentWatch')}
                   </Button>
 
