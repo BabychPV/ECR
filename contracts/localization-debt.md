@@ -571,6 +571,74 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
   `ECR-SEC-0404`/`ECR-SIM-0422` уже були нейтральними; `ECR-ROW-0409` теж не
   чіпався (лишень де і чому він тепер трохи вводить в оману — див. вище).
 
+## ✎ 2026-09-25: Templates + доменна конфігурація (B-14) — 27 кидків, 9 файлів, закрито повністю
+
+`GetTemplateStructureHandler.cs` (1), `PatchPresentationHandler.cs` (4),
+`SheetDefHandlers.cs` (4), `TemplateQueryHandlers.cs` (4),
+`ValidationRuleHandlers.cs` (5), `CalculationBinding.cs` (1),
+`FormulaDef.cs` (2), `SheetDef.cs` (1), `TemplateVersion.cs` (5) закрито
+повністю, 27 кидків; 93 у 46 файлах → **66 у 37 файлах**.
+
+- `err.ECR-TMPL-0404.templateVersion`, `err.ECR-TMPL-0404.table`,
+  `err.ECR-TMPL-0404.sheet`, `err.ECR-AUTH-0401.anonymousWrite`,
+  `err.ECR-AUTH-0401.signInRequired`, `err.ECR-AUTH-0403.permission`,
+  `err.ECR-REQ-0422.pageSizeOutOfRange` {max} — наявні ключі, перевикористані
+  для тих самих фактів («версії/таблиці/аркуша немає», «сесія без
+  користувача», «увійдіть», «бракує права X», «розмір сторінки поза межами»),
+  що вже несуть `Repository<T,TId>.GetAsync`/`TemplateVersionStore`/
+  `ColumnDefHandlers`/`FormulaDefHandlers`/`DocumentQueryHandlers`/
+  `ListProjectsHandler` та решта.
+- `PatchPresentationHandler.cs`: `err.ECR-TMPL-0422.emptyPatch` — порожній
+  патч; `err.ECR-TMPL-0422.patchNotJson` — патч не є коректним JSON;
+  `err.ECR-SCHM-0409.presentationPatchBreaking` {fieldCount} — серед змін є
+  `Breaking` на версії з документами; `err.ECR-TMPL-0409.presentationPatchStructural`
+  {fieldCount} — серед змін є структурна. Обидва останні несуть у `Details`
+  ще й сирий перелік полів (`breakingFields`/`structuralFields`) окремим
+  полем для клієнта, у тексті подробиці підставляється лише кількість — той
+  самий прийом, що `periodKeys` (2026-09-23): резолвер підставляє лише
+  `string`, а перелік рядком через кому тут не читався б краще за число.
+- `SheetDefHandlers.cs`: `err.ECR-TMPL-0422.sheetCodeTakenByDeleted`
+  {sheetCode, versionId} — новий, дзеркало до `.columnCodeTakenByDeleted`/
+  `.tableCodeTakenByDeleted`/`.rowKeyTakenByDeleted`; видалення аркуша
+  перевикористало наявний `err.ECR-TMPL-0404.sheet` {sheetCode, versionId}
+  (заведений раніше в області `ColumnDefHandlers`, першого разу не мав
+  виклику — тепер має).
+- `ValidationRuleHandlers.cs`: новий `err.ECR-TMPL-0404.validationRule`
+  {code, tableDefId} — правила з таким кодом немає в таблиці; пошук
+  таблиці двічі перевикористав наявний `.table`.
+- `CalculationBinding.Update`: новий `err.ECR-CFG-0422.calculationBindingMatchRequired`
+  {outputCode} — прив'язка виходу без предиката зіставлення (код лишено
+  `ECR-CFG-0422`, уже перевантажений іншими причинами з попередніх раундів).
+- `FormulaDef.AssignColumn`/`AssignRow`: один новий ключ на обидва —
+  `err.ECR-TMPL-0422.formulaAssignScopeMismatch` {scope, expectedScope}: той
+  самий факт «формулу не можна прив'язати не до тієї цілі», незалежно від
+  напрямку. ⚠ Обидва виклики в єдиному місці (`FormulaDefHandlers.HandleAsync`)
+  завжди передають `scope`, що вже збігається з очікуваним (`RequireColumnOrRow`
+  перевіряє раніше) — кидок захисний, не досяжний із поточного єдиного
+  викликача, але лишається доменним інваріантом і локалізований так само, як
+  решта: рішення судження, а не факт, тому не занесено у звільнення.
+- `SheetDef.AddTable`: новий `err.ECR-TMPL-0409.tableCodeTaken` {tableCode,
+  sheetCode} — дзеркало до `TableDef.AddColumn`/`AddRow`
+  (`.columnCodeTaken`/`.rowKeyTaken`), рівнем вище (таблиця на аркуші, а не
+  колонка/рядок у таблиці).
+- `TemplateVersion.cs` (5 кидків, найбільший внесок цього проходу):
+  `AddSheet` — новий `err.ECR-TMPL-0409.sheetCodeTaken` {sheetCode}, той
+  самий контракт, що вже мав `AddHeaderField` поруч; `Publish` — новий
+  `err.ECR-TMPL-0409.alreadyPublishedOrDeprecated` {version, status};
+  `ApplyPresentationRevision` — новий `err.ECR-TMPL-0409.presentationRevisionConflict`
+  {expectedRevision, actualRevision}; `Deprecate` — новий
+  `err.ECR-TMPL-0409.deprecateRequiresPublished` {status}; `EnsureStructurallyMutable`
+  — новий `err.ECR-TMPL-0409.structurallyFrozen` {version, status}. ⚠ Останній
+  — єдине джерело факту «версія заморожена» для ВСІХ структурних обробників
+  (`SaveSheetDefHandler`, `SaveColumnDefHandler`, `SaveTableDefHandler`,
+  `SaveRowDefHandler`, `SaveFormulaDefHandler`, `SaveValidationRuleHandler`,
+  `PeriodAccessRuleHandlers`, `TableRelationHandlers`) — кожен уже кличе цей
+  метод, тому один ключ тут локалізує факт одразу для всіх, хоча жоден із
+  тих файлів у списку цього проходу немає.
+- Заголовки кодів не змінювались — `ECR-TMPL-0404`/`ECR-TMPL-0409`/
+  `ECR-TMPL-0422`/`ECR-SCHM-0409`/`ECR-CFG-0422`/`ECR-AUTH-0401`/
+  `ECR-AUTH-0403`/`ECR-REQ-0422` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
@@ -587,20 +655,11 @@ PI-адаптери (`CollectionRunner.cs` 2, `PiAfCatalogReader.cs` 2,
 | `src/Ecr.Application/Projects/CloneProjectHandler.cs` | 3 |
 | `src/Ecr.Application/Recalculation/RecalculationService.cs` | 1 |
 | `src/Ecr.Application/Reporting/ReportSnapshotHandlers.cs` | 3 |
-| `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
-| `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/SheetDefHandlers.cs` | 4 |
-| `src/Ecr.Application/Templates/TemplateQueryHandlers.cs` | 4 |
-| `src/Ecr.Application/Templates/ValidationRuleHandlers.cs` | 5 |
 | `src/Ecr.Application/Units/ConvertUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Units/CreateUnitHandler.cs` | 1 |
 | `src/Ecr.Application/Workflow/ApprovalRouteHandlers.cs` | 4 |
 | `src/Ecr.Calculations/CalculationOrchestrator.cs` | 1 |
 | `src/Ecr.Calculations/GenericCalculationModule.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/CalculationBinding.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/FormulaDef.cs` | 2 |
-| `src/Ecr.Domain/Entities/Configuration/SheetDef.cs` | 1 |
-| `src/Ecr.Domain/Entities/Configuration/TemplateVersion.cs` | 5 |
 | `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
 | `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |
 | `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |

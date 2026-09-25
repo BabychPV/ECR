@@ -88,7 +88,15 @@ public sealed class SheetDef : Entity<int>
             throw new DomainException(
                 "ECR-TMPL-0409",
                 $"Таблиця з кодом {table.Code} на аркуші {Code} уже існує: код — це ідентичність, " +
-                "на нього посилаються вирази.");
+                "на нього посилаються вирази.",
+                new Dictionary<string, object?>
+                {
+                    // Дзеркало до TableDef.AddColumn/AddRow (`.columnCodeTaken`/
+                    // `.rowKeyTaken`): той самий клас факту, рівнем вище.
+                    ["messageKey"] = "err.ECR-TMPL-0409.tableCodeTaken",
+                    ["sheetCode"] = Code,
+                    ["tableCode"] = table.Code,
+                });
         }
 
         _tables.Add(table);

@@ -71,7 +71,10 @@ public sealed class SaveSheetDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         // ⛔ Повний граф версії, ВІДСТЕЖУВАНИЙ — так само, як публікація
         // (`PublishTemplateVersionHandler`). Порожній `IRepository.FindAsync`
@@ -111,7 +114,16 @@ public sealed class SaveSheetDefHandler(
                 ErrorCodes.TemplateInvalid,
                 $"Код аркуша «{code}» зайнятий видаленим аркушем цієї версії. " +
                 "Код — це ідентичність, і повторно використати його в цій версії не можна. " +
-                "Заведіть аркуш з іншим кодом або клонуйте версію.");
+                "Заведіть аркуш з іншим кодом або клонуйте версію.",
+                new Dictionary<string, object?>
+                {
+                    // ⚠ Дзеркало до `.columnCodeTakenByDeleted`/`.tableCodeTakenByDeleted`/
+                    // `.rowKeyTakenByDeleted` (2026-09-23/2026-09-25): код зайнятий
+                    // м'яко видаленим записом.
+                    ["messageKey"] = "err.ECR-TMPL-0422.sheetCodeTakenByDeleted",
+                    ["sheetCode"] = code,
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -261,7 +273,10 @@ public sealed class DeleteSheetDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -269,7 +284,16 @@ public sealed class DeleteSheetDefHandler(
 
         var sheet = version.Sheets.FirstOrDefault(s => string.Equals(s.Code, code, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Аркуша «{code}» у версії {templateVersionId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Аркуша «{code}» у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    // Наявний ключ (`err.ECR-TMPL-0404.sheet`, заведений у ColumnDefHandlers
+                    // area) — той самий факт «аркуша з таким кодом немає».
+                    ["messageKey"] = "err.ECR-TMPL-0404.sheet",
+                    ["sheetCode"] = code,
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
         var change = classifier.ClassifyDeletion(nameof(SheetDef), hasDocuments);

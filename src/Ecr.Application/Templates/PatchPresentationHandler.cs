@@ -55,7 +55,10 @@ public sealed class PatchPresentationHandler(
 
         if (changes.Count == 0)
         {
-            throw new BusinessRuleException("ECR-TMPL-0422", "Порожній патч: змінювати нічого.");
+            throw new BusinessRuleException(
+                "ECR-TMPL-0422",
+                "Порожній патч: змінювати нічого.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.emptyPatch" });
         }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
@@ -103,6 +106,12 @@ public sealed class PatchPresentationHandler(
                 "Клонування версії тут не допомагає — переносити документи буде нікуди.",
                 new Dictionary<string, object?>
                 {
+                    // ⚠ Сам перелік полів лишається структурою `Details["breakingFields"]`
+                    // окремим полем для клієнта (той самий прийом, що
+                    // `periodKeys`/`structuralFields`): резолвер підставляє лише
+                    // string, тому в тексті — лише кількість.
+                    ["messageKey"] = "err.ECR-SCHM-0409.presentationPatchBreaking",
+                    ["fieldCount"] = breaking.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["breakingFields"] = breaking,
                     ["hasDocuments"] = hasDocuments,
                 });
@@ -119,7 +128,12 @@ public sealed class PatchPresentationHandler(
                 "ECR-TMPL-0409",
                 "Патч містить структурні зміни, які в опублікованій версії заборонені: " +
                 string.Join(", ", violations) + ". Структурні зміни вносяться клонуванням версії (ФВ-7.1).",
-                new Dictionary<string, object?> { ["structuralFields"] = violations });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0409.presentationPatchStructural",
+                    ["fieldCount"] = violations.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["structuralFields"] = violations,
+                });
         }
 
         // ⛔ ЗМІНА ЗАСТОСОВУЄТЬСЯ. Цього рядка тут не було: обробник розбирав
@@ -194,7 +208,10 @@ public sealed class PatchPresentationHandler(
         }
         catch (JsonException ex)
         {
-            throw new BusinessRuleException("ECR-TMPL-0422", $"Патч не є коректним JSON: {ex.Message}");
+            throw new BusinessRuleException(
+                "ECR-TMPL-0422",
+                $"Патч не є коректним JSON: {ex.Message}",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.patchNotJson" });
         }
     }
 }

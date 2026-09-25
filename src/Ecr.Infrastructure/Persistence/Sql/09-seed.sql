@@ -1050,6 +1050,25 @@ USING (VALUES
     (N'err.ECR-TMPL-0409.columnCodeTaken',           N'en', N'A column with code "{columnCode}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.rowKeyTaken',               N'en', N'A row with key "{rowKey}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.headerFieldCodeTaken',      N'en', N'A header field with code "{headerFieldCode}" already exists in this template version.', 1),
+    -- B-14: GetTemplateStructureHandler.cs/PatchPresentationHandler.cs/
+    -- SheetDefHandlers.cs/TemplateQueryHandlers.cs/ValidationRuleHandlers.cs +
+    -- CalculationBinding/FormulaDef/SheetDef/TemplateVersion (Configuration).
+    -- `.table`/`.sheet`/`.templateVersion` вище перевикористані (той самий
+    -- факт, звідки б до нього не дійшли); нижче — нові.
+    (N'err.ECR-TMPL-0422.emptyPatch',                N'en', N'The patch is empty: there is nothing to change.', 1),
+    (N'err.ECR-TMPL-0422.patchNotJson',              N'en', N'The patch is not valid JSON.', 1),
+    (N'err.ECR-SCHM-0409.presentationPatchBreaking', N'en', N'The patch changes {fieldCount} identity field(s) on a version that already has documents. This is a rejection, not a warning: cells reference column code and row key, so values already entered would stop being found after the rename. Cloning the version does not help here — there would be nowhere to carry the documents.', 1),
+    (N'err.ECR-TMPL-0409.presentationPatchStructural', N'en', N'The patch changes {fieldCount} structural field(s), which are not allowed on a published version. Structural changes go through cloning the version.', 1),
+    (N'err.ECR-TMPL-0422.sheetCodeTakenByDeleted',   N'en', N'Sheet code "{sheetCode}" in template version {versionId} is taken by a deleted sheet: it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0404.validationRule',            N'en', N'Rule "{code}" does not exist in table {tableDefId}.', 1),
+    (N'err.ECR-CFG-0422.calculationBindingMatchRequired', N'en', N'The output binding "{outputCode}" has no match predicate: an empty string is neither "the whole table" (an empty JSON object) nor a narrowing.', 1),
+    (N'err.ECR-TMPL-0422.formulaAssignScopeMismatch', N'en', N'A formula with scope {scope} cannot be assigned to a {expectedScope}: the scope must match the target.', 1),
+    (N'err.ECR-TMPL-0409.tableCodeTaken',            N'en', N'A table with code "{tableCode}" already exists on sheet "{sheetCode}".', 1),
+    (N'err.ECR-TMPL-0409.sheetCodeTaken',            N'en', N'A sheet with code "{sheetCode}" already exists in this template version.', 1),
+    (N'err.ECR-TMPL-0409.alreadyPublishedOrDeprecated', N'en', N'Version {version} is already published or withdrawn from use (state {status}). Publishing again is not possible: a published version is structurally frozen, and changes go through cloning into a new version.', 1),
+    (N'err.ECR-TMPL-0409.presentationRevisionConflict', N'en', N'Expected appearance revision {expectedRevision}, got {actualRevision}. The mismatch means someone else already changed it in a way this session has not seen.', 1),
+    (N'err.ECR-TMPL-0409.deprecateRequiresPublished', N'en', N'Only a published version can be withdrawn from use; the current state is {status}. A draft has nothing to withdraw — it never went into use.', 1),
+    (N'err.ECR-TMPL-0409.structurallyFrozen',        N'en', N'Version {version} is in state {status} and is structurally frozen. Structural changes go through cloning into a new version; without a clone, documents already submitted would silently change their structure.', 1),
 
     -- Поля шапки документа (foundation): той самий draft->publish шлях, що
     -- колонки таблиці, тому подробиці — під ECR-TMPL-0422/0404, як у колонок.
