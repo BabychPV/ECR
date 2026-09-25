@@ -107,5 +107,22 @@ public sealed class CellValueConfiguration : IEntityTypeConfiguration<CellValue>
         builder.HasIndex(x => new { x.PeriodKeyValue, x.TableRowId, x.ColumnDefId })
                .HasDatabaseName("IX_CellValue_Fill")
                .HasFilter("[IsCalculated] = 0");
+
+        // ⛔ R-05, B-18: «Where used» довідника й одиниці та перевірка
+        // видалення запису (`RegistryStore.CountReferencesAsync`) питають
+        // «чи посилається на це хоч одна комірка» — глобально, БЕЗ PeriodKey
+        // (див. той метод: ключ партиції там змінив би відповідь). Без індексу
+        // це скан усієї doc.CellValue: на стенді 2.06 млн рядків — 7.4 с і
+        // 3 млн читань dic.RegistryEntry. Фільтр — лише комірки з посиланням:
+        // індекс крихітний. Вирівняний по ps_ByPeriodKey (PeriodKey — неявний
+        // ключ розділу; розміщення задає міграція B18HotPathIndexes), тож
+        // TRUNCATE … WITH (PARTITIONS) архівації не ламається.
+        builder.HasIndex(x => x.ValueRegistryEntryId)
+               .HasDatabaseName("IX_CellValue_RegistryEntry")
+               .HasFilter("[ValueRegistryEntryId] IS NOT NULL");
+
+        builder.HasIndex(x => x.ValueUnitId)
+               .HasDatabaseName("IX_CellValue_Unit")
+               .HasFilter("[ValueUnitId] IS NOT NULL");
     }
 }

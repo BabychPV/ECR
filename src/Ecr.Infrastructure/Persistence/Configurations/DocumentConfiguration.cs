@@ -298,6 +298,17 @@ public sealed class TableRowConfiguration : IEntityTypeConfiguration<TableRow>
         builder.HasIndex(x => new { x.PeriodKeyValue, x.TableInstanceId, x.RowKeyValue })
                .IsUnique().HasDatabaseName("UQ_TableRow_Key");
 
+        // ⚠ B-18: живі рядки екземпляра — предикат `PeriodKey + TableInstanceId
+        // + IsDeleted = 0` у RowStore (ключі, версії, сироти) і в TableFillStore.
+        // UQ_TableRow_Key має той самий префікс, але не має IsDeleted, тож
+        // кожен рядок платив key lookup: на 700-рядковому екземплярі стенда
+        // 1548 читань на запит (1816 викликів у кеші планів). Тут — 6.
+        // Вирівняний по ps_ByPeriodKey (міграція B18HotPathIndexes).
+        builder.HasIndex(x => new { x.PeriodKeyValue, x.TableInstanceId })
+               .HasDatabaseName("IX_TableRow_Live")
+               .IncludeProperties(x => x.RowKeyValue)
+               .HasFilter("[IsDeleted] = 0");
+
         builder.HasOne<TableInstance>()
                .WithMany()
                .HasForeignKey(x => new { x.PeriodKeyValue, x.TableInstanceId })

@@ -154,6 +154,13 @@ public sealed class ColumnDefConfiguration : IEntityTypeConfiguration<ColumnDef>
         builder.HasIndex(x => new { x.TableDefId, x.Code })
                .IsUnique().HasDatabaseName("UQ_ColumnDef");
 
+        // B-18: «Where used» довідника й одиниці шукає колонки за посиланням —
+        // без індексу скан усього cfg.ColumnDef (6000 рядків на стенді, 74
+        // читання → 6). Без фільтра навмисно: таблиця мала, а фільтрований
+        // індекс вимагав би QUOTED_IDENTIFIER ON від кожного запису в неї.
+        builder.HasIndex(x => x.LookupRegistryDefId).HasDatabaseName("IX_ColumnDef_LookupRegistryDefId");
+        builder.HasIndex(x => x.UnitId).HasDatabaseName("IX_ColumnDef_UnitId");
+
         // ⛔ Q-222: був у 02a-db-schema.md (FK_ColumnDef_Cascade), ніколи не
         // потрапив у цю конфігурацію.
         builder.HasOne<ColumnDef>()
