@@ -306,6 +306,77 @@ public sealed class AuditWriter(EcrDbContext db) : IAuditWriter
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Максимум рядків за один <c>INSERT</c> подій безпеки.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ На відміну від <see cref="WriteCellChangesAsync"/>, тут немає TVP
+    /// (<c>aud.SecurityEventTvp</c>): це вимагало б нового типу в схемі, а
+    /// пакетний запис для цього завдання — форма виклику, не нова сутність
+    /// схеми. Замість табличного параметра — один багаторядковий <c>INSERT</c>
+    /// із текстом запиту, що росте з розміром батчу (сигнатура НЕ стала, на
+    /// відміну від TVP-шляху) — прийнятно, бо на відміну від комірок (сотні за
+    /// збереження діапазону) подій безпеки за один імпорт довідника — одиниці
+    /// й десятки, не сотні. Ліміт SQL Server на параметри команди — 2100; при
+    /// 7 параметрах на рядок це ~300 рядків, тож межа взята з запасом і батч
+    /// рубається на кілька послідовних команд, якщо рядків більше.
+    /// </remarks>
+    private const int MaxSecurityEventsPerBatch = 250;
+
+    /// <inheritdoc />
+    public async Task WriteSecurityEventsAsync(IReadOnlyList<SecurityEventRecord> events, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        if (events.Count == 0)
+        {
+            return;
+        }
+
+        for (var offset = 0; offset < events.Count; offset += MaxSecurityEventsPerBatch)
+        {
+            var count = Math.Min(MaxSecurityEventsPerBatch, events.Count - offset);
+            await WriteSecurityEventsChunkAsync(events, offset, count, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Один похід до сервера для до <see cref="MaxSecurityEventsPerBatch"/> подій.</summary>
+    private async Task WriteSecurityEventsChunkAsync(
+        IReadOnlyList<SecurityEventRecord> events, int offset, int count, CancellationToken ct)
+    {
+        await using var command = CreateCommand();
+        var values = new string[count];
+
+        for (var i = 0; i < count; i++)
+        {
+            var evt = events[offset + i];
+            var t = $"@t{i}";
+            var e = $"@e{i}";
+            var tu = $"@tu{i}";
+            var tr = $"@tr{i}";
+            var d = $"@d{i}";
+            var u = $"@u{i}";
+            var x = $"@x{i}";
+
+            AddTimestamp(command, t, evt.ChangedAt);
+            AddText(command, e, evt.EventType, EntityTypeLength);
+            AddNullableInt32(command, tu, evt.TargetUserId);
+            AddNullableInt32(command, tr, evt.TargetRoleId);
+            AddText(command, d, evt.DetailsJson, UnboundedLength);
+            AddInt32(command, u, evt.ChangedByUserId);
+            AddText(command, x, evt.CorrelationId, CorrelationIdLength);
+
+            values[i] = $"({t}, {e}, {tu}, {tr}, {d}, {u}, {x})";
+        }
+
+        command.CommandText = $"""
+            INSERT INTO aud.SecurityEvent
+                (ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId)
+            VALUES {string.Join(",\n", values)};
+            """;
+
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     public async Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct)
     {

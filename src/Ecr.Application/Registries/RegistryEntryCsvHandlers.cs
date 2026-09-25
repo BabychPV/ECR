@@ -321,19 +321,26 @@ public sealed class ImportRegistryEntriesHandler(
             // UpsertRegistryEntryHandler.HandleAsync). Формат DetailsJson —
             // буквально той самий, що там: registryDefId/entryId/changes,
             // щоб один і той самий запис читав обидва шляхи однаково.
-            foreach (var (entry, changes) in valueChanges)
+            //
+            // ⛔ Один пакетний виклик, а не цикл поштучних await — та сама
+            // логіка, що B-10 (ca63ed56) уже застосував до ЧИТАННЯ в цьому ж
+            // імпорті: N окремих round-trip на N змінених записів довідника
+            // не масштабується для великого CSV.
+            if (valueChanges.Count > 0)
             {
-                await audit.WriteSecurityEventAsync(
-                    new SecurityEventRecord(
+                var securityEvents = valueChanges
+                    .Select(vc => new SecurityEventRecord(
                         clock.UtcNow, UpsertRegistryEntryHandler.ValueChangedEventType, TargetUserId: null, TargetRoleId: null,
                         JsonSerializer.Serialize(new
                         {
                             registryDefId = definition.Id,
-                            entryId = entry.Id,
-                            changes = changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
+                            entryId = vc.Entry.Id,
+                            changes = vc.Changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
                         }),
-                        userId, currentUser.CorrelationId),
-                    innerCt).ConfigureAwait(false);
+                        userId, currentUser.CorrelationId))
+                    .ToList();
+
+                await audit.WriteSecurityEventsAsync(securityEvents, innerCt).ConfigureAwait(false);
             }
         }, ct).ConfigureAwait(false);
 

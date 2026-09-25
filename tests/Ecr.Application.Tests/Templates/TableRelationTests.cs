@@ -588,6 +588,9 @@ public sealed class TableRelationTests(SqlServerFixture sql)
         public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct)
             => inner.WriteSecurityEventAsync(evt, ct);
 
+        public Task WriteSecurityEventsAsync(IReadOnlyList<SecurityEventRecord> events, CancellationToken ct)
+            => inner.WriteSecurityEventsAsync(events, ct);
+
         public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct)
             => inner.WritePublicationEventAsync(evt, ct);
     }

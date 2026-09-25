@@ -17,6 +17,14 @@ public interface IAuditWriter
     /// <summary>Записує подію безпеки.</summary>
     public Task WriteSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct);
 
+    /// <summary>
+    /// Записує групу подій безпеки за мінімум походів до сервера, у тій самій
+    /// транзакції. Для одиночної події лишається <see cref="WriteSecurityEventAsync"/>
+    /// — цей метод не замінює його, а додається поруч для викликачів, які й так
+    /// збирають список (наприклад, пер-рядковий слід імпорту CSV довідника).
+    /// </summary>
+    public Task WriteSecurityEventsAsync(IReadOnlyList<SecurityEventRecord> events, CancellationToken ct);
+
     /// <summary>Записує подію публікації з diff <b>результатів</b>, а не коду (ФВ-9.6).</summary>
     public Task WritePublicationEventAsync(PublicationEventRecord evt, CancellationToken ct);
 }
