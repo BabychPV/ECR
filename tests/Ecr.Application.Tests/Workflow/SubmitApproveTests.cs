@@ -306,6 +306,60 @@ public sealed class SubmitApproveTests
         await _reportSnapshots.Received(1).MarkSubmittedAsync(55, 9, Arg.Any<CancellationToken>());
     }
 
+    // ──────────────────────────── Погодження ──────────────────────────
+    // F-25 (пряме рішення людини, UX-PASS R4): та сама людина не може бути
+    // тим, хто подав аркуш, і тим, хто його погоджує.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Погодження_власного_подання_відхиляється()
+    {
+        // Той самий користувач (`_user.UserId` == 9), що подав аркуш,
+        // намагається сам його затвердити.
+        _sheets[Water].Submit(userId: 9, Now);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.approveOwnSubmission", error.Details!["messageKey"]);
+
+        // Стан не зрушив: перевірку зупиняє ДО будь-якого запису.
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Погодження_подання_іншого_користувача_дозволене()
+    {
+        // ⚠ Контроль до тесту вище: наявна поведінка (хтось ІНШИЙ подав,
+        // поточний користувач погоджує) не ламається новим правилом.
+        _sheets[Water].Submit(userId: 999, Now);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Approved, _sheets[Water].Status);
+        Assert.Equal(9, _sheets[Water].ApprovedByUserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Відхилення_власного_подання_дозволене()
+    {
+        // ⚠ Заборона стосується лише ЗАТВЕРДЖЕННЯ (`approved: true`):
+        // відхилити власне подання — не конфлікт інтересів, а штатне
+        // повернення собі ж на доопрацювання.
+        _sheets[Water].Submit(userId: 9, Now);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: false, reason: "помилка у сумі", CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Rejected, _sheets[Water].Status);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public async Task Подання_аркуша_за_період_не_зачіпає_інші_аркуші()
     {
