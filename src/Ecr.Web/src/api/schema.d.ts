@@ -15611,7 +15611,7 @@ export interface components {
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
          */
-        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow";
+        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel";
         /** @description Мапінг у відповіді на створення. */
         EntityFieldMapDto: {
             aggregation: null | components["schemas"]["AggregationKind"];

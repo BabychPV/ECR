@@ -3265,7 +3265,8 @@
           "ArchivingInProgress",
           "BusinessRule",
           "SimulationReadOnly",
-          "OutsidePermitWindow"
+          "OutsidePermitWindow",
+          "InsufficientGrantLevel"
         ]
       },
       "EntityFieldMapDto": {
