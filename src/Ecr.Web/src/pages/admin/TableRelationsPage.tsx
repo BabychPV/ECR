@@ -20,6 +20,7 @@ import {
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { showApiError, showDone } from '@/shared/ui/notify';
@@ -52,6 +53,10 @@ export function TableRelationsPage(): JSX.Element {
   const mayEdit = can(session.data, 'Template.Edit');
 
   const [draft, setDraft] = useState<RelationDraft | null>(null);
+
+  // ⛔ R-06/X-01: зв'язок видалявся одним натисканням, без питання. Зв'язок
+  // вирішує, звідки таблиця бере числа, — його зникнення тихо змінює форму.
+  const [removing, setRemoving] = useState<string | null>(null);
 
   const relations = useQuery({
     queryKey: ['table-relations', versionId],
@@ -91,6 +96,7 @@ export function TableRelationsPage(): JSX.Element {
     mutationFn: (code: string) => deleteTableRelation(versionId, code),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['table-relations', versionId] });
+      setRemoving(null);
       showDone(t('tables.relationDeleted'));
     },
     onError: showApiError,
@@ -169,8 +175,9 @@ export function TableRelationsPage(): JSX.Element {
                           size="compact-xs"
                           variant="subtle"
                           color="statusError"
-                          loading={remove.isPending}
-                          onClick={() => remove.mutate(relation.code)}
+                          // ⚠ Лише на натиснутій кнопці, а не на всіх рядках.
+                          loading={remove.isPending && remove.variables === relation.code}
+                          onClick={() => setRemoving(relation.code)}
                         >
                           {t('tables.deleteRelation')}
                         </Button>
@@ -183,6 +190,18 @@ export function TableRelationsPage(): JSX.Element {
           </Table>
         )}
       </AsyncBoundary>
+
+      <ConfirmModal
+        opened={removing !== null}
+        title={t('tables.deleteRelationTitle', { code: removing ?? '' })}
+        text={t('tables.deleteRelationText')}
+        verb={t('tables.deleteRelation')}
+        isPending={remove.isPending}
+        onConfirm={() => {
+          if (removing !== null) remove.mutate(removing);
+        }}
+        onClose={() => setRemoving(null)}
+      />
 
       {draft !== null && (
         <Paper withBorder p="md">

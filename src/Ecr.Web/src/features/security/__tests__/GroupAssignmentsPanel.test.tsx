@@ -27,6 +27,9 @@ const Strings: Record<string, string> = {
   'groupRoles.validFrom': 'Valid from',
   'groupRoles.validTo': 'Valid to',
   'groupRoles.validityOrder': 'End before start',
+  'groupRoles.empty': 'No group has a role',
+  'groupRoles.revokeTitle': 'Revoke {role} from {group}?',
+  'groupRoles.revokeText': 'Members lose it',
 };
 
 const roles: RoleView[] = [
@@ -116,10 +119,43 @@ describe('GroupAssignmentsPanel', () => {
 
     await user().click(screen.getByRole('button', { name: 'Revoke' }));
 
+    // ⛔ R-06/X-01: перше натискання лише ПИТАЄ — з назвою ролі й групи.
+    expect(await screen.findByText('Revoke Publishers from CORP\\EcrOps?')).not.toBeNull();
+    expect(fetchSpy.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+
+    await user().click(screen.getByTestId('confirm-verb'));
+
     await waitFor(() => {
       const call = fetchSpy.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
       expect(String(call?.[0])).toContain('/api/v1/security/group-assignments/11');
     });
+  });
+
+  it('скасування підтвердження не відкликає нічого (R-06)', async () => {
+    const fetchSpy = stubFetch(() => json({}, 201));
+    await renderPanel();
+
+    await screen.findByText('CORP\\EcrOps');
+    await user().click(screen.getByRole('button', { name: 'Revoke' }));
+    await user().click(await screen.findByTestId('confirm-cancel'));
+
+    await waitFor(() => expect(screen.queryByTestId('confirm-verb')).toBeNull());
+    expect(fetchSpy.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+  });
+
+  it('порожній перелік — окреме речення, а не голий заголовок таблиці (X-14)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes('/ui-strings/')
+          ? json({ languageCode: 'en', revision: 1, strings: Strings })
+          : json([]),
+      ),
+    );
+    await renderPanel();
+
+    expect(await screen.findByText('No group has a role')).not.toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Group' })).toBeNull();
   });
 
   it('небезпечна роль: 409 показує права, і лише «Assign anyway» шле confirmDangerous', async () => {

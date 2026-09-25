@@ -15,6 +15,7 @@ import {
 } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { t } from '@/shared/i18n';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Hint } from '@/shared/ui/Hint';
 import { Timestamp } from '@/shared/ui/Timestamp';
@@ -48,6 +49,11 @@ export function ChannelsPanel(): JSX.Element {
   const [draft, setDraft] = useState<ChannelDraft | null>(null);
   const [secretFor, setSecretFor] = useState<NotificationChannel | null>(null);
   const [secret, setSecret] = useState('');
+
+  // ⛔ R-06/X-01: канал видалявся одним натисканням, без питання й без
+  // відгуку. Видалений канал — це сповіщення, які перестають доходити, і
+  // людина дізнається про це не з екрана, а з тиші.
+  const [removing, setRemoving] = useState<NotificationChannel | null>(null);
 
   const channels = useQuery({
     queryKey: NotificationChannelsKey,
@@ -89,6 +95,7 @@ export function ChannelsPanel(): JSX.Element {
     mutationFn: (id: number) => deleteNotificationChannel(id),
     onSuccess: async () => {
       await invalidate();
+      setRemoving(null);
       showDone(t('notifications.channelDeleted'));
     },
     onError: showApiError,
@@ -254,7 +261,8 @@ export function ChannelsPanel(): JSX.Element {
                       size="compact-xs"
                       variant="subtle"
                       color="statusError"
-                      onClick={() => remove.mutate(channel.id)}
+                      loading={remove.isPending && remove.variables === channel.id}
+                      onClick={() => setRemoving(channel)}
                     >
                       {t('common.delete')}
                     </Button>
@@ -426,6 +434,18 @@ export function ChannelsPanel(): JSX.Element {
           </Stack>
         )}
       </Modal>
+
+      <ConfirmModal
+        opened={removing !== null}
+        title={t('notifications.deleteChannelTitle', { name: removing?.name ?? '' })}
+        text={t('notifications.deleteChannelText')}
+        verb={t('common.delete')}
+        isPending={remove.isPending}
+        onConfirm={() => {
+          if (removing !== null) remove.mutate(removing.id);
+        }}
+        onClose={() => setRemoving(null)}
+      />
     </Stack>
   );
 }
