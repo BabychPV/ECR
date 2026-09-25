@@ -77,6 +77,24 @@ public sealed class CreateDocumentHandler(
 
         var versionId = await ProjectVersionAsync(projectId, templateVersionId, ct).ConfigureAwait(false);
 
+        // ⛔ F-11 (UX-прохід, четвертий раунд): в АРХІВОВАНОМУ проєкті документ
+        // не заводиться. Доти `POST /documents` відповідав тут `201`: документ
+        // з'являвся в проєкті, чиї періоди всі закриті (`D-123`), тобто
+        // заповнити його було неможливо, а подати — тим паче. Код — той самий
+        // `ECR-PRD-0409`, що й решта відмов архівованого проєкту
+        // (`projectArchived`, `openPeriods`).
+        if (await documents.FindProjectStatusAsync(projectId, ct).ConfigureAwait(false) == ProjectStatus.Archived)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.PeriodClosed,
+                $"Проєкт {projectId} заархівований: нові документи в ньому не створюються.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0409.projectArchivedNoDocuments",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         // ⛔ Архівований шаблон НЕ пропонується для нових документів (директива
         // №15, `BE-26`). Правило стоїть саме тут, а не лише у фільтрі переліку:
         // `templateVersionId` приходить із тіла запиту, і «не показувати в

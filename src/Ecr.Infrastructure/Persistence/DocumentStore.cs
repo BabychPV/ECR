@@ -464,6 +464,15 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<Domain.Enums.ProjectStatus?> FindProjectStatusAsync(int projectId, CancellationToken ct)
+        => await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (Domain.Enums.ProjectStatus?)p.Status)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
     public async Task<int> GetTemplateVersionIdAsync(long documentId, CancellationToken ct)
     {
         // Один запит через увесь ланцюг: документ → проєкт. Версія живе на

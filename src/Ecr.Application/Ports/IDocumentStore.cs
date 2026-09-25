@@ -215,6 +215,15 @@ public interface IDocumentStore
     /// </remarks>
     public Task<int?> FindProjectTemplateVersionIdAsync(int projectId, CancellationToken ct);
 
+    /// <summary>Стан ПРОЄКТУ; <c>null</c> — проєкту немає.</summary>
+    /// <remarks>
+    /// ⛔ F-11: створення документа не питало стану проєкту взагалі, і
+    /// <c>POST /documents</c> в АРХІВОВАНОМУ проєкті відповідав <c>201</c>.
+    /// Окремий вузький запит, а не сутність проєкту: створенню потрібне одне
+    /// поле, а <c>IPeriodStore.FindProjectAsync</c> тягне ще й усі періоди.
+    /// </remarks>
+    public Task<Domain.Enums.ProjectStatus?> FindProjectStatusAsync(int projectId, CancellationToken ct);
+
     /// <summary>
     /// Фіксує зміну документа: <c>ModifiedAt</c> і <c>ModifiedByUserId</c>.
     /// </summary>

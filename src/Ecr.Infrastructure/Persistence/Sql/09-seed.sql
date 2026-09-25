@@ -1167,6 +1167,11 @@ USING (VALUES
     (N'err.ECR-PRJ-0422.notDraft',              N'en', N'Only a draft can be activated; the project is in state {status}.', 1),
     (N'err.ECR-PRJ-0422.noPeriods',             N'en', N'The calendar of project {projectId} produced no period: check the period kind, the reporting year and the offset policy.', 1),
     (N'err.ECR-PRD-0409.openPeriods',           N'en', N'Project {projectId} has periods that are not closed: archiving is not possible.', 1),
+    -- F-11 / F-12: архівований проєкт — кінцевий стан.
+    (N'err.ECR-PRD-0409.projectAlreadyArchived', N'en', N'Project "{projectCode}" is already archived.', 1),
+    (N'err.ECR-PRD-0409.archiveNotActive',      N'en', N'Only an active project can be archived; the project is {status}.', 1),
+    (N'err.ECR-PRD-0409.projectArchivedCurrentPeriod', N'en', N'Project "{projectCode}" is archived: its current period cannot be changed.', 1),
+    (N'err.ECR-PRD-0409.projectArchivedNoDocuments', N'en', N'Project {projectId} is archived: new documents cannot be created in it.', 1),
     (N'err.ECR-PRD-4225.graceAfterHardClose',   N'en', N'The grace period ({graceOffsetDays} days) cannot be longer than the hard close ({hardCloseOffsetDays} days): the period would close for good before its own grace period ends.', 1),
     (N'err.ECR-PRD-4225.negativeYearGrace',     N'en', N'The year-end grace period ({yearGraceOffsetDays} days) cannot be negative.', 1),
     -- BE-25: only a never-published, never-used methodology version can be deleted.
