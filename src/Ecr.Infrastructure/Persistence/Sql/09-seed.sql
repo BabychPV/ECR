@@ -423,7 +423,11 @@ UPDATE t
     -- F-15/B-12 (четвертий раунд UX, лінія B1): відмова золотого набору
     -- називає тести, що розійшлися.
     (N'err.ECR-CALC-0422.goldenSetDiverged', N'en', N'Version {version} cannot be published: {count} values diverged on the golden set.',
-                                                N'Version {version} cannot be published: {count} value(s) diverged on the golden set (tests: {tests}).')
+                                                N'Version {version} cannot be published: {count} value(s) diverged on the golden set (tests: {tests}).'),
+    -- F-22: обчислювану комірку рахує або формула шаблону, або методологія —
+    -- «відкрийте версію шаблону» для колонки методології хибне.
+    (N'grid.formulaBarNoExpression',     N'en', N'The expression is not sent with the table: open the template version to read it',
+                                                N'Calculated by the system — by a template formula or by the methodology bound to this column. The expression is not sent with the table.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -2276,7 +2280,7 @@ USING (VALUES
     (N'grid.formulaBarEmpty',            N'en', N'Select a cell to see what is in it', 1),
     (N'grid.formulaBarAddress',          N'en', N'{row} · {column}', 1),
     (N'grid.formulaBarCalculated',       N'en', N'Calculated', 1),
-    (N'grid.formulaBarNoExpression',     N'en', N'The expression is not sent with the table: open the template version to read it', 1),
+    (N'grid.formulaBarNoExpression',     N'en', N'Calculated by the system — by a template formula or by the methodology bound to this column. The expression is not sent with the table.', 1),
     (N'grid.formulaBarValue',            N'en', N'Value: {value}', 1),
     (N'grid.formulaBarNoValue',          N'en', N'(empty)', 1),
     (N'grid.totalsRowLabel',             N'en', N'Total', 1),
@@ -4150,6 +4154,8 @@ USING (VALUES
     (N'publish.problem.libraryHasRules', N'en', N'Methodology {code} is a library but has {count} active rules: a library does not calculate for any document.', 1),
     (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1),
     (N'methodologies.columnNotFound', N'en', N'No column matches. Search by column code or by part of its header.', 1),
+    (N'methodologies.constantDialogTitle', N'en', N'Constant', 1),
+    (N'methodologies.constantUnit', N'en', N'Unit', 1),
     (N'documents.calculationResultsStale', N'en', N'These results are out of date', 1),
     (N'documents.calculationResultsStaleHint', N'en', N'The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.', 1),
     (N'methodologies.publications', N'en', N'Publication log', 1),

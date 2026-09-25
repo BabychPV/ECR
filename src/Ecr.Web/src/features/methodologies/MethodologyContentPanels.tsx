@@ -27,7 +27,7 @@ import type {
 } from '@/api/types';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import { normalizeDecimal } from '@/shared/format';
+import { formatDecimal, normalizeDecimal } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -146,6 +146,22 @@ interface ConstantDraft {
  */
 const Unbounded = '…';
 
+/**
+ * Підпис виду константи — один на таблицю й діалог (F-29, четвертий раунд UX).
+ *
+ * ⛔ Доти діалог казав «Number», а таблиця — сире «Numeric»: той самий вид
+ * виглядав як два різні.
+ */
+function constantKindLabel(kind: string): string {
+  return kind === 'Text'
+    ? t('methodologies.resultText')
+    : kind === 'CategoryLabel'
+      ? t('methodologies.categoryLabel')
+      : kind === 'Numeric'
+        ? t('methodologies.resultNumber')
+        : kind;
+}
+
 /** Порожня константа для нового запису. */
 const emptyConstant: ConstantDraft = {
   code: '',
@@ -258,13 +274,19 @@ export function MethodologyConstantsPanel({
               {list.map((constant) => (
                 <Table.Tr key={constant.id}>
                   <Table.Td>{constant.code}</Table.Td>
-                  <Table.Td>{constant.kind}</Table.Td>
+                  {/* ⚠ F-29: вид — тим самим підписом, що й у діалозі («Number»),
+                      а не сирим значенням переліку («Numeric»). */}
+                  <Table.Td>{constantKindLabel(constant.kind)}</Table.Td>
                   <Table.Td>
                     {/* ⛔ Нерозібране число показується як є і позначається:
                         саме про такі рядки публікація вимагає рішення людини,
                         а мовчазний нуль дав би правдоподібні й неправильні
                         числа. */}
-                    {constant.value ?? constant.textValue ?? '—'}
+                    {/* ⚠ F-21: число — без 16 хвостових нулів сховища
+                        (`2.5000000000000000` → `2.5`), мовою інтерфейсу. */}
+                    {(constant.value === null ? null : (formatDecimal(constant.value) ?? constant.value)) ??
+                      constant.textValue ??
+                      '—'}
                     {constant.isResolved ? '' : ` · ${t('methodologies.unresolved')}`}
                   </Table.Td>
                   {/* ⚠ `dateOnly` в обох колонках. Вікно дії константи
@@ -324,7 +346,7 @@ export function MethodologyConstantsPanel({
       <Modal
         opened={editing !== null}
         onClose={() => setEditing(null)}
-        title={t('methodologies.constants')}
+        title={t('methodologies.constantDialogTitle')}
       >
         {editing !== null && (
           <Stack gap="sm">
@@ -340,11 +362,10 @@ export function MethodologyConstantsPanel({
               description={t('methodologies.constantKindHint')}
               allowDeselect={false}
               value={editing.kind}
-              data={[
-                { value: 'Numeric', label: t('methodologies.resultNumber') },
-                { value: 'Text', label: t('methodologies.resultText') },
-                { value: 'CategoryLabel', label: t('methodologies.categoryLabel') },
-              ]}
+              data={(['Numeric', 'Text', 'CategoryLabel'] as const).map((kind) => ({
+                value: kind,
+                label: constantKindLabel(kind),
+              }))}
               onChange={(value) =>
                 setEditing({
                   ...editing,
@@ -374,7 +395,7 @@ export function MethodologyConstantsPanel({
                 >
                   {(disabled) => (
                     <Select
-                      label={t('methodologies.outputUnit')}
+                      label={t('methodologies.constantUnit')}
                       description={t('methodologies.constantUnitHint')}
                       searchable
                       disabled={disabled}
@@ -820,7 +841,7 @@ export function MethodologyRequiredInputsPanel({
                 <Table.Tr key={requiredInput.id}>
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
-                      {requiredInput.columnDefId}
+                      {requiredInput.columnCode ?? requiredInput.columnDefId}
                       {/* ⛔ UI-аудит, lane 5 (`Q-337`): деактивована прив'язка
                           лишала вимогу без ЖОДНОГО натяку, що вона зависла —
                           рядок і далі показував `Column: X, Severity: Block`
@@ -1410,8 +1431,10 @@ export function MethodologyBindingsPanel({
             <Table.Tbody>
               {list.map((binding) => (
                 <Table.Tr key={binding.id}>
-                  <Table.Td>{binding.tableDefId}</Table.Td>
-                  <Table.Td>{binding.columnDefId}</Table.Td>
+                  {/* ⚠ F-21: таблиця й колонка — кодами, а не «193 / 6017»;
+                      ідентифікатор лишається лише як запасний варіант. */}
+                  <Table.Td>{binding.tableCode ?? binding.tableDefId}</Table.Td>
+                  <Table.Td>{binding.columnCode ?? binding.columnDefId}</Table.Td>
                   <Table.Td>{binding.outputCode}</Table.Td>
                   <Table.Td>
                     <Text size="sm" ff="monospace">

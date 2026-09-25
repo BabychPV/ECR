@@ -472,8 +472,19 @@ public sealed class ListMethodologyRequiredInputsHandler(
             .Select(b => b.ColumnDefId)
             .ToHashSet();
 
+        // ⚠ F-21: колонка — кодом, а не голим `ColumnDefId`.
+        var columnCodes = new Dictionary<int, string>();
+        foreach (var columnDefId in requiredInputs.Select(r => r.ColumnDefId).Distinct())
+        {
+            if (await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false) is { } column)
+            {
+                columnCodes[columnDefId] = column.Code;
+            }
+        }
+
         return [.. requiredInputs.Select(
-            r => MethodologyAuthoringMap.RequiredInput(r, activeColumns.Contains(r.ColumnDefId)))];
+            r => MethodologyAuthoringMap.RequiredInput(r, activeColumns.Contains(r.ColumnDefId))
+                with { ColumnCode = columnCodes.GetValueOrDefault(r.ColumnDefId) })];
     }
 }
 
@@ -907,9 +918,25 @@ public sealed class ListCalculationBindingsHandler(
             .ListTableNamesAsync([.. found.Select(b => b.TableDefId).Distinct()], ct)
             .ConfigureAwait(false);
 
-        return [.. found.Select(b => tables.TryGetValue(b.TableDefId, out var table)
-            ? MethodologyAuthoringMap.Binding(b) with { TableCode = table.Code, TableNameL10n = table.NameL10n }
-            :MethodologyAuthoringMap.Binding(b))];
+        // ⚠ F-21: колонка — кодом, а не голим `ColumnDefId` («193 / 6017»).
+        // Прив'язок у методології — одиниці, тож по запиту на колонку.
+        var columnCodes = new Dictionary<int, string>();
+        foreach (var columnDefId in found.Select(b => b.ColumnDefId).Distinct())
+        {
+            if (await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false) is { } column)
+            {
+                columnCodes[columnDefId] = column.Code;
+            }
+        }
+
+        return [.. found.Select(b =>
+        {
+            var dto = MethodologyAuthoringMap.Binding(b) with { ColumnCode = columnCodes.GetValueOrDefault(b.ColumnDefId) };
+
+            return tables.TryGetValue(b.TableDefId, out var table)
+                ? dto with { TableCode = table.Code, TableNameL10n = table.NameL10n }
+                : dto;
+        })];
     }
 }
 

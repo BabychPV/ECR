@@ -51,6 +51,7 @@ const Strings: Record<string, string> = {
   'methodologies.categoryLabel': 'Category label',
   'methodologies.value': 'Value',
   'methodologies.outputUnit': 'Unit',
+  'methodologies.constantUnit': 'Unit',
   'methodologies.outputs': 'Outputs',
   'methodologies.addOutput': 'Add output',
   'methodologies.ordinal': 'Ordinal',
