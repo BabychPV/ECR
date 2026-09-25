@@ -280,7 +280,13 @@ public sealed class CalculationOrchestrator(
             ?? throw new Domain.Abstractions.DomainException(
                 "ECR-PRD-0404",
                 $"Періоду {periodKey.Value} для документа {documentId} не існує: "
-                + "дату резолвінгу методології обчислити нема з чого.");
+                + "дату резолвінгу методології обчислити нема з чого.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0404.periodForDocument",
+                    ["periodKey"] = periodKey.Value.ToString(CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
+                });
 
         return bounds.PeriodEnd;
     }

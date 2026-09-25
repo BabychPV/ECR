@@ -327,16 +327,25 @@ public sealed class PatchCellsHandler(
         var table = snapshot.Sheets
             .SelectMany(sh => sh.Tables)
             .FirstOrDefault(t => t.Id == instance.TableDefId)
-            // ⛔ ЄДИНА відмова цього обробника БЕЗ `messageKey`, і це рішення,
-            // а не пропуск. Сюди неможливо потрапити діями оператора: екземпляр
-            // таблиці вже розв'язаний (`ResolveTableInstanceAsync`), і те, що
-            // його `TableDefId` відсутній у знімку ВЛАСНОЇ версії шаблону, —
-            // розходження метаданих із даними, тобто зламаний інваріант. Текст
-            // тут називає два внутрішні ідентифікатори й адресований тому, хто
-            // читає журнал сервера; перекладати його на мову оператора означало
-            // б пообіцяти, що з цим можна щось зробити зі сторони інтерфейсу.
+            // ✎ 2026-09-25 (B-14, Documents+Reporting+Projects+Units+Localization
+            // зріз): ДО цього коментар тут пояснював, чому кидок лишається БЕЗ
+            // `messageKey` — «неможливо потрапити діями оператора, адресований
+            // тому, хто читає журнал сервера». Рішення мало сенс 2026-09-18,
+            // коли ключа під цей факт не існувало. Відтоді
+            // `err.ECR-TMPL-0404.table` заведений (`ColumnDefHandlers.FindTable`,
+            // 2026-09-23) і вже показується операторові в аналогічних ситуаціях
+            // («таблиці з таким Id немає в цій версії») — той самий факт,
+            // незалежно від шляху (правило 2 рецепту). Тримати цей один випадок
+            // без ключа означало б не «безпечніше», а лише непослідовно: та сама
+            // фраза локалізована в одному обробнику й ні — у сусідньому.
             ?? throw new NotFoundException(
-                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.");
+                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.table",
+                    ["tableDefId"] = instance.TableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = instance.TemplateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         // ⚠ У мапі — сам ColumnDef, а не лише Id. Значення розбирається за
         // ОГОЛОШЕНИМ типом колонки: через HTTP усе приходить JsonElement-ом, і
         // здогадка за виглядом значення клала число в текст, а ідентифікатор

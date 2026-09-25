@@ -664,6 +664,14 @@ USING (VALUES
     (N'err.ECR-UOM-4091',  N'en', N'Unit code already in use', 1),
     (N'err.ECR-UOM-4091.unitCodeTaken', N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
     (N'err.ECR-UOM-0404.unitId', N'en', N'There is no unit with Id {id}.', 1),
+    -- Борг локалізації (B-14, Units): конверсія одиниць шукає за КОДОМ, не
+    -- за Id — окремий ключ на той самий код помилки, той самий прийом, що
+    -- `.tableByCode`/`.columnCode` у шаблонах (2026-09-23).
+    (N'err.ECR-UOM-0404.code', N'en', N'There is no unit with code "{code}" in the catalog.', 1),
+    -- Борг локалізації (B-14, Units): заведення одиниці посилається на
+    -- розмірність, якої немає в `uom.Dimension` — окремий код (`ECR-UOM-4041`)
+    -- від «одиниці немає» вище, і власний ключ під нього.
+    (N'err.ECR-UOM-4041.dimensionId', N'en', N'There is no dimension with Id {dimensionId} in the catalog.', 1),
     (N'err.ECR-UOM-0409',  N'en', N'Unit is in use', 1),
     (N'err.ECR-UOM-0409.unitInUse', N'en', N'Unit "{code}" cannot be removed: it is referenced in {total} place(s).', 1),
     -- BE-15: зміна одиниці (`PUT /api/v1/units/{id}`).
@@ -762,6 +770,11 @@ USING (VALUES
     (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
     (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
     (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
+    -- Борг локалізації (B-14, Reporting): побудова зрізу за КОДОМ звіту —
+    -- окремий факт від `.def`/`.version` вище (id-based): тут одне повідомлення
+    -- покриває і «коду немає», і «код є, чинної версії немає», бо
+    -- `FindCurrentVersionAsync` не розрізняє їх на цьому рівні.
+    (N'err.ECR-RPT-0404.code',               N'en', N'Report "{code}" does not exist or has no current version.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
@@ -1243,6 +1256,9 @@ USING (VALUES
     (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),
+    -- B-14 (Calculations + Workflow + Audit): ReplaceApprovalRouteHandler —
+    -- two consecutive steps of a project's approval route share the same role.
+    (N'err.ECR-DOC-0422.approvalRouteConsecutiveRole', N'en', N'Steps {stepA} and {stepB} share the same role {roleId}: the second one would be passed by the same person right after the first, so it adds no approval.', 1),
     -- Sheet lock (SheetEditGate) not acquired in time: the other action is still running.
     (N'err.ECR-DOC-4091.sheetBeingSubmitted',   N'en', N'This sheet is being submitted right now. Your changes were not saved; try again in a moment.', 1),
     (N'err.ECR-DOC-4091.sheetBeingEdited',      N'en', N'This sheet is being saved or recalculated right now. The sheet was not submitted; try again in a moment.', 1),
@@ -1252,6 +1268,11 @@ USING (VALUES
     (N'err.ECR-PRJ-0404.project',               N'en', N'Project {projectId} was not found.', 1),
     (N'err.ECR-PRJ-0404.projectOfPeriod',       N'en', N'The project of period {periodId} was not found.', 1),
     (N'err.ECR-PRD-0404.period',                N'en', N'Period {periodId} was not found.', 1),
+    -- B-14 (Calculations + Workflow + Audit): calculation-run entry points
+    -- resolve a period by (documentId, periodKey) or (projectId, periodKey),
+    -- not by the surrogate id `.period` above — different facts, same code.
+    (N'err.ECR-PRD-0404.periodForProject',      N'en', N'Period {periodKey} does not exist in project {projectId}.', 1),
+    (N'err.ECR-PRD-0404.periodForDocument',     N'en', N'Period {periodKey} does not exist for document {documentId}.', 1),
     (N'err.ECR-PRD-0409.projectArchived',      N'en', N'Project "{projectCode}" is archived: its periods cannot be reopened.', 1),
     (N'err.ECR-PRD-0409.transitionNotAllowed',  N'en', N'Period {periodKey} cannot go from {from} to {to}.', 1),
     (N'err.ECR-PRD-0409.reopenOnlyClosed',      N'en', N'Only a closed period can be reopened; the period is {state}.', 1),
@@ -1335,6 +1356,9 @@ USING (VALUES
     (N'err.ECR-CALC-0433.legacyExtensionFunction', N'en', N'The version uses {functionCount} function(s) not available in Legacy mode: switch it to Strict mode from a new effective date.', 1),
     (N'err.ECR-CALC-0438.missingColumns',       N'en', N'A formula argument has no matching column in {tableCount} bound table(s).', 1),
     (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).', 1),
+    -- B-14 (Calculations + Workflow + Audit): a batch of the calculation
+    -- schedule has a methodology dependency cycle (CalculationPlan.Build).
+    (N'err.ECR-TMPL-4221.methodologyCycle',     N'en', N'The methodologies form a dependency cycle ({cycleLength} involved).', 1),
 
     -- ⛔ `RoleAndUserHandlers.cs` (23 кидки, найбільший файл боргу локалізації
     -- на замір 254/74): ролі, користувачі, межі чинності призначення
