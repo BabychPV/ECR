@@ -29,6 +29,7 @@ namespace Ecr.Application.Documents;
 /// </remarks>
 public sealed class GetCalculationResultsHandler(
     ICalculationResultStore results,
+    IMethodologyStore methodologies,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
@@ -64,13 +65,40 @@ public sealed class GetCalculationResultsHandler(
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var rows = await results.ReadCurrentAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        if (rows.Count == 0)
+        {
+            return [];
+        }
 
-        return [.. rows.Select(r => new CalculationResultDto(
-            r.MethodologyVersionId,
-            r.SourceRowKey,
-            r.OutputCode,
-            r.Value,
-            r.UnitId,
-            r.SubstanceEntryId))];
+        // ⛔ F-05 (четвертий раунд UX): свіжість. Доти після зміни входів панель
+        // показувала старі числа як чинні, і документ подавали з результатами,
+        // що вже не відповідали даним. Тепер кожне число каже, чи змінилися
+        // входи після прогону, що його дав.
+        var freshness = await methodologies
+            .GetCalculationFreshnessAsync(documentId, periodKey, ct)
+            .ConfigureAwait(false);
+
+        // ⚠ F-21: номер версії й код методології замість голого ідентифікатора.
+        var labels = await methodologies
+            .GetVersionLabelsAsync([.. rows.Select(r => r.MethodologyVersionId).Distinct()], ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r =>
+        {
+            var label = labels.GetValueOrDefault(r.MethodologyVersionId);
+
+            return new CalculationResultDto(
+                r.MethodologyVersionId,
+                r.SourceRowKey,
+                r.OutputCode,
+                r.Value,
+                r.UnitId,
+                r.SubstanceEntryId,
+                label?.MethodologyCode,
+                label?.Version,
+                freshness.IsStale,
+                freshness.CalculatedAt,
+                freshness.InputsChangedAt);
+        })];
     }
 }

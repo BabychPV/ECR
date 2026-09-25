@@ -24,7 +24,9 @@ public sealed class ExcelExporter(
     IStyleCatalog styles,
     IRegistryStore registries,
     StyleMapper styleMapper,
-    FormulaTranslator formulaTranslator) : IExcelExporter
+    FormulaTranslator formulaTranslator,
+    IMethodologyStore? methodologies = null,
+    ICalculationResultStore? results = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -109,6 +111,18 @@ public sealed class ExcelExporter(
         var slicesBatch = await cellStore
             .ReadSlicesAsync(instanceIds, ct)
             .ConfigureAwait(false);
+
+        // ⛔ F-02 (четвертий раунд UX): колонка `Calculated` — числом
+        // методології, тим самим розв'язанням посилання, що й сітка
+        // (`CalculatedCellOverlay`). Доти книга віддавала її порожньою.
+        // ⚠ Порти необов'язкові лише заради тестів, що конструюють експортер
+        // вручну; у контейнері розв'язуються завжди.
+        if (methodologies is not null && results is not null)
+        {
+            slicesBatch = await new Ecr.Application.Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(documentId, options.PeriodKey, snapshot, instances, rowIdsBatch, slicesBatch, ct)
+                .ConfigureAwait(false);
+        }
 
         using var workbook = new XLWorkbook();
 

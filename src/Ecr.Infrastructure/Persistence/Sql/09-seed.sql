@@ -4149,7 +4149,9 @@ USING (VALUES
     (N'publish.problem.importNoVersion', N'en', N'Imported methodology {code} has no version in effect on {date}: its formulas are not visible.', 1),
     (N'publish.problem.libraryHasRules', N'en', N'Methodology {code} is a library but has {count} active rules: a library does not calculate for any document.', 1),
     (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1),
-    (N'methodologies.columnNotFound', N'en', N'No column matches. Search by column code or by part of its header.', 1)
+    (N'methodologies.columnNotFound', N'en', N'No column matches. Search by column code or by part of its header.', 1),
+    (N'documents.calculationResultsStale', N'en', N'These results are out of date', 1),
+    (N'documents.calculationResultsStaleHint', N'en', N'The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

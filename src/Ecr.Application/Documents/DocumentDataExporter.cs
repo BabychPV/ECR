@@ -73,7 +73,9 @@ public sealed class DocumentDataExporter(
     ICellStore cellStore,
     IRowStore rowStore,
     IMetadataCache metadata,
-    IRegistryStore registries)
+    IRegistryStore registries,
+    IMethodologyStore? methodologies = null,
+    ICalculationResultStore? results = null)
 {
     private const string RowKeyHeader = "rowKey";
 
@@ -121,6 +123,15 @@ public sealed class DocumentDataExporter(
         var ids = instances.Select(i => i.TableInstanceId).ToList();
         var rowIds = await rowStore.GetRowIdsBatchAsync(ids, key, ct).ConfigureAwait(false);
         var slices = await cellStore.ReadSlicesAsync(ids, ct).ConfigureAwait(false);
+
+        // ⛔ F-02: колонка `Calculated` — числом методології, як у сітці й xlsx
+        // (`CalculatedCellOverlay`). Порти необов'язкові лише заради тестів.
+        if (methodologies is not null && results is not null)
+        {
+            slices = await new Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(documentId, periodKey, snapshot, instances, rowIds, slices, ct)
+                .ConfigureAwait(false);
+        }
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
 
         var tables = new List<ExportTable>();

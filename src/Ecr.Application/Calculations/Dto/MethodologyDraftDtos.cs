@@ -234,10 +234,23 @@ public sealed record CalculationBindingDto(
 /// <param name="Value">Значення.</param>
 /// <param name="UnitId">Одиниця результату.</param>
 /// <param name="SubstanceEntryId">Речовина; <c>null</c> — вихід без речовини.</param>
+/// <param name="MethodologyCode">Код методології — підпис числа (F-21).</param>
+/// <param name="MethodologyVersion">Номер версії методології («1.2.0»), а не її ідентифікатор (F-21).</param>
+/// <param name="IsStale">
+/// Входи документа змінилися після прогону, що дав це число (F-05): число
+/// вже не відповідає даним, потрібен перерахунок.
+/// </param>
+/// <param name="CalculatedAt">Коли завершився прогін (UTC).</param>
+/// <param name="InputsChangedAt">Остання зміна входів після прогону (UTC); <c>null</c> — не змінювались.</param>
 public sealed record CalculationResultDto(
     int MethodologyVersionId,
     string? SourceRowKey,
     string OutputCode,
     decimal Value,
     int UnitId,
-    long? SubstanceEntryId);
+    long? SubstanceEntryId,
+    string? MethodologyCode = null,
+    string? MethodologyVersion = null,
+    bool IsStale = false,
+    DateTime? CalculatedAt = null,
+    DateTime? InputsChangedAt = null);

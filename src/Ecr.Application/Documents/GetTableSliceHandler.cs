@@ -24,6 +24,11 @@ namespace Ecr.Application.Documents;
 /// замовчуванням існує лише заради тестів, що конструюють обробник вручну, і
 /// вимикає кеш, а не підміняє його тихою заглушкою.
 /// </param>
+/// <param name="results">
+/// Числа методологій (F-02). ⚠ Необов'язковий лише заради тестів, що
+/// конструюють обробник вручну: у контейнері розв'язується завжди, і без нього
+/// колонка <c>Calculated</c> була б порожньою — рівно дефект, який тут закрито.
+/// </param>
 public sealed class GetTableSliceHandler(
     IRowStore rowStore,
     ICellStore cellStore,
@@ -33,7 +38,8 @@ public sealed class GetTableSliceHandler(
     IMethodologyStore methodologies,
     IPeriodStore periods,
     IStyleCatalog styles,
-    IMemoryCache? memory = null)
+    IMemoryCache? memory = null,
+    ICalculationResultStore? results = null)
 {
     private readonly MethodologyRequiredColumnsCache _required = new(memory);
 
@@ -117,6 +123,29 @@ public sealed class GetTableSliceHandler(
         var versions = await rowStore.GetRowVersionsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                      .ConfigureAwait(false);
         var keyById = rowIds.ToDictionary(kv => kv.Value, kv => kv.Key);
+
+        // ⛔ F-02 (четвертий раунд UX): колонка `Calculated` отримує число
+        // методології ПОСИЛАННЯМ (`D-69`) — тут, у зрізі, з якого малює сітка.
+        // Доти зріз віддавав лише введені колонки, і `EMISSION` була порожньою,
+        // хоча панель результатів показувала R1 = 20. Таблиця без такої колонки
+        // не робить жодного додаткового запиту.
+        var calculated = table.Columns
+            .Where(c => !c.IsDeleted && c.DataType == Domain.Enums.CellDataType.Calculated)
+            .Select(c => c.Id)
+            .ToHashSet();
+
+        if (results is not null && calculated.Count > 0)
+        {
+            var overlaid = await new Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(
+                    documentId,
+                    instance.PeriodKey,
+                    [new Calculations.OverlayTable(tableInstanceId, table.Id, rowIds, cells, calculated)],
+                    ct)
+                .ConfigureAwait(false);
+
+            cells = overlaid[tableInstanceId];
+        }
         var orphans = await rowStore.GetOrphanFlagsAsync(tableInstanceId, new Domain.ValueObjects.PeriodKey(instance.PeriodKey), ct)
                                     .ConfigureAwait(false);
 
