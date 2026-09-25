@@ -3997,7 +3997,9 @@ USING (VALUES
     -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
     (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
     -- ⛔ F-13: нічний прохід архівації (`ArchiveJob.SweepAsync`).
-    (N'jobs.archiveSweepDone',                  N'en', N'Years moved to the archive: {archived}; skipped: {skipped}; failed: {failed}.', 1)
+    (N'jobs.archiveSweepDone',                  N'en', N'Years moved to the archive: {archived}; skipped: {skipped}; failed: {failed}.', 1),
+    -- ⛔ F-27: у «My tasks» замість ідентифікатора файлу експорту.
+    (N'jobs.exportReady',                       N'en', N'The file is ready to download.', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
