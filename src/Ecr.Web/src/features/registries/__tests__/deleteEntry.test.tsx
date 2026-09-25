@@ -32,7 +32,11 @@ const SeededStrings: Record<string, string> = {
   'registries.editEntry': 'Edit',
   'registries.search': 'Search',
   'registries.searchPlaceholder': 'Filter by code or name',
+  'registries.referencedBy': 'Referenced by',
+  'registries.referenceKind.cells': 'Document cells',
+  'registries.referenceKind.methodologyConstants': 'Methodology constants',
   'common.delete': 'Delete',
+  'registries.deleteEntryTitle': 'Delete entry "{code}"?',
   'common.cancel': 'Cancel',
   'common.save': 'Save',
 };
@@ -83,6 +87,9 @@ const inUse = {
   // рівно так, як їх пише `ExceptionHandlingMiddleware`.
   registryEntryId: 42,
   references: 7,
+
+  // ⛔ V-08: розклад за видами — сервер віддає лише ненульові.
+  referenceKinds: { cells: 5, methodologyConstants: 2 },
 };
 
 interface Attempt {
@@ -177,6 +184,20 @@ afterEach(() => {
 });
 
 describe('Видалення запису довідника з інтерфейсу', () => {
+  it('діалог називає запис і ставить фокус на «Cancel», а не на хрестик (X-23)', async () => {
+    mockFetch(() => new Response(null, { status: 204 }));
+    await loadCatalog('en', 'private');
+
+    show();
+    const dialog = await openConfirm();
+
+    // ⛔ Доти заголовок був голим «Delete», а фокус падав на хрестик.
+    expect(within(dialog).getByText('Delete entry "KG"?')).toBeDefined();
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }));
+    });
+  });
+
   it('підтвердження шле DELETE саме на адресу цього запису', async () => {
     const attempts = mockFetch(() => new Response(null, { status: 204 }));
     await loadCatalog('en', 'private');
@@ -222,12 +243,19 @@ describe('Видалення запису довідника з інтерфей
     // Текст відмови — серверний, уже локалізований каталогом помилок.
     expect(screen.getByText('Entry «KG» is referenced by 7 cells.')).toBeDefined();
 
+    // ⛔ V-08: ХТО посилається — переліком за видами. Мутація: прибрати
+    // `blockedBy` у `RegistriesPage.tsx` — рядків переліку немає.
+    const kinds = within(dialog).getByRole('list', { name: 'Referenced by' });
+    expect(within(kinds).getByText('Document cells: 5')).toBeDefined();
+    expect(within(kinds).getByText('Methodology constants: 2')).toBeDefined();
+
     // ⛔ І пропонується саме вікно чинності, а не повтор: `POST …/validity` —
     // єдина дія, яка змінює стан справи, а не запит.
     expect(within(dialog).getByRole('button', { name: 'Valid' })).toBeDefined();
 
-    // ⚠ Кнопки «видалити» в діалозі більше немає: повтор не пропонується.
-    expect(within(dialog).queryByRole('button', { name: 'Delete' })).toBeNull();
+    // ⚠ Повтор не пропонується: підтвердження в діалозі недоступне
+    // (`ConfirmModal`, X-23 — діалог той самий, стан «заблоковано»).
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toHaveProperty('disabled', true);
 
     // Повторних спроб клієнт не робить сам: 4xx не повторюється.
     expect(attempts).toHaveLength(1);

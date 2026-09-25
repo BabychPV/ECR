@@ -5,6 +5,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { loadCatalog } from '@/shared/i18n';
+import { setLoginRedirect } from '@/api/client';
 import { testTheme } from '@/test/render';
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
 
@@ -25,7 +26,7 @@ const Strings: Record<string, string> = {
   'password.repeat': 'Repeat password',
   'password.mismatch': 'Passwords do not match',
   'password.submit': 'Change',
-  'password.policy': 'At least 12 characters, with upper case, lower case and a digit.',
+  'password.policy': 'At least 12 characters.',
 };
 
 interface Call {
@@ -86,6 +87,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setLoginRedirect(() => {});
 });
 
 function show(): void {
@@ -130,6 +132,52 @@ describe('ChangePasswordPage: клієнтська перевірка політ
     // Не загальним банером, і сирий код клієнту не показаний.
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByText('ECR-PWD-0422')).toBeNull();
+  });
+
+  it('V-16: хибний поточний пароль (401) — під полем поточного пароля, без виходу з системи', async () => {
+    const redirect = vi.fn();
+    setLoginRedirect(redirect);
+    refusal = {
+      status: 401,
+      errorCode: 'ECR-AUTH-0401',
+      messageKey: 'err.ECR-AUTH-0401.currentPasswordWrong',
+      detail: 'The current password is incorrect.',
+    };
+    const user = userEvent.setup();
+    show();
+
+    await user.type(await screen.findByLabelText('Current password'), 'WrongPassword1');
+    await user.type(screen.getByLabelText('New password'), 'NewPassword123');
+    await user.type(screen.getByLabelText('Repeat password'), 'NewPassword123');
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+
+    const message = await screen.findByText('The current password is incorrect.');
+    const field = screen.getByLabelText('Current password');
+    expect(message.closest('.mantine-InputWrapper-root')?.contains(field)).toBe(true);
+
+    // ⛔ Сеанс живий — перенаправлення на вхід немає.
+    expect(redirect).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('V-16: сеанс справді скінчився (401 signInRequired) — перенаправлення лишається', async () => {
+    const redirect = vi.fn();
+    setLoginRedirect(redirect);
+    refusal = {
+      status: 401,
+      errorCode: 'ECR-AUTH-0401',
+      messageKey: 'err.ECR-AUTH-0401.signInRequired',
+      detail: 'Sign in required.',
+    };
+    const user = userEvent.setup();
+    show();
+
+    await user.type(await screen.findByLabelText('Current password'), 'OldPassword1');
+    await user.type(screen.getByLabelText('New password'), 'NewPassword123');
+    await user.type(screen.getByLabelText('Repeat password'), 'NewPassword123');
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+
+    await waitFor(() => expect(redirect).toHaveBeenCalledTimes(1));
   });
 
   it('інша відмова (наприклад, невірний поточний пароль) — банером, не під полем нового пароля', async () => {

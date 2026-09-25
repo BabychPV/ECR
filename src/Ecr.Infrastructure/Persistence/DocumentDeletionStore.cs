@@ -22,6 +22,7 @@ public sealed class DocumentDeletionStore(EcrDbContext db) : IDocumentDeletionSt
         var states = await db.ApprovalStates
             .FromSql($"SELECT * FROM wf.ApprovalState WITH (UPDLOCK, HOLDLOCK) WHERE DocumentId = {documentId}")
             .AsNoTracking()
+            .OrderBy(s => s.Id)
             .Take(MaxStates)
             .ToListAsync(ct)
             .ConfigureAwait(false);

@@ -33,7 +33,10 @@ public sealed class ApproveSheetHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може затверджувати.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16: спільний валідатор (`PeriodKey.Parse`), не первинний
+        // конструктор — той не перевіряє нічого, і невірний період доходив
+        // би до затвердження мовчки.
+        var key = PeriodKey.Parse(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         var decision = await access.CanApproveAsync(profile, documentId, sheetDefId, key, ct)
@@ -48,6 +51,36 @@ public sealed class ApproveSheetHandler(
                     ["messageKey"] = "err.ECR-ACCS-0403.approveDenied",
                     ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["reason"] = decision.Reason.ToString(),
+                });
+        }
+
+        // ⛔ F-25 (пряме рішення людини): та сама людина не може бути тим, хто
+        // подав аркуш (`Submit`), і тим, хто його погоджує (`Approve`) —
+        // правило чотирьох очей, той самий клас перевірки, що
+        // `RunCalculationHandler.RequireValidApproval` (`ECR-CALC-0409`) уже
+        // застосовує до погодження перерахунку закритого періоду.
+        //
+        // ⚠ Стан читається ТУТ, ДО транзакції: `IAccessDecisionService` не
+        // знає, хто подав аркуш (лише статус), і заводити цю обізнаність
+        // туди заради одного правила означало б тягнути `SubmittedByUserId`
+        // крізь `CellAccessContext`/`EditRules`, якими користуються ще п'ять
+        // інших рішень. `ApproveCoreAsync` нижче отримує вже завантажений
+        // стан, а не читає його вдруге.
+        //
+        // ⛔ Перевірка лише для ЗАТВЕРДЖЕННЯ (`approved == true`): відхилити
+        // власне подання — не конфлікт інтересів, а штатна дія (повернути
+        // собі ж на доопрацювання), і забороняти її означало б зайву відмову
+        // там, де ризику немає.
+        var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
+        if (approved && state.SubmittedByUserId == userId)
+        {
+            throw new AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Затвердження аркуша {sheetDefId} відхилено: той самий користувач подав і погоджує аркуш.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.approveOwnSubmission",
+                    ["sheetDefId"] = sheetDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
 
@@ -66,22 +99,22 @@ public sealed class ApproveSheetHandler(
         // зовнішньої транзакції (`UnitOfWork.cs:174-178`), тож це обгортка, а
         // не переробка.
         await uow.ExecuteInTransactionAsync(
-            innerCt => ApproveCoreAsync(documentId, sheetDefId, periodKey, key, approved, reason, userId, innerCt),
+            innerCt => ApproveCoreAsync(state, documentId, sheetDefId, periodKey, approved, reason, userId, innerCt),
             ct).ConfigureAwait(false);
     }
 
     /// <summary>Зміна стану, аудит проміжного кроку і статус зрізу — під транзакцією.</summary>
     private async Task ApproveCoreAsync(
+        ApprovalState state,
         long documentId,
         int sheetDefId,
         int periodKey,
-        PeriodKey key,
         bool approved,
         string? reason,
         int userId,
         CancellationToken ct)
     {
-        var state = await workflow.GetOrCreateAsync(documentId, sheetDefId, key, ct).ConfigureAwait(false);
+        var key = new PeriodKey(periodKey);
         var now = clock.UtcNow;
 
         // `BE-11`: стан ДО дії — для журналу переходів.

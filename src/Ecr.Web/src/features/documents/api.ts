@@ -49,7 +49,7 @@ export interface FillSummary {
   /** Таблиці, у яких заповнені всі комірки, що їх має заповнити людина. */
   filled: number;
 
-  /** Усього таблиць у документі за цей період. */
+  /** Таблиць, у яких людині є що заповнити (`inputCells > 0`, `R-13`). */
   total: number;
 
   /**
@@ -65,17 +65,22 @@ export interface FillSummary {
 /**
  * Зводить перелік таблиць у «68 з 91».
  *
- * ⚠ Таблиця БЕЗ жодної вхідної комірки (`inputCells === 0` — усе формульне
- * або закрите правилом періоду) вважається заповненою: заповнювати в ній
- * нічого, і лишити її вічно «незаповненою» означало б, що документ ніколи не
- * дійде до 100 %.
+ * ⛔ `R-13`. Таблиця БЕЗ жодної вхідної комірки (`inputCells === 0` — усе
+ * формульне, закрите правилом періоду або динамічна без жодного рядка) доти
+ * вважалася ЗАПОВНЕНОЮ — «заповнювати нічого, отже заповнено». На порожньому
+ * документі це давало «Tables filled completely: 92 of 92»: число, на яке
+ * спираються, вирішуючи, чи подавати звіт. Тепер така таблиця не входить НІ
+ * в чисельник, НІ в знаменник: рахуються лише таблиці, де людині є що
+ * заповнити, — і документ так само доходить до 100 %, коли заповнено все,
+ * що можна заповнити.
  */
 export function summarize(tables: readonly TableStatus[]): FillSummary {
   const validated = tables.some((table) => table.errorCount !== null);
+  const toFill = tables.filter((table) => table.inputCells > 0);
 
   return {
-    filled: tables.filter((table) => table.filledCells >= table.inputCells).length,
-    total: tables.length,
+    filled: toFill.filter((table) => table.filledCells >= table.inputCells).length,
+    total: toFill.length,
     hasErrors: validated ? tables.some((table) => (table.errorCount ?? 0) > 0) : null,
   };
 }

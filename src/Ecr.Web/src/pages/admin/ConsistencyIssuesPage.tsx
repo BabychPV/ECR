@@ -11,10 +11,12 @@ import {
 } from '@/features/jobs/useConsistencyRun';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
-import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { ErrorAlert, TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { Timestamp } from '@/shared/ui/Timestamp';
+import { useDebouncedFilter, useFilterCursor } from '@/shared/ui/useDebouncedFilter';
+import { useFieldDraft } from '@/shared/ui/useFieldDraft';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -42,10 +44,18 @@ import { t } from '@/shared/i18n';
 export function ConsistencyIssuesPage(): JSX.Element {
   const [ruleCode, setRuleCode] = useUrlState('ruleCode');
   const [showResolved, setShowResolved] = useUrlState('showResolved');
-  const [cursor, setCursor] = useState<string | null>(null);
 
   const openOnly = showResolved !== '1';
   const rule = ruleCode ?? '';
+  // ⛔ Код правила набирається з клавіатури — у запит після паузи, а не на
+  // кожну літеру (той самий дефект, що в журналі змін, `useDebouncedFilter`).
+  const appliedRule = useDebouncedFilter(rule);
+  // ⛔ Поле показує ВЛАСНЕ значення, а не адресу (`useFieldDraft`): кероване
+  // адресою, воно при процесорі 4× із набору `CNS-0123` лишало `"C3"`, `"S3"`
+  // (живий стенд, 5 з 5) — адреса запізнюється, і React повертав полю старе.
+  const ruleField = useFieldDraft(rule);
+  // ⛔ Курсор — від застосованого фільтра, не від сирого поля (`useFilterCursor`).
+  const [cursor, setCursor] = useFilterCursor(`${appliedRule}|${String(openOnly)}`);
 
   // ⚠ Дія «перевірити зараз» — лише з правом, яке вимагає сам ендпоінт
   // (`System.RunJob`), а не тим, яким відкрито екран: інакше кнопка обіцяла б
@@ -56,11 +66,11 @@ export function ConsistencyIssuesPage(): JSX.Element {
   const run = useConsistencyRun();
 
   const issues = useQuery({
-    queryKey: [...ConsistencyIssuesKey, rule, openOnly, cursor],
+    queryKey: [...ConsistencyIssuesKey, appliedRule, openOnly, cursor],
     queryFn: () =>
       apiFetch<ConsistencyIssuePage>(
         `/api/v1/consistency/issues?limit=100&openOnly=${String(openOnly)}` +
-          (rule.length === 0 ? '' : `&ruleCode=${encodeURIComponent(rule)}`) +
+          (appliedRule.length === 0 ? '' : `&ruleCode=${encodeURIComponent(appliedRule)}`) +
           (cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`),
       ),
   });
@@ -76,10 +86,12 @@ export function ConsistencyIssuesPage(): JSX.Element {
               miw={220}
               label={t('consistency.rule')}
               description={t('consistency.ruleHint')}
-              value={rule}
+              value={ruleField.value}
+              onFocus={ruleField.onFocus}
+              onBlur={ruleField.onBlur}
               onChange={(event) => {
+                ruleField.setValue(event.currentTarget.value);
                 setRuleCode(event.currentTarget.value);
-                setCursor(null);
               }}
             />
             <Checkbox
@@ -87,7 +99,6 @@ export function ConsistencyIssuesPage(): JSX.Element {
               checked={openOnly}
               onChange={(event) => {
                 setShowResolved(event.currentTarget.checked ? null : '1');
-                setCursor(null);
               }}
             />
             {runs && (
@@ -245,7 +256,14 @@ function RunStatus({ run }: { run: ConsistencyRun }): JSX.Element | null {
           {t('consistency.runJoined')}
         </Text>
       )}
-      {run.failure !== null && <Text size="sm">{run.failure}</Text>}
+      {/* ⛔ `X-04`: `failure` — сирий `ex.Message` задачі (українською чи
+          мовою СУБД), і стояв тут видимим рядком поруч із локалізованим
+          «Check failed». Коду помилки хук не віддає, тож людині — бейдж, а
+          сирий текст лише згорнутим: екран адміністративний, і саме
+          адміністратор його розгортає, розбираючи збій. */}
+      {run.failure !== null && run.failure !== '' && (
+        <TechnicalDetails label={t('common.technicalDetails')}>{run.failure}</TechnicalDetails>
+      )}
     </Group>
   );
 }

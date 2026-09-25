@@ -61,6 +61,21 @@ public sealed class ListResourceGrantsHandler(
 
         if (grants.Count == 0)
         {
+            // ⛔ B-07: неіснуюча роль давала `200 []` — «грантів немає» на
+            // адресі, якої не існує. Роль із грантами існує за побудовою, тож
+            // питаємо лише тут.
+            if ((await users.ListRolesAsync(ct).ConfigureAwait(false)).All(r => r.Id != roleId))
+            {
+                throw new NotFoundException(
+                    ErrorCodes.SecurityPrincipalNotFound,
+                    $"Ролі {roleId} не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                        ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+
             return grants;
         }
 
@@ -82,7 +97,9 @@ public sealed class ListResourceGrantsHandler(
         IAccessDecisionService access, ICurrentUser currentUser, CancellationToken ct)
     {
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException("ECR-AUTH-0401", "Потрібна автентифікація.");
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
@@ -90,7 +107,11 @@ public sealed class ListResourceGrantsHandler(
             ? userId
             : throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
     }
 }
 
@@ -140,7 +161,13 @@ public sealed class ReplaceResourceGrantsHandler(
             // ⛔ Родина SEC, а не ROW (`P-25`, рядок 2): суб'єкт відмови —
             // запис каталогу безпеки, а `ROW` маршрутизує на клієнті в
             // обробник помилок рядка таблиці документа.
-            ?? throw new NotFoundException(ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.");
+            ?? throw new NotFoundException(
+                ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                    ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // ⛔ Дублікат ловиться ТУТ, а не унікальним індексом: `UQ_ResourceGrant`
         // дав би 500 «внутрішня помилка» замість пояснення, який саме ресурс
@@ -151,9 +178,21 @@ public sealed class ReplaceResourceGrantsHandler(
 
         if (duplicate is not null)
         {
+            // ⛔ Родина SEC, а не ROW (`P-25`, рядок 3, той самий прецедент,
+            // що й `UserDuplicate` вище в `ErrorCodes.cs`): суб'єкт конфлікту —
+            // запис каталогу безпеки (роль/грант), а не рядок таблиці
+            // документа. `ROW` тут раніше маршрутизував на клієнті в
+            // обробник помилок сітки документа (`DocumentGrid.tsx`), де
+            // сторінки грантів ролі немає взагалі.
             throw new BusinessRuleException(
-                "ECR-ROW-0409",
-                $"Ресурс {duplicate.Key.ResourceKind} {duplicate.Key.ResourceId} названо в наборі двічі.");
+                ErrorCodes.SecurityConflict,
+                $"Ресурс {duplicate.Key.ResourceKind} {duplicate.Key.ResourceId} названо в наборі двічі.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0409.resourceGrantDuplicate",
+                    ["resourceKind"] = duplicate.Key.ResourceKind.ToString(),
+                    ["resourceId"] = duplicate.Key.ResourceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         await users.ReplaceGrantsAsync(roleId, grants, ct).ConfigureAwait(false);

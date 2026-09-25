@@ -259,7 +259,7 @@ public sealed class RecalculationWriteScopeTests
             _headers,
             _audit,
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            _uow);
+            _uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>

@@ -16,7 +16,8 @@ namespace Ecr.Api.Controllers;
 public sealed class AuthController(
     LoginHandler login,
     GetCurrentUserHandler currentUserHandler,
-    Ecr.Application.Common.ICurrentUser currentUser) : ControllerBase
+    Ecr.Application.Common.ICurrentUser currentUser,
+    Ecr.Application.Ports.ISimulationService simulation) : ControllerBase
 {
     /// <summary>Вхід доменного користувача.</summary>
     /// <remarks>
@@ -83,6 +84,16 @@ public sealed class AuthController(
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> Logout(CancellationToken ct)
     {
+        // ⛔ V-06: вихід закриває й сеанс симуляції цього входу — інакше він
+        // лишався б відкритим в `aud.SimulationSession` назавжди, і журнал
+        // стверджував би, що адміністратор досі дивиться чужими очима.
+        if (currentUser.SimulationSessionId is { } sessionId
+            && await simulation.GetActorAsync(sessionId, ct).ConfigureAwait(false) is { } actor
+            && actor == currentUser.UserId)
+        {
+            await simulation.EndAsync(sessionId, ct).ConfigureAwait(false);
+        }
+
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)
                          .ConfigureAwait(false);
         return NoContent();
@@ -117,7 +128,9 @@ public sealed class AuthController(
             view.Grants,
             view.Denies,
             view.IsSimulation,
-            view.SimulatedForUserId));
+            view.SimulatedForUserId,
+            view.SimulatedForUserName,
+            view.SimulationSessionId));
     }
 
     /// <summary>Чи стоїть вимога змінити пароль у поточній cookie.</summary>
@@ -182,6 +195,8 @@ public sealed record LocalLoginRequest(string UserName, string Password);
 /// <param name="Denies">Явні заборони; <c>IsDeny</c> перемагає завжди.</param>
 /// <param name="IsSimulation">Сеанс симуляції «очима користувача» (ФВ-6.16a).</param>
 /// <param name="SimulatedForUserId">Кого симулюють; <c>null</c> — не симуляція.</param>
+/// <param name="SimulatedForUserName">Ім'я того, кого симулюють, — для банера «Viewing as …» (V-06).</param>
+/// <param name="SimulationSessionId">Сеанс симуляції цього входу — щоб завершити його з будь-якої вкладки.</param>
 public sealed record CurrentUserDto(
     int UserId,
     string? UserName,
@@ -191,4 +206,6 @@ public sealed record CurrentUserDto(
     IReadOnlyDictionary<string, string> Grants,
     IReadOnlyList<string> Denies,
     bool IsSimulation,
-    int? SimulatedForUserId);
+    int? SimulatedForUserId,
+    string? SimulatedForUserName = null,
+    long? SimulationSessionId = null);

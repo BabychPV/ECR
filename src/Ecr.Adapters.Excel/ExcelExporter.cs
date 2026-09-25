@@ -24,7 +24,9 @@ public sealed class ExcelExporter(
     IStyleCatalog styles,
     IRegistryStore registries,
     StyleMapper styleMapper,
-    FormulaTranslator formulaTranslator) : IExcelExporter
+    FormulaTranslator formulaTranslator,
+    IMethodologyStore? methodologies = null,
+    ICalculationResultStore? results = null) : IExcelExporter
 {
     /// <summary>Рядок, з якого починається перший блок аркуша.</summary>
     private const int FirstRow = 1;
@@ -54,6 +56,13 @@ public sealed class ExcelExporter(
         ArgumentNullException.ThrowIfNull(options);
 
         var periodKey = new PeriodKey(options.PeriodKey);
+
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і експорт відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
 
         var instances = await rowStore
             .GetTableInstancesAsync(documentId, periodKey, ct)
@@ -102,6 +111,18 @@ public sealed class ExcelExporter(
         var slicesBatch = await cellStore
             .ReadSlicesAsync(instanceIds, ct)
             .ConfigureAwait(false);
+
+        // ⛔ F-02 (четвертий раунд UX): колонка `Calculated` — числом
+        // методології, тим самим розв'язанням посилання, що й сітка
+        // (`CalculatedCellOverlay`). Доти книга віддавала її порожньою.
+        // ⚠ Порти необов'язкові лише заради тестів, що конструюють експортер
+        // вручну; у контейнері розв'язуються завжди.
+        if (methodologies is not null && results is not null)
+        {
+            slicesBatch = await new Ecr.Application.Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(documentId, options.PeriodKey, snapshot, instances, rowIdsBatch, slicesBatch, ct)
+                .ConfigureAwait(false);
+        }
 
         using var workbook = new XLWorkbook();
 
@@ -316,12 +337,18 @@ public sealed class ExcelExporter(
             worksheet.Range(headerRow, 1, headerRow, columns.Count).Style = headerStyleValue;
         }
 
-        // Порядок рядків — за описом шаблону, а динамічні — за ключем. Порядок
-        // «як прийшло з бази» змінювався б від запуску до запуску, і diff двох
-        // вивантажень показував би зміни там, де їх немає.
+        // Порядок рядків — за описом шаблону, а рядки без опису — у порядку
+        // появи (ідентифікатор рядка). Порядок «як прийшло з бази» змінювався б
+        // від запуску до запуску, і diff двох вивантажень показував би зміни там,
+        // де їх немає.
+        //
+        // ⛔ `V-10`: це ТЕ САМЕ правило, що в сітці (`GetTableSliceHandler`:
+        // `Ordinal`, потім `RowId`). Доти рядки без опису йшли за ключем
+        // ОРДИНАЛЬНО — `R1, R10, …, R18, R2` — і книга не збігалася з екраном, з
+        // якого її вивантажили.
         var keys = rowIds.Keys
             .OrderBy(k => snapshot.RowsByKey.TryGetValue((table.Id, k), out var def) ? def.Ordinal : int.MaxValue)
-            .ThenBy(k => k, StringComparer.Ordinal)
+            .ThenBy(k => rowIds[k])
             .ToList();
 
         var rowRefs = new List<ExcelRowRef>(keys.Count);
@@ -544,6 +571,22 @@ public sealed class ExcelExporter(
     /// ⚠ Саме другим проходом. Формула може посилатися на таблицю, яку ще не
     /// вивантажили; трансляція під час першого проходу давала б
     /// <c>#REF!</c> залежно від порядку аркушів — тобто відтворювано неправильно.
+    ///
+    /// ⛔ `V-10`: формула лягає рівно туди, де її рахує система
+    /// (<c>RecalculationService.Targets</c>), і транслюється ОКРЕМО для кожної
+    /// комірки — з таблицею й рядком цієї комірки: <c>[A] * 2</c> у рядку 7 — це
+    /// <c>A7*2</c>, а не <c>#REF!*2</c>. Доти формула колонки транслювалася один
+    /// раз без контексту і клалася лише в ПЕРШИЙ рядок.
+    ///
+    /// ⚠ Рішення для того, що відтворити не можна (посилання на інший період,
+    /// предикат, діалект методології, невідома функція): комірка лишається
+    /// ЗНАЧЕННЯМ, без формули. Excel не показує <c>#REF!</c> там, де в системі
+    /// число, а імпорт однаково не бере з обчислюваної комірки нічого. Так само —
+    /// для комірки, на яку претендують ДВІ формули (колонки й рядка): яка з них
+    /// правильна, вирішує перерахунок, а не книга.
+    ///
+    /// ⚠ Формула рядка БЕЗ колонки («усі колонки рядка») у книгу не пишеться:
+    /// вона лягла б і в текстові колонки, і в дати.
     /// </remarks>
     private void WriteFormulas(
         XLWorkbook workbook, TemplateVersionSnapshot snapshot, IReadOnlyList<ExcelTableBlock> blocks)
@@ -559,36 +602,61 @@ public sealed class ExcelExporter(
             }
 
             var worksheet = workbook.Worksheet(block.SheetName);
+            var targets = new Dictionary<(string RowKey, int ColumnDefId), List<FormulaDef>>();
 
             foreach (var formula in table.Formulas.Where(f => !f.IsDeleted && f.ColumnDefId is not null))
             {
-                var column = block.Columns.FirstOrDefault(c => c.ColumnDefId == formula.ColumnDefId);
+                foreach (var row in Rows(table, block, formula))
+                {
+                    var key = (row.RowKey, formula.ColumnDefId!.Value);
 
-                if (column is null)
+                    if (!targets.TryGetValue(key, out var list))
+                    {
+                        targets[key] = list = [];
+                    }
+
+                    list.Add(formula);
+                }
+            }
+
+            var rowNumbers = block.Rows.ToDictionary(r => r.RowKey, r => r.Number, StringComparer.Ordinal);
+
+            foreach (var ((rowKey, columnDefId), formulas) in targets)
+            {
+                var column = block.Columns.FirstOrDefault(c => c.ColumnDefId == columnDefId);
+
+                if (column is null || formulas.Count != 1)
                 {
                     continue;
                 }
 
-                var translated = formulaTranslator.ToExcel(formula.Expression, coordinates);
+                var translated = formulaTranslator.ToExcel(
+                    formulas[0].Expression, coordinates, new FormulaContext(table.Code, rowKey));
 
-                if (string.IsNullOrEmpty(translated))
+                if (string.IsNullOrEmpty(translated) || FormulaTranslator.IsBroken(translated))
                 {
                     continue;
                 }
 
-                foreach (var row in Rows(block, formula))
-                {
-                    worksheet.Cell(row.Number, column.Number).FormulaA1 = translated;
-                }
+                worksheet.Cell(rowNumbers[rowKey], column.Number).FormulaA1 = translated;
             }
         }
     }
 
-    /// <summary>Рядки, на які лягає формула.</summary>
-    private static IEnumerable<ExcelRowRef> Rows(ExcelTableBlock block, FormulaDef formula)
-        => formula.Scope == FormulaScope.Row
-            ? block.Rows
-            : block.Rows.Take(1);
+    /// <summary>Рядки блоку, які обчислює формула, — те саме правило, що в перерахунку.</summary>
+    private static IEnumerable<ExcelRowRef> Rows(TableDef table, ExcelTableBlock block, FormulaDef formula)
+    {
+        if (formula.Scope == FormulaScope.Column)
+        {
+            return block.Rows;
+        }
+
+        var rowKey = Ecr.Application.Recalculation.FormulaOutputs.RowKeyOf(table, formula);
+
+        return rowKey is null
+            ? []
+            : block.Rows.Where(r => string.Equals(r.RowKey, rowKey, StringComparison.Ordinal));
+    }
 
     /// <summary>Мапа <c>(TableCode, RowKey, ColumnCode)</c> → адреса Excel.</summary>
     private static Dictionary<(string, string, string), string> Coordinates(

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
-import { Badge, Button, Group, Select, Switch, Table, Text, TextInput } from '@mantine/core';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { Group, Select, Switch, Text, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
 import type { SetUiStringRequest, UiStringCatalog, UiStringRevisionResponse } from '@/api/types';
 import { UiStringsCsvPanel } from '@/features/localization/UiStringsCsvPanel';
+import { UiStringsTable } from '@/features/localization/UiStringsTable';
 import { useLanguages } from '@/shared/i18n/useLanguages';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -64,6 +65,9 @@ export const RowsPerChunk = 100;
  */
 const LoadAheadMargin = '200px 0px';
 
+/** Стабільна порожнеча — щоб `UiStringsTable` (`memo`) не отримував новий `{}` на кожен рендер. */
+const NoStrings: Record<string, string> = {};
+
 type UiStringCoverageResponse = components['schemas']['UiStringCoverageResponse'];
 type UiStringListResponse = components['schemas']['UiStringListResponse'];
 
@@ -74,6 +78,17 @@ export function UiStringsPage(): JSX.Element {
   const [rawLang, setLang] = useUrlState('lang');
   const lang = rawLang ?? DefaultLanguage;
   const [filter, setFilter] = useState('');
+
+  /*
+   * ⛔ Живий дефект (2026-09-24, замір на стенді): «Filter by key» фільтрував і
+   * перемальовував таблицю СИНХРОННО на кожен символ — максимум 227 мс на
+   * символ (dev). Поле вводу оновлюється одразу (`filter`), а перелік і
+   * таблиця йдуть за ВІДКЛАДЕНИМ значенням: React малює їх перервним рендером
+   * після кадру з новим символом, а `UiStringsTable` (`memo`) у терміновому
+   * рендері не чіпається зовсім. Результат фільтра той самий — він лише
+   * наздоганяє поле, а не блокує його.
+   */
+  const deferredFilter = useDeferredValue(filter);
 
   // Який ключ редагуємо і що саме введено.
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -152,20 +167,25 @@ export function UiStringsPage(): JSX.Element {
     onError: showApiError,
   });
 
-  const strings = catalog.data?.strings ?? {};
-  const original = reference.data?.strings ?? {};
+  const strings = catalog.data?.strings ?? NoStrings;
+  const original = reference.data?.strings ?? NoStrings;
 
   // ⚠ Перелік ключів береться з МОВИ ЗА ЗАМОВЧУВАННЯМ, а не з обраної: у
   // неперекладеної мови сервер віддає підмінені значення, і взяти ключі
   // звідти означало б показати рівно ті самі рядки й ніколи не побачити
   // пропущених.
   const onlyMissing = missingOnly && !isDefault;
-  const missingKeys = new Set((missing.data?.items ?? []).map((item) => item.key));
+  const missingItems = missing.data?.items;
 
-  const keys = Object.keys(original)
-    .filter((key) => key.toLowerCase().includes(filter.toLowerCase()))
-    .filter((key) => !onlyMissing || missingKeys.has(key))
-    .sort((a, b) => a.localeCompare(b));
+  const keys = useMemo(() => {
+    const needle = deferredFilter.toLowerCase();
+    const missingKeys = new Set((missingItems ?? []).map((item) => item.key));
+
+    return Object.keys(original)
+      .filter((key) => key.toLowerCase().includes(needle))
+      .filter((key) => !onlyMissing || missingKeys.has(key))
+      .sort((a, b) => a.localeCompare(b));
+  }, [original, deferredFilter, onlyMissing, missingItems]);
 
   /** Скільки рядків зараз намальовано. */
   const [shown, setShown] = useState(RowsPerChunk);
@@ -178,9 +198,20 @@ export function UiStringsPage(): JSX.Element {
    */
   useEffect(() => {
     setShown(RowsPerChunk);
-  }, [filter, lang, missingOnly]);
+  }, [deferredFilter, lang, missingOnly]);
 
-  const visible = keys.slice(0, shown);
+  const visible = useMemo(() => keys.slice(0, shown), [keys, shown]);
+
+  const saveMutate = save.mutate;
+  const startEdit = useCallback((key: string, initial: string) => {
+    setEditingKey(key);
+    setDraft(initial);
+  }, []);
+  const cancelEdit = useCallback(() => setEditingKey(null), []);
+  const saveKey = useCallback(
+    (key: string) => saveMutate({ key, value: draft }),
+    [saveMutate, draft],
+  );
 
   /** Маячок у кінці списку; його появу й ловить спостерігач. */
   const sentinel = useRef<HTMLDivElement | null>(null);
@@ -331,114 +362,21 @@ export function UiStringsPage(): JSX.Element {
         }}
       >
         {() => (
-          <Table striped className="ecr-sticky-head">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>{t('uiStrings.key')}</Table.Th>
-                <Table.Th>{t('uiStrings.original')}</Table.Th>
-                <Table.Th>{t('uiStrings.translation')}</Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {visible.map((key) => {
-                const value = strings[key] ?? '';
-                const source = original[key] ?? '';
-
-                // ⛔ Ознака «немає перекладу»: значення дослівно збігається з
-                // оригіналом. Сервер підміняє відсутній переклад мовою за
-                // замовчуванням, тому в каталозі порожнеча не видно ніколи —
-                // і саме тому неперекладений інтерфейс виглядає перекладеним.
-                const untranslated = !isDefault && value === source;
-
-                return (
-                  <Table.Tr key={key}>
-                    {/* ⚠ `data-allow-dotted`: ключ каталогу тут — ДАНІ редактора,
-                        а не неперекладений напис (сторож `ФВ-14.9`, `D-138`). */}
-                    <Table.Td data-allow-dotted>
-                      <Text size="xs">{key}</Text>
-                    </Table.Td>
-                    <Table.Td>{source}</Table.Td>
-                    <Table.Td>
-                      {editingKey === key ? (
-                        <TextInput
-                          size="xs"
-                          aria-label={`${t('uiStrings.translation')} · ${key}`}
-                          value={draft}
-                          onChange={(event) => setDraft(event.currentTarget.value)}
-                          data-autofocus
-                        />
-                      ) : (
-                        <Group gap="xs">
-                          <Text>{value}</Text>
-                          {untranslated && (
-                            <Badge size="xs" color="statusWarning" variant="light">
-                              {t('uiStrings.untranslated')}
-                            </Badge>
-                          )}
-                        </Group>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap="xs" justify="flex-end">
-                        {editingKey === key ? (
-                          <>
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              onClick={() => setEditingKey(null)}
-                            >
-                              {t('common.cancel')}
-                            </Button>
-                            <Button
-                              size="compact-xs"
-                              loading={save.isPending}
-                              onClick={() => save.mutate({ key, value: draft })}
-                            >
-                              {t('common.save')}
-                            </Button>
-                          </>
-                        ) : (
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            onClick={() => {
-                              setEditingKey(key);
-
-                              // ⚠ Поле відкривається з ПОРОЖНІМ значенням для
-                              // неперекладеного ключа: підставлений оригінал
-                              // тут — найлегший спосіб «перекласти» сотню
-                              // рядків, натиснувши «зберегти» сто разів.
-                              setDraft(untranslated ? '' : value);
-                            }}
-                          >
-                            {t('uiStrings.edit')}
-                          </Button>
-                        )}
-                      </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                );
-              })}
-
-              {/* ⛔ Маячок — ОСТАННІМ РЯДКОМ таблиці, а не сусіднім блоком:
-                  `<div>` між `<tbody>` і `</table>` браузер викидає з таблиці
-                  в попередній вузол (foster parenting), і спостерігач стежив
-                  би за елементом, що стоїть НЕ там, де здається в коді.
-                  Порожній рядок не малює нічого видимого — його робота вся в
-                  тому, щоб потрапити в область видимості.
-
-                  ⚠ Рядок є ЛИШЕ доки є що домальовувати: інакше він лишався б
-                  порожнім хвостом смугастої таблиці назавжди. */}
-              {shown < keys.length && (
-                <Table.Tr data-testid="ui-strings-sentinel">
-                  <Table.Td colSpan={4}>
-                    <div ref={sentinel} aria-hidden="true" />
-                  </Table.Td>
-                </Table.Tr>
-              )}
-            </Table.Tbody>
-          </Table>
+          <UiStringsTable
+            visible={visible}
+            hasMore={shown < keys.length}
+            sentinel={sentinel}
+            strings={strings}
+            original={original}
+            isDefault={isDefault}
+            editingKey={editingKey}
+            draft={draft}
+            saving={save.isPending}
+            onDraftChange={setDraft}
+            onEdit={startEdit}
+            onCancel={cancelEdit}
+            onSave={saveKey}
+          />
         )}
       </AsyncBoundary>
     </>

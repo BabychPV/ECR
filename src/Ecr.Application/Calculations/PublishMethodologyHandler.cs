@@ -1,4 +1,4 @@
-﻿// src/Ecr.Application/Calculations/PublishMethodologyHandler.cs
+// src/Ecr.Application/Calculations/PublishMethodologyHandler.cs
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Common;
@@ -74,6 +74,14 @@ public sealed class PublishMethodologyHandler(
 
         var version = methodology.Versions.Single(v => v.Id == methodologyVersionId);
 
+        // ⛔ F-14 (четвертий раунд UX): «чотири ока» — ПЕРШОЮ відмовою, до золотого
+        // набору. Правило живе в домені (`MethodologyVersion.Publish`), але той
+        // стоїть у самому кінці, і автор, що публікує свою версію, спершу
+        // отримував відмову золотого тесту («Period not found · ECR-PRD-0404»), а
+        // про справжню причину дізнавався лише після того, як виправляв тести.
+        // Доменну перевірку не знято: вона лишається останньою лінією.
+        RejectAuthor(version, userId);
+
         // ⛔ Дата набуття чинності обов'язкова і перевіряється ПЕРШОЮ. Без неї
         // версія не має місця в часі: незрозуміло, які періоди рахувати нею, а
         // які — попередньою, і `VersionOn` не має відповіді. У схемі це
@@ -91,14 +99,26 @@ public sealed class PublishMethodologyHandler(
                 });
         }
 
+        // ⛔ V-18: правила відбору рядків — ДО золотого набору. Версія, чиї
+        // правила не збігаються ні з чим або збігаються не в тому порядку,
+        // проходила б публікацію з зеленим тестом: тест рахує формули, а не те,
+        // ЯКІ рядки документа до них дійдуть. Тут ловиться й те, що збережено
+        // до появи перевірки при збереженні.
+        await CheckRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        // ⛔ B-13: тест без періоду — людська відмова з назвою тесту ДО прогону.
+        // Доти модуль падав глибоко всередині з `ECR-PRD-0404` «Періоду 0 для
+        // документа 0 не існує…» — правда, але не про те, що має виправити автор.
+        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+        RequireTestPeriods(testCases);
+
         // Diff рахується ДО публікації: після неї попередня версія вже не та,
         // що була чинною, і порівнювати стало б нема з чим.
         var previous = methodology.VersionOn(from.AddDays(-1));
-        var diff = await BuildDiffAsync(methodology, version, previous, ct).ConfigureAwait(false);
+        var diff = await BuildDiffAsync(methodology, version, previous, testCases, ct).ConfigureAwait(false);
 
         // Зелений тест — не прапорець, а факт: усі випадки золотого набору
         // зійшлися в межах допуску (ФВ-9.12, ФВ-13.7).
-        var testCases = await methodologies.GetTestCasesAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var verdicts = await JudgeAsync(methodology, version, testCases, ct).ConfigureAwait(false);
         var greenTest = GoldenSet.IsGreen(verdicts);
 
@@ -171,13 +191,16 @@ public sealed class PublishMethodologyHandler(
             .ResolveImportsAsync(methodologyVersionId, effectiveFrom, ct)
             .ConfigureAwait(false);
 
-        var problems = new List<string>();
+        var problems = new List<PublishProblem>();
         problems.AddRange(await LibraryProblemsAsync(methodology, methodologyVersionId, ct).ConfigureAwait(false));
         problems.AddRange(imports
             .Where(library => library.MethodologyVersionId is null)
-            .Select(library =>
+            .Select(library => PublishProblem.Of(
+                "publish.problem.importNoVersion",
                 $"Імпортована методологія «{library.MethodologyCode}» не має версії, чинної на "
-                + $"{effectiveFrom:yyyy-MM-dd}: її формули невидимі."));
+                + $"{effectiveFrom:yyyy-MM-dd}: її формули невидимі.",
+                ("code", library.MethodologyCode),
+                ("date", effectiveFrom.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)))));
 
         if (formulas.Count == 0)
         {
@@ -249,6 +272,9 @@ public sealed class PublishMethodologyHandler(
         // має побачити їх у ту саму мить, а не знайти через тиждень у логах.
         var warnings = new List<string>();
 
+        // ⛔ V-18: невідома константа — іменна відмова, а не рядок у «N проблем».
+        MethodologyPublishChecks.CheckUnknownConstants(parsed, constants);
+
         problems.AddRange(MethodologyPublishChecks.Check(
             parsed,
             constants,
@@ -262,18 +288,25 @@ public sealed class PublishMethodologyHandler(
         if (!ordering.IsSuccess)
         {
             var byId = formulas.ToDictionary(f => f.Id, f => f.Code);
-            var cycleLength = ordering.CyclePath?.Count ?? 0;
+            string NameOf(int id) => byId.TryGetValue(id, out var code)
+                ? code
+                : id.ToString(CultureInfo.InvariantCulture);
+
+            // ⛔ V-18: шлях циклу ЗАМКНЕНИЙ — `[A, B, A]` (`TopologicalSorter`),
+            // і `Count` рахував перший вузол двічі: «3 formula(s) involved» на
+            // цикл із двох. Рахуються РІЗНІ формули, а шлях іде в текст
+            // поіменно — інакше методолог шукає цикл сам.
+            var path = ordering.CyclePath ?? [];
+            var cycleLength = path.Distinct().Count();
 
             throw new BusinessRuleException(
                 "ECR-TMPL-4221",
-                Ecr.Expressions.Graph.CycleDescription.Describe(
-                    ordering.CyclePath,
-                    id => byId.TryGetValue(id, out var code) ? code : id.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture)),
+                Ecr.Expressions.Graph.CycleDescription.Describe(ordering.CyclePath, NameOf),
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-TMPL-4221.formulaCycle",
                     ["cycleLength"] = cycleLength.ToString(CultureInfo.InvariantCulture),
+                    ["cyclePath"] = string.Join(" → ", path.Select(NameOf)),
                 });
         }
 
@@ -432,8 +465,15 @@ public sealed class PublishMethodologyHandler(
     /// <remarks>
     /// ⚠ Перелік, а не перша помилка (02b §12): методолог, який виправляє їх по
     /// одній за прогін, робить це стільки разів, скільки їх є.
+    /// <para>
+    /// ⛔ F-15/B-12: <c>count</c> — РЯДКОМ. Підстановка каталогу
+    /// (<c>ExceptionHandlingMiddleware</c>) бере лише рядкові значення, і
+    /// <c>int</c> лишав у тексті сире <c>{count}</c>. Перелік іде окремим полем
+    /// <c>problems</c> (ключ + підстановки кожного пункту) — клієнт перекладає
+    /// його сам, а не отримує одне українське речення.
+    /// </para>
     /// </remarks>
-    private static void Reject(List<string> problems)
+    private static void Reject(List<PublishProblem> problems)
     {
         if (problems.Count > 0)
         {
@@ -443,9 +483,99 @@ public sealed class PublishMethodologyHandler(
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-CALC-0422.publishChecksFailed",
-                    ["count"] = problems.Count,
+                    ["count"] = problems.Count.ToString(CultureInfo.InvariantCulture),
+                    ["problems"] = problems,
                 });
         }
+    }
+
+    /// <summary>Автор версії не публікує її сам (<c>D-40</c>, F-14).</summary>
+    /// <param name="version">Версія, яку публікують.</param>
+    /// <param name="userId">Хто публікує.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0409</c>, <c>authorCannotPublish</c>.</exception>
+    /// <remarks>
+    /// ⚠ Лише для чернетки: повторна публікація опублікованої версії — інша
+    /// відмова (<c>RequireDraft</c> домену), і підміняти її «чотирма очима»
+    /// означало б назвати не ту причину.
+    /// </remarks>
+    private static void RejectAuthor(MethodologyVersion version, int userId)
+    {
+        if (version.IsPublished || version.CreatedByUserId != userId)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0409",
+            $"Користувач {userId.ToString(CultureInfo.InvariantCulture)} є автором версії {version.Version} "
+            + "і не може її опублікувати (правило чотирьох очей, D-40).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0409.authorCannotPublish",
+                ["version"] = version.Version,
+            });
+    }
+
+    /// <summary>Кожен тест золотого набору має справжній період (B-13).</summary>
+    /// <param name="testCases">Тести версії.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>, <c>goldenTestNoPeriod</c>.</exception>
+    /// <remarks>
+    /// ⚠ Тут — лише форма ключа (<c>PeriodKey.IsValid</c>: рік×100 + номер).
+    /// Ключ правильної форми, якого немає в документі тесту, ловить
+    /// <see cref="RunTestAsync"/> — тією самою відмовою.
+    /// </remarks>
+    private static void RequireTestPeriods(IReadOnlyList<MethodologyTestCase> testCases)
+    {
+        var broken = testCases.FirstOrDefault(t => !t.Input.PeriodKey.IsValid);
+        if (broken is not null)
+        {
+            throw TestWithoutPeriod(broken);
+        }
+    }
+
+    /// <summary>Відмова «тест не має періоду» — з назвою тесту.</summary>
+    private static BusinessRuleException TestWithoutPeriod(MethodologyTestCase testCase)
+        => new(
+            "ECR-CALC-0422",
+            $"Тест золотого набору «{testCase.Code}» не має періоду: вкажіть у вході документ і період, "
+            + "що існує (periodKey — рік×100 + номер, напр. 202601). Без нього тривалість періоду "
+            + "обчислити нема з чого.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.goldenTestNoPeriod",
+                ["test"] = testCase.Code,
+                ["periodKey"] = testCase.Input.PeriodKey.Value.ToString(CultureInfo.InvariantCulture),
+                ["documentId"] = testCase.Input.DocumentId.ToString(CultureInfo.InvariantCulture),
+            });
+
+    /// <summary>Проганяє тест і перекладає «періоду немає» на мову тесту (B-13).</summary>
+    private async Task<CalculationOutput> RunTestAsync(
+        MethodologyTestCase testCase, MethodologyDescriptor descriptor, CancellationToken ct)
+    {
+        try
+        {
+            return await module
+                .ExecuteAsync(WithDescriptor(testCase.Input, descriptor), ct)
+                .ConfigureAwait(false);
+        }
+        catch (DomainException ex) when (string.Equals(ex.ErrorCode, "ECR-PRD-0404", StringComparison.Ordinal))
+        {
+            throw TestWithoutPeriod(testCase);
+        }
+    }
+
+    /// <summary>Предикати й узгодженість активних правил версії (V-18).</summary>
+    private async Task CheckRulesAsync(int methodologyVersionId, CancellationToken ct)
+    {
+        var rules = await methodologies.GetRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+        foreach (var rule in rules)
+        {
+            MethodologyRuleChecks.RequireValidPredicate(rule.Code, rule.MatchJson);
+        }
+
+        MethodologyRuleChecks.RequireConsistentSet(
+            [.. rules.Select(r => new MethodologyRuleChecks.RuleSpec(r.Code, r.MatchJson, r.Priority))]);
     }
 
     /// <summary>Проблеми, що випливають із природи методології (поправка 6).</summary>
@@ -454,7 +584,7 @@ public sealed class PublishMethodologyHandler(
     /// планувальник запускатиме її окремо, з порожнім набором аргументів, і
     /// щоночі писатиме або нулі, або помилку — залежно від формул.
     /// </remarks>
-    private async Task<IEnumerable<string>> LibraryProblemsAsync(
+    private async Task<IEnumerable<PublishProblem>> LibraryProblemsAsync(
         Methodology methodology, int methodologyVersionId, CancellationToken ct)
     {
         if (methodology.Kind != MethodologyKind.Library)
@@ -466,8 +596,12 @@ public sealed class PublishMethodologyHandler(
 
         return rules.Count == 0
             ? []
-            : [$"Методологія «{methodology.Code}» оголошена бібліотекою, але має {rules.Count} "
-               + "активних правил прив'язки: бібліотека не рахує ні для кого, на її формули посилаються."];
+            : [PublishProblem.Of(
+                "publish.problem.libraryHasRules",
+                $"Методологія «{methodology.Code}» оголошена бібліотекою, але має {rules.Count} "
+                + "активних правил прив'язки: бібліотека не рахує ні для кого, на її формули посилаються.",
+                ("code", methodology.Code),
+                ("count", rules.Count.ToString(CultureInfo.InvariantCulture)))];
     }
 
     /// <summary>
@@ -510,7 +644,7 @@ public sealed class PublishMethodologyHandler(
         Dictionary<string, int> byCode,
         IReadOnlyList<MethodologyLibrary> imports,
         HashSet<int> dependencies,
-        List<string> problems)
+        List<PublishProblem> problems)
     {
         var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
         if (parsed.Expression is null)
@@ -567,9 +701,14 @@ public sealed class PublishMethodologyHandler(
                 // рядків у `calc.MethodologyImport`.
                 // ⚠ TODO: потрібен окремий код `ECR-CALC-0435`.
                 case MethodologyReferenceOutcome.Ambiguous:
-                    problems.Add(
+                    problems.Add(PublishProblem.Of(
+                        "publish.problem.ambiguousReference",
                         $"Формула «{formula.Code}»: посилання «!{code}» знайдено у "
-                        + $"{reference.Candidates.Count} імпортах ({string.Join(", ", reference.Candidates)}).");
+                        + $"{reference.Candidates.Count} імпортах ({string.Join(", ", reference.Candidates)}).",
+                        ("formula", formula.Code),
+                        ("name", code),
+                        ("count", reference.Candidates.Count.ToString(CultureInfo.InvariantCulture)),
+                        ("candidates", string.Join(", ", reference.Candidates))));
                     break;
 
                 default:
@@ -623,7 +762,11 @@ public sealed class PublishMethodologyHandler(
         }
 
         var divergences = GoldenSet.Divergences(verdicts);
+        var red = verdicts.Where(v => !v.IsGreen).ToList();
 
+        // ⛔ F-15/B-12: `count` — рядком (інакше в тексті лишалося сире
+        // `{count}`), і тексту додано НАЗВИ тестів, що розійшлися: «3 values
+        // diverged» без жодного імені не давало знайти, що саме виправляти.
         throw new BusinessRuleException(
             "ECR-CALC-0422",
             $"Публікацію версії {version.Version} відхилено: на золотому наборі розійшлося "
@@ -632,8 +775,9 @@ public sealed class PublishMethodologyHandler(
             {
                 ["messageKey"] = "err.ECR-CALC-0422.goldenSetDiverged",
                 ["version"] = version.Version,
-                ["count"] = divergences.Count,
-                ["goldenSet"] = verdicts.Where(v => !v.IsGreen).ToList(),
+                ["count"] = divergences.Count.ToString(CultureInfo.InvariantCulture),
+                ["tests"] = string.Join(", ", red.Select(v => v.Code)),
+                ["goldenSet"] = red,
             });
     }
 
@@ -653,8 +797,7 @@ public sealed class PublishMethodologyHandler(
 
         foreach (var testCase in testCases)
         {
-            var output = await module
-                .ExecuteAsync(WithDescriptor(testCase.Input, Descriptor(methodology, version)), ct)
+            var output = await RunTestAsync(testCase, Descriptor(methodology, version), ct)
                 .ConfigureAwait(false);
 
             verdicts.Add(GoldenSet.Judge(testCase, output));
@@ -668,21 +811,18 @@ public sealed class PublishMethodologyHandler(
         Methodology methodology,
         MethodologyVersion version,
         MethodologyVersion? previous,
+        IReadOnlyList<MethodologyTestCase> testCases,
         CancellationToken ct)
     {
         var changes = new List<MethodologyResultDelta>();
-
-        var testCases = await methodologies.GetTestCasesAsync(version.Id, ct).ConfigureAwait(false);
 
         if (previous is not null)
         {
             foreach (var testCase in testCases)
             {
-                var after = await module
-                    .ExecuteAsync(WithDescriptor(testCase.Input, Descriptor(methodology, version)), ct)
+                var after = await RunTestAsync(testCase, Descriptor(methodology, version), ct)
                     .ConfigureAwait(false);
-                var before = await module
-                    .ExecuteAsync(WithDescriptor(testCase.Input, Descriptor(methodology, previous)), ct)
+                var before = await RunTestAsync(testCase, Descriptor(methodology, previous), ct)
                     .ConfigureAwait(false);
 
                 foreach (var value in after.Values)

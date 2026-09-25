@@ -37,7 +37,8 @@ export type DenyReason =
   | 'ArchivingInProgress'
   | 'BusinessRule'
   | 'SimulationReadOnly'
-  | 'OutsidePermitWindow';
+  | 'OutsidePermitWindow'
+  | 'InsufficientGrantLevel';
 
 /** Рішення про комірку. */
 export interface CellDecision {
@@ -76,6 +77,7 @@ const Hints: Record<DenyReason, string> = {
   BusinessRule: 'deny.BusinessRule',
   SimulationReadOnly: 'deny.SimulationReadOnly',
   OutsidePermitWindow: 'deny.OutsidePermitWindow',
+  InsufficientGrantLevel: 'deny.InsufficientGrantLevel',
 };
 
 /** Ключ комірки у словнику прав, який віддає сервер. */
@@ -157,6 +159,19 @@ export function decide(slice: TableSliceDto, rowKey: string, column: ColumnDto):
  */
 function reasonOf(permission: string): DenyReason | null {
   return permission in Hints ? (permission as DenyReason) : null;
+}
+
+/**
+ * Текст причини заборони за її серверною назвою — або `null` для невідомої.
+ *
+ * ⚠ Той самий текст, що в підказці сірої комірки: відмова прев'ю імпорту
+ * (`deny.<EditDenyReason>`, `V-10`) і сіра комірка сітки — одна й та сама
+ * причина, і двох формулювань в неї бути не повинно.
+ */
+export function denyText(reason: string): string | null {
+  const known = reasonOf(reason);
+
+  return known === null ? null : deny(known).hint;
 }
 
 function deny(reason: DenyReason): CellDecision {

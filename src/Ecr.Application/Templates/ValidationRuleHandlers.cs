@@ -46,7 +46,8 @@ public sealed class SaveValidationRuleHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IFormulaEngine formulaEngine)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -71,7 +72,10 @@ public sealed class SaveValidationRuleHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -82,7 +86,23 @@ public sealed class SaveValidationRuleHandler(
             .SelectMany(s => s.Tables)
             .FirstOrDefault(t => t.Id == tableDefId)
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Таблиці {tableDefId} у версії {templateVersionId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Таблиці {tableDefId} у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    // Наявний ключ (`SaveColumnDefHandler.FindTable`, 2026-09-23) —
+                    // той самий факт «таблиці з таким Id немає».
+                    ["messageKey"] = "err.ECR-TMPL-0404.table",
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+
+        // ⛔ V-19: правило з `[CDEC] >= ` зберігалося з «saved», а публікація
+        // вирази правил не перевіряла зовсім — зламане правило доїжджало до
+        // документа. Діалект той самий, яким правило рахує `ValidationEngine`.
+        ExpressionRejection.RequireValid(
+            formulaEngine, version, command.Expression, ExpressionDialect.Template,
+            new ExpressionSite(table.Id, null, command.ColumnDefId));
 
         var ecrCode = EcrCode.Create(code);
         var message = new LocalizedText(new Dictionary<string, string>(command.MessageL10n, StringComparer.OrdinalIgnoreCase));
@@ -246,7 +266,10 @@ public sealed class DeleteValidationRuleHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -256,11 +279,25 @@ public sealed class DeleteValidationRuleHandler(
             .SelectMany(s => s.Tables)
             .FirstOrDefault(t => t.Id == tableDefId)
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Таблиці {tableDefId} у версії {templateVersionId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Таблиці {tableDefId} у версії {templateVersionId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.table",
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var rule = table.ValidationRules.FirstOrDefault(r => string.Equals(r.Code, code, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Правила «{code}» у таблиці {tableDefId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Правила «{code}» у таблиці {tableDefId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.validationRule",
+                    ["code"] = code,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
         var change = classifier.ClassifyDeletion(nameof(ValidationRule), hasDocuments);

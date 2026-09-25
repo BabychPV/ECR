@@ -123,6 +123,9 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("DocumentId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("ErrorMessage")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
@@ -152,7 +155,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "PeriodKey")
+                    b.HasIndex("ProjectId", "PeriodKey", "DocumentId")
                         .IsUnique()
                         .HasDatabaseName("UX_CalculationRun_Current")
                         .HasFilter("[Status] = 'Current'");
@@ -641,7 +644,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("tinyint");
 
                     b.Property<byte>("TraceLevel")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValue((byte)1);
 
@@ -814,6 +816,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                     b.HasAlternateKey("TableDefId", "Id")
                         .HasName("UQ_ColumnDef_ForFk");
 
+                    b.HasIndex("LookupRegistryDefId")
+                        .HasDatabaseName("IX_ColumnDef_LookupRegistryDefId");
+
+                    b.HasIndex("UnitId")
+                        .HasDatabaseName("IX_ColumnDef_UnitId");
+
                     b.HasIndex("TableDefId", "Code")
                         .IsUnique()
                         .HasDatabaseName("UQ_ColumnDef");
@@ -842,7 +850,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<byte>("Dialect")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("0", "DF_Formula_Dialect");
 
@@ -1094,7 +1101,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<byte>("SourceKind")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("2", "DF_RegDef_Src");
 
@@ -1508,7 +1514,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<byte>("StorageMode")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("0", "DF_TableDef_Storage");
 
@@ -1960,6 +1965,14 @@ namespace Ecr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("PeriodKeyValue", "TableRowId", "ColumnDefId");
 
+                    b.HasIndex("ValueRegistryEntryId")
+                        .HasDatabaseName("IX_CellValue_RegistryEntry")
+                        .HasFilter("[ValueRegistryEntryId] IS NOT NULL");
+
+                    b.HasIndex("ValueUnitId")
+                        .HasDatabaseName("IX_CellValue_Unit")
+                        .HasFilter("[ValueUnitId] IS NOT NULL");
+
                     b.HasIndex("PeriodKeyValue", "TableRowId", "ColumnDefId")
                         .HasDatabaseName("IX_CellValue_Fill")
                         .HasFilter("[IsCalculated] = 0");
@@ -2258,7 +2271,6 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.Property<byte>("CurrentPeriodMode")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint")
                         .HasDefaultValueSql("0", "DF_Project_CPMode");
 
@@ -2412,6 +2424,12 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     b.HasKey("PeriodKeyValue", "Id");
+
+                    b.HasIndex("PeriodKeyValue", "TableInstanceId")
+                        .HasDatabaseName("IX_TableRow_Live")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("PeriodKeyValue", "TableInstanceId"), new[] { "RowKeyValue" });
 
                     b.HasIndex("PeriodKeyValue", "TableInstanceId", "RowKeyValue")
                         .IsUnique()

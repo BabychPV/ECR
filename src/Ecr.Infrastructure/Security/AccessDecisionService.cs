@@ -27,6 +27,12 @@ public sealed class AccessDecisionService(
     Application.Common.ICurrentUser currentUser,
     Application.Ports.IWorkflowStore workflow) : IAccessDecisionService
 {
+    /// <summary>
+    /// Розрахунок стану періоду для рішень (F-08). Без стану, тому один на
+    /// тип: параметр конструктора зачепив би кожне місце, що створює службу.
+    /// </summary>
+    private static readonly Domain.Services.PeriodStateCalculator PeriodStates = new();
+
     /// <inheritdoc />
     public async Task<AccessProfile> BuildProfileAsync(int userId, CancellationToken ct)
     {
@@ -43,7 +49,8 @@ public sealed class AccessDecisionService(
             // виглядав би як звичайний користувач без грантів, а це різні речі
             // і в UI, і в журналі.
             throw new AccessDeniedException(
-                "ECR-AUTH-0401", "Обліковий запис не існує або вимкнений.");
+                "ECR-AUTH-0401", "Обліковий запис не існує або вимкнений.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.accountDisabled" });
         }
 
         // Ключ кешу — користувач + штамп + відбиток груп: зміна ролей крутить
@@ -203,6 +210,10 @@ public sealed class AccessDecisionService(
         var assignments = await db.RoleAssignments
             .AsNoTracking()
             .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
+            // Найновіші призначення першими — той самий порядок, що й у
+            // відбитку груп вище: на стелі обидва бачать ОДНІ Й ТІ САМІ
+            // призначення, а не дві різні довільні вибірки (EF 10102).
+            .OrderByDescending(a => a.Id)
             .Take(MaxRoleAssignments)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -865,13 +876,25 @@ public sealed class AccessDecisionService(
             .FirstAsync(ct)
             .ConfigureAwait(false);
 
-        // Стан періоду — ЗБЕРЕЖЕНЕ значення, а не функція від now() (ФВ-1.12).
         var period = await db.Periods
             .AsNoTracking()
             .Where(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == periodKey.Value)
-            .Select(p => new { p.State, p.Sequence })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
+
+        // ⛔ F-08: стан для РІШЕННЯ — на `clock.UtcNow`, а не збережений.
+        // Збережений змінює лише годинна задача, і перевідкритий період після
+        // `ReopenedUntil` ще до години приймав запис. `Closed` не
+        // повертається назад ніколи (`PeriodStateCalculator.Effective`).
+        //
+        // ⚠ Лише для АКТИВНОГО проєкту — як і в самій задачі: періоди чернетки
+        // не відкриваються за датами, доки проєкт не активовано (`A7-25`), і
+        // розрахунок тут відкрив би їх повз активацію.
+        var periodState = period is null
+            ? PeriodState.Scheduled
+            : project.Status == ProjectStatus.Active
+                ? PeriodStates.Effective(period, clock.UtcNow)
+                : period.State;
 
         var sheetStatus = sheetDefId is { } sheet
             ? await db.ApprovalStates
@@ -917,7 +940,7 @@ public sealed class AccessDecisionService(
             // «період не відкрито» для користувача — та сама відмова.
             project.Status,
             project.IsArchiving,
-            period?.State ?? PeriodState.Scheduled,
+            periodState,
             outOfWindow,
             sheetStatus ?? DocumentStatus.Draft,
             column?.IsComputed ?? false,

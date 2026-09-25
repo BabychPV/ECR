@@ -70,7 +70,8 @@ public sealed class SaveFormulaDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IFormulaEngine formulaEngine)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -106,7 +107,10 @@ public sealed class SaveFormulaDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         // ⛔ Повний граф версії, ВІДСТЕЖУВАНИЙ — так само, як SaveSheetDefHandler:
         // порожній `IRepository.FindAsync` без `Include` не бачив би жодної
@@ -120,6 +124,15 @@ public sealed class SaveFormulaDefHandler(
         var (table, existing, resolvedId) = FindTarget(version, tableDefId, scope, target);
 
         RequireComputedColumn(table, scope, resolvedId);
+
+        // ⛔ V-19: синтаксис і посилання — ДО запису. Раніше `[CDEC] * * 2` і
+        // `[NOPE] + 1` зберігалися з «saved», і автор дізнавався про помилку
+        // лише на публікації, та ще й загальним «does not pass validation».
+        ExpressionRejection.RequireValid(
+            formulaEngine, version, command.Expression, command.Dialect,
+            scope == FormulaScope.Column
+                ? new ExpressionSite(table.Id, null, resolvedId)
+                : new ExpressionSite(table.Id, table.Rows.First(r => r.Id == resolvedId).RowKeyValue, null));
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -199,7 +212,12 @@ public sealed class SaveFormulaDefHandler(
         throw new BusinessRuleException(
             ErrorCodes.TemplateInvalid,
             $"Область формули {scope} тут не приймається: адресується лише Column або Row " +
-            "(Cell поєднує обидві адреси одразу — для нього немає єдиної адреси).");
+            "(Cell поєднує обидві адреси одразу — для нього немає єдиної адреси).",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-0422.formulaScopeInvalid",
+                ["scope"] = scope.ToString(),
+            });
     }
 
     /// <summary>
@@ -302,21 +320,11 @@ public sealed class SaveFormulaDefHandler(
     internal static (TableDef Table, FormulaDef? Existing, int ResolvedId) FindTarget(
         TemplateVersion version, int tableDefId, FormulaScope scope, string target)
     {
-        TableDef? table = null;
-        foreach (var sheet in version.Sheets)
-        {
-            table = sheet.Tables.FirstOrDefault(t => t.Id == tableDefId);
-            if (table is not null)
-            {
-                break;
-            }
-        }
-
-        if (table is null)
-        {
-            throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Таблиці {tableDefId} у версії {version.Id} немає.");
-        }
+        // ⛔ B-14 (UX-аудит, четвертий раунд): наявний хелпер, спільний із
+        // ColumnDefHandlers/RowDefHandlers — той самий факт «таблиці з таким
+        // Id у версії немає», один messageKey незалежно від того, яка дія до
+        // нього дійшла.
+        var table = SaveColumnDefHandler.FindTable(version, tableDefId);
 
         if (scope == FormulaScope.Column)
         {
@@ -324,7 +332,15 @@ public sealed class SaveFormulaDefHandler(
                 || table.Columns.FirstOrDefault(c => c.Id == columnDefId) is not { } column)
             {
                 throw new NotFoundException(
-                    ErrorCodes.TemplateNotFound, $"Колонки «{target}» у таблиці {tableDefId} немає.");
+                    ErrorCodes.TemplateNotFound,
+                    $"Колонки «{target}» у таблиці {tableDefId} немає.",
+                    new Dictionary<string, object?>
+                    {
+                        // Той самий ключ, що ColumnUsageHandler/MethodologyAuthoringHandlers:
+                        // той самий факт «колонки з таким Id немає», а не новий текст.
+                        ["messageKey"] = "err.ECR-TMPL-0404.column",
+                        ["columnDefId"] = target,
+                    });
             }
 
             var existingOnColumn = table.Formulas.FirstOrDefault(f =>
@@ -335,7 +351,14 @@ public sealed class SaveFormulaDefHandler(
 
         var row = table.Rows.FirstOrDefault(r => string.Equals(r.RowKeyValue, target, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Рядка «{target}» у таблиці {tableDefId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Рядка «{target}» у таблиці {tableDefId} немає.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.row",
+                    ["rowKey"] = target,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var existingOnRow = table.Formulas.FirstOrDefault(f =>
             !f.IsDeleted && f.Scope == FormulaScope.Row && f.RowDefId == row.Id);
@@ -418,7 +441,10 @@ public sealed class DeleteFormulaDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -431,7 +457,14 @@ public sealed class DeleteFormulaDefHandler(
             var kind = scope == FormulaScope.Column ? "колонці" : "рядку";
             throw new NotFoundException(
                 ErrorCodes.TemplateNotFound,
-                $"На {kind} «{target}» у таблиці {tableDefId} немає формули.");
+                $"На {kind} «{target}» у таблиці {tableDefId} немає формули.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.formula",
+                    ["scope"] = scope.ToString(),
+                    ["target"] = target,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);

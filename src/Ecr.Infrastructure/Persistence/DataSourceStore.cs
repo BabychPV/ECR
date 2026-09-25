@@ -37,6 +37,7 @@ public sealed class DataSourceStore(EcrDbContext db) : IDataSourceStore
         var entities = await db.SourceEntities.AsNoTracking()
             .GroupBy(e => e.DataSourceId)
             .Select(g => new { DataSourceId = g.Key, Count = g.Count() })
+            .OrderBy(g => g.DataSourceId)
             .Take(MaxSources)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -45,6 +46,7 @@ public sealed class DataSourceStore(EcrDbContext db) : IDataSourceStore
                                join e in db.SourceEntities.AsNoTracking() on s.SourceEntityId equals e.Id
                                group s by e.DataSourceId into g
                                select new { DataSourceId = g.Key, Count = g.Count() })
+            .OrderBy(g => g.DataSourceId)
             .Take(MaxSources)
             .ToListAsync(ct)
             .ConfigureAwait(false);

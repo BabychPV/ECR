@@ -215,7 +215,7 @@ describe('«Повторити» і посилання на результат (
      * чи з `documentId` — і `href` перестане збігатися з тим, що віддав
      * сервер: посилання поведе на неіснуючий файл.
      */
-    const link = screen.getByRole('link', { name: '⟦document.exportReady⟧' });
+    const link = screen.getByRole('link', { name: '⟦jobs.resultDownload⟧' });
     expect(link.getAttribute('href')).toBe('/api/v1/documents/42/export/abc-123');
   });
 
@@ -223,6 +223,30 @@ describe('«Повторити» і посилання на результат (
     show([row({ jobId: 'z', state: 'Succeeded', resultUrl: null })]);
 
     expect(document.querySelector('[data-job-result]')).toBeNull();
-    expect(screen.queryByRole('link', { name: '⟦document.exportReady⟧' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '⟦jobs.resultDownload⟧' })).toBeNull();
+  });
+  it('F-27: експорт — людський текст і посилання, а не hex; успішний перерахунок формул прихований', () => {
+    show([
+      row({
+        jobId: 'exp',
+        state: 'Succeeded',
+        message: '3f1c0b0e9a2d4c6e8b7a5f4d3c2b1a09',
+        resultUrl: '/api/v1/documents/42/export/3f1c0b0e9a2d4c6e8b7a5f4d3c2b1a09',
+      }),
+      row({
+        jobId: 'recalc',
+        jobCode: 'Ecr.Application.Ports.IFormulaRecalculationJob',
+        state: 'Succeeded',
+        message: 'Recalculated cells: 0.',
+      }),
+    ]);
+
+    expect(screen.getByText('⟦jobs.exportReady⟧')).toBeTruthy();
+    expect(screen.queryByText('3f1c0b0e9a2d4c6e8b7a5f4d3c2b1a09')).toBeNull();
+    expect(screen.getByRole('link', { name: '⟦jobs.resultDownload⟧' })).toBeTruthy();
+
+    // ⛔ Мутація: прибрати `filter(isShownInMyTasks)` — рядок перерахунку повернеться.
+    expect(document.querySelector('[data-job-id="recalc"]')).toBeNull();
+    expect(screen.queryByText('Recalculated cells: 0.')).toBeNull();
   });
 });

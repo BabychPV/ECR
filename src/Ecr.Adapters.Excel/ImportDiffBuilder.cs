@@ -1,5 +1,6 @@
 using System.Globalization;
 using ClosedXML.Excel;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
@@ -95,9 +96,27 @@ public sealed class ImportDiffBuilder
                 }
 
                 var cell = worksheet.Cell(row.Number, column.Number);
+
+                // ⛔ `V-10`. Формула в обчислюваній комірці — це те, що туди
+                // поклав САМ експорт (`ExcelExporter.WriteFormulas`), а не
+                // значення користувача: система однаково порахує комірку сама.
+                // Порівнювати її кешований результат (а Excel перерахує його,
+                // щойно користувач змінить вхідну комірку поруч) означало б
+                // відхиляти кожну книгу, у якій змінили хоч одне вхідне число, —
+                // і з «усе або нічого» Apply не ставав доступним ніколи.
+                if (IsCalculated(definition) && cell.HasFormula)
+                {
+                    continue;
+                }
+
                 var incoming = Read(cell, definition, lookups);
                 var existing = values.GetValueOrDefault((row.RowKey, column.ColumnDefId))?.Value;
 
+                // ⛔ `V-10`. Обчислювані й read-only комірки порівнюються з
+                // поточним значенням ТАК САМО, як вхідні, і відхиляються
+                // (нижче) лише тоді, коли користувач їх ЗМІНИВ. Незмінена
+                // обчислювана комірка експортованої книги пропускається мовчки:
+                // вона не правка, а копія того, що система й так тримає.
                 if (Same(incoming, existing, definition))
                 {
                     continue;
@@ -117,7 +136,8 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-CELL-4221",
-                        "Комірка обчислюється системою: значення з файлу не застосовується."));
+                        "The cell is calculated by the system: the value from the file is not applied.",
+                        table.Code, table.NameL10n, ImportMessageKeys.Calculated));
 
                     continue;
                 }
@@ -126,7 +146,8 @@ public sealed class ImportDiffBuilder
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ROW-0404",
-                        "Рядка з таким ключем у документі немає: імпорт рядків не створює."));
+                        "The document has no row with this key: import does not create rows.",
+                        table.Code, table.NameL10n, ImportMessageKeys.NoRow));
 
                     continue;
                 }
@@ -136,20 +157,86 @@ public sealed class ImportDiffBuilder
                 // ⚠ Заборонені комірки НЕ застосовуються і показуються
                 // переліком (ФВ-4.4). Мовчазне пропускання виглядало б як
                 // успішний імпорт, після якого частина чисел не змінилася.
+                //
+                // ⛔ F-30: діагностика — англійською і з причиною-кодом, без
+                // `decision.Detail`. Та буває готовим українським реченням
+                // («Сеанс симуляції користувача …»), і саме воно їхало в
+                // `message` відповіді поруч із ключем. Людині текст дає ключ
+                // (`deny.<причина>` — той самий, що в підказці сітки).
                 if (decisions.TryGetValue(address, out var decision) && !decision.IsAllowed)
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, "ECR-ACCS-0403",
-                        decision.Detail ?? $"Змінювати комірку не дозволено: {decision.Reason}."));
+                        $"Editing the cell is not allowed: {decision.Reason}.",
+                        table.Code, table.NameL10n, ImportMessageKeys.Denied(decision.Reason)));
 
                     continue;
                 }
 
-                changes.Add(new ImportChange(row.RowKey, column.Code, Display(existing, definition), incoming));
+                // ⛔ Ціла частина понад межу сховища (`decimal(34,16)`, 18
+                // розрядів) — відмова в ПРЕВ'Ю, а не зміна. Інакше вона
+                // доходила б до застосування, і там `CellValueReader` відхиляв
+                // увесь пакет — користувач дізнавався б про одну комірку ціною
+                // відмови всієї книги, вже після того, як погодився на прев'ю.
+                // На відміну від хвоста після коми (нормалізується вище), тут
+                // округлювати нема до чого: число просто не вміщується.
+                if (incoming is decimal number && !CellValueReader.IntegerPartFits(number))
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        $"The number has more than {CellValueReader.StorageIntegerDigits} digits before the decimal point: storage cannot hold it.",
+                        table.Code, table.NameL10n, ImportMessageKeys.IntegerDigits));
+
+                    continue;
+                }
+
+                // ⛔ F-06: тип перевіряє ТОЙ САМИЙ читач, що й запис
+                // (`CellValueReader.Read` у `PatchCellsHandler`). Доти `abc` у
+                // числовій колонці ставав звичайною зміною, Apply був активний, а
+                // застосування відповідало 422 «expects a number» — на всю
+                // книгу, вже після того, як людина погодилася на перегляд.
+                if (TypeMismatch(incoming, definition) is { } mismatch)
+                {
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch, mismatch.Message,
+                        table.Code, table.NameL10n, mismatch.MessageKey));
+
+                    continue;
+                }
+
+                changes.Add(new ImportChange(
+                    row.RowKey, column.Code, Display(existing, definition), incoming, table.Code, table.NameL10n));
             }
         }
 
         return new TableDiff(block.TableInstanceId, periodKey, changes, rejected, versions);
+    }
+
+    /// <summary>
+    /// Відмова читача запису для значення з книги; <c>null</c> — значення
+    /// ляже в комірку.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ключ відмови — ІМПОРТНИЙ (<see cref="ImportMessageKeys.TypeMismatch"/>):
+    /// ключ читача несе в тексті «Column "{columnCode}"», а рядок переліку
+    /// перегляду вже має колонку окремим стовпцем і підстановок не передає.
+    /// </remarks>
+    private static (string Message, string? MessageKey)? TypeMismatch(object? incoming, ColumnDef definition)
+    {
+        try
+        {
+            _ = CellValueReader.Read(incoming, definition);
+
+            return null;
+        }
+        catch (Ecr.Application.Errors.BusinessRuleException error)
+            when (string.Equals(error.ErrorCode, CellValueReader.TypeMismatch, StringComparison.Ordinal))
+        {
+            var readerKey = error.Details?.GetValueOrDefault("messageKey") as string;
+
+            return ($"The value does not match the column type ({readerKey ?? error.ErrorCode}).",
+                    ImportMessageKeys.TypeMismatch(readerKey));
+        }
     }
 
     /// <summary>Читає значення з книги у формі, придатній для <c>PatchCell</c>.</summary>
@@ -177,9 +264,26 @@ public sealed class ImportDiffBuilder
                     ? integer
                     : text;
 
-            case CellDataType.Decimal:
+            // ⛔ `V-10`: обчислювані колонки (`Formula`, `Calculated`) тримають
+            // ЧИСЛО (`ValueNumeric`) і експортуються числом — і читаються так
+            // само. Доти вони падали в `default` і читалися текстом, тож
+            // `Same()` порівнював «10» з `ValueString`, якого в них немає, і
+            // КОЖНА непорожня обчислювана комірка незміненої книги ставала
+            // відмовою.
+            case CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated:
+                // ⛔ `U-23`: двійковий хвіст Excel нормалізується ТУТ, явно і
+                // до прев'ю, а не мовчки в сховищі. `0.1 + 0.2` в аркуші — це
+                // `0.30000000000000004` (17 знаків), а сховище тримає 16
+                // (`CellValueReader.StorageScale`). Сервер ручне введення з
+                // таким хвостом відхиляє, тож без цього кроку один такий
+                // осередок валив би застосування всієї книги. Округлюється
+                // лише до масштабу СХОВИЩА — тобто рівно те, що сховище однаково
+                // відкинуло б; оголошений масштаб колонки тут не застосовується
+                // (його порушення лишається відмовою). Округлене значення
+                // видно в прев'ю як «нове», і воно ж — те, що буде записано й
+                // потрапить у журнал.
                 return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
-                    ? number
+                    ? decimal.Round(number, CellValueReader.StorageScale, MidpointRounding.AwayFromZero)
                     : text;
 
             case CellDataType.Bool:
@@ -245,34 +349,57 @@ public sealed class ImportDiffBuilder
         => column.DataType is CellDataType.Formula or CellDataType.Calculated || column.IsReadOnly;
 
     /// <summary>Чи збігається значення з файлу з тим, що вже записано.</summary>
+    /// <remarks>
+    /// ⛔ `V-10`. Порівнюється з <see cref="Current"/> — тим самим значенням, яке
+    /// експорт кладе в книгу (<c>ExcelExporter.WriteValue</c> бере поле ЗА ТИПОМ
+    /// колонки), а не з усім <see cref="CellValueData"/>. Інакше комірка, що
+    /// в базі непорожня, а в книзі порожня (порожній рядок <c>''</c>, або число в
+    /// колонці дати), давала «зміну» на незміненій книзі — фантом
+    /// <c>R4 C1 '' → —</c> на DOC-000001.
+    /// </remarks>
     private static bool Same(object? incoming, CellValueData? existing, ColumnDef definition)
     {
-        if (existing is null || existing.IsEmpty)
+        var current = Current(existing, definition);
+
+        if (incoming is string { Length: 0 })
         {
-            return incoming is null;
+            incoming = null;
+        }
+
+        if (current is null || incoming is null)
+        {
+            return current is null && incoming is null;
         }
 
         return definition.DataType switch
         {
-            CellDataType.Int or CellDataType.Decimal =>
-                incoming is decimal d ? existing.ValueNumeric == d
-                : incoming is int i && existing.ValueNumeric == i,
-            CellDataType.Bool => incoming is bool b && existing.ValueBool == b,
-            CellDataType.Date => incoming is DateTime t && existing.ValueDate == t,
-            CellDataType.Lookup => incoming is long id && existing.ValueRegistryEntryId == id,
+            CellDataType.Int or CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated =>
+                current is decimal number
+                && (incoming is decimal d ? number == d : incoming is int i && number == i),
+            CellDataType.Bool => incoming is bool b && current is bool flag && flag == b,
+            CellDataType.Date => incoming is DateTime t && current is DateTime date && date == t,
+            CellDataType.Lookup => incoming is long id && current is long entry && entry == id,
 
             // ⛔ Unit порівнюється за `ValueUnitId` (аудит §8.3). Без цієї гілки
             // порівняння йшло через `ValueString`, який для Unit-комірки
             // ЗАВЖДИ `null` — тож `Same()` повертав `false` для будь-якої
             // непорожньої Unit-комірки, і кожна з них позначалася зміненою.
-            CellDataType.Unit => incoming is int unitId && existing.ValueUnitId == unitId,
+            CellDataType.Unit => incoming is int unitId && current is int unit && unit == unitId,
 
-            _ => string.Equals(existing.ValueString, incoming as string, StringComparison.Ordinal),
+            _ => string.Equals(current as string, incoming as string, StringComparison.Ordinal),
         };
     }
 
-    /// <summary>Поточне значення у вигляді, придатному для показу в переліку змін.</summary>
-    private static object? Display(CellValueData? value, ColumnDef definition)
+    /// <summary>
+    /// Поточне значення комірки в тій формі, у якій його бачить книга: поле за
+    /// ТИПОМ колонки; порожній рядок і відсутнє поле — <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Порожній рядок і відсутність значення — одне й те саме для людини, і
+    /// Excel не вміє їх розрізнити взагалі: порожня комірка книги повертається
+    /// як «нічого», а не як <c>''</c>.
+    /// </remarks>
+    private static object? Current(CellValueData? value, ColumnDef definition)
     {
         if (value is null || value.IsEmpty)
         {
@@ -287,9 +414,12 @@ public sealed class ImportDiffBuilder
             CellDataType.Date => value.ValueDate,
             CellDataType.Lookup => value.ValueRegistryEntryId,
             CellDataType.Unit => value.ValueUnitId,
-            _ => value.ValueString,
+            _ => string.IsNullOrEmpty(value.ValueString) ? null : value.ValueString,
         };
     }
+
+    /// <summary>Поточне значення у вигляді, придатному для показу в переліку змін.</summary>
+    private static object? Display(CellValueData? value, ColumnDef definition) => Current(value, definition);
 }
 
 /// <summary>Diff однієї таблиці.</summary>
@@ -307,3 +437,68 @@ public sealed record TableDiff(
     IReadOnlyList<ImportChange> Changes,
     IReadOnlyList<ImportRejection> Rejected,
     IReadOnlyDictionary<string, string> RowVersions);
+
+/// <summary>
+/// Ключі текстів відмов прев'ю імпорту в каталозі (D-95, `V-10`).
+/// </summary>
+/// <remarks>
+/// ⚠ Одне місце для обох класів адаптера (<see cref="ImportDiffBuilder"/> і
+/// <see cref="ExcelImporter"/>): рядок кожного ключа лежить у <c>09-seed.sql</c>,
+/// а клієнт перелічує їх літералами (<c>ImportPanel.rejectionText</c>).
+/// </remarks>
+public static class ImportMessageKeys
+{
+    /// <summary>Комірку рахує система, і користувач змінив її значення.</summary>
+    public const string Calculated = "err.ECR-CELL-4221.importCalculated";
+
+    /// <summary>Рядка з ключем із файлу в документі немає.</summary>
+    public const string NoRow = "err.ECR-ROW-0404.importNoRow";
+
+    /// <summary>Значення стоїть поза рядками таблиці (під нею чи в таблиці без рядків).</summary>
+    public const string OutsideRows = "err.ECR-ROW-0404.importOutsideRows";
+
+    /// <summary>Ціла частина числа не вміщується в сховище.</summary>
+    public const string IntegerDigits = "err.ECR-CELL-0422.importIntegerDigits";
+
+    /// <summary>Екземпляра таблиці з файлу немає в документі за цей період.</summary>
+    public const string InstanceMissing = "err.ECR-IMP-0422.importInstanceMissing";
+
+    /// <summary>Таблиці з файлу немає в чинній версії шаблону.</summary>
+    public const string TableMissing = "err.ECR-IMP-0422.importTableMissing";
+
+    /// <summary>Правка заборонена правами або станом — той самий текст, що в підказці сітки.</summary>
+    public static string Denied(EditDenyReason reason) => $"deny.{reason}";
+
+    /// <summary>Значення з книги не читається як число (F-06).</summary>
+    public const string ExpectsNumber = "err.ECR-CELL-0422.importExpectsNumber";
+
+    /// <summary>Значення з книги не читається як true/false.</summary>
+    public const string ExpectsBoolean = "err.ECR-CELL-0422.importExpectsBoolean";
+
+    /// <summary>Значення з книги не читається як дата.</summary>
+    public const string ExpectsDate = "err.ECR-CELL-0422.importExpectsDate";
+
+    /// <summary>Код із книги не знайдено серед записів довідника (або одиниць) колонки.</summary>
+    public const string ExpectsIdentifier = "err.ECR-CELL-0422.importExpectsIdentifier";
+
+    /// <summary>Код із книги не знайдено серед одиниць виміру (колонка Unit).</summary>
+    public const string ExpectsUnit = "err.ECR-CELL-0422.importExpectsUnit";
+
+    /// <summary>Імпортний ключ для відмови читача запису за ключем самого читача.</summary>
+    /// <param name="readerKey"><c>messageKey</c> відмови <c>CellValueReader</c>.</param>
+    /// <remarks>
+    /// ⚠ Невідомий ключ читача (нова перевірка там) лишається як є — клієнт
+    /// покаже загальну «комірку відхилено»: краще менш точний текст, ніж
+    /// мовчазна зміна, на якій Apply впаде на всю книгу.
+    /// </remarks>
+    public static string? TypeMismatch(string? readerKey) => readerKey switch
+    {
+        "err.ECR-CELL-0422.expectsNumber" => ExpectsNumber,
+        "err.ECR-CELL-0422.expectsBoolean" => ExpectsBoolean,
+        "err.ECR-CELL-0422.expectsDate" => ExpectsDate,
+        "err.ECR-CELL-0422.expectsIdentifier" => ExpectsIdentifier,
+        "err.ECR-CELL-0422.expectsUnitIdentifier" => ExpectsUnit,
+        "err.ECR-CELL-0422.tooManyIntegerDigits" => IntegerDigits,
+        _ => readerKey,
+    };
+}

@@ -59,7 +59,8 @@ public sealed class PublishTemplateVersionHandler(
             throw new BusinessRuleException(
                 "ECR-TMPL-0422",
                 "Публікацію відхилено: причина обов'язкова — порожній рядок нічого не "
-                + "пояснює тому, хто за рік питає, чому цю версію ввели в обіг.");
+                + "пояснює тому, хто за рік питає, чому цю версію ввели в обіг.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.publishReasonRequired" });
         }
 
         // ⛔ Саме `GetWithStructureAsync`, а не `IRepository.GetAsync`. Другий —
@@ -106,6 +107,13 @@ public sealed class PublishTemplateVersionHandler(
         // відмова на правила означала б два кола виправлень замість одного.
         diagnostics = [.. diagnostics, .. PublishChecks.CheckRules(version)];
 
+        // ⛔ V-03: дві формули в одну комірку — відхиляється тут, до
+        // перерахунку, який на такій конфігурації падав на PRIMARY KEY.
+        diagnostics = [.. diagnostics, .. FormulaTargetConflicts.Check(version, formulaEngine)];
+
+        // ⛔ V-19: вирази правил валідації публікація досі не розбирала взагалі.
+        diagnostics = [.. diagnostics, .. RuleExpressionChecks.Check(version, formulaEngine)];
+
         // ⛔ Плюс перевірка СТРУКТУРИ: версія без жодного аркуша публікувалася
         // кодом `204`, і ні домен, ні сервер цього не бачили (директива №09
         // §6.5, `S-09`). `TemplateVersion.Publish` навмисно не перевіряє це
@@ -126,15 +134,15 @@ public sealed class PublishTemplateVersionHandler(
         {
             // Усі проблеми одразу, а не перша: інакше користувач публікував би
             // версію десятки разів, виправляючи по одній.
-            throw new BusinessRuleException(
-                "ECR-TMPL-0422",
-                $"Публікацію відхилено: знайдено проблем — {diagnostics.Count}.",
-                new Dictionary<string, object?>
-                {
-                    ["diagnostics"] = diagnostics
-                        .Select(d => new DiagnosticInfo(d.Code, d.Message, d.Position, d.Length))
-                        .ToList(),
-                });
+            //
+            // ⛔ V-19: відмова несе КОНКРЕТНУ причину з ключем (ключ першого
+            // зауваження, що його має, з підстановками), а не лише загальне
+            // «does not pass validation» — причина раніше лежала тільки в
+            // `diagnostics` українським реченням.
+            throw ExpressionRejection.Build(
+                diagnostics,
+                "err.ECR-TMPL-0422.publishRejected",
+                $"Публікацію відхилено: знайдено проблем — {diagnostics.Count}.");
         }
 
         // ⛔ Граф залежностей фіксується САМЕ ТУТ і зберігається. Діапазони

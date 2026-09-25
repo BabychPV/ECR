@@ -47,6 +47,12 @@ function json(body: unknown): Response {
   });
 }
 
+/**
+ * Межа очікування: під навантаженням повного прогону перехід модалки Mantine
+ * і перший рендер займають понад типову секунду `waitFor`.
+ */
+const Ceiling = 10_000;
+
 const afterEachRestorers: Array<() => void> = [];
 
 /** Підміняє мережу: мови довідника й успішне збереження запису. */
@@ -121,31 +127,31 @@ function mount() {
 }
 
 describe('RegistryEntryEditor: повторне відкриття "New entry" після збереження', () => {
-  it('поля порожні, а не заповнені чи конкатеновані з попереднім записом', async () => {
+  it('поля порожні, а не заповнені чи конкатеновані з попереднім записом', { timeout: 30_000 }, async () => {
     const net = serveOk();
     const user = userEvent.setup();
     mount();
 
     // Перше відкриття «New entry», введення і збереження.
     await user.click(screen.getByRole('button', { name: 'open-new-entry' }));
-    const code = await screen.findByLabelText(t('registries.code'));
-    const name = await screen.findByLabelText(`${t('registries.name')} · English`);
+    const code = await screen.findByLabelText(t('registries.code'), {}, { timeout: Ceiling });
+    const name = await screen.findByLabelText(`${t('registries.name')} · English`, {}, { timeout: Ceiling });
 
     await user.type(code, 'PHENOL');
     await user.type(name, 'Phenol');
 
     await user.click(screen.getByRole('button', { name: t('common.save') }));
 
-    await waitFor(() => expect(net.postedBodies()).toHaveLength(1));
+    await waitFor(() => expect(net.postedBodies()).toHaveLength(1), { timeout: Ceiling });
     expect(net.postedBodies()[0]?.code).toBe('PHENOL');
 
     // Модалка закрилася (upsert.onSuccess кличе handleClose → onClose).
-    await waitFor(() => expect(screen.queryByLabelText(t('registries.code'))).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText(t('registries.code'))).toBeNull(), { timeout: Ceiling });
 
     // Друге відкриття «New entry» — той самий компонент, key знову null.
     await user.click(screen.getByRole('button', { name: 'open-new-entry' }));
-    const codeAgain = await screen.findByLabelText(t('registries.code'));
-    const nameAgain = await screen.findByLabelText(`${t('registries.name')} · English`);
+    const codeAgain = await screen.findByLabelText(t('registries.code'), {}, { timeout: Ceiling });
+    const nameAgain = await screen.findByLabelText(`${t('registries.name')} · English`, {}, { timeout: Ceiling });
 
     // ⛔ ЧЕРВОНИЙ до фіксу: поля містили б "PHENOL" / "Phenol" — старий текст
     // лишався б, і будь-який новий ввід дописувався б до нього, а не заміняв.

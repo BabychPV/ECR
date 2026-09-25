@@ -15,9 +15,31 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
     /// <param name="methodologyId">Методологія.</param>
     /// <param name="onDate">Дата періоду, а не «сьогодні» (ФВ-9.3).</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Дескриптор чинної версії; <c>null</c> — методологія на цю дату ЩЕ НЕ
+    /// ДІЄ (усі опубліковані версії починаються пізніше).
+    /// </returns>
     /// <exception cref="DomainException">
-    /// Немає жодної чинної версії — <c>ECR-CALC-0422</c>.
+    /// Немає жодної опублікованої версії взагалі — <c>ECR-CALC-0422</c>.
     /// </exception>
+    /// <remarks>
+    /// ⛔ F-04 (четвертий раунд UX), рішення: період РАНІШЕ за першу чинну
+    /// версію — не помилка, а «методологія тут не застосовується». Доти він
+    /// валив ВЕСЬ перерахунок документа («Методологія 2 не має версії, чинної на
+    /// 2025-12-31»), разом із методологіями, які для цього періоду чинні, і
+    /// разом із формулами шаблону — тобто один новий метод робив неможливим
+    /// перерахунок кожного історичного періоду. Чинна на дату версія —
+    /// властивість ЧАСУ (ФВ-9.3): методологія, запроваджена з 2026-01-01, для
+    /// грудня 2025 просто ще не існувала, і правильний результат там —
+    /// відсутність числа, а не відмова. Оркестратор уже пропускає <c>null</c>
+    /// (<c>CalculationOrchestrator.RunAsync</c>), а сітка показує порожню
+    /// комірку, не нуль (D-69: результат читається за посиланням).
+    ///
+    /// ⚠ Методологія, прив'язана до таблиці, але без ЖОДНОЇ опублікованої
+    /// версії, — інше: це незавершена конфігурація, і мовчазний пропуск сховав
+    /// би її назавжди. Там відмова лишається, але англійським текстом і з
+    /// ключем (текст винятку потрапляє в журнал задачі як є).
+    /// </remarks>
     public async Task<MethodologyDescriptor?> ResolveVersionAsync(
         int methodologyId, DateOnly onDate, CancellationToken ct)
     {
@@ -36,21 +58,26 @@ public sealed class MethodologyResolver(IMethodologyStore store, ICellStore cell
                 MethodologyVersionKey.Currency)
             .FirstOrDefault();
 
-        // ⛔ Жодної чинної версії — це не порожній результат, а помилка
-        // конфігурації: методологію прив'язали до таблиці, але вона не має
-        // чим рахувати. Повернути null тихо означало б, що рядки просто не
-        // порахуються, і нуль у звіті виглядатиме як виміряне значення.
-        if (version is null)
+        // ⛔ Опублікованої версії немає ЗОВСІМ — помилка конфігурації:
+        // методологію прив'язали до таблиці, але вона не має чим рахувати.
+        if (!versions.Any(v => v.EffectiveFrom is not null))
         {
             throw new DomainException(
                 "ECR-CALC-0422",
-                $"Методологія {methodologyId} не має версії, чинної на {onDate:yyyy-MM-dd}.",
+                $"Methodology {methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture)} "
+                + "is bound to a table but has no published version to calculate with.",
                 new Dictionary<string, object?>
                 {
-                    ["messageKey"] = "err.ECR-CALC-0422.noEffectiveVersion",
-                    ["methodologyId"] = methodologyId,
-                    ["date"] = onDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                    ["messageKey"] = "err.ECR-CALC-0422.noPublishedVersion",
+                    ["methodologyId"] = methodologyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
+        }
+
+        // ⚠ F-04: версії є, але всі починаються ПІЗНІШЕ — на цю дату
+        // методологія ще не діє, і цей період вона не рахує (див. remarks).
+        if (version is null)
+        {
+            return null;
         }
 
         return new MethodologyDescriptor(

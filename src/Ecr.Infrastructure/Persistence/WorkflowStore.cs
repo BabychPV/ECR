@@ -176,7 +176,13 @@ public sealed class WorkflowStore(EcrDbContext db) : IWorkflowStore
 
         return period ?? throw new NotFoundException(
             "ECR-PRD-0422",
-            $"Період {periodKey.Value} не належить проєкту документа {documentId}.");
+            $"Період {periodKey.Value} не належить проєкту документа {documentId}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-PRD-0422.periodNotInProjectOfDocument",
+                ["periodKey"] = periodKey.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
     }
 
     /// <inheritdoc />

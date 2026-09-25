@@ -29,6 +29,7 @@ public sealed class TemplateVersionsController(
     SaveTableDefHandler saveTable,
     DeleteTableDefHandler deleteTable,
     SaveColumnDefHandler saveColumn,
+    GetColumnDefHandler getColumn,
     DeleteColumnDefHandler deleteColumn,
     GetHeaderFieldDefsHandler headerFields,
     SaveHeaderFieldDefHandler saveHeaderField,
@@ -39,6 +40,7 @@ public sealed class TemplateVersionsController(
     SaveFormulaDefHandler saveFormula,
     DeleteFormulaDefHandler deleteFormula,
     SaveValidationRuleHandler saveValidationRule,
+    ListValidationRulesHandler listValidationRules,
     DeleteValidationRuleHandler deleteValidationRule,
     CreatePeriodAccessRuleHandler createPeriodAccessRule,
     SavePeriodAccessRuleHandler savePeriodAccessRule,
@@ -438,6 +440,27 @@ public sealed class TemplateVersionsController(
     }
 
     /// <summary>
+    /// Повний склад однієї колонки — те, що приймає й повертає <c>PUT</c> нижче.
+    /// Право <c>Template.View</c>.
+    /// </summary>
+    /// <param name="id">Версія шаблону.</param>
+    /// <param name="tableId">Таблиця, якій належить колонка.</param>
+    /// <param name="code">Код колонки.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ X-02: форма правки колонки відкривається з цієї відповіді, а не з
+    /// бідного опису колонки в <c>GET …/structure</c>. Інакше <c>PUT</c> (заміна
+    /// цілком) стирав точність, одиницю, довідник, значення за замовчуванням і
+    /// стиль колонки при кожному повторному збереженні.
+    /// </remarks>
+    [HttpGet("tables/{tableId:int}/columns/{code}")]
+    [ProducesResponseType<ColumnDefDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ColumnDefDto>> GetColumn(
+        int id, int tableId, string code, CancellationToken ct)
+        => Ok(await getColumn.HandleAsync(id, tableId, code, ct).ConfigureAwait(false));
+
+    /// <summary>
     /// Записує колонку таблиці чернетки. Право <c>Template.Edit</c>.
     /// </summary>
     /// <param name="id">Версія-чернетка.</param>
@@ -567,6 +590,7 @@ public sealed class TemplateVersionsController(
     /// </remarks>
     [HttpGet("styles")]
     [ProducesResponseType<IReadOnlyList<StyleDefDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<StyleDefDto>>> ListStyles(int id, CancellationToken ct)
         => Ok(await listStyles.HandleAsync(id, ct).ConfigureAwait(false));
 
@@ -690,8 +714,30 @@ public sealed class TemplateVersionsController(
         "row" => Ecr.Domain.Enums.FormulaScope.Row,
         _ => throw new Application.Errors.BusinessRuleException(
             ErrorCodes.TemplateInvalid,
-            $"Невідома область формули «{scope}»: очікується column або row."),
+            $"Невідома область формули «{scope}»: очікується column або row.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-0422.formulaScopeInvalid",
+                ["scope"] = scope,
+            }),
     };
+
+    /// <summary>
+    /// Правила валідації таблиці. Право <c>Template.View</c>.
+    /// </summary>
+    /// <param name="id">Версія шаблону.</param>
+    /// <param name="tableId">Таблиця.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ X-15: без цього переліку діалог видаляв правило введеним з пам'яті
+    /// кодом, якого екран ніде не показував.
+    /// </remarks>
+    [HttpGet("tables/{tableId:int}/validation-rules")]
+    [ProducesResponseType<IReadOnlyList<ValidationRuleDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<ValidationRuleDto>>> ListValidationRules(
+        int id, int tableId, CancellationToken ct)
+        => Ok(await listValidationRules.HandleAsync(id, tableId, ct).ConfigureAwait(false));
 
     /// <summary>
     /// Записує правило валідації таблиці чернетки. Право <c>Template.Edit</c>.
@@ -841,7 +887,8 @@ public sealed class TemplateVersionsController(
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
         ?? throw new Application.Errors.AccessDeniedException(
-            ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ErrorCodes.Unauthorized, "Сесія не містить користувача.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 }
 
 /// <summary>Запит на публікацію версії.</summary>

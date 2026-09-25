@@ -185,9 +185,10 @@ public sealed class ValidateDocumentHandlerTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як і відсутній, а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
     }
 }

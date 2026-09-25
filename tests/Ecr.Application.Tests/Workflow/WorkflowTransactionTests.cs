@@ -43,6 +43,15 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
 {
     private const int PeriodKeyValue = 202601;
     private const int UserId = 9;
+
+    /// <summary>
+    /// Погоджувач, ІНШИЙ за <see cref="UserId"/> (F-25): та сама людина не
+    /// може подати й погодити власний аркуш, тож усі тести цього класу, де
+    /// `Approve` йде за `Submit`, мусять використовувати різних користувачів
+    /// — інакше `ApproveSheetHandler` тепер законно відмовляє.
+    /// </summary>
+    private const int ApproverId = 11;
+
     private const int RoleId = 77;
     private static readonly DateTime Now = new(2026, 4, 1, 6, 0, 0, DateTimeKind.Utc);
 
@@ -225,12 +234,21 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(new Dictionary<string, ExpressionValue>());
 
+        // ⚠ Предмет цього класу — межа коміту (`DAT-06`), не F-05: жодного
+        // прогону розрахунку методологій тут немає, тож свіжість завжди
+        // «числа актуальні» (`CalculatedAt = null` → `IsStale = false`).
+        var methodologies = Substitute.For<IMethodologyStore>();
+        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new CalculationFreshness(null, null));
+
         return new SubmitSheetHandler(
             cells, rows, new WorkflowStore(db), documents, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             headers,
             new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), new TestClock(Now));
+            new UnitOfWork(db), User(), new TestClock(Now), new SheetEditGate(db),
+            NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+            methodologies);
     }
 
     private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)
@@ -241,7 +259,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
 
         return new ApproveSheetHandler(
             new WorkflowStore(db), Access(), new ReportSnapshotSync(snapshots, documents),
-            new UnitOfWork(db), User(), new TestClock(Now), new AuditWriter(db));
+            new UnitOfWork(db), Approver(), new TestClock(Now), new AuditWriter(db));
     }
 
     /// <summary>Дозволяє все і повертає маршрут із ДВОХ кроків.</summary>
@@ -255,8 +273,12 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
     {
         var access = Substitute.For<IAccessDecisionService>();
 
-        access.BuildProfileAsync(UserId, Arg.Any<CancellationToken>())
-              .Returns(new AccessBuilder { UserId = UserId }.Build());
+        // ⚠ Будь-який `userId`, а не лише `UserId`: `Approve()` тепер кличе
+        // цей самий фабричний метод із `Approver()` (F-25), і профіль мусить
+        // будуватися для того користувача, що насправді викликає, а не для
+        // жорстко зашитого `UserId`.
+        access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+              .Returns(call => new AccessBuilder { UserId = call.Arg<int>() }.Build());
         access.CanSubmitAsync(
                   Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(),
                   Arg.Any<CancellationToken>())
@@ -276,6 +298,14 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
     {
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(UserId);
+        return user;
+    }
+
+    /// <summary>Погоджувач для тестів `Approve` (F-25) — див. <see cref="ApproverId"/>.</summary>
+    private static ICurrentUser Approver()
+    {
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(ApproverId);
         return user;
     }
 

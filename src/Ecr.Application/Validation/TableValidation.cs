@@ -31,6 +31,7 @@ internal static class TableValidation
     /// Значення шапки документа, ключовані кодом поля — для <c>HDR.X</c> у
     /// правилах усіх трьох рівнів; порожній словник — прогін без шапки.
     /// </param>
+    /// <param name="language">Мова запиту — <see cref="ValidationEngine.ValidateScope"/> (B-11).</param>
     /// <remarks>
     /// ⛔ Рівень РЯДКА виконується ПО РЯДКАХ, а кожне повідомлення отримує
     /// свій <c>RowKey</c> (директива №09 `W8` п.3, `S-19`). Доти всі три рівні
@@ -47,7 +48,8 @@ internal static class TableValidation
         TableDef table,
         IReadOnlyList<CellRecord> cells,
         IReadOnlyDictionary<string, long> rowIds,
-        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headers)
+        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headers,
+        string language)
     {
         var messages = new List<ValidationMessage>();
 
@@ -61,7 +63,7 @@ internal static class TableValidation
         foreach (var rowKey in rowIds.Keys.Order(StringComparer.Ordinal))
         {
             messages.AddRange(engine
-                .ValidateScope(scope: 1, table.ValidationRules, slice.ForRow(rowKey), headers)
+                .ValidateScope(scope: 1, table.ValidationRules, slice.ForRow(rowKey), headers, language)
                 .Select(m => m with { RowKey = rowKey }));
         }
 
@@ -69,7 +71,7 @@ internal static class TableValidation
         // означало б повторити те саме порушення N разів.
         foreach (var scope in AboveRowLevels)
         {
-            messages.AddRange(engine.ValidateScope(scope, table.ValidationRules, slice, headers));
+            messages.AddRange(engine.ValidateScope(scope, table.ValidationRules, slice, headers, language));
         }
 
         return messages;

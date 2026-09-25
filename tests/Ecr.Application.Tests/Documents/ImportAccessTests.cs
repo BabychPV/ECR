@@ -41,11 +41,12 @@ public sealed class ImportAccessTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`), а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => new PreviewImportHandler(_importer, _access, _user)
                 .HandleAsync(DocumentId, Stream.Null, CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
         await _importer.DidNotReceiveWithAnyArgs().PreviewAsync(0, null!, CancellationToken.None);
     }
 
@@ -73,11 +74,12 @@ public sealed class ImportAccessTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`), а не 403.
+        var denied = await Assert.ThrowsAsync<NotFoundException>(
             () => new ApplyImportHandler(_importer, _jobs, _access, _user)
                 .HandleAsync(DocumentId, "token-1", CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
         await _importer.DidNotReceiveWithAnyArgs().ApplyAsync(0, null!, CancellationToken.None);
     }
 }

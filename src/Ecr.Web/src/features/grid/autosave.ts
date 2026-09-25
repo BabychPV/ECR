@@ -8,12 +8,18 @@ import {
   cellKey,
   discardPendingRows,
   hasPending,
+  markPendingRejected,
   openDocument,
   pendingCount,
   pendingSlices,
   resetPending,
+  sendableEdits,
   subscribePending,
 } from './pendingStore';
+import { queryKeys } from '@/api/queryKeys';
+import type { TableSliceDto } from '@/api/types';
+import { withKnownVersions } from './edits';
+import { rejectionMarksOf } from './saveErrors';
 import {
   applyPatchLocally,
   buildRequest,
@@ -207,7 +213,9 @@ export function cancelAutosave(): void {
 export function flushAutosave(): void {
   scheduler.cancel();
 
-  for (const slice of pendingSlices()) {
+  // ⛔ `V-01`: лише те, що не тримає відмова сервера. Відхилена правка в пакеті
+  // — це пакет, відхилений цілком, разом з усіма правильними правками.
+  for (const slice of pendingSlices({ sendableOnly: true })) {
     const saver = savers.get(keyOfSlice(slice.tableInstanceId, slice.periodKey));
 
     if (saver !== undefined) {
@@ -221,6 +229,38 @@ export function flushAutosave(): void {
     // імені, і правка лишається в сховищі, а не зникає.
     orphanSaver?.(slice);
   }
+}
+
+/**
+ * Тримає відхилені правки пакета й довозить решту (`V-01`).
+ *
+ * ⛔ Спільне для обох зберігачів — сітки й безхазяйного зрізу: розійдись вони,
+ * і правило «відмова не блокує інших» діяло б лише для змонтованої сітки.
+ *
+ * ⚠ Повтор ПЛАНУЄТЬСЯ, якщо в пакеті були правки, яких відмова не стосувалась:
+ * вони правильні, але сервер відхилив їх разом із поганою, і без повтору вони
+ * чекали б наступної правки оператора — або перезавантаження, тобто зникли б.
+ * Зациклення немає: кожна така відмова позначає щонайменше одну правку
+ * (`rejectionMarksOf`), тож наступний пакет щоразу менший.
+ *
+ * @returns Чи позначено бодай одну правку.
+ */
+export function holdRejectedEdits(
+  tableInstanceId: number,
+  periodKey: number,
+  error: unknown,
+  attempted: readonly PendingEdit[],
+): boolean {
+  const marks = rejectionMarksOf(error, attempted);
+  if (marks.length === 0) return false;
+
+  if (markPendingRejected(tableInstanceId, periodKey, marks) === 0) return false;
+
+  const sent = new Set(attempted.map((edit) => cellKey(edit)));
+  const innocent = sendableEdits(tableInstanceId, periodKey).some((edit) => sent.has(cellKey(edit)));
+  if (innocent) scheduleAutosave();
+
+  return true;
 }
 
 /**
@@ -317,7 +357,14 @@ async function saveOrphanSlice(
   documentId: number,
   slice: PendingSlice,
 ): Promise<void> {
-  const request = buildRequest(slice.tableInstanceId, slice.periodKey, slice.edits);
+  // ⛔ `B-09`: версія рядка — остання відома кешу, а не та, з якою правку
+  // зроблено (`withKnownVersions`): інакше правка, що чекала повтору, їхала б
+  // зі старою версією й діставала `409` на власних змінах.
+  const request = buildRequest(
+    slice.tableInstanceId,
+    slice.periodKey,
+    withKnownVersions(slice.edits, cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey)),
+  );
 
   // ⚠ Знімок ТОГО, ЩО ПІШЛО: доки patch летить, у той самий зріз може
   // прийти нова правка з іншої сітки чи з відновленої черги — і підтверджувати
@@ -335,6 +382,7 @@ async function saveOrphanSlice(
       sent,
     );
   } catch (error) {
+    holdRejectedEdits(slice.tableInstanceId, slice.periodKey, error, slice.edits);
     showApiError(error);
   }
 }
@@ -390,13 +438,31 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
   useEffect(
     () =>
       registerUnloadFlush(hasPending, () => {
-        for (const slice of pendingSlices()) {
+        // ⚠ `V-01`: і тут без відхилених — інакше останній шанс зберегти
+        // правильні правки згорів би на тій самій відмові.
+        for (const slice of pendingSlices({ sendableOnly: true })) {
           sendPatchBeacon(
             documentId,
-            buildRequest(slice.tableInstanceId, slice.periodKey, slice.edits),
+            buildRequest(
+              slice.tableInstanceId,
+              slice.periodKey,
+              withKnownVersions(
+                slice.edits,
+                cachedSlice(queryClient, slice.tableInstanceId, slice.periodKey),
+              ),
+            ),
           );
         }
       }),
-    [documentId],
+    [documentId, queryClient],
   );
+}
+
+/** Зріз із кешу — без запиту; `undefined`, якщо його ще не читали. */
+function cachedSlice(
+  queryClient: QueryClient,
+  tableInstanceId: number,
+  periodKey: number,
+): TableSliceDto | undefined {
+  return queryClient.getQueryData<TableSliceDto>(queryKeys.slices.one(tableInstanceId, periodKey));
 }

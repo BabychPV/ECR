@@ -132,6 +132,11 @@ function mockApi(): Recorded {
         return json({ id: 3, code: 'Amount' });
       }
 
+      // ⚠ R-07: форма колонки Decimal тепер показує вибір одиниці.
+      if (url.endsWith('/api/v1/units')) {
+        return json([]);
+      }
+
       throw new Error(`Немає мока для ${method} ${url}`);
     }),
   );

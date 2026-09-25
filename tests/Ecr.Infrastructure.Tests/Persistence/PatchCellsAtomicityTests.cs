@@ -127,6 +127,8 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         // ⛔ Рішення на КОЖНУ пару (рядок, колонка) зрізу — саме так поводиться
         // справжній `AccessDecisionService.CanEditSliceAsync` (`:280-295`:
         // подвійний цикл по рядках і колонках, без пропусків). Тут стояв
@@ -168,7 +170,7 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             cells, rows, documents, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
             methodologies, registries, headers, audit, Substitute.For<IAuditReader>(),
-            jobs, uow, user, clock);
+            jobs, uow, user, clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>());
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

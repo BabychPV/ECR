@@ -34,7 +34,7 @@ public sealed class RoleLifecycleStoreTests(SqlServerFixture sql)
         {
             // Права беруться з того, що є в базі: сід тут не гарантований, а
             // вигаданий код упав би на `FK_RolePerm_Perm`.
-            var permissions = await db.Permissions.Select(p => p.Id).Take(2).ToListAsync();
+            var permissions = await db.Permissions.OrderBy(p => p.Id).Select(p => p.Id).Take(2).ToListAsync();
 
             roleId = await new UserStore(db).AddRoleAsync(
                 new Role(EcrCode.Create($"LIFE_{_tag}"), Text("Life")), permissions, CancellationToken.None);

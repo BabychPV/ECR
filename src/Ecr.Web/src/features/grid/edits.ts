@@ -1,5 +1,5 @@
 import type { RowDto, TableSliceDto } from '@/api/types';
-import { sameCellValue } from './cellValue';
+import { sameCellValue, sameDateValue } from './cellValue';
 import { parseNumber } from './clipboard';
 import { decide } from './permissions';
 import { columnIndexOf, rowIndexOf } from './rowIndex';
@@ -75,7 +75,8 @@ export function captureEdit(
   // ⛔ Порівняння саме ЗНАЧЕННЯ (`sameCellValue`), не тексту: `'5'` і
   // `'5.0000000000'` — той самий `decimal`, а текстове порівняння назвало б їх
   // різними й лишило б комірку брудною назавжди.
-  if (sameCellValue(after, before)) return null;
+  const same = column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
+  if (same) return null;
 
   return {
     pending: {
@@ -88,6 +89,68 @@ export function captureEdit(
     step: { rowKey: signal.rowKey, columnCode: signal.columnCode, before, after },
     columnHeader: column.header,
   };
+}
+
+/**
+ * Чи введене ПОВЕРТАЄ комірку до збереженого значення (`V-01`).
+ *
+ * ⛔ `captureEdit` таке ігнорує — і правильно, коли незбереженої правки немає.
+ * Але коли вона є (зокрема відхилена, `abc`), «набрати старе число назад» — це
+ * і є виправлення, а без цієї перевірки воно не робило нічого: відхилена правка
+ * лишалась у сховищі з маркером і «Retry save» назавжди.
+ */
+export function revertsToSaved(
+  slice: TableSliceDto,
+  signal: EditSignal,
+  rows: ReadonlyMap<string, RowDto> = rowIndexOf(slice),
+): boolean {
+  if (signal.columnCode.length === 0 || signal.rowKey.length === 0) return false;
+
+  const column = columnIndexOf(slice).get(signal.columnCode);
+  if (column === undefined || !decide(slice, signal.rowKey, column).editable) return false;
+
+  const row = rows.get(signal.rowKey);
+  if (row === undefined) return false;
+
+  const after = coerce(signal.raw, column.dataType);
+  const before = row.cells[signal.columnCode] ?? null;
+
+  return column.dataType === 'Date' ? sameDateValue(after, before) : sameCellValue(after, before);
+}
+
+/**
+ * Правки з ОСТАННЬОЮ відомою версією рядка — у мить надсилання, а не введення
+ * (`B-09`).
+ *
+ * ⛔ Доти `baseVersion` запам'ятовувалась при введенні (`captureEdit`) і їхала
+ * такою назавжди. Правка, яку сервер відхилив (`422`) чи яка чекала повтору,
+ * лишалась зі СТАРОЮ версією, хоча наступний успішний патч того самого рядка
+ * вже підняв її в кеші (`applyPatchLocally`). Повтор ішов зі старою версією і
+ * діставав `409` на власних змінах — і так при кожному повторі, вічно.
+ *
+ * ⚠ «Остання відома» — це версія рядка, який людина БАЧИТЬ: кеш зрізу несе
+ * тільки те, що сервер віддав цьому екрану (зріз або відповідь на власний
+ * патч). Чужа правка, якої екран не бачив, версію в кеші не піднімає, тож
+ * конфлікт із нею й далі ловиться — оптимістичне блокування не послаблене.
+ *
+ * @param overrides Версії, які людина обрала ЯВНО («Keep mine» у діалозі
+ * конфлікту, `conflicts[].currentVersion`): вони сильніші за кеш — саме кеш у
+ * цю мить і застарів.
+ */
+export function withKnownVersions(
+  edits: readonly PendingEdit[],
+  slice: TableSliceDto | undefined,
+  overrides?: ReadonlyMap<string, string>,
+): PendingEdit[] {
+  const rows = slice === undefined ? undefined : rowIndexOf(slice);
+
+  return edits.map((edit) => {
+    const known = overrides?.get(edit.rowKey) ?? rows?.get(edit.rowKey)?.rowVersion;
+
+    // ⚠ Рядка в кеші немає (зріз ще не завантажено, або він новий) — версія
+    // лишається та, з якою правку зроблено: вигадувати іншу нема з чого.
+    return known === undefined || known === edit.baseVersion ? edit : { ...edit, baseVersion: known };
+  });
 }
 
 /**
@@ -156,7 +219,15 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
     // ⚠ Порожнє не стає `false`: «не заповнювали» і «ні» — різні стани.
     if (normalized.length === 0) return null;
 
-    return normalized === 'true' || normalized === '1' || normalized === 'так';
+    if (BoolTrue.has(normalized)) return true;
+    if (BoolFalse.has(normalized)) return false;
+
+    // ⛔ `V-07`: тут стояло `normalized === 'true' || …`, тобто БУДЬ-ЯКИЙ
+    // нерозпізнаний текст ставав `false`: `maybe` мовчки перезаписував `True`
+    // (`aud.CellChange` id 75). Тепер — те саме правило, що й для числа вище:
+    // нерозпізнане їде ТЕКСТОМ, сервер відповідає `ECR-CELL-0422` з назвою
+    // колонки, і комірка лишається позначеною з причиною (`V-01`).
+    return raw;
   }
 
   // ⛔ Директива registry-lookup, PR A4: комірка `Lookup` тримає
@@ -165,7 +236,16 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
   // вибір), або рядкове представлення `entry.Id`, обраного зі списку, — той
   // самий шлях, що й `Int`/`Decimal` вище: нерозпізнане значення лишається
   // текстом, і сервер відповість `ECR-CELL-0422`, а не мовчазний нуль.
-  if (dataType === 'Lookup') {
+  // ⛔ `R-02`: порожнє поле дати — «не заповнено», а не порожній рядок. Поле
+  // дати віддає `''`, коли дату стерли чи не обирали; такий рядок сервер
+  // відхиляв (`422`), а вихід із редактора без вибору ставав «правкою».
+  if (dataType === 'Date') {
+    return raw.trim().length === 0 ? null : raw;
+  }
+
+  // ⛔ `R-01`: `Unit` тримає `ValueUnitId` — той самий ідентифікатор числом,
+  // що й `Lookup`; редактор одиниці шле рядок ідентифікатора.
+  if (dataType === 'Lookup' || dataType === 'Unit') {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return null;
 
@@ -175,3 +255,13 @@ export function coerce(raw: string, dataType: string | undefined): unknown {
 
   return raw;
 }
+
+/**
+ * Написи логічного значення, які вважаються відповіддю «так»/«ні» (`V-07`).
+ *
+ * ⚠ Закритий перелік, а не «усе, що не так, — ні»: мови продукту (en/uk/ru/kk),
+ * `1`/`0` з Excel і `true`/`false`, які віддає Ctrl+C цієї ж сітки (`cellText`).
+ * Усе інше — не відповідь, а помилка введення, і вирішує її людина.
+ */
+const BoolTrue: ReadonlySet<string> = new Set(['true', '1', 'yes', 'y', 'так', 'да', 'иә']);
+const BoolFalse: ReadonlySet<string> = new Set(['false', '0', 'no', 'n', 'ні', 'нет', 'жоқ']);

@@ -325,8 +325,11 @@ describe('RulesMatrixPanel: відмова ≠ порожня матриця (L1
 
       await awaitSettled(client, 'success', 'success');
 
-      expect(screen.getByText('⟦notifications.noChannels⟧')).toBeTruthy();
-      expect(screen.getByText('⟦notifications.noChannelsHint⟧')).toBeTruthy();
+      // ⚠ Власний ключ панелі — `notifications.rulesNoChannels`/`…Hint`, НЕ
+      // `notifications.noChannels`/`…Hint` із `ChannelsPanel`: див. коментар
+      // над цим блоком у `RulesMatrixPanel.tsx`.
+      expect(screen.getByText('⟦notifications.rulesNoChannels⟧')).toBeTruthy();
+      expect(screen.getByText('⟦notifications.rulesNoChannelsHint⟧')).toBeTruthy();
 
       // ⛔ Це НЕ відмова: жодного банера й жодної дії «повторити».
       expect(screen.queryByRole('table')).toBeNull();

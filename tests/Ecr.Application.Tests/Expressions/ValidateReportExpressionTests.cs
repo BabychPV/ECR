@@ -70,7 +70,7 @@ public sealed class ValidateReportExpressionTests
         var result = await ValidateAsync(
             "[Value] > 1", new ReportExpressionContext([new("Value", "money")], null, null));
 
-        Assert.Contains(result.Diagnostics, d => d.Message.Contains("«money»", StringComparison.Ordinal));
+        Assert.Contains(result.Diagnostics, d => d.MessageKey == "expr.report.unknownColumnType" && d.MessageParams!["type"] == "money");
     }
 
     private Task<ExpressionValidationDto> ValidateAsync(string text, ReportExpressionContext? context)

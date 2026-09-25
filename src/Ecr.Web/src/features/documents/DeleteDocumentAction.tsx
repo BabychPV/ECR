@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button } from '@mantine/core';
+import { Menu } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import type { DocumentSummary } from '@/api/types';
@@ -51,8 +51,22 @@ export interface DeleteDocumentActionArgs {
 }
 
 export interface DeleteDocumentAction {
-  /** Кнопка разом із підтвердженням — для шапки; `null`, якщо дії немає. */
-  readonly trigger: JSX.Element | null;
+  /**
+   * Пункт меню «More» на сторінці документа; `null`, якщо дії немає.
+   *
+   * ⛔ Пункт меню, а не кнопка в рядку дій: рідкісна й незворотна дія не
+   * живе серед щоденних — у рядку вона переповнювала його й «випадала» на
+   * окремий рядок під поле періоду (знімок людини, 1290 px). Меню ж у рядку
+   * займає рівно одне місце, хоч би що в ньому лежало.
+   */
+  readonly menuItem: JSX.Element | null;
+
+  /**
+   * Підтвердження. ⚠ ОКРЕМО від пункту: випадне меню розмонтовує свій вміст,
+   * щойно закривається, а закривається воно саме кліком по пункту — діалог
+   * усередині пункту зник би разом із меню.
+   */
+  readonly dialog: JSX.Element | null;
 
   /** Банер відмови сервера — під шапкою; `null`, якщо відмови не було. */
   readonly refusal: JSX.Element | null;
@@ -61,8 +75,8 @@ export interface DeleteDocumentAction {
 /**
  * Дія «Видалити документ-чернетку» на сторінці документа.
  *
- * ⚠ Хук повертає ДВА вузли, а не один компонент, і це рішення про місце, не
- * про стиль. Кнопка живе в шапці (`PageHeader.actions` — ряд кнопок), а
+ * ⚠ Хук повертає ТРИ вузли (пункт, діалог, відмова), а не один компонент, і це рішення про місце, не
+ * про стиль. Пункт живе в меню «More» сторінки (`DocumentMoreMenu`), а
  * відмова — банер `ErrorAlert` із причиною, кодом і кореляцією, якому в ряду
  * кнопок не місце. Покласти банер у `ConfirmModal` не можна: його `text`
  * загорнутий у `<Text>` (`<p>`), а `Alert` — це `<div>`, тобто невалідна
@@ -123,37 +137,36 @@ export function useDeleteDocumentAction({
   const shown =
     allowed && document !== undefined && isKnownDraft(document.sheetStates, sheetCodes);
 
-  const trigger = shown ? (
-    <>
-      <Button
-        size="xs"
-        variant="outline"
-        color="statusError"
-        onClick={() => {
-          remove.reset();
-          setOpened(true);
-        }}
-      >
-        {t('documents.delete')}
-      </Button>
+  const menuItem = shown ? (
+    <Menu.Item
+      color="statusError"
+      data-delete-document=""
+      onClick={() => {
+        remove.reset();
+        setOpened(true);
+      }}
+    >
+      {t('documents.delete')}
+    </Menu.Item>
+  ) : null;
 
-      <ConfirmModal
-        opened={opened}
-        title={t('documents.deleteTitle', { name })}
-        text={t('documents.deleteText')}
-        consequences={[{ text: t('documents.deleteNote'), note: true }]}
-        verb={t('documents.delete')}
-        danger
-        isPending={remove.isPending}
-        onConfirm={() => remove.mutate()}
-        onClose={() => setOpened(false)}
-      />
-    </>
+  const dialog = shown ? (
+    <ConfirmModal
+      opened={opened}
+      title={t('documents.deleteTitle', { name })}
+      text={t('documents.deleteText')}
+      consequences={[{ text: t('documents.deleteNote'), note: true }]}
+      verb={t('documents.delete')}
+      danger
+      isPending={remove.isPending}
+      onConfirm={() => remove.mutate()}
+      onClose={() => setOpened(false)}
+    />
   ) : null;
 
   // ⚠ Без `onRetry`: «повторити» тут означало б повторне видалення БЕЗ
   // підтвердження. Банер знімає наступне відкриття діалогу (`remove.reset()`).
   const refusal = remove.error === null ? null : <ErrorAlert error={remove.error} />;
 
-  return { trigger, refusal };
+  return { menuItem, dialog, refusal };
 }

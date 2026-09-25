@@ -107,7 +107,7 @@ public sealed class PiSqlClientDataSource(
         int dataSourceId, CancellationToken ct)
     {
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
-                     ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.");
+                     ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         using var command = connection.CreateCommand();
@@ -147,7 +147,8 @@ public sealed class PiSqlClientDataSource(
         ArgumentNullException.ThrowIfNull(request);
 
         var source = await store.FindDataSourceAsync(request.DataSourceId, ct).ConfigureAwait(false)
-                     ?? throw Unavailable($"Джерело {request.DataSourceId} не існує або вимкнене.");
+                     ?? throw Unavailable(
+                         $"Джерело {request.DataSourceId} не існує або вимкнене.", request.DataSourceId);
 
         var (element, attribute) = Split(request.SourcePath);
 
@@ -239,7 +240,12 @@ public sealed class PiSqlClientDataSource(
             throw new BusinessRuleException(
                 SourceUnavailable,
                 $"Рядок з'єднання джерела {source.Code} не читається: {ex.Message}",
-                new Dictionary<string, object?> { ["dataSource"] = source.Code });
+                new Dictionary<string, object?>
+                {
+                    // Той самий ключ, що SqlDataSource.cs: той самий факт («не читається»).
+                    ["messageKey"] = "err.ECR-INT-0503.connectionStringBroken",
+                    ["dataSource"] = source.Code,
+                });
         }
 
         if (secrets.Find(source.SecretName) is { } secret)
@@ -280,13 +286,24 @@ public sealed class PiSqlClientDataSource(
                 throw new SourceAuthenticationException(
                     AuthenticationRefused,
                     $"PI SQL Client не приймає облікові дані джерела {source.Code}: {ex.Message}",
-                    new Dictionary<string, object?> { ["dataSource"] = source.Code });
+                    new Dictionary<string, object?>
+                    {
+                        // Той самий ключ, що SqlDataSource.cs: той самий факт
+                        // («службові облікові дані відмовлено»).
+                        ["messageKey"] = "err.ECR-INT-0502.credentialsRefused",
+                        ["dataSource"] = source.Code,
+                    });
             }
 
             throw new BusinessRuleException(
                 SourceUnavailable,
                 $"PI SQL Client не з'єднується з {source.Code}: {ex.Message}",
-                new Dictionary<string, object?> { ["dataSource"] = source.Code });
+                new Dictionary<string, object?>
+                {
+                    // Той самий ключ, що SqlDataSource.cs: той самий факт («не з'єднується»).
+                    ["messageKey"] = "err.ECR-INT-0503.connectFailed",
+                    ["dataSource"] = source.Code,
+                });
         }
         finally
         {
@@ -439,7 +456,11 @@ public sealed class PiSqlClientDataSource(
             {
                 throw new BusinessRuleException(
                     SourceUnavailable,
-                    "Ім'я об'єкта джерела містить керівний символ: запит не будується.");
+                    "Ім'я об'єкта джерела містить керівний символ: запит не будується.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-INT-0503.controlCharacterInName",
+                    });
             }
         }
 
@@ -481,5 +502,14 @@ public sealed class PiSqlClientDataSource(
             : (sourcePath, sourcePath);
     }
 
-    private static BusinessRuleException Unavailable(string message) => new(SourceUnavailable, message);
+    private static BusinessRuleException Unavailable(string message, int dataSourceId)
+        => new(
+            SourceUnavailable,
+            message,
+            new Dictionary<string, object?>
+            {
+                // Той самий ключ, що SqlDataSource.cs/CollectionRunner.cs/PiAfCatalogReader.cs.
+                ["messageKey"] = "err.ECR-INT-0503.sourceMissing",
+                ["dataSourceId"] = dataSourceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
 }

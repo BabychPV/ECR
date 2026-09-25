@@ -138,7 +138,13 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         ArgumentNullException.ThrowIfNull(roleCodes);
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct).ConfigureAwait(false)
-                   ?? throw new Application.Errors.NotFoundException("ECR-SEC-0404", $"Користувача {userId} не знайдено.");
+                   ?? throw new Application.Errors.NotFoundException(
+                       "ECR-SEC-0404", $"Користувача {userId} не знайдено.",
+                       new Dictionary<string, object?>
+                       {
+                           ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                           ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                       });
 
         // ⛔ Коди розв'язуються ДО будь-якої зміни: невідома роль у наборі
         // означає помилку в переліку, і призначити «те, що знайшлося» гірше
@@ -158,7 +164,12 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         if (unknown.Count > 0)
         {
             throw new Application.Errors.NotFoundException(
-                "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.");
+                "ECR-SEC-0404", $"Ролей не існує або вони вимкнені: {string.Join(", ", unknown)}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.rolesUnknown",
+                    ["roles"] = string.Join(", ", unknown),
+                });
         }
 
         // ⚠ Кожна роль набору йде в одну з двох груп (`#48`, ФВ-6.16): якщо
@@ -289,6 +300,8 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .AsNoTracking()
             .Join(db.Permissions, rp => rp.PermissionCode, p => p.Id,
                   (rp, p) => new { rp.RoleId, Code = p.Id, p.IsDangerous })
+            .OrderBy(x => x.RoleId)
+            .ThenBy(x => x.Code)
             .Take(MaxRoles * MaxPermissions)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -400,7 +413,9 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     public async Task<Ecr.Application.Security.RoleUsage> CountRoleUsageAsync(int roleId, CancellationToken ct)
         => new(
             await db.RoleAssignments.CountAsync(a => a.RoleId == roleId, ct).ConfigureAwait(false),
-            await db.ResourceGrants.CountAsync(g => g.RoleId == roleId, ct).ConfigureAwait(false));
+            await db.ResourceGrants.CountAsync(g => g.RoleId == roleId, ct).ConfigureAwait(false),
+            await db.ApprovalSteps.CountAsync(s => s.RoleId == roleId, ct).ConfigureAwait(false),
+            await db.PeriodAccessRules.CountAsync(r => r.RoleId == roleId, ct).ConfigureAwait(false));
 
     /// <inheritdoc />
     public async Task RenameRoleAsync(
@@ -521,6 +536,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .AsNoTracking()
             .Where(a => a.UserId == userId || (a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid)))
             .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { Assignment = a, r.Code })
+            .OrderByDescending(x => x.Assignment.Id)
             .Take(MaxAssignments)
             .ToListAsync(ct)
             .ConfigureAwait(false);

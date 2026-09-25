@@ -1,5 +1,6 @@
 import { useState, type JSX } from 'react';
 import {
+  Box,
   Button,
   Card,
   Checkbox,
@@ -14,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import type { JobStatus, JobSummary } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { TechnicalDetails } from '@/shared/ui/ErrorAlert';
 import { DataTable } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -107,6 +109,18 @@ export function JobsPage(): JSX.Element {
       <Group align="end" mb="md">
         <TextInput
           label={t('jobs.id')}
+          /* ⛔ `U-09`. Обидва рядки переїхали СЮДИ з порожнього стану під
+              полем: доки ідентифікатора не введено, «Enter a job id» був
+              окремим екраном-заглушкою НАД журналом задач, тобто на чистій
+              базі екран показував два порожні стани поспіль («Enter a job
+              id» і «No jobs yet»), а фільтр «Only my jobs» опинявся затиснутим
+              між ними — це читається як зламана сторінка.
+
+              ⚠ Рядки каталогу ті самі (`jobs.pick`, `jobs.pickHint`), і це
+              навмисно: їх не прибрано, а поставлено туди, де вони й є
+              підказкою до дії — на самому полі, а не замість вмісту. */
+          placeholder={t('jobs.pick')}
+          description={t('jobs.pickHint')}
           value={input}
           onChange={(event) => setInput(event.currentTarget.value)}
           // ⚠ Без цього Enter у полі не робив нічого — ідентифікатор задачі
@@ -126,15 +140,24 @@ export function JobsPage(): JSX.Element {
       </Group>
 
       {/*
-       * ⚠ Доки ідентифікатор не введено, `data` — `undefined`: обгортка каже
-       * «введіть ідентифікатор», а не «задачі немає». Невідомий ідентифікатор
-       * дає 404 і показується станом помилки з кодом — саме тому клієнт не
-       * малює вічний прогрес задачі, якої не існує.
+       * ⛔ `U-09`, те саме правило, що встановлено в `U-08`: на екрані
+       * одночасно видно рівно ОДИН порожній стан — той, що пояснює найближчу
+       * перешкоду. Картка стеження ПІДПОРЯДКОВАНА журналу нижче: саме з нього
+       * беруть ідентифікатор кнопкою «Watch», а на чистій базі брати його
+       * нізвідки. Тому доки задачу не обрано, картки немає зовсім, і єдиний
+       * порожній стан на екрані — «No jobs yet» журналу.
+       *
+       * ⚠ Підказка не зникла, а переїхала на поле вводу вище (`placeholder`/
+       * `description`) — тобто лишилася там, де по ній діють.
+       *
+       * ⚠ Невідомий ідентифікатор і далі дає 404 і показується станом
+       * помилки з кодом — клієнт не малює вічний прогрес задачі, якої немає.
        */}
+      {jobId !== null && (
       <AsyncBoundary<JobStatus>
-        isPending={jobId !== null && job.isPending}
+        isPending={job.isPending}
         error={job.error}
-        data={jobId === null ? undefined : job.data}
+        data={job.data}
         emptyTitle={t('jobs.pick')}
         emptyHint={t('jobs.pickHint')}
         onRetry={() => void job.refetch()}
@@ -178,12 +201,17 @@ export function JobsPage(): JSX.Element {
               correlationId={status.correlationId}
             />
 
-            {/* ⛔ Текст помилки — без стека (ФВ-6.11): стек виносить назовні
-                шляхи, імена і подекуди значення. */}
-            {status.error !== null && (
-              <Text size="sm" c="statusError">
-                {status.error}
-              </Text>
+            {/* ⛔ `X-04`: сирий `error` задачі — `ex.Message` сервера
+                (українське речення розробника чи «Violation of PRIMARY KEY…»)
+                — стояв тут видимим рядком ПІД локалізованою причиною
+                `JobFailure`, тобто англійський екран показував одну відмову
+                двічі, і вдруге — чужою мовою. Причину людині каже
+                `JobFailure` (код → каталог); сирий текст лишається лише
+                згорнутим — екран і так відкривається тільки з
+                `System.ViewHealth`, тобто адміністраторові, що розбирає збій.
+                Без стека (ФВ-6.11): його сервер сюди не кладе. */}
+            {status.error !== null && status.error !== undefined && status.error !== '' && (
+              <TechnicalDetails label={t('common.technicalDetails')}>{status.error}</TechnicalDetails>
             )}
 
             {/* ⛔ Лише для Failed: перезапускати задачу, що виконується чи вже
@@ -204,6 +232,7 @@ export function JobsPage(): JSX.Element {
         </Card>
         )}
       </AsyncBoundary>
+      )}
 
       {/*
        * ⛔ До цього розділу задачу можна було побачити лише знаючи її GUID:
@@ -337,7 +366,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
               </Stack>
             ),
             sortValue: (job) => jobKindLabel(job.jobCode),
-            minWidth: 180,
+            minWidth: 130,
           },
           {
             key: 'state',
@@ -352,11 +381,15 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                 {/* ⚠ BE-08+: `JobSummary` тепер несе те саме `maxAttempts`, що й
                     `JobStatus` картки — «спроба N з M», коли обидва відомі. */}
                 <JobAttempt attempt={job.attempt} maxAttempts={job.maxAttempts} />
-                <JobFailure
-                  state={job.state}
-                  errorCode={job.errorCode}
-                  correlationId={job.correlationId}
-                />
+                {/* ⚠ `X-22`: ідентифікатор кореляції (32 знаки без пробілів) разом із
+                    кнопкою копіювання робив колонку стану ~360 px — переноситься. */}
+                <Box maw={240} className="ecr-wrap-anywhere" data-job-failure-cell="">
+                  <JobFailure
+                    state={job.state}
+                    errorCode={job.errorCode}
+                    correlationId={job.correlationId}
+                  />
+                </Box>
               </Stack>
             ),
           },
@@ -366,7 +399,18 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
             key: 'message',
             label: t('jobs.recentMessage'),
             sortable: false,
-            render: (job) => job.message ?? '',
+            // ⛔ `X-22`: при 1280 таблиця була ширша за екран, і «Started»/«Watch»
+            // стояли за правим краєм. Найширше тут — повідомлення (ключ експорту
+            // на 32 шістнадцяткові знаки): тепер воно обрізається з повним
+            // текстом у `title`, а не розсуває таблицю.
+            render: (job) =>
+              job.message === null || job.message === undefined || job.message === '' ? (
+                ''
+              ) : (
+                <Text size="sm" className="ecr-ellipsis" maw={160} title={job.message} data-job-message="">
+                  {job.message}
+                </Text>
+              ),
           },
           {
             key: 'createdByDisplayName',
@@ -410,7 +454,7 @@ function RecentJobs({ onPick }: { onPick: (jobId: string) => void }): JSX.Elemen
                 {/* ⚠ `wrap="nowrap"`: дії в одному рядку таблиці не мають
                     переносити одна одну на другий рядок і рвати висоту рядків. */}
                 <Group gap="xs" wrap="nowrap">
-                  <Button variant="subtle" size="xs" onClick={() => onPick(job.jobId)}>
+                  <Button variant="subtle" size="compact-xs" onClick={() => onPick(job.jobId)}>
                     {t('jobs.recentWatch')}
                   </Button>
 

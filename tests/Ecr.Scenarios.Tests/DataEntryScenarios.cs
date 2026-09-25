@@ -411,13 +411,17 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             new Uri($"/api/v1/documents/{doc.DocumentId}/rows", UriKind.Relative),
             new { tableInstanceId, rowKey = (string?)null });
 
-        // ⛔ Доказ сценарію: без Manage на таблиці Forbidden доводив би лише
-        // «немає гранта», а не «isDeny перекрив дозвіл». Причина в тілі —
-        // те саме, що прийшло б і за просту відсутність гранта (`NoGrant`),
-        // тому дискримінатор — саме мутація нижче, а не сам код причини.
-        Assert.Equal(HttpStatusCode.Forbidden, createRow.StatusCode);
+        // ⛔ Доказ сценарію: заборона на проєкт перекриває Manage на таблиці.
+        //
+        // ✎ V-02: відповідь — `404 ECR-DOC-0404`, а не `403 NoGrant`. Заборона
+        // на проєкт робить документ НЕВИДИМИМ (`GET /documents/{id}` теж 404),
+        // і `CreateRowHandler` тепер перевіряє видимість першою — до того
+        // відмова про таблицю (`ECR-ROW-0409`, `NoGrant`) розповідала про
+        // документ, якого цей користувач не бачить. Без `IsDeny` (грант
+        // Manage на таблиці) рядок створився б — дискримінатор той самий.
+        Assert.Equal(HttpStatusCode.NotFound, createRow.StatusCode);
         var body = await createRow.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("NoGrant", body.GetProperty("reason").GetString());
+        Assert.Equal("ECR-DOC-0404", body.GetProperty("errorCode").GetString());
     }
 
     [Fact]
@@ -461,6 +465,12 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
             new { tableInstanceId, rowKey = (string?)null });
 
         Assert.True(createRow.StatusCode == HttpStatusCode.Forbidden, $"{createRow.StatusCode}: {app.ErrorsText}");
+
+        // ✎ V-06: до виправлення цей `403` приходив як `NoGrant` — адміністратор
+        // без гранта на проєкт, — а не від симуляції, яка профілю запиту
+        // взагалі не торкалася. Тепер відмова саме симуляції, до обробника.
+        var body = await createRow.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("ECR-SIM-0403", body.GetProperty("errorCode").GetString());
     }
 
     /// <remarks>
@@ -720,7 +730,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-19")]
-    public async Task Непроведена_перевірка_це_404_а_не_порожній_перелік()
+    public async Task Непроведена_перевірка_каже_це_полем_а_не_порожнім_переліком()
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
@@ -736,7 +746,27 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         // ⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді. Показати
         // першу замість другої означає повідомити неправду про готовність
         // документа рівно тоді, коли на неї спираються, подаючи звітність.
-        Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+        //
+        // ✎ `X-32`: цей поділ тепер несе поле `validated`, а не код `404` —
+        // «ще не перевіряли» є звичайним станом нового документа, і `404` на
+        // кожне його відкриття був червоним шумом у консолі браузера.
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+
+        var body = await read.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("validated").GetBoolean());
+        Assert.Empty(body.GetProperty("messages").EnumerateArray());
+
+        // ⛔ І дзеркало: після перевірки те саме поле — `true`. Без нього тест
+        // лишався б зеленим на полі, що завжди `false`.
+        var validate = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/validate", UriKind.Relative),
+            new { periodKey = doc.PeriodKey });
+        Assert.Equal(HttpStatusCode.OK, validate.StatusCode);
+
+        var after = await (await admin.Client.GetAsync(new Uri(
+                $"/api/v1/documents/{doc.DocumentId}/validation?periodKey={doc.PeriodKey}", UriKind.Relative)))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(after.GetProperty("validated").GetBoolean());
     }
 
     /// <remarks>
@@ -945,11 +975,14 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         Assert.True(periods.GetArrayLength() > 0, $"календар проєкту {projectId} порожній.");
         var periodKey = periods[0].GetProperty("periodKey").GetInt32();
 
-        var versionId = await StructureScenarios.CreateEmptyDraftVersionAsync(admin.Client, prefix);
-
+        // ✎ `V-11`: документ заводиться на версії ПРОЄКТУ, тож версії в запиті
+        // немає. Доти тут заводилася ОКРЕМА порожня версія, і документ жив на
+        // версії, чужій для свого проєкту, — рівно той стан, у якому документ
+        // відкривається без аркушів; сервер його більше не приймає
+        // (`err.ECR-DOC-0422.versionNotProject`).
         var createDoc = await admin.Client.PostAsJsonAsync(
             new Uri("/api/v1/documents", UriKind.Relative),
-            new { projectId, templateVersionId = versionId, sheetDefIds = Array.Empty<int>() });
+            new { projectId, sheetDefIds = Array.Empty<int>() });
         Assert.Equal(HttpStatusCode.Created, createDoc.StatusCode);
         var documentId = (await createDoc.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("documentId").GetInt64();
 
@@ -1133,6 +1166,28 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                 $"колонка {code}: {addCalculated.StatusCode}: {app.ErrorsText}");
         }
 
+        // ✎ V-19: поле шапки заводиться ДО формули — збереження формули тепер
+        // резолвить посилання, і `HDR.Area` на ще не заведене поле відхилялося б.
+        // ⛔ Поле шапки — ДО публікації, тим самим шляхом чернетка→публікація,
+        // що колонка/аркуш/таблиця вище: PUT .../header-fields/{code} відмовляє
+        // ECR-TMPL-0409 на опублікованій версії (EnsureStructurallyMutable).
+        if (headerField is { } field)
+        {
+            var addHeaderField = await client.PutAsJsonAsync(
+                new Uri($"/api/v1/template-versions/{versionId}/header-fields/{field.Code}", UriKind.Relative),
+                new
+                {
+                    labelL10n = new Dictionary<string, string> { ["en"] = field.Code },
+                    ordinal = 0,
+                    dataType = field.DataType,
+                    isRequired = false,
+                    lookupRegistryDefId = (int?)null,
+                });
+            Assert.True(
+                addHeaderField.StatusCode == HttpStatusCode.OK,
+                $"поле шапки {field.Code}: {addHeaderField.StatusCode}: {app.ErrorsText}");
+        }
+
         // ⛔ Колонка-формула і сама формула — ДО публікації, і це не порядок
         // зручності. Розкриті залежності (`cfg.FormulaDependency`) складає
         // саме публікація (`PublishChecks.Dependencies`), а без них
@@ -1221,26 +1276,6 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
                     isActive = true,
                 });
             Assert.True(addRule.StatusCode == HttpStatusCode.OK, $"{addRule.StatusCode}: {app.ErrorsText}");
-        }
-
-        // ⛔ Поле шапки — ДО публікації, тим самим шляхом чернетка→публікація,
-        // що колонка/аркуш/таблиця вище: PUT .../header-fields/{code} відмовляє
-        // ECR-TMPL-0409 на опублікованій версії (EnsureStructurallyMutable).
-        if (headerField is { } field)
-        {
-            var addHeaderField = await client.PutAsJsonAsync(
-                new Uri($"/api/v1/template-versions/{versionId}/header-fields/{field.Code}", UriKind.Relative),
-                new
-                {
-                    labelL10n = new Dictionary<string, string> { ["en"] = field.Code },
-                    ordinal = 0,
-                    dataType = field.DataType,
-                    isRequired = false,
-                    lookupRegistryDefId = (int?)null,
-                });
-            Assert.True(
-                addHeaderField.StatusCode == HttpStatusCode.OK,
-                $"поле шапки {field.Code}: {addHeaderField.StatusCode}: {app.ErrorsText}");
         }
 
         var publish = await client.PostAsJsonAsync(

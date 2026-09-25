@@ -189,11 +189,28 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
         // унікальному індексі замість того, щоб мовчки додати другий
         // актуальний прогін, з якого `ReadCurrentAsync` зібрала б кожне число
         // документа двічі.
-        var previous = await db.CalculationRuns
+        var previousQuery = db.CalculationRuns
             .Where(r => r.ProjectId == run.ProjectId
                         && r.PeriodKey == run.PeriodKey
                         && r.Id != calculationRunId
-                        && r.Status == CalculationRun.CurrentStatus)
+                        && r.Status == CalculationRun.CurrentStatus);
+
+        // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
+        // хвиля UX-PASS R4). Прогін ОДНОГО документа (`run.DocumentId`
+        // задано) знімає актуальність ЛИШЕ з прогонів ТОГО САМОГО документа —
+        // не з прогону всього проєкту й не з прогонів інших документів: він
+        // порахував наново тільки свій документ, тож чужа актуальність
+        // лишається чинною. Прогін УСЬОГО проєкту (`run.DocumentId == null`)
+        // і далі знімає актуальність з УСІХ прогонів області, як і раніше —
+        // він рахує кожен документ проєкту заново, тож усе попереднє (і
+        // проєктне, і документне) застаріло разом.
+        if (run.DocumentId is { } documentId)
+        {
+            previousQuery = previousQuery.Where(r => r.DocumentId == documentId);
+        }
+
+        var previous = await previousQuery
+            .OrderBy(r => r.Id)
             .Take(MaxSupersededRuns)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -236,17 +253,41 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
     /// окремо), тож «актуальний прогін періоду» — не одне число, а з'єднання з
     /// проєкцією в тип, на полях якого потім сортують, EF перекласти не може
     /// взагалі.
+    ///
+    /// ⛔ Перевага ДОКУМЕНТНОГО прогону над ПРОЄКТНИМ (третя хвиля UX-PASS R4,
+    /// «CalculationRun ховає результати сусідніх документів»): відколи
+    /// <c>CalculationRun.DocumentId</c> розрізняє область прогону,
+    /// <c>SwitchCurrentRunAsync</c> документного прогону НЕ знімає
+    /// актуальність із прогону всього проєкту (той рахує й ІНШІ документи,
+    /// чию актуальність гасити не можна) — тож обидва можуть бути
+    /// <c>Current</c> ОДНОЧАСНО для того самого документа. Без переваги нижче
+    /// результати документа читалися б із ДВОХ прогонів разом — те саме
+    /// подвоєння, від якого захищає <c>UX_CalculationRun_Current</c>. Коли для
+    /// документа є ВЛАСНИЙ актуальний прогін, читаємо ЛИШЕ з нього; інакше —
+    /// з актуального прогону всього проєкту, як і раніше (документ, що ще
+    /// ніколи не мав власного прогону, — типовий і сьогоднішній випадок).
     /// </remarks>
     public async Task<IReadOnlyList<CalculationResultRow>> ReadCurrentAsync(
         long documentId, int periodKey, CancellationToken ct)
     {
+        var hasDedicatedCurrent = await db.CalculationRuns
+            .AsNoTracking()
+            .AnyAsync(
+                r => r.DocumentId == documentId
+                     && r.PeriodKey == periodKey
+                     && r.Status == CalculationRun.CurrentStatus,
+                ct)
+            .ConfigureAwait(false);
+
         var rows = await db.CalculationResults
             .AsNoTracking()
             .Where(r => r.DocumentId == documentId
                         && r.PeriodKey == periodKey
                         && db.CalculationRuns.Any(
                             run => run.Id == r.CalculationRunId
-                                   && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus))
+                                   && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus
+                                   && (run.DocumentId == documentId
+                                       || (!hasDedicatedCurrent && run.DocumentId == null))))
             .OrderBy(r => r.SourceRowKey)
             .ThenBy(r => r.OutputCode)
             .Take(MaxResults)

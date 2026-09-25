@@ -159,6 +159,31 @@ public static class ErrorCodes
     public const string ComputationOnManualColumn = "ECR-TMPL-4227";
 
     /// <summary>
+    /// Фіксована таблиця (<c>TableRowMode.Fixed</c>) без жодного живого
+    /// <c>RowDef</c> (директива 2026-09-25, живий перегляд стенду).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знайдено живим переглядом стенду: шаблон версії 1, 92 таблиці, 0
+    /// <c>RowDef</c> — нові документи з такого шаблону створювалися БЕЗ
+    /// РЯДКІВ у фіксованих таблицях. Наслідок мовчазний: таблиця не порожня
+    /// через відсутність даних, вона порожня СТРУКТУРНО, і оператор не може
+    /// в неї нічого ввести — рядків, куди можна писати, просто немає, а
+    /// причина ніде не написана.
+    ///
+    /// ⚠ Перевірка звужена до <c>RowMode.Fixed</c> і НЕ чіпає <c>Mixed</c>:
+    /// у <c>Mixed</c> рядки може додати користувач (<c>TableDef.
+    /// AllowsDynamicRows</c>), тож нуль рядків на момент публікації — це
+    /// стартовий стан таблиці, яку заповнюють з нуля, а не дефект. Лише
+    /// <c>Fixed</c> обіцяє «рядки визначені в шаблоні» (див. коментар
+    /// <c>TableRowMode.Fixed</c>) і не має ІНШОГО способу отримати рядок:
+    /// <c>TableDef.AddRow</c> сам забороняє додавання рядків, коли
+    /// <c>RowMode == Dynamic</c>, а для <c>Fixed</c> рядок можна завести лише
+    /// в чернетці ДО публікації — після неї шлях один: RowDef має бути вже
+    /// там.
+    /// </remarks>
+    public const string FixedTableWithoutRows = "ECR-TMPL-4228";
+
+    /// <summary>
     /// <c>Breaking</c>-зміна у версії з документами (ФВ-7.4).
     /// </summary>
     /// <remarks>
@@ -192,6 +217,19 @@ public static class ErrorCodes
     // Документи, рядки, комірки
     public const string DocumentNotFound = "ECR-DOC-0404";
     public const string DocumentSubmitted = "ECR-DOC-0409";
+
+    /// <summary>
+    /// Аркуш зараз зайнятий: блокування «документ × аркуш × період» не взято за
+    /// відведений час (<c>ECR-DOC-4091</c>, <c>SheetEditGate</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код, а не <see cref="DocumentSubmitted"/>: той каже «аркуш
+    /// подано, потрібен Reopen», тобто стан, який повтором не минає. Тут —
+    /// навпаки: подання (або правка) ще триває, і той самий запит за мить
+    /// пройде. Клієнт, що розрізняє відмови за кодом, мусить бачити різницю.
+    /// </remarks>
+    public const string SheetBusy = "ECR-DOC-4091";
+
     public const string DocumentCompositionInvalid = "ECR-DOC-0422";
     public const string RowNotFound = "ECR-ROW-0404";
     public const string RowDuplicate = "ECR-ROW-0409";
@@ -223,6 +261,11 @@ public static class ErrorCodes
     /// самої причини, що обов'язкові вхідні колонки методології (`ECR-CALC-0437`)
     /// не діляться кодом зі звичайною помилкою формату: інакше користувач
     /// шукав би причину не там.
+    ///
+    /// ⚠ Тим самим кодом відмовляє й комірка <c>Unit</c> з неіснуючою
+    /// одиницею (B-02, <c>FK_CellValue_Unit</c> → раніше <c>500</c>): суб'єкт
+    /// той самий — посилання на запис, якого немає; ЯКИЙ саме запис — каже
+    /// <c>messageKey</c> (<c>missingEntry</c> / <c>missingUnit</c>).
     /// </remarks>
     public const string CellRegistryEntryMissing = "ECR-CELL-4223";
 
@@ -480,7 +523,16 @@ public static class ErrorCodes
     public const string MethodologyArgumentColumnMissing = "ECR-CALC-0438";
 
     // Робочий процес
-    /// <summary><c>Submit</c> при наявності рядків <c>IsOrphaned</c> (ФВ-8.13).</summary>
+    /// <summary>
+    /// <c>Submit</c> неможливий: рядки <c>IsOrphaned</c> (ФВ-8.13), незакриті
+    /// помилки валідації аркуша, або застарілі результати прив'язаних
+    /// методологій (F-05 — <c>messageKey</c> = <c>staleMethodologyResults</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один код на три причини, той самий прийом, що
+    /// <see cref="MethodologyConflict"/>: суб'єкт відмови той самий —
+    /// «Подання неможливе», а ЯКА саме причина, каже <c>messageKey</c>.
+    /// </remarks>
     public const string SubmitBlockedByOrphans = "ECR-SUB-4221";
 
     // Безпека: симуляція і зміна пароля
@@ -488,9 +540,10 @@ public static class ErrorCodes
     /// Спроба запису в сеансі симуляції (<c>SimulationReadOnly</c>, ФВ-6.16a).
     /// </summary>
     /// <remarks>
-    /// ⚠ Заброньований: заборона доїжджає до клієнта як
-    /// <see cref="AccessDenied"/> з <c>EditDenyReason.SimulationReadOnly</c> —
-    /// однією відмовою доступу з причиною, а не окремим кодом.
+    /// ⚠ Кидає <c>SimulationReadOnlyMiddleware</c> на будь-який небезпечний
+    /// метод під сеансом (V-06), до обробника. Запис комірок, що якимось чином
+    /// дійшов би до обробника, і далі відхиляє <c>EditRules</c> як
+    /// <see cref="AccessDenied"/> з <c>EditDenyReason.SimulationReadOnly</c>.
     /// </remarks>
     public const string SimulationReadOnly = "ECR-SIM-0403";
 

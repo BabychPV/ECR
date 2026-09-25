@@ -154,20 +154,21 @@ public sealed class ImportRegistryEntriesHandler(
             columns.Add((i, field));
         }
 
-        // ⛔ Наявний запис розв'язується ЗА РЯДКОМ через FindEntryByCodeAsync
-        // (той самий метод, яким UpsertRegistryEntryHandler.CreateAsync
-        // перевіряє зайнятість коду) — НЕ через ListEntriesAsync. Той читає
-        // AsNoTracking (правильно для списків), і об'єкт без відстеження, до
-        // якого потім прив'язали б нове значення поля через навігацію
-        // RegistryValue.Entry, EF вважає щойно доданим — і на SaveChanges
-        // намагається вставити його ЗНОВУ з чужим Id (IDENTITY_INSERT).
-        // FindEntryByCodeAsync читає БЕЗ AsNoTracking, тож запис лишається
-        // «Unchanged», а не «Added».
-
-        // Один запит на КОЖЕН зустрінутий (довідник-джерело, код) — не на
-        // кожен рядок файлу: той самий рядок довідника-джерела в CSV
-        // повторюється часто (той самий дозвіл на десятки водних об'єктів).
-        var lookupCache = new Dictionary<(int RefRegistryDefId, string Code), long?>();
+        // ⛔ Наявний запис розв'язується через FindEntriesByCodesAsync — З
+        // відстеженням, як FindEntryByCodeAsync (яким UpsertRegistryEntryHandler.
+        // CreateAsync перевіряє зайнятість коду), — НЕ через ListEntriesAsync.
+        // Той читає AsNoTracking (правильно для списків), і об'єкт без
+        // відстеження, до якого потім прив'язали б нове значення поля через
+        // навігацію RegistryValue.Entry, EF вважає щойно доданим — і на
+        // SaveChanges намагається вставити його ЗНОВУ з чужим Id
+        // (IDENTITY_INSERT). Тут запис лишається «Unchanged», а не «Added».
+        //
+        // ⛔ B-10: усе, що рядок читав із бази поштучно, читається ПАКЕТОМ до
+        // циклу — наявні записи за кодами, їхні значення, записи-цілі Lookup.
+        // Доти 80 рядків із двома Lookup-полями давали 245 SELECT TOP(1) з
+        // dic.RegistryEntry і 80 ListValues; тепер набір запитів сталий.
+        var prefetched = await PrefetchAsync(definition.Id, records, codeColumn, columns, ct).ConfigureAwait(false);
+        var lookupCache = prefetched.LookupCache;
 
         var errors = new List<RegistryEntryImportError>();
         var seenCodes = new HashSet<string>(StringComparer.Ordinal);
@@ -212,7 +213,7 @@ public sealed class ImportRegistryEntriesHandler(
                 continue;
             }
 
-            var entry = await registries.FindEntryByCodeAsync(definition.Id, code, ct).ConfigureAwait(false);
+            var entry = prefetched.EntriesByCode.GetValueOrDefault(code);
             var isNew = entry is null;
 
             var (values, refField, refErrorKey) = await ResolveRowAsync(record, columns, lookupCache, ct)
@@ -247,8 +248,12 @@ public sealed class ImportRegistryEntriesHandler(
             {
                 // Реюз: та сама перевірка типу, обов'язковості й складу полів,
                 // що при ручному редагуванні запису — жодного дубля правила.
+                var prefetch = new RegistryValuesPrefetch(
+                    isNew ? null : prefetched.ValuesByEntry.GetValueOrDefault(entry.Id) ?? [],
+                    prefetched.LookupTargets);
+
                 changes = await UpsertRegistryEntryHandler
-                    .ApplyValuesAsync(registries, definition, entry, values, ct)
+                    .ApplyValuesAsync(registries, definition, entry, values, prefetch, ct)
                     .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is DomainException or BusinessRuleException)
@@ -316,23 +321,116 @@ public sealed class ImportRegistryEntriesHandler(
             // UpsertRegistryEntryHandler.HandleAsync). Формат DetailsJson —
             // буквально той самий, що там: registryDefId/entryId/changes,
             // щоб один і той самий запис читав обидва шляхи однаково.
-            foreach (var (entry, changes) in valueChanges)
+            //
+            // ⛔ Один пакетний виклик, а не цикл поштучних await — та сама
+            // логіка, що B-10 (ca63ed56) уже застосував до ЧИТАННЯ в цьому ж
+            // імпорті: N окремих round-trip на N змінених записів довідника
+            // не масштабується для великого CSV.
+            if (valueChanges.Count > 0)
             {
-                await audit.WriteSecurityEventAsync(
-                    new SecurityEventRecord(
+                var securityEvents = valueChanges
+                    .Select(vc => new SecurityEventRecord(
                         clock.UtcNow, UpsertRegistryEntryHandler.ValueChangedEventType, TargetUserId: null, TargetRoleId: null,
                         JsonSerializer.Serialize(new
                         {
                             registryDefId = definition.Id,
-                            entryId = entry.Id,
-                            changes = changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
+                            entryId = vc.Entry.Id,
+                            changes = vc.Changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
                         }),
-                        userId, currentUser.CorrelationId),
-                    innerCt).ConfigureAwait(false);
+                        userId, currentUser.CorrelationId))
+                    .ToList();
+
+                await audit.WriteSecurityEventsAsync(securityEvents, innerCt).ConfigureAwait(false);
             }
         }, ct).ConfigureAwait(false);
 
         return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true);
+    }
+
+    /// <summary>
+    /// Читає пакетом усе, що цикл рядків інакше читав би поштучно (<c>B-10</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Коди збираються за ТИМИ САМИМИ правилами, що в циклі (обрізка,
+    /// <see cref="CsvReader.UnescapeFormula"/>, порожнє пропускається), —
+    /// але без відсіву помилкових рядків: зайвий код у запиті нічого не
+    /// ламає, а пропущений означав би «запису немає». Порівняння кодів —
+    /// регістронезалежне, як колація бази, якою відповідав
+    /// <see cref="IRegistryStore.FindEntryByCodeAsync"/>.
+    /// </remarks>
+    private async Task<ImportPrefetch> PrefetchAsync(
+        int registryDefId,
+        IReadOnlyList<IReadOnlyList<string>> records,
+        int codeColumn,
+        List<(int Index, RegistryFieldDef Field)> columns,
+        CancellationToken ct)
+    {
+        var ownCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var refCodes = new Dictionary<int, HashSet<string>>();
+
+        for (var i = 1; i < records.Count; i++)
+        {
+            var record = records[i];
+            var code = Cell(record, codeColumn).Trim();
+            if (code.Length > 0)
+            {
+                ownCodes.Add(code);
+            }
+
+            foreach (var (idx, field) in columns)
+            {
+                if (field.DataType != CellDataType.Lookup || field.RefRegistryDefId is not { } refDefId)
+                {
+                    continue;
+                }
+
+                var raw = CsvReader.UnescapeFormula(Cell(record, idx)).Trim();
+                if (raw.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!refCodes.TryGetValue(refDefId, out var set))
+                {
+                    set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    refCodes[refDefId] = set;
+                }
+
+                set.Add(raw);
+            }
+        }
+
+        var entriesByCode = (await registries.FindEntriesByCodesAsync(registryDefId, ownCodes, ct).ConfigureAwait(false))
+            .ToDictionary(e => e.Code, StringComparer.OrdinalIgnoreCase);
+
+        var lookupCache = new Dictionary<(int RefRegistryDefId, string Code), long?>();
+        var lookupTargets = new Dictionary<long, RegistryEntry>();
+
+        foreach (var (refDefId, codes) in refCodes)
+        {
+            var found = (await registries.FindEntriesByCodesAsync(refDefId, codes, ct).ConfigureAwait(false))
+                .ToDictionary(e => e.Code, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var code in codes)
+            {
+                var target = found.GetValueOrDefault(code);
+                lookupCache[(refDefId, code)] = target?.Id;
+                if (target is not null)
+                {
+                    lookupTargets[target.Id] = target;
+                }
+            }
+        }
+
+        var valuesByEntry = entriesByCode.Count == 0
+            ? new Dictionary<long, IReadOnlyList<RegistryValue>>()
+            : (await registries
+                    .ListValuesForEntriesAsync([.. entriesByCode.Values.Select(e => e.Id)], ct)
+                    .ConfigureAwait(false))
+                .GroupBy(v => v.RegistryEntryId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<RegistryValue>)[.. g]);
+
+        return new ImportPrefetch(entriesByCode, valuesByEntry, lookupCache, lookupTargets);
     }
 
     /// <summary>
@@ -472,4 +570,30 @@ public sealed class ImportRegistryEntriesHandler(
 
     private static string Cell(IReadOnlyList<string> record, int index)
         => index < record.Count ? record[index] : string.Empty;
+
+    /// <summary>Прочитане пакетом до циклу рядків.</summary>
+    /// <param name="EntriesByCode">Наявні записи довідника за кодом.</param>
+    /// <param name="ValuesByEntry">Значення полів наявних записів.</param>
+    /// <param name="LookupCache">Код посилання → Id запису-цілі (<c>null</c> — немає).</param>
+    /// <param name="LookupTargets">Записи-цілі посилань за Id.</param>
+    private sealed record ImportPrefetch(
+        IReadOnlyDictionary<string, RegistryEntry> EntriesByCode,
+        IReadOnlyDictionary<long, IReadOnlyList<RegistryValue>> ValuesByEntry,
+        Dictionary<(int RefRegistryDefId, string Code), long?> LookupCache,
+        IReadOnlyDictionary<long, RegistryEntry> LookupTargets);
 }
+
+/// <summary>
+/// Прочитане пакетом для <see cref="UpsertRegistryEntryHandler.ApplyValuesAsync"/>
+/// (<c>B-10</c>, імпорт CSV).
+/// </summary>
+/// <param name="ExistingValues">
+/// Наявні значення запису; <c>null</c> — прочитати з бази (<c>ListValuesAsync</c>).
+/// </param>
+/// <param name="LookupTargets">
+/// Уже прочитані записи — цілі <c>Lookup</c>-посилань; чого тут немає, те
+/// читається з бази, як і без пакета.
+/// </param>
+internal sealed record RegistryValuesPrefetch(
+    IReadOnlyList<RegistryValue>? ExistingValues,
+    IReadOnlyDictionary<long, RegistryEntry>? LookupTargets);

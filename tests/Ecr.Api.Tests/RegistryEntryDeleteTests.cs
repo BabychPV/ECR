@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
@@ -111,7 +112,8 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
         Assert.Equal("err.ECR-REG-0409.entryReferenced", problem.GetProperty("messageKey").GetString());
         Assert.Equal("Registry entry conflict", problem.GetProperty("title").GetString());
         Assert.StartsWith("Entry \"", problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
-        Assert.Contains("cells reference it", problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Contains("still referenced", problem.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Equal(1, problem.GetProperty("referenceKinds").GetProperty("cells").GetInt32());
 
         // ⛔ Саме КІЛЬКІСТЬ, а не факт відмови. Клієнт пропонує закрити запис
         // датою замість повтору, і «на запис посилаються N комірок» — єдине,
@@ -124,6 +126,76 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
 
         // Запис лишився в обігу: відмова не має бути частковою.
         Assert.False(await IsDeletedAsync(fixture.EntryId).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// ⛔ V-08 (третій раунд UX): посилання з поля Lookup ІНШОГО запису
+    /// довідника і з константи методології теж блокують видалення.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: у <c>RegistryStore.CountReferencesAsync</c> лишити самі
+    /// комірки (як до виправлення) — обидва тести червоні: <c>204</c> і
+    /// <c>IsDeleted = 1</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Запис_на_який_посилається_поле_Lookup_іншого_запису_дає_409_з_видом_посилання()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData")
+            .ConfigureAwait(true);
+
+        var fixture = await SeedRegistriesAsync().ConfigureAwait(true);
+        await ReferenceFromRegistryValueAsync(fixture.EntryId).ConfigureAwait(true);
+
+        var problem = await DeleteExpectingConflictAsync(client, fixture).ConfigureAwait(true);
+
+        Assert.Equal(1, problem.GetProperty("references").GetInt32());
+        Assert.Equal(1, problem.GetProperty("referenceKinds").GetProperty("registryValues").GetInt32());
+        Assert.False(await IsDeletedAsync(fixture.EntryId).ConfigureAwait(true));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Запис_на_який_посилається_константа_методології_дає_409_з_видом_посилання()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData")
+            .ConfigureAwait(true);
+
+        var fixture = await SeedRegistriesAsync().ConfigureAwait(true);
+        await ReferenceFromMethodologyConstantAsync(fixture.EntryId).ConfigureAwait(true);
+
+        var problem = await DeleteExpectingConflictAsync(client, fixture).ConfigureAwait(true);
+
+        Assert.Equal(1, problem.GetProperty("referenceKinds").GetProperty("methodologyConstants").GetInt32());
+        Assert.False(await IsDeletedAsync(fixture.EntryId).ConfigureAwait(true));
+    }
+
+    /// <summary>
+    /// Посилання з запису, який сам уже видалений, не блокує: інакше пару
+    /// записів, що посилаються один на одного, не прибрати ніколи.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Посилання_з_видаленого_запису_видалення_не_блокує()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Registry.View", "Registry.EditData")
+            .ConfigureAwait(true);
+
+        var fixture = await SeedRegistriesAsync().ConfigureAwait(true);
+        await ReferenceFromRegistryValueAsync(fixture.EntryId, ownerDeleted: true).ConfigureAwait(true);
+
+        var response = await client
+            .DeleteAsync(new Uri(
+                $"/api/v1/registries/{fixture.Code}/entries/{fixture.EntryId}", UriKind.Relative))
+            .ConfigureAwait(true);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
 
     [Fact]
@@ -225,6 +297,83 @@ public sealed class RegistryEntryDeleteTests(SqlServerFixture sql)
             document.TableDefId,
             new CellValueData { ValueRegistryEntryId = registryEntryId }));
 
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Шле DELETE і перевіряє, що це 409 із ключем «на запис посилаються».</summary>
+    private static async Task<JsonElement> DeleteExpectingConflictAsync(HttpClient client, RegistryFixture fixture)
+    {
+        var response = await client
+            .DeleteAsync(new Uri(
+                $"/api/v1/registries/{fixture.Code}/entries/{fixture.EntryId}", UriKind.Relative))
+            .ConfigureAwait(false);
+
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.Conflict, $"{response.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("err.ECR-REG-0409.entryReferenced", problem.GetProperty("messageKey").GetString());
+
+        return problem;
+    }
+
+    /// <summary>
+    /// Запис СУСІДНЬОГО довідника посилається на наш полем Lookup
+    /// (<c>dic.RegistryValue.ValueRefEntryId</c>).
+    /// </summary>
+    private async Task ReferenceFromRegistryValueAsync(long registryEntryId, bool ownerDeleted = false)
+    {
+        var tag = $"{Guid.NewGuid():N}"[..8].ToUpperInvariant();
+
+        await using var db = new EcrDbContext(Options());
+
+        var target = await db.RegistryEntries.AsNoTracking()
+            .Where(e => e.Id == registryEntryId).Select(e => e.RegistryDefId).SingleAsync().ConfigureAwait(false);
+
+        var holder = new RegistryDef(EcrCode.Create($"REGH{tag}"), Name($"Holder {tag}"), isTemporal: false);
+        db.RegistryDefs.Add(holder);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var field = new RegistryFieldDef(holder.Id, EcrCode.Create("Ref"), Name("Ref"), CellDataType.Lookup, 1);
+        field.PointTo(target);
+        db.RegistryFieldDefs.Add(field);
+
+        var owner = new RegistryEntry(holder.Id, EcrCode.Create($"H{tag}"), Name($"Holder entry {tag}"));
+        db.RegistryEntries.Add(owner);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var value = new RegistryValue(owner, field.Id);
+        value.Set(CellDataType.Lookup, registryEntryId, null);
+        db.RegistryValues.Add(value);
+
+        if (ownerDeleted)
+        {
+            owner.SoftDelete();
+        }
+
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Константа методології звужена цим записом як речовиною.</summary>
+    private async Task ReferenceFromMethodologyConstantAsync(long registryEntryId)
+    {
+        await using var db = new EcrDbContext(Options());
+
+        var unit = await db.Units.OrderBy(u => u.Id).Select(u => u.Id).FirstAsync().ConfigureAwait(false);
+
+        var methodology = new Methodology(
+            EcrCode.Create($"RD{Guid.NewGuid():N}"[..20]), Name("V-08 methodology"));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var version = new MethodologyVersion(
+            methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, DateTime.UtcNow);
+        db.MethodologyVersions.Add(version);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var constant = version.AddNumericConstant(EcrCode.Create("EF"), 1m, unit);
+        constant.SetScope(category: null, registryEntryId);
+        db.MethodologyConstants.Add(constant);
         await db.SaveChangesAsync().ConfigureAwait(false);
     }
 

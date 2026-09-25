@@ -68,7 +68,7 @@ public sealed class StyleDefTests
 
     private SaveStyleDefHandler Save() => new(_styles, _store, _uow, _access, _user);
 
-    private ListStyleDefsHandler List() => new(_styles, _access, _user);
+    private ListStyleDefsHandler List() => new(_styles, _store, _access, _user);
 
     [Fact]
     public async Task Новий_стиль_заводиться_і_зберігається()

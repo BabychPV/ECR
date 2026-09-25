@@ -1,19 +1,18 @@
 import { useState, type JSX } from 'react';
-import { Anchor, Button, Group, Modal, TextInput } from '@mantine/core';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Anchor, Button, Group, Modal, Text, TextInput } from '@mantine/core';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
+import type { components } from '@/api/schema';
 import type {
   CreateTemplateRequest,
-  CreateTemplateVersionRequest,
   TemplateIdResponse,
   TemplatePage,
   TemplateSummary,
-  TemplateVersionPage,
   TemplateVersionSummary,
-  VersionIdResponse,
 } from '@/api/types';
+import { NewTemplateVersionModal } from '@/features/templates/NewTemplateVersionModal';
 import { can, useSession } from '@/shared/session/useSession';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
@@ -40,7 +39,6 @@ export function TemplatesPage(): JSX.Element {
 
   // Для якого шаблону заводимо версію; `null` — діалог закритий.
   const [versioning, setVersioning] = useState<number | null>(null);
-  const [versionNumber, setVersionNumber] = useState('');
 
   const templates = useQuery({
     queryKey: queryKeys.templates.list(),
@@ -48,23 +46,53 @@ export function TemplatesPage(): JSX.Element {
   });
 
   const items = templates.data?.items ?? [];
+  const templateIds = items.map((template) => template.id);
 
-  // ⚠ Версії читаються ПО ШАБЛОНУ: маршрут контракту —
-  // `GET /api/v1/templates/{id}/versions`. До аудиту сторінка била в
-  // `/api/v1/template-versions`, якого не існує, і перелік версій був
-  // порожній завжди (`A7-03`).
-  // ⛔ Q-225: ендпоінт курсорний (той самий патерн, що й `/api/v1/templates`
-  // поруч) — відповідь тепер `{items, nextCursor, totalCount}`, а не голий
-  // масив. `?limit=100` — той самий одноразовий ліміт сторінки, що й вище.
-  const versionQueries = useQueries({
-    queries: items.map((template) => ({
-      queryKey: queryKeys.templates.versionsOf(template.id),
-      queryFn: () =>
-        apiFetch<TemplateVersionPage>(`/api/v1/templates/${template.id}/versions?limit=100`),
-    })),
+  /**
+   * Відповідь `GET /api/v1/templates/versions` — версії, ЗГРУПОВАНІ по
+   * шаблону (`TemplateQueryHandlers.TemplateVersionsForTemplate`).
+   *
+   * ⚠ Тип береться напряму зі згенерованої схеми (`components['schemas']`),
+   * а не через псевдонім у `@/api/types` (як заведено для решти DTO цього
+   * файлу, `D-137`): межа дозволених файлів цієї задачі не охоплювала
+   * `@/api/types` (лише сама сторінка, тести й перелічені файли бекенда).
+   * Перенесення в спільний файл типів лишається боргом (Next steps).
+   */
+  type TemplateVersionsForTemplate = components['schemas']['TemplateVersionsForTemplate'];
+
+  /*
+   * ⛔ BR-07: до цього тут стояв `useQueries` — ОКРЕМИЙ HTTP-запит версій на
+   * КОЖЕН шаблон переліку (N шаблонів → N запитів; підтверджений 2026-09-25
+   * пробіл продуктивності). Версії читалися ПО ШАБЛОНУ:
+   * `GET /api/v1/templates/{id}/versions` (до аудиту сторінка била в
+   * `/api/v1/template-versions`, якого не існує, — `A7-03`).
+   *
+   * Тепер — ОДИН запит на весь видимий перелік:
+   * `GET /api/v1/templates/versions?ids=...` (`TemplatesController.
+   * ListVersionsForTemplates` → `ListTemplateVersionsHandler.HandleBatchAsync`).
+   *
+   * ⚠ Ключ кешу — літерал, а не через `queryKeys.templates.*`: він
+   * навмисно НЕ префікс і не суфікс `versionsOf(id)`/`allVersionsOf()` —
+   * ті лишаються ОКРЕМИМ записом, бо на них і далі спираються ІНШІ екрани
+   * (`TemplateVersionsSection`, `ExpressionsPage`, `TemplateVersionPage`,
+   * `CreateProjectModal`, `breadcrumbResolvers`), яких ця задача не чіпає.
+   * Додати сюди новий запис фабрики (`api/queryKeys.ts`) не можна було в
+   * межах дозволених файлів — перенесення туди лишається боргом.
+   */
+  const versionsBatchKey = ['templates', 'versionsBatch', ...templateIds] as const;
+
+  const versionsBatch = useQuery({
+    queryKey: versionsBatchKey,
+    queryFn: () => {
+      const idsQuery = templateIds.map((id) => `ids=${id}`).join('&');
+      return apiFetch<readonly TemplateVersionsForTemplate[]>(
+        `/api/v1/templates/versions?${idsQuery}`,
+      );
+    },
+    enabled: templateIds.length > 0,
   });
 
-  const versionsError = versionQueries.find((query) => query.error)?.error ?? null;
+  const versionsError = versionsBatch.error;
 
   /*
    * Версії РЯДКА — за ідентифікатором шаблону, а не за позицією рядка.
@@ -75,12 +103,11 @@ export function TemplatesPage(): JSX.Element {
    * сама формула віддала б рядку ЧУЖИЙ перелік версій — посилання вело б на
    * версію іншого шаблону, лишаючись при цьому цілком правдоподібним на вигляд.
    *
-   * ⚠ Сам масив `versionQueries` і далі індексується `items`: `useQueries`
-   * повертає результати в порядку переданих запитів, і саме тут цей порядок
-   * востаннє має значення.
+   * ⚠ Тепер джерело — Map за `templateId` із ОДНІЄЇ пакетної відповіді, а не
+   * позиція в масиві паралельних запитів: те саме правило, новий носій.
    */
   const versionsOf = new Map<number, readonly TemplateVersionSummary[]>(
-    items.map((template, index) => [template.id, versionQueries[index]?.data?.items ?? []]),
+    (versionsBatch.data ?? []).map((entry) => [entry.templateId, entry.versions]),
   );
 
   /**
@@ -108,35 +135,14 @@ export function TemplatesPage(): JSX.Element {
   });
 
   /**
-   * Створення версії шаблону.
+   * Остання версія шаблону — від неї клонується наступна.
    *
    * ⚠ Клон робиться з ОСТАННЬОЇ версії, якщо вона є: порожня версія поруч із
    * наявною структурою — майже завжди помилка, а не намір. Номер задає
    * людина: `Major.Minor.Patch.Build` несе сенс (`ФВ-2.8`), і вигадувати його
-   * за користувача означало б вигадувати клас зміни.
+   * за користувача означало б вигадувати клас зміни. Сам діалог —
+   * `NewTemplateVersionModal` (спільний із карткою шаблону, `U-19`).
    */
-  const createVersion = useMutation({
-    mutationFn: (target: { templateId: number; cloneFrom: number | null }) =>
-      apiFetch<VersionIdResponse>(`/api/v1/templates/${target.templateId}/versions`, {
-        method: 'POST',
-        body: JSON.stringify({
-          versionNumber: versionNumber.trim(),
-          cloneFromVersionId: target.cloneFrom,
-        } satisfies CreateTemplateVersionRequest),
-      }),
-    onSuccess: async (_result, target) => {
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.templates.versionsOf(target.templateId),
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.templates.list() });
-      setVersioning(null);
-      setVersionNumber('');
-      showDone(t('templates.versionCreated'));
-    },
-    onError: showApiError,
-  });
-
-  /** Остання версія шаблону — від неї клонується наступна. */
   const latestVersionOf = (templateId: number): number | null => {
     const versions = versionsOf.get(templateId) ?? [];
 
@@ -214,8 +220,15 @@ export function TemplatesPage(): JSX.Element {
                 size="sm"
                 to={`/admin/templates/${template.id}/versions/${version.id}`}
               >
-                {version.version} · r{version.presentationRevision}
+                {version.version}
               </Anchor>
+              {/* ⚠ Лічильник правок вигляду — лише коли він щось каже: «r0»
+                  без підпису читався як незрозумілий код (UX-прохід 2026-09-23). */}
+              {version.presentationRevision > 0 && (
+                <Text size="xs" c="dimmed">
+                  {t('version.presentationRevision', { revision: version.presentationRevision })}
+                </Text>
+              )}
               <StatusBadge kind="version" state={version.status} quiet />
             </Group>
           ))}
@@ -314,39 +327,24 @@ export function TemplatesPage(): JSX.Element {
         </Group>
       </Modal>
 
-      <Modal
-        opened={versioning !== null}
-        onClose={() => setVersioning(null)}
-        title={t('templates.newVersion')}
-      >
-        <TextInput
-          label={t('templates.versionNumber')}
-          description={t('templates.versionNumberHint')}
-          value={versionNumber}
-          onChange={(event) => setVersionNumber(event.currentTarget.value)}
-          data-autofocus
-        />
+      <NewTemplateVersionModal
+        templateId={versioning}
+        cloneFrom={versioning === null ? null : latestVersionOf(versioning)}
+        onClose={() => {
+          setVersioning(null);
 
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setVersioning(null)}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            disabled={versionNumber.trim().length === 0}
-            loading={createVersion.isPending}
-            onClick={() => {
-              if (versioning !== null) {
-                createVersion.mutate({
-                  templateId: versioning,
-                  cloneFrom: latestVersionOf(versioning),
-                });
-              }
-            }}
-          >
-            {t('common.save')}
-          </Button>
-        </Group>
-      </Modal>
+          /*
+           * ⚠ `NewTemplateVersionModal.onSuccess` інвалідовує
+           * `queryKeys.templates.versionsOf(templateId)` — запис кешу ІНШИХ
+           * екранів (див. коментар над `versionsBatchKey` вище). Пакетний
+           * запит цієї сторінки має ВЛАСНИЙ ключ і під ту інвалідацію не
+           * потрапляє, тож оновлюємо його тут явно — і на «Скасувати» теж
+           * (зайвий повторний запит дешевший за застарілий перелік версій
+           * після успішного створення).
+           */
+          void queryClient.invalidateQueries({ queryKey: ['templates', 'versionsBatch'] });
+        }}
+      />
     </>
   );
 }

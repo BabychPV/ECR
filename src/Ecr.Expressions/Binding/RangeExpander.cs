@@ -51,8 +51,9 @@ public sealed class RangeExpander
             var missing = from < 0 ? fromRowKey : toRowKey;
             diagnostics?.Add(new ExpressionDiagnostic(
                 ExpressionErrors.Unresolved,
-                $"Рядка '{missing}' немає в таблиці '{table.Code}' — межа діапазону не резолвиться.",
-                position, 1));
+                $"Row \"{missing}\" does not exist in table \"{table.Code}\": the range boundary cannot be resolved.",
+                position, 1,
+                "expr.ref.unknownRangeBound", DiagnosticParams.Of(("row", missing), ("table", table.Code))));
             return [];
         }
 
@@ -63,8 +64,9 @@ public sealed class RangeExpander
             // написано, і сховати друкарську помилку.
             diagnostics?.Add(new ExpressionDiagnostic(
                 ExpressionErrors.Unresolved,
-                $"Діапазон '{fromRowKey}:{toRowKey}' записаний у зворотному порядку.",
-                position, 1));
+                $"The range \"{fromRowKey}:{toRowKey}\" is written in reverse order.",
+                position, 1,
+                "expr.ref.reversedRange", DiagnosticParams.Of(("from", fromRowKey), ("to", toRowKey))));
             return [];
         }
 

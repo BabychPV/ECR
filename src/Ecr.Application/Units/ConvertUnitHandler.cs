@@ -89,7 +89,17 @@ public sealed class ConvertUnitHandler(IUnitCatalog catalog)
     private static UnitRef Resolve(UnitCatalogSnapshot catalogue, string code)
         => catalogue.Units.TryGetValue(code, out var unit)
             ? unit
-            : throw new NotFoundException("ECR-UOM-0404", $"Одиниці «{code}» немає в довіднику.");
+            // ⚠ Новий ключ, не `.unitId` (`Repository`/`Unit` заміри): той
+            // шукає за числовим Id, цей — за КОДОМ одиниці з тіла запиту
+            // конверсії; різний адресат помилки за різним ключем, той самий
+            // прийом, що `.column`/`.columnCode` у шаблонах (2026-09-23).
+            : throw new NotFoundException(
+                "ECR-UOM-0404", $"Одиниці «{code}» немає в довіднику.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-UOM-0404.code",
+                    ["code"] = code,
+                });
 }
 
 /// <summary>Перелік одиниць із розмірностями (ФВ-16.2).</summary>

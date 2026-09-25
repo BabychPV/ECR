@@ -1,4 +1,14 @@
 import type { TemplateStructureDto } from '@/api/types';
+
+/**
+ * Рівно те, що читає перевірка: аркуш — ідентифікатор і група. ⚠ Не вся
+ * структура: діалог створення документа бере аркуші з
+ * `GET /projects/{id}/document-template` (V-12), де таблиць немає.
+ */
+type Composition = {
+  sheets: readonly Pick<TemplateStructureDto['sheets'][number], 'id' | 'sheetGroup'>[];
+  groupRules: TemplateStructureDto['groupRules'];
+};
 import { t } from '@/shared/i18n';
 
 /** Правило «усі аркуші групи обов'язкові» — той самий код, що на сервері. */
@@ -27,7 +37,7 @@ const RequiresOne = 1;
  * оригіналом.
  */
 export function groupRuleViolations(
-  structure: Pick<TemplateStructureDto, 'sheets' | 'groupRules'> | undefined,
+  structure: Composition | undefined,
   selectedSheetIds: readonly number[],
 ): string[] {
   if (structure === undefined) {

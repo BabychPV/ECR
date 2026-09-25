@@ -252,7 +252,22 @@ public enum EditDenyReason : byte
     /// — це той самий дефект, що весь <c>A7</c>. Тепер механізм є
     /// (<c>PeriodAccessRuleKind.SourceWindow</c>).
     /// </remarks>
-    OutsidePermitWindow = 14
+    OutsidePermitWindow = 14,
+
+    /// <summary>
+    /// Грант на ресурс Є, але його рівень нижчий за потрібний дії
+    /// (<c>EditRules.CanSubmit</c>/<c>CanApprove</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Раніше обидва випадки — «гранта немає взагалі» і «грант є, але
+    /// закороткий» — поверталися як <see cref="NoGrant"/>, і користувач не
+    /// міг відрізнити «зверніться по грант» від «зверніться по підвищення
+    /// рівня гранта». <see cref="NoGrant"/> лишається для СПРАВЖНЬОЇ
+    /// відсутності гранта (<c>Effective == GrantLevel.None</c>) — саме тому
+    /// <c>Effective</c> перевіряється на <c>None</c> окремо від порівняння з
+    /// потрібним рівнем.
+    /// </remarks>
+    InsufficientGrantLevel = 15
 }
 
 /// <summary>

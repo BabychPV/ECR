@@ -303,7 +303,7 @@ export function useCellPatch(documentId: number): {
  * чужий формат), — це `0`, тобто «про решту нічого не відомо». Показати `NaN`
  * у реченні «і ще N комірок» було б гірше за мовчання.
  */
-function moreConflictsOf(error: EcrApiError): number {
+export function moreConflictsOf(error: EcrApiError): number {
   const raw = error.problem.extensions2?.[MoreConflictsExtension];
   const parsed = Number(raw);
 

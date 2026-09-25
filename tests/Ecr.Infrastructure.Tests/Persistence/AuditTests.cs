@@ -144,6 +144,51 @@ public sealed class AuditTests(SqlServerFixture sql)
         Assert.Contains($"{marchPartition}|202601", rows);
     }
 
+    /// <summary>
+    /// Пакетний запис подій безпеки (<see cref="AuditWriter.WriteSecurityEventsAsync"/>)
+    /// — той самий доказ раундтрипами, що <see cref="Аудит_ста_комірок_пишеться_одним_запитом_а_не_ста"/>,
+    /// але для імпорту CSV довідника: N змінених записів раніше давали N
+    /// окремих <c>INSERT</c> до <c>aud.SecurityEvent</c>.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Пакет_подій_безпеки_пишеться_одним_запитом_а_не_N()
+    {
+        const string correlationId = "audit-batch-security-events";
+        var events = SecurityEvents(count: 50, correlationId);
+
+        await using var db = CreateContext([]);
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        await connection.OpenAsync();
+        connection.StatisticsEnabled = true;
+        connection.ResetStatistics();
+
+        await new AuditWriter(db).WriteSecurityEventsAsync(events, CancellationToken.None);
+
+        var roundtrips = (long)connection.RetrieveStatistics()["ServerRoundtrips"]!;
+        Assert.Equal(1, roundtrips);
+
+        var count = await ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM aud.SecurityEvent WHERE CorrelationId = '{correlationId}'");
+        Assert.Equal(50, count);
+
+        // ⛔ Не просто «50 рядків»: кожен мусить нести СВІЙ DetailsJson, а не
+        // той самий запис, повторений 50 разів (мутація, яку рахунок рядків
+        // сам по собі не ловить).
+        var distinctDetails = await ScalarAsync<int>(
+            $"SELECT COUNT(DISTINCT DetailsJson) FROM aud.SecurityEvent WHERE CorrelationId = '{correlationId}'");
+        Assert.Equal(50, distinctDetails);
+    }
+
+    private static List<SecurityEventRecord> SecurityEvents(int count, string correlationId)
+    {
+        var at = new DateTime(2026, 9, 25, 12, 0, 0, DateTimeKind.Utc);
+        return [.. Enumerable.Range(0, count).Select(i => new SecurityEventRecord(
+            at, "TestBatchSecurityEvent", TargetUserId: null, TargetRoleId: null,
+            DetailsJson: $$"""{"i":{{i}}}""", ChangedByUserId: 42, CorrelationId: correlationId))];
+    }
+
     private async Task<TestDocument> BuildAsync(int periodKey = 202601)
         => await new TestDocumentBuilder(sql.ConnectionString)
             .BuildAsync(periodKey: periodKey, ct: CancellationToken.None);

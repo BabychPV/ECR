@@ -120,10 +120,33 @@ public sealed class TemplatesController(
     /// </remarks>
     [HttpGet("{id:int}/versions")]
     [ProducesResponseType<Ecr.Application.Common.PagedResult<Ecr.Application.Ports.TemplateVersionSummary>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ListVersions(
         int id, [FromQuery] int limit, [FromQuery] string? cursor, CancellationToken ct)
         => Ok(await listVersions.HandleAsync(id, new CursorRequest(limit == 0 ? 50 : limit, cursor), ct)
             .ConfigureAwait(false));
+
+    /// <summary>
+    /// Версії ДЕКІЛЬКОХ шаблонів ОДНИМ зверненням — не по одному на шаблон.
+    /// Право <c>Template.View</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ BR-07: перелік шаблонів (`/admin/templates`) читав версії ОКРЕМИМ
+    /// запитом на КОЖЕН рядок (N+1 на клієнті) — підтверджений 2026-09-25
+    /// пробіл продуктивності. Тут — один запит на весь видимий перелік.
+    ///
+    /// ⚠ Повторювані <c>ids=</c>, а не через кому — той самий патерн, що вже
+    /// в <c>GET /api/v1/methodologies?ids=</c> (`RD-06`, стандартний біндинг
+    /// ASP.NET для масиву в query-рядку). Маршрут — літерал <c>versions</c>,
+    /// а не <c>{id:int}</c>, тож неоднозначності з <see cref="ListVersions"/>
+    /// поруч немає.
+    /// </remarks>
+    /// <param name="ids">Шаблони, чиї версії цікавлять.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpGet("versions")]
+    [ProducesResponseType<IReadOnlyList<TemplateVersionsForTemplate>>(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListVersionsForTemplates([FromQuery] int[] ids, CancellationToken ct)
+        => Ok(await listVersions.HandleBatchAsync(ids ?? [], ct).ConfigureAwait(false));
 
     /// <summary>Створює версію шаблону. Право <c>Template.Edit</c>.</summary>
     /// <remarks><c>CloneFromVersionId</c> задає клонування замість порожньої версії.</remarks>

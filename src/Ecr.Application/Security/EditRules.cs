@@ -46,6 +46,12 @@ public readonly record struct CellAccessContext(
 /// функція дозволяє прогнати всі п'ятнадцять сценаріїв <c>02c §6</c> і
 /// <c>tz/07</c> §7.6 за мілісекунди й без бази. Служба лишає собі те, що вміє
 /// лише вона: дістати дані.
+///
+/// ⚠ Перевірка <c>ProjectStatus.Archived</c>/<c>IsArchiving</c> — спільна для
+/// ВСІХ чотирьох рішень (<see cref="CanEdit"/>, <see cref="CanSubmit"/>,
+/// <see cref="CanApprove"/>, <see cref="CanReopen"/>), одразу після
+/// симуляції: архівація — термінальний стан проєкту, і робочий процес має
+/// зупинятись так само, як і редагування (<c>tz/07</c> §7.4).
 /// </remarks>
 public static class EditRules
 {
@@ -148,6 +154,16 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
         }
 
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
+        }
+
         if (context.PeriodState == PeriodState.Closed)
         {
             return EditDecision.Deny(EditDenyReason.PeriodClosed);
@@ -163,9 +179,21 @@ public static class EditRules
 
         // ⚠ Подання потребує рівня Submit, а не Write: право заповнювати і
         // право відповідати за подане — різні повноваження (02c A11).
-        if (Effective(profile, context) < GrantLevel.Submit)
+        //
+        // ⛔ Грант ВІДСУТНІЙ (None) і грант Є, але закороткий, — дві різні
+        // причини відмовити, і до цього обидві поверталися як NoGrant.
+        // Користувачеві з рівнем View/Write це читалося як «у вас немає
+        // жодного доступу», хоча насправді доступ є — бракує саме рівня
+        // Submit, і дія користувача інша: просити підвищення гранта, а не
+        // грант із нуля.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Submit)
         {
-            return EditDecision.Deny(EditDenyReason.NoGrant);
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для подання потрібен {GrantLevel.Submit}.");
         }
 
         return hasBlockingErrors
@@ -188,6 +216,16 @@ public static class EditRules
         if (profile.IsSimulation)
         {
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
+        }
+
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
         }
 
         // Затверджувати можна лише подане: затвердження чернетки означало б,
@@ -213,9 +251,20 @@ public static class EditRules
                 $"Крок маршруту погодження вимагає ролі {roleId}; зараз черга не ваша.");
         }
 
-        return Effective(profile, context) >= GrantLevel.Approve
-            ? EditDecision.Allow()
-            : EditDecision.Deny(EditDenyReason.NoGrant);
+        // ⛔ Та сама різниця причин, що в CanSubmit вище: грант ВІДСУТНІЙ і
+        // грант Є, але нижчий за Approve, — не одне й те саме для
+        // користувача, який читає відмову.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Approve)
+        {
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для затвердження потрібен {GrantLevel.Approve}.");
+        }
+
+        return EditDecision.Allow();
     }
 
     /// <summary>Чи можна повернути поданий/затверджений аркуш у <c>Draft</c>.</summary>
@@ -234,6 +283,16 @@ public static class EditRules
         if (profile.IsSimulation)
         {
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
+        }
+
+        if (context.ProjectStatus == ProjectStatus.Archived)
+        {
+            return EditDecision.Deny(EditDenyReason.ProjectArchived);
+        }
+
+        if (context.IsArchiving)
+        {
+            return EditDecision.Deny(EditDenyReason.ArchivingInProgress);
         }
 
         if (context.SheetStatus is not (DocumentStatus.Submitted or DocumentStatus.Approved))

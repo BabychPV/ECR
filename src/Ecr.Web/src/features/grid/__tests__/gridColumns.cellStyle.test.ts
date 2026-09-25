@@ -84,7 +84,10 @@ describe('gridColumns — стиль колонки в живій сітці (д
     // ⚠ Клас БАЗОВИЙ (`ecr-cell`), не порожній рядок: стиль сам по собі не
     // рахується "станом" (`cellStateOf` тут повернув би `null` — жодна
     // комірка не dirty/readOnly/calculated/orphaned/rounded).
-    expect(props.class).toBe('ecr-cell');
+    //
+    // ✒ `U-05`: поруч стоїть `ecr-cell-numeric` — колонка `Decimal`
+    // вирівнюється праворуч. Фону він не задає й зі станами не змагається.
+    expect(props.class).toBe('ecr-cell ecr-cell-numeric');
   });
 
   it('той самий стиль І dirty-стан — ОБИДВА видимі одночасно (клас dirty + font-weight bold)', () => {
@@ -101,5 +104,27 @@ describe('gridColumns — стиль колонки в живій сітці (д
     expect(props.style).toEqual({ fontWeight: 'bold' });
     expect(props.class).toContain('dirty');
     expect(props['data-cell-state']).toBe('dirty');
+  });
+
+  /**
+   * ⛔ `X-10`: колір і заливка автора — класами й змінними, які читає
+   * `cellEditors.css`; заливку CSS кладе лише на комірку БЕЗ `data-cell-state`.
+   * Тут доводиться, що комірка несе і клас, і змінні — і що стан їх не знімає
+   * (його пріоритет тримає CSS, а не зникнення класу).
+   */
+  it('X-10: колір і заливка — класи ecr-cell-styled/ecr-cell-filled і змінні, поряд зі станом', () => {
+    const coloured = { ...boldStyle(), foregroundArgb: (0xff1a1a1a | 0) as number, backgroundArgb: (0xffffff00 | 0) as number };
+    const withStyle = slice({ columns: [column({ style: coloured })] });
+
+    const plain = cellPropsOf(gridColumns(withStyle, false, NoLocalFlags, {}, noRequiredInput), 'R1');
+    expect(plain.class).toContain('ecr-cell-styled');
+    expect(plain.class).toContain('ecr-cell-filled');
+    expect(plain.style).toMatchObject({ '--ecr-cell-fill': '#ffff00', '--ecr-cell-fg-light': '#1a1a1a' });
+    expect(plain).not.toHaveProperty('data-cell-state');
+
+    const dirtyFlags: LocalCellFlags = { dirty: new Set([cellKey('R1', 'C1')]), rounded: new Set() };
+    const dirty = cellPropsOf(gridColumns(withStyle, false, dirtyFlags, {}, noRequiredInput), 'R1');
+    expect(dirty.class).toContain('ecr-cell-filled');
+    expect(dirty['data-cell-state']).toBe('dirty');
   });
 });

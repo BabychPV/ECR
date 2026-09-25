@@ -25,7 +25,12 @@ public readonly partial record struct RowKey
             ? key
             : throw new Abstractions.DomainException(
                 "ECR-CFG-0422",
-                $"Ключ рядка «{value}» недопустимий: він потрапляє у формули без екранування, тому дозволені лише літери, цифри й підкреслення.");
+                $"Ключ рядка «{value}» недопустимий: він потрапляє у формули без екранування, тому дозволені лише літери, цифри й підкреслення.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CFG-0422.rowKeyInvalid",
+                    ["value"] = value,
+                });
 
     public static bool TryCreate(string? value, out RowKey key)
     {

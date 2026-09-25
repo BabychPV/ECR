@@ -1,8 +1,8 @@
-﻿import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { Button, Group, NumberInput, Select, Switch, Table, Text } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EcrApiError, apiFetch } from '@/api/client';
+import { apiFetch } from '@/api/client';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import type { ReplaceGrantsRequest, ResourceGrantDto, RoleView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { t } from '@/shared/i18n';
@@ -47,14 +47,11 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['grants', roleId] });
-      notifications.show({ color: 'green', message: t('grants.saved') });
+      showDone(t('grants.saved'));
     },
-    onError: (error) => {
-      notifications.show({
-        color: 'statusError',
-        message: error instanceof EcrApiError ? error.message : String(error),
-      });
-    },
+    // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
+    // (українською без `messageKey`). Той самий розбір, що й скрізь.
+    onError: showApiError,
   });
 
   return (

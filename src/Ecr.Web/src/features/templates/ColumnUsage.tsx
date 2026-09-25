@@ -1,7 +1,8 @@
 import type { JSX } from 'react';
-import { Skeleton } from '@mantine/core';
+import { Skeleton, Stack, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { RegistryUsageList } from '@/features/registries/RegistryUsage';
+import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { columnUsage } from './columnApi';
 
@@ -24,7 +25,20 @@ export function columnUsageKey(columnDefId: number): readonly ['templates', 'col
  * самий фолбек «не використовується ніде» при `total: 0`. Новий компонент
  * списку тут не пишеться навмисно.
  */
-export function TemplateColumnUsage({ columnDefId }: { readonly columnDefId: number }): JSX.Element {
+export function TemplateColumnUsage({
+  columnDefId,
+  isDraft = false,
+}: {
+  readonly columnDefId: number;
+
+  /**
+   * ⛔ R-12: версія — чернетка. Залежності формул (`cfg.FormulaDependency`)
+   * записує лише ПУБЛІКАЦІЯ, тож у чернетці формули шаблону, що читають
+   * колонку, тут не з'являються ніколи — і «Not used anywhere» читалося як
+   * «можна видаляти». Чесне пояснення замість мовчазного нуля.
+   */
+  readonly isDraft?: boolean;
+}): JSX.Element {
   const usage = useQuery({
     queryKey: columnUsageKey(columnDefId),
     queryFn: () => columnUsage(columnDefId),
@@ -38,5 +52,16 @@ export function TemplateColumnUsage({ columnDefId }: { readonly columnDefId: num
     return <Skeleton height={120} radius="sm" data-column-usage="pending" />;
   }
 
-  return <RegistryUsageList usage={usage.data} />;
+  if (!isDraft) {
+    return <RegistryUsageList usage={usage.data} />;
+  }
+
+  return (
+    <Stack gap="xs">
+      <Text size="sm" c="dimmed" data-column-usage="draft-note">
+        {t('columns.usageDraftNote')}
+      </Text>
+      <RegistryUsageList usage={usage.data} />
+    </Stack>
+  );
 }

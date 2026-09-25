@@ -123,7 +123,14 @@ public sealed class MethodologyVersionConfiguration : IEntityTypeConfiguration<M
         builder.Property(x => x.Level).HasColumnName("Level");
         builder.Property(x => x.NumericMode).HasDefaultValue(Domain.Enums.NumericMode.Legacy);
         builder.Property(x => x.CalendarMode).HasDefaultValue(Domain.Enums.CalendarMode.Actual);
-        builder.Property(x => x.TraceLevel).HasDefaultValue(Domain.Enums.TraceLevel.ErrorsOnly);
+        // ⛔ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601)
+        // вважав `Off` (= 0, CLR-замовчування) «незаданим» і на INSERT
+        // мовчки підставляв DEFAULT схеми (`ErrorsOnly`): версія з `Off`,
+        // зокрема клон (`CloneAsDraft`), у базі ставала `ErrorsOnly`.
+        // Конструктор сутності задає значення явно, тож на DEFAULT схеми код
+        // не покладається.
+        builder.Property(x => x.TraceLevel).HasDefaultValue(Domain.Enums.TraceLevel.ErrorsOnly).ValueGeneratedNever();
         builder.Property(x => x.EffectiveFrom).HasColumnType("date");
         builder.Property(x => x.ChangeReason).HasMaxLength(1000);
         builder.Property(x => x.ContentHash).HasColumnType("varbinary(32)");
@@ -453,15 +460,18 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         // двічі, за двома різними версіями методології. Звіт при цьому
         // будується й не кидає нічого.
         //
-        // ⚠ Область — ПАРА «проєкт × період», а не сам проєкт: перерахунки
-        // різних періодів ідуть паралельно, і кожен має власний актуальний
-        // прогін. `PeriodKey IS NULL` (річний прогін) — теж окрема область, і
-        // SQL Server дає це задарма: в унікальному індексі NULL рівний NULL.
+        // ⚠ Область — ТРІЙКА «проєкт × період × документ», а не пара «проєкт
+        // × період»: перерахунки різних періодів ідуть паралельно, і кожен
+        // має власний актуальний прогін. `PeriodKey IS NULL` (річний прогін) і
+        // `DocumentId IS NULL` (прогін усього проєкту, третя хвиля UX-PASS R4,
+        // «CalculationRun ховає результати сусідніх документів») — теж окремі
+        // області, і SQL Server дає це задарма: в унікальному індексі NULL
+        // рівний NULL.
         //
         // ⚠ Фільтр по `Status`, а не індекс по всій таблиці: знятих з
         // актуальності прогонів накопичуються мільйони, і вони мусять
         // співіснувати з чинним (ЗБР-1, «нічого не затирається»).
-        builder.HasIndex(x => new { x.ProjectId, x.PeriodKey })
+        builder.HasIndex(x => new { x.ProjectId, x.PeriodKey, x.DocumentId })
                .IsUnique()
                .HasFilter("[Status] = 'Current'")
                .HasDatabaseName("UX_CalculationRun_Current");

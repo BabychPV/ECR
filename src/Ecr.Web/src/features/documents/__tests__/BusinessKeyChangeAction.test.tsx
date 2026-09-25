@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MantineProvider } from '@mantine/core';
+import { MantineProvider, Menu } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { DocumentSummary } from '@/api/types';
 import {
@@ -134,7 +134,15 @@ function Harness({ document }: { document: DocumentSummary }): JSX.Element {
   return (
     <div>
       <h1>{document.businessKey}</h1>
-      {action.trigger}
+      {/* ⚠ Пункт живе в меню «More» сторінки (`DocumentToolbar`); тут меню
+          відкрите завжди, щоб перевіряти сам пункт, а не механіку меню. */}
+      <Menu opened withinPortal={false}>
+        <Menu.Target>
+          <span>menu</span>
+        </Menu.Target>
+        <Menu.Dropdown>{action.menuItem}</Menu.Dropdown>
+      </Menu>
+      {action.dialog}
       {action.refusal}
     </div>
   );
@@ -229,7 +237,7 @@ describe('useBusinessKeyChangeAction: показ кнопки', () => {
     show({});
     await settle();
 
-    const button = await screen.findByRole('button', ChangeKeyButton);
+    const button = await screen.findByRole('menuitem', ChangeKeyButton);
     expect(button).toBeDefined();
     expect(button.hasAttribute('disabled')).toBe(false);
   });
@@ -239,14 +247,14 @@ describe('useBusinessKeyChangeAction: показ кнопки', () => {
     await settle();
 
     expect(screen.getByRole('heading', { name: 'DOC-0042' })).toBeDefined();
-    expect(screen.queryByRole('button', ChangeKeyButton)).toBeNull();
+    expect(screen.queryByRole('menuitem', ChangeKeyButton)).toBeNull();
   });
 
   it('право є, але без гранта Write на проєкт — кнопки НЕМАЄ', async () => {
     show({ me: currentUser({ permissions: ['Document.ChangeKey'], grants: {} }) });
     await settle();
 
-    expect(screen.queryByRole('button', ChangeKeyButton)).toBeNull();
+    expect(screen.queryByRole('menuitem', ChangeKeyButton)).toBeNull();
   });
 
   it('право є, грант лише Read — кнопки НЕМАЄ (поріг саме Write)', async () => {
@@ -255,14 +263,14 @@ describe('useBusinessKeyChangeAction: показ кнопки', () => {
     });
     await settle();
 
-    expect(screen.queryByRole('button', ChangeKeyButton)).toBeNull();
+    expect(screen.queryByRole('menuitem', ChangeKeyButton)).toBeNull();
   });
 
   it('аркуш поданий — кнопка є, але ВИМКНЕНА, з видимою причиною', async () => {
     show({ document: { ...DraftDocument, sheetStates: { GEN: 'Draft', AIR: 'Submitted' } } });
     await settle();
 
-    const button = await screen.findByRole('button', ChangeKeyButton);
+    const button = await screen.findByRole('menuitem', ChangeKeyButton);
     expect(button.hasAttribute('disabled')).toBe(true);
 
     // ⛔ Мутаційний доказ: прибери текст `data-change-key-blocked-reason` — і
@@ -276,7 +284,7 @@ describe('useBusinessKeyChangeAction: показ кнопки', () => {
     show({ document: { ...DraftDocument, sheetStates: { GEN: 'Approved' } } });
     await settle();
 
-    const button = await screen.findByRole('button', ChangeKeyButton);
+    const button = await screen.findByRole('menuitem', ChangeKeyButton);
     expect(button.hasAttribute('disabled')).toBe(true);
   });
 });
@@ -286,7 +294,7 @@ describe('useBusinessKeyChangeAction: діалог і валідність фо�
     show({});
     await settle();
 
-    fireEvent.click(await screen.findByRole('button', ChangeKeyButton));
+    fireEvent.click(await screen.findByRole('menuitem', ChangeKeyButton));
 
     const confirm = await screen.findByTestId('business-key-confirm');
     expect(confirm.hasAttribute('disabled')).toBe(true);
@@ -299,7 +307,7 @@ describe('useBusinessKeyChangeAction: діалог і валідність фо�
     show({});
     await settle();
 
-    fireEvent.click(await screen.findByRole('button', ChangeKeyButton));
+    fireEvent.click(await screen.findByRole('menuitem', ChangeKeyButton));
     fireEvent.change(await screen.findByLabelText(/newBusinessKey/), {
       target: { value: 'DOC-9999' },
     });
@@ -313,7 +321,7 @@ describe('useBusinessKeyChangeAction: діалог і валідність фо�
     show({});
     await settle();
 
-    fireEvent.click(await screen.findByRole('button', ChangeKeyButton));
+    fireEvent.click(await screen.findByRole('menuitem', ChangeKeyButton));
     fireEvent.change(await screen.findByLabelText(/newBusinessKey/), {
       target: { value: DraftDocument.businessKey },
     });
@@ -326,7 +334,7 @@ describe('useBusinessKeyChangeAction: діалог і валідність фо�
     show({});
     await settle();
 
-    fireEvent.click(await screen.findByRole('button', ChangeKeyButton));
+    fireEvent.click(await screen.findByRole('menuitem', ChangeKeyButton));
     fireEvent.change(await screen.findByLabelText(/newBusinessKey/), {
       target: { value: 'DOC-9999' },
     });
@@ -337,7 +345,7 @@ describe('useBusinessKeyChangeAction: діалог і валідність фо�
 });
 
 async function submitChange(newKey: string, reason: string): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', ChangeKeyButton));
+  fireEvent.click(await screen.findByRole('menuitem', ChangeKeyButton));
   fireEvent.change(await screen.findByLabelText(/newBusinessKey/), { target: { value: newKey } });
   fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: reason } });
   fireEvent.click(screen.getByTestId('business-key-confirm'));

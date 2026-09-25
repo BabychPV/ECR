@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Expressions;
 using Ecr.Expressions.Ast;
 using Ecr.Expressions.Binding;
@@ -120,10 +121,7 @@ public static class PublishChecks
         var ordering = formulaEngine.BuildEvaluationOrder(nodes);
         if (!ordering.IsSuccess)
         {
-            diagnostics.Add(new ExpressionDiagnostic(
-                ExpressionErrors.Cycle,
-                Ecr.Expressions.Graph.CycleDescription.Describe(ordering.CyclePath),
-                0, 1));
+            diagnostics.Add(Ecr.Expressions.Graph.CycleDescription.Diagnostic(ordering.CyclePath));
         }
         else
         {
@@ -502,6 +500,7 @@ public static class PublishChecks
         foreach (var table in LiveTables(version.Sheets))
         {
             CheckComputedColumns(table, boundColumnIds, diagnostics);
+            CheckFixedTableRows(table, diagnostics);
         }
 
         return diagnostics;
@@ -596,6 +595,50 @@ public static class PublishChecks
                 0,
                 1));
         }
+    }
+
+    /// <summary>
+    /// Фіксована таблиця без жодного живого <c>RowDef</c> (<c>ECR-TMPL-4228</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Знайдено живим переглядом стенду: шаблон версії 1, 92 таблиці, 0
+    /// <c>RowDef</c> — нові документи з такого шаблону створювалися без
+    /// жодного рядка у фіксованих таблицях: порожні, непридатні для введення
+    /// даних, і користувач не розуміє чому. Публікація такого не бачила
+    /// взагалі — `Run` дивиться лише на формули, а формул тут і не було, бо
+    /// формулі в такій таблиці нема на який рядок писатися.
+    ///
+    /// ⚠ Лише <c>RowMode.Fixed</c>. <c>Mixed</c> навмисно НЕ звужує список:
+    /// там рядки може додати користувач (<c>TableDef.AllowsDynamicRows</c>),
+    /// тож нуль рядків на момент публікації — законний стартовий стан, а не
+    /// дефект. Звузити перевірку до самого лише <c>Fixed</c> — свідоме
+    /// рішення, а не недогляд: тільки <c>Fixed</c> обіцяє «рядки визначені в
+    /// шаблоні» й не має ІНШОГО шляху їх отримати — після публікації рядок
+    /// зафіксованій таблиці вже нізвідки взяти.
+    ///
+    /// ⚠ <c>!IsDeleted</c>, а не просто «Rows.Count == 0»: таблиця, у якої всі
+    /// рядки м'яко видалені, для оператора виглядає так само порожньою, як і
+    /// таблиця, де рядків не заводили ніколи.
+    /// </remarks>
+    private static void CheckFixedTableRows(TableDef table, List<ExpressionDiagnostic> diagnostics)
+    {
+        if (table.RowMode != TableRowMode.Fixed)
+        {
+            return;
+        }
+
+        if (table.Rows.Any(r => !r.IsDeleted))
+        {
+            return;
+        }
+
+        diagnostics.Add(new ExpressionDiagnostic(
+            ErrorCodes.FixedTableWithoutRows,
+            $"Таблиця {table.Code} фіксована (рядки визначені в шаблоні), але жодного рядка в "
+            + "ній немає. В опублікованій формі це порожня таблиця, у яку оператор не зможе "
+            + "ввести жодного значення.",
+            0,
+            1));
     }
 
     /// <summary>

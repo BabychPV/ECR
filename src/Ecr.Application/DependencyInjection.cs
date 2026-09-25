@@ -74,6 +74,7 @@ public static class DependencyInjection
         // Третій і четвертий зрізи — колонка й рядок таблиці (ФВ-2.1..ФВ-2.5,
         // W5.2), за зразком аркуша й таблиці вище.
         services.AddScoped<SaveColumnDefHandler>();
+        services.AddScoped<GetColumnDefHandler>();
         services.AddScoped<DeleteColumnDefHandler>();
         services.AddScoped<SaveRowDefHandler>();
         services.AddScoped<DeleteRowDefHandler>();
@@ -101,6 +102,7 @@ public static class DependencyInjection
         // PeriodAccessRuleHandlers.cs).
         services.AddScoped<SaveValidationRuleHandler>();
         services.AddScoped<DeleteValidationRuleHandler>();
+        services.AddScoped<ListValidationRulesHandler>();
         services.AddScoped<CreatePeriodAccessRuleHandler>();
         services.AddScoped<SavePeriodAccessRuleHandler>();
         services.AddScoped<DeletePeriodAccessRuleHandler>();
@@ -124,6 +126,7 @@ public static class DependencyInjection
 
         // Документи і комірки (модуль 1.8)
         services.AddScoped<CreateDocumentHandler>();
+        services.AddScoped<GetDocumentTemplateHandler>();
         services.AddScoped<ListDocumentsHandler>();
         services.AddScoped<GetDocumentListSummaryHandler>();
         services.AddScoped<GetDocumentHandler>();
@@ -133,6 +136,11 @@ public static class DependencyInjection
         // Вирази, валідація і перерахунок (модулі 2.6–2.8)
         services.AddScoped<Validation.ValidationEngine>();
         services.AddScoped<Recalculation.RecalculationService>();
+
+        // ⚠ Той самий екземпляр у межах скоупу: подання мусить рахувати ТИМ
+        // САМИМ `EcrDbContext`, у транзакції якого воно тримає блокування.
+        services.AddScoped<Recalculation.ISubmitRecalculation>(
+            sp => sp.GetRequiredService<Recalculation.RecalculationService>());
         services.AddScoped<ValidateDocumentHandler>();
         services.AddScoped<GetValidationResultHandler>();
         services.AddScoped<Templates.PublishTemplateVersionHandler>();
@@ -207,6 +215,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.CreateRegistryHandler>();
         services.AddScoped<Registries.GetRegistryEntriesHandler>();
         services.AddScoped<Registries.UpsertRegistryEntryHandler>();
+        services.AddScoped<Registries.GetRegistryEntryHandler>();
         services.AddScoped<Registries.SetEntryValidityHandler>();
         services.AddScoped<Registries.SwitchRegistrySourceHandler>();
         services.AddScoped<Registries.DeleteRegistryEntryHandler>();
@@ -242,10 +251,14 @@ public static class DependencyInjection
         services.AddScoped<Calculations.PublishMethodologyHandler>();
         services.AddScoped<Calculations.SimulateMethodologyHandler>();
         services.AddScoped<Calculations.ListMethodologyVersionsHandler>();
+        services.AddScoped<Calculations.ListMethodologyPublicationsHandler>();
         services.AddScoped<Calculations.CreateMethodologyVersionHandler>();
         services.AddScoped<Calculations.ListMethodologyFormulasHandler>();
         services.AddScoped<Calculations.SaveMethodologyFormulaHandler>();
         services.AddScoped<Calculations.DeleteMethodologyFormulaHandler>();
+
+        // B-07: версія з маршруту мусить належати методології з маршруту.
+        services.AddScoped<Calculations.MethodologyVersionScope>();
 
         // Авторство методології з нуля (директива №09, `W6`): сама методологія,
         // константи, правила відбору, виходи, золотий набір, режими і прив'язка

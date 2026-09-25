@@ -15,6 +15,8 @@ namespace Ecr.Application.Security;
 /// Сеанс симуляції «очима користувача» (ФВ-6.16a).
 /// </param>
 /// <param name="SimulatedForUserId">Кого симулюють; <c>null</c> — не симуляція.</param>
+/// <param name="SimulatedForUserName">Ім'я того, кого симулюють (V-06): банер «Viewing as …» з номером не читається.</param>
+/// <param name="SimulationSessionId">Сеанс симуляції цього входу; <c>null</c> — не симуляція.</param>
 public sealed record CurrentUserView(
     int UserId,
     string? UserName,
@@ -23,7 +25,9 @@ public sealed record CurrentUserView(
     IReadOnlyDictionary<string, string> Grants,
     IReadOnlyList<string> Denies,
     bool IsSimulation,
-    int? SimulatedForUserId);
+    int? SimulatedForUserId,
+    string? SimulatedForUserName = null,
+    long? SimulationSessionId = null);
 
 /// <summary>
 /// Компактна проєкція профілю доступу для клієнта.
@@ -32,7 +36,12 @@ public sealed record CurrentUserView(
 /// Клієнт має знати права **наперед**, щоб не показувати кнопки, які все одно
 /// дадуть 403. Це не заміна перевіркам на сервері: UI ховає, сервер забороняє.
 /// </remarks>
-public sealed class GetCurrentUserHandler(IAccessDecisionService access, ICurrentUser currentUser)
+/// <remarks>
+/// ⚠ <paramref name="users"/> — лише для імені суб'єкта симуляції; сеанс
+/// рідкісний, тож і звернення до бази за іменем буває лише під ним.
+/// </remarks>
+public sealed class GetCurrentUserHandler(
+    IAccessDecisionService access, ICurrentUser currentUser, Ports.IUserStore? users = null)
 {
     /// <summary>Повертає профіль поточного користувача.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -43,7 +52,19 @@ public sealed class GetCurrentUserHandler(IAccessDecisionService access, ICurren
                          "ECR-AUTH-0401", "Сесія не містить користувача.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
+        // ⛔ V-06: під сеансом симуляції `access` (обгортка
+        // `SimulationAwareAccessDecisionService`) повертає профіль СУБ'ЄКТА з
+        // `IsSimulation` — тобто `/me` каже клієнтові чужі права, а не свої.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        string? subjectName = null;
+        if (profile.IsSimulation && profile.SimulatedForUserId is { } subjectId && users is not null)
+        {
+            var subject = await users.FindByIdAsync(subjectId, ct).ConfigureAwait(false);
+            subjectName = subject is null
+                ? null
+                : string.IsNullOrWhiteSpace(subject.DisplayName) ? subject.UserName : subject.DisplayName;
+        }
 
         return new CurrentUserView(
             userId,
@@ -57,7 +78,9 @@ public sealed class GetCurrentUserHandler(IAccessDecisionService access, ICurren
             // який забув, що дивиться чужими правами, ухвалює рішення про
             // чужий доступ, бачачи не свої можливості (ФВ-6.16a).
             profile.IsSimulation,
-            profile.SimulatedForUserId);
+            profile.SimulatedForUserId,
+            subjectName,
+            profile.IsSimulation ? currentUser.SimulationSessionId : null);
     }
 
     /// <summary>Рівень гранта на проєкт — для швидкої перевірки на клієнті.</summary>

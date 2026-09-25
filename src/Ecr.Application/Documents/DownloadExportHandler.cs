@@ -70,18 +70,9 @@ public sealed class DownloadExportHandler(
                            ["messageKey"] = "err.ECR-DOC-0404.exportExpired",
                        });
 
-        var read = await access.CanReadDocumentAsync(profile, book.DocumentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {book.DocumentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = book.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
+        // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, book.DocumentId, ct).ConfigureAwait(false);
 
         return book.Content;
     }

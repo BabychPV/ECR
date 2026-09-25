@@ -352,13 +352,11 @@ UPDATE t
     (N'state.errorUnknown',              N'en', N'An unexpected error occurred. Retry; if it repeats, quote the code below to support.',
                                                 N'An unexpected error occurred. Retry; if it repeats, contact support and describe what you were doing.'),
     (N'version.diffOtherHint',           N'en', N'The other version to compare against; take the id from the template list.',
-                                                N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).'),
+                                                N'Another version of this template. Changes are always shown from the older version to the newer one.'),
     (N'columns.lookupRegistryDefIdHint', N'en', N'Identifier of the registry this column looks values up from.',
                                                 N'The registry this column looks values up from.'),
     (N'workflow.recalculateHint',        N'en', N'Recalculates every sheet of this document for the shown period, not only this one.',
                                                 N'Recalculates this sheet. Formulas may still read data from other sheets of the same document.'),
-    (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.',
-                                                N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.'),
     (N'err.ECR-PRJ-0409',                N'en', N'A project with code "{code}" already exists.', N'Project code already in use'),
     (N'err.ECR-CFG-0422',                N'en', N'The code "{code}" is invalid: only Latin letters, digits, and underscores are allowed, the first character must be a letter, maximum length 64.',
                                                 N'Invalid code'),
@@ -382,7 +380,69 @@ UPDATE t
     (N'err.ECR-PRD-0409',                N'en', N'The period is closed', N'Period state conflict'),
     (N'err.ECR-PRD-0422',                N'en', N'The period is outside the project', N'Invalid period request'),
     (N'err.ECR-AUTH-0403.jobNotYours',   N'en', N'This background job was started by someone else: permission {permission} is required to cancel it.', N'This background job was started by someone else: permission {permission} is required to act on it.'),
-    (N'err.ECR-CALC-4221',               N'en', N'Recalculation of a closed period', N'Recalculation is not allowed')
+    (N'err.ECR-CALC-4221',               N'en', N'Recalculation of a closed period', N'Recalculation is not allowed'),
+    -- U-17: заголовок банера відсилав «див. помилку вище» — а помилка і є цей
+    -- самий банер; той самий текст стояв ще й позначкою над ним.
+    (N'grid.saveError',                  N'en', N'Not saved — see the error above', N'The server rejected this change'),
+    -- `U-09`, пунктуація порожніх станів зведена до ОДНОГО правила:
+    -- ЗАГОЛОВОК порожнього стану — без крапки в кінці, ПІДКАЗКА під ним —
+    -- повне речення з крапкою. Так уже написані 40+ заголовків каталогу
+    -- («No registries yet», «Pick a project», «Enter a job id»); ці два були
+    -- єдиними винятками, і на екрані `/admin/jobs` виняток стояв просто під
+    -- правилом.
+    (N'jobs.recentEmpty',                N'en', N'No jobs yet.', N'No jobs yet'),
+    (N'documents.empty',                 N'en', N'No documents for this period.', N'No documents for this period'),
+    -- V-09: роль у маршруті погодження чи правилі доступу до періоду теж «зайнята».
+    (N'err.ECR-SEC-0409.roleInUse',      N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s). Remove them first.',
+                                                N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s), {approvalSteps} approval route step(s), {periodAccessRules} period access rule(s). Remove them first.'),
+    -- V-16: сервер перевіряє лише довжину (`ChangePasswordHandler`,
+    -- `PasswordPolicy.MinLength`); прапорці складності не вмикаються (`P-1`).
+    (N'password.policy',                 N'en', N'At least 12 characters, with upper case, lower case and a digit.', N'At least 12 characters.'),
+    -- V-08: відмова видалення запису довідника рахує тепер не лише комірки, а
+    -- підказка коду обіцяла, що запис «ніколи не видаляється» — неправда.
+    (N'err.ECR-REG-0409.entryReferenced', N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.',
+                                                N'Entry "{code}" cannot be deleted: it is still referenced {referenceCount} time(s) — by document cells, other registry entries or methodology constants. Close it with an end date instead: history stays readable and new periods will not offer it.'),
+    (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.',
+                                                N'Cells store the entry id, so the code can change. An entry that anything still references cannot be removed — close it with an end date instead.'),
+    -- V-18: цикл формул — поіменно і з чесною кількістю.
+    (N'err.ECR-TMPL-4221.formulaCycle',   N'en', N'The formulas form a dependency cycle ({cycleLength} formula(s) involved).',
+                                                N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).'),
+    -- R-09/R-10 (четвертий раунд UX): друга версія порівняння вибирається зі
+    -- списку версій свого шаблону, а не вводиться ідентифікатором.
+    (N'version.diffOther',               N'en', N'Compare with version id', N'Compare with version'),
+    (N'version.diffOtherHint',           N'en', N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).',
+                                                N'Another version of this template. Changes are always shown from the older version to the newer one.'),
+    (N'version.diffPick',                N'en', N'Enter the other version', N'Pick the other version'),
+    -- B-09: у конфлікту з'явився вихід — підказка його називає; рядок переліку — і моє значення.
+    (N'grid.conflictHint', N'en', N'{count} cell(s) were changed by another user. Review them before saving again.',
+                                                N'{count} cell(s) were changed by someone else after this table was loaded. Keep your values to overwrite theirs, or discard yours to see theirs.'),
+    (N'grid.conflictItem', N'en', N'Row {row}, column {column}: their value {value} — {user}, {time}',
+                                                N'Row {row}, column {column}: yours {yours}, theirs {value} — {user}, {time}'),
+    -- B-02: тим самим кодом тепер відмовляє й неіснуюча одиниця в колонці `Unit`.
+    (N'err.ECR-CELL-4223',               N'en', N'Reference to a missing registry entry', N'Reference to a missing registry entry or unit'),
+    -- F-15/B-12 (четвертий раунд UX, лінія B1): відмова золотого набору
+    -- називає тести, що розійшлися.
+    (N'err.ECR-CALC-0422.goldenSetDiverged', N'en', N'Version {version} cannot be published: {count} values diverged on the golden set.',
+                                                N'Version {version} cannot be published: {count} value(s) diverged on the golden set (tests: {tests}).'),
+    -- F-22: обчислювану комірку рахує або формула шаблону, або методологія —
+    -- «відкрийте версію шаблону» для колонки методології хибне.
+    (N'grid.formulaBarNoExpression',     N'en', N'The expression is not sent with the table: open the template version to read it',
+                                                N'Calculated by the system — by a template formula or by the methodology bound to this column. The expression is not sent with the table.'),
+    -- X-34/F-20 (четвертий раунд UX, лінія E2): права межа — останній день перед
+    -- жорстким закриттям, а не «кінець діапазону»; «Grace until» насправді
+    -- ПОЧАТОК пільгового вікна.
+    (N'periods.range',                   N'en', N'Range', N'Accepts data'),
+    (N'periods.rangeHint',               N'en', N'Start = period start + Open offset ({open} d). End = period end + Hard-close offset ({hardClose} d, policy {code}): the period is fully Closed after this moment, and even late edits are no longer accepted.',
+                                                N'From = period start + Open offset ({open} d). To = the last day before the hard close, period end + Hard-close offset ({hardClose} d, policy {code}): after it the period is Closed and even late edits are refused. Dates are in the site time zone.'),
+    (N'periods.grace',                   N'en', N'Grace until', N'Late edits from'),
+    (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}). It stays in Grace until the end of Range (Hard-close, +{hardClose} d).',
+                                                N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}), in the site time zone. It stays in Grace until the hard close (+{hardClose} d).'),
+    -- F-19: перелік проєктів звужено грантами — «ще немає» було неправдою.
+    (N'periods.noProjects',              N'en', N'No projects yet', N'No projects available to you'),
+    (N'periods.noProjectsHint',          N'en', N'A project defines the reporting calendar: without one there are no periods.',
+                                                N'The list shows only projects you have been granted access to. If a project should be here, ask an administrator for access.'),
+    -- R-18: автор журналу обирається за іменем, а не набирається номером.
+    (N'audit.authorHint',                N'en', N'User id; leave empty for everyone.', N'Who made the change; leave empty for everyone.')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -413,7 +473,24 @@ DELETE t
     -- BE-24 крок 2: збереження опису довідника завжди йде в чернетку, а опис
     -- змінює лише публікація — обидва ключі втратили місце на екрані.
     (N'registries.saveDefinition',                 N'en', N'Save definition'),
-    (N'registries.definitionSaved',                N'en', N'Saved. Definition version: {version}.')
+    (N'registries.definitionSaved',                N'en', N'Saved. Definition version: {version}.'),
+    -- U-16: головна кнопка сітки суперечила моделі роботи — збереження
+    -- автоматичне, а «Save (N)» рахувала не «чекає збереження», а «збереження
+    -- не пройшло». Замінена на `grid.retrySave`, видиму лише після відмови.
+    (N'grid.save',                                 N'en', N'Save ({count})'),
+    -- U-18: рядок «Still needed» став спільним для діалогів створення —
+    -- ключ `common.stillNeeded`.
+    (N'periods.stillNeeded',                       N'en', N'Still needed: {fields}'),
+    -- Відмова типу поля шапки: один ключ з `{expected}` підставляв українське
+    -- слово в англійське речення; замінено на `err.ECR-HDR-0422.expects*`.
+    (N'err.ECR-HDR-0422.typeMismatch',             N'en', N'Header field "{headerFieldCode}" expects a {expected}.'),
+    -- X-02 (четвертий раунд UX): форма колонки більше не відкривається на
+    -- неповних даних — попереджати «збереження зітре» нема про що. Обидва
+    -- тексти, що побували в базах.
+    (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.'),
+    (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.'),
+    -- X-32: «ще не перевіряли» — `200` з `validated: false`, а не відмова `404`.
+    (N'err.ECR-DOC-0404.notValidated',             N'en', N'Document {documentId} has not been validated for period {periodKey} yet.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -455,6 +532,11 @@ USING (VALUES
     (N'common.retry',      N'en', N'Retry', 0),
     (N'common.delete',     N'en', N'Remove', 0),
     (N'common.loading',    N'en', N'Loading...', 0),
+    -- Q-298 / U-18: підказка біля недоступної кнопки підтвердження форми
+    -- створення — перелік бракуючих полів (`StillNeeded`). Спільна для всіх
+    -- діалогів створення, тому `common.*`; до U-18 жила як `periods.stillNeeded`
+    -- лише в діалозі проєкту (прибраний ключ — у секції вище).
+    (N'common.stillNeeded', N'en', N'Still needed: {fields}', 0),
     (N'state.errorTitle',                N'en', N'The request failed', 0),
     (N'state.errorUnknown',              N'en', N'An unexpected error occurred. Retry; if it repeats, contact support and describe what you were doing.', 0),
     (N'state.emptyTitle',                N'en', N'Nothing here yet', 0),
@@ -537,7 +619,7 @@ USING (VALUES
     (N'err.ECR-SEC-0409.roleCodeTaken', N'en', N'A role with code "{code}" already exists.', 1),
     -- ⛔ `BE-14`: та сама родина, інші причини — роль не видаляється, доки на
     -- ній щось тримається, а вбудована не видаляється й не перейменовується.
-    (N'err.ECR-SEC-0409.roleInUse', N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s). Remove them first.', 1),
+    (N'err.ECR-SEC-0409.roleInUse', N'en', N'Role "{code}" is in use: {assignments} assignment(s), {grants} grant(s), {approvalSteps} approval route step(s), {periodAccessRules} period access rule(s). Remove them first.', 1),
     (N'err.ECR-SEC-0409.roleBuiltIn', N'en', N'Role "{code}" is built in: it cannot be renamed or deleted.', 1),
     (N'err.ECR-SEC-0404.roleNotFound', N'en', N'Role {roleId} does not exist.', 1),
     -- Ролі групам каталогу (ФВ-6.15): небезпечна роль — лише з підтвердженням.
@@ -548,8 +630,19 @@ USING (VALUES
     (N'err.ECR-SEC-0404.userNotFound', N'en', N'User {userId} does not exist.', 1),
     (N'err.ECR-SEC-0409.cannotTargetSelf', N'en', N'You cannot lock your own account or reset its password here. Change your own password from your profile.', 1),
     (N'err.ECR-SEC-0409.lastAdministrator', N'en', N'"{userName}" is the last active administrator: nobody would be left to manage users.', 1),
+    -- 2026-09-25: код виправлено з `ECR-ROW-0409` (родина рядка таблиці
+    -- документа) на `ECR-SEC-0409` (родина безпеки) — окрема задача, не
+    -- локалізація; messageKey лишився той самий
+    -- (`.resourceGrantDuplicate`). Див. `contracts/localization-debt.md`,
+    -- запис 2026-09-25 «Security-кластер (B-14)».
+    (N'err.ECR-SEC-0409.resourceGrantDuplicate', N'en', N'Resource {resourceKind} {resourceId} is listed twice in the set.', 1),
     (N'err.ECR-USR-0422.domainPasswordReset', N'en', N'"{userName}" is a domain account: its password is managed in the domain, not here.', 1),
     (N'err.ECR-USR-0422.lockReasonRequired', N'en', N'A reason of up to {max} characters is required: it is recorded in the security journal.', 1),
+    -- B-15 (UX-аудит, четвертий раунд): наскрізний ключ, не прив'язаний до
+    -- жодного контролера — ApiBehaviorOptions.InvalidModelStateResponseFactory
+    -- (Program.cs) кидає його на будь-якому невалідному JSON-тілі чи типі, що
+    -- не зв'язується, незалежно від ендпоінта.
+    (N'err.ECR-REQ-0422.malformedRequest', N'en', N'The request does not match the expected shape: check field types and JSON syntax.', 1),
     (N'err.ECR-REQ-0422.principalNotResolved', N'en', N'Group "{principal}" was not found in the directory. Check the name or enter its SID.', 1),
     (N'err.ECR-REQ-0422.principalSidMalformed', N'en', N'"{principal}" is not a valid SID.', 1),
     (N'err.ECR-REQ-0422.validityOrder', N'en', N'The start of the validity window is later than its end.', 1),
@@ -558,6 +651,7 @@ USING (VALUES
     -- Покриває і зайнятий код, і видалення запису, на який посилаються.
     (N'err.ECR-REG-0409',  N'en', N'Registry entry conflict', 1),
     (N'err.ECR-REG-0409.entryCodeTaken', N'en', N'An entry with code "{code}" already exists in this registry (Id {id}).', 1),
+    (N'err.ECR-REG-0409.entryCodeTakenConcurrently', N'en', N'An entry with code "{code}" was just created in this registry by another request.', 1),
     (N'err.ECR-USR-0409',  N'en', N'User name already in use', 1),
     (N'err.ECR-USR-0409.userNameTaken', N'en', N'A user named "{userName}" already exists.', 1),
     -- ⛔ Аудит-пас 4: ще шість джерел, той самий клас дефекту (Q-303/Q-304)
@@ -570,6 +664,14 @@ USING (VALUES
     (N'err.ECR-UOM-4091',  N'en', N'Unit code already in use', 1),
     (N'err.ECR-UOM-4091.unitCodeTaken', N'en', N'A unit with code "{code}" already exists (Id {id}).', 1),
     (N'err.ECR-UOM-0404.unitId', N'en', N'There is no unit with Id {id}.', 1),
+    -- Борг локалізації (B-14, Units): конверсія одиниць шукає за КОДОМ, не
+    -- за Id — окремий ключ на той самий код помилки, той самий прийом, що
+    -- `.tableByCode`/`.columnCode` у шаблонах (2026-09-23).
+    (N'err.ECR-UOM-0404.code', N'en', N'There is no unit with code "{code}" in the catalog.', 1),
+    -- Борг локалізації (B-14, Units): заведення одиниці посилається на
+    -- розмірність, якої немає в `uom.Dimension` — окремий код (`ECR-UOM-4041`)
+    -- від «одиниці немає» вище, і власний ключ під нього.
+    (N'err.ECR-UOM-4041.dimensionId', N'en', N'There is no dimension with Id {dimensionId} in the catalog.', 1),
     (N'err.ECR-UOM-0409',  N'en', N'Unit is in use', 1),
     (N'err.ECR-UOM-0409.unitInUse', N'en', N'Unit "{code}" cannot be removed: it is referenced in {total} place(s).', 1),
     -- BE-15: зміна одиниці (`PUT /api/v1/units/{id}`).
@@ -602,6 +704,8 @@ USING (VALUES
     -- зовнішнього ключа і виходила назовні голим `500` — тобто дефект даних
     -- виглядав як збій сервера.
     (N'err.ECR-REQ-0422.periodMismatch',     N'en', N'The period {periodKey} in the request does not match period {expectedPeriodKey} of table instance {tableInstanceId}.', 1),
+    -- B-05: походження правки з тіла `PATCH …/cells` — лише людське.
+    (N'err.ECR-REQ-0422.cellOriginNotAllowed', N'en', N'Origin "{origin}" cannot be set by a client: an edit made here is recorded as {allowed}.', 1),
     (N'err.ECR-IMP-0422.notAWorkbook',       N'en', N'The file cannot be read as an .xlsx workbook.', 1),
     -- ⚠ Збір із SQL-джерела, яке не є PI (`ФВ-11.8`, транспорт `Sql`). Усі
     -- чотири подробиці кажуть, ЩО саме поправити: ключ налаштування, поле
@@ -611,10 +715,24 @@ USING (VALUES
     (N'err.ECR-INT-0503.connectionStringBroken', N'en', N'The connection string of source "{dataSource}" cannot be parsed: fix the Endpoint field of the source.', 1),
     (N'err.ECR-INT-0503.connectFailed',         N'en', N'The SQL source "{dataSource}" cannot be reached.', 1),
     (N'err.ECR-INT-0503.sourceMissing',         N'en', N'Data source {dataSourceId} does not exist or is switched off: there is nothing to collect.', 1),
+    -- B-14 (UX-аудит, четвертий раунд): CollectionRunner.cs.
+    (N'err.ECR-INT-0503.sourceEntityUnavailable', N'en', N'Source entity {sourceEntityId} does not exist or is switched off: there is nothing to collect.', 1),
+    (N'err.ECR-INT-0503.transportNotRegistered',  N'en', N'Transport "{transport}" is not registered.', 1),
+    (N'err.ECR-INT-0502.authenticationRefused',   N'en', N'Source "{sourceCode}" refused authentication: retrying with the same credentials will not help, an administrator needs to step in.', 1),
+    (N'err.ECR-INT-0503.controlCharacterInName',  N'en', N'The source object name contains a control character: the query cannot be built.', 1),
+    (N'err.ECR-INT-0502.piWebApiUnauthorized',    N'en', N'PI Web API answered {status} on {path}: the source does not accept the credentials.', 1),
+    (N'err.ECR-INT-0503.piWebApiErrorStatus',     N'en', N'PI Web API answered {status} on {path}.', 1),
+    (N'err.ECR-INT-0503.piWebApiTimeout',         N'en', N'PI Web API did not answer {path} within {attempts} attempts: request timed out.', 1),
+    (N'err.ECR-INT-0422.sourceUnitMismatch',      N'en', N'Attribute "{sourcePath}" reports unit "{actualUnitCode}", but the mapping declares unit {declaredUnitId}. Collection has stopped.', 1),
+    (N'err.ECR-INT-0422.unitMissingFromSnapshot', N'en', N'Unit {unitId} is not in the unit catalog: the conversion at the boundary cannot proceed.', 1),
     (N'err.ECR-INT-0503.sourcePathTooLong',     N'en', N'The entity path is longer than {maxLength} characters, so it cannot be sent to source "{dataSource}". A truncated path is not an error but silence: the source would answer "no such entity".', 1),
     (N'err.ECR-INT-0502.credentialsRefused',    N'en', N'The SQL source "{dataSource}" refused the service credentials. This is not a temporary outage: the collection will not retry.', 1),
     (N'err.ECR-CALC-0422.constantNoValue',   N'en', N'A numeric constant needs a value: an empty number is not "zero by default" — it is a decision nobody made.', 1),
     (N'err.ECR-CALC-0422.constantNoUnit',    N'en', N'A numeric constant needs a unit: the dimension check cannot run without it.', 1),
+    -- V-17(b): речовина константи — живий запис довідника.
+    (N'err.ECR-CALC-0422.constantSubstanceNotFound', N'en', N'Constant "{constantCode}": substance (registry entry) {substanceEntryId} does not exist.', 1),
+    -- V-17(c): симуляція читає ключ періоду як місяць.
+    (N'err.ECR-CALC-0422.simulatePeriodInvalid', N'en', N'Period key {periodKey} is not a month: expected YYYYMM, for example 202609.', 1),
     -- D-52a: опис звіту керує побудовою зрізу, тож колонка, якої джерело не
     -- має, відмовляє вже при створенні версії опису.
     (N'err.ECR-RPT-0422.unknownColumn',      N'en', N'Row source "{rowSource}" has no column "{columnCode}".', 1),
@@ -652,6 +770,11 @@ USING (VALUES
     (N'err.ECR-RPT-0404.def',                N'en', N'Report definition {reportDefId} does not exist.', 1),
     (N'err.ECR-RPT-0404.version',            N'en', N'Report version {reportVersionId} does not exist.', 1),
     (N'err.ECR-RPT-0404.versionWrongDef',    N'en', N'Version {reportVersionId} belongs to definition {versionDefId}, not {reportDefId}.', 1),
+    -- Борг локалізації (B-14, Reporting): побудова зрізу за КОДОМ звіту —
+    -- окремий факт від `.def`/`.version` вище (id-based): тут одне повідомлення
+    -- покриває і «коду немає», і «код є, чинної версії немає», бо
+    -- `FindCurrentVersionAsync` не розрізняє їх на цьому рівні.
+    (N'err.ECR-RPT-0404.code',               N'en', N'Report "{code}" does not exist or has no current version.', 1),
     -- ⛔ `Q-341`, перший зріз: відмови збереження комірки (`PatchCellsHandler`)
     -- — найгарячіший шлях продукту, бо через нього йде КОЖНЕ збереження в
     -- сітці. Ключі мають суфікс (`err.<код>.<що саме>`), а не форму рівно
@@ -666,8 +789,35 @@ USING (VALUES
     (N'err.ECR-ACCS-0403.deniedCells',       N'en', N'Cells you may not edit in this batch: {deniedCount}. Reason for the first: {reason}.', 1),
     (N'err.ECR-CELL-0422.validationBlocked', N'en', N'Validation rejected the save: {cellCount} cell(s) with an error.', 1),
     (N'err.ECR-CELL-0422.unknownColumn',     N'en', N'There is no column "{columnCode}" in this template version.', 1),
+    -- ⛔ `U-02`: найчастіша інтерактивна відмова продукту — набране в комірку
+    -- не того типу. `CellValueReader.Mismatch` збирав речення рядком у коді
+    -- («Колонка «C5» очікує число.»), і воно доїжджало на екран українською
+    -- під англійським заголовком. Ключів ЧОТИРИ, а не один із підстановкою
+    -- `{expected}`: резолвер (`UiStringResolver.Format`) підставляє рядки як
+    -- є і другого рівня розв'язання ключів не має, тож слово «число» лишилося
+    -- б українським усередині англійського речення. Окремий ключ на тип дає
+    -- ще й граматично правильну фразу в кожній мові.
+    -- ⚠ Поле `expected` у `Details` тепер СТАЛЕ кодове слово (`Number`,
+    -- `Boolean`, `Date`, `Identifier`) — як `{status}` і `{reason}` у сусідніх
+    -- шаблонах; у тексті воно не підставляється.
+    -- Приватна область: сітка доступна лише після входу.
+    (N'err.ECR-CELL-0422.expectsNumber',     N'en', N'Column "{columnCode}" expects a number.', 1),
+    (N'err.ECR-CELL-0422.expectsBoolean',    N'en', N'Column "{columnCode}" expects true or false.', 1),
+    (N'err.ECR-CELL-0422.expectsDate',       N'en', N'Column "{columnCode}" expects a date.', 1),
+    (N'err.ECR-CELL-0422.expectsIdentifier', N'en', N'Column "{columnCode}" expects the identifier of a registry entry.', 1),
+    -- X-31: колонка одиниць очікує ідентифікатор ОДИНИЦІ, а не запису довідника.
+    (N'err.ECR-CELL-0422.expectsUnitIdentifier', N'en', N'Column "{columnCode}" expects the identifier of a unit of measure.', 1),
+    -- ⛔ `U-23`: число з більшою кількістю знаків після коми, ніж тримає
+    -- сховище (`decimal(34,16)`), доти приймалося й мовчки округлювалося на
+    -- клієнті SqlClient, а запит закінчувався «Saved». Тепер — відмова тим
+    -- самим механізмом, що й `expects*` вище (правило `ФВ-9.16c`/`D-116`:
+    -- округлює лише вставка, видимо, на клієнті). `{maxScale}` — число рядком.
+    (N'err.ECR-CELL-0422.tooManyDecimals',   N'en', N'Column "{columnCode}" keeps at most {maxScale} digits after the decimal point.', 1),
+    (N'err.ECR-CELL-0422.tooManyIntegerDigits', N'en', N'Column "{columnCode}" keeps at most {maxIntegerDigits} digits before the decimal point.', 1),
     (N'err.ECR-CALC-0437.requiredInputs',    N'en', N'Required methodology input columns are empty: {rowCount} row(s) with an error.', 1),
     (N'err.ECR-CELL-4223.missingEntry',      N'en', N'Reference to a registry entry that does not exist: {cellCount} cell(s).', 1),
+    -- B-02: той самий код для колонки `Unit`, власне речення.
+    (N'err.ECR-CELL-4223.missingUnit',       N'en', N'Reference to a unit of measure that does not exist: {cellCount} cell(s).', 1),
     -- ⛔ `Q-341`, другий зріз: УСІ кидки `ECR-DOC-0404` — «документа/аркуша/
     -- екземпляра таблиці немає». Це найчастіший 404 продукту: код лежить на
     -- шляху відкриття сітки (`GetTableSliceHandler`, `RowStore`,
@@ -682,11 +832,6 @@ USING (VALUES
     (N'err.ECR-DOC-0404.sheetNotInDocument', N'en', N'Sheet {sheetDefId} is not part of document {documentId}.', 1),
     (N'err.ECR-DOC-0404.periodEmpty',        N'en', N'Document {documentId} for period {periodKey} does not exist or is empty.', 1),
     (N'err.ECR-DOC-0404.exportExpired',      N'en', N'The workbook is gone or has expired: build the export again.', 1),
-    -- ⚠ «Ще не перевіряли» — окреме речення, а не `periodEmpty`. Той самий код
-    -- відповіді означає тут інше: документ є, період є, просто перевірку ще не
-    -- запускали. Підставити сюди «does not exist or is empty» означало б
-    -- повідомити неправду про дані (`DocumentsController.LastValidation`).
-    (N'err.ECR-DOC-0404.notValidated',        N'en', N'Document {documentId} has not been validated for period {periodKey} yet.', 1),
     (N'err.ECR-DOC-0404.version',             N'en', N'Version {versionId} of document {documentId} was not found.', 1),
     (N'err.ECR-DOC-0422.compareVersion',      N'en', N'A version must be a number or "current".', 1),
     (N'err.ECR-DOC-0422.comparePeriods',      N'en', N'Versions from different periods cannot be compared.', 1),
@@ -735,6 +880,10 @@ USING (VALUES
     (N'err.ECR-REQ-0422.uiStringEmptyValue',   N'en', N'The translation is empty.', 1),
     (N'err.ECR-REQ-0422.uiStringTooLong',      N'en', N'The translation is longer than 1000 characters.', 1),
     (N'err.ECR-REQ-0422.uiStringDuplicateKey', N'en', N'This key already appears earlier in the file.', 1),
+    -- B-03: PUT /ui-strings/{lang}/{key} — та сама пара перевірок, що й CSV-імпорт вище,
+    -- лише напряму на одному рядку: раніше обидва випадки доїжджали до бази як гола 500-ка
+    -- (`String or binary data would be truncated`, порушення `FK_UiString_Lang`).
+    (N'err.ECR-REQ-0422.uiStringUnknownLanguage', N'en', N'"{lang}" is not a known language: add it to the language registry first.', 1),
     -- BE-33: канали сповіщень. У відмові вебхука немає ні URL, ні хоста — URL є секретом.
     (N'err.ECR-REQ-0422.notificationChannelInvalid',   N'en', N'A channel needs a name of up to 100 characters; an SMTP channel also needs at least one recipient.', 1),
     (N'err.ECR-REQ-0422.notificationChannelNameTaken', N'en', N'A channel named "{name}" already exists.', 1),
@@ -851,9 +1000,23 @@ USING (VALUES
     -- назавжди лишається на своїй версії (рішення людини на `Q15-05`), тож
     -- речення мусить це сказати — інакше адміністратор боятиметься кнопки.
     (N'err.ECR-TMPL-0422.templateNameRequired',  N'en', N'A template needs a name in at least one language.', 1),
+    -- V-19: відмова збереження/публікації виразу. Коли зауваження несе власний
+    -- ключ (`expr.*`), відмова бере його; ці два — для решти.
+    (N'err.ECR-TMPL-0422.expressionInvalid',     N'en', N'The expression is not valid: check {code} at position {position}.', 1),
+    (N'err.ECR-TMPL-0422.publishRejected',       N'en', N'The template version cannot be published: {count} problem(s) found; the first is {code} at position {position}.', 1),
+    (N'err.ECR-TMPL-0422.publishReasonRequired', N'en', N'A publication reason is required: an empty line explains nothing to whoever later asks why this version was put into use.', 1),
     (N'err.ECR-TMPL-0409.templateArchived',      N'en', N'Template "{code}" is archived: new documents are no longer created from it, while existing ones keep working.', 1),
     (N'err.ECR-TMPL-0409.templateAlreadyArchived', N'en', N'Template "{code}" is already archived.', 1),
     (N'err.ECR-TMPL-0409.templateNotArchived',     N'en', N'Template "{code}" is not archived: there is nothing to bring back.', 1),
+    -- B-04 / X-30: номер нової версії шаблону і джерело клону.
+    (N'err.ECR-TMPL-0422.versionNumberRequired',   N'en', N'A version number is required, in the form Major.Minor.Patch.Build.', 1),
+    (N'err.ECR-TMPL-0422.versionNumberFormat',     N'en', N'Version number "{version}" does not match the form Major.Minor.Patch.Build.', 1),
+    (N'err.ECR-TMPL-0422.cloneSourceOtherTemplate', N'en', N'Version {sourceVersionId} belongs to another template: a version can only be cloned within its own template ({templateId}).', 1),
+    (N'err.ECR-TMPL-0409.versionNumberTaken',      N'en', N'Version {version} already exists in this template.', 1),
+    -- B-14: TemplateVersionStore.cs.
+    (N'err.ECR-TMPL-0409.templateCodeTaken',       N'en', N'A template with code "{code}" already exists.', 1),
+    (N'err.ECR-TMPL-0422.presentationFieldUnknown', N'en', N'Field {entityType}.{field} does not belong to the presentation layer.', 1),
+    (N'err.ECR-TMPL-0404.presentationTarget',      N'en', N'{entityType} {entityId} does not belong to version {versionId}.', 1),
 
     -- Борг локалізації: правила доступу до періоду й зв'язки між таблицями
     -- (`PeriodAccessRuleHandlers`/`PeriodAccessRuleDef`,
@@ -893,9 +1056,38 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.maxDynamicRowsNotPositive', N'en', N'MaxDynamicRows must be positive; got {value}.', 1),
     (N'err.ECR-TMPL-0422.maxDynamicRowsNeedsDynamicMode', N'en', N'MaxDynamicRows only makes sense where users add rows; table "{tableCode}" is in {rowMode} mode.', 1),
     (N'err.ECR-TMPL-0422.tableIsDynamic',            N'en', N'Table "{tableCode}" is dynamic: its rows are created at runtime, not in the template.', 1),
+    -- B-14 (UX-аудит, четвертий раунд): FormulaDefHandlers.cs. `.table` вище
+    -- перевикористано (спільний SaveColumnDefHandler.FindTable), нижче — нові.
+    (N'err.ECR-TMPL-0422.formulaScopeInvalid',       N'en', N'Formula scope {scope} is not accepted here: only Column or Row (Cell combines both addresses and has no single address).', 1),
+    (N'err.ECR-TMPL-0404.row',                       N'en', N'Row "{rowKey}" does not exist in table {tableDefId}.', 1),
+    (N'err.ECR-TMPL-0404.formula',                   N'en', N'There is no formula on {scope} "{target}" in table {tableDefId}.', 1),
+    -- B-14: RowDefHandlers.cs.
+    (N'err.ECR-TMPL-0422.rowKeyTakenByDeleted',      N'en', N'Row key "{rowKey}" in table {tableDefId} is taken by a deleted row: cells still reference it by key, so it cannot be reused in this version. Use a different key or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.rowKindImmutable',          N'en', N'The kind of row "{rowKey}" cannot change after creation ({oldRowKind} -> {newRowKind}). Create a new row or clone the version.', 1),
+    (N'err.ECR-TMPL-0422.rowSelfParent',             N'en', N'Row "{rowKey}" cannot be its own parent.', 1),
+    (N'err.ECR-TMPL-0422.parentRowNotFound',         N'en', N'Parent row "{parentRowKey}" does not exist in table {tableDefId}.', 1),
     (N'err.ECR-TMPL-0409.columnCodeTaken',           N'en', N'A column with code "{columnCode}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.rowKeyTaken',               N'en', N'A row with key "{rowKey}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.headerFieldCodeTaken',      N'en', N'A header field with code "{headerFieldCode}" already exists in this template version.', 1),
+    -- B-14: GetTemplateStructureHandler.cs/PatchPresentationHandler.cs/
+    -- SheetDefHandlers.cs/TemplateQueryHandlers.cs/ValidationRuleHandlers.cs +
+    -- CalculationBinding/FormulaDef/SheetDef/TemplateVersion (Configuration).
+    -- `.table`/`.sheet`/`.templateVersion` вище перевикористані (той самий
+    -- факт, звідки б до нього не дійшли); нижче — нові.
+    (N'err.ECR-TMPL-0422.emptyPatch',                N'en', N'The patch is empty: there is nothing to change.', 1),
+    (N'err.ECR-TMPL-0422.patchNotJson',              N'en', N'The patch is not valid JSON.', 1),
+    (N'err.ECR-SCHM-0409.presentationPatchBreaking', N'en', N'The patch changes {fieldCount} identity field(s) on a version that already has documents. This is a rejection, not a warning: cells reference column code and row key, so values already entered would stop being found after the rename. Cloning the version does not help here — there would be nowhere to carry the documents.', 1),
+    (N'err.ECR-TMPL-0409.presentationPatchStructural', N'en', N'The patch changes {fieldCount} structural field(s), which are not allowed on a published version. Structural changes go through cloning the version.', 1),
+    (N'err.ECR-TMPL-0422.sheetCodeTakenByDeleted',   N'en', N'Sheet code "{sheetCode}" in template version {versionId} is taken by a deleted sheet: it cannot be reused in this version. Use a different code or clone the version.', 1),
+    (N'err.ECR-TMPL-0404.validationRule',            N'en', N'Rule "{code}" does not exist in table {tableDefId}.', 1),
+    (N'err.ECR-CFG-0422.calculationBindingMatchRequired', N'en', N'The output binding "{outputCode}" has no match predicate: an empty string is neither "the whole table" (an empty JSON object) nor a narrowing.', 1),
+    (N'err.ECR-TMPL-0422.formulaAssignScopeMismatch', N'en', N'A formula with scope {scope} cannot be assigned to a {expectedScope}: the scope must match the target.', 1),
+    (N'err.ECR-TMPL-0409.tableCodeTaken',            N'en', N'A table with code "{tableCode}" already exists on sheet "{sheetCode}".', 1),
+    (N'err.ECR-TMPL-0409.sheetCodeTaken',            N'en', N'A sheet with code "{sheetCode}" already exists in this template version.', 1),
+    (N'err.ECR-TMPL-0409.alreadyPublishedOrDeprecated', N'en', N'Version {version} is already published or withdrawn from use (state {status}). Publishing again is not possible: a published version is structurally frozen, and changes go through cloning into a new version.', 1),
+    (N'err.ECR-TMPL-0409.presentationRevisionConflict', N'en', N'Expected appearance revision {expectedRevision}, got {actualRevision}. The mismatch means someone else already changed it in a way this session has not seen.', 1),
+    (N'err.ECR-TMPL-0409.deprecateRequiresPublished', N'en', N'Only a published version can be withdrawn from use; the current state is {status}. A draft has nothing to withdraw — it never went into use.', 1),
+    (N'err.ECR-TMPL-0409.structurallyFrozen',        N'en', N'Version {version} is in state {status} and is structurally frozen. Structural changes go through cloning into a new version; without a clone, documents already submitted would silently change their structure.', 1),
 
     -- Поля шапки документа (foundation): той самий draft->publish шлях, що
     -- колонки таблиці, тому подробиці — під ECR-TMPL-0422/0404, як у колонок.
@@ -905,7 +1097,18 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.headerFieldDataTypeImmutable',         N'en', N'The data type of header field "{headerFieldCode}" cannot change after creation ({oldDataType} -> {newDataType}). Create a new field or clone the version.', 1),
     (N'err.ECR-HDR-0404.headerField',                N'en', N'Header field "{headerFieldCode}" does not exist in this document''s template version.', 1),
     (N'err.ECR-HDR-0422.validationBlocked',          N'en', N'The value for header field "{headerFieldCode}" does not match its type or required setting.', 1),
-    (N'err.ECR-HDR-0422.typeMismatch',               N'en', N'Header field "{headerFieldCode}" expects a {expected}.', 1),
+    -- ⛔ Було одним ключем `typeMismatch` з `{expected}`, а значенням
+    -- `expected` їхало українське слово: «Header field "QTY" expects a
+    -- число.». Резолвер другого рівня ключів не має — тип тепер частина
+    -- ключа, як `err.ECR-CELL-0422.expects*` (`U-02`). Старий ключ — у
+    -- «Прибраних ключах» вище.
+    (N'err.ECR-HDR-0422.expectsNumber',              N'en', N'Header field "{headerFieldCode}" expects a number.', 1),
+    (N'err.ECR-HDR-0422.expectsBoolean',             N'en', N'Header field "{headerFieldCode}" expects true or false.', 1),
+    (N'err.ECR-HDR-0422.expectsDate',                N'en', N'Header field "{headerFieldCode}" expects a date.', 1),
+    (N'err.ECR-HDR-0422.expectsIdentifier',          N'en', N'Header field "{headerFieldCode}" expects the identifier of a registry entry or unit.', 1),
+    -- `U-23` для шапки: той самий `decimal(34,16)`, та сама відмова.
+    (N'err.ECR-HDR-0422.tooManyDecimals',            N'en', N'Header field "{headerFieldCode}" keeps at most {maxScale} digits after the decimal point.', 1),
+    (N'err.ECR-HDR-0422.tooManyIntegerDigits',       N'en', N'Header field "{headerFieldCode}" keeps at most {maxIntegerDigits} digits before the decimal point.', 1),
 
     (N'err.ECR-ROW-0404.tableRow',           N'en', N'Table row {rowId} was not found.', 1),
     (N'err.ECR-REG-0404.registryEntry',      N'en', N'Registry entry {entryId} was not found.', 1),
@@ -932,7 +1135,7 @@ USING (VALUES
     (N'err.ECR-REG-0422.duplicateCodes',     N'en', N'Codes repeat in the set: {codes}.', 1),
     (N'err.ECR-REG-0422.switchReasonRequired', N'en', N'Give a reason for switching the master source.', 1),
     (N'err.ECR-REG-0422.openPeriod',         N'en', N'The registry source cannot be switched while periods are open: some documents would be filled from one list of entries and some from another.', 1),
-    (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: {referenceCount} cells reference it. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
+    (N'err.ECR-REG-0409.entryReferenced',    N'en', N'Entry "{code}" cannot be deleted: it is still referenced {referenceCount} time(s) — by document cells, other registry entries or methodology constants. Close it with an end date instead: history stays readable and new periods will not offer it.', 1),
     -- BE-24 крок 2: чернетка опису довідника і її публікація.
     (N'err.ECR-REG-0404.definitionDraft',    N'en', N'Registry "{registryCode}" has no draft definition.', 1),
     (N'err.ECR-REG-0409.definitionDraftChanged', N'en', N'The draft definition of registry "{registryCode}" was changed or published after you opened it. Reload it and repeat your changes.', 1),
@@ -953,6 +1156,9 @@ USING (VALUES
     (N'err.ECR-REG-0422.valueNotBoolean',    N'en', N'The value "{value}" is not a boolean.', 1),
     (N'err.ECR-REG-0422.valueNotDate',       N'en', N'The value "{value}" is not a date.', 1),
     (N'err.ECR-REG-0422.valueNotEntryId',    N'en', N'The value "{value}" is not a registry entry identifier.', 1),
+    -- V-08(b), V-17(a): значення поля Lookup — живий запис оголошеного довідника.
+    (N'err.ECR-REG-0422.lookupEntryNotFound', N'en', N'Field "{field}": registry entry {value} does not exist.', 1),
+    (N'err.ECR-REG-0422.lookupWrongRegistry', N'en', N'Field "{field}" looks up registry "{expectedRegistry}", but entry {value} ("{entryCode}") belongs to another registry.', 1),
     (N'err.ECR-REG-0422.selfLink',           N'en', N'Entry {entryId} cannot be linked to itself.', 1),
     (N'err.ECR-REG-0422.linkPayloadNotObject', N'en', N'Link attributes must be a JSON object.', 1),
     (N'err.ECR-REG-0422.linkPayloadInvalidJson', N'en', N'Link attributes are not valid JSON: {reason}', 1),
@@ -981,8 +1187,29 @@ USING (VALUES
     -- ⚠ Публічна область (0) — лише те, що видно ДО входу або замість екрана
     -- (ФВ-14.9b): вимога увійти, блокування, разовий пароль, 500.
     (N'err.ECR-AUTH-0401.signInRequired',       N'en', N'You are not signed in or your session has ended: sign in again.', 0),
+    -- ⛔ `U-01`: відмова входу не мала ключа, тому `ErrorAlert.tsx` (рішення
+    -- 2026-09-20 — подробиця без `messageKey` не показується) не друкував
+    -- НІЧОГО, і користувач із хибним паролем бачив саму лише вказівку
+    -- «Sign in to continue.». Область публічна (0): це екран ДО входу.
+    -- ⚠ Текст навмисно не розрізняє «немає такого користувача» і «пароль не
+    -- той» — інакше форма входу перелічує чужі облікові записи (ФВ-6.11).
+    (N'err.ECR-AUTH-0401.invalidCredentials',   N'en', N'The user name or password is incorrect.', 0),
     (N'err.ECR-AUTH-0401.accountMissing',       N'en', N'Your account no longer exists: sign in again.', 1),
+    -- B-14 (security cluster): вимкнений/неіснуючий обліковий запис —
+    -- окремий факт від «сеансу нема»/«акаунта нема» вище (AccessDecisionService).
+    (N'err.ECR-AUTH-0401.accountDisabled',      N'en', N'Your account does not exist or has been deactivated.', 1),
     (N'err.ECR-AUTH-0401.currentPasswordWrong', N'en', N'The current password is incorrect.', 1),
+    -- V-06: сеанс симуляції «очима користувача» — лише читання.
+    (N'err.ECR-SIM-0403.readOnly',              N'en', N'You are viewing as another user: nothing can be changed. Stop viewing to make changes.', 1),
+    (N'err.ECR-SIM-0422.noSession',             N'en', N'There is no active viewing session to stop.', 1),
+    -- B-14 (security cluster): EndSimulationHandler/StartSimulationHandler/
+    -- SimulationService — той самий носій (симуляція «очима користувача»),
+    -- три різні факти на трьох різних кодах ексепшена (виняток лишено як є,
+    -- локалізується лише подробиця).
+    (N'err.ECR-AUTH-0403.simulationSessionNotFound', N'en', N'There is no active simulation session to end.', 1),
+    (N'err.ECR-AUTH-0403.simulationNotYours',   N'en', N'You can only end your own simulation session.', 1),
+    (N'err.ECR-SIM-0422.selfSimulation',        N'en', N'Simulating yourself has no purpose.', 1),
+    (N'err.ECR-SIM-0422.reasonRequired',        N'en', N'A reason for the simulation is required: without it the audit log answers nothing.', 1),
     (N'err.ECR-AUTH-0403.domainPassword',       N'en', N'The password of a domain account is changed in the domain, not here.', 1),
     (N'err.ECR-AUTH-0423.lockedAfterFailures',  N'en', N'The account is temporarily locked after failed sign-in attempts. Try again later.', 0),
     (N'err.ECR-AUTH-0423.lockedByAdministrator', N'en', N'The account has been locked by an administrator. Contact your administrator.', 0),
@@ -998,10 +1225,14 @@ USING (VALUES
     (N'err.ECR-AUTH-0403.noProjectManageGrant', N'en', N'You have no Manage grant on project {projectId}.', 1),
     (N'err.ECR-ACCS-0403.submitDenied',         N'en', N'Sheet {sheetDefId} cannot be submitted: {reason}.', 1),
     (N'err.ECR-ACCS-0403.approveDenied',        N'en', N'Sheet {sheetDefId} cannot be approved or rejected: {reason}.', 1),
+    -- F-25: the same person cannot both submit and approve a sheet (four-eyes rule).
+    (N'err.ECR-ACCS-0403.approveOwnSubmission', N'en', N'Sheet {sheetDefId} cannot be approved by the same person who submitted it.', 1),
     (N'err.ECR-ACCS-0403.reopenDenied',         N'en', N'Sheet {sheetDefId} cannot be returned to work: {reason}.', 1),
     (N'err.ECR-ACCS-0403.addRowDenied',         N'en', N'A row cannot be added to this table: {reason}.', 1),
     (N'err.ECR-SUB-4221.orphanedRows',          N'en', N'The sheet cannot be submitted: {rowCount} row(s) lost their registry entry.', 1),
     (N'err.ECR-SUB-4221.validationBlocked',     N'en', N'The sheet cannot be submitted: {messageCount} blocking validation error(s).', 1),
+    -- F-02/F-05 follow-up: a bound methodology result is stale (inputs changed after the calculation run) — submission is blocked until a recalculation.
+    (N'err.ECR-SUB-4221.staleMethodologyResults', N'en', N'The sheet cannot be submitted: methodology results are stale — document inputs changed after the calculation run. Recalculate before submitting.', 1),
     (N'err.ECR-PRD-4223.reopenPeriodFirst',     N'en', N'Period {periodKey} is closed: reopen the period first, then the sheet.', 1),
     (N'err.ECR-DOC-0409.reopenWrongState',      N'en', N'Only a submitted or approved sheet can be returned to work; the sheet is {status}.', 1),
     (N'err.ECR-DOC-0409.submitWrongState',      N'en', N'Only a draft or rejected sheet can be submitted; the sheet is {status}.', 1),
@@ -1027,12 +1258,23 @@ USING (VALUES
     (N'err.ECR-DOC-0422.recallReasonRequired',  N'en', N'A reason is required to recall the sheet.', 1),
     (N'err.ECR-DOC-0422.unknownSheets',         N'en', N'The document includes sheets that are not in the template version.', 1),
     (N'err.ECR-DOC-0422.sheetGroupRules',       N'en', N'The selected sheets break the sheet group rules.', 1),
+    -- B-14 (Calculations + Workflow + Audit): ReplaceApprovalRouteHandler —
+    -- two consecutive steps of a project's approval route share the same role.
+    (N'err.ECR-DOC-0422.approvalRouteConsecutiveRole', N'en', N'Steps {stepA} and {stepB} share the same role {roleId}: the second one would be passed by the same person right after the first, so it adds no approval.', 1),
+    -- Sheet lock (SheetEditGate) not acquired in time: the other action is still running.
+    (N'err.ECR-DOC-4091.sheetBeingSubmitted',   N'en', N'This sheet is being submitted right now. Your changes were not saved; try again in a moment.', 1),
+    (N'err.ECR-DOC-4091.sheetBeingEdited',      N'en', N'This sheet is being saved or recalculated right now. The sheet was not submitted; try again in a moment.', 1),
     (N'err.ECR-ROW-0409.rowsFromTemplate',      N'en', N'Table "{tableCode}" has RowMode = {rowMode}: its rows come from the template, so rows cannot be added.', 1),
     (N'err.ECR-ROW-0409.rowLimitReached',       N'en', N'Table "{tableCode}" has reached its dynamic-row limit: {max}.', 1),
     (N'err.ECR-ROW-0409.rowKeyExists',          N'en', N'A row with key "{rowKey}" already exists in this table.', 1),
     (N'err.ECR-PRJ-0404.project',               N'en', N'Project {projectId} was not found.', 1),
     (N'err.ECR-PRJ-0404.projectOfPeriod',       N'en', N'The project of period {periodId} was not found.', 1),
     (N'err.ECR-PRD-0404.period',                N'en', N'Period {periodId} was not found.', 1),
+    -- B-14 (Calculations + Workflow + Audit): calculation-run entry points
+    -- resolve a period by (documentId, periodKey) or (projectId, periodKey),
+    -- not by the surrogate id `.period` above — different facts, same code.
+    (N'err.ECR-PRD-0404.periodForProject',      N'en', N'Period {periodKey} does not exist in project {projectId}.', 1),
+    (N'err.ECR-PRD-0404.periodForDocument',     N'en', N'Period {periodKey} does not exist for document {documentId}.', 1),
     (N'err.ECR-PRD-0409.projectArchived',      N'en', N'Project "{projectCode}" is archived: its periods cannot be reopened.', 1),
     (N'err.ECR-PRD-0409.transitionNotAllowed',  N'en', N'Period {periodKey} cannot go from {from} to {to}.', 1),
     (N'err.ECR-PRD-0409.reopenOnlyClosed',      N'en', N'Only a closed period can be reopened; the period is {state}.', 1),
@@ -1043,11 +1285,16 @@ USING (VALUES
     -- Борг локалізації (ProjectQueryHandlers.cs): перелік, створення й
     -- перехід стану проєкту, CRUD політик періодів.
     (N'err.ECR-PRD-4091.code',                  N'en', N'A period policy with code "{code}" already exists.', 1),
-    (N'err.ECR-TMPL-0404.versionRequired',      N'en', N'A project cannot be created without a template version.', 1),
+    (N'err.ECR-TMPL-0422.versionRequired',      N'en', N'A project cannot be created without a template version.', 1),
     (N'err.ECR-PRD-0422.periodPolicyRequired',  N'en', N'A project cannot be created without a period policy.', 1),
     (N'err.ECR-PRJ-0422.notDraft',              N'en', N'Only a draft can be activated; the project is in state {status}.', 1),
     (N'err.ECR-PRJ-0422.noPeriods',             N'en', N'The calendar of project {projectId} produced no period: check the period kind, the reporting year and the offset policy.', 1),
     (N'err.ECR-PRD-0409.openPeriods',           N'en', N'Project {projectId} has periods that are not closed: archiving is not possible.', 1),
+    -- F-11 / F-12: архівований проєкт — кінцевий стан.
+    (N'err.ECR-PRD-0409.projectAlreadyArchived', N'en', N'Project "{projectCode}" is already archived.', 1),
+    (N'err.ECR-PRD-0409.archiveNotActive',      N'en', N'Only an active project can be archived; the project is {status}.', 1),
+    (N'err.ECR-PRD-0409.projectArchivedCurrentPeriod', N'en', N'Project "{projectCode}" is archived: its current period cannot be changed.', 1),
+    (N'err.ECR-PRD-0409.projectArchivedNoDocuments', N'en', N'Project {projectId} is archived: new documents cannot be created in it.', 1),
     (N'err.ECR-PRD-4225.graceAfterHardClose',   N'en', N'The grace period ({graceOffsetDays} days) cannot be longer than the hard close ({hardCloseOffsetDays} days): the period would close for good before its own grace period ends.', 1),
     (N'err.ECR-PRD-4225.negativeYearGrace',     N'en', N'The year-end grace period ({yearGraceOffsetDays} days) cannot be negative.', 1),
     -- BE-25: only a never-published, never-used methodology version can be deleted.
@@ -1086,7 +1333,7 @@ USING (VALUES
     (N'err.ECR-CALC-0422.publishChecksFailed',  N'en', N'The version failed pre-publication checks ({count} problems).', 1),
     (N'err.ECR-CALC-0422.formulasNotSaved',     N'en', N'Save the formulas of the version before publishing it.', 1),
     (N'err.ECR-CALC-0422.goldenSetEmpty',       N'en', N'Version {version} cannot be published: its golden set has no cases, so nothing was checked.', 1),
-    (N'err.ECR-CALC-0422.goldenSetDiverged',    N'en', N'Version {version} cannot be published: {count} values diverged on the golden set.', 1),
+    (N'err.ECR-CALC-0422.goldenSetDiverged',    N'en', N'Version {version} cannot be published: {count} value(s) diverged on the golden set (tests: {tests}).', 1),
     (N'err.ECR-CALC-0422.deprecateNotPublished', N'en', N'Version {version} is not published, so there is nothing to withdraw.', 1),
     (N'err.ECR-CALC-0422.versionNotInMethodology', N'en', N'Version {version} does not belong to methodology {code}.', 1),
     (N'err.ECR-CALC-0422.noEffectiveVersion',   N'en', N'The methodology has no version in effect on {date}.', 1),
@@ -1100,12 +1347,20 @@ USING (VALUES
     (N'err.ECR-CALC-0422.formulaNoExpression',  N'en', N'Formula "{code}" needs an expression: an empty one would silently yield zero.', 1),
     (N'err.ECR-CALC-0422.textFormulaUnit',      N'en', N'Formula "{code}" returns text, so it cannot have a result unit.', 1),
     (N'err.ECR-CALC-0422.ruleNoPredicate',      N'en', N'Rule "{code}" needs a predicate; to match the whole table, use an empty JSON object.', 1),
+    -- V-18: правила відбору рядків методології — при збереженні й публікації.
+    (N'err.ECR-CALC-0422.ruleMatchInvalid',       N'en', N'The predicate of rule "{code}" is not a flat JSON object of column–value pairs; such a predicate matches no row. To match the whole table, use an empty JSON object.', 1),
+    (N'err.ECR-CALC-0422.rulePriorityDuplicate',  N'en', N'Rules {rules} share priority {priority}: which one matches first would depend on storage order. Give each active rule its own priority.', 1),
+    (N'err.ECR-CALC-0422.ruleCatchAllNotLast',    N'en', N'Rule "{rule}" (empty predicate — the whole table) has priority {priority}, higher than the specific rules {shadowed}: they would never apply. An empty predicate needs the lowest priority (the largest number).', 1),
+    (N'err.ECR-CALC-0422.unknownConstants',       N'en', N'The formulas reference constants that this version does not define ({count}): {constants}. Each of them would evaluate to #REF.', 1),
     (N'err.ECR-CALC-0422.selfDependency',       N'en', N'A methodology cannot depend on itself.', 1),
     (N'err.ECR-CALC-0422.selfImport',           N'en', N'A methodology cannot import itself: its own formulas are already visible.', 1),
     (N'err.ECR-CALC-0432.undeclaredArguments',  N'en', N'The formula expression uses {undeclaredCount} token(s) missing from its declared argument list.', 1),
     (N'err.ECR-CALC-0433.legacyExtensionFunction', N'en', N'The version uses {functionCount} function(s) not available in Legacy mode: switch it to Strict mode from a new effective date.', 1),
     (N'err.ECR-CALC-0438.missingColumns',       N'en', N'A formula argument has no matching column in {tableCount} bound table(s).', 1),
-    (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle ({cycleLength} formula(s) involved).', 1),
+    (N'err.ECR-TMPL-4221.formulaCycle',         N'en', N'The formulas form a dependency cycle: {cyclePath} ({cycleLength} formula(s)).', 1),
+    -- B-14 (Calculations + Workflow + Audit): a batch of the calculation
+    -- schedule has a methodology dependency cycle (CalculationPlan.Build).
+    (N'err.ECR-TMPL-4221.methodologyCycle',     N'en', N'The methodologies form a dependency cycle ({cycleLength} involved).', 1),
 
     -- ⛔ `RoleAndUserHandlers.cs` (23 кидки, найбільший файл боргу локалізації
     -- на замір 254/74): ролі, користувачі, межі чинності призначення
@@ -1118,6 +1373,33 @@ USING (VALUES
     (N'err.ECR-REQ-0422.validityRoleNotAssigned', N'en', N'A validity window was given for role "{code}", which is not part of the roles being assigned.', 1),
     (N'err.ECR-USR-0422.windowsSidRequired',      N'en', N'A domain account requires a SID.', 1),
     (N'err.ECR-USR-0422.initialPasswordRequired', N'en', N'A local account requires a one-time password.', 1),
+
+    -- B-14 (останній кластер: Api + Domain + Infra Persistence + Jobs) — 24
+    -- кидків, 18 файлів. Дрібні місця, розкидані по контролерах, доменних
+    -- сутностях і сховищах; частина перевикористала наявні ключі
+    -- (`err.ECR-AUTH-0401.anonymousWrite`, `.err.ECR-TMPL-0422.formulaScopeInvalid`,
+    -- `err.ECR-ROW-0409.rowKeyExists`/`.rowKeysExist`, `err.ECR-CELL-0409.batchStale`
+    -- — той самий факт, що вже несуть CreateRowHandler/PatchCellsHandler/
+    -- Project.cs/FormulaDefHandlers.cs), нижче — нові.
+    (N'err.ECR-AUTH-0401.securityStampStale', N'en', N'Your session is no longer valid: your permissions changed. Sign in again.', 1),
+    (N'err.ECR-REG-0422.selfParent',          N'en', N'Entry {entryId} cannot be its own parent.', 1),
+    (N'err.ECR-INT-0422.materializationRequiresAggregation', N'en', N'Mapping of field "{sourceField}" names row "{targetRowKey}", but does not say how to fold period points: the system does not know whether the value is instantaneous or cumulative.', 1),
+    (N'err.ECR-RPT-0409.versionNotDraft',           N'en', N'Report version {version} is {status}: there is nothing to publish.', 1),
+    (N'err.ECR-RPT-0409.snapshotSubmittedContent',  N'en', N'Snapshot {snapshotId} was submitted: its content is not rebuilt, a new snapshot is needed.', 1),
+    (N'err.ECR-RPT-0409.snapshotSubmittedStatus',   N'en', N'Snapshot {snapshotId} was submitted: its status does not change, a new snapshot is needed.', 1),
+    (N'err.ECR-USR-0422.receivesAlertsRequiresEmail', N'en', N'User "{userName}" has no email: there is nowhere to turn alerts on.', 1),
+    (N'err.ECR-PRD-4224.countOutOfRange',    N'en', N'The period count {count} is outside 1..{max}.', 1),
+    (N'err.ECR-PRD-4224.countNotDivisor',    N'en', N'The period count {count} does not divide the year evenly: 12 must be divisible by it, or part of the year would have no period.', 1),
+    (N'err.ECR-PRD-4224.sequenceOutOfRange', N'en', N'The period sequence number {sequence} is outside 1..{max}.', 1),
+    (N'err.ECR-PRD-0422.keyInvalid',         N'en', N'Period key {value} is not a period: expected Year*100 + Sequence, e.g. 202601.', 1),
+    (N'err.ECR-PRD-0422.policyNotFound',     N'en', N'Period policy {periodPolicyId} was not found. Run the seed before creating a project.', 1),
+    (N'err.ECR-PRD-0422.periodNotInProjectOfDocument', N'en', N'Period {periodKey} does not belong to the project of document {documentId}.', 1),
+    (N'err.ECR-CFG-0422.rowKeyInvalid',      N'en', N'Row key "{value}" is not allowed: it goes into formulas unescaped, so only letters, digits, dot, underscore and hyphen are accepted.', 1),
+    (N'err.ECR-CFG-4221.notIana',            N'en', N'Site time zone "{value}" is not a known IANA identifier (e.g. "Asia/Aqtau"). Windows identifiers such as "Central Asia Standard Time" and offsets such as "+05:00" are not accepted.', 1),
+    (N'err.ECR-SYS-0503.schedulerNotConfigured', N'en', N'Background jobs are not configured yet: the scheduler is not running. This operation requires a queue and is unavailable.', 0),
+    (N'err.ECR-DOC-0409.businessKeyExhausted', N'en', N'Could not find a free business key for the document.', 1),
+    (N'err.ECR-DOC-0409.businessKeyDuplicate', N'en', N'A document with key "{businessKey}" already exists in this project.', 1),
+    (N'err.ECR-CELL-0409.concurrentChange',  N'en', N'The data changed after you read it.', 1),
 
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
     --
@@ -1161,12 +1443,14 @@ USING (VALUES
     (N'err.ECR-TMPL-4225',  N'en', N'A required column is not covered', 1),
     (N'err.ECR-TMPL-4226',  N'en', N'Computed column without a source', 1),
     (N'err.ECR-TMPL-4227',  N'en', N'Computation on a manual-entry column', 1),
+    (N'err.ECR-TMPL-4228',  N'en', N'Fixed table without rows', 1),
     (N'err.ECR-SCHM-0409',  N'en', N'Breaking change in a version with documents', 1),
     (N'err.ECR-SCHM-0422',  N'en', N'A migration strategy is required', 1),
 
     -- Документи, рядки, комірки.
     (N'err.ECR-DOC-0404',   N'en', N'Document not found', 1),
     (N'err.ECR-DOC-0409',   N'en', N'The document is submitted', 1),
+    (N'err.ECR-DOC-4091',   N'en', N'The sheet is busy', 1),
     (N'err.ECR-DOC-0422',   N'en', N'Invalid document composition', 1),
     (N'err.ECR-ROW-0404',   N'en', N'Row not found', 1),
     (N'err.ECR-ROW-0409',   N'en', N'Row key conflict', 1),
@@ -1174,7 +1458,7 @@ USING (VALUES
     (N'err.ECR-CELL-0422',  N'en', N'Invalid cell value', 1),
     (N'err.ECR-CELL-4221',  N'en', N'The cell is computed', 1),
     (N'err.ECR-CELL-4222',  N'en', N'Value out of range', 1),
-    (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry', 1),
+    (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry or unit', 1),
     (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
     (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
     (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),
@@ -1283,8 +1567,15 @@ USING (VALUES
     (N'period.next',                     N'en', N'Next period', 1),
     (N'documents.sheets',                N'en', N'Sheets', 1),
     (N'documents.state',                 N'en', N'State', 1),
-    (N'documents.empty',                 N'en', N'No documents for this period.', 1),
+    (N'documents.empty',                 N'en', N'No documents for this period', 1),
     (N'documents.more',                  N'en', N'Load more', 1),
+    -- ⛔ `U-06`: підпис над деревом аркушів. Голий дріб «0 / 91» стояв тут
+    -- без жодного слова і читався як «не введено нічого» на документі,
+    -- заповненому на ~90 %: у чисельник потрапляють лише таблиці, у яких
+    -- закриті ВСІ вхідні комірки, тож таблиця з 710 заповненими з 774 не
+    -- рахується зовсім. Текст називає саме це, а не «заповненість» узагалі —
+    -- інакше підпис лише замінив би одну двозначність іншою.
+    (N'document.tablesFilled',           N'en', N'Tables filled completely: {filled} of {total}', 1),
     (N'document.validate',               N'en', N'Validate', 1),
     (N'document.validationClean',        N'en', N'Validation passed with no errors.', 1),
     (N'document.validationErrors',       N'en', N'Validation found {count} error(s).', 1),
@@ -1339,7 +1630,13 @@ USING (VALUES
     (N'document.exportFormatJson',       N'en', N'JSON', 1),
     (N'document.exportBuilding',         N'en', N'Building...', 1),
     (N'document.exportReady',            N'en', N'Download the workbook', 1),
+    -- V-10: підпис посилання — за форматом побудованого файлу.
+    (N'document.exportReadyCsv',         N'en', N'Download the CSV archive', 1),
+    (N'document.exportReadyJson',        N'en', N'Download the JSON file', 1),
     (N'document.exportFailed',           N'en', N'Export failed.', 1),
+    -- Меню рідкісних і небезпечних дій документа (зміна ключа, видалення):
+    -- поза рядком щоденних кнопок, праворуч.
+    (N'document.moreActions',            N'en', N'More', 1),
     (N'document.noSheets',               N'en', N'This document has no sheets for the selected period.', 1),
     -- Порівняння версій подання документа. ⚠ Перелік змін обрізає сервер, тож
     -- банер каже прямо: за показаним можуть бути ще зміни.
@@ -1371,16 +1668,21 @@ USING (VALUES
     (N'grid.loadFailed',                 N'en', N'The table could not be loaded.', 1),
     (N'grid.undo',                       N'en', N'Undo', 1),
     (N'grid.redo',                       N'en', N'Redo', 1),
-    (N'grid.save',                       N'en', N'Save ({count})', 1),
+    -- ⛔ `U-16`: кнопка називає те, що справді робить. Ключа `grid.save`
+    -- («Save ({count})») більше немає: збереження в сітці — автоматичне
+    -- (`autosave.ts`), і лічильник у кнопці набирався РІВНО тоді, коли
+    -- сервер правку відхилив. Кнопка тепер з'являється лише в цьому випадку
+    -- і пропонує саме повтор.
+    (N'grid.retrySave',                  N'en', N'Retry save ({count})', 1),
     (N'grid.edit',                       N'en', N'Edit {column}', 1),
     (N'grid.paste',                      N'en', N'Paste {count} cell(s)', 1),
     (N'grid.conflictTitle',              N'en', N'Someone changed these cells', 1),
-    (N'grid.conflictHint',               N'en', N'{count} cell(s) were changed by another user. Review them before saving again.', 1),
+    (N'grid.conflictHint',               N'en', N'{count} cell(s) were changed by someone else after this table was loaded. Keep your values to overwrite theirs, or discard yours to see theirs.', 1),
     -- ⛔ `BE-06`: перелік, а не саме лише число. До цих рядків сітка показувала
     -- лише лічильник, бо сервер і не мав чого сказати: чиє значення, хто і коли
     -- заповнювалися заглушками, і час чужої правки дорівнював поточному часу
     -- сервера. Рішення «беру їхнє / лишаю своє» ухвалюють саме за цими трьома.
-    (N'grid.conflictItem',               N'en', N'Row {row}, column {column}: their value {value} — {user}, {time}', 1),
+    (N'grid.conflictItem',               N'en', N'Row {row}, column {column}: yours {yours}, theirs {value} — {user}, {time}', 1),
     -- ⚠ Стеля переліку — 100 комірок: решту показує лічильник, бо людина, яка
     -- бачить сто рядків із трьохсот, вважає, що бачить усі.
     (N'grid.conflictMore',               N'en', N'And {count} more changed cell(s) not listed here.', 1),
@@ -1397,7 +1699,13 @@ USING (VALUES
     (N'grid.roundedShow',                N'en', N'Show the list', 1),
     (N'grid.saving',                     N'en', N'Saving...', 1),
     (N'grid.saved',                      N'en', N'Saved', 1),
-    (N'grid.saveError',                  N'en', N'Not saved — see the error above', 1),
+    -- ⛔ `U-17`: одна відмова — одне повідомлення. Обидва місця (позначка в
+    -- рядку кнопок і банер із причиною) показували ОДИН ключ, тобто той
+    -- самий текст двічі поруч, і верхній напис відсилав «вище» до того, що
+    -- насправді нижче. Тепер позначка — два слова власним ключем, а банер
+    -- каже, ЧИЯ це відмова; сама причина стоїть у його тілі.
+    (N'grid.saveFailedMark',             N'en', N'Not saved', 1),
+    (N'grid.saveError',                  N'en', N'The server rejected this change', 1),
     -- ⛔ `BE-05`: статус-рядок перерахунку. Запис і перерахунок — різні моменти:
     -- комірка вже в базі, а обчислені колонки ще ні, і до появи `jobId` у
     -- відповіді сказати про це було нічим.
@@ -1447,6 +1755,7 @@ USING (VALUES
     (N'deny.BusinessRule',               N'en', N'A domain rule blocks this change.', 1),
     (N'deny.SimulationReadOnly',         N'en', N'Permission simulation: writing is disabled regardless of permissions.', 1),
     (N'deny.OutsidePermitWindow',        N'en', N'Outside the permit validity window: the permit did not cover this month.', 1),
+    (N'deny.InsufficientGrantLevel',     N'en', N'Your grant level is too low for this action: ask for a higher grant level, not a new grant.', 1),
     (N'deny.Unknown',                    N'en', N'Editing is blocked: {reason}.', 1),
     (N'password.title',                  N'en', N'Change password', 1),
     (N'password.current',                N'en', N'Current password', 1),
@@ -1454,7 +1763,7 @@ USING (VALUES
     (N'password.repeat',                 N'en', N'Repeat the new password', 1),
     (N'password.submit',                 N'en', N'Change password', 1),
     (N'password.mismatch',               N'en', N'The two entries do not match.', 1),
-    (N'password.policy',                 N'en', N'At least 12 characters, with upper case, lower case and a digit.', 1),
+    (N'password.policy',                 N'en', N'At least 12 characters.', 1),
     (N'templates.title',                 N'en', N'Templates', 1),
     (N'templates.code',                  N'en', N'Code', 1),
     (N'templates.versions',              N'en', N'Versions', 1),
@@ -1473,6 +1782,15 @@ USING (VALUES
     (N'registries.parent',               N'en', N'Parent', 1),
     (N'registries.fields',               N'en', N'Fields', 1),
     (N'registries.validity',             N'en', N'Valid', 1),
+    -- V-08: розклад відмови «на запис посилаються» за видами (`referenceKinds`).
+    (N'registries.referencedBy',                         N'en', N'Referenced by', 1),
+    (N'registries.referenceKind.cells',                  N'en', N'Document cells', 1),
+    (N'registries.referenceKind.headerValues',           N'en', N'Document header fields', 1),
+    (N'registries.referenceKind.registryValues',         N'en', N'Other registry entries (lookup fields)', 1),
+    (N'registries.referenceKind.childEntries',           N'en', N'Child entries', 1),
+    (N'registries.referenceKind.links',                  N'en', N'Cascade links', 1),
+    (N'registries.referenceKind.methodologyConstants',   N'en', N'Methodology constants', 1),
+    (N'registries.referenceKind.methodologySubstances',  N'en', N'Methodology substances', 1),
     (N'registries.hierarchical',         N'en', N'hierarchical', 1),
     (N'registries.temporal',             N'en', N'time-bound', 1),
     -- ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
@@ -1500,6 +1818,66 @@ USING (VALUES
     (N'expressions.resultType',          N'en', N'Result type: {type}', 1),
     (N'expressions.startTyping',         N'en', N'Type an expression', 1),
     (N'expressions.startTypingHint',     N'en', N'It is checked exactly as publishing would check it.', 1),
+    -- ⛔ IntelliSense редактора виразів (2026-09-24): пояснення замість порожнього
+    -- переліку. Порожнеча після `[` чи `CST.` читалася як «підказок тут немає»,
+    -- хоча насправді бракувало обраної версії (`features/expressions/describe.ts`).
+    (N'expressions.hint.pickTemplateVersion',        N'en', N'Pick a template version to get column suggestions', 1),
+    (N'expressions.hint.pickTemplateVersionHeaders', N'en', N'Pick a template version to get header field suggestions', 1),
+    (N'expressions.hint.noHeaders',                  N'en', N'This template version has no header fields', 1),
+    (N'expressions.hint.pickMethodologyVersion',     N'en', N'Pick a methodology version to get constant, formula and argument suggestions', 1),
+    (N'expressions.hint.noConstants',                N'en', N'This methodology version has no constants', 1),
+    (N'expressions.hint.noFormulas',                 N'en', N'This methodology version has no formulas yet', 1),
+    (N'expressions.hint.noArguments',                N'en', N'No arguments: the methodology has no active binding to a source table', 1),
+
+    -- Довідка під курсором миші і в переліку (`describe.ts`).
+    (N'expressions.doc.column',    N'en', N'Column of table {table}', 1),
+    (N'expressions.doc.row',       N'en', N'Row of table {table}', 1),
+    (N'expressions.doc.table',     N'en', N'Table on sheet {sheet}', 1),
+    (N'expressions.doc.sheet',     N'en', N'Sheet', 1),
+    (N'expressions.doc.type',      N'en', N'Type: {type}', 1),
+    (N'expressions.doc.unit',      N'en', N'Unit: {unit}', 1),
+    (N'expressions.doc.constant',  N'en', N'Methodology constant', 1),
+    (N'expressions.doc.formula',   N'en', N'Result of another formula of this version', 1),
+    (N'expressions.doc.argument',  N'en', N'Field of the source row', 1),
+    (N'expressions.doc.header',    N'en', N'Document header field', 1),
+
+    -- ⚠ Короткий опис функції — ключ за ім'ям у нижньому регістрі: `ROUND`
+    -- шаблону і `Round` методології описує той самий рядок. Функцію без рядка
+    -- підказка показує лише сигнатурою (`hasText`), тож новій функції сервера
+    -- рядок тут не обов'язковий. Семантика — `02b` §7, §8.
+    (N'expressions.fn.abs',           N'en', N'Absolute value.', 1),
+    (N'expressions.fn.average',       N'en', N'Average of non-empty values; empty set gives null.', 1),
+    (N'expressions.fn.convert',       N'en', N'Converts a number from one unit to another — the only way to change a unit.', 1),
+    (N'expressions.fn.count',         N'en', N'Number of non-empty values.', 1),
+    (N'expressions.fn.if',            N'en', N'Returns the second argument when the condition is true, otherwise the third.', 1),
+    (N'expressions.fn.iferror',       N'en', N'Returns the fallback when the value is a calculation error (not when it is empty).', 1),
+    (N'expressions.fn.max',           N'en', N'Largest of the values.', 1),
+    (N'expressions.fn.min',           N'en', N'Smallest of the values.', 1),
+    (N'expressions.fn.product',       N'en', N'Product of non-empty values; empty set gives 1.', 1),
+    (N'expressions.fn.regfield',      N'en', N'Field of the registry record a lookup cell points to.', 1),
+    (N'expressions.fn.round',         N'en', N'Rounds to the given number of decimal places.', 1),
+    (N'expressions.fn.sum',           N'en', N'Sum of the values; empty values are ignored, empty set gives 0.', 1),
+    (N'expressions.fn.sumif',         N'en', N'Sum over the rows that satisfy the condition.', 1),
+    (N'expressions.fn.acos',          N'en', N'Arc cosine, in radians.', 1),
+    (N'expressions.fn.asin',          N'en', N'Arc sine, in radians.', 1),
+    (N'expressions.fn.atan',          N'en', N'Arc tangent, in radians.', 1),
+    (N'expressions.fn.ceiling',       N'en', N'Smallest integer not less than the value.', 1),
+    (N'expressions.fn.cos',           N'en', N'Cosine of an angle in radians.', 1),
+    (N'expressions.fn.exp',           N'en', N'e raised to the given power.', 1),
+    (N'expressions.fn.floor',         N'en', N'Largest integer not greater than the value.', 1),
+    (N'expressions.fn.ieeeremainder', N'en', N'IEEE remainder of a divided by b (not the same as %).', 1),
+    (N'expressions.fn.ln',            N'en', N'Natural logarithm.', 1),
+    (N'expressions.fn.log',           N'en', N'Logarithm of a to base b.', 1),
+    (N'expressions.fn.log10',         N'en', N'Base-10 logarithm.', 1),
+    (N'expressions.fn.pow',           N'en', N'a raised to the power b.', 1),
+    (N'expressions.fn.sign',          N'en', N'Sign of the value: -1, 0 or 1.', 1),
+    (N'expressions.fn.sin',           N'en', N'Sine of an angle in radians.', 1),
+    (N'expressions.fn.sqrt',          N'en', N'Square root.', 1),
+    (N'expressions.fn.tan',           N'en', N'Tangent of an angle in radians.', 1),
+    (N'expressions.fn.truncate',      N'en', N'Integer part of the value.', 1),
+    (N'expressions.fn.substance',     N'en', N'Property of the substance being calculated, by code.', 1),
+    (N'expressions.fn.ifs',           N'en', N'Value of the first pair whose condition is true.', 1),
+    (N'expressions.fn.in',            N'en', N'True when the first argument equals any of the others.', 1),
     (N'expressions.skippedTitle',        N'en', N'Not checked here', 1),
     (N'expressions.runTests',            N'en', N'Run the golden set', 1),
     (N'expressions.testsGreen',          N'en', N'Green', 1),
@@ -1784,17 +2162,17 @@ USING (VALUES
     (N'periods.project',                 N'en', N'Project', 1),
     (N'periods.key',                     N'en', N'Period', 1),
     (N'periods.sequence',                N'en', N'Sequence', 1),
-    (N'periods.range',                   N'en', N'Range', 1),
+    (N'periods.range',                   N'en', N'Accepts data', 1),
     -- ⛔ Q-337, lane 2 UI-аудиту: сторінка показувала «Range»/«Grace until»
     -- без жодного пояснення, а мітка політики `+15/45` (форма створення
     -- проєкту) показує лише два з чотирьох чисел і не на цій сторінці.
     -- Тултипи нижче пояснюють похідну формулу в термінах РЕАЛЬНИХ чисел
     -- політики проєкту (`{open}`/`{grace}`/`{hardClose}`/`{code}` —
     -- підставляються з `PeriodCalendarDto.Policy`, а не вигадані).
-    (N'periods.rangeHint',               N'en', N'Start = period start + Open offset ({open} d). End = period end + Hard-close offset ({hardClose} d, policy {code}): the period is fully Closed after this moment, and even late edits are no longer accepted.', 1),
+    (N'periods.rangeHint',               N'en', N'From = period start + Open offset ({open} d). To = the last day before the hard close, period end + Hard-close offset ({hardClose} d, policy {code}): after it the period is Closed and even late edits are refused. Dates are in the site time zone.', 1),
     (N'periods.state',                   N'en', N'State', 1),
-    (N'periods.grace',                   N'en', N'Grace until', 1),
-    (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}). It stays in Grace until the end of Range (Hard-close, +{hardClose} d).', 1),
+    (N'periods.grace',                   N'en', N'Late edits from', 1),
+    (N'periods.graceHint',               N'en', N'The moment the period leaves Open and enters Grace (still writable, but edits are flagged as late): period end + Grace offset ({grace} d, policy {code}), in the site time zone. It stays in Grace until the hard close (+{hardClose} d).', 1),
     (N'periods.activate',                N'en', N'Activate project', 1),
     (N'periods.activated',               N'en', N'The project is active: periods now follow their dates.', 1),
     (N'periods.draftHint',               N'en', N'The project is a draft: periods stay closed until it is activated.', 1),
@@ -1829,7 +2207,9 @@ USING (VALUES
     (N'jobs.title',                      N'en', N'Jobs', 1),
     (N'jobs.id',                         N'en', N'Job id', 1),
     (N'jobs.watch',                      N'en', N'Watch', 1),
-    (N'jobs.recentEmpty',                N'en', N'No jobs yet.', 1),
+    (N'jobs.recentEmpty',                N'en', N'No jobs yet', 1),
+    -- V-10: результат задачі буває книгою, ZIP-архівом CSV і JSON.
+    (N'jobs.resultDownload',             N'en', N'Download the file', 1),
     -- Шухляда «My tasks» у шапці (BE-08): власні фонові задачі, усім ролям.
     (N'jobs.myTasks',                    N'en', N'My tasks', 1),
     (N'jobs.myTasksClose',               N'en', N'Close my tasks', 1),
@@ -1905,8 +2285,8 @@ USING (VALUES
     (N'security.noUsersHint',            N'en', N'Domain users appear after their first sign-in; local accounts are created here.', 1),
     (N'grants.empty',                    N'en', N'This role has no grants', 1),
     (N'grants.emptyHint',                N'en', N'Permissions say what a person can do; grants say to which projects. Without a grant the role opens nothing.', 1),
-    (N'periods.noProjects',              N'en', N'No projects yet', 1),
-    (N'periods.noProjectsHint',          N'en', N'A project defines the reporting calendar: without one there are no periods.', 1),
+    (N'periods.noProjects',              N'en', N'No projects available to you', 1),
+    (N'periods.noProjectsHint',          N'en', N'The list shows only projects you have been granted access to. If a project should be here, ask an administrator for access.', 1),
     (N'periods.noPeriods',               N'en', N'This project has no periods', 1),
     (N'periods.noPeriodsHint',           N'en', N'Periods are generated from the project calendar; a draft project has none until it is activated.', 1),
     (N'sources.empty',                   N'en', N'No collection sources configured', 1),
@@ -2041,7 +2421,7 @@ USING (VALUES
     (N'grid.formulaBarEmpty',            N'en', N'Select a cell to see what is in it', 1),
     (N'grid.formulaBarAddress',          N'en', N'{row} · {column}', 1),
     (N'grid.formulaBarCalculated',       N'en', N'Calculated', 1),
-    (N'grid.formulaBarNoExpression',     N'en', N'The expression is not sent with the table: open the template version to read it', 1),
+    (N'grid.formulaBarNoExpression',     N'en', N'Calculated by the system — by a template formula or by the methodology bound to this column. The expression is not sent with the table.', 1),
     (N'grid.formulaBarValue',            N'en', N'Value: {value}', 1),
     (N'grid.formulaBarNoValue',          N'en', N'(empty)', 1),
     (N'grid.totalsRowLabel',             N'en', N'Total', 1),
@@ -2133,6 +2513,8 @@ USING (VALUES
     (N'import.blockedTitle',             N'en', N'This file cannot be applied as it is', 1),
     (N'import.blockedHint',              N'en', N'Partial application is not allowed: fix the file or refresh the sheet and import again.', 1),
     (N'import.noChanges',                N'en', N'The file matches the sheet: there is nothing to apply.', 1),
+    -- V-10: зміна й відмова називають таблицю (ключі R1/C1 однакові в десятках таблиць).
+    (N'import.table',                    N'en', N'Table', 1),
     (N'import.row',                      N'en', N'Row', 1),
     (N'import.column',                   N'en', N'Column', 1),
     (N'import.was',                      N'en', N'Was', 1),
@@ -2140,6 +2522,16 @@ USING (VALUES
     (N'import.reason',                   N'en', N'Reason', 1),
     (N'import.apply',                    N'en', N'Apply', 1),
     (N'import.applied',                  N'en', N'The import has been applied.', 1),
+    -- V-10: причини відмов прев'ю — мовою інтерфейсу, за messageKey відмови.
+    -- V-11: документ заводиться на версії шаблону проєкту.
+    (N'err.ECR-DOC-0422.versionNotProject', N'en', N'A document is created on the template version of its project; a different version is not accepted.', 1),
+    (N'import.rejectedCell',             N'en', N'This value cannot be imported.', 1),
+    (N'err.ECR-CELL-4221.importCalculated', N'en', N'The system calculates this cell, and the file changes its value: the value from the file is not applied.', 1),
+    (N'err.ECR-ROW-0404.importNoRow',    N'en', N'The document has no row with this key: import does not create rows.', 1),
+    (N'err.ECR-ROW-0404.importOutsideRows', N'en', N'This value is outside the rows of the table: import does not create rows. Add the row in the sheet first, then export again.', 1),
+    (N'err.ECR-CELL-0422.importIntegerDigits', N'en', N'The number has more than 18 digits before the decimal point: storage cannot hold it.', 1),
+    (N'err.ECR-IMP-0422.importInstanceMissing', N'en', N'This table from the file is not in the document for this period: the structure was probably changed after export.', 1),
+    (N'err.ECR-IMP-0422.importTableMissing', N'en', N'This table from the file is not in the template version in force.', 1),
 
     (N'grid.addRow',                     N'en', N'Add row', 1),
 
@@ -2153,6 +2545,11 @@ USING (VALUES
     (N'templates.versionCreated',        N'en', N'The version has been created from the latest one.', 1),
     (N'templates.versionNumber',         N'en', N'Version number', 1),
     (N'templates.versionNumberHint',     N'en', N'Major.Minor.Patch.Build — the number says what kind of change this is.', 1),
+    -- U-19: перелік версій на картці шаблону (`TemplateVersionsSection`).
+    (N'templates.versionStatus',         N'en', N'Status', 1),
+    (N'templates.versionPublishedAt',    N'en', N'Published', 1),
+    (N'templates.versionsEmpty',         N'en', N'No versions yet', 1),
+    (N'templates.versionsEmptyHint',     N'en', N'A version holds the sheets and columns of the template. Create the first one to lay out its structure.', 1),
 
     -- Картка шаблону (`UI-09`): перейменування, архівування, повернення в обіг.
     -- ⚠ `templates.card` — назва РІВНЯ, а не заглушка замість назви шаблону:
@@ -2178,12 +2575,12 @@ USING (VALUES
 
     (N'version.clone',                   N'en', N'Clone version', 1),
     (N'version.diff',                    N'en', N'Compare versions', 1),
-    (N'version.diffOther',               N'en', N'Compare with version id', 1),
+    (N'version.diffOther',               N'en', N'Compare with version', 1),
     -- ⛔ Аудит-пас 5: старий текст надсилав до переліку шаблонів по ідентифікатор
     -- версії, а той список показує лише номер версії (`1.0.0.0`), не id —
     -- ідентифікатор видно ЛИШЕ в адресному рядку відкритої версії.
-    (N'version.diffOtherHint',           N'en', N'The other version to compare against — open it and copy the id from its URL (…/versions/{id}).', 1),
-    (N'version.diffPick',                N'en', N'Enter the other version', 1),
+    (N'version.diffOtherHint',           N'en', N'Another version of this template. Changes are always shown from the older version to the newer one.', 1),
+    (N'version.diffPick',                N'en', N'Pick the other version', 1),
     (N'version.diffSame',                N'en', N'The versions are structurally identical', 1),
     (N'version.diffSameHint',            N'en', N'Nothing to migrate: documents can move between them freely.', 1),
     (N'version.diffElement',             N'en', N'Element', 1),
@@ -2210,6 +2607,8 @@ USING (VALUES
     (N'version.cloned',                  N'en', N'The clone is ready and open.', 1),
     (N'version.presentation',            N'en', N'Appearance', 1),
     (N'version.patched',                 N'en', N'Applied; the version is now at revision {revision}.', 1),
+    -- Підпис лічильника поруч із заголовком версії (раніше — голе `r0`).
+    (N'version.presentationRevision',    N'en', N'Appearance revision {revision}', 1),
     (N'version.headerHint',              N'en', N'The heading operators see above the column.', 1),
     (N'version.displayFormat',           N'en', N'Display format', 1),
     (N'version.displayFormatHint',       N'en', N'How the number is shown; it does not change the stored value.', 1),
@@ -2276,6 +2675,8 @@ USING (VALUES
     (N'security.deleteRoleConfirm',      N'en', N'Delete role "{code}"? This cannot be undone.', 1),
     (N'security.roleDeleteRefused',      N'en', N'The role cannot be deleted', 1),
     (N'security.roleAssignments',        N'en', N'Assignments', 1),
+    (N'security.roleApprovalSteps',      N'en', N'Approval route steps', 1),
+    (N'security.rolePeriodAccessRules',  N'en', N'Period access rules', 1),
     -- Ролі, призначені групам каталогу (ФВ-6.15): перелік, відкликання, призначення.
     (N'groupRoles.title',                N'en', N'Roles assigned to directory groups', 1),
     (N'groupRoles.group',                N'en', N'Group', 1),
@@ -2344,7 +2745,7 @@ USING (VALUES
     (N'registries.editEntry',            N'en', N'Edit', 1),
     (N'registries.entryCreated',         N'en', N'The entry has been created.', 1),
     (N'registries.entrySaved',           N'en', N'The entry has been saved.', 1),
-    (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change; the entry itself is never deleted.', 1),
+    (N'registries.entryCodeHint',        N'en', N'Cells store the entry id, so the code can change. An entry that anything still references cannot be removed — close it with an end date instead.', 1),
     -- Імпорт записів довідника з CSV (BE-24 крок 3). ⚠ Перший перегляд іде
     -- сухим прогоном (dryRun): файл не застосовується, доки людина не
     -- натисне «Apply». Файл із помилковими рядками не застосовується взагалі —
@@ -2519,11 +2920,6 @@ USING (VALUES
     -- інтерфейс, бо форма не мала звідки взяти кількість.
     (N'periods.customCount',             N'en', N'Number of periods', 1),
     (N'periods.customCountHint',         N'en', N'Must divide the year evenly (1..12): 5 would leave November and December outside any period.', 1),
-    -- Q-298: підказка біля недоступної кнопки «Зберегти» у формі створення
-    -- проєкту — перелік бракуючих полів замість мовчазної недоступності
-    -- кнопки без жодного пояснення (`CreateDocumentModal.tsx` має той самий
-    -- дефект і поки що без цього фіксу).
-    (N'periods.stillNeeded',             N'en', N'Still needed: {fields}', 1),
     -- T6/#37: CRUD політик періодів — до цього завести чи змінити політику
     -- можна було лише сідингом або рукою DBA.
     (N'periods.managePolicies',          N'en', N'Manage policies', 1),
@@ -2666,7 +3062,7 @@ USING (VALUES
     -- і «що було з ЦІЄЮ коміркою» можна було поставити лише читаючи сторінки
     -- очима — тобто ніяк, бо сторінок за тиждень тисячі.
     (N'audit.author',                    N'en', N'By user', 1),
-    (N'audit.authorHint',                N'en', N'User id; leave empty for everyone.', 1),
+    (N'audit.authorHint',                N'en', N'Who made the change; leave empty for everyone.', 1),
     (N'audit.originAny',                 N'en', N'Any origin', 1),
     (N'audit.lateOnly',                  N'en', N'Late edits only', 1),
     (N'audit.rowKey',                    N'en', N'Row key', 1),
@@ -3140,7 +3536,6 @@ USING (VALUES
     -- до того самого класу полів, що `precision`/`lookup`/`unit` уже мали —
     -- `TemplateColumnDto` (GET …/structure) його теж не несе (`D-137`), тож
     -- редагування колонки без кешу цього сеансу так само стерло б стиль.
-    (N'columns.partialDataWarning',      N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.', 1),
     (N'columns.errCode',                 N'en', N'Give the column a code: it is how the column is addressed.', 1),
     -- ⛔ Q-338: та сама причина, що `tableDef.errCodeInvalid` (Q-336).
     (N'columns.errCodeInvalid',          N'en', N'The code can contain only Latin letters, digits, and underscores, and must start with a letter.', 1),
@@ -3372,8 +3767,71 @@ USING (VALUES
     -- ПОВІДОМЛЕННЯ в редакторі формул, а не смерть процесу від
     -- StackOverflowException, якого в .NET не перехоплює жоден catch.
     (N'expr.nestingTooDeep',                   N'en', N'The expression is nested deeper than {max} levels.', 1),
+    -- V-03: дві формули в одну комірку. Адреси — у нотації мови виразів
+    -- (`RTOT·*`, `*·CFRM`, `RTOT·CFRM`), а не словами.
+    (N'expr.publish.formulaTargetConflict',    N'en', N'Formulas {first} and {second} both calculate cell {cell} in table "{table}": a cell can be calculated by only one formula. Remove one of the two formulas.', 1),
+    -- V-19: зауваження резолвера посилань (`ReferenceResolver`, `RangeExpander`,
+    -- `DependencyExtractor`) — раніше лише українським реченням без ключа.
+    (N'expr.ref.unknownColumn',                N'en', N'Column "{column}" does not exist in table "{table}".', 1),
+    (N'expr.ref.unknownRow',                   N'en', N'Row "{row}" does not exist in table "{table}".', 1),
+    (N'expr.ref.unknownTable',                 N'en', N'Table "{sheet}.{table}" does not exist in this template version.', 1),
+    (N'expr.ref.unknownHeaderField',           N'en', N'Header field "{name}" does not exist in this template version.', 1),
+    (N'expr.ref.ownTableMissing',              N'en', N'Table {tableDefId} that owns the expression is not in the template structure.', 1),
+    (N'expr.ref.rowKeyInDynamicTable',         N'en', N'Table "{table}" is dynamic: a specific row ("{row}") cannot be referenced, only a predicate.', 1),
+    (N'expr.ref.predicateInFixedTable',        N'en', N'Table "{table}" has fixed rows: a predicate is not needed, the rows are known in advance.', 1),
+    (N'expr.ref.unknownRowSelector',           N'en', N'Unknown row selector.', 1),
+    (N'expr.ref.monthPlaceholderOutsideColumn', N'en', N'The Month placeholder can only be used in a formula bound to a month column.', 1),
+    (N'expr.ref.unknownRangeBound',            N'en', N'Row "{row}" does not exist in table "{table}": the range bound cannot be resolved.', 1),
+    (N'expr.ref.reversedRange',                N'en', N'Range "{from}:{to}" is written in reverse order.', 1),
+    (N'expr.ref.rangeTableUnavailable',        N'en', N'The range cannot be expanded: its table is not available.', 1),
     -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
     (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
+    -- V-20: діагностики зв'язувача, поради діалекту методологій і цикли — ключами каталогу.
+    (N'expr.unknownFunctionCase', N'en', N'Function "{name}" is not available in the {dialect} dialect. In the legacy engine (NCalc 1.3.8) names are case-sensitive: write "{exact}".', 1),
+    (N'expr.unknownFunctionReplacement.POWER', N'en', N'Function "{name}" is not available in the {dialect} dialect. In the legacy engine (NCalc 1.3.8) use Pow(a, b) instead.', 1),
+    (N'expr.unknownFunctionReplacement.TRUNC', N'en', N'Function "{name}" is not available in the {dialect} dialect. In the legacy engine (NCalc 1.3.8) use Truncate(a) instead — it truncates to an integer only; to n digits write Truncate(a * 10^n) / 10^n.', 1),
+    (N'expr.unknownFunctionReplacement.MOD', N'en', N'Function "{name}" is not available in the {dialect} dialect. In the legacy engine (NCalc 1.3.8) use the % operator instead.', 1),
+    (N'expr.unknownFunctionReplacement.SWITCH', N'en', N'Function "{name}" is not available in the {dialect} dialect. In the legacy engine (NCalc 1.3.8) use nested if(condition, then, else) instead.', 1),
+    (N'expr.unknownFunctionReplacement.COALESCE', N'en', N'Function "{name}" is not available in the {dialect} dialect, and nothing replaces it: null does not occur at run time in the methodology dialect.', 1),
+    (N'expr.unknownFunctionReplacement.IFERROR', N'en', N'Function "{name}" is not available in the {dialect} dialect, and nothing replaces it: an evaluation error is not caught in the methodology dialect.', 1),
+    (N'expr.predicate.functionCall', N'en', N'Calling function "{name}" in a predicate is not allowed: the predicate is evaluated for every row of the table.', 1),
+    (N'expr.predicate.crossPeriod', N'en', N'A cross-period reference is not allowed in a predicate: filtering this period must not read another one.', 1),
+    (N'expr.predicate.nested', N'en', N'A nested predicate is not allowed.', 1),
+    (N'expr.predicate.sameRowOnly', N'en', N'A predicate may reference only columns of the same row.', 1),
+    (N'expr.predicate.ternary', N'en', N'The ternary operator is not allowed in a predicate.', 1),
+    (N'expr.report.resultType', N'en', N'A result of type {expected} was expected, but the expression gives {actual}.', 1),
+    (N'expr.report.ownRowColumnsOnly', N'en', N'A report rule sees only the columns of its own row: [Code].', 1),
+    (N'expr.report.columnMissing', N'en', N'The report row has no column "{column}".', 1),
+    (N'expr.report.parameterMissing', N'en', N'The report has no parameter "@{name}".', 1),
+    (N'expr.report.scope', N'en', N'A report rule sees only the columns of its own row and the report parameters.', 1),
+    (N'expr.report.unknownColumnType', N'en', N'Unknown type "{type}" of column "{name}".', 1),
+    (N'expr.report.unknownParameterType', N'en', N'Unknown type "{type}" of parameter "{name}".', 1),
+    (N'expr.report.unknownResultType', N'en', N'Unknown expected result type "{type}".', 1),
+    (N'expr.type.notNeedsBoolean', N'en', N'Negation applies only to a Boolean value.', 1),
+    (N'expr.type.signNeedsNumber', N'en', N'A unary sign applies only to a number.', 1),
+    (N'expr.type.datesNotAdded', N'en', N'Dates cannot be added; the difference of two dates is a number of days.', 1),
+    (N'expr.type.logicalNeedsBoolean', N'en', N'A logical operation needs Boolean operands.', 1),
+    (N'expr.type.incomparable', N'en', N'Comparison of incompatible types: {left} and {right}.', 1),
+    (N'expr.type.conditionNeedsBoolean', N'en', N'The condition must be Boolean.', 1),
+    (N'expr.type.ifNeedsCondition', N'en', N'The first argument of IF must be a condition.', 1),
+    (N'expr.type.arithmeticNeedsNumber', N'en', N'Arithmetic expects a number, but the operand is of type {actual}.', 1),
+    (N'expr.unit.branchesDiffer', N'en', N'The branches of a condition must be in the same unit.', 1),
+    (N'expr.unit.addNeedsConvert', N'en', N'Adding values in different units needs an explicit CONVERT.', 1),
+    (N'expr.unit.productUndeclared', N'en', N'The product of two dimensioned quantities has no declared unit.', 1),
+    (N'expr.unit.inverseUndeclared', N'en', N'Dividing a dimensionless value by a dimensioned one has no declared unit.', 1),
+    (N'expr.unit.derivedMissing', N'en', N'The unit catalogue (uom.Unit) has no derived unit for this division.', 1),
+    (N'expr.unit.compareNeedsConvert', N'en', N'Comparing values in different units needs an explicit CONVERT.', 1),
+    (N'expr.unit.rowScopedAggregate', N'en', N'Aggregating a column with a per-row unit needs an explicit CONVERT to a common unit.', 1),
+    (N'expr.unit.aggregateNeedsConvert', N'en', N'Aggregating values in different units needs an explicit CONVERT.', 1),
+    (N'expr.unit.convertArity', N'en', N'CONVERT takes three arguments: the value, the source unit and the target unit.', 1),
+    (N'expr.unit.convertTargetLiteral', N'en', N'The target unit of CONVERT must be a literal, not an expression: otherwise the unit of the result is unknown until run time.', 1),
+    (N'expr.unit.unknownUnit', N'en', N'Unit "{unit}" does not exist in the unit catalogue (uom.Unit).', 1),
+    (N'expr.unit.convertSourceForm', N'en', N'The source unit of CONVERT is a literal or a reference to a unit column.', 1),
+    (N'expr.unit.convertDimensions', N'en', N'CONVERT from "{from}" to "{to}" is impossible: the dimensions differ. That needs a context coefficient, which belongs to a methodology.', 1),
+    (N'expr.unit.dimensionMismatch', N'en', N'The operands have different dimensions: no conversion between them is possible at all.', 1),
+    (N'expr.cycle', N'en', N'The formulas form a cycle: {path}.', 1),
+    (N'expr.cycleSelf', N'en', N'Formula "{name}" reads its own result. It has no evaluation order: it needs the value before the value exists. In the legacy system such a formula was silently never calculated.', 1),
+    (N'expr.cycleUnknownPath', N'en', N'The formulas form a cycle.', 1),
 
     -- /admin/health (`Q-304`): статуси перевірок будувалися одразу готовим
     -- українським реченням (`HealthCheckResult.Description`) — не через
@@ -3593,6 +4051,14 @@ USING (VALUES
     (N'notifications.saveRules',           N'en', N'Save rules', 1),
     (N'notifications.rulesSaved',          N'en', N'Rules saved.', 1),
 
+    -- ⚠ Власний текст блоку Rules, коли каналів нуль — НЕ той самий ключ, що
+    -- `notifications.noChannels`/`notifications.noChannelsHint` у `ChannelsPanel`
+    -- вище: ці два кажуть різні факти («каналів немає» проти «правил немає,
+    -- бо каналів немає»), і однаковий текст під різними заголовками виглядав
+    -- як зламаний рендер (`RulesMatrixPanel.tsx`).
+    (N'notifications.rulesNoChannels',     N'en', N'No rules yet', 1),
+    (N'notifications.rulesNoChannelsHint', N'en', N'Rules route events to channels; add a channel first, then rules can send to it.', 1),
+
     -- ⚠ `NotificationEventKind` — п'ять видів, усі приходять у `eventKinds`,
     -- навіть ті, на які правила ще немає.
     (N'notifications.event.JobFailed',              N'en', N'Background job failed', 1),
@@ -3609,7 +4075,278 @@ USING (VALUES
     (N'notifications.channelGone',         N'en', N'The channel has been deleted; the log entry remains.', 1),
     (N'notifications.showMore',            N'en', N'Show more', 1),
     (N'notifications.noDeliveries',        N'en', N'No deliveries yet', 1),
-    (N'notifications.noDeliveriesHint',    N'en', N'Nothing has been sent since the log was started.', 1)
+    (N'notifications.noDeliveriesHint',    N'en', N'Nothing has been sent since the log was started.', 1),
+
+    -- ══ Назви прав для матриці `/admin/security` (`U-11`) ══
+    --
+    -- ⛔ Матриця підписувала 41 колонку сирим кодом сервера
+    -- (`Calculation.EditConstant`, `System.ManageLocalization`, …). Той самий
+    -- клас, який за тиждень закривали чотири рази (#437, #438, #440, #441), —
+    -- тут він лишався в найширшому місці продукту.
+    --
+    -- ⛔ Ключ — `permission.<Code>`, де `<Code>` записаний ТАК, ЯК ЙОГО НАЗИВАЄ
+    -- СЕРВЕР (`sec.Permission.Code` вище в цьому ж файлі). Це вже усталена тут
+    -- форма для ключів, похідних від значення сервера (`status.<вид>.<стан>`,
+    -- `deny.<причина>`): будь-яке приведення регістру дало б другу
+    -- відповідність, яку нема кому перевірити — рівно `A7-02`.
+    --
+    -- ⚠ Код НЕ зникає з екрана: він лишається другим рядком підпису
+    -- (`TwoLine`, `KIT.md` §1.7). Адміністратор безпеки оперує саме кодами —
+    -- вони в журналі `DangerousPermissionsGranted`, у відмові
+    -- `err.ECR-AUTH-0403.permission` («Requires permission {permission}») і в
+    -- шаблонах складених ролей (`Report.%`). Причина — в `permissionLabel.ts`.
+    --
+    -- ⚠ Назва описує ДІЮ, а не повторює код словами: «Edit constant» нічого не
+    -- додає до `Calculation.EditConstant`; «Edit methodology constants» каже,
+    -- ЧОГО саме стосується право. Область приватна (1): матриця — за входом.
+    (N'permission.Template.View',            N'en', N'View templates', 1),
+    (N'permission.Template.Edit',            N'en', N'Edit template structure', 1),
+    (N'permission.Template.Publish',         N'en', N'Publish template versions', 1),
+
+    (N'permission.Registry.View',            N'en', N'View registries', 1),
+    (N'permission.Registry.EditData',        N'en', N'Edit registry rows', 1),
+    (N'permission.Registry.EditDefinition',  N'en', N'Edit registry structure', 1),
+    (N'permission.Registry.Publish',         N'en', N'Publish registry versions', 1),
+
+    (N'permission.Document.View',            N'en', N'View documents', 1),
+    (N'permission.Document.Create',          N'en', N'Create documents', 1),
+    (N'permission.Document.Delete',          N'en', N'Delete draft documents', 1),
+    (N'permission.Document.Import',          N'en', N'Import documents from a workbook', 1),
+    (N'permission.Document.Export',          N'en', N'Export documents', 1),
+    (N'permission.Document.Reopen',          N'en', N'Return a submitted document to draft', 1),
+    (N'permission.Document.ChangeKey',       N'en', N'Change the business key of a document', 1),
+
+    (N'permission.Project.Manage',           N'en', N'Manage projects', 1),
+
+    (N'permission.Period.Configure',         N'en', N'Configure reporting periods', 1),
+    (N'permission.Period.Reopen',            N'en', N'Reopen a closed period', 1),
+
+    (N'permission.Calculation.View',         N'en', N'View methodologies', 1),
+    (N'permission.Calculation.EditFormula',  N'en', N'Edit methodology formulas', 1),
+    (N'permission.Calculation.EditConstant', N'en', N'Edit methodology constants', 1),
+    (N'permission.Calculation.EditRule',     N'en', N'Edit methodology rules', 1),
+    (N'permission.Calculation.Publish',      N'en', N'Publish methodology versions', 1),
+    (N'permission.Calculation.Recalculate',  N'en', N'Run a recalculation', 1),
+    (N'permission.Calculation.ManageRequiredInputs', N'en', N'Manage required input columns', 1),
+
+    (N'permission.Report.ViewRegulatory',    N'en', N'View regulatory reports', 1),
+    (N'permission.Report.BuildSnapshot',     N'en', N'Build a report snapshot', 1),
+    (N'permission.Report.Export',            N'en', N'Export reports', 1),
+    (N'permission.Report.EditDefinition',    N'en', N'Author regulatory report definitions', 1),
+    (N'permission.Report.ViewCampaign',      N'en', N'View the campaign overview of all projects', 1),
+
+    (N'permission.Integration.View',         N'en', N'View collection sources', 1),
+    (N'permission.Integration.Manage',       N'en', N'Manage collection sources and their secrets', 1),
+    (N'permission.Integration.EditSchedule', N'en', N'Edit collection schedules', 1),
+
+    (N'permission.Uom.EditCatalog',          N'en', N'Edit the catalogue of units of measure', 1),
+
+    (N'permission.Security.ManageUsers',     N'en', N'Manage users', 1),
+    (N'permission.Security.ManageRoles',     N'en', N'Manage roles and their permissions', 1),
+    (N'permission.Security.ViewAudit',       N'en', N'View the audit log', 1),
+    (N'permission.Security.Simulate',        N'en', N'Simulate the access of another user', 1),
+
+    (N'permission.System.ViewHealth',        N'en', N'View system health and the job queue', 1),
+    (N'permission.System.RunJob',            N'en', N'Start and cancel background jobs', 1),
+    (N'permission.System.ManageLocalization', N'en', N'Manage interface strings and languages', 1),
+    (N'permission.System.ManageNotifications', N'en', N'Manage notification channels and rules', 1),
+
+    -- ══ Назви карток стану на `/admin/health` (`U-14`) ══
+    --
+    -- ⛔ Заголовками карток стояли імена реєстрації перевірок — `db`, `jobs`,
+    -- `sources` (`Program.cs`, `AddCheck<DatabaseHealthCheck>("db", …)`),
+    -- маленькими літерами, над цілком людським реченням, яке `Q-304` уже
+    -- перевело на цей самий каталог («Database is available.»).
+    --
+    -- ⚠ Ключ несе ІМ'Я перевірки так, як його реєструє сервер; невідома
+    -- перевірка показує саме ім'я, а не позначений ключ (`checkLabel`).
+    (N'health.check.db',                     N'en', N'Database', 1),
+    (N'health.check.jobs',                   N'en', N'Background jobs', 1),
+    (N'health.check.sources',                N'en', N'Collection sources', 1),
+
+    -- ══ Імпорт і фонові задачі: четвертий раунд UX-PASS (лінія B2) ══
+    --
+    -- ⛔ F-06: відмова типу — у ПЕРЕГЛЯДІ, тим самим читачем, що й запис.
+    -- Колонка стоїть у рядку переліку окремо, тож ключі без `{columnCode}`.
+    (N'err.ECR-CELL-0422.importExpectsNumber',     N'en', N'The value is not a number.', 1),
+    (N'err.ECR-CELL-0422.importExpectsBoolean',    N'en', N'The value is not true or false.', 1),
+    (N'err.ECR-CELL-0422.importExpectsDate',       N'en', N'The value is not a date.', 1),
+    (N'err.ECR-CELL-0422.importExpectsIdentifier', N'en', N'No entry with this code in the column''s registry or list of units.', 1),
+    (N'err.ECR-CELL-0422.importExpectsUnit',       N'en', N'No unit of measure with this code.', 1),
+    -- ⛔ F-24 і сусіди: відмови імпорту, що доти їхали українським реченням.
+    (N'err.ECR-IMP-0422.previewExpired',        N'en', N'The import preview has expired or was already applied. Load the file again.', 1),
+    (N'err.ECR-IMP-0422.previewUnreadable',     N'en', N'The saved import preview cannot be read. Load the file again.', 1),
+    (N'err.ECR-IMP-0422.previewOtherDocument',  N'en', N'This import preview was built for another document.', 1),
+    (N'err.ECR-IMP-0422.workbookOtherDocument', N'en', N'The workbook was exported from another document.', 1),
+    (N'err.ECR-IMP-0422.noMapSheet',            N'en', N'The workbook has no service sheet: only a file exported by this system can be imported.', 1),
+    (N'err.ECR-IMP-0422.mapBroken',             N'en', N'The service sheet of the workbook is empty or damaged. Export the document again.', 1),
+    -- Великий імпорт іде у фон (F-01): людина має знати, де шукати результат.
+    (N'import.queued',                          N'en', N'The import is large and is being applied in the background. Follow it in My tasks.', 1),
+    -- ⛔ F-27: у «My tasks» замість ідентифікатора файлу експорту.
+    (N'jobs.exportReady',                       N'en', N'The file is ready to download.', 1),
+    -- ══ Четвертий раунд UX, лінія D: шаблони й довідники ══
+    (N'common.close', N'en', N'Close', 0),
+    (N'columns.unit', N'en', N'Unit', 1),
+    (N'columns.unitHint', N'en', N'The unit values of this column are stored in. Once set, it can be changed but not cleared.', 1),
+    (N'columns.unitEmpty', N'en', N'No units found', 1),
+    (N'columns.usageDraftNote', N'en', N'This version is a draft: template formulas that read this column are recorded when the version is published, so they are not listed yet.', 1),
+    (N'columns.deleteTitle', N'en', N'Remove column "{name}"?', 1),
+    (N'sheets.deleteTitle', N'en', N'Remove sheet "{name}"?', 1),
+    (N'tableDef.deleteTitle', N'en', N'Remove table "{name}"?', 1),
+    (N'rows.deleteTitle', N'en', N'Remove row "{name}"?', 1),
+    (N'structure.deleteText', N'en', N'It is removed from this draft version. Formulas, rules and relations that refer to it must be fixed before the version can be published.', 1),
+    (N'validationRules.existing', N'en', N'Existing rules', 1),
+    (N'validationRules.empty', N'en', N'This table has no validation rules yet.', 1),
+    (N'validationRules.inactive', N'en', N'Inactive', 1),
+    (N'validationRules.deleteNamed', N'en', N'Remove rule {code}', 1),
+    (N'validationRules.deleteTitle', N'en', N'Remove rule "{code}"?', 1),
+    (N'validationRules.deleteText', N'en', N'The rule stops checking this table. This cannot be undone: to bring it back, create it again.', 1),
+    (N'version.titleOf', N'en', N'Template version {version}', 1),
+    (N'version.diffDirection', N'en', N'From v{from} to v{to}', 1),
+    (N'version.diffNoOther', N'en', N'This template has no other versions', 1),
+    (N'periodRules.sheet', N'en', N'Sheet', 1),
+    (N'periodRules.table', N'en', N'Table', 1),
+    (N'periodRules.role', N'en', N'Role', 1),
+    (N'periodRules.sourceColumn', N'en', N'Source column', 1),
+    (N'periodRules.sourceColumnEmpty', N'en', N'This version has no lookup columns', 1),
+    (N'periodRules.deleteTitle', N'en', N'Remove period access rule {id}?', 1),
+    (N'periodRules.deleteText', N'en', N'Cells it locked become editable again according to the remaining rules.', 1),
+    (N'tables.deleteRelationTitle', N'en', N'Remove relation "{code}"?', 1),
+    (N'tables.deleteRelationText', N'en', N'The target table stops taking its numbers from the source table.', 1),
+    (N'notifications.deleteChannelTitle', N'en', N'Remove channel "{name}"?', 1),
+    (N'notifications.deleteChannelText', N'en', N'Notifications routed to this channel stop being delivered.', 1),
+    (N'groupRoles.empty', N'en', N'No directory group has a role yet.', 1),
+    (N'groupRoles.revokeTitle', N'en', N'Revoke role {role} from {group}?', 1),
+    (N'groupRoles.revokeText', N'en', N'Every member of the group loses the permissions of this role.', 1),
+    (N'units.deleteTitle', N'en', N'Remove unit "{code}"?', 1),
+    (N'units.deleteChecking', N'en', N'Checking where the unit is used…', 1),
+    (N'registries.deleteEntryTitle', N'en', N'Remove entry "{code}"?', 1),
+    (N'registries.usageDataInDocuments', N'en', N'Values of this registry are already stored in documents', 1),
+    (N'err.ECR-TMPL-0422.diffOtherTemplate', N'en', N'Only versions of the same template can be compared.', 1),
+    (N'enum.dataType.String', N'en', N'Text', 1),
+    (N'enum.dataType.Int', N'en', N'Whole number', 1),
+    (N'enum.dataType.Decimal', N'en', N'Number', 1),
+    (N'enum.dataType.Bool', N'en', N'Yes / no', 1),
+    (N'enum.dataType.Date', N'en', N'Date', 1),
+    (N'enum.dataType.Lookup', N'en', N'Registry value', 1),
+    (N'enum.dataType.Unit', N'en', N'Unit per row', 1),
+    (N'enum.dataType.Formula', N'en', N'Formula', 1),
+    (N'enum.dataType.Calculated', N'en', N'Methodology result', 1),
+    (N'enum.rowKind.Group', N'en', N'Group', 1),
+    (N'enum.rowKind.Item', N'en', N'Item', 1),
+    (N'enum.rowKind.Balance', N'en', N'Balance', 1),
+    (N'enum.rowKind.Note', N'en', N'Note', 1),
+    (N'enum.rowKind.Header', N'en', N'Header', 1),
+    (N'enum.diffKind.Added', N'en', N'Added', 1),
+    (N'enum.diffKind.Removed', N'en', N'Removed', 1),
+    (N'enum.diffKind.Modified', N'en', N'Changed', 1),
+    (N'enum.diffKind.Presentation', N'en', N'Appearance', 1),
+    (N'enum.changeClass.Safe', N'en', N'Safe', 1),
+    (N'enum.changeClass.Presentation', N'en', N'Appearance only', 1),
+    (N'enum.changeClass.Guarded', N'en', N'Needs a migration', 1),
+    (N'enum.changeClass.Breaking', N'en', N'Breaking', 1),
+    (N'enum.periodRuleKind.AlwaysReadOnly', N'en', N'Always read-only', 1),
+    (N'enum.periodRuleKind.HeaderRows', N'en', N'Header rows', 1),
+    (N'enum.periodRuleKind.EditablePeriodOnly', N'en', N'Editable in a period range', 1),
+    (N'enum.periodRuleKind.RelativeWindow', N'en', N'Window around the current period', 1),
+    (N'enum.periodRuleKind.SourceWindow', N'en', N'Window from a source column', 1),
+    (N'enum.periodRuleKind.Expression', N'en', N'Expression', 1),
+    (N'enum.outOfWindow.ReadOnly', N'en', N'Read-only', 1),
+    (N'enum.outOfWindow.Warn', N'en', N'Warn', 1),
+    (N'enum.outOfWindow.AllowWithConfirmation', N'en', N'Allow with confirmation', 1),
+    (N'enum.outOfWindow.Hide', N'en', N'Hide', 1),
+    -- B-09: конфлікт версії має вихід — «Keep mine» / «Discard mine».
+    (N'grid.conflictKeepMine', N'en', N'Keep mine', 1),
+    (N'grid.conflictDiscardMine', N'en', N'Discard mine', 1),
+    (N'grid.conflictRowGone', N'en', N'Row {row} no longer exists: your changes to it cannot be saved.', 1),
+
+    -- X-13, R-01, R-02: редактори комірок — пошук і вибір зі списку (Lookup, Bool, Unit), поле дати.
+    (N'grid.listSearchPlaceholder', N'en', N'Type to search', 1),
+    (N'grid.listLoading', N'en', N'Loading options...', 1),
+    (N'grid.listNothingFound', N'en', N'Nothing matches', 1),
+    (N'grid.listMore', N'en', N'{count} more: type to narrow the list', 1),
+    (N'grid.listClear', N'en', N'(clear the cell)', 1),
+    (N'grid.lookupEditorLabel', N'en', N'Choose a registry entry', 1),
+    (N'grid.boolEditorLabel', N'en', N'Choose yes or no', 1),
+    (N'grid.unitEditorLabel', N'en', N'Choose a unit', 1),
+    (N'grid.dateEditorLabel', N'en', N'Choose a date', 1),
+    (N'grid.boolYes', N'en', N'Yes', 1),
+    (N'grid.boolNo', N'en', N'No', 1),
+
+    -- X-39: заглушка таблиці, яку ще не прогорнули.
+    (N'grid.tableLoadsOnScroll', N'en', N'This table loads when you scroll to it.', 1),
+
+    -- F-17, F-18, X-25: пояснення рівня для подання, причина закритого документа, підтвердження затвердження.
+    (N'workflow.submitNeedsGrant', N'en', N'Submitting needs the Submit access level on this project or sheet; yours is {level}. Ask an administrator to raise it.', 1),
+    (N'workflow.approveTitle', N'en', N'Approve this sheet?', 1),
+    (N'workflow.approveHint', N'en', N'Approved figures become final for this period and go into regulatory reports. To change them later, the sheet has to be returned for edits.', 1),
+    (N'document.lock.projectArchived', N'en', N'This project is archived: its documents are read-only.', 1),
+    (N'document.lock.periodClosed', N'en', N'Period {period} is closed: its data can no longer be edited, imported, submitted or recalculated. Ask a period manager to reopen it.', 1),
+    (N'document.lock.periodNotOpen', N'en', N'Period {period} is not open yet: data entry starts when it opens.', 1),
+    (N'document.lock.sheetApproved', N'en', N'This sheet has been approved; editing is closed until it is returned for edits.', 1),
+
+    -- ── Четвертий раунд UX, лінія B1 (методологія → документ) ──────────
+    (N'err.ECR-CALC-0422.unknownUnit', N'en', N'{code}: unit {unitId} does not exist in the unit catalog.', 1),
+    (N'err.ECR-CALC-0422.bindingMatchInvalid', N'en', N'The match condition for output {outputCode} is not a flat JSON object of "column → value" pairs, so it would match no row.', 1),
+    (N'err.ECR-CALC-0422.bindingUnknownOutput', N'en', N'No version of this methodology declares output {outputCode}: nothing would ever be calculated for this binding.', 1),
+    (N'err.ECR-CALC-0422.noPublishedVersion', N'en', N'Methodology {methodologyId} is bound to a table but has no published version to calculate with.', 1),
+    (N'err.ECR-CALC-0422.goldenTestNoPeriod', N'en', N'Golden test {test} has no period: set a document and an existing period in its input (periodKey is year × 100 + number, e.g. 202601).', 1),
+    (N'publish.problemsTitle', N'en', N'What to fix before publishing', 1),
+    (N'publish.problem.constantNotNumber', N'en', N'Constant {code} is declared numeric, but its value "{value}" is not a number: decide on a value, zero is not a default.', 1),
+    (N'publish.problem.constantNoText', N'en', N'Constant {code} ({kind}) has no text.', 1),
+    (N'publish.problem.categoryLabelInExpression', N'en', N'Formula {formula} refers to CST.{code}, which is a category label, not a value.', 1),
+    (N'publish.problem.textConstantInArithmetic', N'en', N'Formula {formula} uses text constant CST.{code} ("{value}") in arithmetic.', 1),
+    (N'publish.problem.numberReturnsText', N'en', N'Formula {formula} is declared numeric but returns only text.', 1),
+    (N'publish.problem.textReturnsNumber', N'en', N'Formula {formula} is declared as text but returns a number.', 1),
+    (N'publish.problem.textOutput', N'en', N'Formula {formula} returns text but is declared a methodology output: results are stored as numbers.', 1),
+    (N'publish.problem.importNoVersion', N'en', N'Imported methodology {code} has no version in effect on {date}: its formulas are not visible.', 1),
+    (N'publish.problem.libraryHasRules', N'en', N'Methodology {code} is a library but has {count} active rules: a library does not calculate for any document.', 1),
+    (N'publish.problem.ambiguousReference', N'en', N'Formula {formula}: reference !{name} is found in {count} imports ({candidates}).', 1),
+    (N'methodologies.columnNotFound', N'en', N'No column matches. Search by column code or by part of its header.', 1),
+    (N'methodologies.constantDialogTitle', N'en', N'Constant', 1),
+    (N'methodologies.constantUnit', N'en', N'Unit', 1),
+    (N'documents.calculationResultsStale', N'en', N'These results are out of date', 1),
+    (N'documents.calculationResultsStaleHint', N'en', N'The inputs changed after the last recalculation, so these numbers no longer match the data. Recalculate the sheet before submitting it.', 1),
+    (N'methodologies.publications', N'en', N'Publication log', 1),
+    (N'methodologies.publicationsEmpty', N'en', N'No version of this methodology has been published yet.', 1),
+    (N'methodologies.publishedAt', N'en', N'Published', 1),
+    (N'methodologies.publishedBy', N'en', N'Published by', 1),
+    (N'methodologies.publicationReason', N'en', N'Reason for the change', 1),
+    (N'methodologies.publicationChanges', N'en', N'Changed values on the golden set', 1),
+
+    -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
+    (N'common.technicalDetails', N'en', N'Technical details', 1),
+    -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
+    -- бо 502 буває й на сторінці входу.
+    (N'err.http.notFound', N'en', N'The page or record you asked for does not exist.', 0),
+    (N'err.http.forbidden', N'en', N'You do not have permission for this action.', 0),
+    (N'err.http.timeout', N'en', N'The server took too long to answer. Try again.', 0),
+    (N'err.http.unavailable', N'en', N'The server is not reachable right now. Try again in a minute.', 0),
+    (N'err.http.serverError', N'en', N'The server could not complete the request.', 0),
+    (N'err.http.requestFailed', N'en', N'The request could not be completed.', 0),
+    -- X-26: доступні імена службових кнопок (були англійськими літералами).
+    (N'common.closeNotification', N'en', N'Close notification', 0),
+    (N'common.togglePasswordVisibility', N'en', N'Show or hide the password', 0),
+    (N'common.undo', N'en', N'Undo', 1),
+    (N'nav.skipToContent', N'en', N'Skip to main content', 1),
+    (N'nav.showAllCrumbs', N'en', N'Show the whole path', 1),
+    -- X-34: що покриває період за періодичністю проєкту (Sequence — номер, не місяць).
+    (N'periods.quarterOf', N'en', N'Q{quarter} {year}', 1),
+    (N'periods.customOf', N'en', N'{year}, period {sequence}', 1),
+    -- X-25/X-29: підтвердження важких дій проєкту; назва колонки дій для читалки.
+    (N'common.actions', N'en', N'Actions', 1),
+    (N'periods.activateTitle', N'en', N'Activate project {code}?', 1),
+    (N'periods.activateConfirm', N'en', N'Periods start opening and closing by the calendar, and documents can be created in them. An active project cannot go back to draft, and its time zone can no longer be changed.', 1),
+    (N'periods.recalcTitle', N'en', N'Recalculate the whole project {code}?', 1),
+    (N'periods.recalcConfirm', N'en', N'Every document of every period of this project is recalculated in the background. This can take a while, and figures in open documents may change when it finishes.', 1),
+    -- R-18/X-35: журнал змін називає людей, документи й колонки, а не номери.
+    (N'audit.authorAny', N'en', N'Anyone', 1),
+    (N'audit.userGone', N'en', N'User #{id} (no longer exists)', 1),
+    (N'audit.documentGone', N'en', N'Document #{id} (deleted)', 1),
+    (N'audit.columnGone', N'en', N'Column #{id} (deleted)', 1),
+    -- X-07: перелік, що не вмістився в одну сторінку, про це каже.
+    (N'common.shownOf', N'en', N'Showing {shown} of {total}', 1),
+    (N'common.shownSoFar', N'en', N'Showing the first {shown}; there are more', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

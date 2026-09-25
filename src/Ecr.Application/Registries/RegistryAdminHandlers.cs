@@ -380,20 +380,27 @@ public sealed class DeleteRegistryEntryHandler(
         }
 
         var references = await registries.CountReferencesAsync(registryEntryId, ct).ConfigureAwait(false);
-        if (references > 0)
+        if (references.Total > 0)
         {
+            // ⛔ V-08: відмова несе не лише загальне число, а й розклад за
+            // видами — «на запис посилаються 3 константи методології» людина
+            // може піти й виправити, «3 посилання» — ні.
+            var byKind = references.ByKind();
+
             throw new BusinessRuleException(
                 "ECR-REG-0409",
-                $"Запис «{entry.Code}» не видаляється: на нього посилаються комірок — {references}. "
+                $"Запис «{entry.Code}» не видаляється: на нього посилаються — {references.Total} "
+                + $"({string.Join(", ", byKind.Select(k => $"{k.Key}: {k.Value}"))}). "
                 + "Закрийте його датою — історія лишиться читабельною, а в нових періодах він не пропонуватиметься.",
                 new Dictionary<string, object?>
                 {
                     // Сирі числа лишаються для клієнта; резолвер підставляє лише рядки.
                     ["messageKey"] = "err.ECR-REG-0409.entryReferenced",
                     ["code"] = entry.Code,
-                    ["referenceCount"] = references.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["referenceCount"] = references.Total.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["registryEntryId"] = registryEntryId,
-                    ["references"] = references,
+                    ["references"] = references.Total,
+                    ["referenceKinds"] = byKind,
                 });
         }
 

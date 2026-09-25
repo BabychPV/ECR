@@ -59,6 +59,18 @@ export function PresentationEditor({
     setHidden(column.isHidden);
   }
 
+  /**
+   * ⛔ X-24: закриття СКИДАЄ `loadedFor`. Без цього «Cancel» і повторне
+   * відкриття тієї самої колонки бачили `loadedFor === column.id`, умова
+   * наповнення вище не спрацьовувала, і діалог показував НЕЗБЕРЕЖЕНЕ введення
+   * попередньої спроби так, ніби воно вже в структурі. Та сама форма, що в
+   * `RegistryEntryEditor.handleClose`. Усі шляхи закриття — через неї.
+   */
+  const handleClose = (): void => {
+    setLoadedFor(null);
+    onClose();
+  };
+
   const patch = useMutation({
     mutationFn: (changes: PresentationChange[]) =>
       apiFetch<PresentationRevisionResponse>(
@@ -72,7 +84,7 @@ export function PresentationEditor({
         queryKey: queryKeys.templates.version(templateVersionId),
       });
 
-      onClose();
+      handleClose();
       showDone(t('version.patched', { revision: result.presentationRevision }));
     },
     onError: showApiError,
@@ -111,7 +123,7 @@ export function PresentationEditor({
   return (
     <Modal
       opened={column !== null}
-      onClose={onClose}
+      onClose={handleClose}
       title={column === null ? '' : `${t('version.presentation')} · ${column.code}`}
     >
       <LocalizedInput
@@ -146,7 +158,7 @@ export function PresentationEditor({
       />
 
       <Group justify="flex-end" mt="md">
-        <Button variant="default" onClick={onClose}>
+        <Button variant="default" onClick={handleClose}>
           {t('common.cancel')}
         </Button>
 

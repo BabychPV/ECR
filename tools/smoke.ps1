@@ -305,7 +305,7 @@ try {
     Call PATCH "/api/v1/documents/$documentId/cells" @{
         tableInstanceId = $instance
         periodKey       = $periodKey
-        origin          = 'Manual'
+        origin          = 'UserEdit'
         rows            = @(@{
             rowKey      = $row.rowKey
             baseVersion = $row.rowVersion

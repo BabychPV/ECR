@@ -26,7 +26,8 @@ public sealed class ProjectsController(
     ChangeProjectTimeZoneHandler changeTimeZone,
     RunCalculationHandler recalculate,
     Ecr.Application.Workflow.GetApprovalRouteHandler getRoute,
-    Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute) : ControllerBase
+    Ecr.Application.Workflow.ReplaceApprovalRouteHandler replaceRoute,
+    Ecr.Application.Documents.GetDocumentTemplateHandler documentTemplate) : ControllerBase
 {
     /// <summary>Перелік проєктів. Право <c>Document.View</c>.</summary>
     [HttpGet]
@@ -107,6 +108,22 @@ public sealed class ProjectsController(
 
         return Ok(updated);
     }
+
+    /// <summary>
+    /// Версія шаблону проєкту й аркуші для нового документа. Право
+    /// <c>Document.Create</c> і грант <c>Write</c> на проєкт (V-12).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не потребує <c>Template.View</c>: це не перегляд шаблону, а рівно те,
+    /// без чого не створити документ, — версію визначає проєкт.
+    /// </remarks>
+    [HttpGet("{id:int}/document-template")]
+    [ProducesResponseType<Ecr.Application.Documents.DocumentTemplateDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<Ecr.Application.Documents.DocumentTemplateDto>> DocumentTemplate(
+        int id, CancellationToken ct)
+        => await documentTemplate.HandleAsync(id, ct).ConfigureAwait(false);
 
     /// <summary>
     /// Маршрут погодження проєкту. Право <c>Project.Manage</c>.

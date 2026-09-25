@@ -216,6 +216,91 @@ public sealed class RegistryValueJsonNormalizationTests(SqlServerFixture sql)
     }
 
     /// <summary>Довідник-джерело з одним записом (ціль для поля <c>Lookup</c>) і довідник із п'ятьма типізованими полями.</summary>
+    /// <summary>
+    /// ⛔ V-17(a): неіснуючий запис у полі Lookup доходив до бази і падав на
+    /// <c>FK_RegValue_Ref</c> — <c>500</c>. Мутація: прибрати виклик
+    /// <c>RequireLookupTargetAsync</c> в <c>ApplyValuesAsync</c> — тест
+    /// червоний (<c>500</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Неіснуючий_запис_у_полі_Lookup_дає_422_а_не_500()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+
+        var fixture = await SeedAsync().ConfigureAwait(true);
+
+        var problem = await PostLookupExpecting422Async(client, fixture, 999_999_999L).ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-REG-0422.lookupEntryNotFound", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("LookF", problem.GetProperty("field").GetString());
+        Assert.Equal("Field \"LookF\": registry entry 999999999 does not exist.", problem.GetProperty("detail").GetString());
+    }
+
+    /// <summary>
+    /// ⛔ V-08(b): Id запису ІНШОГО довідника, ніж оголошений у полі, —
+    /// валідне число і хибне посилання; доти приймалося (<c>201</c>).
+    /// Мутація та сама — тест червоний (<c>201</c>).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Запис_іншого_довідника_у_полі_Lookup_дає_422()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app).ConfigureAwait(true);
+
+        var fixture = await SeedAsync().ConfigureAwait(true);
+        var foreign = await ForeignEntryAsync().ConfigureAwait(true);
+
+        var problem = await PostLookupExpecting422Async(client, fixture, foreign).ConfigureAwait(true);
+
+        Assert.Equal("err.ECR-REG-0422.lookupWrongRegistry", problem.GetProperty("messageKey").GetString());
+        Assert.Equal($"LK{fixture.Tag}", problem.GetProperty("expectedRegistry").GetString());
+    }
+
+    private static async Task<JsonElement> PostLookupExpecting422Async(HttpClient client, Fixture fixture, long target)
+    {
+        var response = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/registries/{fixture.Code}/entries", UriKind.Relative),
+            new
+            {
+                id = (long?)null,
+                registryDefId = fixture.DefinitionId,
+                code = $"E{fixture.Tag}",
+                display = new { values = new Dictionary<string, string> { ["en"] = "Entry" } },
+                parentEntryId = (long?)null,
+                values = new Dictionary<string, object?> { ["LookF"] = target },
+            }).ConfigureAwait(false);
+
+        var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {body}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REG-0422", problem.GetProperty("errorCode").GetString());
+        return problem;
+    }
+
+    /// <summary>Запис у третьому довіднику — ні в тому, що оголошує поле.</summary>
+    private async Task<long> ForeignEntryAsync()
+    {
+        var tag = $"{Guid.NewGuid():N}"[..8].ToUpperInvariant();
+
+        await using var db = new EcrDbContext(Options());
+
+        var definition = new RegistryDef(EcrCode.Create($"FR{tag}"), Name($"Foreign {tag}"), isTemporal: false);
+        db.RegistryDefs.Add(definition);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var entry = new RegistryEntry(definition.Id, EcrCode.Create($"F{tag}"), Name($"Foreign {tag}"));
+        db.RegistryEntries.Add(entry);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return entry.Id;
+    }
+
     private async Task<Fixture> SeedAsync()
     {
         var tag = $"{Guid.NewGuid():N}"[..8].ToUpperInvariant();

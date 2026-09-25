@@ -61,7 +61,12 @@ public readonly record struct SiteTimeZone
                 + "(наприклад, «Asia/Aqtau»). Windows-ідентифікатори на кшталт "
                 + "«Central Asia Standard Time» і зсуви на кшталт «+05:00» не приймаються: "
                 + "пояс задає межі періодів і позначки пізніх змін, і після відкриття "
-                + "першого періоду його вже не змінити.");
+                + "першого періоду його вже не змінити.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CFG-4221.notIana",
+                    ["value"] = value ?? "—",
+                });
 
     /// <summary>
     /// Перевіряє ідентифікатор без винятку.

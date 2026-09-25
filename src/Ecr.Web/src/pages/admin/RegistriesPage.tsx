@@ -1,11 +1,16 @@
 ﻿import { useMemo, useState, type JSX } from 'react';
-import { Badge, Button, Checkbox, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Badge, Button, Group, List, Select, Stack, Text } from '@mantine/core';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
-import { createRegistry, entryReferences, useDeleteRegistryEntry } from '@/features/registries/api';
+import {
+  entryReferenceKinds,
+  entryReferences,
+  useDeleteRegistryEntry,
+} from '@/features/registries/api';
+import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
 import {
   RegistryEntryEditor,
   ValidityEditor,
@@ -15,11 +20,11 @@ import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { DataTable, type DataTableColumn } from '@/shared/ui/DataTable';
 import { FilterBar } from '@/shared/ui/FilterBar';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { showApiError, showDone } from '@/shared/ui/notify';
 import { useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
 
@@ -72,7 +77,6 @@ function todayIso(): string {
 export function RegistriesPage(): JSX.Element {
   const [code, setCode] = useUrlState('code');
   const session = useSession();
-  const queryClient = useQueryClient();
 
   /*
    * ⛔ UI-аудит-пас 8, lane4, п.6: таблиця записів довідника була голим
@@ -104,32 +108,10 @@ export function RegistriesPage(): JSX.Element {
   // Заведення довідника з нуля (директива №11, T4): доти в системі не було
   // жодного способу, доступного людині, додати довідник, якого немає в seed.
   const [creating, setCreating] = useState(false);
-  const [newCode, setNewCode] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newIsTemporal, setNewIsTemporal] = useState(false);
 
   const registries = useQuery({
     queryKey: queryKeys.registries.list(),
     queryFn: () => apiFetch<RegistryDefDto[]>('/api/v1/registries'),
-  });
-
-  const create = useMutation({
-    mutationFn: () =>
-      createRegistry({
-        code: newCode,
-        nameL10n: { en: newName },
-        isTemporal: newIsTemporal,
-      }),
-    onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.registries.list() });
-      setCreating(false);
-      setNewCode('');
-      setNewName('');
-      setNewIsTemporal(false);
-      setCode(created.code);
-      showDone(t('registries.created'));
-    },
-    onError: showApiError,
   });
 
   const selected = registries.data?.find((registry) => registry.code === code);
@@ -169,6 +151,9 @@ export function RegistriesPage(): JSX.Element {
   // це число, а не текст відмови, вирішує, ЩО показати замість «повторити».
   const blocked = entryReferences(remove.error);
 
+  // ⛔ V-08: ХТО посилається — комірки, інші записи, константи методологій.
+  const blockedBy = entryReferenceKinds(remove.error);
+
   const needle = (query ?? '').trim().toLowerCase();
 
   /*
@@ -192,6 +177,25 @@ export function RegistriesPage(): JSX.Element {
         entry.display.toLowerCase().includes(needle),
     );
   }, [code, entries.data, needle]);
+
+  /*
+   * ⛔ `U-08`. Правило порожніх станів, яке цей набір встановлює: **на екрані
+   * одночасно видно рівно ОДИН порожній стан — той, що пояснює НАЙБЛИЖЧУ
+   * перешкоду**; підпорядкований розділ свого не показує, доки головну
+   * перешкоду не знято.
+   *
+   * Тут це було порушено буквально: на чистій базі межа переліку довідників
+   * казала «No registries yet», а таблиця під нею — «Pick a registry above».
+   * Друга порада нездійсненна САМЕ тоді, коли показана перша: обирати нема з
+   * чого. Перелік записів підпорядкований переліку довідників (без довідника
+   * запису не існує), тож він і мовчить.
+   *
+   * ⚠ Умова — «дані приїхали І не порожні», а не `length > 0` над `?? []`:
+   * поки перелік у дорозі або відмовив, стан показує межа вище, і «Pick a
+   * registry» під спінером чи під помилкою — той самий другий порожній стан,
+   * лише з іншої причини.
+   */
+  const hasRegistries = registries.data !== undefined && registries.data.length > 0;
 
   const canEditData = can(session.data, 'Registry.EditData');
 
@@ -429,7 +433,7 @@ export function RegistriesPage(): JSX.Element {
        * ⚠ Малюється лише з обраним довідником: без нього фільтрувати нема
        * чого, а контрол без даних — це `D15-06`.
        */}
-      {code !== null && (
+      {hasRegistries && code !== null && (
         <FilterBar
           search={{
             label: t('registries.search'),
@@ -463,6 +467,9 @@ export function RegistriesPage(): JSX.Element {
        * `GET …/entries` віддає повний масив без курсора, тож підсумок «N / M»
        * не малюється зовсім (`D15-06`).
        */}
+      {/* ⛔ `U-08`: підпорядкована таблиця мовчить, доки перешкода «довідників
+          немає» не знята — див. `hasRegistries` вище. */}
+      {hasRegistries && (
       <DataTable<RegistryEntryDto>
         columns={columns}
         rows={rows}
@@ -477,6 +484,7 @@ export function RegistriesPage(): JSX.Element {
         clearFiltersLabel={t('filters.clear')}
         onRetry={() => void entries.refetch()}
       />
+      )}
 
       {selected !== undefined && (
         <RegistryEntryEditor
@@ -501,102 +509,72 @@ export function RegistriesPage(): JSX.Element {
        * запис посилаються N комірок» — це два стани однієї розмови, і людина
        * не має шукати причину в плашці, що з'їхала кудись у куток.
        */}
-      <Modal
+      {/*
+       * ⛔ X-23: тут стояв голий `<Modal>` із заголовком «Remove» без назви
+       * запису й фокусом на хрестику. Тепер — `ConfirmModal`: назва запису в
+       * заголовку, фокус на «Cancel». Стан «заблоковано» — той самий діалог
+       * із недоступним підтвердженням і дією, яка справді можлива.
+       */}
+      <ConfirmModal
         opened={deleting !== null}
+        title={t('registries.deleteEntryTitle', { code: deleting?.code ?? '' })}
+        text={blocked === null ? deleting?.display : undefined}
+        verb={t('common.delete')}
+        confirmDisabled={blocked !== null}
+        isPending={remove.isPending}
+        onConfirm={() => {
+          if (deleting !== null) {
+            remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
+          }
+        }}
         onClose={() => setDeleting(null)}
-        title={t('common.delete')}
       >
-        <Stack gap="sm">
-          <Text size="sm">
-            {deleting?.code} — {deleting?.display}
-          </Text>
+        {blocked !== null && (
+          <Stack gap="sm">
+            {/* ⚠ Текст відмови — СЕРВЕРНИЙ: він уже локалізований каталогом
+                і називає причину словами. Поруч — саме число посилань, бо
+                воно і є мірою наслідку. */}
+            <Group gap="xs">
+              <Badge color="statusWarning">{blocked}</Badge>
+              <Text size="sm">{remove.error?.message}</Text>
+            </Group>
 
-          {blocked === null ? (
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => setDeleting(null)}>
-                {t('common.cancel')}
-              </Button>
+            {/* ⛔ V-08: розклад посилань за видами — куди йти виправляти. */}
+            {blockedBy.length > 0 && (
+              <List size="sm" aria-label={t('registries.referencedBy')}>
+                {blockedBy.map(({ kind, count }) => (
+                  <List.Item key={kind}>
+                    {t(`registries.referenceKind.${kind}`)}: {count}
+                  </List.Item>
+                ))}
+              </List>
+            )}
+
+            {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
+                треба не запит, а намір — запис виводять з обігу датою
+                (`ФВ-8.5`), і тоді історичні документи лишаються читабельними. */}
+            <Group justify="flex-start">
               <Button
-                color="statusError"
-                loading={remove.isPending}
+                variant="light"
                 onClick={() => {
-                  if (deleting !== null) {
-                    remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
-                  }
+                  setValidity(deleting);
+                  setDeleting(null);
                 }}
               >
-                {t('common.delete')}
+                {t('registries.validity')}
               </Button>
             </Group>
-          ) : (
-            <>
-              {/* ⚠ Текст відмови — СЕРВЕРНИЙ: він уже локалізований каталогом
-                  і називає причину словами. Поруч — саме число посилань, бо
-                  воно і є мірою наслідку. */}
-              <Group gap="xs">
-                <Badge color="statusWarning">{blocked}</Badge>
-                <Text size="sm">{remove.error?.message}</Text>
-              </Group>
+          </Stack>
+        )}
+      </ConfirmModal>
 
-              {/* ⛔ Замість «повторити». Повтор дасть ту саму відмову: змінити
-                  треба не запит, а намір — запис виводять з обігу датою
-                  (`ФВ-8.5`), і тоді історичні документи лишаються читабельними. */}
-              <Group justify="flex-end">
-                <Button variant="default" onClick={() => setDeleting(null)}>
-                  {t('common.cancel')}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setValidity(deleting);
-                    setDeleting(null);
-                  }}
-                >
-                  {t('registries.validity')}
-                </Button>
-              </Group>
-            </>
-          )}
-        </Stack>
-      </Modal>
-
-      <Modal
+      {/* ⛔ U-18: діалог винесено в `CreateRegistryModal` — той самий
+          контракт, що й «New project» (зірочки, «Still needed», Cancel/Save). */}
+      <CreateRegistryModal
         opened={creating}
         onClose={() => setCreating(false)}
-        title={t('registries.newRegistryTitle')}
-      >
-        <Stack gap="sm">
-          <TextInput
-            label={t('registries.code')}
-            description={t('registries.registryCodeHint')}
-            value={newCode}
-            onChange={(event) => setNewCode(event.currentTarget.value)}
-            data-autofocus
-          />
-
-          <TextInput
-            label={t('registries.name')}
-            value={newName}
-            onChange={(event) => setNewName(event.currentTarget.value)}
-          />
-
-          {/* ⛔ Рішення приймається ОДИН РАЗ при заведенні: змінити його для
-              довідника з даними означало б перетлумачити вже введені записи. */}
-          <Checkbox
-            label={t('registries.temporalField')}
-            description={t('registries.temporalFieldHint')}
-            checked={newIsTemporal}
-            onChange={(event) => setNewIsTemporal(event.currentTarget.checked)}
-          />
-
-          <Button
-            disabled={newCode.trim().length === 0 || newName.trim().length === 0}
-            loading={create.isPending}
-            onClick={() => create.mutate()}
-          >
-            {t('registries.newRegistry')}
-          </Button>
-        </Stack>
-      </Modal>
+        onCreated={setCode}
+      />
     </>
   );
 }

@@ -253,7 +253,17 @@ describe('PeriodsPage: межі періоду і крайні строки', ()
 
       const grace = timeNode(GraceEndsAt);
       expect(grace, 'пільговий строк не намальовано елементом <time>').not.toBeNull();
-      expect(grace?.textContent).toBe(formatDateTime(GraceEndsAt));
+      /*
+       * ⚠ `timeZone` тут ОБОВ'ЯЗКОВИЙ і має збігатися з тим, що передає
+       * `SiteTime`/`siteMomentText` у `PeriodsPage.tsx` (`calendar.timeZoneId`,
+       * а не системний пояс раннера): без нього `formatDateTime` мовчки бере
+       * `Intl.DateTimeFormat().resolvedOptions().timeZone` середовища
+       * виконання, і твердження випадково збігається лише там, де системний
+       * пояс збігається з поясом майданчика (тобто НЕ на CI-раннері з UTC).
+       */
+      expect(grace?.textContent).toBe(
+        formatDateTime(GraceEndsAt, { dateStyle: 'medium', timeStyle: 'short', timeZone: calendar.timeZoneId }),
+      );
       expect(grace?.textContent).toMatch(/\d{1,2}:\d{2}/);
     },
     SlowEnvTimeout,

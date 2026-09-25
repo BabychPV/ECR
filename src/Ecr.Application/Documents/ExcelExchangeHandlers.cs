@@ -55,18 +55,8 @@ public sealed class ExportDocumentHandler(
         // користувач узагалі вивантажує документи»; грант каже, ЯКІ. Без
         // другої перевірки право `Document.Export`, видане роллю `DataEntry`,
         // відкривало б будь-який проєкт.
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
         // сховища не може дорівнювати jobId: той повертає черга вже після
@@ -126,18 +116,8 @@ public sealed class PreviewImportHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         // ⚠ Синхронно, попри розмір файлу: користувач стоїть над результатом і
         // без нього не може зробити наступний крок. Перегляд у фоні означав би
@@ -199,26 +179,26 @@ public sealed class ApplyImportHandler(
             .RequireAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
-        if (!read.IsAllowed)
-        {
-            throw new Errors.AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає доступу до документа {documentId}: {read.Reason}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
-                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["reason"] = read.Reason.ToString(),
-                });
-        }
+        // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
 
         var pendingCount = await importer.CountPendingChangesAsync(previewToken, ct).ConfigureAwait(false);
 
         if (pendingCount > LargeImportThreshold)
         {
+            // ⛔ F-01: автор — у завданні. Задача виконується поза HTTP-запитом,
+            // і без нього запис комірок бачив «анонімного» користувача та падав
+            // на `ECR-AUTH-0401` щоразу, не застосувавши нічого.
+            var actor = new JobActor(
+                currentUser.UserId ?? profile.UserId,
+                currentUser.UserName,
+                currentUser.Language,
+                [.. currentUser.GroupSids],
+                currentUser.CorrelationId);
+
             var jobId = await jobs
                 .EnqueueAsync<IExcelImportJob>(
-                    new ExcelImportTask(documentId, previewToken), ct, currentUser.UserId)
+                    new ExcelImportTask(documentId, previewToken, actor), ct, currentUser.UserId)
                 .ConfigureAwait(false);
 
             return ImportApplyResult.Queued(jobId);
@@ -260,4 +240,9 @@ public sealed record ImportApplyResult
 /// <summary>Завдання застосування великого імпорту у фоні.</summary>
 /// <param name="DocumentId">Документ.</param>
 /// <param name="PreviewToken">Токен раніше побудованого diff.</param>
-public sealed record ExcelImportTask(long DocumentId, string PreviewToken);
+/// <param name="Actor">
+/// Хто поставив задачу — від його імені вона й пише (F-01); <c>null</c> лише в
+/// завданні, поставленому до цієї правки, і таке завдання відмовляє
+/// <c>ECR-AUTH-0401</c>, як і досі.
+/// </param>
+public sealed record ExcelImportTask(long DocumentId, string PreviewToken, JobActor? Actor = null);

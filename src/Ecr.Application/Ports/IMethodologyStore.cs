@@ -113,6 +113,40 @@ public interface IMethodologyStore
         int tableDefId, CancellationToken ct);
 
     /// <summary>
+    /// Активні прив'язки виходів методологій до колонок названих таблиць —
+    /// разом з усіма версіями кожної методології (F-02).
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці документа, що читаються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Прив'язки; порожньо — жодна колонка цих таблиць не отримує результату.</returns>
+    public Task<IReadOnlyList<ColumnResultBinding>> GetColumnResultBindingsAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    /// <summary>
+    /// Чи змінилися входи документа після прогону, що дав його актуальні числа (F-05).
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Свіжість; <c>CalculatedAt = null</c> — актуальних чисел немає.</returns>
+    public Task<CalculationFreshness> GetCalculationFreshnessAsync(
+        long documentId, int periodKey, CancellationToken ct);
+
+    /// <summary>Код методології й номер версії — для підпису числа (F-21).</summary>
+    /// <param name="methodologyVersionIds">Версії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Підписи; невідомої версії в результаті немає.</returns>
+    public Task<IReadOnlyDictionary<int, MethodologyVersionLabel>> GetVersionLabelsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct);
+
+    /// <summary>Журнал публікацій версій методології, найновіші першими (F-16).</summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Записи журналу.</returns>
+    public Task<IReadOnlyList<MethodologyPublicationEntry>> ListPublicationsAsync(
+        int methodologyId, CancellationToken ct);
+
+    /// <summary>
     /// Методологія-контейнер разом з усіма своїми версіями; <c>null</c> — версії немає.
     /// </summary>
     /// <remarks>
@@ -216,3 +250,61 @@ public sealed record MethodologyTestCase(
     CalculationInput Input,
     IReadOnlyDictionary<string, decimal> Expected,
     decimal Tolerance);
+
+/// <summary>
+/// Активна прив'язка виходу методології до колонки — у формі, потрібній
+/// накладанню результатів на документ (F-02).
+/// </summary>
+/// <param name="TableDefId">Таблиця колонки.</param>
+/// <param name="ColumnDefId">Колонка-приймач.</param>
+/// <param name="MethodologyId">Методологія-джерело.</param>
+/// <param name="OutputCode">Вихід.</param>
+/// <param name="MatchJson">Предикат рядків; <c>{}</c> — уся таблиця.</param>
+/// <param name="VersionIds">
+/// Усі версії методології — будь-яка з них могла дати число цього періоду
+/// (версія резолвиться за датою періоду, ФВ-9.3).
+/// </param>
+public sealed record ColumnResultBinding(
+    int TableDefId,
+    int ColumnDefId,
+    int MethodologyId,
+    string OutputCode,
+    string MatchJson,
+    IReadOnlyList<int> VersionIds);
+
+/// <summary>Свіжість результатів методологій документа за період (F-05).</summary>
+/// <param name="CalculatedAt">Коли завершився прогін, що дав актуальні числа.</param>
+/// <param name="InputsChangedAt">
+/// Остання зміна ВХОДІВ (ручний запис, імпорт) після початку цього прогону;
+/// <c>null</c> — числа відповідають даним.
+/// </param>
+public sealed record CalculationFreshness(DateTime? CalculatedAt, DateTime? InputsChangedAt)
+{
+    /// <summary>Чи змінилися входи після розрахунку — числа застарілі.</summary>
+    public bool IsStale => InputsChangedAt is not null;
+}
+
+/// <summary>Підпис версії методології для людини: код методології й номер версії (F-21).</summary>
+/// <param name="MethodologyVersionId">Версія.</param>
+/// <param name="MethodologyCode">Код методології.</param>
+/// <param name="Version">Номер версії («1.2.0»).</param>
+public sealed record MethodologyVersionLabel(int MethodologyVersionId, string MethodologyCode, string Version);
+
+/// <summary>Одна публікація версії методології з журналу <c>aud.PublicationEvent</c> (F-16).</summary>
+/// <param name="Id">Запис журналу.</param>
+/// <param name="ChangedAt">Коли опубліковано (UTC).</param>
+/// <param name="MethodologyVersionId">Опублікована версія.</param>
+/// <param name="Version">Номер версії.</param>
+/// <param name="ChangeReason">Причина зміни (ФВ-14.7).</param>
+/// <param name="ChangedByUserId">Хто опублікував.</param>
+/// <param name="ChangedByName">Ім'я того, хто опублікував; <c>null</c> — облікового запису вже немає.</param>
+/// <param name="ResultDiffJson">Diff результатів на золотому наборі (ФВ-9.6), як записано.</param>
+public sealed record MethodologyPublicationEntry(
+    long Id,
+    DateTime ChangedAt,
+    int MethodologyVersionId,
+    string Version,
+    string? ChangeReason,
+    int ChangedByUserId,
+    string? ChangedByName,
+    string? ResultDiffJson);

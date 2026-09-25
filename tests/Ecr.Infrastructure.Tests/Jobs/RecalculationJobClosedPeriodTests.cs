@@ -466,7 +466,7 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
             _headers,
             Substitute.For<IAuditWriter>(),
             new TestClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)),
-            uow);
+            uow, Substitute.For<Ecr.Application.Ports.ISheetEditGate>());
     }
 
     /// <summary>Порожня шапка документа — тести цього файлу її не читають.</summary>

@@ -30,7 +30,11 @@ public sealed class ExcelImporter(
     ICellStore cellStore,
     IRowStore rowStore,
     IUnitOfWork uow,
-    IBackgroundJobScheduler jobs) : IExcelImporter
+    IBackgroundJobScheduler jobs,
+
+    // ⛔ Спільні блокування аркушів книги беруться ЗАЗДАЛЕГІДЬ і в стабільному
+    // порядку (`ExcelImportSheetLockOrderTests`) — див. `ApplyAsync`.
+    ISheetEditGate sheetGate) : IExcelImporter
 {
     /// <summary>Порожній зріз — таблиця без жодного рядка чи непорожньої комірки.</summary>
     private static readonly IReadOnlyDictionary<string, long> EmptyRowIds =
@@ -73,6 +77,7 @@ public sealed class ExcelImporter(
                 $"Книгу вивантажено з документа {map.DocumentId}, а імпорт іде в {documentId}.",
                 new Dictionary<string, object?>
                 {
+                    ["messageKey"] = "err.ECR-IMP-0422.workbookOtherDocument",
                     ["expectedDocumentId"] = documentId,
                     ["actualDocumentId"] = map.DocumentId,
                 });
@@ -98,6 +103,13 @@ public sealed class ExcelImporter(
         // належать цьому документу за цей період — блок книги з чужим
         // (чи вигаданим) `TableInstanceId` інакше пішов би прямо в пакетні
         // читання рядків/комірок нижче без жодної перевірки належності.
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і перегляд імпорту відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
+
         var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
 
         if (instances.Count == 0)
@@ -119,7 +131,8 @@ public sealed class ExcelImporter(
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
-                         "ECR-AUTH-0401", "Анонімний запит не може імпортувати дані.");
+                         "ECR-AUTH-0401", "Анонімний запит не може імпортувати дані.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
@@ -150,7 +163,9 @@ public sealed class ExcelImporter(
                 rejected.Add(new ImportRejection(
                     "—", block.TableCode, "ECR-IMP-0422",
                     "Екземпляра таблиці з файлу немає в цьому документі за цей період: "
-                    + "структуру, ймовірно, змінено після експорту."));
+                    + "структуру, ймовірно, змінено після експорту.",
+                    block.TableCode,
+                    MessageKey: ImportMessageKeys.InstanceMissing));
 
                 continue;
             }
@@ -159,7 +174,9 @@ public sealed class ExcelImporter(
             {
                 rejected.Add(new ImportRejection(
                     "—", block.TableCode, "ECR-IMP-0422",
-                    "Таблиці з файлу немає в чинній версії шаблону."));
+                    "Таблиці з файлу немає в чинній версії шаблону.",
+                    block.TableCode,
+                    MessageKey: ImportMessageKeys.TableMissing));
 
                 continue;
             }
@@ -201,6 +218,14 @@ public sealed class ExcelImporter(
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
             rejected.AddRange(diff.Rejected);
+        }
+
+        // ⛔ `V-10`: значення поза рядками таблиць (порожній документ, рядок під
+        // таблицею) — відмова з поясненням, а не мовчазний пропуск, після якого
+        // діалог каже «файл збігається з аркушем».
+        foreach (var sheet in validBlocks.GroupBy(v => v.Block.SheetName, StringComparer.OrdinalIgnoreCase))
+        {
+            rejected.AddRange(StrayValueDetector.Find(workbook.Worksheet(sheet.Key), [.. sheet]));
         }
 
         var token = Guid.NewGuid().ToString("N");
@@ -267,9 +292,31 @@ public sealed class ExcelImporter(
         var seeds = new List<RecalculationSeed>();
         long seedTableInstanceId = 0;
 
+        var period = new PeriodKey(plan.PeriodKey);
+        var sheets = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
+
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
             {
+                // ⛔ Першою дією транзакції — спільні блокування ВСІХ аркушів
+                // книги в порядку ключа «документ × аркуш × період» (у межах
+                // книги — `SheetDefId` за зростанням), той самий порядок, що в
+                // `RecalculationService`. Доти їх брав кожен
+                // `PatchCellsHandler` сам — у порядку ТАБЛИЦЬ КНИГИ: черга
+                // блокувань FIFO, спільний запит стає за винятковим (подання),
+                // що вже чекає, і імпорт (B, потім A) проти перерахунку
+                // (A, потім B) з двома поданнями в черзі давав цикл. Повторне
+                // спільне блокування того самого аркуша в обробнику — той самий
+                // власник, воно видається одразу.
+                //
+                // ⚠ Стан аркуша тут не перевіряється: це робить
+                // `PatchCellsHandler` під тим самим блокуванням і своєю відмовою
+                // (`ECR-ACCS-0403`), тож двох правд про «подано» не з'являється.
+                foreach (var sheetDefId in sheets)
+                {
+                    _ = await sheetGate.EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                }
+
                 // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із
                 // оголошенням: <c>ExecuteInTransactionAsync</c> віддає тіло
                 // стратегії повторів EF (<c>EnableRetryOnFailure</c>), яка має
@@ -311,7 +358,7 @@ public sealed class ExcelImporter(
                                 deferRecalculationUntilMi02: seeds)
                             .ConfigureAwait(false);
                     }
-                    catch (EcrException error) when (Blame(error, diff.TableInstanceId) is { } named)
+                    catch (EcrException error) when (Blame(error, diff) is { } named)
                     {
                         throw named;
                     }
@@ -356,6 +403,47 @@ public sealed class ExcelImporter(
     }
 
     /// <summary>
+    /// Аркуші таблиць книги, у які застосування пише, — у порядку, у якому
+    /// береться їхнє блокування (<c>SheetDefId</c> за зростанням).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Читається ДО транзакції: це структура (екземпляр → таблиця → аркуш),
+    /// яка між переглядом і застосуванням не змінюється. Екземпляр, якого вже
+    /// немає в документі, сюди не потрапляє — його відхилить сам
+    /// <c>PatchCellsHandler</c> своєю відмовою.
+    /// </remarks>
+    private async Task<IReadOnlyList<int>> SheetsInLockOrderAsync(
+        long documentId, PeriodKey period, ImportPlan plan, CancellationToken ct)
+    {
+        var changed = plan.Tables.Where(t => t.Changes.Count > 0).Select(t => t.TableInstanceId).ToHashSet();
+        if (changed.Count == 0)
+        {
+            return [];
+        }
+
+        var instances = await rowStore.GetTableInstancesAsync(documentId, period, ct).ConfigureAwait(false);
+        var sheets = new SortedSet<int>();
+
+        foreach (var group in instances.Where(i => changed.Contains(i.TableInstanceId)).GroupBy(i => i.TemplateVersionId))
+        {
+            var snapshot = await metadata.GetAsync(group.Key, ct).ConfigureAwait(false);
+            var sheetOfTable = snapshot.Sheets
+                .SelectMany(s => s.Tables)
+                .ToDictionary(t => t.Id, t => t.SheetDefId);
+
+            foreach (var instance in group)
+            {
+                if (sheetOfTable.TryGetValue(instance.TableDefId, out var sheetDefId))
+                {
+                    sheets.Add(sheetDefId);
+                }
+            }
+        }
+
+        return [.. sheets];
+    }
+
+    /// <summary>
     /// Та сама відмова, але з номером таблиці, на якій застосування спинилося;
     /// <c>null</c> — тип відмови невідомий, і викликач лишає оригінал як є.
     /// </summary>
@@ -372,7 +460,7 @@ public sealed class ExcelImporter(
     /// виняток іде далі зі своїм стеком, а не підмінюється типом, який змінив
     /// би статус відповіді.
     /// </remarks>
-    private static EcrException? Blame(EcrException error, long tableInstanceId)
+    private static EcrException? Blame(EcrException error, TableDiff diff)
     {
         var details = new Dictionary<string, object?>(StringComparer.Ordinal);
 
@@ -385,7 +473,19 @@ public sealed class ExcelImporter(
         }
 
         details["tableInstanceId"] =
-            tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            diff.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        // ⛔ F-24: конфлікт версії — РЯДКОВИЙ, і обробник запису перелічує КОЖНУ
+        // комірку батчу в розбіжному рядку. Для імпорту це означало список
+        // комірок, яких ніхто, крім самого імпорту, не чіпав: їхнє чинне
+        // значення рівно те, що перегляд показав як «було». Лишаються ті, що
+        // справді змінилися після перегляду, — саме їх людині треба звірити.
+        if (error is ConcurrencyConflictException
+            && details.TryGetValue("conflicts", out var raw)
+            && raw is IEnumerable<CellConflictDto> conflicts)
+        {
+            details["conflicts"] = ChangedSincePreview(conflicts, diff);
+        }
 
         return error switch
         {
@@ -395,6 +495,84 @@ public sealed class ExcelImporter(
             BusinessRuleException => new BusinessRuleException(error.ErrorCode, error.Message, details),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Розбіжності, у яких чинне значення комірки вже НЕ те, що перегляд
+    /// показав як «було» (F-24).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Комірка без пари в плані лишається: невідомо, що бачив перегляд, —
+    /// а прибрати справжню розбіжність гірше, ніж показати зайву.
+    /// </remarks>
+    private static List<CellConflictDto> ChangedSincePreview(
+        IEnumerable<CellConflictDto> conflicts, TableDiff diff)
+    {
+        var previewed = new Dictionary<(string RowKey, string ColumnCode), object?>();
+
+        foreach (var change in diff.Changes)
+        {
+            previewed[(change.RowKey, change.ColumnCode)] = change.OldValue;
+        }
+
+        return
+        [
+            .. conflicts.Where(conflict =>
+                !previewed.TryGetValue((conflict.RowKey, conflict.ColumnCode), out var old)
+                || !SameScalar(old, conflict.TheirValue)),
+        ];
+    }
+
+    /// <summary>
+    /// Чи те саме значення: з плану (після JSON — <see cref="JsonElement"/>) і
+    /// з бази (скаляр CLR).
+    /// </summary>
+    private static bool SameScalar(object? previewed, object? current)
+    {
+        var left = CellValueReader.Normalize(previewed);
+        var right = CellValueReader.Normalize(current);
+
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        if (TryNumber(left, out var a) && TryNumber(right, out var b))
+        {
+            return a == b;
+        }
+
+        if (right is DateTime date && left is string text
+            && DateTime.TryParse(
+                text, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+        {
+            return parsed == date;
+        }
+
+        return string.Equals(
+            Convert.ToString(left, System.Globalization.CultureInfo.InvariantCulture),
+            Convert.ToString(right, System.Globalization.CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
+    }
+
+    private static bool TryNumber(object value, out decimal number)
+    {
+        switch (value)
+        {
+            case decimal d:
+                number = d;
+                return true;
+            case int i:
+                number = i;
+                return true;
+            case long l:
+                number = l;
+                return true;
+            default:
+                number = 0;
+                return false;
+        }
     }
 
     /// <summary>
@@ -420,17 +598,23 @@ public sealed class ExcelImporter(
         var stored = await previews.FindAsync(previewToken, ct).ConfigureAwait(false)
                      ?? throw new BusinessRuleException(
                          "ECR-IMP-0422",
-                         "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.");
+                         "Перегляд імпорту не знайдено або його строк вийшов: побудуйте його заново.",
+
+                         // ⛔ F-24: без ключа деталь приїжджала українським
+                         // реченням під англійським заголовком.
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewExpired" });
 
         var plan = JsonSerializer.Deserialize<ImportPlan>(stored, Options)
                    ?? throw new BusinessRuleException(
-                       "ECR-IMP-0422", "Збережений перегляд імпорту не читається.");
+                       "ECR-IMP-0422", "Збережений перегляд імпорту не читається.",
+                       new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewUnreadable" });
 
         if (documentId is not null && plan.DocumentId != documentId)
         {
             throw new BusinessRuleException(
                 "ECR-IMP-0422",
-                $"Перегляд належить документу {plan.DocumentId}, а застосування йде в {documentId}.");
+                $"Перегляд належить документу {plan.DocumentId}, а застосування йде в {documentId}.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.previewOtherDocument" });
         }
 
         return plan;
@@ -443,7 +627,16 @@ public sealed class ExcelImporter(
         {
             return new XLWorkbook(file);
         }
-        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or FormatException)
+        // ⛔ F-07: файл, що не є книгою, ClosedXML відхиляє чим завгодно, крім
+        // того, що тут перелічували: текст і PDF — `OpenXmlPackageException`,
+        // zip без частини книги — навіть `NullReferenceException` зсередини
+        // `XLWorkbook.LoadSpreadsheetDocument`. Кожне з них ставало 500. Тому
+        // фільтр — не за типом, а за місцем: конструктор лише РОЗБИРАЄ файл, і
+        // будь-яка його відмова означає «це не книга» (скасування — не
+        // відмова розбору, воно йде далі як є).
+#pragma warning disable CA1031 // Причина — у ⛔ вище: перелік типів відмов стороннього розбору не закривається.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+#pragma warning restore CA1031
         {
             throw new BusinessRuleException(
                 "ECR-IMP-0422", "Файл не читається як книга .xlsx.",
@@ -465,7 +658,8 @@ public sealed class ExcelImporter(
             throw new BusinessRuleException(
                 "ECR-IMP-0422",
                 "У книзі немає службового аркуша з картою: імпортувати можна лише файл, "
-                + "вивантажений цією системою.");
+                + "вивантажений цією системою.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.noMapSheet" });
         }
 
         // ⚠ Карта складається з усіх непорожніх комірок стовпця A: експортер
@@ -478,11 +672,24 @@ public sealed class ExcelImporter(
                 .OrderBy(c => c.Address.RowNumber)
                 .Select(c => c.GetString()));
 
-        return (string.IsNullOrWhiteSpace(json)
-                   ? null
-                   : JsonSerializer.Deserialize<ExcelWorkbookMap>(json, Options))
+        ExcelWorkbookMap? map;
+
+        try
+        {
+            map = string.IsNullOrWhiteSpace(json)
+                ? null
+                : JsonSerializer.Deserialize<ExcelWorkbookMap>(json, Options);
+        }
+        catch (JsonException)
+        {
+            // ⚠ Зіпсована вручну карта — та сама відмова, що й порожня, а не 500.
+            map = null;
+        }
+
+        return map
                ?? throw new BusinessRuleException(
-                   "ECR-IMP-0422", "Карта книги порожня або пошкоджена.");
+                   "ECR-IMP-0422", "Карта книги порожня або пошкоджена.",
+                   new Dictionary<string, object?> { ["messageKey"] = "err.ECR-IMP-0422.mapBroken" });
     }
 
     /// <summary>Коди записів довідників: <c>RegistryDefId</c> → код → <c>Id</c>.</summary>

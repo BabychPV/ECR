@@ -31,7 +31,7 @@ public sealed class CycleDescriptionTests
         var text = CycleDescription.Describe([1], _ => "Total");
 
         Assert.Contains("Total", text, StringComparison.Ordinal);
-        Assert.Contains("власний результат", text, StringComparison.Ordinal);
+        Assert.Contains("reads its own result", text, StringComparison.Ordinal);
         Assert.DoesNotContain("→", text, StringComparison.Ordinal);
     }
 
@@ -47,7 +47,7 @@ public sealed class CycleDescriptionTests
         // категорією, а не як наш дефект (`H-24d-2`).
         var text = CycleDescription.Describe([7], _ => "ECW_EC_tons_184");
 
-        Assert.Contains("чинній системі", text, StringComparison.Ordinal);
+        Assert.Contains("legacy system", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class CycleDescriptionTests
         var text = CycleDescription.Describe([7, 7], _ => "Total");
 
         Assert.Contains("Total", text, StringComparison.Ordinal);
-        Assert.Contains("власний результат", text, StringComparison.Ordinal);
+        Assert.Contains("reads its own result", text, StringComparison.Ordinal);
         Assert.DoesNotContain("→", text, StringComparison.Ordinal);
     }
 
@@ -81,7 +81,7 @@ public sealed class CycleDescriptionTests
         var text = CycleDescription.Describe([1, 2], _ => "Total");
 
         Assert.Contains("Total → Total", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("власний результат", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("reads its own result", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -101,8 +101,8 @@ public sealed class CycleDescriptionTests
         // ⚠ Порожній шлях означає «цикл є, але сортувальник не назвав який».
         // Дописати сюди щось правдоподібне означало б показати користувачеві
         // формули, яких у циклі немає.
-        Assert.Equal("Формули утворюють цикл.", CycleDescription.Describe(null));
-        Assert.Equal("Формули утворюють цикл.", CycleDescription.Describe([]));
+        Assert.Equal("The formulas form a cycle.", CycleDescription.Describe(null));
+        Assert.Equal("The formulas form a cycle.", CycleDescription.Describe([]));
     }
 
     [Fact]

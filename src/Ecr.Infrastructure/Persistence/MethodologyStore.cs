@@ -91,6 +91,7 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .Where(b => b.MethodologyId == id && b.IsActive)
             .Select(b => b.TableDefId)
             .Distinct()
+            .OrderBy(tableId => tableId)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -219,6 +220,8 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
         var formulas = await db.MethodologyFormulas
             .AsNoTracking()
             .Where(f => versionIds.Contains(f.MethodologyVersionId))
+            .OrderBy(f => f.MethodologyVersionId)
+            .ThenBy(f => f.Id)
             .Select(f => new { f.MethodologyVersionId, f.Code })
             .Take(MaxChildren)
             .ToListAsync(ct)
@@ -253,6 +256,7 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
 
         var existing = await db.MethodologyDependencies
             .Where(d => d.FromMethodologyId == fromMethodologyId)
+            .OrderBy(d => d.Id)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -298,6 +302,7 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
         => await db.MethodologyRequiredInputs
             .AsNoTracking()
             .Where(r => r.MethodologyVersionId == methodologyVersionId)
+            .OrderBy(r => r.Id)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -310,9 +315,156 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .Where(b => b.IsActive && b.TableDefId == tableDefId)
             .Select(b => b.MethodologyId)
             .Distinct()
+            .OrderBy(methodologyId => methodologyId)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Два запити на весь набір таблиць, не по запиту на таблицю: зріз —
+    /// найгарячіше читання системи. Версії — УСІХ статусів: виведена з обігу
+    /// версія лишається тією, що порахувала свої періоди.
+    /// </remarks>
+    public async Task<IReadOnlyList<ColumnResultBinding>> GetColumnResultBindingsAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        if (tableDefIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = tableDefIds.ToList();
+
+        var bindings = await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && ids.Contains(b.TableDefId))
+            .OrderBy(b => b.Id)
+            .Take(MaxChildren)
+            .Select(b => new { b.TableDefId, b.ColumnDefId, b.MethodologyId, b.OutputCode, b.MatchJson })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (bindings.Count == 0)
+        {
+            return [];
+        }
+
+        var methodologyIds = bindings.Select(b => b.MethodologyId).Distinct().ToList();
+
+        var versions = await db.MethodologyVersions
+            .AsNoTracking()
+            .Where(v => methodologyIds.Contains(v.MethodologyId))
+            .OrderBy(v => v.Id)
+            .Select(v => new { v.Id, v.MethodologyId })
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byMethodology = versions.ToLookup(v => v.MethodologyId, v => v.Id);
+
+        return bindings.ConvertAll(b => new ColumnResultBinding(
+            b.TableDefId, b.ColumnDefId, b.MethodologyId, b.OutputCode, b.MatchJson,
+            [.. byMethodology[b.MethodologyId]]));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ «Актуальний прогін документа» — останній прогін зі статусом
+    /// <c>Current</c>, у якому є числа ЦЬОГО документа (прогін належить
+    /// проєкту й періоду, не документу). Входи — зміни <c>aud.CellChange</c>
+    /// документа за період після ПОЧАТКУ прогону, крім <c>Recalculation</c>:
+    /// формули шаблону пишуть свої комірки саме всередині прогону, і рахувати
+    /// їх «зміною входів» означало б позначати застарілим кожен свіжий
+    /// результат.
+    ///
+    /// ⚠ Сирий SQL: <c>aud.*</c> немає в моделі EF (журнал пише
+    /// <c>AuditWriter</c> через TVP).
+    /// </remarks>
+    public async Task<CalculationFreshness> GetCalculationFreshnessAsync(
+        long documentId, int periodKey, CancellationToken ct)
+    {
+        var rows = await db.Database
+            .SqlQuery<FreshnessRow>($"""
+                SELECT TOP (1)
+                       r.FinishedAt AS CalculatedAt,
+                       (SELECT MAX(c.ChangedAt)
+                          FROM aud.CellChange AS c
+                         WHERE c.DocumentId = {documentId}
+                           AND c.PeriodKey = {periodKey}
+                           AND c.ChangedAt > r.StartedAt
+                           AND c.Origin <> N'Recalculation') AS InputsChangedAt
+                  FROM calc.CalculationRun AS r
+                 WHERE r.Status = N'Current'
+                   AND r.PeriodKey = {periodKey}
+                   AND EXISTS (SELECT 1
+                                 FROM calc.CalculationResult AS cr
+                                WHERE cr.CalculationRunId = r.Id
+                                  AND cr.PeriodKey = {periodKey}
+                                  AND cr.DocumentId = {documentId})
+                 ORDER BY r.Id DESC
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.Count == 0
+            ? new CalculationFreshness(null, null)
+            : new CalculationFreshness(rows[0].CalculatedAt, rows[0].InputsChangedAt);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<int, MethodologyVersionLabel>> GetVersionLabelsAsync(
+        IReadOnlyCollection<int> methodologyVersionIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(methodologyVersionIds);
+        if (methodologyVersionIds.Count == 0)
+        {
+            return new Dictionary<int, MethodologyVersionLabel>();
+        }
+
+        var ids = methodologyVersionIds.ToList();
+
+        var labels = await (
+            from version in db.MethodologyVersions.AsNoTracking()
+            where ids.Contains(version.Id)
+            join methodology in db.Methodologies.AsNoTracking() on version.MethodologyId equals methodology.Id
+            orderby version.Id
+            select new { version.Id, methodology.Code, version.Version })
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return labels.ToDictionary(l => l.Id, l => new MethodologyVersionLabel(l.Id, l.Code, l.Version));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Журнал спільний для шаблонів і методологій (<c>EntityType</c>), і
+    /// <c>EntityId</c> — версія, а не методологія: звужується через
+    /// <c>calc.MethodologyVersion</c>. Ім'я — з <c>sec.User</c> (F-16: «By user»
+    /// числом не читається).
+    /// </remarks>
+    public async Task<IReadOnlyList<MethodologyPublicationEntry>> ListPublicationsAsync(
+        int methodologyId, CancellationToken ct)
+        => await db.Database
+            .SqlQuery<MethodologyPublicationEntry>($"""
+                SELECT TOP (500)
+                       e.Id, e.ChangedAt, v.Id AS MethodologyVersionId, v.Version, e.ChangeReason,
+                       e.ChangedByUserId, COALESCE(NULLIF(u.DisplayName, N''), u.UserName) AS ChangedByName,
+                       e.ResultDiffJson
+                  FROM aud.PublicationEvent AS e
+                  JOIN calc.MethodologyVersion AS v ON v.Id = e.EntityId
+                  LEFT JOIN sec.[User] AS u ON u.Id = e.ChangedByUserId
+                 WHERE e.EntityType = N'calc.MethodologyVersion'
+                   AND v.MethodologyId = {methodologyId}
+                 ORDER BY e.ChangedAt DESC, e.Id DESC
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <summary>Рядок запиту свіжості.</summary>
+    public sealed record FreshnessRow(DateTime? CalculatedAt, DateTime? InputsChangedAt);
 
     /// <inheritdoc />
     /// <remarks>

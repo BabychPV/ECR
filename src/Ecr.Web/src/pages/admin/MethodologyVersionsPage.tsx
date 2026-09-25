@@ -43,6 +43,7 @@ import {
 } from '@/features/methodologies/draft';
 import { useDeleteVersionAction } from '@/features/methodologies/DeleteVersionAction';
 import { VersionDiffModal } from '@/features/methodologies/VersionDiffModal';
+import { showPublishError } from '@/features/methodologies/publishError';
 import { t } from '@/shared/i18n';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -93,6 +94,13 @@ const MethodologyTestsPanel = lazyPanel('MethodologyTestsPanel');
  * `lazyPanel` тримає сім попередніх. Спільного модуля вона не потребує —
  * ні станів, ні чернеток панелей змісту вона не читає.
  */
+/** Журнал публікацій (F-16) — власний чанк, як і матриця покриття. */
+const MethodologyPublicationsPanel = lazy(async () => {
+  const loaded = await import('@/features/methodologies/MethodologyPublicationsPanel');
+
+  return { default: loaded.MethodologyPublicationsPanel };
+});
+
 const MethodologyRuleCoveragePanel = lazy(async () => {
   const loaded = await import('@/features/methodologies/RuleCoveragePanel');
 
@@ -304,7 +312,8 @@ export function MethodologyVersionsPage(): JSX.Element {
     // `ECR-CALC-0409`). `showApiError` показує ТЕКСТ відмови сервера, а не
     // узагальнене «не вдалося»: саме цей клас багів (проковтнута відповідь
     // сервера) уже знайдено в іншому місці цього аудиту.
-    onError: showApiError,
+    // ⚠ F-15/B-12: під назвою — перелік проблем із поля `problems`.
+    onError: showPublishError,
   });
 
   const placement = useMemo<ExpressionPlacement>(
@@ -635,6 +644,9 @@ export function MethodologyVersionsPage(): JSX.Element {
             methodologyId={methodologyId}
             versionId={selected.id}
           />
+
+          {/* ⚠ F-16: журнал публікацій належить МЕТОДОЛОГІЇ, не версії. */}
+          <MethodologyPublicationsPanel methodologyId={methodologyId} />
 
           {/* ⚠ Покриття «виходи → колонки» — ПІСЛЯ матриці покриття правил, а
               не перед нею: обидві лише ПОКАЗУЮТЬ наслідки того, що складено

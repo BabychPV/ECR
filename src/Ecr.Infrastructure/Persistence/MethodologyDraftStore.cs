@@ -384,12 +384,20 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
     /// запис версії» довелося б оголосити в домені заради читання в
     /// інфраструктурі — тобто вписати в модель предметної області подробицю
     /// однієї вибірки.
+    /// <para>
+    /// ⚠ Порядок за <c>Id</c> — порядок створення в джерелі: клон вставляє
+    /// копії в тому самому порядку, а на стелі <c>Take</c> бере ті самі
+    /// записи, а не довільну вибірку плану (EF 10102). Обмеження
+    /// <see cref="Domain.Abstractions.Entity{TId}"/> — не нова залежність
+    /// домену, а наявний базовий тип усіх восьми наборів.
+    /// </para>
     /// </remarks>
     private static async Task<List<TChild>> ChildrenAsync<TChild>(
         IQueryable<TChild> source, CancellationToken ct)
-        where TChild : class
+        where TChild : Domain.Abstractions.Entity<int>
         => await source
             .AsNoTracking()
+            .OrderBy(c => c.Id)
             .Take(MaxChildren)
             .ToListAsync(ct)
             .ConfigureAwait(false);

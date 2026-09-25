@@ -285,7 +285,7 @@ try {
     $adminRole = ($roles | Where-Object { $_.code -eq 'E2EAdmin' }).id
     if (-not $operatorRole -or -not $adminRole) { Fail 'ролі не створилися' }
 
-    Step 'два іменовані користувачі'
+    Step 'три іменовані користувачі'
     Call POST '/api/v1/users' @{
         userName = 'e2e-operator'; provider = 'Local'; sid = $null
         displayName = 'E2E operator'; initialPassword = 'E2E-Operator-2026!'
@@ -298,13 +298,37 @@ try {
         roleCodes = @('E2EAdmin')
     } | Out-Null
 
+    # ⛔ F-25 (пряме рішення людини, `ApproveSheetHandler.cs`): та сама
+    # людина не може подати аркуш (`Submit`) і сама ж його погодити
+    # (`Approve`) — правило чотирьох очей. `keyboardPath.spec.ts` подає
+    # аркуш від імені `e2e-admin`, тож затверджувати ним ЦЕЙ САМИЙ аркуш
+    # сервер відмовляє (`403 ECR-ACCS-0403`, `err.ECR-ACCS-0403.approveOwnSubmission`)
+    # — другий обліковий запис із тим самим грантом (роль `E2EAdmin`) існує
+    # рівно для цього кроку.
+    #
+    # ⛔ Ім'я НЕ `e2e-approver` — живцем зловлено на стенді. Кнопка
+    # затвердження шукається `getByRole('button', { name: /Approve|Затвердити/i })`,
+    # а Playwright звіряє `name`-регексп ПІДРЯДКОМ: `e2e-approver` містить
+    # `approve`, тож той самий локатор (з `.first()`) резолвився в кнопку
+    # МЕНЮ КОРИСТУВАЧА (її доступне ім'я — юзернейм) замість кнопки
+    # робочого процесу. Симптом був загадковий: фокус і клік проходили без
+    # жодної помилки, а замість діалогу підтвердження відкривалося меню
+    # «Тема/Пароль/Вийти» — і це коштувало кількох прогонів, доки
+    # відеокадр трасування не показав меню замість діалогу.
+    Call POST '/api/v1/users' @{
+        userName = 'e2e-reviewer'; provider = 'Local'; sid = $null
+        displayName = 'E2E reviewer'; initialPassword = 'E2E-Reviewer-2026!'
+        roleCodes = @('E2EAdmin')
+    } | Out-Null
+
     # ⚠ Разовий пароль міняється ЗАРАЗ, а не в тесті: інакше кожен прогін
     # починався б із примусової зміни пароля, і перевірявся б саме цей екран,
     # а не той, заради якого прогін написаний (`ФВ-6.18`).
-    Step 'зміна разових паролів обох'
+    Step 'зміна разових паролів усіх трьох'
     foreach ($account in @(
             @{ user = 'e2e-operator'; issued = 'E2E-Operator-2026!'; work = 'E2E-Operator-Work-2026!' },
-            @{ user = 'e2e-admin'; issued = 'E2E-Admin-2026!'; work = 'E2E-Admin-Work-2026!' })) {
+            @{ user = 'e2e-admin'; issued = 'E2E-Admin-2026!'; work = 'E2E-Admin-Work-2026!' },
+            @{ user = 'e2e-reviewer'; issued = 'E2E-Reviewer-2026!'; work = 'E2E-Reviewer-Work-2026!' })) {
 
         $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
         Call POST '/api/v1/login/local' @{ userName = $account.user; password = $account.issued } | Out-Null

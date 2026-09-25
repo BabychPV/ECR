@@ -496,11 +496,11 @@ public sealed class SqlDataSource(
     /// <summary>Джерела немає або воно вимкнене.</summary>
     /// <param name="dataSourceId">Ідентифікатор із запиту.</param>
     /// <remarks>
-    /// ⚠ Ключ несе й цей кидок, хоча храповик локалізації його не бачить:
-    /// <c>MessageKeyRatchetTests</c> шукає літеральне <c>throw new …Exception(</c>,
-    /// а тут кидається результат методу. Покладатися на цю сліпу пляму —
-    /// означало б лишити людині українське речення в продукті, де української
-    /// мови немає.
+    /// ⚠ Ключ несе й цей кидок, хоча кидається результат методу, а не
+    /// літеральне <c>throw new …Exception(</c>. Доти храповик локалізації таких
+    /// місць не бачив; з 2026-09-23 <c>MessageKeyRatchetTests</c> рахує і
+    /// фабрики (<c>BusinessRuleException X(…) =&gt; new(…)</c>), тож ключ тут —
+    /// не лише чесність, а й вимога сторожа.
     /// </remarks>
     private static BusinessRuleException Unavailable(int dataSourceId)
         => new(

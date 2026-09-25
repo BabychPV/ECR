@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuditPage } from '@/pages/admin/AuditPage';
-import { cellChangesQuery, isSingleCell } from '@/features/audit/api';
+import { cellChangesQuery, isSingleCell, structureChangesQuery } from '@/features/audit/api';
 import { testTheme } from '@/test/render';
 
 /**
@@ -106,8 +106,11 @@ describe('cellChangesQuery — рядок запиту журналу', () => {
   it('несе вікно завжди, а решту — лише коли задано', () => {
     const query = new URLSearchParams(cellChangesQuery({ from: '2026-01-01', to: '2026-01-08' }));
 
-    expect(query.get('from')).toBe('2026-01-01');
-    expect(query.get('to')).toBe('2026-01-08');
+    // ⚠ Межа їде миттєвостями, а не датами: сервер порівнює `ChangedAt` з
+    // миттєвостями UTC. Сама рівність тут нічого не доводить про втрачену
+    // добу — це робить окремий `describe` нижче.
+    expect(query.get('from')).toBe(new Date(2026, 0, 1).toISOString());
+    expect(query.get('to')).toBe(new Date(2026, 0, 9).toISOString());
 
     /*
      * ⛔ Порожні фільтри НЕ надсилаються зовсім. `?rowKey=` сервер трактує як
@@ -185,8 +188,8 @@ describe('AuditPage: фільтри з адреси доїжджають до с
       // ⛔ Вікно лишається ОБОВ'ЯЗКОВИМ у кожному запиті: таблиця
       // партиційована за `ChangedAt`, і запит без меж пішов би по всіх
       // партиціях. Це не оптимізація — це «сервер зайнятий».
-      expect(query.get('from')).toBe('2026-01-01');
-      expect(query.get('to')).toBe('2026-01-08');
+      expect(query.get('from')).toBe(new Date(2026, 0, 1).toISOString());
+      expect(query.get('to')).toBe(new Date(2026, 0, 9).toISOString());
     },
     SlowEnvTimeout,
   );
@@ -205,4 +208,98 @@ describe('AuditPage: фільтри з адреси доїжджають до с
     },
     SlowEnvTimeout,
   );
+});
+
+/**
+ * `U-20`: журнал ніколи не показував СЬОГОДНІШНІХ змін.
+ *
+ * ⛔ Що було. Вікно за замовчуванням — `from = сьогодні−7`, `to = сьогодні`, і
+ * клієнт надсилав ці дати як є. Сервер порівнює `ChangedAt < @to`, тож
+ * `to = 2026-09-23` означало «до півночі, з якої 23-тє тільки почалося» —
+ * увесь поточний день випадав. На екрані стояло «No changes in this window»
+ * при трьох рядках у `aud.CellChange` о 17:19–17:20 того самого дня. Той
+ * самий запит із `to=2026-09-24` повертав усі три.
+ *
+ * ⛔ Чому це найгірший різновид відмови: журнал дивляться передусім СЬОГОДНІ
+ * («хто щойно це змінив»), і він відповідав «змін не було» — тобто неправдою,
+ * без жодної ознаки, що щось не так.
+ *
+ * ⛔ **Мутаційний доказ.** Повернути `windowEnd` до `instant(value, 0)` —
+ * і обидва `describe` нижче червоніють на `toBeLessThan(to)`: зміна о 17:19
+ * опиняється поза вікном, яке людина набрала включно з цим днем.
+ */
+describe('U-20: вікно, що закінчується сьогоднішньою датою, включає сьогоднішні зміни', () => {
+  /** Дата з `<input type="date">` для моменту в поясі браузера. */
+  function dateField(at: Date): string {
+    return [
+      String(at.getFullYear()),
+      String(at.getMonth() + 1).padStart(2, '0'),
+      String(at.getDate()).padStart(2, '0'),
+    ].join('-');
+  }
+
+  /** Те саме порівняння, що в `AuditReader`: `ChangedAt >= @from AND ChangedAt < @to`. */
+  function covers(query: string, changedAt: Date): boolean {
+    const params = new URLSearchParams(query);
+    const from = Date.parse(params.get('from') ?? '');
+    const to = Date.parse(params.get('to') ?? '');
+
+    expect(Number.isNaN(from)).toBe(false);
+    expect(Number.isNaN(to)).toBe(false);
+
+    return changedAt.getTime() >= from && changedAt.getTime() < to;
+  }
+
+  // Рівно той випадок зі стенда: зміни о 17:19–17:20 того дня, яким
+  // закінчується вікно за замовчуванням.
+  const today = new Date(2026, 8, 23, 17, 20, 0);
+  const changedAt = new Date(2026, 8, 23, 17, 19, 0);
+  const to = dateField(today);
+  const from = dateField(new Date(2026, 8, 16));
+
+  it('журнал комірок бачить зміну, зроблену сьогодні', () => {
+    const query = cellChangesQuery({ from, to });
+
+    expect(covers(query, changedAt)).toBe(true);
+
+    // ⛔ І межа НЕ їде далі, ніж на одну добу: зміна завтрашнього ранку у
+    // вікно не входить. Без цього рядка «плюс доба» можна було б замінити
+    // на «плюс рік» і тест лишився б зеленим.
+    expect(covers(query, new Date(2026, 8, 24, 0, 1, 0))).toBe(false);
+  });
+
+  it('початок вікна не втрачає перших годин першої доби', () => {
+    /*
+     * ⚠ Дзеркальний бік того самого дефекту. Гола дата `2026-09-16` читалася
+     * сервером як ПІВНІЧ UTC; у поясі UTC+3 це 03:00 місцевого, тож зміна о
+     * 00:30 першого дня вікна теж випадала. Тепер обидві межі — місцева
+     * північ, у тому самому поясі, у якому `Timestamp` друкує `changedAt`.
+     */
+    expect(covers(cellChangesQuery({ from, to }), new Date(2026, 8, 16, 0, 30, 0))).toBe(true);
+    expect(covers(cellChangesQuery({ from, to }), new Date(2026, 8, 15, 23, 30, 0))).toBe(false);
+  });
+
+  it('вкладка структурних змін має ту саму межу, а не свою', () => {
+    /*
+     * ⛔ Дві вкладки одного екрана ділять ОДНУ пару дат. Полагодити лише
+     * журнал комірок означало б, що одна вкладка каже правду, а сусідня — ні,
+     * і розбіжність між ними читалася б як факт про дані.
+     */
+    expect(covers(structureChangesQuery({ from, to }), changedAt)).toBe(true);
+    expect(covers(structureChangesQuery({ from, to }), new Date(2026, 8, 24, 0, 1, 0))).toBe(false);
+  });
+
+  it('готову миттєвість ISO не зсуває вдруге', () => {
+    /*
+     * ⚠ Історія ОДНІЄЇ комірки й наскрізні тести надсилають не дату, а
+     * миттєвість. Додати їй добу означало б зсунути їхнє вікно на добу
+     * вперед — тобто зламати їх тим самим способом, яким тут лагодять екран.
+     */
+    const query = new URLSearchParams(
+      cellChangesQuery({ from: '2026-09-16T00:00:00.000Z', to: '2026-09-23T17:20:00.000Z' }),
+    );
+
+    expect(query.get('from')).toBe('2026-09-16T00:00:00.000Z');
+    expect(query.get('to')).toBe('2026-09-23T17:20:00.000Z');
+  });
 });

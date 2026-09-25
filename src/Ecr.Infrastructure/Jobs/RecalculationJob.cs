@@ -89,8 +89,17 @@ public sealed class RecalculationJob(
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
 
+        // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
+        // хвиля UX-PASS R4): прогін ОДНОГО документа (`request.DocumentId > 0`,
+        // маршрут `RecalculateDocumentHandler`) несе свій `DocumentId`, щоб
+        // `SwitchCurrentRunAsync` знімав актуальність лише в межах ЦЬОГО
+        // документа, а не всього `(ProjectId, PeriodKey)`. Прогін усього
+        // проєкту (`DocumentId <= 0` — нічний розклад чи адміністративна
+        // команда) лишається `DocumentId = null`, як і завжди: він рахує ВСІ
+        // документи проєкту заново, тож законно перекриває їх усіх.
         var run = new Domain.Entities.Calculations.CalculationRun(
-            projectId, request.PeriodKey, request.TriggeredByUserId, clock.UtcNow);
+            projectId, request.PeriodKey, request.TriggeredByUserId, clock.UtcNow,
+            documentId: request.DocumentId > 0 ? request.DocumentId : null);
 
         try
         {
@@ -412,6 +421,10 @@ public sealed class RecalculationJob(
         var scopes = await scopesQuery
             .Select(i => i.PeriodKeyValue)
             .Distinct()
+            // За зростанням ДО стелі: на межі беруться найраніші періоди —
+            // ті, від яких рахуються наступні (`[Period:-1]`), — а не
+            // довільні (EF 10102).
+            .OrderBy(key => key)
             .Take(MaxBindings)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -469,6 +482,8 @@ public sealed class RecalculationJob(
         }
 
         var instances = await instancesQuery
+            .OrderBy(i => i.PeriodKeyValue)
+            .ThenBy(i => i.Id)
             .Take(MaxBindings)
             .Select(i => new InstanceRow(i.Id, i.TableDefId, i.PeriodKeyValue))
             .ToListAsync(ct)
@@ -484,6 +499,7 @@ public sealed class RecalculationJob(
         var bindings = await db.CalculationBindings
             .AsNoTracking()
             .Where(b => b.IsActive && tableDefIds.Contains(b.TableDefId))
+            .OrderBy(b => b.Id)
             .Take(MaxBindings)
             .Select(b => new BindingRow(b.TableDefId, b.MethodologyId))
             .ToListAsync(ct)

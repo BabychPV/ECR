@@ -58,6 +58,8 @@ public sealed class ExcelImporterTemplateVersionTests
     {
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
 
         // ⚠ Порожній словник рішень — жодна адреса не заборонена явно
         // (той самий прийом, що й у PatchCellsTests): ImportDiffBuilder
@@ -180,14 +182,14 @@ public sealed class ExcelImporterTemplateVersionTests
                 methodologies, patchRegistries, patchHeaders,
                 Substitute.For<IAuditWriter>(), Substitute.For<IAuditReader>(),
                 Substitute.For<IBackgroundJobScheduler>(), Substitute.For<IUnitOfWork>(),
-                Substitute.For<ICurrentUser>(), Substitute.For<IClock>()),
+                Substitute.For<ICurrentUser>(), Substitute.For<IClock>(), Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>()),
             new ImportDiffBuilder(), _cellStore, _rowStore,
             // ⚠ `DAT-05`: імпортер тепер сам відкриває транзакцію на всю книгу
             // і сам ставить задачу перерахунку. Ці тести — про `PreviewAsync`,
             // тобто до транзакції не доходять; саб віддає працюючу заглушку,
             // щоб причина падіння в майбутньому тесті не виглядала як дефект
             // продукту.
-            FakeUnitOfWork.Passthrough(), Substitute.For<IBackgroundJobScheduler>());
+            FakeUnitOfWork.Passthrough(), Substitute.For<IBackgroundJobScheduler>(), Substitute.For<ISheetEditGate>());
     }
 
     /// <summary>Саб <see cref="IUnitOfWork"/>, чия «транзакція» просто виконує тіло.</summary>

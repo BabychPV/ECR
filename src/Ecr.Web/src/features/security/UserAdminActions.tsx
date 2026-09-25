@@ -8,11 +8,12 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { showDone } from '@/shared/ui/notify';
 import { problemText } from '@/shared/ui/problemText';
+import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { t } from '@/shared/i18n';
 import { LockReasonMaxLength, lockUser, resetUserPassword, unlockUser } from './userAdminApi';
 
-/** Та сама кнопка-тумблер, що й у формі створення користувача (`Q-260`). */
-const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+// Та сама кнопка-тумблер, що й у формі створення користувача (`Q-260`).
+// ✎ `X-26`: пропи — `a11yLabels.passwordToggleProps()` (каталог + запасний літерал).
 
 /**
  * Відмова «пароль закороткий» — єдина, що належить ПОЛЮ, а не діалогу.
@@ -181,7 +182,7 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
               value={password}
               onChange={(event) => setPassword(event.currentTarget.value)}
               error={tooShortText}
-              visibilityToggleButtonProps={passwordToggleProps}
+              visibilityToggleButtonProps={passwordToggleProps()}
               data-autofocus
             />
 

@@ -485,6 +485,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                 on state.DocumentId equals document.Id
             where document.ProjectId == projectId
                   && (periodKey == null || state.PeriodKey == periodKey.Value.Value)
+            orderby state.Id
             select state.Status;
 
         var statuses = await query.Take(MaxRows).ToListAsync(ct).ConfigureAwait(false);
@@ -530,6 +531,25 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                   // результати всіх прогонів разом — числа виросли б кратно
                   // кількості перерахунків і лишилися б правдоподібними.
                   && run.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus
+
+                  // ⛔ Той самий пріоритет, що й `CalculationResultStore.ReadCurrentAsync`
+                  // (третя хвиля UX-PASS R4, «CalculationRun ховає результати
+                  // сусідніх документів»): документний прогін (`DocumentId`
+                  // заданий) і проєктний прогін (`DocumentId == null`) можуть
+                  // бути `Current` ОДНОЧАСНО для того самого документа —
+                  // документний НЕ знімає актуальність із проєктного (той рахує
+                  // й ІНШІ документи). Без цієї умови зріз склав би результати
+                  // ОБОХ прогонів для документа з власним прогоном — те саме
+                  // подвоєння, що вище коментар уже застерігає, лише з іншого
+                  // джерела. Рядок проєктного прогону береться ЛИШЕ якщо для
+                  // цього документа й періоду НЕМАЄ власного актуального прогону.
+                  && (run.DocumentId == result.DocumentId
+                      || (run.DocumentId == null
+                          && !db.CalculationRuns.Any(dedicated =>
+                              dedicated.ProjectId == projectId
+                              && dedicated.DocumentId == result.DocumentId
+                              && dedicated.PeriodKey == result.PeriodKey
+                              && dedicated.Status == Domain.Entities.Calculations.CalculationRun.CurrentStatus)))
 
             // ⛔ Сортування стоїть ДО проєкції, і це не косметика. Поки
             // `OrderBy` висів на вже спроєктованому `ResultRow`, EF не міг
@@ -637,7 +657,16 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
         return columns;
     }
 
-    /// <summary>Актуальний прогін проєкту й періоду.</summary>
+    /// <summary>Актуальний прогін проєкту й періоду — лише для поля походження зрізу.</summary>
+    /// <remarks>
+    /// ⚠ Із документним виміром `CalculationRun.DocumentId` актуальних прогонів
+    /// області може бути КІЛЬКА одночасно (проєктний + документні), а поле
+    /// зрізу (<c>ReportSnapshot.CalculationRunId</c>) — одне. `FirstOrDefaultAsync`
+    /// бере довільний із них: це прийнятно для одного посилального поля «звідки
+    /// приблизно взято числа» (діагностика), АЛЕ самі ЧИСЛА зрізу рахує
+    /// <see cref="AggregateAsync"/> окремим, повним по документах запитом — і
+    /// саме він, а не це поле, визначає, що потрапляє в звіт.
+    /// </remarks>
     private Task<long?> CurrentRunAsync(int projectId, PeriodKey? periodKey, CancellationToken ct)
         => db.CalculationRuns
             .AsNoTracking()
@@ -665,6 +694,7 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
                         && s.PeriodKey == snapshot.PeriodKey
                         && s.Id != snapshot.Id
                         && s.IsCurrent)
+            .OrderBy(s => s.Id)
             .Take(MaxCurrentSnapshots)
             .ToListAsync(ct)
             .ConfigureAwait(false);

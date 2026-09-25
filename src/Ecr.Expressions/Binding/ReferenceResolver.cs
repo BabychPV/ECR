@@ -58,15 +58,17 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
                 if (table.AllowsDynamicRows)
                 {
                     Report(diagnostics, node,
-                        $"Таблиця '{table.Code}' динамічна: посилатися на конкретний рядок " +
-                        $"'{single.RowKey}' не можна, лише предикатом.");
+                        "expr.ref.rowKeyInDynamicTable", DiagnosticParams.Of(("table", table.Code), ("row", single.RowKey)),
+                        $"Table \"{table.Code}\" is dynamic: a specific row \"{single.RowKey}\" cannot be "
+                        + "referenced, only a predicate.");
                     return null;
                 }
 
                 if (!snapshot.RowsByKey.ContainsKey((table.Id, single.RowKey)))
                 {
                     Report(diagnostics, node,
-                        $"Рядка '{single.RowKey}' немає в таблиці '{table.Code}'.");
+                        "expr.ref.unknownRow", DiagnosticParams.Of(("row", single.RowKey), ("table", table.Code)),
+                        $"Row \"{single.RowKey}\" does not exist in table \"{table.Code}\".");
                     return null;
                 }
 
@@ -83,7 +85,8 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
                 if (!table.AllowsDynamicRows)
                 {
                     Report(diagnostics, node,
-                        $"Таблиця '{table.Code}' фіксована: предикат тут зайвий, рядки відомі наперед.");
+                        "expr.ref.predicateInFixedTable", DiagnosticParams.Of(("table", table.Code)),
+                        $"Table \"{table.Code}\" is fixed: a predicate is not needed, its rows are known in advance.");
                     return null;
                 }
 
@@ -92,7 +95,7 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             }
 
             default:
-                Report(diagnostics, node, "Невідомий селектор рядків.");
+                Report(diagnostics, node, "expr.ref.unknownRowSelector", null, "Unknown row selector.");
                 return null;
         }
     }
@@ -121,7 +124,9 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
 
         if (field is null)
         {
-            Report(diagnostics, node, $"Поля шапки '{node.Name}' немає в опублікованій версії шаблону.");
+            Report(diagnostics, node,
+                "expr.ref.unknownHeaderField", DiagnosticParams.Of(("name", node.Name)),
+                $"Header field \"{node.Name}\" does not exist in the published template version.");
         }
 
         return field;
@@ -136,7 +141,10 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             var own = tables.FirstOrDefault(x => x.Table.Id == currentTableDefId).Table;
             if (own is null)
             {
-                Report(diagnostics, node, $"Таблиці {currentTableDefId}, у якій живе формула, немає у знімку.");
+                Report(diagnostics, node,
+                    "expr.ref.ownTableMissing",
+                    DiagnosticParams.Of(("tableDefId", currentTableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture))),
+                    $"Table {currentTableDefId}, which holds the formula, is not in the snapshot.");
             }
 
             return own;
@@ -166,7 +174,8 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
         if (candidates.Count == 0)
         {
             Report(diagnostics, node,
-                $"Таблиці '{node.SheetCode ?? "…"}.{node.TableCode}' немає в опублікованій версії шаблону.");
+                "expr.ref.unknownTable", DiagnosticParams.Of(("sheet", node.SheetCode ?? "…"), ("table", node.TableCode)),
+                $"Table \"{node.SheetCode ?? "…"}.{node.TableCode}\" does not exist in the published template version.");
             return null;
         }
 
@@ -184,7 +193,8 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
             }
 
             Report(diagnostics, node,
-                "Плейсхолдер '{Month}' можна вжити лише у формулі, прив'язаній до місячної колонки.");
+                "expr.ref.monthPlaceholderOutsideColumn", null,
+                "The month placeholder can be used only in a formula bound to a monthly column.");
             return null;
         }
 
@@ -193,7 +203,9 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
 
         if (column is null)
         {
-            Report(diagnostics, node, $"Колонки '{node.ColumnSelector}' немає в таблиці '{table.Code}'.");
+            Report(diagnostics, node,
+                "expr.ref.unknownColumn", DiagnosticParams.Of(("column", node.ColumnSelector), ("table", table.Code)),
+                $"Column \"{node.ColumnSelector}\" does not exist in table \"{table.Code}\".");
             return null;
         }
 
@@ -207,9 +219,14 @@ public sealed class ReferenceResolver(TemplateVersionSnapshot snapshot)
         return column.Id;
     }
 
-    private static void Report(List<ExpressionDiagnostic>? diagnostics, AstNode node, string message)
+    private static void Report(
+        List<ExpressionDiagnostic>? diagnostics,
+        AstNode node,
+        string messageKey,
+        IReadOnlyDictionary<string, string>? messageParams,
+        string message)
         => diagnostics?.Add(new ExpressionDiagnostic(
-            ExpressionErrors.Unresolved, message, node.Position, 1));
+            ExpressionErrors.Unresolved, message, node.Position, 1, messageKey, messageParams));
 }
 
 /// <summary>Резолвлене посилання.</summary>

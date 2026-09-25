@@ -1,10 +1,12 @@
-﻿import type { JSX } from 'react';
-import { Badge, Button, Group, Text } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import type { JSX } from 'react';
+import { Badge, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { EcrApiError, apiEnqueue, apiFetch } from '@/api/client';
+import { apiEnqueue, apiFetch } from '@/api/client';
+import { showApiError, showDone } from '@/shared/ui/notify';
 import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
 import { DataSourcesTable } from '@/features/integration/DataSourcesTable';
+import { listDataSources } from '@/features/integration/dataSourceApi';
+import { DataSourcesQueryKey } from '@/features/integration/dataSourcesKey';
 import type { CollectRequest, SourceEntityStatus } from '@/api/types';
 import { can, useSession } from '@/shared/session/useSession';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
@@ -43,6 +45,40 @@ export function SourcesPage(): JSX.Element {
     queryFn: () => apiFetch<SourceEntityStatus[]>('/api/v1/sources'),
   });
 
+  /*
+   * ⛔ `U-09`, те саме правило, що встановлено в `U-08`: на екрані одночасно
+   * видно рівно ОДИН порожній стан — той, що пояснює найближчу перешкоду.
+   *
+   * На чистій базі ця сторінка показувала ТРИ поспіль: «No collection sources
+   * configured», «No connections configured», «No collection runs». Причинний
+   * порядок між ними жорсткий і зворотний до візуального: сутність збору
+   * належить З'ЄДНАННЮ, прогін належить сутності. Отже найближча перешкода —
+   * «з'єднань немає», і саме її розділ (єдиний, що має власну дію «New
+   * connection») лишається на екрані сам; два підпорядковані мовчать.
+   *
+   * ⚠ Той самий ключ запиту, що й у `DataSourcesTable` — react-query віддає
+   * один і той самий кеш, другого звернення до сервера тут немає.
+   *
+   * ⚠ «Дані приїхали І не порожні»: поки перелік з'єднань у дорозі або
+   * відмовив, стан показує сам розділ з'єднань, а не три заглушки поспіль.
+   */
+  const connections = useQuery({ queryKey: DataSourcesQueryKey, queryFn: listDataSources });
+
+  const hasConnections = connections.data !== undefined && connections.data.length > 0;
+
+  /*
+   * ⛔ Підпорядкований розділ мовчить лише тоді, коли йому СВОГО показати
+   * нічого. Перша редакція цього правила ховала сутності за самою лише
+   * відсутністю з'єднань — і разом із заглушкою ховала РЕАЛЬНІ рядки, коли
+   * сервер віддав сутності при порожньому переліку з'єднань (так будують
+   * світ `SourcesPage.perRowCollect/inactiveA11y/runStatusTone`). Перешкода
+   * «з'єднань немає» найближча лише для ПОРОЖНЬОГО розділу; розділ із даними
+   * показує дані, хай би що казав сусід.
+   */
+  const hasEntities = sources.data !== undefined && sources.data.length > 0;
+
+  const showSubordinate = hasConnections || hasEntities;
+
   const collect = useMutation({
     mutationFn: (id: number) => {
       const to = new Date();
@@ -57,20 +93,32 @@ export function SourcesPage(): JSX.Element {
       // ⚠ 202 з jobId: збір ходить по мережі до чужої системи, і його
       // тривалість визначає не наш код.
       // ⛔ Аудит-пас 8, lane6, п.8: людський вигляд у тості, сам `jobId` — не.
-      notifications.show({ message: t('sources.queued', { job: humanizeJobId(job.jobId) }) });
+      showDone(t('sources.queued', { job: humanizeJobId(job.jobId) }));
     },
-    onError: (error) => {
-      notifications.show({
-        color: 'statusError',
-        message: error instanceof EcrApiError ? error.message : String(error),
-      });
-    },
+    // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
+    // (українською без `messageKey`). Той самий розбір, що й скрізь.
+    onError: showApiError,
   });
 
   return (
     <ListPage
       header={{ title: t('sources.title') }}
       table={
+        !showSubordinate ? null : (
+        <Stack gap="sm" data-source-entities="">
+        {/* ⛔ `U-09`: у розділу не було ні власного заголовка, ні дії — на
+            відміну від «Connections» поруч, тож три таблиці поспіль читалися
+            як одна зламана. Заголовок того ж рівня, що й у сусідніх розділів
+            (`DataSourcesTable`, `CollectionRunsPanel`): `order={2}`
+            `size="h4"`.
+
+            ⚠ Рядок каталогу той самий, яким уже підписаний лічильник
+            сутностей у переліку з'єднань (`sources.entities`) — один термін
+            на одну річ; новий ключ під те саме слово завів би другий. */}
+        <Title order={2} size="h4">
+          {t('sources.entities')}
+        </Title>
+
         <DataTable<SourceEntityStatus>
           columns={[
             {
@@ -188,6 +236,8 @@ export function SourcesPage(): JSX.Element {
               : `${source.displayName ?? source.code} — ${t('sources.inactive')}`
           }
         />
+        </Stack>
+        )
       }
     >
       <DataSourcesTable />
@@ -199,7 +249,10 @@ export function SourcesPage(): JSX.Element {
        * `routes.ts`, якого нема куди дописати в сторожа
        * `EndpointCoverageTests.RouteLabelKeys` (деталь — `CollectionRunsPanel.tsx`).
        */}
-      <CollectionRunsPanel />
+      {/* ⛔ `U-09`: журнал прогонів підпорядкований з'єднанням двічі —
+          прогін не існує без сутності, сутність не існує без з'єднання. Доки
+          з'єднань немає, свого порожнього стану він не показує. */}
+      {showSubordinate && <CollectionRunsPanel />}
     </ListPage>
   );
 }

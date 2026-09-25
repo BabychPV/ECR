@@ -148,17 +148,21 @@ describe('DocumentGrid: справжня причина відмови пока�
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'simulate-edit' }));
 
-    // ⚠ Кнопка «Зберегти» — детермінований шлях, без очікування 500-мс
-    // дебаунсу автозбереження.
-    const saveButton = await screen.findByRole('button', { name: /grid\.save/ });
-    await user.click(saveButton);
+    // ✎ `U-16`: кнопки «Save (N)» до відмови більше не існує — збереження
+    // робить автозбереження (500-мс дебаунс, `autosave.ts`), а кнопка
+    // з'являється вже ПІСЛЯ відмови й називається «повторити». Тому шлях
+    // сюди тепер той самий, що й у користувача: правка → автозбереження →
+    // відмова.
 
     // ⛔ Це і є доказ фіксу: раніше під заглушкою "NOT SAVED — SEE THE ERROR
     // ABOVE" не було НІЧОГО — цей текст просто не існував у DOM. Тепер він
     // з'являється, дослівно як відповів сервер.
-    await waitFor(() => {
-      expect(screen.getByText(SERVER_MESSAGE)).toBeTruthy();
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByText(SERVER_MESSAGE)).toBeTruthy();
+      },
+      { timeout: 5_000 },
+    );
   });
 
   it('успішне повторне збереження прибирає банер помилки', async () => {
@@ -169,8 +173,12 @@ describe('DocumentGrid: справжня причина відмови пока�
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'simulate-edit' }));
-    await user.click(await screen.findByRole('button', { name: /grid\.save/ }));
-    await waitFor(() => expect(screen.getByText(SERVER_MESSAGE)).toBeTruthy());
+
+    // ✎ `U-16`: першу спробу робить автозбереження, і саме її відмова
+    // вводить у гру кнопку повтору.
+    await waitFor(() => expect(screen.getByText(SERVER_MESSAGE)).toBeTruthy(), {
+      timeout: 5_000,
+    });
 
     // Наступна спроба (та сама правка) цього разу приймається сервером.
     vi.stubGlobal(
@@ -190,7 +198,7 @@ describe('DocumentGrid: справжня причина відмови пока�
       }),
     );
 
-    await user.click(await screen.findByRole('button', { name: /grid\.save/ }));
+    await user.click(await screen.findByRole('button', { name: /grid\.retrySave/ }));
 
     await waitFor(() => {
       expect(screen.queryByText(SERVER_MESSAGE)).toBeNull();

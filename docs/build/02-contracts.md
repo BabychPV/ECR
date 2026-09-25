@@ -2974,6 +2974,26 @@ public interface IWorkflowStore
 }
 ```
 
+#### `ISheetEditGate`
+
+Серіалізація подання аркуша і правок його комірок на ключі «документ × аркуш × період» (`sp_getapplock`, власник — транзакція). Правка бере спільне блокування першою дією транзакції запису і перевіряє стан аркуша під ним; подання — виняткове, від перевірки прав до коміту зрізу. Закриває стан «правку прийнято й зажурналізовано, а в `calc.SubmissionSnapshot` її немає» (`SubmitEditRaceTests`). Сигнатури — у `src/Ecr.Application/Ports/ISheetEditGate.cs`.
+
+Перерахунок формул шаблону (`RecalculationService`, обидва входи — `FormulaRecalculationJob` і `RecalculationJob`) бере спільні блокування ВСІХ аркушів, у які пише, першою дією своєї транзакції запису, у порядку ключа «документ × аркуш × період» (у межах прогону — `SheetDefId` за зростанням), і не пише в аркуш, стан якого під блокуванням `Submitted`/`Approved` (ФВ-9.17: подане змінює лише Reopen). Закриває стан «зріз подання каже одне обчислене число, жива комірка поданого аркуша — інше» (`SubmitRecalculationRaceTests`).
+
+Подання саме перераховує формули шаблону СВОГО аркуша (`ISubmitRecalculation`, той самий `RecalculationService`, звужений до аркуша × періоду) під своїм винятковим блокуванням, до валідації й зрізу: каскадна задача після правки могла ще стояти в черзі, а після подання поданий аркуш вона пропускає. Спільного блокування свого аркуша цей прогін не бере (той самий власник); інші аркуші документа, які читають його формули, читаються в останньому зафіксованому стані без блокувань.
+
+Блокування не взято за `Database:SheetLockTimeoutSeconds` (типово 30 с) або запит став жертвою дедлоку — `409 ECR-DOC-4091` з `messageKey` `err.ECR-DOC-4091.sheetBeingSubmitted` (чекала правка чи перерахунок) або `err.ECR-DOC-4091.sheetBeingEdited` (чекало подання). Стан, який повтором минає, тому 409, а не 423 (`Locked` у цьому API — заблокований обліковий запис) і не 503 (сервіс справний): те саме сімейство, що `ECR-CELL-0409`, — «ваш запит розминувся з чужою дією над тим самим ресурсом» (`SheetEditGateTimeoutTests`).
+
+```csharp
+public interface ISheetEditGate
+{
+    public Task<DocumentStatus> EnterEditAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+    public Task EnterSubmitAsync(
+        long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct);
+}
+```
+
 ## 6. Формат помилки
 
 Усі помилки API повертаються як `application/problem+json`
@@ -3082,6 +3102,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-TMPL-4225` | 422 | обов'язкова колонка без правила і без формули (ФВ-5.11) |
 | `ECR-TMPL-4226` | 422 | обчислювана колонка (`Formula`/`Calculated`) без джерела: ні формули шаблону, ні прив'язки методології |
 | `ECR-TMPL-4227` | 422 | обчислення на НЕобчислюваній колонці: формула шаблону або прив'язка методології на колонці ручного вводу |
+| `ECR-TMPL-4228` | 422 | фіксована таблиця (`RowMode.Fixed`) без жодного живого `RowDef` — публікується структурно порожньою |
 | `ECR-CFG-0422` | 422 | код або `RowKey` не відповідає шаблону — помилка введення, не збій |
 | `ECR-CFG-4221` | 422 | `Project.TimeZoneId` не є відомим ідентифікатором IANA: порожньо, невідомий пояс, Windows-ідентифікатор (`Central Asia Standard Time`) або зсув (`+05:00`) |
 | `ECR-REQ-0422` | 422 | параметр самого запиту поза межами: розмір сторінки, ширина або напрям вікна аудиту |
@@ -3090,6 +3111,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-SCHM-0422` | 422 | `Guarded`-зміна без стратегії міграції |
 | `ECR-DOC-0404` | 404 | документ не знайдено |
 | `ECR-DOC-0409` | 409 | документ подано; потрібен `Reopen` (D-67) |
+| `ECR-DOC-4091` | 409 | аркуш зайнятий поданням або правкою (блокування аркуша × періоду не взято вчасно); повторити запит за мить |
 | `ECR-DOC-0422` | 422 | склад документа порушує `SheetGroupRule` |
 | `ECR-ROW-0404` | 404 | рядок не знайдено |
 | `ECR-ROW-0409` | 409 | рядок із таким `RowKey` уже існує в цьому екземплярі |
@@ -3212,6 +3234,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/templates/{id}/restore` | `Template.Edit` | 1 |
 | `GET` | `/api/v1/templates/{id}/versions` | `Template.View` | 1 |
 | `POST` | `/api/v1/templates/{id}/versions` | `Template.Edit` | 1 |
+| `GET` | `/api/v1/templates/versions` | `Template.View` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/clone` | `Template.Edit` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/publish` | `Template.Publish` | 1 |
 | `POST` | `/api/v1/template-versions/{id}/deprecate` | `Template.Publish` | 1 |
@@ -3228,6 +3251,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/sheets/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/sheets/{sheetCode}/tables/{code}` | `Template.Edit` | 7 |
+| `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/columns/{code}` | `Template.Edit` | 7 |
 | `GET` | `/api/v1/template-versions/{id}/header-fields` | `Template.View` | 8 |
@@ -3238,6 +3262,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/rows/{code}` | `Template.Edit` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableDefId}/formulas/{scope}/{target}` | `Template.Edit` | 7 |
+| `GET` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules` | `Template.View` | 7 |
 | `PUT` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
 | `DELETE` | `/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}` | `Template.Edit` | 7 |
 | `POST` | `/api/v1/template-versions/{id}/period-access-rules` | `Template.Edit` | 7 |
@@ -3250,6 +3275,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/period-policies/{id}` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
 | `PUT` | `/api/v1/projects/{id}/approval-route` | `Project.Manage` | 3 |
+| `GET` | `/api/v1/projects/{id}/document-template` | `Document.Create` | 4 |
 | `POST` | `/api/v1/projects/{id}/activate` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/archive` | `Project.Manage` | 1 |
 | `POST` | `/api/v1/projects/{id}/clone` | `Project.Manage` | 3 |
@@ -3328,6 +3354,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/methodologies/{id}/versions/{vid}` | `Calculation.EditFormula` | 7 |
 | `GET` | `/api/v1/methodologies/{id}/bindings` | `Calculation.View` | 7 |
 | `PUT` | `/api/v1/methodologies/{id}/bindings/{columnDefId}/{outputCode}` | `Calculation.EditRule` | 7 |
+| `GET` | `/api/v1/methodologies/{id}/publications` | `Calculation.View` | 7 |
 | `GET` | `/api/v1/documents/{id}/calculation-results` | `Calculation.View` | 7 |
 | `POST` | `/api/v1/methodologies/{id}/versions/{vid}/publish` | `Calculation.Publish` | 4 |
 | `POST` | `/api/v1/methodologies/{id}/simulate` | `Calculation.View` | 4 |
@@ -3409,6 +3436,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/notifications/rules` | `System.ManageNotifications` | 7 |
 | `GET` | `/api/v1/notifications/deliveries` | `System.ManageNotifications` | 7 |
 | `POST` | `/api/v1/auth/change-password` | — (власний пароль) | 3 |
+| `GET` | `/api/v1/registries/{code}/entries/{id}` | `Registry.View` | 4 |
 | `POST` | `/api/v1/registries/{code}/entries/{id}/validity` | `Registry.EditData` | 4 |
 | `DELETE` | `/api/v1/registries/{code}/entries/{id}` | `Registry.EditData` | 4 |
 | `GET` | `/api/v1/registries/{code}/definition` | `Registry.View` | 8 |

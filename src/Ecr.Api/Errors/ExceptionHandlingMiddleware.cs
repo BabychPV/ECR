@@ -112,6 +112,19 @@ public sealed partial class ExceptionHandlingMiddleware(
         {
             foreach (var (key, value) in details)
             {
+                // ⛔ B-06 (UX-прохід, четвертий раунд): зарезервоване ім'я
+                // `problem+json` у подробицях НЕ копіюється. Розширення
+                // серіалізуються поруч зі стандартними членами, тож
+                // `["detail"] = …` давав ДВА ключі `detail` в одному об'єкті —
+                // і `JSON.parse` клієнта брав ОСТАННІЙ: сире українське речення
+                // обробника (або `null`) замість уже локалізованого. Так само
+                // `errorCode`/`correlationId` з подробиць тихо переписали б
+                // справжні.
+                if (ReservedMembers.Contains(key))
+                {
+                    continue;
+                }
+
                 problem.Extensions[key] = value;
             }
         }
@@ -487,6 +500,19 @@ public sealed partial class ExceptionHandlingMiddleware(
         _ => (StatusCodes.Status500InternalServerError, ErrorCodes.Internal,
               "Внутрішня помилка. Зверніться до адміністратора з ідентифікатором кореляції.", InternalDetails),
     };
+
+    /// <summary>
+    /// Члени <c>problem+json</c>, які пише сам конвеєр: стандартні (RFC 9457
+    /// §3.1) і два наші. Подробиці винятку їх не перекривають (B-06).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без урахування регістру: <c>"Detail"</c> поруч із <c>"detail"</c> —
+    /// формально два різні ключі, але клієнт, що мапить їх у поля без
+    /// регістру, отримав би ту саму колізію.
+    /// </remarks>
+    internal static readonly IReadOnlySet<string> ReservedMembers = new HashSet<string>(
+        ["type", "title", "status", "detail", "instance", "errorCode", "correlationId"],
+        StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Суфікс доменних кодів «конфлікт стану» (<c>ECR-&lt;ДОМЕН&gt;-0409</c>).</summary>
     private const string ConflictCodeSuffix = "-0409";

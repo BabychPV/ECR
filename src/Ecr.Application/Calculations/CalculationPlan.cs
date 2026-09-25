@@ -52,10 +52,17 @@ public static class CalculationPlan
             {
                 // ⛔ Цикл — відмова, а не «порахуємо як вийде». Порядок, узятий
                 // навмання, дав би числа, які змінюються між прогонами.
+                var cycle = pending.Keys.Order().ToList();
                 throw new Errors.BusinessRuleException(
                     "ECR-TMPL-4221",
                     "Методології утворюють цикл залежностей: "
-                    + string.Join(", ", pending.Keys.Order()));
+                    + string.Join(", ", cycle),
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-TMPL-4221.methodologyCycle",
+                        ["cycleLength"] = cycle.Count.ToString(CultureInfo.InvariantCulture),
+                        ["methodologyVersionIds"] = cycle,
+                    });
             }
 
             batches.Add(new CalculationBatch(batches.Count, ready));

@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   Textarea,
+  VisuallyHidden,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,20 +32,23 @@ import { markSlicesStale } from '@/features/grid/sliceCache';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
 import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
+import { hasProjectGrant } from '@/features/documents/BusinessKeyChangeAction';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { Hint } from '@/shared/ui/Hint';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { ReasonModal } from '@/shared/ui/ReasonModal';
 import { StatusBadge, statusKey } from '@/shared/ui/StatusBadge';
-import { Timestamp } from '@/shared/ui/Timestamp';
-import { formatDateTime } from '@/shared/format';
-import { showApiError, showDone } from '@/shared/ui/notify';
+import { formatDate, formatDateTime } from '@/shared/format';
+import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
+import { errorCodeText } from '@/shared/ui/problemText';
 import { useUrlNumber } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { fetchAllProjects } from '@/features/projects/allProjects';
 
 /**
  * Поле дати — за `import()`, і не заради стилю.
@@ -116,6 +120,107 @@ function zoneOffsetMs(instant: number, timeZoneId: string): number {
   const wall = Date.UTC(at('year'), at('month') - 1, at('day'), at('hour') % 24, at('minute'), at('second'));
 
   return wall - instant;
+}
+
+/**
+ * Пояс, яким `Intl` справді вміє форматувати; інакше — UTC (`X-34`).
+ *
+ * ⚠ Та сама причина, що й `try` у `zoneClock`: `timeZoneId` приходить із
+ * сервера, і невідома `Intl` зона кинула б `RangeError` посеред рендера.
+ */
+function formattableZone(timeZoneId: string): string {
+  return zoneClock(timeZoneId).resolvedOptions().timeZone;
+}
+
+/**
+ * Момент у поясі МАЙДАНЧИКА — для екрана (`X-34`/`F-20`).
+ *
+ * ⛔ Тут стояв `<Timestamp>`, тобто пояс БРАУЗЕРА. Межі періоду — моменти
+ * майданчика (`D-68`): 202601 проєкту на `Asia/Aqtau` (+05:00) відкривається
+ * 1 січня 00:00 за Актау, тобто 31 грудня 19:00 UTC, — і адміністратор у UTC
+ * бачив «Dec 31, 2025» як початок січня. «Grace until: Feb 14, 9:00 PM» при
+ * справжньому 15.02 00:00 +05 — та сама розбіжність, на годину, що вирішує
+ * «встиг чи ні».
+ *
+ * ⚠ Точний момент лишається в `dateTime`/`title` — як у `Timestamp`.
+ */
+/** Момент зі зсувом: складники настінного часу майданчика — групи 1…6. */
+const WallClock = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?[+-]\d{2}:\d{2}$/;
+
+/** Текст моменту майданчика; `null` — рядок не розібрався (показується як є). */
+export function siteMomentText(value: string, zone: string, dateOnly = false, inclusiveEnd = false): string | null {
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) return null;
+
+  /*
+   * ⛔ Спершу — НАСТІННИЙ час із самого рядка (`2025-01-01T00:00:00+06:00` →
+   * 1 січня 00:00), і лише без зсуву в рядку — пояс проєкту через `Intl`.
+   * Причина зміряна живцем: сервер рахує межі своєю базою поясів, браузер —
+   * своєю, і вони розходяться (`Asia/Almaty` у свіжому ICU — уже +05:00, у
+   * базі Windows — ще +06:00). Через `Intl` межа 202501 показувалася б
+   * «Dec 31, 2024». Зсув у відповіді — те, як межу порахував САМ сервер, і
+   * саме за ним вона застосовується.
+   */
+  const wall = WallClock.exec(value);
+  const wallAt = wall === null
+    ? null
+    : Date.UTC(Number(wall[1]), Number(wall[2]) - 1, Number(wall[3]), Number(wall[4]), Number(wall[5]), Number(wall[6] ?? '0'));
+  const shown = new Date((wallAt ?? at) - (inclusiveEnd ? 1 : 0));
+  const timeZone = wallAt === null ? formattableZone(zone) : 'UTC';
+  return dateOnly
+    ? formatDate(shown, { dateStyle: 'medium', timeZone })
+    : formatDateTime(shown, { dateStyle: 'medium', timeStyle: 'short', timeZone });
+}
+
+function SiteTime({
+  value,
+  zone,
+  dateOnly = false,
+  inclusiveEnd = false,
+}: {
+  readonly value: string | null | undefined;
+  readonly zone: string;
+  readonly dateOnly?: boolean;
+  /**
+   * Межа ВИКЛЮЧНА (`endsAt` — «після цього моменту закрито»), а показати
+   * треба останній ДЕНЬ, коли ще можна: північ 17 березня — це «до 16
+   * березня включно», а не «17 березня».
+   */
+  readonly inclusiveEnd?: boolean;
+}): JSX.Element {
+  if (value === null || value === undefined || value === '') return <span data-timestamp="none">—</span>;
+
+  const text = siteMomentText(value, zone, dateOnly, inclusiveEnd);
+  if (text === null) return <span data-timestamp="unparsed">{value}</span>;
+
+  return (
+    <time dateTime={value} title={value} data-timestamp="ok">
+      {text}
+    </time>
+  );
+}
+
+/**
+ * Який календарний відрізок покриває період (`X-34`): «January 2026»,
+ * «Q4 2025», «2026».
+ *
+ * ⛔ `Sequence` — порядковий номер, а не місяць (`R-A6`): у квартальному
+ * проєкті 202504 — четвертий КВАРТАЛ 2025, а не квітень. Підпис без
+ * періодичності проєкту вгадував би саме місяць.
+ */
+export function periodCaption(year: number, sequence: number, kind: string): string {
+  if (kind === 'Monthly' && sequence >= 1 && sequence <= 12) {
+    return formatDate(new Date(Date.UTC(year, sequence - 1, 1)), {
+      year: 'numeric',
+      month: 'long',
+      timeZone: 'UTC',
+    });
+  }
+
+  if (kind === 'Quarterly') return t('periods.quarterOf', { quarter: sequence, year });
+  if (kind === 'Yearly') return String(year);
+
+  return t('periods.customOf', { sequence, year });
 }
 
 /**
@@ -199,12 +304,18 @@ export function PeriodsPage(): JSX.Element {
   // `changingTimeZone` на цій сторінці, а не `ReasonModal`.
   const [archiving, setArchiving] = useState(false);
 
+  // ⛔ `X-25`: активація проєкту й перерахунок УСЬОГО проєкту йшли одним
+  // кліком. Обидві дії важкі (перша незворотна, друга ставить у чергу всі
+  // документи всіх періодів) — тепер через підтвердження; `null` — закрито.
+  const [confirming, setConfirming] = useState<'activate' | 'recalculate' | null>(null);
+
   // ⛔ Проєкти ВИБИРАЮТЬСЯ зі списку, а не вводяться номером. Це не про
   // зручність: без переліку не видно СТАНУ проєкту, а саме він визначає, чи
   // відкриються періоди взагалі (`A7-25`).
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
+    queryFn: fetchAllProjects,
   });
 
   const periods = useQuery({
@@ -214,6 +325,35 @@ export function PeriodsPage(): JSX.Element {
   });
 
   const selected = (projects.data?.items ?? []).find((p) => p.id === projectId);
+
+  /*
+   * ⛔ `U-10`. Сторінка відкривалася на «Pick a project», хоча проєкт у
+   * системі ОДИН — тобто вимагала вибору там, де вибору немає, і до кліку
+   * лишалася порожньою.
+   *
+   * ⛔ Межа автовибору названа прямо, і вона вузька: обирається лише коли
+   * варіант рівно ОДИН. Автовибір «першого-ліпшого» з десяти тут заборонений
+   * — він мовчки показав би адміністраторові календар чужого проєкту, і
+   * найдорожче те, що на екрані ніщо не сказало б, що вибір зроблено за
+   * нього. Проєкти рівноправні: «поточного» серед них немає (на відміну від
+   * періоду, у якого є `isCurrent` — див. `DocumentsPage.tsx`), тож іншого
+   * чесного критерію, ніж «він один», не існує.
+   *
+   * ⚠ Вибір потрапляє в АДРЕСУ (`?projectId=`, `useUrlNumber`), а не в
+   * локальний стан: поле показує його, і посилання на сторінку лишається
+   * робочим. Це те саме, що зробила б людина кліком.
+   *
+   * ⚠ Ефект, а не обчислення під час рендера: `setProjectId` пише в адресу,
+   * тобто це побічна дія. Умова `projectId === null` тримає його одноразовим
+   * — знявши вибір, людина не отримає його назад тим самим тактом (окрема
+   * дія «скинути» на цій сторінці не передбачена, але й підміняти намір
+   * мовчки не можна).
+   */
+  const onlyProject = projects.data?.items.length === 1 ? projects.data.items[0] : undefined;
+
+  useEffect(() => {
+    if (projectId === null && onlyProject !== undefined) setProjectId(onlyProject.id);
+  }, [projectId, onlyProject, setProjectId]);
 
   // ⚠ Аудит-пас 8, п.2: `POST /archive` відмовляє `409 ECR-PRD-0409`, коли є
   // хоч один незакритий період, — але діалог підтвердження про це мовчав, і
@@ -465,17 +605,17 @@ export function PeriodsPage(): JSX.Element {
       return;
     }
 
-    // ⛔ Q-234: `error`, а не `message`. `JobStatus.Message` несе останній
-    // прогрес (`IJobProgress.ReportAsync`) — на відмові він лишається тим,
-    // яким був до неї (часто порожній або застаріле «Виконується»), а причину
-    // відмови несе `Error` (`FinishAsync(..., errorMessage: ex.Message, ...)`,
-    // `QuartzJobAdapter.cs`). Досі показувався порожній чи нерелевантний текст
-    // саме тоді, коли оператору найпотрібніша причина.
+    // ⛔ Q-234: не `message` — це останній прогрес, на відмові застарілий.
+    // ⛔ `X-04`: і не `error` — той несе `ex.Message` сервера
+    // (`FinishAsync(..., errorMessage: ex.Message, ...)`): українське речення
+    // розробника чи «Violation of PRIMARY KEY…» на англійському екрані.
+    // Причина — за КОДОМ із каталогу, невідомий код — загальний текст.
     notifications.show({
       color: 'statusError',
-      message: recalcJob.data?.error ?? t('workflow.recalcFailed'),
+      message: errorCodeText(recalcJob.data?.errorCode, t('workflow.recalcFailed')),
+      closeButtonProps: notificationCloseButtonProps,
     });
-  }, [recalcJobId, recalcOutcome, recalcJob.data?.error, queryClient]);
+  }, [recalcJobId, recalcOutcome, recalcJob.data?.errorCode, queryClient]);
 
   /*
    * ⚠ Пояс МАЙДАНЧИКА, а не той, у якому сидить адміністратор: строк
@@ -512,8 +652,23 @@ export function PeriodsPage(): JSX.Element {
   };
 
   const manages = can(session.data, 'Project.Manage');
-  const configures = can(session.data, 'Period.Configure');
-  const reopens = can(session.data, 'Period.Reopen');
+
+  // ⛔ `F-19`: право каже, ЩО можна, а грант — НАД ЧИМ. Сервер для кожної дії
+  // над КОНКРЕТНИМ проєктом (активація, пояс, клон, архів, маршрут погодження,
+  // поточний період) вимагає ще й гранта Manage на нього
+  // (`ActivateProjectHandler`, `SetCurrentPeriodHandler`, …). З грантом Read
+  // «Make current» стояв на кожному рядку й давав 403.
+  const managesSelected =
+    projectId !== null && hasProjectGrant(session.data ?? undefined, projectId, 'Manage');
+  const managesProject = manages && managesSelected;
+  const configures = can(session.data, 'Period.Configure') && managesSelected;
+  // ⛔ Право `Period.Reopen` не каже, ЧИЇ періоди: сервер вимагає ще й гранта
+  // Manage на проєкт (`ReopenPeriodHandler`). Без цієї умови кнопка обіцяла б
+  // дію, яка завершиться 403.
+  const reopens =
+    can(session.data, 'Period.Reopen') &&
+    projectId !== null &&
+    hasProjectGrant(session.data, projectId, 'Manage');
   const recalculates = can(session.data, 'Calculation.Recalculate');
 
   return (
@@ -546,7 +701,7 @@ export function PeriodsPage(): JSX.Element {
             {/* ⛔ Маршрут погодження (`ФВ-5.17`). Дві таблиці існували від
                 Етапу 3 і не мали жодного способу наповнення — багатоетапне
                 затвердження було конфігурацією, якої неможливо створити. */}
-            {selected !== undefined && manages && (
+            {selected !== undefined && managesProject && (
               <ApprovalRouteEditor projectId={selected.id} />
             )}
 
@@ -564,11 +719,14 @@ export function PeriodsPage(): JSX.Element {
                 задача станів до нього не доходить, періоди лишаються
                 `Scheduled`, і система відмовляє в кожній комірці з причиною
                 «період ще не відкрито» — неправдивою (`A7-25`). */}
-            {selected?.status === 'Draft' && manages && (
+            {/* ⛔ `X-25`: активація — незворотна (`Draft → Active`, назад
+                шляху немає: календар починає відкривати й закривати періоди),
+                і йшла одним кліком. Тепер — через підтвердження нижче. */}
+            {selected?.status === 'Draft' && managesProject && (
               <Button
                 size="xs"
                 loading={activate.isPending}
-                onClick={() => activate.mutate(selected.id)}
+                onClick={() => setConfirming('activate')}
               >
                 {t('periods.activate')}
               </Button>
@@ -578,13 +736,13 @@ export function PeriodsPage(): JSX.Element {
                 зі `Scheduled`, зміна безпечна (ФВ-1.1a); сервер перевіряє це
                 насправді через `Project.ChangeTimeZone`, кнопка — лише
                 видимий проксі. */}
-            {selected?.status === 'Draft' && manages && (
+            {selected?.status === 'Draft' && managesProject && (
               <Button size="xs" variant="default" onClick={() => setChangingTimeZone(true)}>
                 {t('periods.timezoneChange')}
               </Button>
             )}
 
-            {selected !== undefined && manages && (
+            {selected !== undefined && managesProject && (
               <Button size="xs" variant="default" onClick={() => setCloning(true)}>
                 {t('periods.clone')}
               </Button>
@@ -598,7 +756,7 @@ export function PeriodsPage(): JSX.Element {
                 size="xs"
                 variant="default"
                 loading={recalculate.isPending || recalcRunning}
-                onClick={() => recalculate.mutate(selected.id)}
+                onClick={() => setConfirming('recalculate')}
               >
                 {recalcRunning ? t('workflow.recalcRunning') : t('workflow.recalculate')}
               </Button>
@@ -606,10 +764,14 @@ export function PeriodsPage(): JSX.Element {
 
             {/* ⚠ Архівація пропонується лише активному проєкту: чернетку
                 архівувати нема від чого, а вже заархівований — кінцевий стан. */}
-            {selected?.status === 'Active' && manages && (
+            {/* ⛔ `X-29`: `variant="default"` разом із `color="statusError"` —
+                Mantine малює `default` сірим, і колір просто губився: кінцева,
+                незворотна дія виглядала як «Clone» поруч. `outline` лишає
+                кнопку вторинною, але червоною. */}
+            {selected?.status === 'Active' && managesProject && (
               <Button
                 size="xs"
-                variant="default"
+                variant="outline"
                 color="statusError"
                 loading={archive.isPending}
                 onClick={() => setArchiving(true)}
@@ -716,7 +878,10 @@ export function PeriodsPage(): JSX.Element {
                   </Text>
                 </Hint>
               </Table.Th>
-              <Table.Th />
+              {/* ⚠ `X-29`: колонка дій — з назвою для читалки, а не порожня. */}
+              <Table.Th>
+                <VisuallyHidden>{t('common.actions')}</VisuallyHidden>
+              </Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -724,6 +889,11 @@ export function PeriodsPage(): JSX.Element {
               <Table.Tr key={period.periodKey}>
                 <Table.Td>
                   {period.periodKey}
+                  {/* ⚠ `X-34`: що саме покриває період — за періодичністю
+                      проєкту, а не з `periodKey` арифметикою (`R-A6`). */}
+                  <Text span size="xs" c="dimmed" ml="xs" data-period-caption="">
+                    {periodCaption(period.year, period.sequence, calendar.periodKind)}
+                  </Text>
                   {period.isCurrent && (
                     <Badge ml="xs" size="xs" variant="light">
                       {t('periods.current')}
@@ -751,8 +921,12 @@ export function PeriodsPage(): JSX.Element {
                       2026, 11:59 PM» відповідає на нього гірше за
                       «Sep 1 — Sep 30». Точний момент нікуди не дівається: він
                       у `dateTime` кожного з двох `<time>`. */}
-                  <Timestamp value={period.startsAt} dateOnly /> —{' '}
-                  <Timestamp value={period.endsAt} dateOnly />
+                  {/* ✎ `X-34`/`F-20`: пояс МАЙДАНЧИКА (`SiteTime`), а права
+                      межа — останній день, коли дані ще приймаються:
+                      `endsAt` — виключне жорстке закриття, а не кінець
+                      місяця, і підпис колонки тепер каже саме це. */}
+                  <SiteTime value={period.startsAt} zone={calendar.timeZoneId} dateOnly /> —{' '}
+                  <SiteTime value={period.endsAt} zone={calendar.timeZoneId} dateOnly inclusiveEnd />
                 </Table.Td>
                 <Table.Td>
                   {/* ⛔ UI-аудит, lane 8 (рішення НЕ скасоване, лише переїхало):
@@ -782,7 +956,8 @@ export function PeriodsPage(): JSX.Element {
                           КРАЙНІЙ СТРОК, і «до 30 вересня» без години не
                           відповідає на питання «чи встигну ще сьогодні». */}
                       {t('periods.reopenedUntil', {
-                        until: formatDateTime(period.reopenedUntil),
+                        until:
+                          siteMomentText(period.reopenedUntil, calendar.timeZoneId) ?? period.reopenedUntil,
                       })}
                     </Badge>
                   )}
@@ -792,7 +967,7 @@ export function PeriodsPage(): JSX.Element {
                     позначиться в аудиті як пізня (`D-70`). Тире для «немає»
                     тепер дає сам `Timestamp`, а не `?? '—'` на місці. */}
                 <Table.Td>
-                  <Timestamp value={period.graceEndsAt} />
+                  <SiteTime value={period.graceEndsAt} zone={calendar.timeZoneId} />
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">
@@ -1031,6 +1206,37 @@ export function PeriodsPage(): JSX.Element {
           </Group>
         </Stack>
       </Modal>
+
+      {/* ⛔ `X-25`: підтвердження ПЕРЕД дією, фокус на «Cancel» (`L6`,
+          `ConfirmModal`). Не `danger`: жодна з двох дій не знищує даних, але
+          обидві — важкі, і клік повз них не має їх запускати. */}
+      <ConfirmModal
+        opened={confirming === 'activate' && selected !== undefined}
+        title={t('periods.activateTitle', { code: selected?.code ?? '' })}
+        text={t('periods.activateConfirm')}
+        verb={t('periods.activate')}
+        danger={false}
+        isPending={activate.isPending}
+        onConfirm={() => {
+          if (selected !== undefined) activate.mutate(selected.id);
+          setConfirming(null);
+        }}
+        onClose={() => setConfirming(null)}
+      />
+
+      <ConfirmModal
+        opened={confirming === 'recalculate' && selected !== undefined}
+        title={t('periods.recalcTitle', { code: selected?.code ?? '' })}
+        text={t('periods.recalcConfirm')}
+        verb={t('workflow.recalculate')}
+        danger={false}
+        isPending={recalculate.isPending}
+        onConfirm={() => {
+          if (selected !== undefined) recalculate.mutate(selected.id);
+          setConfirming(null);
+        }}
+        onClose={() => setConfirming(null)}
+      />
 
       <ReasonModal
         opened={pinning !== null}

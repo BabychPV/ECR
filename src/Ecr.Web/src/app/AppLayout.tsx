@@ -1,4 +1,4 @@
-﻿import {
+import {
   Suspense,
   useEffect,
   useState,
@@ -23,8 +23,9 @@ import { useDisclosure } from '@mantine/hooks';
 import { Navigate, Outlet, ScrollRestoration, useLocation, useMatches } from 'react-router-dom';
 import { Breadcrumbs, isRouteHandle } from './Breadcrumbs';
 import { NavRouteLink } from './NavRouteLink';
+import { NotFoundPage } from './NotFoundPage';
 import { canAccessRoute } from './routeAccess';
-import { navRoutes, type RouteHandle } from './routes';
+import { navRoutes, routes, type RouteHandle } from './routes';
 import { routeTransitionClassName } from './motionTokens';
 import { useRouteTransitionFocus } from './useRouteTransitionFocus';
 import { usePreferenceSync } from '@/features/preferences/usePreferenceSync';
@@ -70,14 +71,10 @@ const MainContentId = 'main-content';
  * інакше воно виглядало б як зайвий текст перед шапкою для тих, хто його не
  * потребує.
  *
- * ⛔ Текст — не через `t()`. Каталог рядків живе в
- * `Ecr.Infrastructure/Persistence/Sql/09-seed.sql`, а ця картка (Q-263,
- * директива Хвилі 3) навмисно обмежена двома файлами
- * (`AppLayout.tsx`, `test/a11y.ts`) саме для паралельної ізоляції ліній —
- * файл сідів чіпають одразу кілька ліній, і зайва правка тут була б зайвим
- * ризиком конфлікту поза межами картки. Судження зафіксоване тут одним
- * рядком (`CLAUDE.md`): англійський літерал лишається доти, доки окрема
- * картка не заведе ключ у каталозі.
+ * ✎ `X-26`: текст — із каталогу (`nav.skipToContent`). Раніше тут був
+ * англійський літерал «до окремої картки з ключем»; ця картка його й завела.
+ * `t()` тут безпечний: каркас малюється лише після приватного каталогу
+ * (`catalogReady` нижче).
  */
 function SkipToContentLink(): JSX.Element {
   const [isFocused, setIsFocused] = useState(false);
@@ -139,7 +136,7 @@ function SkipToContentLink(): JSX.Element {
       onBlur={() => setIsFocused(false)}
       style={isFocused ? visibleStyle : hiddenStyle}
     >
-      Skip to main content
+      {t('nav.skipToContent')}
     </a>
   );
 }
@@ -176,6 +173,11 @@ export function AppLayout(): JSX.Element {
    * проміжного рендера безпечно.
    */
   const transitionRef = useRouteTransitionFocus(MainContentId);
+
+  // ⛔ `R-19`/`X-09`: `/documents/abc` — неіснуюча сторінка, а не документ,
+  // що «не знайшовся» на сервері. Сторінку не монтуємо зовсім — інакше вона
+  // встигає піти запитами на `…/NaN`. Хук — до ранніх `return` (правила хуків).
+  const malformedPath = hasMalformedParam(useMatches());
 
   // Перемальовує каркас і сторінку, коли приватний каталог доїхав.
   useCatalog();
@@ -324,14 +326,15 @@ export function AppLayout(): JSX.Element {
               {me.isSimulation && (
                 <>
                   <Badge color="statusWarning" variant="filled">
-                    {t('app.simulating', { user: me.simulatedForUserId ?? '—' })}
+                    {/* ⚠ Ім'я, а не номер (V-06): «Viewing as 17» нічого не каже. */}
+                    {t('app.simulating', { user: me.simulatedForUserName ?? me.simulatedForUserId ?? '—' })}
                   </Badge>
 
                   {/* ⛔ Вихід стоїть ПОРУЧ із баджем. Саме тут користувач
                       помічає, що дивиться чужими правами, і саме тут має
                       бути вихід: інакше єдиним способом завершити сеанс
                       лишався б вихід із системи. */}
-                  <EndSimulationButton />
+                  <EndSimulationButton sessionId={me.simulationSessionId ?? null} />
                 </>
               )}
               {/* Пошук даних (BE-19): у статичному бандлі — лише кнопка й Ctrl+K. */}
@@ -345,7 +348,7 @@ export function AppLayout(): JSX.Element {
                   тих, заради кого він існує. У статичному бандлі — лише кнопка
                   й лічильник; шухляда — динамічним `import()`, як палітра. */}
               <MyTasksLauncher />
-              <UserMenu userName={me.userName ?? '—'} />
+              <UserMenu userName={me.userName ?? '—'} changePasswordPath={routes.changePassword.path} />
             </Group>
           </Group>
         </AppShell.Header>
@@ -423,7 +426,7 @@ export function AppLayout(): JSX.Element {
            */}
           <div ref={transitionRef} className={routeTransitionClassName}>
             <Suspense fallback={<RouteFallback />}>
-              <Outlet />
+              {malformedPath ? <NotFoundPage /> : <Outlet />}
             </Suspense>
           </div>
         </AppShell.Main>
@@ -458,6 +461,22 @@ function RouteFallback(): JSX.Element {
   if (shape === 'dashboard') return <DashboardRouteSkeleton />;
 
   return <GenericRouteSkeleton />;
+}
+
+/** Ціле додатне число без знаків і пробілів — єдина форма ідентифікатора в адресі. */
+const NumericSegment = /^\d+$/;
+
+/**
+ * Чи має найглибший збіг параметр, що мусить бути числом, а ним не є
+ * (`routes.ts` → `handle.numericParams`).
+ */
+function hasMalformedParam(matches: ReturnType<typeof useMatches>): boolean {
+  const leaf = matches[matches.length - 1];
+  if (leaf === undefined || !isRouteHandle(leaf.handle)) return false;
+
+  return (leaf.handle.numericParams ?? []).some(
+    (name) => !NumericSegment.test(leaf.params[name] ?? ''),
+  );
 }
 
 /**

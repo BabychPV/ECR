@@ -4,10 +4,11 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
-import type { RegistryDefDto, RegistryEntryDto } from '@/api/types';
+import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
 import { coerce } from '@/features/grid/edits';
 import { cellText, sameCellValue } from '@/features/grid/cellValue';
 import { lookupCellDisplay } from '@/features/grid/LookupCellEditor';
+import { unitCellDisplay } from '@/features/grid/UnitCellEditor';
 import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -333,6 +334,20 @@ export function DocumentHeaderPanel({
     lookupEntriesQueries.forEach((query) => void query.refetch());
   };
 
+  /*
+   * ⛔ `R-01`: поле шапки типу `Unit` було текстовим полем — `kg` набрати
+   * можна, а зберегти ні: сервер чекає ідентифікатор одиниці. Перелік одиниць
+   * — той самий запит (`['units']`), що й у сітки, і лише тоді, коли таке
+   * поле справді є.
+   */
+  const hasUnitFields = fieldsOf(header.data).some((field) => field.dataType === 'Unit');
+  const units = useQuery({
+    queryKey: ['units'],
+    queryFn: () => apiFetch<UnitRef[]>('/api/v1/units'),
+    enabled: hasUnitFields,
+    staleTime: 60 * 60 * 1000,
+  });
+
   const [draft, setDraft] = useState<Draft>({});
   const [loadedFor, setLoadedFor] = useState<number | null>(null);
 
@@ -388,6 +403,9 @@ export function DocumentHeaderPanel({
       <Title order={4}>{t('document.header.title')}</Title>
 
       {lookupError !== null && <ErrorAlert error={lookupError} onRetry={refetchLookups} />}
+      {hasUnitFields && units.error !== null && (
+        <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
+      )}
 
       <Stack gap="xs">
         {fields.map((field) => (
@@ -407,6 +425,7 @@ export function DocumentHeaderPanel({
                 ? false
                 : (lookupPendingByRegistryId.get(field.lookupRegistryDefId) ?? registriesList.isPending)
             }
+            units={units.data ?? null}
           />
         ))}
       </Stack>
@@ -445,6 +464,7 @@ function HeaderFieldInput({
   onChange,
   lookupEntries,
   lookupPending,
+  units,
 }: {
   field: DocumentHeaderField;
   value: unknown;
@@ -454,6 +474,8 @@ function HeaderFieldInput({
   lookupEntries: readonly RegistryEntryDto[];
   /** Чи довідник ЦЬОГО поля ще завантажується (окремий запит на довідник). */
   lookupPending: boolean;
+  /** Перелік одиниць для полів `Unit`; `null` — ще не приїхав. */
+  units: readonly UnitRef[] | null;
 }): JSX.Element {
   const label = `${localized(field.label)}${field.isRequired ? ' *' : ''}`;
 
@@ -483,6 +505,36 @@ function HeaderFieldInput({
           data-header-field={field.code}
         />
       </Suspense>
+    );
+  }
+
+  if (field.dataType === 'Unit') {
+    // ⛔ `R-01`: одиниця — вибір зі списку за кодом, а не номер текстом.
+    // Чернетка — рядок ідентифікатора, як і в `Lookup`; числом його робить
+    // `coerce(raw, 'Unit')` при збереженні (`edits.ts`).
+    const selectedId = typeof value === 'string' && value.trim().length > 0 ? Number(value) : null;
+    const selectedIdValid = selectedId !== null && Number.isFinite(selectedId);
+    const known = selectedIdValid && (units ?? []).some((unit) => unit.id === selectedId);
+    const options = [
+      ...(units ?? []).map((unit) => ({ value: String(unit.id), label: `${unit.code} · ${unit.dimensionCode}` })),
+      // ⚠ Одиниця, якої в переліку немає, лишається видимою — дані є.
+      ...(selectedIdValid && !known
+        ? [{ value: String(selectedId), label: unitCellDisplay(selectedId, units ?? []) }]
+        : []),
+    ];
+
+    return (
+      <Select
+        label={label}
+        disabled={disabled || units === null}
+        searchable
+        clearable
+        nothingFoundMessage={units === null ? t('grid.listLoading') : t('grid.listNothingFound')}
+        data={options}
+        value={selectedIdValid ? String(selectedId) : null}
+        onChange={(next) => onChange(next ?? '')}
+        data-header-field={field.code}
+      />
     );
   }
 

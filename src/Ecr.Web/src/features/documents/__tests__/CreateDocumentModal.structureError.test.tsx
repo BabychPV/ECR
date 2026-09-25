@@ -25,9 +25,13 @@ import { testTheme } from '@/test/render';
  * станових псевдокласах, яку запускає пастка фокуса випадного списку
  * (коментар у `src/test/setup.ts`). Рекурсію обірвано — версія обирається у
  * справжньому `Select`.
+ *
+ * ✎ V-12: аркуші тепер приходять із `GET /projects/{id}/document-template`
+ * (версію визначає проєкт), а не зі `/structure` обраної версії — і той самий
+ * захист від «аркушів немає» тримається на новому джерелі.
  */
 
-/** Чи відповідати на запит структури відмовою. */
+/** Чи відповідати на запит складу документа відмовою. */
 let structureFails = true;
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -57,7 +61,7 @@ function mockServer(): void {
         });
       }
 
-      if (url.includes('/structure')) {
+      if (url.includes('/document-template')) {
         return structureFails
           ? jsonResponse(
               {
@@ -75,29 +79,13 @@ function mockServer(): void {
             )
           : jsonResponse({
               templateVersionId: 5,
-              presentationRevision: 1,
-              isEditable: false,
+              templateCode: 'AIR',
+              version: '1.0',
               groupRules: [],
               sheets: [
-                { id: 9, code: 'GEN', nameL10n: { values: { en: 'General' } }, sheetGroup: null },
+                { id: 9, code: 'GEN', nameL10n: { values: { en: 'General' } }, sheetGroup: null, isMandatory: false },
               ],
             });
-      }
-
-      if (url.includes('/versions')) {
-        return jsonResponse({
-          items: [{ id: 5, version: '1.0', status: 'Published' }],
-          nextCursor: null,
-          totalCount: 1,
-        });
-      }
-
-      if (url.includes('/api/v1/templates')) {
-        return jsonResponse({
-          items: [{ id: 3, code: 'AIR', nameL10n: { values: {} } }],
-          nextCursor: null,
-          totalCount: 1,
-        });
       }
 
       if (url.includes('/api/v1/projects')) {
@@ -128,14 +116,14 @@ function show(): void {
 }
 
 /**
- * Обирає опубліковану версію шаблону — саме після цього йде запит структури.
+ * Обирає проєкт — саме після цього йде запит складу документа.
  *
  * ⚠ Опції випадного списку Mantine рендеряться в порталі поза модалкою, тому
  * шукаються через `screen`.
  */
-async function pickVersion(): Promise<void> {
-  fireEvent.click(await screen.findByLabelText('⟦documents.version⟧'));
-  fireEvent.click(await screen.findByRole('option', { name: 'AIR · 1.0' }));
+async function pickProject(): Promise<void> {
+  fireEvent.click(await screen.findByLabelText('⟦documents.project⟧'));
+  fireEvent.click(await screen.findByRole('option', { name: 'PRJ' }));
 }
 
 afterEach(() => {
@@ -148,7 +136,7 @@ describe('CreateDocumentModal: збій запиту структури не в�
     mockServer();
     show();
 
-    await pickVersion();
+    await pickProject();
 
     // ⛔ Мутаційний доказ (RED до фіксу): `structure.data?.sheets ?? []`
     // давав порожній перелік чекбоксів, і на екрані НЕ БУЛО нічого з
@@ -164,9 +152,25 @@ describe('CreateDocumentModal: збій запиту структури не в�
     mockServer();
     show();
 
-    await pickVersion();
+    await pickProject();
 
     await waitFor(() => expect(screen.getByText('General (GEN)')).toBeTruthy());
     expect(screen.queryByRole('alert')).toBeNull();
+
+    // ⚠ Версію видно, але обирати її нема з чого: її визначає проєкт.
+    expect(screen.getByText(/AIR · 1\.0/)).toBeTruthy();
+  });
+
+  it('V-12: діалог не питає жодного ендпоінта шаблонів (Template.View)', async () => {
+    structureFails = false;
+    mockServer();
+    show();
+
+    await pickProject();
+    await waitFor(() => expect(screen.getByText('General (GEN)')).toBeTruthy());
+
+    const urls = (vi.mocked(fetch).mock.calls as [RequestInfo | URL][]).map(([input]) => String(input));
+    expect(urls.some((url) => url.includes('/api/v1/projects/1/document-template'))).toBe(true);
+    expect(urls.filter((url) => url.includes('/api/v1/templates') || url.includes('/template-versions/'))).toEqual([]);
   });
 });

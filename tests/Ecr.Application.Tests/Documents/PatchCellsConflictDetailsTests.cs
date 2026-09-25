@@ -75,6 +75,11 @@ public sealed class PatchCellsConflictDetailsTests
 
     public PatchCellsConflictDetailsTests()
     {
+        // ⚠ Видимість документа — перша перевірка обробника (V-02); предмет
+        // цього файлу — перелік розбіжностей, тож документ тут видимий.
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
+
         var column = new ColumnDef(
             TableDefId, EcrCode.Create("Volume"),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume" }), 1, CellDataType.Decimal);
@@ -114,7 +119,8 @@ public sealed class PatchCellsConflictDetailsTests
     private PatchCellsHandler Handler()
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Application.Validation.ValidationEngine(new RealFormulaEngine()),
-               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock);
+               _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
+               Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {

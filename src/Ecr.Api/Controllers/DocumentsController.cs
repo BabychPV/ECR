@@ -235,7 +235,8 @@ public sealed class DocumentsController(
             periodKey,
             [.. messages.Select(m => new ValidationFindingDto(
                 m.Severity.ToString(), m.RuleCode, m.Message,
-                m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))]));
+                m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))],
+            Validated: true));
     }
 
     /// <summary>
@@ -249,16 +250,23 @@ public sealed class DocumentsController(
     /// сторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ
     /// перевірку заново.
     ///
-    /// ⚠ <c>404</c>, а не порожній перелік, коли перевірку ще не запускали:
-    /// «зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
-    /// першу замість другої означає повідомити неправду про готовність.
+    /// ⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
+    /// першу замість другої означає повідомити неправду про готовність. Тому
+    /// неперевірений документ віддає <c>validated: false</c>, а не порожній
+    /// перелік сам по собі.
+    ///
+    /// ✎ `X-32`: доти це розрізнення несла відповідь <c>404</c>. Але «ще не
+    /// перевіряли» — звичайний стан кожного нового документа, а не помилка:
+    /// КОЖНЕ відкриття такого документа давало червоний рядок у консолі
+    /// браузера («Failed to load resource: 404») і невдалий запит у мережі —
+    /// шум, за яким справжні відмови перестають помічати. Тепер це <c>200</c>
+    /// з тим самим змістом, названим полем.
     /// </remarks>
     /// <param name="id">Документ.</param>
     /// <param name="periodKey">Період.</param>
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:long}/validation")]
     [ProducesResponseType<ValidationResultResponse>(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> LastValidation(
         long id, [FromQuery] int periodKey, CancellationToken ct)
     {
@@ -266,24 +274,10 @@ public sealed class DocumentsController(
             .HandleAsync(id, PeriodKey.Parse(periodKey), ct)
             .ConfigureAwait(false);
 
-        // ⛔ Той самий дефект, що в `Get` вище (F4), і те саме лікування. Код
-        // відповіді лишається `404` — саме на нього спирається клієнт, щоб
-        // відрізнити «ще не перевіряли» від «перевірили, зауважень немає».
-        // Змінюється лише те, що в тілі: `problem+json` із поясненням замість
-        // голого `errorCode`, з якого клієнт міг зібрати хіба «HTTP 404».
-        //
-        // ⚠ Ключ ОКРЕМИЙ (`notValidated`), а не `periodEmpty`: той самий код
-        // означає тут інше — документ є, період є, перевірку ще не запускали.
+        // ⚠ `X-32`: «ще не перевіряли» — `200` з `validated: false`, а не `404`
+        // (коментар над дією).
         return messages is null
-            ? throw new Ecr.Application.Errors.NotFoundException(
-                "ECR-DOC-0404",
-                $"Документ {id} за період {periodKey} ще не перевіряли.",
-                new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["messageKey"] = "err.ECR-DOC-0404.notValidated",
-                    ["documentId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["periodKey"] = periodKey.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                })
+            ? Ok(new ValidationResultResponse(id, periodKey, [], Validated: false))
             : Ok(new ValidationResultResponse(
                 id,
                 periodKey,
@@ -294,7 +288,8 @@ public sealed class DocumentsController(
                     // це серіалізований `List<ValidationMessage>` цілком
                     // (`ValidateDocumentHandler.cs:106`), тож таблиця в ньому
                     // вже є і міграція для цього поля не потрібна.
-                    m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))]));
+                    m.TableDefId, m.RowKey, m.ColumnCode, m.BlocksSave))],
+                Validated: true));
     }
 
     /// <summary>Перерахунок документа, або лише одного його аркуша. Право <c>Calculation.Recalculate</c>.</summary>
@@ -408,8 +403,7 @@ public sealed class DocumentsController(
     /// неправдою, що й «0 зауважень» у неперевіреного документа
     /// (<c>A7-28</c>): у клієнта має лишитися змога показати «—», а не
     /// зелений нуль. Сусідній <c>GET …/validation</c> тримає той самий поділ
-    /// кодом <c>404</c> (<c>err.ECR-DOC-0404.notValidated</c>); тут
-    /// <c>404</c> не годиться — заповненість відома й до першої перевірки.
+    /// полем <c>validated: false</c> (`X-32`).
     /// </remarks>
     [HttpGet("{id:long}/tables/status")]
     [ProducesResponseType<IReadOnlyList<Ecr.Application.Documents.Dto.TableStatusDto>>(StatusCodes.Status200OK)]
@@ -542,7 +536,12 @@ public sealed class DocumentsController(
 
 /// <summary>Запит на створення документа.</summary>
 /// <param name="ProjectId">Проєкт.</param>
-/// <param name="TemplateVersionId">Опублікована версія шаблону.</param>
+/// <param name="TemplateVersionId">
+/// Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;
+/// поле, якщо задане, мусить із нею збігатися (інакше <c>422</c>
+/// <c>err.ECR-DOC-0422.versionNotProject</c>). Клієнту його надсилати не треба:
+/// склад аркушів для діалогу дає <c>GET /projects/{id}/document-template</c>.
+/// </param>
 /// <param name="SheetDefIds">Аркуші, які входять у документ.</param>
 /// <param name="Name">
 /// Людське ім'я документа мовами каталогу; <c>null</c> — без імені.
@@ -551,9 +550,9 @@ public sealed class DocumentsController(
 /// </param>
 public sealed record CreateDocumentRequest(
     int ProjectId,
-    int TemplateVersionId,
     IReadOnlyList<int> SheetDefIds,
-    IReadOnlyDictionary<string, string>? Name = null);
+    IReadOnlyDictionary<string, string>? Name = null,
+    int? TemplateVersionId = null);
 
 /// <summary>Дія над документом у межах одного періоду.</summary>
 /// <param name="PeriodKey">Період; <c>Рік*100 + Номер</c> (R-A6).</param>
@@ -619,12 +618,17 @@ public sealed record ImportApplyRequest(string PreviewToken);
 /// <param name="DocumentId">Документ.</param>
 /// <param name="PeriodKey">Період, за який виконано перевірку.</param>
 /// <param name="Messages">Зауваження ВСІХ рівнів.</param>
+/// <param name="Validated">
+/// Чи документ за цей період узагалі перевіряли. <c>false</c> — перевірку ще не
+/// запускали, і порожній <c>Messages</c> тоді НЕ означає «зауважень немає»
+/// (`X-32`, `A7-28`).
+/// </param>
 /// <remarks>
 /// ⚠ <c>200</c> означає «перевірку виконано», а не «зауважень немає»: рішення,
 /// чи можна подавати, ухвалює клієнт за наявністю рівня <c>Error</c>.
 /// </remarks>
 public sealed record ValidationResultResponse(
-    long DocumentId, int PeriodKey, IReadOnlyList<ValidationFindingDto> Messages);
+    long DocumentId, int PeriodKey, IReadOnlyList<ValidationFindingDto> Messages, bool Validated);
 
 /// <summary>Одне зауваження перевірки.</summary>
 /// <param name="Severity">Рівень: <c>Error</c>, <c>Warning</c>, <c>Info</c>.</param>

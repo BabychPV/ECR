@@ -93,7 +93,8 @@ function mockFetch(calendarFails: boolean): void {
       if (url.includes('/api/v1/me')) {
         return json({
           denies: [],
-          grants: {},
+          // F-19: дії над конкретним проєктом вимагають гранта Manage на нього.
+          grants: { 'Project:7': 'Manage' },
           isSimulation: false,
           language: 'en',
           mustChangePassword: false,

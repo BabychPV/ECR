@@ -116,4 +116,32 @@ public sealed class ArchiveProjectTests
         Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", denied.Details!["messageKey"]);
         Assert.Equal(ProjectStatus.Active, project.Status);
     }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-08")]
+    public async Task Перевідкритий_період_після_until_не_блокує_архівацію()
+    {
+        // Усі закриті; перший перевідкрито до моменту, який уже минув, а
+        // годинна задача ще не прогналася — збережений стан `Grace`.
+        //
+        // ⚠ Годинник — пізніше за природне закриття січня: інакше розрахунок
+        // чесно дав би `Grace` уже за датами, а не за `ReopenedUntil`.
+        var project = ArrangeClosed();
+        var later = new DateTime(2026, 12, 1, 9, 0, 0, DateTimeKind.Utc);
+        _clock.UtcNow.Returns(later);
+
+        var reopened = project.Periods[0];
+        reopened.Reopen(later.AddMinutes(-1), "correction", later.AddHours(-1));
+        Assert.Equal(PeriodState.Grace, reopened.State);
+
+        // ⛔ Мутація: прибрати `AdvanceTo(Effective…)` в обробнику — тут
+        // `ECR-PRD-0409` «є незакриті періоди».
+        await Handler().HandleAsync(project.Id, CancellationToken.None);
+
+        Assert.Equal(ProjectStatus.Archived, project.Status);
+
+        // І перехід зафіксовано: архівний проєкт задача станів не обробляє.
+        Assert.Equal(PeriodState.Closed, reopened.State);
+    }
 }

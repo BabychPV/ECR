@@ -11,6 +11,7 @@ import {
   restoreTemplate,
 } from '@/features/templates/templateApi';
 import { templateCardKey, useTemplateCard } from '@/features/templates/templateCardQuery';
+import { TemplateVersionsSection } from '@/features/templates/TemplateVersionsSection';
 import { localized } from '@/shared/i18n/localized';
 import { can, useSession } from '@/shared/session/useSession';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -204,9 +205,14 @@ export function TemplateCardPage(): JSX.Element {
 
   return (
     <>
+      {/*
+       * ⛔ U-19: окремого «← Templates» під шапкою більше немає. Хлібна
+       * крихта «Templates / <код>» (`routes.adminTemplateSection`,
+       * `AppLayout`) уже веде туди ж і стоїть рядком вище — два «назад» одне
+       * під одним змушували вибирати між однаковими діями.
+       */}
       <PageHeader
         title={heading}
-        back={{ label: t('templates.title'), href: '/admin/templates' }}
         meta={data !== undefined && !data.isActive ? t('templates.archivedHint') : undefined}
         primary={primary}
         secondary={secondary}
@@ -253,6 +259,11 @@ export function TemplateCardPage(): JSX.Element {
                 },
               ]}
             />
+
+            {/* ⛔ U-19: версії шаблону з переходом до структури кожної —
+                раніше до редактора структури можна було дійти лише назад
+                через перелік шаблонів. */}
+            <TemplateVersionsSection templateId={templateId} editable={editable} />
           </Stack>
         )}
       </AsyncBoundary>

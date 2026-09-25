@@ -35,6 +35,7 @@ public sealed class SubmitApproveTests
     private readonly IRowStore _rows = Substitute.For<IRowStore>();
     private readonly IWorkflowStore _workflow = Substitute.For<IWorkflowStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+    private readonly IMethodologyStore _methodologies = Substitute.For<IMethodologyStore>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
@@ -78,6 +79,8 @@ public sealed class SubmitApproveTests
                   .Returns(true);
 
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                .Returns(EditDecision.Allow());
         _access.CanApproveAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
@@ -87,6 +90,23 @@ public sealed class SubmitApproveTests
 
         _rows.GetOrphanFlagsAsync(Document, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<long, bool>());
+
+        // ⚠ За замовчуванням — жодного прогону розрахунку взагалі
+        // (`CalculatedAt = null`), тобто `IsStale = false`: більшість тестів
+        // цього файлу не про методології, і застосовувати їм застарілість
+        // навмисно не потрібно. Тест на застарілість підставляє інше значення
+        // сам (`WithStaleMethodologyResults`).
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(null, null));
+
+        // ⚠ Звуження застарілості до аркуша з прив'язкою (наступний крок над
+        // F-05): перевірка `IsStale` в `SubmitSheetHandler` тепер узагалі не
+        // йде, якщо жодна таблиця аркуша не прив'язана до методології. За
+        // замовчуванням тут — прив'язка Є (будь-яка таблиця), щоб наявні
+        // тести на застарілість нижче лишались чинними без змін. Тест на
+        // аркуш БЕЗ прив'язки підставляє порожній список сам.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int> { 1 });
 
         // ⚠ Екземпляри таблиць і знімок структури: подання кличе валідацію
         // (`ФВ-5.4`, `W8`), а вона питає обидва. Порожній набір правил тут
@@ -215,7 +235,9 @@ public sealed class SubmitApproveTests
         => new(_cells, _rows, _workflow, _documents, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _headers,
-               Reports(), _uow, _user, _clock);
+               Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
+               NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
+               _methodologies);
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -302,6 +324,60 @@ public sealed class SubmitApproveTests
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
 
         await _reportSnapshots.Received(1).MarkSubmittedAsync(55, 9, Arg.Any<CancellationToken>());
+    }
+
+    // ──────────────────────────── Погодження ──────────────────────────
+    // F-25 (пряме рішення людини, UX-PASS R4): та сама людина не може бути
+    // тим, хто подав аркуш, і тим, хто його погоджує.
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Погодження_власного_подання_відхиляється()
+    {
+        // Той самий користувач (`_user.UserId` == 9), що подав аркуш,
+        // намагається сам його затвердити.
+        _sheets[Water].Submit(userId: 9, Now);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", error.ErrorCode);
+        Assert.Equal("err.ECR-ACCS-0403.approveOwnSubmission", error.Details!["messageKey"]);
+
+        // Стан не зрушив: перевірку зупиняє ДО будь-якого запису.
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Погодження_подання_іншого_користувача_дозволене()
+    {
+        // ⚠ Контроль до тесту вище: наявна поведінка (хтось ІНШИЙ подав,
+        // поточний користувач погоджує) не ламається новим правилом.
+        _sheets[Water].Submit(userId: 999, Now);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: true, reason: null, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Approved, _sheets[Water].Status);
+        Assert.Equal(9, _sheets[Water].ApprovedByUserId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-25")]
+    public async Task Відхилення_власного_подання_дозволене()
+    {
+        // ⚠ Заборона стосується лише ЗАТВЕРДЖЕННЯ (`approved: true`):
+        // відхилити власне подання — не конфлікт інтересів, а штатне
+        // повернення собі ж на доопрацювання.
+        _sheets[Water].Submit(userId: 9, Now);
+
+        await Approve().HandleAsync(Document, Water, Period, approved: false, reason: "помилка у сумі", CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Rejected, _sheets[Water].Status);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -468,6 +544,86 @@ public sealed class SubmitApproveTests
             Snapshot(new Ecr.Domain.Entities.Configuration.ValidationRule(
                 tableDefId: 3, EcrCode.Create("CAP"), severity, scope: 1, expression,
                 new LocalizedText(new Dictionary<string, string> { ["en"] = "Volume is over the cap" }))));
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_із_застарілими_результатами_методологій_відхиляється()
+    {
+        // ⛔ F-05 дає `IsStale` (входи документа змінилися ПІСЛЯ прогону, що
+        // дав актуальні числа) — доти ЛИШЕ візуальну позначку в сітці й
+        // експорті. Подання само методологічну застарілість не перевіряло
+        // (`SubmitSheetHandler` не мав жодної згадки `IsStale`), тож аркуш із
+        // застарілим прив'язаним числом методології подавався так само, як і
+        // свіжий. Прогін формул аркуша (`ISubmitRecalculation`) цього не
+        // закриває — інший механізм (D-69).
+        var calculatedAt = Now.AddHours(-2);
+        var inputsChangedAt = Now.AddHours(-1);
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(calculatedAt, inputsChangedAt));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+
+        // ⚠ Ні зрізу, ні зміни стану: відмова зупиняє подання ДО того, як
+        // з'явиться будь-який слід — той самий інваріант, що й для орфанів і
+        // блокувальної валідації вище.
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_з_актуальними_результатами_методологій_проходить()
+    {
+        // ⚠ Контрольний випадок до теста вище: прогін БУВ (`CalculatedAt` не
+        // null — на відміну від дефолту фікстури, де методологій не рахували
+        // взагалі), але входи після нього НЕ мінялися (`InputsChangedAt =
+        // null`) — числа актуальні, і подання не має відмовляти.
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(Now.AddHours(-2), null));
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_без_привязки_методології_ігнорує_застарілість_чужого_аркуша()
+    {
+        // ⛔ Аркуш Water (таблиця 3) у цьому тесті НЕ має жодної методологічної
+        // прив'язки — на відміну від дефолту фікстури (конструктор), де
+        // `GetMethodologyIdsBoundToTableAsync` повертає непорожній список для
+        // БУДЬ-якої таблиці. Це і є сценарій звуження: сусідній аркуш того
+        // самого документа+періоду застарілий, а ЦЕЙ аркуш до жодної
+        // методології взагалі не причетний — застарілість чужого не повинна
+        // його блокувати.
+        _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int>());
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+             .Returns(new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))); // IsStale = true
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+
+        // ⚠ Мутаційний доказ, сильніший за «не заблокував»: запит на
+        // свіжість геть НЕ пішов. Застарілість чужого прив'язаного результату
+        // цього непричетного аркуша не стосується, тож і питати про неї
+        // не потрібно (реалізація мусить пропускати виклик, а не лише
+        // ігнорувати його результат).
+        await _methodologies.DidNotReceive()
+            .GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]

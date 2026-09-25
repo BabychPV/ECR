@@ -84,6 +84,17 @@ public sealed class FormulaDefTests
         SetId(_manualColumn, 101);
         _table.AddColumn(_manualColumn);
 
+        // ⚠ V-19: збереження тепер резолвить посилання виразу, тож колонки, на
+        // які посилаються формули цього файла (`[Jan] + [Feb]`), мусять існувати.
+        // Доти фікстура описувала формулу, що посилається в порожнечу, — і
+        // зберігала її зеленим.
+        var jan = new ColumnDef(_table.Id, EcrCode.Create("Jan"), Text("Jan"), 2, CellDataType.Decimal);
+        SetId(jan, 110);
+        _table.AddColumn(jan);
+        var feb = new ColumnDef(_table.Id, EcrCode.Create("Feb"), Text("Feb"), 3, CellDataType.Decimal);
+        SetId(feb, 111);
+        _table.AddColumn(feb);
+
         _row = new RowDef(_table.Id, RowKey.Create("7001001"), 0, Text("7001001"), RowKind.Item);
         SetId(_row, 200);
         _table.AddRow(_row);
@@ -105,7 +116,8 @@ public sealed class FormulaDefTests
         => new(ExpressionDialect.Template, expression);
 
     private SaveFormulaDefHandler Save()
-        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
+        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user,
+            new RealFormulaEngine());
 
     private DeleteFormulaDefHandler Delete()
         => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);

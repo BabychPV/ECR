@@ -2,13 +2,14 @@ import { useState, type JSX } from 'react';
 import { Button, Card, Center, PasswordInput, Stack, Text } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { apiFetch } from '@/api/client';
+import { EcrApiError, apiFetch } from '@/api/client';
 import type { ChangePasswordRequest } from '@/api/types';
 import { isPasswordTooShort } from '@/features/security/UserAdminActions';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { problemText } from '@/shared/ui/problemText';
+import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { t } from '@/shared/i18n';
 
 /**
@@ -37,15 +38,24 @@ import { t } from '@/shared/i18n';
  * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
  * для миші: клавіатура й читалка його не бачили взагалі.
  *
- * ⚠ Напис — ЛІТЕРАЛ, не `t()`. Рядки цього застосунку йдуть винятково із
- * серверного каталогу (`GET /api/v1/ui-strings/...`, сам каталог наповнює
- * `09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський. Ключа під
- * цей напис там ще немає, і завести його звідси не можна: голий `t()` без
- * рядка в каталозі показав би позначений ключ (`⟦...⟧`) читалці замість
- * опису кнопки — рівно той дефект, від якого рятує `Missing`-позначка в
- * `shared/i18n`.
+ * ✎ `X-26`: напис — із каталогу (`common.togglePasswordVisibility`) з
+ * англійським запасним (`a11yLabels.ts`); раніше — англійський літерал.
  */
-const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+
+/**
+ * Відмова «поточний пароль не підходить» (V-16).
+ *
+ * ⚠ Сервер відповідає `401`, але сеанс живий: транспорт не виводить із системи
+ * саме на цьому ключі (`api/client.ts`, `isFormAnswer401`), а тут відмова йде
+ * під поле поточного пароля — туди, де помилка й зроблена.
+ */
+export function isCurrentPasswordWrong(error: unknown): boolean {
+  return (
+    error instanceof EcrApiError
+    && error.problem.errorCode === 'ECR-AUTH-0401'
+    && error.problem.extensions2?.['messageKey'] === 'err.ECR-AUTH-0401.currentPasswordWrong'
+  );
+}
 export function ChangePasswordPage(): JSX.Element {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -66,6 +76,8 @@ export function ChangePasswordPage(): JSX.Element {
   // помилки й `messageKey`, а не текст, під полем, а не в загальному банері.
   const tooShort = isPasswordTooShort(error);
   const tooShortText = tooShort ? (problemText(error).detail ?? problemText(error).title) : null;
+  const currentWrong = isCurrentPasswordWrong(error);
+  const currentWrongText = currentWrong ? (problemText(error).detail ?? problemText(error).title) : null;
 
   async function submit(): Promise<void> {
     setBusy(true);
@@ -100,8 +112,9 @@ export function ChangePasswordPage(): JSX.Element {
             label={t('password.current')}
             value={current}
             onChange={(event) => setCurrent(event.currentTarget.value)}
+            error={currentWrongText ?? undefined}
             autoComplete="current-password"
-            visibilityToggleButtonProps={passwordToggleProps}
+            visibilityToggleButtonProps={passwordToggleProps()}
           />
           <PasswordInput
             label={t('password.next')}
@@ -109,7 +122,7 @@ export function ChangePasswordPage(): JSX.Element {
             onChange={(event) => setNext(event.currentTarget.value)}
             error={tooShortText ?? undefined}
             autoComplete="new-password"
-            visibilityToggleButtonProps={passwordToggleProps}
+            visibilityToggleButtonProps={passwordToggleProps()}
           />
           <PasswordInput
             label={t('password.repeat')}
@@ -117,15 +130,15 @@ export function ChangePasswordPage(): JSX.Element {
             onChange={(event) => setRepeat(event.currentTarget.value)}
             error={mismatch ? t('password.mismatch') : undefined}
             autoComplete="new-password"
-            visibilityToggleButtonProps={passwordToggleProps}
+            visibilityToggleButtonProps={passwordToggleProps()}
           />
 
           <Button loading={busy} disabled={mismatch || next.length === 0} onClick={() => void submit()}>
             {t('password.submit')}
           </Button>
 
-          {/* Решта відмов — банером; `tooShort` уже під полем нового пароля. */}
-          {!tooShort && <ErrorAlert error={error} />}
+          {/* Решта відмов — банером; `tooShort` і хибний поточний пароль уже під своїми полями. */}
+          {!tooShort && !currentWrong && <ErrorAlert error={error} />}
 
           {/* ⚠ Вимоги до пароля показуються ДО спроби: правила, видимі лише у
               відповіді про помилку, змушують вгадувати. */}

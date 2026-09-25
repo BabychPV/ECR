@@ -32,6 +32,24 @@ export function saveValidationRule(
   );
 }
 
+/**
+ * Правила таблиці (X-15): діалог показує їх переліком і видаляє вибране —
+ * доти видалення йшло введеним з пам'яті кодом, якого екран не показував.
+ */
+export function listValidationRules(templateVersionId: number, tableDefId: number): Promise<ValidationRuleDto[]> {
+  return apiFetch<ValidationRuleDto[]>(
+    `/api/v1/template-versions/${String(templateVersionId)}/tables/${String(tableDefId)}/validation-rules`,
+  );
+}
+
+/** Ключ запиту {@link listValidationRules} — локальний, єдиний споживач поруч. */
+export function validationRulesKey(
+  templateVersionId: number,
+  tableDefId: number,
+): readonly ['templates', 'validationRules', number, number] {
+  return ['templates', 'validationRules', templateVersionId, tableDefId] as const;
+}
+
 /** Прибирає правило з таблиці чернетки (фізично). */
 export function deleteValidationRule(
   templateVersionId: number,

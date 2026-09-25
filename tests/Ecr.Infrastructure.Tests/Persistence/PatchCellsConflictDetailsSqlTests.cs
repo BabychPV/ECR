@@ -168,6 +168,8 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
             Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
         };
         access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
               .Returns(doc.RowIds
                   .SelectMany(rowId => doc.ColumnDefIds
@@ -197,7 +199,7 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
         return new PatchCellsHandler(
             cellStore, rowStore, documentStore, periods, metadata, access,
             new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
-            methodologies, registries, headers, auditWriter, auditReader, jobs, uow, user, clock);
+            methodologies, registries, headers, auditWriter, auditReader, jobs, uow, user, clock, new SheetEditGate(db), new Ecr.Infrastructure.Persistence.UnitCatalog(db));
     }
 
     private static ColumnDef ColumnDefFor(TestDocument doc, int ordinal, CellDataType type)

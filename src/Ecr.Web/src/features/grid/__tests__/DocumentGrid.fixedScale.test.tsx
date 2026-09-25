@@ -210,15 +210,24 @@ describe('формат комірки: scale = 4', () => {
     expect((await screen.findByTestId('cell-r2-C1')).textContent).toBe('');
   });
 
-  it('Formula, scale 2: «1.005» показано як «1.01», модель лишається повною', async () => {
+  it('Formula, scale 2: «1.005» показано повністю, а не обрізано до «1.01»', async () => {
+    /*
+     * ✒ 2026-09-23 (`U-05`): `scale` — НИЖНЯ межа подачі
+     * (доповнення нулями), а не верхня. Сервер звіряє масштаб
+     * лише для `Decimal` (`ColumnDef.Validate` п. 7), тож вихід
+     * `Formula`/`Calculated` законно несе довший дріб — і це значущі
+     * знаки даних про викиди, а не шум.
+     */
     mockServer();
     show();
 
     const cell = await screen.findByTestId('cell-r1-C3');
 
-    expect(cell.textContent).toBe('1.01');
-    // ⛔ Округлення показу не потрапляє в модель (редактор, буфер, PATCH).
-    expect(cell.getAttribute('data-model')).toBe('1.0050000000');
+    expect(cell.textContent).toBe('1.005');
+    // ✎ `U-24`: модель (а з нею й поле редактора) — канонічний запис без
+    // хвостових нулів сховища, а не `1.0050000000`. Значущий третій знак
+    // лишається: канон зрізає нулі, а не цифри.
+    expect(cell.getAttribute('data-model')).toBe('1.005');
   });
 
   it('дзеркало: колонка без scale нулями не доповнюється', async () => {

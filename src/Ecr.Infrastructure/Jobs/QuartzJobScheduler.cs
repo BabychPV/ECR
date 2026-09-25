@@ -502,5 +502,9 @@ public sealed class QuartzJobScheduler(
     private ISchedulerFactory Scheduler(string what)
         => schedulerFactory
            ?? throw new BusinessRuleException(
-               UnavailableCode, UnavailableMessage, new Dictionary<string, object?> { ["job"] = what });
+               UnavailableCode, UnavailableMessage, new Dictionary<string, object?>
+               {
+                   ["messageKey"] = "err.ECR-SYS-0503.schedulerNotConfigured",
+                   ["job"] = what,
+               });
 }

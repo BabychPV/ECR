@@ -73,7 +73,9 @@ public sealed class DocumentDataExporter(
     ICellStore cellStore,
     IRowStore rowStore,
     IMetadataCache metadata,
-    IRegistryStore registries)
+    IRegistryStore registries,
+    IMethodologyStore? methodologies = null,
+    ICalculationResultStore? results = null)
 {
     private const string RowKeyHeader = "rowKey";
 
@@ -95,7 +97,17 @@ public sealed class DocumentDataExporter(
     public async Task<byte[]> ExportAsync(
         long documentId, int periodKey, string format, bool includeFormulas, CancellationToken ct)
     {
-        var key = new PeriodKey(periodKey);
+        // B-16: спільний валідатор зовнішнього ключа періоду (`PeriodKey.Parse`),
+        // не первинний конструктор — інші читання того самого документа
+        // (`GetDocumentTablesHandler`) вже відмовляють на невірному
+        // `periodKey`, а вивантаження CSV/JSON мовчки приймало його.
+        var key = PeriodKey.Parse(periodKey);
+        // ⛔ Екземпляри таблиць створюються при ПЕРШОМУ відкритті документа
+        // (`GetDocumentTablesHandler`, `A7-30`). Документ, створений і ще не
+        // відкритий, їх не має, і вивантаження CSV/JSON відмовляв «документа не існує або він
+        // порожній» — хоча документ є і шаблон дає йому таблиці (UX-прохід
+        // 2026-09-24, живий стенд). Виклик ідемпотентний.
+        await rowStore.EnsureTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
         var instances = await rowStore.GetTableInstancesAsync(documentId, key, ct).ConfigureAwait(false);
         if (instances.Count == 0)
         {
@@ -115,6 +127,15 @@ public sealed class DocumentDataExporter(
         var ids = instances.Select(i => i.TableInstanceId).ToList();
         var rowIds = await rowStore.GetRowIdsBatchAsync(ids, key, ct).ConfigureAwait(false);
         var slices = await cellStore.ReadSlicesAsync(ids, ct).ConfigureAwait(false);
+
+        // ⛔ F-02: колонка `Calculated` — числом методології, як у сітці й xlsx
+        // (`CalculatedCellOverlay`). Порти необов'язкові лише заради тестів.
+        if (methodologies is not null && results is not null)
+        {
+            slices = await new Calculations.CalculatedCellOverlay(methodologies, results)
+                .ApplyAsync(documentId, periodKey, snapshot, instances, rowIds, slices, ct)
+                .ConfigureAwait(false);
+        }
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
 
         var tables = new List<ExportTable>();

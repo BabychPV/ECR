@@ -124,6 +124,8 @@ public sealed class RecalculationJobIdTests
         // предмет тесту — з ним 200 віддався б і без автора задачі.
         _access.BuildProfileAsync(Editor, Arg.Any<CancellationToken>())
                .Returns(new AccessBuilder { UserId = Editor }.Build());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
 
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>
@@ -185,6 +187,8 @@ public sealed class RecalculationJobIdTests
         _user.UserId.Returns(Stranger);
         _access.BuildProfileAsync(Stranger, Arg.Any<CancellationToken>())
                .Returns(new AccessBuilder { UserId = Stranger }.Build());
+        _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
 
         var denied = await Assert.ThrowsAsync<Application.Errors.AccessDeniedException>(
             () => Controller().Get(response.RecalculationJobId!, CancellationToken.None))
@@ -198,7 +202,7 @@ public sealed class RecalculationJobIdTests
                 _cells, _rows, _documents, _periods, _metadata, _access,
                 new Application.Validation.ValidationEngine(new RealFormulaEngine()),
                 _methodologies, _registries, _headers, _audit, Substitute.For<IAuditReader>(),
-                _jobs, _uow, _user, _clock)
+                _jobs, _uow, _user, _clock, Substitute.For<ISheetEditGate>(), NSubstitute.Substitute.For<Ecr.Application.Ports.IUnitCatalog>())
             .HandleAsync(
                 new PatchCellsRequest(
                     TableInstance, Period, "UserEdit",

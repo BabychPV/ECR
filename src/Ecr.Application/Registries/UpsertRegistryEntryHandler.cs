@@ -6,6 +6,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -92,10 +93,16 @@ public sealed class UpsertRegistryEntryHandler(
             ? await LoadAsync(id, definition.Id, ct).ConfigureAwait(false)
             : await CreateAsync(definition.Id, code, dto, userId, ct).ConfigureAwait(false);
 
-        entry.Rename(dto.Display);
+        // ⛔ X-03: назва ЗЛИВАЄТЬСЯ з наявною, а не заміняється. Доти
+        // `Rename(dto.Display)` писав рівно те, що приїхало, — а форма правки
+        // (до фіксу клієнта) везла назву лише під `en`, і кожне збереження
+        // запису мовчки стирало російський і казахський переклади. Мова, якої
+        // в запиті немає, лишається як була; мова з порожнім текстом —
+        // свідомо прибирається (так клієнт каже «цей переклад видалено»).
+        entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
         entry.SetParent(dto.ParentEntryId);
 
-        var changes = await ApplyValuesAsync(registries, definition, entry, dto.Values, ct).ConfigureAwait(false);
+        var changes = await ApplyValuesAsync(registries, definition, entry, dto.Values, prefetch: null, ct).ConfigureAwait(false);
 
         // ⛔ Вікно дії сюди НЕ приймається, хоча воно є полем запису: його
         // зміна тягне перерахунок IsOrphaned (ФВ-8.13a), і зроблена мимохідь
@@ -168,11 +175,23 @@ public sealed class UpsertRegistryEntryHandler(
     /// входу — тотожність.
     /// </para>
     /// </remarks>
+    /// <param name="registries">Сховище довідників.</param>
+    /// <param name="definition">Опис довідника.</param>
+    /// <param name="entry">Запис, якому застосовуються значення.</param>
+    /// <param name="values">Значення за кодами полів.</param>
+    /// <param name="prefetch">
+    /// Прочитане пакетом наперед (<c>B-10</c>, імпорт CSV): наявні значення
+    /// цього запису й цілі <c>Lookup</c>-посилань. <c>null</c> — читати з
+    /// бази поштучно, як ручний upsert. Правила ті самі в обох випадках —
+    /// змінюється лише ДЖЕРЕЛО тих самих рядків.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
     internal static async Task<IReadOnlyList<RegistryValueFieldChange>> ApplyValuesAsync(
         IRegistryStore registries,
         Domain.Entities.Configuration.RegistryDef definition,
         RegistryEntry entry,
         IReadOnlyDictionary<string, object?> values,
+        RegistryValuesPrefetch? prefetch,
         CancellationToken ct)
     {
         if (values is null || values.Count == 0)
@@ -200,7 +219,8 @@ public sealed class UpsertRegistryEntryHandler(
         }
 
         var existing = entry.IsPersisted
-            ? (await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false))
+            ? (prefetch?.ExistingValues
+               ?? await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false))
                 .ToDictionary(v => v.RegistryFieldDefId)
             : [];
 
@@ -226,6 +246,11 @@ public sealed class UpsertRegistryEntryHandler(
             var oldValue = isNew ? null : RawValue(value!, field.DataType);
             value!.Set(field.DataType, CellValueReader.Normalize(raw), field.UnitId);
             var newValue = RawValue(value, field.DataType);
+
+            if (field.DataType == CellDataType.Lookup && value.ValueRefEntryId is { } target)
+            {
+                await RequireLookupTargetAsync(registries, field, target, prefetch?.LookupTargets, ct).ConfigureAwait(false);
+            }
 
             if (!Equals(oldValue, newValue))
             {
@@ -256,6 +281,71 @@ public sealed class UpsertRegistryEntryHandler(
         return changes;
     }
 
+    /// <summary>
+    /// Значення поля Lookup мусить бути живим записом САМЕ того довідника, який
+    /// оголошує поле (V-08(b), V-17(a), третій раунд UX).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти неіснуючий Id доходив до бази й падав на <c>FK_RegValue_Ref</c> —
+    /// <c>500</c> «зверніться до адміністратора» на звичайну описку в полі, — а
+    /// Id запису ІНШОГО довідника приймався (<c>201</c>): число валідне,
+    /// посилання — ні, і каскади та списки вибору на такому значенні мовчки
+    /// показували чуже.
+    /// ⚠ Видалений логічно запис — теж «не знайдено»: він поза обігом, і нове
+    /// посилання на нього не має з'являтися.
+    /// <para>
+    /// ⚠ <paramref name="knownTargets"/> — записи, уже прочитані пакетом
+    /// (імпорт CSV резолвить код посилання в Id саме з них, <c>B-10</c>):
+    /// повторний <c>FindEntryAsync</c> на кожне значення дав би N+1 з тим самим
+    /// рядком. Той самий відстежуваний об'єкт — ті самі перевірки нижче.
+    /// </para>
+    /// </remarks>
+    private static async Task RequireLookupTargetAsync(
+        IRegistryStore registries,
+        RegistryFieldDef field,
+        long target,
+        IReadOnlyDictionary<long, RegistryEntry>? knownTargets,
+        CancellationToken ct)
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        var entry = knownTargets is not null && knownTargets.TryGetValue(target, out var known)
+            ? known
+            : await registries.FindEntryAsync(target, ct).ConfigureAwait(false);
+
+        if (entry is null || entry.IsDeleted)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поле «{field.Code}»: запису довідника {target} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.lookupEntryNotFound",
+                    ["field"] = field.Code,
+                    ["value"] = target.ToString(invariant),
+                });
+        }
+
+        if (field.RefRegistryDefId is { } expected && entry.RegistryDefId != expected)
+        {
+            var expectedDefinition = await registries
+                .FindDefinitionByIdAsync(expected, ct).ConfigureAwait(false);
+            var expectedCode = expectedDefinition?.Code ?? expected.ToString(invariant);
+
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поле «{field.Code}» посилається на довідник «{expectedCode}», а запис {target} "
+                + $"(«{entry.Code}») належить іншому довіднику.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.lookupWrongRegistry",
+                    ["field"] = field.Code,
+                    ["value"] = target.ToString(invariant),
+                    ["entryCode"] = entry.Code,
+                    ["expectedRegistry"] = expectedCode,
+                });
+        }
+    }
+
     /// <summary>Типізоване значення поля — для порівняння до/після і для аудиту.</summary>
     /// <remarks>
     /// ⚠ Той самий вибір колонки за типом, що вже застосовує
@@ -278,6 +368,34 @@ public sealed class UpsertRegistryEntryHandler(
         // виконання сюди дійде.
         _ => null,
     };
+
+    /// <summary>Наявна назва, поверх якої лягли мови з запиту (X-03).</summary>
+    /// <remarks>
+    /// ⚠ Порожній або пробільний текст мови в запиті — видалення цього
+    /// перекладу; мова, якої в запиті немає зовсім, — без змін.
+    /// </remarks>
+    internal static LocalizedText Merge(LocalizedText current, LocalizedText? incoming)
+    {
+        var merged = new Dictionary<string, string>(current.Values, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (language, text) in incoming?.Values ?? new Dictionary<string, string>())
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                merged.Remove(language);
+            }
+            else
+            {
+                merged[language] = text;
+            }
+        }
+
+        return new LocalizedText(merged);
+    }
+
+    /// <summary>Назва нового запису без порожніх мов.</summary>
+    private static LocalizedText WithoutEmpty(LocalizedText? display)
+        => Merge(new LocalizedText(), display);
 
     private async Task<RegistryEntry> LoadAsync(long id, int registryDefId, CancellationToken ct)
     {

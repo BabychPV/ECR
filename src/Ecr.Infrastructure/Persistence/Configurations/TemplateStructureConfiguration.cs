@@ -79,7 +79,12 @@ public sealed class TableDefConfiguration : IEntityTypeConfiguration<TableDef>
         // DEFAULT-и з іменами за 02a-db-schema.md: безіменне обмеження
         // неможливо прибрати скриптом, не з'ясувавши спершу його
         // випадкове ім'я на конкретній базі.
-        builder.Property(x => x.StorageMode).HasDefaultValueSql("0", "DF_TableDef_Storage");
+        // ⚠ `ValueGeneratedNever`: значення ЗАВЖДИ надсилається з коду, а
+        // DEFAULT лишається лише для вставок повз EF. Без цього EF (20601) не
+        // надсилав би CLR-замовчування (0) і підставляв би DEFAULT схеми;
+        // тут вони збігаються (0), тож втрати не було — але правило одне для
+        // всіх переліків із DEFAULT, щоб наступна зміна DEFAULT не відкрила її.
+        builder.Property(x => x.StorageMode).HasDefaultValueSql("0", "DF_TableDef_Storage").ValueGeneratedNever();
         builder.Property(x => x.IsDeleted).HasDefaultValue(false, "DF_TableDef_Del");
         builder.LocalizedText(x => x.NameL10n);
 
@@ -148,6 +153,13 @@ public sealed class ColumnDefConfiguration : IEntityTypeConfiguration<ColumnDef>
 
         builder.HasIndex(x => new { x.TableDefId, x.Code })
                .IsUnique().HasDatabaseName("UQ_ColumnDef");
+
+        // B-18: «Where used» довідника й одиниці шукає колонки за посиланням —
+        // без індексу скан усього cfg.ColumnDef (6000 рядків на стенді, 74
+        // читання → 6). Без фільтра навмисно: таблиця мала, а фільтрований
+        // індекс вимагав би QUOTED_IDENTIFIER ON від кожного запису в неї.
+        builder.HasIndex(x => x.LookupRegistryDefId).HasDatabaseName("IX_ColumnDef_LookupRegistryDefId");
+        builder.HasIndex(x => x.UnitId).HasDatabaseName("IX_ColumnDef_UnitId");
 
         // ⛔ Q-222: був у 02a-db-schema.md (FK_ColumnDef_Cascade), ніколи не
         // потрапив у цю конфігурацію.

@@ -116,10 +116,22 @@ describe('gridColumns — індикатор обов\'язковості кол
     expect(String(props['title'])).toContain('columnRequiredHint');
   });
 
-  it('звичайна колонка не має columnProperties узагалі (поведінка решти сітки не зачеплена)', () => {
+  it('колонка без вимоги підказки в заголовку не отримує', () => {
+    /*
+     * ✒ `U-05`: твердження звужено з «`columnProperties` немає взагалі» до
+     * «підказки немає»: числова колонка тепер законно має
+     * `columnProperties` з класом вирівнювання. Суть перевірки та сама:
+     * зірочка й її пояснення не з’являються там, де вимоги немає.
+     */
     const columns = gridColumns(slice(), false, NoLocalFlags, {}, noRequiredInput);
     const found = columns.find((c) => c.prop === 'C1');
 
-    expect(found?.columnProperties).toBeUndefined();
+    const props =
+      typeof found?.columnProperties === 'function'
+        ? ((found.columnProperties({} as never) ?? {}) as Record<string, unknown>)
+        : {};
+
+    expect(props['title']).toBeUndefined();
+    expect(String(found?.name ?? '')).not.toContain('*');
   });
 });

@@ -66,6 +66,10 @@ public static class DependencyInjection
                     errorNumbersToAdd: null);
             }));
 
+        // F-13. Читач архіву, від якого залежать і NormalizedCellStore, і
+        // RowStore (фолбек «гаряча схема порожня → перевір arc.*»); Scoped,
+        // бо тримає EcrDbContext, а той теж Scoped.
+        services.AddScoped<ArchiveAwareCellReader>();
         services.AddScoped<ICellStore, NormalizedCellStore>();
         services.AddScoped<IRowStore, RowStore>();
         services.AddScoped<IDocumentHeaderStore, DocumentHeaderStore>();
@@ -83,6 +87,10 @@ public static class DependencyInjection
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IAuditWriter, AuditWriter>();
         services.AddScoped<IWorkflowStore, WorkflowStore>();
+        services.AddScoped<ISheetEditGate, SheetEditGate>();
+        services.AddSingleton(new SheetEditGatePolicy(TimeSpan.FromSeconds(Math.Clamp(
+            ReadInt(configuration, "Database:SheetLockTimeoutSeconds", SheetEditGatePolicy.DefaultLockTimeoutSeconds),
+            1, 300))));
         services.AddScoped<IDocumentVersionStore, DocumentVersionStore>();
         services.AddScoped<IPeriodStore, PeriodStore>();
         services.AddScoped<IAuditReader, AuditReader>();
@@ -186,13 +194,21 @@ public static class DependencyInjection
             sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
             sp.GetRequiredService<CacheLifetimes>()));
         services.AddSingleton<IRegistryEntryCache, Caching.RegistryEntryCache>();
-        services.AddScoped<Application.Security.IAccessDecisionService, AccessDecisionService>();
+        // ⛔ V-06: назовні — обгортка, що підставляє профіль суб'єкта під час
+        // симуляції. `SimulationService` отримує САМУ службу: обгортці він
+        // потрібен, і через обгортку утворилося б коло залежностей.
+        services.AddScoped<AccessDecisionService>();
+        services.AddScoped<Application.Security.IAccessDecisionService>(sp => new SimulationAwareAccessDecisionService(
+            sp.GetRequiredService<AccessDecisionService>(),
+            sp.GetRequiredService<ISimulationService>(),
+            sp.GetRequiredService<Application.Common.ICurrentUser>()));
         services.AddSingleton<Application.Security.IPasswordHasher, PasswordHasher>();
         services.AddScoped<SecurityStampValidator>();
         services.AddScoped<IUserStore, UserStore>();
         services.AddSingleton<Application.Ports.IPrincipalNameResolver, WindowsPrincipalNameResolver>();
         services.AddScoped<Application.Ports.IResourceNameResolver, ResourceNameResolver>();
-        services.AddScoped<ISimulationService, SimulationService>();
+        services.AddScoped<ISimulationService>(sp => new SimulationService(
+            sp.GetRequiredService<EcrDbContext>(), sp.GetRequiredService<AccessDecisionService>()));
 
         // Каталог рядків інтерфейсу — Scoped через EcrDbContext; сам зріз
         // лежить у спільному IMemoryCache під ключем із версією (ФВ-14.9c).

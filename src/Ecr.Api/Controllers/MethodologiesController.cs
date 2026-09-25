@@ -44,8 +44,15 @@ public sealed class MethodologiesController(
     SaveMethodologyTestCaseHandler saveTest,
     SetMethodologyModesHandler setModes,
     ListCalculationBindingsHandler listBindings,
-    SaveCalculationBindingHandler saveBinding) : ControllerBase
+    SaveCalculationBindingHandler saveBinding,
+    MethodologyVersionScope scope) : ControllerBase
 {
+    // ⛔ B-07 (UX-прохід, четвертий раунд): кожна дія з `{vid}` спершу
+    // звіряє, що версія належить методології `{id}` (`MethodologyVersionScope`,
+    // право → належність). Обробники приймають лише `vid`, і без цього
+    // `{id}` у маршруті був декоративним: формули, публікація, видалення й
+    // константи чужої методології діяли через будь-яку адресу.
+
     /// <summary>
     /// Заводить методологію-контейнер. Право <c>Calculation.EditFormula</c>.
     /// </summary>
@@ -142,9 +149,14 @@ public sealed class MethodologiesController(
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:int}/versions/{vid:int}/formulas")]
     [ProducesResponseType<IReadOnlyList<MethodologyFormulaDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<MethodologyFormulaDto>>> Formulas(
         int id, int vid, CancellationToken ct)
-        => Ok(await listFormulas.HandleAsync(vid, ct).ConfigureAwait(false));
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyFormulasHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listFormulas.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Записує формулу версії-чернетки. Право <c>Calculation.EditFormula</c>.
@@ -172,6 +184,7 @@ public sealed class MethodologiesController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyFormulaHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await saveFormula
             .HandleAsync(
@@ -186,9 +199,14 @@ public sealed class MethodologiesController(
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:int}/versions/{vid:int}/constants")]
     [ProducesResponseType<IReadOnlyList<MethodologyConstantDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<MethodologyConstantDto>>> Constants(
         int id, int vid, CancellationToken ct)
-        => Ok(await listConstants.HandleAsync(vid, ct).ConfigureAwait(false));
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyConstantsHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listConstants.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
 
     /// <summary>Формули версії, що посилаються на константу (ФВ-8.14). Право <c>Calculation.View</c>.</summary>
     /// <param name="id">Методологія.</param>
@@ -228,6 +246,7 @@ public sealed class MethodologiesController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyConstantHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await saveConstant
             .HandleAsync(
@@ -258,9 +277,14 @@ public sealed class MethodologiesController(
     /// </remarks>
     [HttpGet("{id:int}/versions/{vid:int}/rules")]
     [ProducesResponseType<IReadOnlyList<MethodologyRuleDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<MethodologyRuleDto>>> Rules(
         int id, int vid, CancellationToken ct)
-        => Ok(await listRules.HandleAsync(vid, ct).ConfigureAwait(false));
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyRulesHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listRules.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Записує правило відбору рядків. Право <c>Calculation.EditRule</c>.
@@ -291,6 +315,7 @@ public sealed class MethodologiesController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyRuleHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await saveRule
             .HandleAsync(vid, code, request.MatchJson, request.Priority, request.IsActive, ct)
@@ -305,9 +330,14 @@ public sealed class MethodologiesController(
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:int}/versions/{vid:int}/required-inputs")]
     [ProducesResponseType<IReadOnlyList<MethodologyRequiredInputDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<MethodologyRequiredInputDto>>> RequiredInputs(
         int id, int vid, CancellationToken ct)
-        => Ok(await listRequiredInputs.HandleAsync(vid, ct).ConfigureAwait(false));
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyRequiredInputsHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listRequiredInputs.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Заводить або змінює обов'язкову вхідну колонку. Право
@@ -334,6 +364,7 @@ public sealed class MethodologiesController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyRequiredInputHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await saveRequiredInput
             .HandleAsync(vid, columnDefId, request.Severity, request.HintL10n, ct)
@@ -346,9 +377,14 @@ public sealed class MethodologiesController(
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:int}/versions/{vid:int}/outputs")]
     [ProducesResponseType<IReadOnlyList<MethodologyOutputDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<MethodologyOutputDto>>> Outputs(
         int id, int vid, CancellationToken ct)
-        => Ok(await listOutputs.HandleAsync(vid, ct).ConfigureAwait(false));
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyOutputsHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listOutputs.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Оголошує вихід версії. Право <c>Calculation.EditFormula</c>.
@@ -374,6 +410,7 @@ public sealed class MethodologiesController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyOutputHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await saveOutput
             .HandleAsync(vid, code, request.UnitId, request.Ordinal, ct)
@@ -386,9 +423,14 @@ public sealed class MethodologiesController(
     /// <param name="ct">Токен скасування.</param>
     [HttpGet("{id:int}/versions/{vid:int}/tests")]
     [ProducesResponseType<IReadOnlyList<MethodologyTestCaseDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<MethodologyTestCaseDto>>> Tests(
         int id, int vid, CancellationToken ct)
-        => Ok(await listTests.HandleAsync(vid, ct).ConfigureAwait(false));
+    {
+        await scope.RequireAsync(id, vid, ListMethodologyTestCasesHandler.Permission, ct).ConfigureAwait(false);
+
+        return Ok(await listTests.HandleAsync(vid, ct).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Записує тест золотого набору. Право <c>Calculation.EditFormula</c>.
@@ -414,6 +456,7 @@ public sealed class MethodologiesController(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SaveMethodologyTestCaseHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await saveTest
             .HandleAsync(vid, code, request.InputJson, request.ExpectedJson, request.Tolerance, ct)
@@ -446,6 +489,7 @@ public sealed class MethodologiesController(
         int id, int vid, [FromBody] SetMethodologyModesRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, SetMethodologyModesHandler.Permission, ct).ConfigureAwait(false);
 
         return Ok(await setModes
             .HandleAsync(vid, request.NumericMode, request.CalendarMode, request.TraceLevel, ct)
@@ -461,6 +505,7 @@ public sealed class MethodologiesController(
     /// </remarks>
     [HttpGet("{id:int}/bindings")]
     [ProducesResponseType<IReadOnlyList<CalculationBindingDto>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<CalculationBindingDto>>> Bindings(
         int id, CancellationToken ct)
         => Ok(await listBindings.HandleAsync(id, ct).ConfigureAwait(false));
@@ -515,6 +560,7 @@ public sealed class MethodologiesController(
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteFormula(int id, int vid, string code, CancellationToken ct)
     {
+        await scope.RequireAsync(id, vid, DeleteMethodologyFormulaHandler.Permission, ct).ConfigureAwait(false);
         await deleteFormula.HandleAsync(vid, code, ct).ConfigureAwait(false);
 
         return NoContent();
@@ -536,12 +582,14 @@ public sealed class MethodologiesController(
     /// </remarks>
     [HttpPost("{id:int}/versions/{vid:int}/publish")]
     [ProducesResponseType<MethodologyPublicationDiff>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<MethodologyPublicationDiff>> Publish(
         int id, int vid, [FromBody] PublishMethodologyRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+        await scope.RequireAsync(id, vid, PublishMethodologyHandler.Permission, ct).ConfigureAwait(false);
 
         // Diff РЕЗУЛЬТАТІВ повертається клієнтові, а не лише пишеться в журнал:
         // той, хто щойно опублікував, має побачити, що саме змінилося в числах.
@@ -564,10 +612,15 @@ public sealed class MethodologiesController(
     /// </remarks>
     [HttpPost("{id:int}/simulate")]
     [ProducesResponseType<SimulationResultDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<SimulationResultDto>> Simulate(
         int id, [FromBody] SimulateMethodologyRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // ⚠ Той самий клас, що й маршрути з `{vid}` (B-07): версія тут у тілі.
+        await scope.RequireAsync(id, request.MethodologyVersionId, SimulateMethodologyHandler.Permission, ct)
+            .ConfigureAwait(false);
 
         return Ok(await simulate
             .HandleAsync(request.MethodologyVersionId, request.PeriodKey, ct)

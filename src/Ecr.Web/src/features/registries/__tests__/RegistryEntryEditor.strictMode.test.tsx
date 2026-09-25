@@ -73,7 +73,8 @@ describe('RegistryEntryEditor: значення поля довідника пі
     const user = userEvent.setup();
     show();
 
-    const field = await screen.findByLabelText(/CAPACITY/);
+    // ⚠ X-16: підпис поля — його НАЗВА, код і тип — в описі під ним.
+    const field = await screen.findByLabelText(/Capacity/);
 
     // ⛔ ЧЕРВОНИЙ до фіксу: другий (StrictMode) виклик апдейтера
     // `setValues` кидав `TypeError`, і `userEvent.type` не завершувався б

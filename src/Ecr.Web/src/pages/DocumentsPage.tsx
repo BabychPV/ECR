@@ -1,9 +1,9 @@
-﻿import { lazy, Suspense, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useState, type JSX } from 'react';
 import { Button, Code, Group, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
-import type { PagedProjects } from '@/api/types';
+import type { PeriodCalendarDto } from '@/api/types';
 import { listDocuments, type DocumentListPage } from '@/features/documents/api';
 import { DocumentListFilterBar } from '@/features/documents/DocumentListFilterBar';
 import { DocumentListSummaryStrip } from '@/features/documents/DocumentListSummaryStrip';
@@ -11,7 +11,7 @@ import { useDocumentListFilters } from '@/features/documents/documentListFilters
 import { LateEditsMark } from '@/features/documents/LateEditsMark';
 import { formatNumber } from '@/shared/format';
 import { can, useSession } from '@/shared/session/useSession';
-import { localized } from '@/shared/i18n/localized';
+import { localized, type LocalizedText } from '@/shared/i18n/localized';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -20,6 +20,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { useUrlNumber, useUrlParamsSetter, useUrlState } from '@/shared/ui/useUrlState';
 import { t } from '@/shared/i18n';
+import { fetchAllProjects } from '@/features/projects/allProjects';
 
 /**
  * Діалог створення документа — за `import()` (`D-132`), як і решта
@@ -79,8 +80,77 @@ export function DocumentsPage(): JSX.Element {
   // кліком поруч (`CreateDocumentModal`).
   const projects = useQuery({
     queryKey: ['projects'],
-    queryFn: () => apiFetch<PagedProjects>('/api/v1/projects?limit=200'),
+    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки (`fetchAllProjects`).
+    queryFn: fetchAllProjects,
   });
+
+  /*
+   * ⛔ `U-10`. Перелік відкривався з ПОРОЖНІМ полем «Period», тому колонка
+   * «State» показувала «—» в кожному рядку — хоча відкритий період у проєкту
+   * рівно один і система його знає (`GET /projects/{id}/periods` віддає
+   * `isCurrent`). Екран мовчки показував «станів немає» там, де стан є.
+   *
+   * ⛔ Межа автовибору, і вона вузька в ДВІ сторони одразу:
+   *  1. проєкт має бути рівно ОДИН — перелік документів наскрізний по
+   *     проєктах, і взяти календар «першого-ліпшого» з десяти означало б
+   *     підставити в адресу період чужого проєкту;
+   *  2. період береться не «перший у списку», а позначений САМИМ сервером як
+   *     поточний (`isCurrent` — `CurrentPeriod`, `D-77`). Якщо позначки немає,
+   *     підставляється `Open`-період — і лише коли він один. Два відкриті
+   *     періоди — неоднозначність, і вибір лишається людині.
+   *
+   * ⛔ Фільтром це НЕ стає, і ця межа тут найважливіша: перелік документів
+   * періодом не фільтрується (див. шапку файла — період керує лише КОЛОНКОЮ
+   * стану), і автовибір не має цього змінити. Він робить рівно те, що зробила
+   * б людина, обравши період руками.
+   *
+   * ⚠ Значення йде в АДРЕСУ (`?periodKey=`), а не в локальний стан: воно має
+   * лишитися видимим у полі й у посиланні, яке звідси надсилають далі
+   * (`documentHref` нижче бере його ж). Локальний стан дав би посилання на
+   * «поточний місяць за замовчуванням» — рівно той дефект, який уже
+   * виправляли в `documentHref` (`UI-walkthrough F3`).
+   *
+   * ⚠ Запит робиться ЛИШЕ доки періоду в адресі немає: `enabled` знімає його,
+   * щойно вибір є, тож звичайне відкриття сторінки з посилання зайвого
+   * звернення не робить.
+   *
+   * ⛔ Автовибір — лише при ВХОДІ на сторінку без періоду в адресі, а не
+   * щоразу, коли `periodKey` став `null`. Живий стенд (2026-09-24,
+   * `drop-repro.mjs`): людина очищала поле (Ctrl+A, Delete), щоб набрати
+   * інший період, — `periodKey` зникав з адреси, автовибір за ~100 мс
+   * дописував `202609` у поле, в якому вона вже друкувала (курсор лишався на
+   * початку), і набір `202608` давав у полі `202608202609` (5 з 5 спроб).
+   * Очищене руками поле — рішення людини, а не «період не обрано».
+   */
+  const [autoPick, setAutoPick] = useState(() => periodKey === null);
+  const onlyProject = projects.data?.items.length === 1 ? projects.data.items[0] : undefined;
+
+  const calendar = useQuery({
+    queryKey: ['periods', onlyProject?.id ?? null],
+    queryFn: () =>
+      apiFetch<PeriodCalendarDto>(`/api/v1/projects/${String(onlyProject?.id ?? 0)}/periods`),
+    enabled: autoPick && periodKey === null && onlyProject !== undefined,
+  });
+
+  useEffect(() => {
+    if (!autoPick || periodKey !== null) return;
+
+    const periods = calendar.data?.periods;
+    if (periods === undefined) return;
+
+    const current = periods.find((period) => period.isCurrent);
+
+    // ⚠ `Open` береться лише коли він ОДИН: два відкриті періоди — це вибір,
+    // а не замовчування, і мовчки взяти один із них означало б показати стан
+    // не того періоду, про який думає людина.
+    const open = periods.filter((period) => period.state === 'Open');
+    const pick = current ?? (open.length === 1 ? open[0] : undefined);
+
+    // ⚠ Рішення при вході ухвалено — з вибором чи без (календар
+    // неоднозначний): далі період змінює лише людина.
+    setAutoPick(false);
+    if (pick !== undefined) setUrlParams({ periodKey: pick.periodKey, cursor: null });
+  }, [autoPick, periodKey, calendar.data, setUrlParams]);
 
   /**
    * ⛔ Директива D15 §0, правило L10. Тут стояло
@@ -139,6 +209,8 @@ export function DocumentsPage(): JSX.Element {
               miw={120}
               value={periodKey}
               onChange={(value) => {
+                // ⛔ Людина обрала сама — автовибір більше не втручається.
+                setAutoPick(false);
                 // ⚠ Період прибрано — прибирається й фільтр стану: без періоду
                 // він однаково не діє, а повернення періоду не має мовчки
                 // відновлювати звуження, якого на екрані вже не видно.
@@ -301,11 +373,20 @@ export function DocumentsPage(): JSX.Element {
                          * незалежних написів.
                          */
                         <Group gap="md">
-                          {Object.entries(document.sheetStates).map(([sheet, state]) => (
-                            <Group key={sheet} gap="xs" wrap="nowrap">
-                              <Text size="xs" c="dimmed">
-                                {sheet}
-                              </Text>
+                          {sheetLabels(document).map(({ code, label, state }) => (
+                            <Group key={code} gap="xs" wrap="nowrap">
+                              {/* ⛔ Аркуш ОДИН — підпис лише шум: питання «чий
+                                  це стан» не виникає.
+                                  ⚠ Аркушів кілька — НАЗВА аркуша мовою
+                                  інтерфейсу, а не внутрішній код
+                                  (`S99819007`), який людині нічого не каже.
+                                  Код — лише запасний варіант (див.
+                                  `sheetLabels`). */}
+                              {!isSingleSheet(document) && (
+                                <Text size="xs" c="dimmed">
+                                  {label}
+                                </Text>
+                              )}
                               <StatusBadge kind="sheet" state={state} />
                             </Group>
                           ))}
@@ -358,4 +439,49 @@ export function DocumentsPage(): JSX.Element {
       )}
     </>
   );
+}
+
+/**
+ * Чи в документа рівно один аркуш — тоді стан у переліку не потребує коду.
+ *
+ * ⚠ Обидві умови разом: `sheetCount` — скільки аркушів у документі, а
+ * `sheetStates` — скільки з них мають рядок стану за період. Якщо аркушів
+ * два, а стан є лише в одного, код ще потрібен: без нього не видно, ЧИЙ це
+ * стан.
+ */
+function isSingleSheet(document: { sheetCount: number; sheetStates: Record<string, string> }): boolean {
+  return document.sheetCount <= 1 && Object.keys(document.sheetStates).length === 1;
+}
+
+/** Аркуш у колонці «State»: код (ключ), підпис для людини, стан. */
+interface SheetLabel {
+  readonly code: string;
+  readonly label: string;
+  readonly state: string;
+}
+
+/**
+ * Аркуші документа для колонки «State» — у порядку аркушів і з назвою.
+ *
+ * ⚠ Джерело — `sheets` (сервер віддає їх у порядку `SheetDef.Ordinal`, з
+ * `nameL10n`). Поле адитивне й необов'язкове в контракті, тож без нього —
+ * старий шлях: словник `sheetStates`, підпис — код.
+ *
+ * ⚠ Назва порожня (не задана жодною мовою) — підпис знову КОД: «чий це стан»
+ * без підпису не прочитати, а порожній `<Text>` поруч із бейджем виглядав би
+ * як зламана клітинка.
+ */
+function sheetLabels(document: {
+  sheetStates: Record<string, string>;
+  sheets?: readonly { code: string; nameL10n: LocalizedText; state: string }[] | null;
+}): SheetLabel[] {
+  if (document.sheets !== undefined && document.sheets !== null && document.sheets.length > 0) {
+    return document.sheets.map((sheet) => {
+      const name = localized(sheet.nameL10n);
+
+      return { code: sheet.code, label: name.length > 0 ? name : sheet.code, state: sheet.state };
+    });
+  }
+
+  return Object.entries(document.sheetStates).map(([code, state]) => ({ code, label: code, state }));
 }

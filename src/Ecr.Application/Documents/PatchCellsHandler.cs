@@ -37,7 +37,17 @@ public sealed class PatchCellsHandler(
     IBackgroundJobScheduler jobs,
     IUnitOfWork uow,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+
+    // ⛔ Спільне блокування аркуша × періоду ВСЕРЕДИНІ транзакції запису і
+    // повторна перевірка стану під ним (`SubmitEditRaceTests`). Перевірка прав
+    // нижче (`EnsureAccessAsync`) іде ПОЗА транзакцією, і сама по собі вона не
+    // бачить подання, яке ще не зафіксоване.
+    ISheetEditGate sheetGate,
+
+    // ⛔ B-02: довідник одиниць — щоб неіснуюча одиниця в комірці `Unit`
+    // відхилялася ДО запису, а не сирим `FK_CellValue_Unit` (`500`).
+    IUnitCatalog units)
 {
     /// <summary>Застосовує зміни.</summary>
     /// <exception cref="ConcurrencyConflictException">
@@ -48,8 +58,8 @@ public sealed class PatchCellsHandler(
     /// </exception>
     /// <exception cref="BusinessRuleException">
     /// Комірковий <c>Error</c> валідації — <c>ECR-CELL-0422</c>; посилання
-    /// <c>Lookup</c>-комірки на неіснуючий запис довідника —
-    /// <c>ECR-CELL-4223</c>.
+    /// <c>Lookup</c>-комірки на неіснуючий запис довідника або <c>Unit</c>-комірки
+    /// на неіснуючу одиницю — <c>ECR-CELL-4223</c>.
     /// </exception>
     /// <param name="request">Батч.</param>
     /// <param name="ct">Скасування.</param>
@@ -90,6 +100,21 @@ public sealed class PatchCellsHandler(
 
         var context = await LoadContextAsync(request, ct).ConfigureAwait(false);
 
+        // ⛔ Порожній пакет — no-op (V-02, третій раунд UX-проходу). До цього
+        // `PATCH` з `rows: []` не мав жодної адреси для перевірки прав, тож
+        // `EnsureAccessAsync` не питав нічого, а запис однаково «торкався»
+        // документа (`ModifiedAt/By`) і віддавав версії ВСІХ рядків таблиці.
+        // Видимість документа вже перевірена в `LoadContextAsync`; писати тут
+        // нема чого — тож і відповідати нема чим, крім нуля.
+        if (context.Creations.Count == 0 && context.Updates.Count == 0)
+        {
+            return new PatchCellsResponse(
+                AppliedCells: 0,
+                RowVersions: new Dictionary<string, string>(StringComparer.Ordinal),
+                Validation: [],
+                RecalculationJobId: null);
+        }
+
         EnforceRowCreationRules(context);
         await EnsureNoVersionConflictsAsync(context, ct).ConfigureAwait(false);
         await EnsureAccessAsync(request, context, ct).ConfigureAwait(false);
@@ -105,6 +130,7 @@ public sealed class PatchCellsHandler(
             .ConfigureAwait(false);
         var messages = EnsureValidationPasses(context, request, changes, requiredInputMessages, headerValues);
         await EnsureRegistryReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
+        await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
         var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
@@ -159,7 +185,7 @@ public sealed class PatchCellsHandler(
     private const int ConflictAuditWindowMonths = 13;
 
     /// <summary>Походження зміни, яку зробила ЛЮДИНА.</summary>
-    private const string UserEditOrigin = "UserEdit";
+    private const string UserEditOrigin = CellChangeOrigins.UserEdit;
 
     /// <summary>Ім'я автора для зміни, яку зробила не людина.</summary>
     private const string SystemUser = "system";
@@ -175,6 +201,7 @@ public sealed class PatchCellsHandler(
     private sealed record RequestContext(
         PeriodKey PeriodKey,
         int UserId,
+        AccessProfile Profile,
         TableInstanceRef Instance,
         TemplateVersionSnapshot Snapshot,
         TableDef Table,
@@ -243,6 +270,30 @@ public sealed class PatchCellsHandler(
         //    їх не можна, це частина первинного ключа комірки.
         var instance = await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
 
+        // ⛔ Видимість документа — ПЕРШОЮ, до будь-якої відмови, що щось
+        // розповідає про таблицю (V-02). Далі по шляху відмови називають ключі
+        // наявних рядків (`ECR-ROW-0409`), версії й чужі значення
+        // (`ECR-CELL-0409`), період екземпляра — і все це раніше діставалося
+        // користувачеві із забороною на проєкт, бо права на комірки
+        // перевірялися лише ПІСЛЯ них і лише для непорожнього батчу.
+        //
+        // ⚠ Відповідь — та сама, що й на читання (`GET /documents/{id}`): 404,
+        // а не 403. Різниця між «заборонено» і «не знайдено» сама була б
+        // відомістю про те, що документ існує.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        var read = await access.CanReadDocumentAsync(profile, instance.DocumentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {instance.DocumentId} не знайдено.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = instance.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         // ⛔ Період із ТІЛА звіряється з періодом екземпляра таблиці
         // (`DIRECTIVE-14-ARCH.md`, `DAT-04`). Не звірявся ніде: розбіжність
         // доїжджала до порушення зовнішнього ключа, і назовні виходив голий
@@ -276,16 +327,25 @@ public sealed class PatchCellsHandler(
         var table = snapshot.Sheets
             .SelectMany(sh => sh.Tables)
             .FirstOrDefault(t => t.Id == instance.TableDefId)
-            // ⛔ ЄДИНА відмова цього обробника БЕЗ `messageKey`, і це рішення,
-            // а не пропуск. Сюди неможливо потрапити діями оператора: екземпляр
-            // таблиці вже розв'язаний (`ResolveTableInstanceAsync`), і те, що
-            // його `TableDefId` відсутній у знімку ВЛАСНОЇ версії шаблону, —
-            // розходження метаданих із даними, тобто зламаний інваріант. Текст
-            // тут називає два внутрішні ідентифікатори й адресований тому, хто
-            // читає журнал сервера; перекладати його на мову оператора означало
-            // б пообіцяти, що з цим можна щось зробити зі сторони інтерфейсу.
+            // ✎ 2026-09-25 (B-14, Documents+Reporting+Projects+Units+Localization
+            // зріз): ДО цього коментар тут пояснював, чому кидок лишається БЕЗ
+            // `messageKey` — «неможливо потрапити діями оператора, адресований
+            // тому, хто читає журнал сервера». Рішення мало сенс 2026-09-18,
+            // коли ключа під цей факт не існувало. Відтоді
+            // `err.ECR-TMPL-0404.table` заведений (`ColumnDefHandlers.FindTable`,
+            // 2026-09-23) і вже показується операторові в аналогічних ситуаціях
+            // («таблиці з таким Id немає в цій версії») — той самий факт,
+            // незалежно від шляху (правило 2 рецепту). Тримати цей один випадок
+            // без ключа означало б не «безпечніше», а лише непослідовно: та сама
+            // фраза локалізована в одному обробнику й ні — у сусідньому.
             ?? throw new NotFoundException(
-                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.");
+                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.table",
+                    ["tableDefId"] = instance.TableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = instance.TemplateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         // ⚠ У мапі — сам ColumnDef, а не лише Id. Значення розбирається за
         // ОГОЛОШЕНИМ типом колонки: через HTTP усе приходить JsonElement-ом, і
         // здогадка за виглядом значення клала число в текст, а ідентифікатор
@@ -319,10 +379,15 @@ public sealed class PatchCellsHandler(
         // 3. Створення і оновлення розділяються за BaseVersion (R-B2):
         //    null означає намір СТВОРИТИ рядок, а не «мені байдуже до версії».
         var creations = request.Rows.Where(r => r.BaseVersion is null).ToList();
-        var updates = request.Rows.Where(r => r.BaseVersion is not null).ToList();
+        //
+        // ⛔ Оновлення без жодної комірки — не оновлення (V-02): прав на нього
+        // перевірити нема на чому (адрес немає), а `BuildCellChangesAsync`
+        // однаково «торкнувся» б рядка й документа. Такий рядок просто не
+        // входить у батч.
+        var updates = request.Rows.Where(r => r.BaseVersion is not null && r.Cells is { Count: > 0 }).ToList();
 
         return new RequestContext(
-            periodKey, userId, instance, snapshot, table, columnDefs, columns, versions, rowIds, creations, updates);
+            periodKey, userId, profile, instance, snapshot, table, columnDefs, columns, versions, rowIds, creations, updates);
     }
 
     /// <summary>
@@ -672,7 +737,7 @@ public sealed class PatchCellsHandler(
     /// </remarks>
     private async Task EnsureAccessAsync(PatchCellsRequest request, RequestContext context, CancellationToken ct)
     {
-        var profile = await access.BuildProfileAsync(context.UserId, ct).ConfigureAwait(false);
+        var profile = context.Profile;
         var denied = new List<EditDecision>();
 
         var addresses = new List<CellAddress>();
@@ -781,8 +846,13 @@ public sealed class PatchCellsHandler(
                     // а НЕ `detail`: подробиця рішення сама буває готовим
                     // українським реченням, і підставити її означало б лише
                     // перенести двомовність усередину локалізованого тексту.
+                    //
+                    // ⛔ B-06: і в подробицях ключа `detail` теж НЕМАЄ. Він
+                    // лягав у `problem+json` другим `detail` поруч зі
+                    // стандартним, і клієнт читав саме його — українське
+                    // речення `first.Detail` замість локалізованого тексту.
+                    // Речення лишається в журналі сервера через `.Message`.
                     ["reason"] = first.Reason.ToString(),
-                    ["detail"] = first.Detail
                 });
         }
     }
@@ -825,6 +895,8 @@ public sealed class PatchCellsHandler(
         // екземплярів таблиць (`MaterializeFixedRowsAsync`).
         if (context.Creations.Count > 0)
         {
+            EnsureCreationValuesReadable(context.Creations, context.ColumnDefs);
+
             var newIds = await rowStore
                 .CreateRowsAsync(
                     request.TableInstanceId, context.PeriodKey,
@@ -1252,6 +1324,67 @@ public sealed class PatchCellsHandler(
     }
 
     /// <summary>
+    /// Комірка <c>Unit</c> не може посилатися на одиницю, якої немає в
+    /// довіднику (B-02, UX-прохід, четвертий раунд).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дзеркало <see cref="EnsureRegistryReferencesExistAsync"/>: для
+    /// <c>Lookup</c> неіснуючий запис давно дає <c>422 ECR-CELL-4223</c>, а для
+    /// <c>Unit</c> те саме значення доходило до сховища й падало на
+    /// <c>FK_CellValue_Unit</c> (<c>NormalizedCellStore</c>) — голий <c>500</c>.
+    /// Код той самий, ключ тексту — ОКРЕМИЙ: «запис довідника» про одиницю був
+    /// би неправдою, і користувач шукав би не той довідник.
+    ///
+    /// ⚠ Довідник одиниць читається лише коли в батчі Є комірка <c>Unit</c>:
+    /// звичайний батч чисел не платить за нього нічого. Сам довідник — десятки
+    /// рядків одним запитом (<see cref="IUnitCatalog"/>).
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-CELL-4223</c>.</exception>
+    private async Task EnsureUnitReferencesExistAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var unitCells = changes.Upserts
+            .Where(record => context.Snapshot.ColumnsById.TryGetValue(
+                record.Address.ColumnDefId, out var column) && column.DataType == CellDataType.Unit)
+            .Where(record => record.Value.ValueUnitId is not null)
+            .ToList();
+
+        if (unitCells.Count == 0)
+        {
+            return;
+        }
+
+        var catalog = await units.GetAsync(ct).ConfigureAwait(false);
+        var known = catalog.Units.Values.Select(u => u.Id).ToHashSet();
+
+        var byRowId = context.RowIds.ToDictionary(p => p.Value, p => p.Key);
+        var missing = unitCells
+            .Where(record => !known.Contains(record.Value.ValueUnitId!.Value))
+            .Select(record => new
+            {
+                RowKey = byRowId.GetValueOrDefault(record.Address.TableRowId),
+                ColumnCode = context.Snapshot.ColumnsById[record.Address.ColumnDefId].Code,
+                UnitId = record.Value.ValueUnitId!.Value,
+            })
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.CellRegistryEntryMissing,
+            $"Посилання на неіснуючу одиницю виміру: комірок — {missing.Count}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CELL-4223.missingUnit",
+                ["cellCount"] = missing.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["cells"] = missing,
+            });
+    }
+
+    /// <summary>
     /// Стан ПЕРЕД записом: старі значення комірок, які буде змінено. ⛔
     /// Читається ДО <c>ApplyAsync</c> — після нього старого значення вже
     /// немає ніде, а саме воно і є половиною запису аудиту.
@@ -1442,6 +1575,8 @@ public sealed class PatchCellsHandler(
         CancellationToken ct)
         => uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            await EnsureSheetStillEditableAsync(context, changes, innerCt).ConfigureAwait(false);
+
             await cellStore.ApplyAsync(
                 new CellChangeSet(
                     request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
@@ -1464,6 +1599,63 @@ public sealed class PatchCellsHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct);
+
+    /// <summary>
+    /// Перша дія транзакції запису: спільне блокування аркуша × періоду і стан
+    /// аркуша, прочитаний ПІД ним.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Що було. <see cref="EnsureAccessAsync"/> читав стан аркуша поза
+    /// транзакцією, під RCSI — тобто бачив останній ЗАФІКСОВАНИЙ стан. Подання,
+    /// що йшло паралельно, до свого коміту лишало аркуш <c>Draft</c>, правка
+    /// проходила, і в підсумку була прийнята й зажурналізована, але в зріз
+    /// подання не потрапила (<c>docs/build/UX-PASS-2026-09-23.md</c>). Те саме —
+    /// коли правка перевірила права ДО подання, а писала ПІСЛЯ його коміту.
+    ///
+    /// ⚠ Що стало. Подання тримає виняткове блокування того самого ключа від
+    /// початку до коміту (<c>SubmitSheetHandler</c>), тож тут є рівно два
+    /// варіанти: подання ще не почалося — правка пише, і подання, взявши
+    /// блокування після її коміту, її прочитає; або подання вже зафіксоване —
+    /// стан тут <c>Submitted</c>, і правку відхилено тією самою відмовою, що й
+    /// у <see cref="EnsureAccessAsync"/>. Проміжного варіанта більше немає.
+    ///
+    /// ⚠ Правки між собою НЕ серіалізуються — блокування спільне.
+    /// </remarks>
+    private async Task EnsureSheetStillEditableAsync(
+        RequestContext context, CellChangeLists changes, CancellationToken ct)
+    {
+        var status = await sheetGate
+            .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+            .ConfigureAwait(false);
+
+        var reason = status switch
+        {
+            DocumentStatus.Submitted => (EditDenyReason?)EditDenyReason.DocumentSubmitted,
+            DocumentStatus.Approved => EditDenyReason.DocumentApproved,
+            _ => null,
+        };
+
+        if (reason is null)
+        {
+            return;
+        }
+
+        var denied = changes.Upserts.Count + changes.Deletes.Count;
+
+        // ⚠ Той самий код, ключ і форма подробиць, що й у `EnsureAccessAsync`:
+        // для людини це та сама відмова, хоч би на якому кроці її спіймали.
+        throw new AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Заборонених комірок у батчі: {denied}. Причина першої: {reason}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.deniedCells",
+                ["deniedCount"] = denied.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                // ⛔ B-06: `["detail"] = null` тут давав у `problem+json`
+                // другий `detail: null`, який перекривав локалізований.
+                ["reason"] = reason.ToString(),
+            });
+    }
 
     /// <summary>Записує аудит батчу — усередині тієї ж транзакції, ДО коміту.</summary>
     private async Task WriteAuditAsync(
@@ -1588,7 +1780,7 @@ public sealed class PatchCellsHandler(
             }
 
             var rowKey = byRowId.GetValueOrDefault(record.Address.TableRowId);
-            foreach (var message in validation.ValidateCell(column, record.Value, rules, headerValues))
+            foreach (var message in validation.ValidateCell(column, record.Value, rules, headerValues, currentUser.Language))
             {
                 messages.Add(message with { RowKey = rowKey });
             }
@@ -1599,7 +1791,7 @@ public sealed class PatchCellsHandler(
         foreach (var row in request.Rows)
         {
             messages.AddRange(validation
-                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row), headerValues)
+                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row), headerValues, currentUser.Language)
                 .Select(m => m with { RowKey = row.RowKey }));
         }
 
@@ -1622,6 +1814,39 @@ public sealed class PatchCellsHandler(
 
         public object? GetCell(string rowKey, string columnCode)
             => string.Equals(rowKey, row.RowKey, StringComparison.Ordinal) ? GetCell(columnCode) : null;
+    }
+
+    /// <summary>
+    /// Читає значення нових рядків ДО того, як рядки з'являться в базі.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>rowStore.CreateRowsAsync</c> пише рядок одразу й поза транзакцією
+    /// <see cref="PersistChangesAsync"/>, а значення комірок розбирає лише
+    /// <see cref="Distribute"/> — ПІСЛЯ вставки. Тож будь-яка відмова значення
+    /// в батчі, що створює рядок (<c>abc</c> у числовій колонці, зайві знаки,
+    /// переповнення цілої частини, невідома колонка), давала клієнтові
+    /// <c>422</c>, а в <c>doc.TableRow</c> лишався порожній рядок-сирота:
+    /// повтор того самого запиту падав уже на <c>ECR-ROW-0409</c> «рядок із
+    /// таким ключем існує». Це порушує правило батчу «часткове застосування
+    /// заборонене» (<c>PatchCellsRequest</c>, B04 §2.3). Розбір тут —
+    /// той самий <see cref="ColumnOf"/> + <see cref="CellValueReader.Read"/>,
+    /// що й у <see cref="Distribute"/>, тож відмова однакова, лише раніше.
+    /// </remarks>
+    private static void EnsureCreationValuesReadable(
+        IReadOnlyList<PatchRow> creations, IReadOnlyDictionary<string, ColumnDef> columnDefs)
+    {
+        foreach (var row in creations)
+        {
+            foreach (var cell in row.Cells)
+            {
+                var column = ColumnOf(columnDefs, cell.ColumnCode);
+
+                if (!cell.IsEmpty)
+                {
+                    _ = CellValueReader.Read(cell.Value, column);
+                }
+            }
+        }
     }
 
     private static void Distribute(
@@ -1700,6 +1925,30 @@ public sealed class PatchCellsHandler(
 
         foreach (var u in upserts)
         {
+            // ⛔ `U-22`: правка, що НІЧОГО не змінила, рядка в журналі не дає.
+            // Доти запис того самого значення давав рядок зміни — і з
+            // різними `OldValue`/`NewValue`: старе приходить зі сховища в
+            // його масштабі (`931.9250000000000000`), нове — як ввів
+            // користувач (`931.925`), тож журнал показував «зміну» там, де
+            // число не змінилося. На живому стенді гірше: введене
+            // `931.9250000000000000123` сховище мовчки обрізало до старого
+            // значення, а журнал записав хвіст (це закрито в `U-23`
+            // відмовою; тут закрито «зміну без зміни» в будь-якій формі).
+            //
+            // ⚠ Порівняння — за значенням (<see cref="CellValueData"/> —
+            // record, <c>decimal ==</c> не зважає на нулі в хвості), і воно
+            // включає <c>IsEmpty</c> та <c>IsCalculated</c>: явна порожнеча
+            // замість відсутньої комірки і ручне значення поверх обчисленого —
+            // це зміни, навіть коли число те саме.
+            //
+            // ⚠ Сама комірка при цьому записується, як і доти (версія рядка,
+            // перерахунок — без змін): журнал змін фіксує ЗМІНИ ЗНАЧЕНЬ, а не
+            // факт натиску Enter.
+            if (previous.TryGetValue(u.Address, out var was) && was == u.Value)
+            {
+                continue;
+            }
+
             records.Add(new CellChangeRecord(
                 now, u.Address, DocumentId: documentId,
                 RowKey: rowKeyById.GetValueOrDefault(u.Address.TableRowId, string.Empty),

@@ -149,6 +149,52 @@ public sealed class PhysicalModelTests(SqlServerFixture sql)
         Assert.Equal("PeriodKey,TableRowId,ColumnDefId|([IsCalculated]=(0))|ps_ByPeriodKey", shape);
     }
 
+    /// <summary>
+    /// B-18 / R-05: індекси гарячих шляхів мають ключ під запит, фільтр і —
+    /// для <c>doc.*</c> — розміщення на схемі розділів.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без <c>IX_CellValue_RegistryEntry</c> «Where used» довідника на стенді
+    /// (2.06 млн комірок) ішов 7.4 с: скан усієї <c>doc.CellValue</c> і 3 млн
+    /// читань <c>dic.RegistryEntry</c>. ⚠ Розміщення перевіряється тут, бо
+    /// архівація (<c>TRUNCATE … WITH (PARTITIONS)</c>) падає на невирівняному
+    /// індексі, а 07 перебудовує такий мовчки — і на заповненій базі дорого.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [InlineData("doc.CellValue", "IX_CellValue_RegistryEntry",
+        "ValueRegistryEntryId|-|([ValueRegistryEntryId] IS NOT NULL)|ps_ByPeriodKey")]
+    [InlineData("doc.CellValue", "IX_CellValue_Unit",
+        "ValueUnitId|-|([ValueUnitId] IS NOT NULL)|ps_ByPeriodKey")]
+    [InlineData("doc.TableRow", "IX_TableRow_Live",
+        "PeriodKey,TableInstanceId|RowKey|([IsDeleted]=(0))|ps_ByPeriodKey")]
+    [InlineData("cfg.ColumnDef", "IX_ColumnDef_LookupRegistryDefId", "LookupRegistryDefId|-|-|PRIMARY")]
+    [InlineData("cfg.ColumnDef", "IX_ColumnDef_UnitId", "UnitId|-|-|PRIMARY")]
+    public async Task Індекси_гарячих_шляхів_B18_мають_ключ_фільтр_і_розміщення(
+        string table, string index, string expected)
+    {
+        var shape = await ScalarAsync<string>($"""
+            SELECT STUFF((SELECT N',' + c.name
+                          FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+                            AND ic.is_included_column = 0 AND ic.key_ordinal > 0
+                          ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 1, N'')
+                   + N'|' + ISNULL(STUFF((SELECT N',' + c.name
+                          FROM sys.index_columns ic
+                          JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                          WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id AND ic.is_included_column = 1
+                          ORDER BY c.name FOR XML PATH('')), 1, 1, N''), N'-')
+                   + N'|' + ISNULL(i.filter_definition, N'-') + N'|' + ds.name
+            FROM sys.indexes i
+            JOIN sys.data_spaces ds ON ds.data_space_id = i.data_space_id
+            WHERE i.object_id = OBJECT_ID(N'{table}') AND i.name = N'{index}'
+            """);
+
+        Assert.Equal(expected, shape);
+    }
+
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]

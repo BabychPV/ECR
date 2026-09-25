@@ -2956,8 +2956,7 @@ export interface paths {
          *     неправдою, що й «0 зауважень» у неперевіреного документа
          *     (`A7-28`): у клієнта має лишитися змога показати «—», а не
          *     зелений нуль. Сусідній `GET …/validation` тримає той самий поділ
-         *     кодом `404` (`err.ECR-DOC-0404.notValidated`); тут
-         *     `404` не годиться — заповненість відома й до першої перевірки.
+         *     полем `validated: false` (`X-32`).
          */
         get: {
             parameters: {
@@ -3062,9 +3061,17 @@ export interface paths {
          *     сторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ
          *     перевірку заново.
          *
-         *     ⚠ `404`, а не порожній перелік, коли перевірку ще не запускали:
-         *     «зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
-         *     першу замість другої означає повідомити неправду про готовність.
+         *     ⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
+         *     першу замість другої означає повідомити неправду про готовність. Тому
+         *     неперевірений документ віддає `validated: false`, а не порожній
+         *     перелік сам по собі.
+         *
+         *     ✎ `X-32`: доти це розрізнення несла відповідь `404`. Але «ще не
+         *     перевіряли» — звичайний стан кожного нового документа, а не помилка:
+         *     КОЖНЕ відкриття такого документа давало червоний рядок у консолі
+         *     браузера («Failed to load resource: 404») і невдалий запит у мережі —
+         *     шум, за яким справжні відмови перестають помічати. Тепер це `200`
+         *     з тим самим змістом, названим полем.
          */
         get: {
             parameters: {
@@ -3090,17 +3097,6 @@ export interface paths {
                         "application/json": components["schemas"]["ValidationResultResponse"];
                         "text/json": components["schemas"]["ValidationResultResponse"];
                         "text/plain": components["schemas"]["ValidationResultResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
-                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -4534,6 +4530,17 @@ export interface paths {
                         "text/plain": components["schemas"]["CalculationBindingDto"][];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         put?: never;
@@ -4632,6 +4639,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/methodologies/{id}/publications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Публікації версій методології, найновіші першими. Право `Calculation.View`. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Методологія. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MethodologyPublicationEntry"][];
+                        "text/json": components["schemas"]["MethodologyPublicationEntry"][];
+                        "text/plain": components["schemas"]["MethodologyPublicationEntry"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/methodologies/{id}/simulate": {
         parameters: {
             query?: never;
@@ -4674,6 +4722,17 @@ export interface paths {
                         "application/json": components["schemas"]["SimulationResultDto"];
                         "text/json": components["schemas"]["SimulationResultDto"];
                         "text/plain": components["schemas"]["SimulationResultDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -4897,6 +4956,17 @@ export interface paths {
                         "application/json": components["schemas"]["MethodologyConstantDto"][];
                         "text/json": components["schemas"]["MethodologyConstantDto"][];
                         "text/plain": components["schemas"]["MethodologyConstantDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -5202,6 +5272,17 @@ export interface paths {
                         "text/plain": components["schemas"]["MethodologyFormulaDto"][];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         put?: never;
@@ -5468,6 +5549,17 @@ export interface paths {
                         "text/plain": components["schemas"]["MethodologyOutputDto"][];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         put?: never;
@@ -5618,6 +5710,17 @@ export interface paths {
                         "text/plain": components["schemas"]["MethodologyPublicationDiff"];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
                 /** @description Conflict */
                 409: {
                     headers: {
@@ -5679,6 +5782,17 @@ export interface paths {
                         "application/json": components["schemas"]["MethodologyRequiredInputDto"][];
                         "text/json": components["schemas"]["MethodologyRequiredInputDto"][];
                         "text/plain": components["schemas"]["MethodologyRequiredInputDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -5883,6 +5997,17 @@ export interface paths {
                         "text/plain": components["schemas"]["MethodologyRuleDto"][];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         put?: never;
@@ -6020,6 +6145,17 @@ export interface paths {
                         "application/json": components["schemas"]["MethodologyTestCaseDto"][];
                         "text/json": components["schemas"]["MethodologyTestCaseDto"][];
                         "text/plain": components["schemas"]["MethodologyTestCaseDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -7325,6 +7461,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/document-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Версія шаблону проєкту й аркуші для нового документа. Право
+         *     `Document.Create` і грант `Write` на проєкт (V-12).
+         * @description ⚠ Не потребує `Template.View`: це не перегляд шаблону, а рівно те,
+         *     без чого не створити документ, — версію визначає проєкт.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentTemplateDto"];
+                        "text/json": components["schemas"]["DocumentTemplateDto"];
+                        "text/plain": components["schemas"]["DocumentTemplateDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{id}/periods": {
         parameters: {
             query?: never;
@@ -8260,7 +8463,50 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Один запис довідника цілком: назва всіма мовами й значення полів.
+         *     Право `Registry.View`.
+         * @description ⛔ X-03/R-04: форма правки запису відкривається з цієї відповіді, а не з
+         *     рядка переліку, де назва лише однією мовою, а значень полів немає.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                    /** @description Запис. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryEntryDetailDto"];
+                        "text/json": components["schemas"]["RegistryEntryDetailDto"];
+                        "text/plain": components["schemas"]["RegistryEntryDetailDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         put?: never;
         post?: never;
         /**
@@ -9347,6 +9593,17 @@ export interface paths {
                         "text/plain": components["schemas"]["ResourceGrantDto"][];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         /**
@@ -9695,7 +9952,7 @@ export interface paths {
         delete: {
             parameters: {
                 query?: {
-                    /** @description Сеанс. */
+                    /** @description Сеанс; не задано — сеанс цього входу. */
                     sessionId?: number;
                 };
                 header?: never;
@@ -11172,6 +11429,17 @@ export interface paths {
                         "text/plain": components["schemas"]["StyleDefDto"][];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         put?: never;
@@ -11434,7 +11702,54 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Повний склад однієї колонки — те, що приймає й повертає `PUT` нижче.
+         *     Право `Template.View`.
+         * @description ⛔ X-02: форма правки колонки відкривається з цієї відповіді, а не з
+         *     бідного опису колонки в `GET …/structure`. Інакше `PUT` (заміна
+         *     цілком) стирав точність, одиницю, довідник, значення за замовчуванням і
+         *     стиль колонки при кожному повторному збереженні.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                    /** @description Таблиця, якій належить колонка. */
+                    tableId: number;
+                    /** @description Код колонки. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ColumnDefDto"];
+                        "text/json": components["schemas"]["ColumnDefDto"];
+                        "text/plain": components["schemas"]["ColumnDefDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         /**
          * Записує колонку таблиці чернетки. Право `Template.Edit`.
          * @description ⛔ Другий вертикальний зріз авторства структури шаблону через API
@@ -11705,6 +12020,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Правила валідації таблиці. Право `Template.View`.
+         * @description ⛔ X-15: без цього переліку діалог видаляв правило введеним з пам'яті
+         *     кодом, якого екран ніде не показував.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Версія шаблону. */
+                    id: number;
+                    /** @description Таблиця. */
+                    tableId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ValidationRuleDto"][];
+                        "text/json": components["schemas"]["ValidationRuleDto"][];
+                        "text/plain": components["schemas"]["ValidationRuleDto"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}": {
         parameters: {
             query?: never;
@@ -11910,6 +12283,59 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Версії ДЕКІЛЬКОХ шаблонів ОДНИМ зверненням — не по одному на шаблон.
+         *     Право `Template.View`.
+         * @description ⛔ BR-07: перелік шаблонів (`/admin/templates`) читав версії ОКРЕМИМ
+         *     запитом на КОЖЕН рядок (N+1 на клієнті) — підтверджений 2026-09-25
+         *     пробіл продуктивності. Тут — один запит на весь видимий перелік.
+         *
+         *     ⚠ Повторювані `ids=`, а не через кому — той самий патерн, що вже
+         *     в `GET /api/v1/methodologies?ids=` (`RD-06`, стандартний біндинг
+         *     ASP.NET для масиву в query-рядку). Маршрут — літерал `versions`,
+         *     а не `{id:int}`, тож неоднозначності з Task&lt;IActionResult&gt; TemplatesController.ListVersions(int id, int limit, string? cursor, CancellationToken ct)
+         *     поруч немає.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Шаблони, чиї версії цікавлять. */
+                    ids?: number[];
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TemplateVersionsForTemplate"][];
+                        "text/json": components["schemas"]["TemplateVersionsForTemplate"][];
+                        "text/plain": components["schemas"]["TemplateVersionsForTemplate"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -12246,6 +12672,17 @@ export interface paths {
                         "application/json": components["schemas"]["PagedResultOfTemplateVersionSummary"];
                         "text/json": components["schemas"]["PagedResultOfTemplateVersionSummary"];
                         "text/plain": components["schemas"]["PagedResultOfTemplateVersionSummary"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -13383,6 +13820,17 @@ export interface paths {
                         "text/plain": string[];
                     };
                 };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         /**
@@ -13854,6 +14302,8 @@ export interface components {
         };
         /** @description Прив'язка виходу методології до колонки документа (`D-69`). */
         CalculationBindingDto: {
+            /** @description Код колонки-приймача (F-21); як і код таблиці — лише в переліку. */
+            columnCode?: null | string;
             /**
              * Format: int32
              * @description Колонка-приймач.
@@ -13892,6 +14342,26 @@ export interface components {
         CalculationLevel: "Configuration" | "Module";
         /** @description Число, яке дав актуальний прогін розрахунку на документі. */
         CalculationResultDto: {
+            /**
+             * Format: date-time
+             * @description Коли завершився прогін (UTC).
+             */
+            calculatedAt?: null | string;
+            /**
+             * Format: date-time
+             * @description Остання зміна входів після прогону (UTC); `null` — не змінювались.
+             */
+            inputsChangedAt?: null | string;
+            /**
+             * @description Входи документа змінилися після прогону, що дав це число (F-05): число
+             *     вже не відповідає даним, потрібен перерахунок.
+             * @default false
+             */
+            isStale: boolean;
+            /** @description Код методології — підпис числа (F-21). */
+            methodologyCode?: null | string;
+            /** @description Номер версії методології («1.2.0»), а не її ідентифікатор (F-21). */
+            methodologyVersion?: null | string;
             /**
              * Format: int32
              * @description Версія, що дала число.
@@ -14084,21 +14554,36 @@ export interface components {
              * @description Момент зміни в UTC.
              */
             changedAt: string;
+            /** @description Ім'я автора (`sec.User.DisplayName`); `null` — запису користувача
+             *     вже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено
+             *     (R-A2, D-86). Журнал показував «By user 3» — число, з яким аудитор нічого
+             *     не зробить. */
+            changedByDisplayName?: null | string;
             /**
              * Format: int32
              * @description Автор — <b>UserId</b>, не SID (R-A2, D-86).
              */
             changedByUserId: number;
+            /** @description Код колонки; `null` — колонки вже немає. */
+            columnCode?: null | string;
+            /** @description Тип колонки (`Decimal`, `Date`…) — щоб клієнт показав значення
+             *     за правилом показу (U-05/U-24), а не у форматі сховища
+             *     (`53.1771000000000000`). */
+            columnDataType?: null | string;
             /**
              * Format: int32
              * @description Колонка.
              */
             columnDefId: number;
+            columnHeaderL10n?: null | components["schemas"]["LocalizedText"];
+            /** @description Бізнес-ключ документа; `null` — документа вже немає. */
+            documentBusinessKey?: null | string;
             /**
              * Format: int64
              * @description Документ.
              */
             documentId: number;
+            documentNameL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Зміна в `Grace` або після `Reopen` (D-70). */
             isLateEdit: boolean;
             /** @description Нове значення. */
@@ -14545,9 +15030,12 @@ export interface components {
             sheetDefIds: number[];
             /**
              * Format: int32
-             * @description Опублікована версія шаблону.
+             * @description Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;
+             *     поле, якщо задане, мусить із нею збігатися (інакше `422`
+             *     `err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:
+             *     склад аркушів для діалогу дає `GET /projects/{id}/document-template`.
              */
-            templateVersionId: number;
+            templateVersionId?: null | number;
         };
         /** @description Запит на створення мапінгу. */
         CreateEntityFieldMapRequest: {
@@ -14833,6 +15321,13 @@ export interface components {
              * @description Кого симулюють; `null` — не симуляція.
              */
             simulatedForUserId: null | number;
+            /** @description Ім'я того, кого симулюють, — для банера «Viewing as …» (V-06). */
+            simulatedForUserName?: null | string;
+            /**
+             * Format: int64
+             * @description Сеанс симуляції цього входу — щоб завершити його з будь-якої вкладки.
+             */
+            simulationSessionId?: null | number;
             /**
              * Format: int32
              * @description Ідентифікатор.
@@ -15006,6 +15501,15 @@ export interface components {
              */
             periodKey: number;
         };
+        /** @description Аркуш складу документа в переліку: код, назва, стан за період. */
+        DocumentSheetState: {
+            /** @description Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`. */
+            code: string;
+            /** @description Назва аркуша мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Стан робочого процесу; аркуш без рядка стану — `Draft`. */
+            state: string;
+        };
         /** @description Документ у переліку. */
         DocumentSummary: {
             /** @description Бізнес-ключ, унікальний у межах проєкту. */
@@ -15056,6 +15560,13 @@ export interface components {
             sheetStates: {
                 [key: string]: string;
             };
+            /** @description Аркуші складу з назвою і станом — ті самі рядки, що в
+             *     SheetStates, але В ПОРЯДКУ аркушів (`SheetDef.Ordinal`)
+             *     і з людською назвою. Потрібне переліку: без назви в колонці «State» стояв
+             *     внутрішній код аркуша (`S99819007`). ⚠ Адитивне поле: словник
+             *     SheetStates лишається як був. `null` — шлях читання
+             *     його не несе (сховище заповнює завжди; як і стан — порожньо без періоду). */
+            sheets?: null | components["schemas"]["DocumentSheetState"][];
             /**
              * Format: int32
              * @description Попередження звідти ж; `null` — за тим самим правилом.
@@ -15105,6 +15616,38 @@ export interface components {
              */
             tableOrdinal: number;
         };
+        /** @description З чого складається новий документ проєкту. */
+        DocumentTemplateDto: {
+            /** @description Правила складу (`SheetGroupRule`) — для попередження ДО збереження. */
+            groupRules: components["schemas"]["SheetGroupRuleDto"][];
+            /** @description Аркуші версії в порядку `Ordinal`. */
+            sheets: components["schemas"]["DocumentTemplateSheetDto"][];
+            /** @description Код шаблону. */
+            templateCode: string;
+            /**
+             * Format: int32
+             * @description Версія шаблону проєкту — те, що йде в `templateVersionId`.
+             */
+            templateVersionId: number;
+            /** @description Позначення версії. */
+            version: string;
+        };
+        /** @description Аркуш, який можна включити в новий документ. */
+        DocumentTemplateSheetDto: {
+            /** @description Код аркуша. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.
+             */
+            id: number;
+            /** @description Чи обов'язковий аркуш. */
+            isMandatory: boolean;
+            /** @description Назва всіма мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+            /** @description Група для правил складу; `null` — поза групами. */
+            sheetGroup: null | string;
+        };
         /** @description Версія документа — зріз подання аркуша (ФВ-5.22). */
         DocumentVersionDto: {
             /** Format: int32 */
@@ -15121,7 +15664,7 @@ export interface components {
          * @description Причина відмови в доступі. Повертається замість `bool` (ФВ-6.8).
          * @enum {unknown}
          */
-        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow";
+        EditDenyReason: "None" | "NoGrant" | "PeriodNotOpenYet" | "PeriodClosed" | "OutOfAccessWindow" | "DocumentSubmitted" | "DocumentApproved" | "ColumnReadOnly" | "RowReadOnly" | "CalculatedCell" | "ProjectArchived" | "ArchivingInProgress" | "BusinessRule" | "SimulationReadOnly" | "OutsidePermitWindow" | "InsufficientGrantLevel";
         /** @description Мапінг у відповіді на створення. */
         EntityFieldMapDto: {
             aggregation: null | components["schemas"]["AggregationKind"];
@@ -15434,10 +15977,20 @@ export interface components {
         };
         /** @description Зміна, яку принесе імпорт. */
         ImportChange: {
+            /** @description Колонка. */
             columnCode: string;
+            /** @description Значення з файлу; `null` — порожньо. */
             newValue: unknown;
+            /** @description Поточне значення; `null` — порожньо. */
             oldValue: unknown;
+            /** @description Рядок. */
             rowKey: string;
+            /** @description Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок
+             *     ОДНАКОВІ (`R1`/`C1`), тож без таблиці рядок переліку не каже,
+             *     ДЕ саме зміниться число. `null` лише в плані, збереженому до цієї
+             *     правки. */
+            tableCode?: null | string;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /** @description Результат попереднього перегляду імпорту. */
         ImportPreview: {
@@ -15452,10 +16005,26 @@ export interface components {
         };
         /** @description Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4). */
         ImportRejection: {
+            /** @description Колонка; для відмови цілої таблиці — її код. */
             columnCode: string;
+            /** @description Адреса комірки книги (`B3`) для значення, у якого немає рядка системи
+             *     (`V-10`: поза рядками таблиці); інакше `null`. */
+            excelCell?: null | string;
+            /** @description Діагностичний текст для журналу — НЕ для показу людині. */
             message: string;
+            /** @description Ключ тексту причини в каталозі (D-95). ⛔ `V-10`: інтерфейс показує текст
+             *     за цим ключем мовою користувача, а не string ImportRejection.Message — доти відмови
+             *     приходили готовими українськими реченнями («Правило доступу: лише читання.»).
+             *     Для відмови правами — `deny.&lt;EditDenyReason&gt;`, ті самі тексти, що
+             *     в підказці сірої комірки сітки. */
+            messageKey?: null | string;
+            /** @description Код причини (`ECR-…`). */
             reasonCode: string;
+            /** @description Рядок; `—` — причина не про рядок. */
             rowKey: string;
+            /** @description Таблиця відмови (`V-10`, як і в ImportChange). */
+            tableCode?: null | string;
+            tableNameL10n?: null | components["schemas"]["LocalizedText"];
         };
         /** @description Тіла відповідей, спільні для кількох контролерів. */
         JobAcceptedResponse: {
@@ -15953,9 +16522,42 @@ export interface components {
              *     показане (№05 §7): оголошений і невжитий аргумент. */
             warnings?: null | string[];
         };
+        /** @description Одна публікація версії методології з журналу `aud.PublicationEvent` (F-16). */
+        MethodologyPublicationEntry: {
+            /** @description Причина зміни (ФВ-14.7). */
+            changeReason: null | string;
+            /**
+             * Format: date-time
+             * @description Коли опубліковано (UTC).
+             */
+            changedAt: string;
+            /** @description Ім'я того, хто опублікував; `null` — облікового запису вже немає. */
+            changedByName: null | string;
+            /**
+             * Format: int32
+             * @description Хто опублікував.
+             */
+            changedByUserId: number;
+            /**
+             * Format: int64
+             * @description Запис журналу.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Опублікована версія.
+             */
+            methodologyVersionId: number;
+            /** @description Diff результатів на золотому наборі (ФВ-9.6), як записано. */
+            resultDiffJson: null | string;
+            /** @description Номер версії. */
+            version: string;
+        };
         /** @description Обов'язкова вхідна колонка методології — gate перед збереженням клітинки
          *     (директива «обов'язкові вхідні колонки методології»). */
         MethodologyRequiredInputDto: {
+            /** @description Код колонки — підпис замість голого `ColumnDefId` (F-21); лише в переліку. */
+            columnCode?: null | string;
             /**
              * Format: int32
              * @description Колонка документа, обов'язкова як вхід.
@@ -16955,6 +17557,39 @@ export interface components {
              * @description Версія опису; росте від зміни складу полів і правил.
              */
             definitionVersion: number;
+        };
+        /** @description Один запис довідника цілком — для форми правки (X-03, R-04). */
+        RegistryEntryDetailDto: {
+            /** @description Стабільний код. */
+            code: string;
+            /** @description Назва ВСІМА мовами каталогу. ⛔ Саме цього бракувало формі: перелік несе
+             *     назву однією мовою, і збереження з нього стирало переклади. */
+            displayL10n: components["schemas"]["LocalizedText"];
+            /**
+             * Format: int64
+             * @description Ідентифікатор.
+             */
+            id: number;
+            /**
+             * Format: int64
+             * @description Батьківський запис; `null` — корінь.
+             */
+            parentEntryId: null | number;
+            /**
+             * Format: date
+             * @description Початок вікна чинності.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Кінець вікна чинності.
+             */
+            validTo: null | string;
+            /** @description Значення полів: код поля → текст в інваріантному форматі, який приймає
+             *     `POST …/entries`; `null` — поле не заповнене. */
+            values: {
+                [key: string]: string;
+            };
         };
         /** @description Запис довідника для UI і резолвінгу. У комірці зберігається
          *     long RegistryEntryDto.Id, а не string RegistryEntryDto.Display (`ФВ-8.8`) — саме тому
@@ -18475,6 +19110,8 @@ export interface components {
              * @description Момент зміни в UTC.
              */
             changedAt: string;
+            /** @description Ім'я автора (`R-18`); `null` — запису користувача вже немає. */
+            changedByDisplayName?: null | string;
             /**
              * Format: int32
              * @description Автор — <b>UserId</b>, не SID (R-A2, D-86).
@@ -18802,11 +19439,22 @@ export interface components {
         TemplateDiffDto: {
             /**
              * Format: int32
-             * @description Скільки документів прив'язано до вихідної версії.
+             * @description Скільки документів прив'язано до вихідної (старшої) версії.
              */
             affectedDocumentCount: number;
             /** @description Зміни з класифікацією за ризиком (`ФВ-7.3`). */
             changes: components["schemas"]["TemplateChangeDto"][];
+            /**
+             * Format: int32
+             * @description Вихідна версія — СТАРША з двох, незалежно від того, з якої відкрили
+             *     порівняння (R-08).
+             */
+            fromVersionId: number;
+            /**
+             * Format: int32
+             * @description Цільова версія — новіша з двох.
+             */
+            toVersionId: number;
         };
         /** @description Створений шаблон. */
         TemplateIdResponse: {
@@ -18912,6 +19560,16 @@ export interface components {
             status: components["schemas"]["TemplateVersionStatus"];
             /** @description Номер версії. */
             version: string;
+        };
+        /** @description Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`). */
+        TemplateVersionsForTemplate: {
+            /**
+             * Format: int32
+             * @description Шаблон, якому належать версії.
+             */
+            templateId: number;
+            /** @description Версії шаблону, у тому самому порядку, що й Task&lt;PagedResult&lt;TemplateVersionSummary&gt;&gt; ListTemplateVersionsHandler.HandleAsync(int templateId, CursorRequest page, CancellationToken ct). */
+            versions: components["schemas"]["TemplateVersionSummary"][];
         };
         /** @description Одна розбіжність: очікували одне, отримали інше. */
         TestCaseMismatch: {
@@ -19401,6 +20059,10 @@ export interface components {
              * @description Період, за який виконано перевірку.
              */
             periodKey: number;
+            /** @description Чи документ за цей період узагалі перевіряли. `false` — перевірку ще не
+             *     запускали, і порожній `Messages` тоді НЕ означає «зауважень немає»
+             *     (`X-32`, `A7-28`). */
+            validated: boolean;
         };
         /** @description Правило валідації для відповіді API. */
         ValidationRuleDto: {

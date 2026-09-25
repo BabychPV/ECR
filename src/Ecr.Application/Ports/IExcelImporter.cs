@@ -39,7 +39,49 @@ public sealed record ImportPreview(
     IReadOnlyList<CellConflictDto> Conflicts);
 
 /// <summary>Зміна, яку принесе імпорт.</summary>
-public sealed record ImportChange(string RowKey, string ColumnCode, object? OldValue, object? NewValue);
+/// <param name="RowKey">Рядок.</param>
+/// <param name="ColumnCode">Колонка.</param>
+/// <param name="OldValue">Поточне значення; <c>null</c> — порожньо.</param>
+/// <param name="NewValue">Значення з файлу; <c>null</c> — порожньо.</param>
+/// <param name="TableCode">
+/// Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок
+/// ОДНАКОВІ (<c>R1</c>/<c>C1</c>), тож без таблиці рядок переліку не каже,
+/// ДЕ саме зміниться число. <c>null</c> лише в плані, збереженому до цієї
+/// правки.
+/// </param>
+/// <param name="TableNameL10n">Назва таблиці мовами каталогу — для показу.</param>
+public sealed record ImportChange(
+    string RowKey,
+    string ColumnCode,
+    object? OldValue,
+    object? NewValue,
+    string? TableCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null);
 
 /// <summary>Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4).</summary>
-public sealed record ImportRejection(string RowKey, string ColumnCode, string ReasonCode, string Message);
+/// <param name="RowKey">Рядок; <c>—</c> — причина не про рядок.</param>
+/// <param name="ColumnCode">Колонка; для відмови цілої таблиці — її код.</param>
+/// <param name="ReasonCode">Код причини (<c>ECR-…</c>).</param>
+/// <param name="Message">Діагностичний текст для журналу — НЕ для показу людині.</param>
+/// <param name="TableCode">Таблиця відмови (`V-10`, як і в <see cref="ImportChange"/>).</param>
+/// <param name="TableNameL10n">Назва таблиці мовами каталогу — для показу.</param>
+/// <param name="MessageKey">
+/// Ключ тексту причини в каталозі (D-95). ⛔ `V-10`: інтерфейс показує текст
+/// за цим ключем мовою користувача, а не <see cref="Message"/> — доти відмови
+/// приходили готовими українськими реченнями («Правило доступу: лише читання.»).
+/// Для відмови правами — <c>deny.&lt;EditDenyReason&gt;</c>, ті самі тексти, що
+/// в підказці сірої комірки сітки.
+/// </param>
+/// <param name="ExcelCell">
+/// Адреса комірки книги (<c>B3</c>) для значення, у якого немає рядка системи
+/// (`V-10`: поза рядками таблиці); інакше <c>null</c>.
+/// </param>
+public sealed record ImportRejection(
+    string RowKey,
+    string ColumnCode,
+    string ReasonCode,
+    string Message,
+    string? TableCode = null,
+    Ecr.Domain.ValueObjects.LocalizedText? TableNameL10n = null,
+    string? MessageKey = null,
+    string? ExcelCell = null);

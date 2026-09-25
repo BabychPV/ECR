@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Application.Reporting;
 using Ecr.Domain.Entities.Calculations;
+using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Reporting;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -223,6 +224,105 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
     }
 
     private const string RuledColumnsJson = """[{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"}]""";
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "CalcRunDocumentScope")]
+    public async Task Зріз_не_дублює_документ_із_власним_прогоном_і_не_губить_сусідній()
+    {
+        // ⛔ Третя хвиля UX-PASS R4, «CalculationRun ховає результати сусідніх
+        // документів»: документний прогін (`CalculationRun.DocumentId`
+        // заданий) і проєктний прогін (`DocumentId == null`) можуть бути
+        // `Current` ОДНОЧАСНО (`SwitchCurrentRunAsync` документного прогону
+        // не знімає актуальність із проєктного — той рахує й ІНШІ документи).
+        // Без переваги в `AggregateAsync` документ A потрапив би в зріз
+        // ДВІЧІ (старе значення проєктного прогону + нове документного), а
+        // документ B, чий прогін лишився лише проєктним, — рівно так, як і
+        // мусить: цю комбінацію тест і перевіряє.
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        await using var db = chain.CreateContext();
+
+        var documentA = await chain.BuildAsync();
+        var periodKey = documentA.PeriodKey.Value;
+
+        var documentB = new Document(documentA.ProjectId, $"DOC-B-{Guid.NewGuid():N}"[..20], 1, Now);
+        db.Documents.Add(documentB);
+        await db.SaveChangesAsync();
+
+        var methodology = new Methodology(
+            EcrCode.Create($"MRPT{Guid.NewGuid().ToString("N")[..10]}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "m" }));
+        db.Methodologies.Add(methodology);
+        await db.SaveChangesAsync();
+
+        var methodologyVersion = new MethodologyVersion(
+            methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, Now);
+        db.MethodologyVersions.Add(methodologyVersion);
+        await db.SaveChangesAsync();
+
+        var unit = await db.Units.AsNoTracking().OrderBy(u => u.Id).FirstAsync();
+        var store = new CalculationResultStore(db, new TestClock(Now));
+
+        // Проєктний прогін — старіший, рахує ОБИДВА документи.
+        var runProject = new CalculationRun(documentA.ProjectId, periodKey, triggeredByUserId: null, Now);
+        db.CalculationRuns.Add(runProject);
+        await db.SaveChangesAsync();
+        await InsertResultAsync(
+            db, runProject.Id, methodologyVersion.Id, periodKey, documentA.DocumentId, unit.Id, "E_OLD", 10m);
+        await InsertResultAsync(
+            db, runProject.Id, methodologyVersion.Id, periodKey, documentB.Id, unit.Id, "E_B", 20m);
+        await store.SwitchCurrentRunAsync(runProject.Id, "{}", CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        // Документ A перераховується ОКРЕМО — свій документний прогін.
+        var runDocA = new CalculationRun(
+            documentA.ProjectId, periodKey, triggeredByUserId: null, Now, documentId: documentA.DocumentId);
+        db.CalculationRuns.Add(runDocA);
+        await db.SaveChangesAsync();
+        await InsertResultAsync(
+            db, runDocA.Id, methodologyVersion.Id, periodKey, documentA.DocumentId, unit.Id, "E_NEW", 999m);
+        await store.SwitchCurrentRunAsync(runDocA.Id, "{}", CancellationToken.None);
+        await db.SaveChangesAsync();
+
+        var version = await PublishedAsync(
+            db, """[{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"}]""");
+
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var snapshotId = await builder.BuildAsync(
+            version.Id, documentA.ProjectId, documentA.PeriodKey, null, CancellationToken.None);
+
+        var rows = await db.ReportRows.AsNoTracking()
+            .Where(r => r.SnapshotId == snapshotId && r.ColumnCode == "OutputCode")
+            .OrderBy(r => r.RowNo)
+            .Select(r => r.ValueString)
+            .ToListAsync();
+
+        // Рівно ДВА рядки: документ A — лише свіже значення власного прогону
+        // (не старе з проєктного, і не обидва разом), документ B — значення
+        // проєктного, як і мало лишитися.
+        Assert.Equal(["E_NEW", "E_B"], rows);
+    }
+
+    /// <summary>
+    /// Вставляє один рядок <c>calc.CalculationResult</c> сирим SQL: `Id`
+    /// береться з послідовності ДО вставки, EF його сам не видає (як у
+    /// <c>CalculationResultStore</c>).
+    /// </summary>
+    private static async Task InsertResultAsync(
+        EcrDbContext db, long runId, int methodologyVersionId, int periodKey, long documentId,
+        int unitId, string outputCode, decimal value)
+    {
+        var text = value.ToString(CultureInfo.InvariantCulture);
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO calc.CalculationResult
+                (Id, CalculationRunId, MethodologyVersionId, PeriodKey, DocumentId, SourceRowKey, OutputCode, Value, UnitId)
+            VALUES (NEXT VALUE FOR calc.CalculationResultSeq, {runId}, {methodologyVersionId},
+                    {periodKey}, {documentId}, N'row-1', {outputCode},
+                    CAST({text} AS decimal(34,16)), {unitId})
+            """);
+    }
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]

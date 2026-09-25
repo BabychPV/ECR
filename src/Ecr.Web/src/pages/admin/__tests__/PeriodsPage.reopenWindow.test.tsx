@@ -91,7 +91,9 @@ const calendar = {
 };
 
 /** Тіла запитів на перевідкриття — саме те, заради чого цей файл існує. */
-function respond(): { bodies: Record<string, unknown>[] } {
+function respond(
+  grants: Record<string, string> = { 'Project:7': 'Manage' },
+): { bodies: Record<string, unknown>[] } {
   const state = { bodies: [] as Record<string, unknown>[] };
 
   vi.stubGlobal(
@@ -103,7 +105,7 @@ function respond(): { bodies: Record<string, unknown>[] } {
         return new Response(
           JSON.stringify({
             denies: [],
-            grants: {},
+            grants,
             isSimulation: false,
             language: 'en',
             mustChangePassword: false,
@@ -310,6 +312,23 @@ describe('PeriodsPage: строк перевідкриття періоду', ()
       await waitFor(() => expect(confirm.disabled).toBe(false), { timeout: Ceiling });
 
       expect(within(dialog).queryByText('⟦periods.reopenUntilPast⟧')).toBeNull();
+    },
+    TestTimeout,
+  );
+
+  it(
+    'Д: право Period.Reopen без гранта Manage на проєкт — кнопки немає',
+    async () => {
+      // ⛔ Сервер відмовляє 403 без гранта Manage (`ReopenPeriodHandler`).
+      // Грант Write навмисно: межа саме Manage, а не «хоч якийсь грант».
+      respond({ 'Project:7': 'Write' });
+      show();
+
+      // Рядок закритого періоду вже намальовано — інакше «кнопки немає»
+      // означало б лише «сторінка ще не завантажилася».
+      await screen.findByText('202601', {}, { timeout: Ceiling });
+
+      expect(screen.queryByRole('button', { name: /⟦periods\.reopen⟧/ })).toBeNull();
     },
     TestTimeout,
   );

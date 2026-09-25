@@ -2,9 +2,11 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Ecr.Api.Errors;
 using Ecr.Application.Common;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
@@ -111,6 +113,159 @@ public sealed partial class MainPathLocalizedErrorTests
         Assert.Equal($"Only a closed period can be reopened; the period is {period.State}.", detail);
     }
 
+    /// <summary>
+    /// `U-01`: хибний пароль пояснює себе реченням, а не самим кодом.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Предмет — не «механізм `messageKey` працює» (це доводить
+    /// <c>GenericMessageKeyLocalizationTests</c>), а те, що ключ несе САМ
+    /// <see cref="LoginHandler"/>. Без ключа <c>ErrorAlert.tsx</c> (рішення
+    /// 2026-09-20) не друкує подробицю ВЗАГАЛІ, і користувач бачить самі лише
+    /// «Sign in to continue.» плюс код: екран не каже, що сталося.
+    ///
+    /// ⚠ Прогін іде крізь справжній конвеєр і справжній <c>09-seed.sql</c>,
+    /// тому тест червоніє і від знятого ключа в коді, і від прибраного рядка
+    /// каталогу, і від кирилиці, що просочилася назад у <c>detail</c>.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Хибний_пароль_називає_причину_а_не_лише_код()
+    {
+        var user = new User("ux-admin", "UX Admin", AuthProvider.Local);
+        user.SetPassword("hash-of-the-real-password");
+
+        var users = Substitute.For<IUserStore>();
+        users.FindByUserNameAsync("ux-admin", Arg.Any<CancellationToken>()).Returns(user);
+        users.GetPolicyAsync(Arg.Any<User>(), Arg.Any<CancellationToken>())
+             .Returns(new PasswordPolicy("Default", minLength: 12, maxFailedAttempts: 5));
+
+        var hasher = Substitute.For<IPasswordHasher>();
+        hasher.Verify(Arg.Any<string>(), Arg.Any<string>()).Returns(false);
+
+        var clock = Substitute.For<IClock>();
+        clock.UtcNow.Returns(Now);
+
+        var handler = new LoginHandler(
+            users, hasher, Substitute.For<IUnitOfWork>(), clock,
+            NullLogger<LoginHandler>.Instance);
+
+        var detail = await DetailAsync(
+            () => handler.HandleAsync("ux-admin", "wrong-password", "127.0.0.1", CancellationToken.None));
+
+        Assert.Equal("The user name or password is incorrect.", detail);
+    }
+
+    /// <summary>
+    /// `U-02`: відмова типу комірки називає колонку й очікуваний тип — мовою
+    /// інтерфейсу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Це найчастіша інтерактивна відмова продукту: її бачить кожен, хто
+    /// набрав не той тип у комірку. Речення збиралося рядком у
+    /// <c>CellValueReader.Mismatch</c>, тож на англійському екрані під
+    /// англійським заголовком стояло «Колонка «C5» очікує число.».
+    ///
+    /// ⚠ Перевіряються ОБИДВА боки правки: і що ключ резолвиться (інакше
+    /// повернулося б запасне українське речення — його ловить перевірка на
+    /// кирилицю в <see cref="DetailAsync"/>), і що <c>{columnCode}</c> справді
+    /// підставлено (інакше <c>detail</c> ніс би фігурні дужки — це теж
+    /// перевіряє <see cref="DetailAsync"/>), і що тип узято ТОЙ САМИЙ: числова
+    /// колонка не має пояснювати себе датою.
+    /// </remarks>
+    [Theory]
+    [InlineData(CellDataType.Decimal, "abc", "Column \"C5\" expects a number.")]
+    [InlineData(CellDataType.Bool, "abc", "Column \"C5\" expects true or false.")]
+    [InlineData(CellDataType.Date, "abc", "Column \"C5\" expects a date.")]
+    [InlineData(CellDataType.Lookup, "abc", "Column \"C5\" expects the identifier of a registry entry.")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Відмова_типу_комірки_називає_колонку_мовою_інтерфейсу(
+        CellDataType dataType, string typed, string expected)
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("C5"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "C5" }), 1, dataType);
+
+        var detail = await DetailAsync(() =>
+        {
+            CellValueReader.Read(typed, column);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(expected, detail);
+    }
+
+    /// <summary>Відмова переповнення цілої частини доїжджає реченням мовою інтерфейсу.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Переповнення_цілої_частини_пояснюється_з_каталогу()
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("C5"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "C5" }), 1, CellDataType.Decimal);
+
+        var detail = await DetailAsync(() =>
+        {
+            CellValueReader.Read("1000000000000000000", column);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal("Column \"C5\" keeps at most 18 digits before the decimal point.", detail);
+    }
+
+    /// <summary>`U-23`: відмова надлишкових знаків доїжджає реченням мовою інтерфейсу.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Надлишкові_знаки_після_коми_пояснюються_з_каталогу()
+    {
+        var column = new ColumnDef(
+            tableDefId: 3, EcrCode.Create("C5"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "C5" }), 1, CellDataType.Decimal);
+
+        var detail = await DetailAsync(() =>
+        {
+            CellValueReader.Read("931.9250000000000000123", column);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal("Column \"C5\" keeps at most 16 digits after the decimal point.", detail);
+    }
+
+    /// <summary>
+    /// Відмова поля шапки називає поле й тип — мовою інтерфейсу, без
+    /// українського слова всередині англійського речення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти ключ тут був (<c>err.ECR-HDR-0422.typeMismatch</c>), але шаблон
+    /// підставляв <c>{expected}</c> = «число», і користувач бачив
+    /// «Header field "QTY" expects a число.». Перевірка на кирилицю в
+    /// <see cref="DetailAsync"/> ловить саме це; рівність речення — що тип
+    /// узято ТОЙ САМИЙ.
+    /// </remarks>
+    [Theory]
+    [InlineData(CellDataType.Decimal, "abc", "Header field \"QTY\" expects a number.")]
+    [InlineData(CellDataType.Bool, "abc", "Header field \"QTY\" expects true or false.")]
+    [InlineData(CellDataType.Date, "abc", "Header field \"QTY\" expects a date.")]
+    [InlineData(CellDataType.Lookup, "abc", "Header field \"QTY\" expects the identifier of a registry entry or unit.")]
+    [InlineData(CellDataType.Unit, "abc", "Header field \"QTY\" expects the identifier of a registry entry or unit.")]
+    [InlineData(CellDataType.Decimal, "931.9250000000000000123", "Header field \"QTY\" keeps at most 16 digits after the decimal point.")]
+    [InlineData(CellDataType.Decimal, "1000000000000000000", "Header field \"QTY\" keeps at most 18 digits before the decimal point.")]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Відмова_поля_шапки_називає_поле_мовою_інтерфейсу(
+        CellDataType dataType, string typed, string expected)
+    {
+        var field = new HeaderFieldDef(
+            templateVersionId: 1, EcrCode.Create("QTY"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Quantity" }), 1, dataType);
+
+        var detail = await DetailAsync(() =>
+        {
+            HeaderValueReader.Read(typed, field);
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(expected, detail);
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Необроблений_виняток_віддає_каталожне_речення_без_тексту_винятку()
@@ -122,7 +277,7 @@ public sealed partial class MainPathLocalizedErrorTests
     }
 
     /// <summary>Проганяє відмову крізь конвеєр і повертає перевірену <c>detail</c>.</summary>
-    private static async Task<string> DetailAsync(Func<Task> act)
+    internal static async Task<string> DetailAsync(Func<Task> act)
     {
         var currentUser = Substitute.For<ICurrentUser>();
         currentUser.Language.Returns("en");

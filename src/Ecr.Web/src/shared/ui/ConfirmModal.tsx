@@ -78,6 +78,17 @@ export interface ConfirmModalProps {
   readonly isPending?: boolean | undefined;
   readonly onConfirm: () => void;
   readonly onClose: () => void;
+
+  /**
+   * Довільний БЛОК між наслідками й кнопками — те, що не є реченням.
+   *
+   * ⚠ Додано для X-23 (четвертий раунд UX): діалог видалення одиниці й запису
+   * довідника показує стан перевірки «де використано» — скелет, перелік
+   * залежних із бейджами виду, відмову. `text` для цього не годиться: він
+   * лягає в `<Text>` (тобто `<p>`), а блок усередині абзацу — недійсна
+   * розмітка (R-20). Існуючі виклики нічого не передають і не змінюються.
+   */
+  readonly children?: ReactNode | undefined;
 }
 
 function asConsequence(item: string | ConfirmConsequence): ConfirmConsequence {
@@ -97,6 +108,7 @@ export function ConfirmModal({
   isPending,
   onConfirm,
   onClose,
+  children,
 }: ConfirmModalProps): JSX.Element {
   const [typed, setTyped] = useState('');
 
@@ -155,6 +167,8 @@ export function ConfirmModal({
             })}
           </List>
         ) : null}
+
+        {children !== undefined && children !== null ? <div data-testid="confirm-body">{children}</div> : null}
 
         {typeToConfirm !== undefined ? (
           <TextInput

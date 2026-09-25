@@ -49,13 +49,41 @@ public sealed class CreateRowHandler(
                 });
         }
 
+        // ⛔ Видимість документа — до будь-якої відмови про таблицю (V-02, той
+        // самий клас, що й у `PatchCellsHandler`). Нижче відмови кажуть режим
+        // таблиці, межу рядків і чи зайнятий ключ — і все це діставалося
+        // користувачеві із забороною на проєкт, бо права питалися лише
+        // наприкінці. Відповідь — як на читання: 404, не 403.
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
+        if (!read.IsAllowed)
+        {
+            throw new Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {documentId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
 
         var table = snapshot.Sheets
             .SelectMany(sh => sh.Tables)
             .FirstOrDefault(t => t.Id == instance.TableDefId)
+            // ⚠ Той самий факт, що й `ColumnDefHandlers.FindTable`/
+            // `ValidationRuleHandlers` (2026-09-23): «таблиці з таким Id немає
+            // в цій версії», незалежно від того, звідки до нього дійшли —
+            // тому наявний ключ, а не новий.
             ?? throw new Errors.NotFoundException(
-                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.");
+                "ECR-TMPL-0404", $"Таблиці {instance.TableDefId} немає в структурі версії {instance.TemplateVersionId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.table",
+                    ["tableDefId"] = instance.TableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["versionId"] = instance.TemplateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         // 1. Рядок можна додати лише туди, де це дозволяє режим. У Fixed склад
         //    рядків заданий шаблоном, і поява «зайвого» зламала б і формули з
@@ -146,8 +174,9 @@ public sealed class CreateRowHandler(
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                    // ⛔ B-06: без `detail` — він дублював стандартний член
+                    // `problem+json` українським реченням (див. `PatchCellsHandler`).
                     ["reason"] = decision.Reason.ToString(),
-                    ["detail"] = decision.Detail
                 });
         }
 

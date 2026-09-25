@@ -41,14 +41,19 @@ public sealed class StartSimulationHandler(
     {
         var actorUserId = currentUser.UserId
                           ?? throw new AccessDeniedException(
-                              "ECR-AUTH-0401", "Анонімний запит не може відкривати симуляцію.");
+                              "ECR-AUTH-0401", "Анонімний запит не може відкривати симуляцію.",
+                              new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var actorProfile = await access.BuildProfileAsync(actorUserId, ct).ConfigureAwait(false);
         if (!actorProfile.Has(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
-                new Dictionary<string, object?> { ["permission"] = Permission });
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
         }
 
         // Симуляція себе безглузда і водночас небезпечна: вона дала б сеанс із
@@ -57,13 +62,15 @@ public sealed class StartSimulationHandler(
         if (subjectUserId == actorUserId)
         {
             throw new BusinessRuleException(
-                "ECR-SIM-0422", "Симуляція самого себе не має сенсу.");
+                "ECR-SIM-0422", "Симуляція самого себе не має сенсу.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SIM-0422.selfSimulation" });
         }
 
         if (string.IsNullOrWhiteSpace(reason))
         {
             throw new BusinessRuleException(
-                "ECR-SIM-0422", "Причина симуляції обов'язкова: без неї журнал не відповідає ні на що.");
+                "ECR-SIM-0422", "Причина симуляції обов'язкова: без неї журнал не відповідає ні на що.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SIM-0422.reasonRequired" });
         }
 
         // ⚠ Спершу ЗАПИС сеансу, потім профіль. Збій між видачею профілю і

@@ -64,7 +64,10 @@ public sealed class SaveRowDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -96,7 +99,14 @@ public sealed class SaveRowDefHandler(
                 $"Ключ рядка «{code}» зайнятий видаленим рядком цієї таблиці. " +
                 "Ключ — це ідентичність: комірки посилаються саме на нього, тому повторно " +
                 "використати його в цій версії не можна. Заведіть рядок з іншим ключем " +
-                "або клонуйте версію.");
+                "або клонуйте версію.",
+                new Dictionary<string, object?>
+                {
+                    // Той самий факт, що .columnCodeTakenByDeleted/.tableCodeTakenByDeleted.
+                    ["messageKey"] = "err.ECR-TMPL-0422.rowKeyTakenByDeleted",
+                    ["rowKey"] = code,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         if (existing is not null && existing.RowKind != command.RowKind)
@@ -106,7 +116,16 @@ public sealed class SaveRowDefHandler(
             throw new BusinessRuleException(
                 ErrorCodes.TemplateInvalid,
                 $"Вид рядка «{code}» незмінний після створення " +
-                $"({existing.RowKind} → {command.RowKind}). Заведіть новий рядок або клонуйте версію.");
+                $"({existing.RowKind} → {command.RowKind}). Заведіть новий рядок або клонуйте версію.",
+                new Dictionary<string, object?>
+                {
+                    // Дзеркало до .columnDataTypeImmutable: RowKind — та сама
+                    // незмінна роль сутності, що DataType у колонки.
+                    ["messageKey"] = "err.ECR-TMPL-0422.rowKindImmutable",
+                    ["rowKey"] = code,
+                    ["oldRowKind"] = existing.RowKind.ToString(),
+                    ["newRowKind"] = command.RowKind.ToString(),
+                });
         }
 
         var parentRowDefId = ResolveParent(table, code, command.ParentRowKey);
@@ -198,13 +217,28 @@ public sealed class SaveRowDefHandler(
         if (string.Equals(parentRowKey, ownCode, StringComparison.Ordinal))
         {
             throw new BusinessRuleException(
-                ErrorCodes.TemplateInvalid, $"Рядок «{ownCode}» не може бути батьком самому собі.");
+                ErrorCodes.TemplateInvalid,
+                $"Рядок «{ownCode}» не може бути батьком самому собі.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0422.rowSelfParent",
+                    ["rowKey"] = ownCode,
+                });
         }
 
         var parent = table.Rows.FirstOrDefault(r => string.Equals(r.RowKeyValue, parentRowKey, StringComparison.Ordinal))
             ?? throw new BusinessRuleException(
                 ErrorCodes.TemplateInvalid,
-                $"Батьківського рядка «{parentRowKey}» у таблиці {table.Id} немає.");
+                $"Батьківського рядка «{parentRowKey}» у таблиці {table.Id} немає.",
+                new Dictionary<string, object?>
+                {
+                    // ⚠ 0422, а не 0404: домен трактує це як помилку ВВЕДЕННЯ
+                    // (посилання на батька, якого нема), а не «ресурсу не
+                    // знайдено» — код лишається незмінним, лише заведено ключ.
+                    ["messageKey"] = "err.ECR-TMPL-0422.parentRowNotFound",
+                    ["parentRowKey"] = parentRowKey,
+                    ["tableDefId"] = table.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         return parent.Id;
     }
@@ -295,7 +329,10 @@ public sealed class DeleteRowDefHandler(
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ?? throw new AccessDeniedException(
+                ErrorCodes.Unauthorized,
+                "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
         var version = await store.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -305,7 +342,16 @@ public sealed class DeleteRowDefHandler(
 
         var row = table.Rows.FirstOrDefault(r => string.Equals(r.RowKeyValue, code, StringComparison.Ordinal))
             ?? throw new NotFoundException(
-                ErrorCodes.TemplateNotFound, $"Рядка «{code}» у таблиці {tableDefId} немає.");
+                ErrorCodes.TemplateNotFound,
+                $"Рядка «{code}» у таблиці {tableDefId} немає.",
+                new Dictionary<string, object?>
+                {
+                    // Той самий ключ, що FormulaDefHandlers.FindTarget (2026-09-25):
+                    // той самий факт «рядка з таким RowKey немає в таблиці».
+                    ["messageKey"] = "err.ECR-TMPL-0404.row",
+                    ["rowKey"] = code,
+                    ["tableDefId"] = tableDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
         var change = classifier.ClassifyDeletion(nameof(RowDef), hasDocuments);

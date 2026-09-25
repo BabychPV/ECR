@@ -86,12 +86,13 @@ describe('ColumnEditor: колонку типу Formula/Calculated можна з
 
     fireEvent.click(await screen.findByLabelText(/columns\.dataType⟧/));
 
-    fireEvent.click(await screen.findByRole('option', { name: 'Formula' }));
+    // ⚠ X-16: опції підписані каталогом, а не сирим значенням переліку.
+    fireEvent.click(await screen.findByRole('option', { name: '⟦enum.dataType.Formula⟧' }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dataType: 'Formula' }));
 
     onChange.mockClear();
     fireEvent.click(await screen.findByLabelText(/columns\.dataType⟧/));
-    fireEvent.click(await screen.findByRole('option', { name: 'Calculated' }));
+    fireEvent.click(await screen.findByRole('option', { name: '⟦enum.dataType.Calculated⟧' }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dataType: 'Calculated' }));
   }, 30_000);
 

@@ -432,6 +432,13 @@
       "CalculationBindingDto": {
         "description": "Прив'язка виходу методології до колонки документа (`D-69`).",
         "properties": {
+          "columnCode": {
+            "description": "Код колонки-приймача (F-21); як і код таблиці — лише в переліку.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "columnDefId": {
             "description": "Колонка-приймач.",
             "format": "int32",
@@ -504,6 +511,41 @@
       "CalculationResultDto": {
         "description": "Число, яке дав актуальний прогін розрахунку на документі.",
         "properties": {
+          "calculatedAt": {
+            "description": "Коли завершився прогін (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "inputsChangedAt": {
+            "description": "Остання зміна входів після прогону (UTC); `null` — не змінювались.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isStale": {
+            "default": false,
+            "description": "Входи документа змінилися після прогону, що дав це число (F-05): число\nвже не відповідає даним, потрібен перерахунок.",
+            "type": "boolean"
+          },
+          "methodologyCode": {
+            "description": "Код методології — підпис числа (F-21).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "methodologyVersion": {
+            "description": "Номер версії методології («1.2.0»), а не її ідентифікатор (F-21).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "methodologyVersionId": {
             "description": "Версія, що дала число.",
             "format": "int32",
@@ -803,20 +845,70 @@
             "format": "date-time",
             "type": "string"
           },
+          "changedByDisplayName": {
+            "description": "Ім'я автора (`sec.User.DisplayName`); `null` — запису користувача\nвже немає (`R-18`). ⛔ Не логін: логін і SID показувати людині заборонено\n(R-A2, D-86). Журнал показував «By user 3» — число, з яким аудитор нічого\nне зробить.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "changedByUserId": {
             "description": "Автор — <b>UserId</b>, не SID (R-A2, D-86).",
             "format": "int32",
             "type": "integer"
+          },
+          "columnCode": {
+            "description": "Код колонки; `null` — колонки вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "columnDataType": {
+            "description": "Тип колонки (`Decimal`, `Date`…) — щоб клієнт показав значення\nза правилом показу (U-05/U-24), а не у форматі сховища\n(`53.1771000000000000`).",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "columnDefId": {
             "description": "Колонка.",
             "format": "int32",
             "type": "integer"
           },
+          "columnHeaderL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Заголовок колонки мовами каталогу."
+              }
+            ]
+          },
+          "documentBusinessKey": {
+            "description": "Бізнес-ключ документа; `null` — документа вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "documentId": {
             "description": "Документ.",
             "format": "int64",
             "type": "integer"
+          },
+          "documentNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Людська назва документа, якщо її задано."
+              }
+            ]
           },
           "isLateEdit": {
             "description": "Зміна в `Grace` або після `Reopen` (D-70).",
@@ -1812,14 +1904,16 @@
             "type": "array"
           },
           "templateVersionId": {
-            "description": "Опублікована версія шаблону.",
+            "description": "Необов'язкове. ⛔ `V-11`: документ заводиться на версії шаблону ПРОЄКТУ;\nполе, якщо задане, мусить із нею збігатися (інакше `422`\n`err.ECR-DOC-0422.versionNotProject`). Клієнту його надсилати не треба:\nсклад аркушів для діалогу дає `GET /projects/{id}/document-template`.",
             "format": "int32",
-            "type": "integer"
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
           "projectId",
-          "templateVersionId",
           "sheetDefIds"
         ],
         "type": "object"
@@ -2453,6 +2547,21 @@
               "integer"
             ]
           },
+          "simulatedForUserName": {
+            "description": "Ім'я того, кого симулюють, — для банера «Viewing as …» (V-06).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "simulationSessionId": {
+            "description": "Сеанс симуляції цього входу — щоб завершити його з будь-якої вкладки.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
           "userId": {
             "description": "Ідентифікатор.",
             "format": "int32",
@@ -2833,6 +2942,29 @@
         ],
         "type": "object"
       },
+      "DocumentSheetState": {
+        "description": "Аркуш складу документа в переліку: код, назва, стан за період.",
+        "properties": {
+          "code": {
+            "description": "Код аркуша (`SheetDef.Code`); він же ключ у `DocumentSummary.SheetStates`.",
+            "type": "string"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва аркуша мовами каталогу."
+          },
+          "state": {
+            "description": "Стан робочого процесу; аркуш без рядка стану — `Draft`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "nameL10n",
+          "state"
+        ],
+        "type": "object"
+      },
       "DocumentSummary": {
         "description": "Документ у переліку.",
         "properties": {
@@ -2905,6 +3037,16 @@
             },
             "description": "Стан робочого процесу: аркуш → статус.",
             "type": "object"
+          },
+          "sheets": {
+            "description": "Аркуші складу з назвою і станом — ті самі рядки, що в\nSheetStates, але В ПОРЯДКУ аркушів (`SheetDef.Ordinal`)\nі з людською назвою. Потрібне переліку: без назви в колонці «State» стояв\nвнутрішній код аркуша (`S99819007`). ⚠ Адитивне поле: словник\nSheetStates лишається як був. `null` — шлях читання\nйого не несе (сховище заповнює завжди; як і стан — порожньо без періоду).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentSheetState"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "warningCount": {
             "description": "Попередження звідти ж; `null` — за тим самим правилом.",
@@ -2997,6 +3139,83 @@
         ],
         "type": "object"
       },
+      "DocumentTemplateDto": {
+        "description": "З чого складається новий документ проєкту.",
+        "properties": {
+          "groupRules": {
+            "description": "Правила складу (`SheetGroupRule`) — для попередження ДО збереження.",
+            "items": {
+              "$ref": "#/components/schemas/SheetGroupRuleDto"
+            },
+            "type": "array"
+          },
+          "sheets": {
+            "description": "Аркуші версії в порядку `Ordinal`.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentTemplateSheetDto"
+            },
+            "type": "array"
+          },
+          "templateCode": {
+            "description": "Код шаблону.",
+            "type": "string"
+          },
+          "templateVersionId": {
+            "description": "Версія шаблону проєкту — те, що йде в `templateVersionId`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "version": {
+            "description": "Позначення версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "templateVersionId",
+          "templateCode",
+          "version",
+          "sheets",
+          "groupRules"
+        ],
+        "type": "object"
+      },
+      "DocumentTemplateSheetDto": {
+        "description": "Аркуш, який можна включити в новий документ.",
+        "properties": {
+          "code": {
+            "description": "Код аркуша.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор `SheetDef` — те, що йде в `sheetDefIds`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isMandatory": {
+            "description": "Чи обов'язковий аркуш.",
+            "type": "boolean"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва всіма мовами каталогу."
+          },
+          "sheetGroup": {
+            "description": "Група для правил складу; `null` — поза групами.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n",
+          "sheetGroup",
+          "isMandatory"
+        ],
+        "type": "object"
+      },
       "DocumentVersionDto": {
         "description": "Версія документа — зріз подання аркуша (ФВ-5.22).",
         "properties": {
@@ -3046,7 +3265,8 @@
           "ArchivingInProgress",
           "BusinessRule",
           "SimulationReadOnly",
-          "OutsidePermitWindow"
+          "OutsidePermitWindow",
+          "InsufficientGrantLevel"
         ]
       },
       "EntityFieldMapDto": {
@@ -3796,12 +4016,36 @@
         "description": "Зміна, яку принесе імпорт.",
         "properties": {
           "columnCode": {
+            "description": "Колонка.",
             "type": "string"
           },
-          "newValue": {},
-          "oldValue": {},
+          "newValue": {
+            "description": "Значення з файлу; `null` — порожньо."
+          },
+          "oldValue": {
+            "description": "Поточне значення; `null` — порожньо."
+          },
           "rowKey": {
+            "description": "Рядок.",
             "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця зміни. ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і коди колонок\nОДНАКОВІ (`R1`/`C1`), тож без таблиці рядок переліку не каже,\nДЕ саме зміниться число. `null` лише в плані, збереженому до цієї\nправки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу — для показу."
+              }
+            ]
           }
         },
         "required": [
@@ -3853,16 +4097,52 @@
         "description": "Відхилена комірка з причиною — користувач має бачити, які саме (ФВ-4.4).",
         "properties": {
           "columnCode": {
+            "description": "Колонка; для відмови цілої таблиці — її код.",
             "type": "string"
+          },
+          "excelCell": {
+            "description": "Адреса комірки книги (`B3`) для значення, у якого немає рядка системи\n(`V-10`: поза рядками таблиці); інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "message": {
+            "description": "Діагностичний текст для журналу — НЕ для показу людині.",
             "type": "string"
           },
+          "messageKey": {
+            "description": "Ключ тексту причини в каталозі (D-95). ⛔ `V-10`: інтерфейс показує текст\nза цим ключем мовою користувача, а не string ImportRejection.Message — доти відмови\nприходили готовими українськими реченнями («Правило доступу: лише читання.»).\nДля відмови правами — `deny.&lt;EditDenyReason&gt;`, ті самі тексти, що\nв підказці сірої комірки сітки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "reasonCode": {
+            "description": "Код причини (`ECR-…`).",
             "type": "string"
           },
           "rowKey": {
+            "description": "Рядок; `—` — причина не про рядок.",
             "type": "string"
+          },
+          "tableCode": {
+            "description": "Таблиця відмови (`V-10`, як і в ImportChange).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tableNameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва таблиці мовами каталогу — для показу."
+              }
+            ]
           }
         },
         "required": [
@@ -4951,9 +5231,77 @@
         ],
         "type": "object"
       },
+      "MethodologyPublicationEntry": {
+        "description": "Одна публікація версії методології з журналу `aud.PublicationEvent` (F-16).",
+        "properties": {
+          "changeReason": {
+            "description": "Причина зміни (ФВ-14.7).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedAt": {
+            "description": "Коли опубліковано (UTC).",
+            "format": "date-time",
+            "type": "string"
+          },
+          "changedByName": {
+            "description": "Ім'я того, хто опублікував; `null` — облікового запису вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "changedByUserId": {
+            "description": "Хто опублікував.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "description": "Запис журналу.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "methodologyVersionId": {
+            "description": "Опублікована версія.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "resultDiffJson": {
+            "description": "Diff результатів на золотому наборі (ФВ-9.6), як записано.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "version": {
+            "description": "Номер версії.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "changedAt",
+          "methodologyVersionId",
+          "version",
+          "changeReason",
+          "changedByUserId",
+          "changedByName",
+          "resultDiffJson"
+        ],
+        "type": "object"
+      },
       "MethodologyRequiredInputDto": {
         "description": "Обов'язкова вхідна колонка методології — gate перед збереженням клітинки\n(директива «обов'язкові вхідні колонки методології»).",
         "properties": {
+          "columnCode": {
+            "description": "Код колонки — підпис замість голого `ColumnDefId` (F-21); лише в переліку.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "columnDefId": {
             "description": "Колонка документа, обов'язкова як вхід.",
             "format": "int32",
@@ -6998,6 +7346,65 @@
         },
         "required": [
           "definitionVersion"
+        ],
+        "type": "object"
+      },
+      "RegistryEntryDetailDto": {
+        "description": "Один запис довідника цілком — для форми правки (X-03, R-04).",
+        "properties": {
+          "code": {
+            "description": "Стабільний код.",
+            "type": "string"
+          },
+          "displayL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва ВСІМА мовами каталогу. ⛔ Саме цього бракувало формі: перелік несе\nназву однією мовою, і збереження з нього стирало переклади."
+          },
+          "id": {
+            "description": "Ідентифікатор.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "parentEntryId": {
+            "description": "Батьківський запис; `null` — корінь.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "validFrom": {
+            "description": "Початок вікна чинності.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець вікна чинності.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Значення полів: код поля → текст в інваріантному форматі, який приймає\n`POST …/entries`; `null` — поле не заповнене.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "displayL10n",
+          "parentEntryId",
+          "validFrom",
+          "validTo",
+          "values"
         ],
         "type": "object"
       },
@@ -10372,6 +10779,13 @@
             "format": "date-time",
             "type": "string"
           },
+          "changedByDisplayName": {
+            "description": "Ім'я автора (`R-18`); `null` — запису користувача вже немає.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "changedByUserId": {
             "description": "Автор — <b>UserId</b>, не SID (R-A2, D-86).",
             "format": "int32",
@@ -11054,7 +11468,7 @@
         "description": "Diff двох версій шаблону. Зіставлення — **за ідентичністю** (`Code`,\n`RowKey`), не за позицією: інакше будь-яке перевпорядкування дало б\n«змінено все».",
         "properties": {
           "affectedDocumentCount": {
-            "description": "Скільки документів прив'язано до вихідної версії.",
+            "description": "Скільки документів прив'язано до вихідної (старшої) версії.",
             "format": "int32",
             "type": "integer"
           },
@@ -11064,11 +11478,23 @@
               "$ref": "#/components/schemas/TemplateChangeDto"
             },
             "type": "array"
+          },
+          "fromVersionId": {
+            "description": "Вихідна версія — СТАРША з двох, незалежно від того, з якої відкрили\nпорівняння (R-08).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "toVersionId": {
+            "description": "Цільова версія — новіша з двох.",
+            "format": "int32",
+            "type": "integer"
           }
         },
         "required": [
           "changes",
-          "affectedDocumentCount"
+          "affectedDocumentCount",
+          "fromVersionId",
+          "toVersionId"
         ],
         "type": "object"
       },
@@ -11270,6 +11696,28 @@
           "presentationRevision",
           "clonedFromVersionId",
           "publishedAt"
+        ],
+        "type": "object"
+      },
+      "TemplateVersionsForTemplate": {
+        "description": "Версії одного шаблону в межах пакетної відповіді (`ListTemplateVersionsHandler.HandleBatchAsync`, `BR-07`).",
+        "properties": {
+          "templateId": {
+            "description": "Шаблон, якому належать версії.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "versions": {
+            "description": "Версії шаблону, у тому самому порядку, що й Task&lt;PagedResult&lt;TemplateVersionSummary&gt;&gt; ListTemplateVersionsHandler.HandleAsync(int templateId, CursorRequest page, CancellationToken ct).",
+            "items": {
+              "$ref": "#/components/schemas/TemplateVersionSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templateId",
+          "versions"
         ],
         "type": "object"
       },
@@ -12260,12 +12708,17 @@
             "description": "Період, за який виконано перевірку.",
             "format": "int32",
             "type": "integer"
+          },
+          "validated": {
+            "description": "Чи документ за цей період узагалі перевіряли. `false` — перевірку ще не\nзапускали, і порожній `Messages` тоді НЕ означає «зауважень немає»\n(`X-32`, `A7-28`).",
+            "type": "boolean"
           }
         },
         "required": [
           "documentId",
           "periodKey",
-          "messages"
+          "messages",
+          "validated"
         ],
         "type": "object"
       },
@@ -16441,7 +16894,7 @@
     },
     "/api/v1/documents/{id}/tables/status": {
       "get": {
-        "description": "⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього\n`GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і\nчитається один раз на відкриття, а це — СТАН (скільки введено), який\nзмінюється після кожного запису. Склеїти їх означало б або\nперечитувати структуру заради лічильника, або показувати лічильник\nіз моменту відкриття сторінки.\n\n⛔ `errorCount`/`warningCount` приходять `null`, доки\nдокумент за цей період не перевіряли. Нуль тут був би тією самою\nнеправдою, що й «0 зауважень» у неперевіреного документа\n(`A7-28`): у клієнта має лишитися змога показати «—», а не\nзелений нуль. Сусідній `GET …/validation` тримає той самий поділ\nкодом `404` (`err.ECR-DOC-0404.notValidated`); тут\n`404` не годиться — заповненість відома й до першої перевірки.",
+        "description": "⚠ Окремий маршрут, а не поля в `DocumentTableDto` сусіднього\n`GET …/tables`: той віддає СТРУКТУРУ (що є в документі) і\nчитається один раз на відкриття, а це — СТАН (скільки введено), який\nзмінюється після кожного запису. Склеїти їх означало б або\nперечитувати структуру заради лічильника, або показувати лічильник\nіз моменту відкриття сторінки.\n\n⛔ `errorCount`/`warningCount` приходять `null`, доки\nдокумент за цей період не перевіряли. Нуль тут був би тією самою\nнеправдою, що й «0 зауважень» у неперевіреного документа\n(`A7-28`): у клієнта має лишитися змога показати «—», а не\nзелений нуль. Сусідній `GET …/validation` тримає той самий поділ\nполем `validated: false` (`X-32`).",
         "parameters": [
           {
             "description": "Документ.",
@@ -16566,7 +17019,7 @@
     },
     "/api/v1/documents/{id}/validation": {
       "get": {
-        "description": "⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).\nПідсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:\n`IValidationResultStore.GetLatestAsync` не мав жодного виклику.\nЦіна видна на екрані — перелік зауважень жив рівно до перезавантаження\nсторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ\nперевірку заново.\n\n⚠ `404`, а не порожній перелік, коли перевірку ще не запускали:\n«зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати\nпершу замість другої означає повідомити неправду про готовність.",
+        "description": "⛔ Читання, а не повторний прогін (директива №09 `W8` п.3, `S-19`).\nПідсумок зберігався давно (`ФВ-5.19`), і прочитати його не міг ніхто:\n`IValidationResultStore.GetLatestAsync` не мав жодного виклику.\nЦіна видна на екрані — перелік зауважень жив рівно до перезавантаження\nсторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ\nперевірку заново.\n\n⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати\nпершу замість другої означає повідомити неправду про готовність. Тому\nнеперевірений документ віддає `validated: false`, а не порожній\nперелік сам по собі.\n\n✎ `X-32`: доти це розрізнення несла відповідь `404`. Але «ще не\nперевіряли» — звичайний стан кожного нового документа, а не помилка:\nКОЖНЕ відкриття такого документа давало червоний рядок у консолі\nбраузера («Failed to load resource: 404») і невдалий запит у мережі —\nшум, за яким справжні відмови перестають помічати. Тепер це `200`\nз тим самим змістом, названим полем.",
         "parameters": [
           {
             "description": "Документ.",
@@ -16609,26 +17062,6 @@
               }
             },
             "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              },
-              "text/plain": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Not Found"
           }
         },
         "summary": "Останній результат перевірки. Право `Document.View`.",
@@ -18280,6 +18713,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Прив'язки методології до колонок. Право `Calculation.View`.",
@@ -18413,6 +18866,58 @@
         ]
       }
     },
+    "/api/v1/methodologies/{id}/publications": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Методологія.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MethodologyPublicationEntry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Публікації версій методології, найновіші першими. Право `Calculation.View`.",
+        "tags": [
+          "MethodologyPublications"
+        ]
+      }
+    },
     "/api/v1/methodologies/{id}/simulate": {
       "post": {
         "description": "Показує, що вийде, якщо опублікувати (ФВ-13.5). Нічого не зберігає:\nсаме тому доступний із правом на перегляд, а не на публікацію.",
@@ -18470,6 +18975,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Прогін методології <b>без запису</b>. Право `Calculation.View`.",
@@ -18787,6 +19312,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Константи версії. Право `Calculation.View`.",
@@ -19235,6 +19780,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Формули версії. Право `Calculation.View`.",
@@ -19643,6 +20208,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Оголошені виходи версії. Право `Calculation.View`.",
@@ -19865,6 +20450,26 @@
             },
             "description": "OK"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "409": {
             "content": {
               "application/json": {
@@ -19967,6 +20572,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Обов'язкові вхідні колонки версії. Право `Calculation.View`.",
@@ -20279,6 +20904,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Правила відбору рядків версії. Право `Calculation.View`.",
@@ -20487,6 +21132,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Золотий набір версії. Право `Calculation.View`.",
@@ -22163,6 +22828,89 @@
         ]
       }
     },
+    "/api/v1/projects/{id}/document-template": {
+      "get": {
+        "description": "⚠ Не потребує `Template.View`: це не перегляд шаблону, а рівно те,\nбез чого не створити документ, — версію визначає проєкт.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentTemplateDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Версія шаблону проєкту й аркуші для нового документа. Право\n`Document.Create` і грант `Write` на проєкт (V-12).",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
     "/api/v1/projects/{id}/periods": {
       "get": {
         "parameters": [
@@ -23471,6 +24219,77 @@
         "tags": [
           "Registries"
         ]
+      },
+      "get": {
+        "description": "⛔ X-03/R-04: форма правки запису відкривається з цієї відповіді, а не з\nрядка переліку, де назва лише однією мовою, а значень полів немає.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Запис.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryEntryDetailDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Один запис довідника цілком: назва всіма мовами й значення полів.\nПраво `Registry.View`.",
+        "tags": [
+          "Registries"
+        ]
       }
     },
     "/api/v1/registries/{code}/entries/{id}/validity": {
@@ -24755,6 +25574,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Ресурсні гранти ролі. Право `Security.ManageRoles`.",
@@ -25093,7 +25932,7 @@
       "delete": {
         "parameters": [
           {
-            "description": "Сеанс.",
+            "description": "Сеанс; не задано — сеанс цього входу.",
             "in": "query",
             "name": "sessionId",
             "schema": {
@@ -27083,6 +27922,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Перелік стилів версії — для вибору наявного стилю під час\nконструювання шаблону. Право `Template.View`.",
@@ -27559,6 +28418,88 @@
           "TemplateVersions"
         ]
       },
+      "get": {
+        "description": "⛔ X-02: форма правки колонки відкривається з цієї відповіді, а не з\nбідного опису колонки в `GET …/structure`. Інакше `PUT` (заміна\nцілком) стирав точність, одиницю, довідник, значення за замовчуванням і\nстиль колонки при кожному повторному збереженні.",
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця, якій належить колонка.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Код колонки.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnDefDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Повний склад однієї колонки — те, що приймає й повертає `PUT` нижче.\nПраво `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      },
       "put": {
         "description": "⛔ Другий вертикальний зріз авторства структури шаблону через API\n(`W5.2`, за зразком `sheets/{code}` вище, `W5.0`).\n\n⚠ Таблиця адресується числовим `tableId`, а не парою кодів\nаркуша й таблиці — та сама форма, що й `SaveTableRelationRequest`\nвище (`SourceTableDefId`/`TargetTableDefId`): клієнт уже має\n`TableDto.Id` з попереднього `GET …/structure`.",
         "parameters": [
@@ -27932,6 +28873,90 @@
         ]
       }
     },
+    "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules": {
+      "get": {
+        "description": "⛔ X-15: без цього переліку діалог видаляв правило введеним з пам'яті\nкодом, якого екран ніде не показував.",
+        "parameters": [
+          {
+            "description": "Версія шаблону.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Таблиця.",
+            "in": "path",
+            "name": "tableId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ValidationRuleDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Правила валідації таблиці. Право `Template.View`.",
+        "tags": [
+          "TemplateVersions"
+        ]
+      }
+    },
     "/api/v1/template-versions/{id}/tables/{tableId}/validation-rules/{code}": {
       "delete": {
         "parameters": [
@@ -28252,6 +29277,60 @@
           }
         },
         "summary": "Створює шаблон. Право `Template.Edit`.",
+        "tags": [
+          "Templates"
+        ]
+      }
+    },
+    "/api/v1/templates/versions": {
+      "get": {
+        "description": "⛔ BR-07: перелік шаблонів (`/admin/templates`) читав версії ОКРЕМИМ\nзапитом на КОЖЕН рядок (N+1 на клієнті) — підтверджений 2026-09-25\nпробіл продуктивності. Тут — один запит на весь видимий перелік.\n\n⚠ Повторювані `ids=`, а не через кому — той самий патерн, що вже\nв `GET /api/v1/methodologies?ids=` (`RD-06`, стандартний біндинг\nASP.NET для масиву в query-рядку). Маршрут — літерал `versions`,\nа не `{id:int}`, тож неоднозначності з Task&lt;IActionResult&gt; TemplatesController.ListVersions(int id, int limit, string? cursor, CancellationToken ct)\nпоруч немає.",
+        "parameters": [
+          {
+            "description": "Шаблони, чиї версії цікавлять.",
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "items": {
+                "format": "int32",
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TemplateVersionsForTemplate"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Версії ДЕКІЛЬКОХ шаблонів ОДНИМ зверненням — не по одному на шаблон.\nПраво `Template.View`.",
         "tags": [
           "Templates"
         ]
@@ -28717,6 +29796,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Сторінка версій шаблону. Право `Template.View`.",
@@ -30144,6 +31243,26 @@
               }
             },
             "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "summary": "Ролі користувача. Право `Security.ManageUsers`.",
@@ -30440,6 +31559,9 @@
     },
     {
       "name": "Methodologies"
+    },
+    {
+      "name": "MethodologyPublications"
     },
     {
       "name": "MethodologyVersions"

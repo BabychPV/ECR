@@ -1,4 +1,4 @@
-﻿// tests/Ecr.Application.Tests/Documents/GetTableSliceTests.cs
+// tests/Ecr.Application.Tests/Documents/GetTableSliceTests.cs
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
@@ -195,10 +195,11 @@ public sealed class GetTableSliceTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Deny(EditDenyReason.NoGrant));
 
-        var denied = await Assert.ThrowsAsync<Ecr.Application.Errors.AccessDeniedException>(
+        // ⛔ B-08: невидимий документ — 404, як і відсутній, а не 403.
+        var denied = await Assert.ThrowsAsync<Ecr.Application.Errors.NotFoundException>(
             () => Handler().HandleAsync(700, TableInstance, Profile(), "en", CancellationToken.None));
 
-        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("ECR-DOC-0404", denied.ErrorCode);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]

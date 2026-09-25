@@ -133,6 +133,17 @@ export interface RouteHandle {
    *  крихта — просто статичний `t(labelKey)`, без резолву й без ін'єкції
    *  логічних предків. */
   crumb?: RouteCrumbConfig;
+
+  /**
+   * Параметри шляху, що мусять бути цілим числом (`R-19`/`X-09`).
+   *
+   * ⛔ React Router 7 не звужує сегмент регуляркою: `/documents/abc` зіставлявся
+   * з `/documents/:id`, сторінка робила `Number('abc')` і йшла трьома запитами
+   * на `…/NaN`, а людина бачила «HTTP 404 · HTTP-404». Такий шлях — просто
+   * неіснуюча сторінка, і `AppLayout` показує на ньому «Сторінку не знайдено»,
+   * не монтуючи сторінку (тобто без жодного запиту).
+   */
+  numericParams?: readonly string[];
 }
 
 /** Один запис дерева маршрутів. */
@@ -176,7 +187,11 @@ export const routes = {
   adminTemplates: {
     id: 'admin-templates',
     path: '/admin/templates',
-    handle: { labelKey: 'nav.templates', permission: 'Template.Edit', icon: 'templates' },
+    // ⛔ `X-38`: перелік читається з `Template.View` (`ListTemplatesHandler`), як і
+    // решта сторінок шаблонів нижче. Тут стояло `Template.Edit`: оператор із правом
+    // перегляду бачив картку шаблону й версії, а сам перелік — «Requires Template.Edit».
+    // Створення й нова версія на сторінці і так ховаються за `Template.Edit`.
+    handle: { labelKey: 'nav.templates', permission: 'Template.View', icon: 'templates' },
     showInNav: true,
   },
   // ⚠ Вузол вкладеності (`PR #2`, `TemplateVersionLayout`): `router.tsx`
@@ -201,6 +216,11 @@ export const routes = {
     path: '/admin/templates/:id',
     handle: {
       labelKey: 'nav.templates',
+      // ⛔ Право — те, що сервер вимагає для ЧИТАННЯ шаблону (`Template.View`,
+      // `GetTemplateStructureHandler`). Без нього гард пропускав рендер, і
+      // користувач без права бачив шапку сторінки з двома сирими 403 під нею
+      // замість сторінки відмови з назвою права (UX-прохід 2026-09-24).
+      permission: 'Template.View',
       crumb: {
         ancestorIds: ['admin-templates'],
         resolveParam: 'id',
@@ -213,6 +233,7 @@ export const routes = {
     path: '/admin/templates/:id/versions/:versionId',
     handle: {
       labelKey: 'version.title',
+      permission: 'Template.View',
       crumb: { resolveParam: 'versionId', resolveWith: 'templateVersionLabel' },
       // ⚠ `skeletonShape: 'form'` (`PR nav-arch #6`) — найглибший (3 рівні)
       // представницький маршрут: сама сторінка вже позначає власний
@@ -230,7 +251,11 @@ export const routes = {
     // дає крихти версії для цього маршруту. Без цього поля людина бачила б
     // «Шаблон / Зв'язки» замість «Шаблон / Версія / Зв'язки» — саме той
     // четвертий рівень, на якому директива вимагає перевірити усічення.
-    handle: { labelKey: 'tables.relationsTitle', crumb: { ancestorIds: ['admin-template-version'] } },
+    handle: {
+      labelKey: 'tables.relationsTitle',
+      permission: 'Template.View',
+      crumb: { ancestorIds: ['admin-template-version'] },
+    },
   },
   adminRegistries: {
     id: 'admin-registries',
@@ -243,6 +268,8 @@ export const routes = {
     path: '/admin/registries/:code/definition',
     handle: {
       labelKey: 'registries.constructor',
+      // Читання визначення — `Registry.View` (`RegistryDefinitionHandlers`).
+      permission: 'Registry.View',
       crumb: {
         ancestorIds: ['admin-registries'],
         resolveParam: 'code',
@@ -259,7 +286,7 @@ export const routes = {
   adminMethodologyVersions: {
     id: 'admin-methodology-versions',
     path: '/admin/methodologies/:id/versions',
-    handle: { labelKey: 'methodologies.versionsTitle' },
+    handle: { labelKey: 'methodologies.versionsTitle', permission: 'Calculation.View' },
   },
   adminExpressions: {
     id: 'admin-expressions',
@@ -428,7 +455,7 @@ export const routes = {
     // Резолв динамічного сегмента (`:id` → бізнес-ключ із кешу запиту) —
     // задача breadcrumbs-резолвера (`PR #3`), не цієї картки.
     path: '/documents/:id',
-    handle: { labelKey: 'documents.title' },
+    handle: { labelKey: 'documents.title', numericParams: ['id'] },
   },
 } as const satisfies Record<string, RouteEntry>;
 

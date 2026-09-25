@@ -54,6 +54,9 @@ public sealed class ValidationRuleTests
         var sheet = builder.Sheet("Water");
         _table = builder.Table(sheet, "Main");
 
+        // ⚠ V-19: збереження правила резолвить посилання — `[Volume]` має існувати.
+        builder.Column(_table, "Volume");
+
         _draft = new TemplateVersion(templateId: 1, version: "1.0.0.0", createdByUserId: 7, utcNow: Now);
         typeof(TemplateVersion).GetProperty(nameof(TemplateVersion.Id))!.SetValue(_draft, 1);
         typeof(TemplateVersion)
@@ -77,7 +80,8 @@ public sealed class ValidationRuleTests
         => new(severity, scope, expression, Message("Порушено"), columnDefId, isActive);
 
     private SaveValidationRuleHandler Save()
-        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);
+        => new(_store, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user,
+            new RealFormulaEngine());
 
     private DeleteValidationRuleHandler Delete()
         => new(_store, _rules, new ChangeClassifier(), _metadataCache, _audit, _uow, _clock, _access, _user);

@@ -96,7 +96,13 @@ public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, 
                      ?? throw new BusinessRuleException(
                          SourceUnavailable,
                          $"Джерело {dataSourceId} не існує або вимкнене.",
-                         new Dictionary<string, object?> { ["dataSourceId"] = dataSourceId });
+                         new Dictionary<string, object?>
+                         {
+                             // Той самий ключ, що SqlDataSource.cs/CollectionRunner.cs:
+                             // той самий факт «джерела немає або воно вимкнене».
+                             ["messageKey"] = "err.ECR-INT-0503.sourceMissing",
+                             ["dataSourceId"] = dataSourceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                         });
 
         // Транспорт — налаштування, не гілка коду (ФВ-11.2): каталог читає той
         // самий адаптер, який потім збиратиме дані. Інакше конфігуратор
@@ -104,7 +110,13 @@ public sealed class PiAfCatalogReader(IEnumerable<IExternalDataSource> sources, 
         return sources.FirstOrDefault(s => s.Transport == source.Transport)
                ?? throw new BusinessRuleException(
                    SourceUnavailable,
-                   $"Транспорт {source.Transport} не зареєстровано.");
+                   $"Транспорт {source.Transport} не зареєстровано.",
+                   new Dictionary<string, object?>
+                   {
+                       // Той самий ключ, що CollectionRunner.cs.
+                       ["messageKey"] = "err.ECR-INT-0503.transportNotRegistered",
+                       ["transport"] = source.Transport.ToString(),
+                   });
     }
 
     /// <summary>Чи є вузол прямою дитиною батька (не онуком).</summary>

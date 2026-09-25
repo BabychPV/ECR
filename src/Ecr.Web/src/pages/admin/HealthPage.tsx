@@ -10,7 +10,7 @@ import { showApiError, showDone } from '@/shared/ui/notify';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
-import { t } from '@/shared/i18n';
+import { hasText, t } from '@/shared/i18n';
 
 type SystemFacts = components['schemas']['SystemFactsResponse'];
 
@@ -101,7 +101,12 @@ export function HealthPage(): JSX.Element {
             {report.checks.map((check) => (
               <Card key={check.name} withBorder>
                 <Group justify="space-between">
-                  <Text fw={600}>{check.name}</Text>
+                  {/* ⛔ Тут стояло `{check.name}` — `db`, `jobs`, `sources`,
+                      тобто внутрішні ідентифікатори перевірок із
+                      `Program.cs` (`AddCheck<…>("db", …)`), маленькими
+                      літерами, під цілком людським реченням («Database is
+                      available.»). `U-14`. */}
+                  <Text fw={600}>{checkLabel(check.name)}</Text>
                   <StatusBadge kind="health" state={check.status} />
                 </Group>
                 {check.description !== null && (
@@ -242,6 +247,26 @@ function fieldLabel(key: string): string {
   const translationKey = FieldLabelKeys[key];
 
   return translationKey === undefined ? key : t(translationKey);
+}
+
+/**
+ * Людська назва перевірки стану (`U-14`).
+ *
+ * ⛔ Перевірки реєструються іменами `db`, `jobs`, `sources` (`Program.cs`), і
+ * саме вони стояли заголовками карток — внутрішній ідентифікатор над реченням,
+ * написаним для людини. Той самий клас, що #437/#438/#440/#441: значення
+ * сервера не є текстом інтерфейсу й не перекладається (`D-95`).
+ *
+ * ⛔ Запасний варіант — САМ ІДЕНТИФІКАТОР, а не `⟦health.check.…⟧`: набір
+ * перевірок задає сервер (`AddCheck<…>`), і четверта перевірка з'явиться в
+ * звіті раніше, ніж рядок під неї в `09-seed.sql`. Позначений ключ на місці
+ * зрозумілого `smtp` був би погіршенням, а не сигналом — той самий аргумент,
+ * що у `permissionLabel.ts`.
+ */
+export function checkLabel(name: string): string {
+  const key = `health.check.${name}`;
+
+  return hasText(key) ? t(key) : name;
 }
 
 /**

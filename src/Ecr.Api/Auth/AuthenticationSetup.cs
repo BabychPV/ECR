@@ -40,6 +40,14 @@ public static class AuthenticationSetup
     /// </remarks>
     public const string MustChangePasswordClaim = "ecr:mustchg";
 
+    /// <summary>Claim із відкритим сеансом симуляції «очима користувача» (ФВ-6.16a, V-06).</summary>
+    /// <remarks>
+    /// ⚠ У cookie, а не запитом «чи є відкритий сеанс» на КОЖЕН запит: сеанс
+    /// рідкісний, і платити за нього мають лише ті запити, що його несуть.
+    /// Ставиться на початку сеансу, знімається завершенням; вихід закриває сеанс.
+    /// </remarks>
+    public const string SimulationSessionClaim = "ecr:sim";
+
     /// <summary>
     /// Відбиток сертифіката, яким шифруються ключі кільця (`MI-01`, `D14-08`).
     /// </summary>

@@ -54,7 +54,11 @@ public sealed class RecallSheetHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може відкликати аркуші.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        var key = new PeriodKey(periodKey);
+        // B-16: `Parse`, а не первинний конструктор — той самий валідатор, що
+        // вже стоїть у `CanRecallAsync` НИЖЧЕ в цьому самому файлі. Було
+        // непослідовно: перевірка «чи можна відкликати» (кнопка) відмовляла
+        // на невірному періоді, а сама дія відкликання — ні.
+        var key = PeriodKey.Parse(periodKey);
 
         // ⛔ Та сама перевірка складу, що й у поданні: `GetOrCreateAsync` створює
         // рядок стану для БУДЬ-ЯКОГО ідентифікатора аркуша (`S-17`).

@@ -177,7 +177,11 @@ code            = letter { letter | digit | "_" } ;         (* EcrCode, R-B6 *)
 3. Для `RowMode = Dynamic` конкретний `RowKey` у формулі **заборонений** —
    тільки предикат (§4.2): динамічні рядки створює користувач, і посилання на
    конкретний з них не має сенсу.
-4. `HDR.<field>` — поле документа з `IsBusinessKey` або `IsScopeField`.
+4. `HDR.<field>` — поле шапки версії (`cfg.HeaderFieldDef`, невидалене).
+   ✎ 2026-09-24: раніше тут стояло «поле документа з `IsBusinessKey` або
+   `IsScopeField`» — формулювання з часів до окремих полів шапки. Публікація
+   (`ReferenceResolver.ResolveHeader`) і рушій читають саме `HeaderFieldDef`;
+   підказка редактора (`GET /expressions/metadata`, `headers`) — тепер теж.
 
 ### 3.4 Діалект `Methodology`
 

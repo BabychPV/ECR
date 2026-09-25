@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -76,12 +77,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .CountAsync(s => s.DocumentId == documentId && s.IsIncluded, ct)
             .ConfigureAwait(false);
 
-        var states = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
+        var sheets = await StatesAsync(documentId, period, ct).ConfigureAwait(false);
         var late = await LateEditsBatchAsync([documentId], period, ct).ConfigureAwait(false);
 
         return new DocumentSummary(
             document.Id, document.ProjectId, document.BusinessKey, document.CreatedAt, sheetCount,
-            states, document.NameL10n, HasLateEdits: late.Contains(documentId));
+            ToStateMap(sheets), document.NameL10n, HasLateEdits: late.Contains(documentId),
+            Sheets: sheets);
     }
 
     /// <inheritdoc />
@@ -165,17 +167,17 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var items = new List<DocumentSummary>(page1.Count);
         foreach (var d in page1)
         {
-            var states = statesByDocument.TryGetValue(d.Id, out var found)
+            IReadOnlyList<DocumentSheetState> sheets = statesByDocument.TryGetValue(d.Id, out var found)
                 ? found
-                : new Dictionary<string, string>(StringComparer.Ordinal);
+                : [];
 
             // ⛔ Немає підсумку — `null`, а не нуль: документ не перевіряли.
             var findings = findingsByDocument.GetValueOrDefault(d.Id);
 
             items.Add(new DocumentSummary(
-                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, states, d.NameL10n,
+                d.Id, d.ProjectId, d.BusinessKey, d.CreatedAt, d.SheetCount, ToStateMap(sheets), d.NameL10n,
                 d.ModifiedAt, d.ModifiedByDisplayName, findings?.ErrorCount, findings?.WarningCount,
-                late.Contains(d.Id)));
+                late.Contains(d.Id), sheets));
         }
 
         return new PagedResult<DocumentSummary>(
@@ -191,6 +193,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var rules = await db.SheetGroupRules
             .AsNoTracking()
             .Where(r => r.TemplateVersionId == templateVersionId)
+            .OrderBy(r => r.Id)
             .Take(MaxRules)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -203,6 +206,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var groups = await db.SheetDefs
             .AsNoTracking()
             .Where(s => s.TemplateVersionId == templateVersionId && s.SheetGroup != null)
+            .OrderBy(s => s.Id)
             .Select(s => new { s.Id, s.SheetGroup })
             .Take(MaxSheets)
             .ToListAsync(ct)
@@ -248,6 +252,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         var rules = await db.SheetGroupRules
             .AsNoTracking()
             .Where(r => r.TemplateVersionId == templateVersionId)
+            .OrderBy(r => r.Id)
             .Take(MaxRules)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -276,6 +281,13 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// звичайне, неконкурентне створення документа отримує той самий
     /// впізнаваний номер, що й до цієї правки. Дірки в нумерації з'являються
     /// лише там, де без них був би <c>500</c> або відмова.
+    ///
+    /// ⛔ `R-17`. Номер рахувався як <c>COUNT + 1</c> — і ключ ВИДАЛЕНОГО
+    /// документа видавався знову: видалили <c>P5-V3-0005</c>, наступний
+    /// створений — знову <c>P5-V3-0005</c>. Той самий ключ в аудиті, у назвах
+    /// експортів і в листуванні означав тепер два різні документи. Тепер
+    /// номер лише зростає: від НАЙБІЛЬШОГО виданого (<see cref="HighestIssuedNumberAsync"/>),
+    /// а не від кількості живих.
     /// </remarks>
     public async Task<string> NextBusinessKeyAsync(
         int projectId, int templateVersionId, CancellationToken ct)
@@ -283,10 +295,18 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // ⚠ Ключ будується з проєкту і порядкового номера, а не з GUID:
         // BusinessKey потрапляє в аудит і в назви експортів, і людина мусить
         // упізнавати його з першого погляду.
-        var used = await db.Documents
+        var count = await db.Documents
             .AsNoTracking()
             .CountAsync(d => d.ProjectId == projectId, ct)
             .ConfigureAwait(false);
+
+        // ⚠ `Max`, а не саме лише найбільший номер: ключі, задані людиною
+        // (`ChangeDocumentKeyHandler`), шаблону не мають і в номер не
+        // рахуються, але й не мають зсунути нумерацію НАЗАД — кількість
+        // документів лишається нижньою межею, як і було.
+        var used = Math.Max(
+            count,
+            await HighestIssuedNumberAsync(projectId, ct).ConfigureAwait(false));
 
         // ⚠ Розкид на повторі — від ОДИНИЦІ, не від нуля: нульовий зсув
         // повернув би рівно той номер, на якому запит щойно програв, тобто
@@ -313,8 +333,111 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // Унікальність тримає індекс; сюди можна дійти лише якщо хтось створює
         // документи швидше, ніж ми перебираємо номери.
         throw new Application.Errors.BusinessRuleException(
-            "ECR-DOC-0409", "Не вдалося підібрати вільний бізнес-ключ документа.");
+            "ECR-DOC-0409", "Не вдалося підібрати вільний бізнес-ключ документа.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0409.businessKeyExhausted" });
     }
+
+    /// <summary>
+    /// Найбільший порядковий номер, який проєкт УЖЕ видавав документу, —
+    /// живому, видаленому чи перейменованому (`R-17`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без міграції схеми, і це свідомо: окремий лічильник означав би нову
+    /// таблицю чи колонку, а слід кожного виданого номера вже є. Живі
+    /// документи несуть його в <c>BusinessKey</c>; видалені й перейменовані —
+    /// у журналі безпеки (<c>aud.SecurityEvent</c>, події
+    /// <c>DocumentDeleted</c> з <c>businessKey</c> і <c>DocumentKeyChanged</c>
+    /// з <c>oldKey</c> — `DeleteDocumentHandler`, `ChangeDocumentKeyHandler`).
+    ///
+    /// ⚠ Межа, названа вголос: журнал пишеться ПІСЛЯ коміту видалення, і
+    /// архівація (`ArchiveJob`) з часом переносить старі події з
+    /// <c>aud.SecurityEvent</c>. Номер, чий слід уже заархівовано або не
+    /// записався через збій журналу, знову стає вільним. Повністю закрити це
+    /// може лише власний лічильник — тобто міграція, якої ця правка не додає.
+    ///
+    /// ⚠ Подій такого роду — одиниці (видалення чернетки й зміна ключа —
+    /// рідкісні ручні дії), тож читання без предиката <c>ChangedAt</c> по всіх
+    /// партиціях журналу коштує мало, а обмежити його вікном означало б знову
+    /// видавати номер, видалений давніше за вікно.
+    /// </remarks>
+    private async Task<int> HighestIssuedNumberAsync(int projectId, CancellationToken ct)
+    {
+        var prefix = string.Create(CultureInfo.InvariantCulture, $"P{projectId}-V");
+
+        var live = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.ProjectId == projectId && d.BusinessKey.StartsWith(prefix))
+            .Select(d => d.BusinessKey)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var project = projectId.ToString(CultureInfo.InvariantCulture);
+
+        var released = await db.Database
+            .SqlQuery<string>($"""
+                SELECT JSON_VALUE(e.DetailsJson, '$.businessKey') AS [Value]
+                  FROM aud.SecurityEvent AS e
+                 WHERE e.EventType = {DeletedEventType}
+                   AND JSON_VALUE(e.DetailsJson, '$.projectId') = {project}
+                UNION ALL
+                SELECT JSON_VALUE(e.DetailsJson, '$.oldKey') AS [Value]
+                  FROM aud.SecurityEvent AS e
+                 WHERE e.EventType = {KeyChangedEventType}
+                   AND JSON_VALUE(e.DetailsJson, '$.projectId') = {project}
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var highest = 0;
+
+        foreach (var key in live.Concat(released))
+        {
+            if (NumberOf(key, prefix) is { } number && number > highest)
+            {
+                highest = number;
+            }
+        }
+
+        return highest;
+    }
+
+    /// <summary>
+    /// Порядковий номер із ключа <c>P{проєкт}-V{версія}-{номер}</c>; <c>null</c> —
+    /// ключ іншого вигляду (заданий людиною) або чужого проєкту.
+    /// </summary>
+    public static int? NumberOf(string? businessKey, string prefix)
+    {
+        if (businessKey is null || !businessKey.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var dash = businessKey.IndexOf('-', prefix.Length);
+        if (dash <= prefix.Length || dash == businessKey.Length - 1)
+        {
+            return null;
+        }
+
+        // ⚠ Між `V` і дефісом — лише цифри версії: `P5-V3x-0007` — не наш ключ.
+        for (var i = prefix.Length; i < dash; i++)
+        {
+            if (!char.IsAsciiDigit(businessKey[i]))
+            {
+                return null;
+            }
+        }
+
+        return int.TryParse(
+            businessKey.AsSpan(dash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+            ? number
+            : null;
+    }
+
+    /// <summary>Подія журналу про видалення документа — `DeleteDocumentHandler.DeletedEventType`.</summary>
+    private const string DeletedEventType = Application.Documents.DeleteDocumentHandler.DeletedEventType;
+
+    /// <summary>Подія журналу про зміну ключа — `ChangeDocumentKeyHandler.EventType`.</summary>
+    private const string KeyChangedEventType = Application.Documents.ChangeDocumentKeyHandler.EventType;
 
     /// <inheritdoc />
     public async Task<bool> HasSheetAsync(long documentId, int sheetDefId, CancellationToken ct)
@@ -329,6 +452,24 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
             .AsNoTracking()
             .Where(d => d.Id == documentId)
             .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<int?> FindProjectTemplateVersionIdAsync(int projectId, CancellationToken ct)
+        => await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (int?)p.TemplateVersionId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public async Task<Domain.Enums.ProjectStatus?> FindProjectStatusAsync(int projectId, CancellationToken ct)
+        => await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (Domain.Enums.ProjectStatus?)p.Status)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
@@ -405,6 +546,81 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                 ct);
     }
 
+    /// <summary>
+    /// Стан КОЖНОГО аркуша складу за період: рядок <c>wf.ApprovalState</c>, а
+    /// де його немає — <c>Draft</c>. ЄДИНЕ місце, звідки стан аркуша беруть і
+    /// картка документа (<see cref="StatesAsync"/>), і сторінка переліку
+    /// (<see cref="StatesBatchAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ U-03. Перелік показував «—» на документі, який смуга над ним рахувала
+    /// як «1 Draft», а фільтр <c>State = Draft</c> — повертав: три відповіді про
+    /// стан одного документа на одному екрані. Причина — джерелом рядків тут був
+    /// <c>wf.ApprovalState</c>, тобто аркуш БЕЗ рядка стану просто не потрапляв у
+    /// словник, тоді як <see cref="WhereState"/> і
+    /// <c>DocumentListSummaryStore</c> обидва рахують такий аркуш чернеткою
+    /// (рядок стану з'являється лише з першим поданням, <c>S-17</c>).
+    ///
+    /// ⛔ Тому джерело рядків — СКЛАД документа (<c>doc.DocumentSheet</c>,
+    /// <c>IsIncluded</c>), рівно як у тих двох; рядок стану лише ДОповнює його.
+    /// Це не четверте правило, а те саме, записане на шляху читання: щоб два
+    /// місця не розійшлися знову, обидва методи читають цей один запит.
+    ///
+    /// ⚠ Наслідок, який називаю прямо: рядок <c>ApprovalState</c> для аркуша
+    /// ПОЗА складом (аркуш вилучили після подання) у словник більше не
+    /// потрапляє. Так і має бути — і смуга, і фільтр його теж не бачать, а
+    /// показувати стан аркуша, якого в документі немає, означало б четверту
+    /// відповідь замість третьої.
+    ///
+    /// ⚠ Корельований підзапит, а не <c>LEFT JOIN</c> у LINQ: він перекладається
+    /// в один <c>OUTER APPLY</c>, тобто запит лишається ОДИН на всю сторінку
+    /// (<c>Q-167</c>) — жодного циклу по документах.
+    ///
+    /// ⚠ <c>PeriodKey</c> стоїть у предикаті партиційованої <c>wf.ApprovalState</c>
+    /// (урок <c>WR-05</c>).
+    ///
+    /// ⚠ Назва й порядок аркуша (<c>SheetDef.NameL10n</c>, <c>Ordinal</c>) —
+    /// з ТОГО Ж з'єднання з <c>cfg.SheetDef</c>, що вже дає код: перелік
+    /// отримує назви без жодного додаткового запиту (<c>Q-167</c>). Сортування
+    /// — у SQL, до <c>Take</c>: стеля обрізає хвіст, а не випадкові аркуші.
+    /// </remarks>
+    private IQueryable<SheetStateRow> SheetStatesQuery(long[] documentIds, int periodKey)
+        => db.DocumentSheets
+            .AsNoTracking()
+            .Where(s => documentIds.Contains(s.DocumentId) && s.IsIncluded)
+            .Join(
+                db.SheetDefs,
+                s => s.SheetDefId,
+                d => d.Id,
+                (s, d) => new { s.DocumentId, s.SheetDefId, d.Code, d.NameL10n, d.Ordinal })
+            .OrderBy(s => s.DocumentId)
+            .ThenBy(s => s.Ordinal)
+            .ThenBy(s => s.Code)
+            .Select(s => new SheetStateRow(
+                s.DocumentId,
+                s.Code,
+                s.NameL10n,
+                db.ApprovalStates
+                    .Where(a => a.DocumentId == s.DocumentId
+                                && a.SheetDefId == s.SheetDefId
+                                && a.PeriodKey == periodKey)
+                    .Select(a => (DocumentStatus?)a.Status)
+                    .FirstOrDefault()));
+
+    /// <summary>Аркуш складу, його назва і стан; <c>null</c> — рядка стану ще немає.</summary>
+    private sealed record SheetStateRow(long DocumentId, string Code, LocalizedText NameL10n, DocumentStatus? Status);
+
+    /// <summary>Рядок запиту → аркуш контракту; аркуш без рядка стану — <c>Draft</c> (<c>U-03</c>).</summary>
+    private static DocumentSheetState ToSheet(SheetStateRow row)
+        => new(row.Code, row.NameL10n, (row.Status ?? DocumentStatus.Draft).ToString());
+
+    /// <summary>
+    /// Словник «код → стан» із тих самих аркушів — щоб <c>SheetStates</c> і
+    /// <c>Sheets</c> не могли розійтися: друге поле не має власного джерела.
+    /// </summary>
+    private static Dictionary<string, string> ToStateMap(IReadOnlyList<DocumentSheetState> sheets)
+        => sheets.ToDictionary(s => s.Code, s => s.State, StringComparer.Ordinal);
+
     /// <summary>Стан аркушів за період; порожньо, якщо період не вказано.</summary>
     /// <remarks>
     /// ⛔ Q-271. Ключ словника — <c>SheetDef.Code</c>, а НЕ числовий
@@ -417,66 +633,64 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
     /// статусу подання/затвердження не оновлювався НІКОЛИ, попри те що сам
     /// запит `/submit`/`/approve` спрацьовував і стан у базі мінявся.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<string, string>> StatesAsync(
+    private async Task<IReadOnlyList<DocumentSheetState>> StatesAsync(
         long documentId, PeriodKeyFilter period, CancellationToken ct)
     {
         if (period.Value is not { } periodKey)
         {
-            return new Dictionary<string, string>(StringComparer.Ordinal);
+            return [];
         }
 
-        var states = await db.ApprovalStates
-            .AsNoTracking()
-            .Where(a => a.DocumentId == documentId && a.PeriodKey == periodKey)
-            .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { s.Code, a.Status })
+        var states = await SheetStatesQuery([documentId], periodKey)
             .Take(MaxSheets)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return states.ToDictionary(
-            s => s.Code,
-            s => s.Status.ToString(),
-            StringComparer.Ordinal);
+        return [.. states.Select(ToSheet)];
     }
 
     /// <summary>Стан аркушів кількох документів ОДНИМ запитом; порожньо, якщо період не вказано.</summary>
     /// <remarks>
     /// ⛔ Q-167 (аудит фази 2, продуктивність). Той самий стан, що й
-    /// <see cref="StatesAsync"/>, але для сторінки документів разом:
+    /// <see cref="StatesAsync"/> — буквально той самий запит
+    /// (<see cref="SheetStatesQuery"/>), лише для сторінки документів разом:
     /// `WHERE DocumentId IN (...)`, згруповано на клієнті, а не запит на
     /// кожен документ сторінки.
+    ///
+    /// ⚠ Документ БЕЗ жодного аркуша складу у словнику відсутній — як і
+    /// раніше. Рядка для нього тут узяти нізвідки: словник — «аркуш → стан»,
+    /// а аркушів немає.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>> StatesBatchAsync(
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<DocumentSheetState>>> StatesBatchAsync(
         IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
     {
         if (period.Value is not { } periodKey || documentIds.Count == 0)
         {
-            return new Dictionary<long, IReadOnlyDictionary<string, string>>();
+            return new Dictionary<long, IReadOnlyList<DocumentSheetState>>();
         }
 
-        var states = await db.ApprovalStates
-            .AsNoTracking()
-            .Where(a => documentIds.Contains(a.DocumentId) && a.PeriodKey == periodKey)
-            .Join(db.SheetDefs, a => a.SheetDefId, s => s.Id, (a, s) => new { a.DocumentId, s.Code, a.Status })
+        // Масив, а не `IReadOnlyList`: `Contains` над масивом EF перекладає в
+        // `IN (...)`, над інтерфейсом — не гарантовано (та сама причина, що в
+        // `ListAsync` для переліку проєктів).
+        var states = await SheetStatesQuery([.. documentIds], periodKey)
             .Take(documentIds.Count * MaxSheets)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⚠ `GroupBy` на клієнті зберігає порядок рядків усередині групи —
+        // тобто порядок аркушів із SQL (`Ordinal`).
         return states
             .GroupBy(s => s.DocumentId)
             .ToDictionary(
                 g => g.Key,
-                IReadOnlyDictionary<string, string> (g) => g.ToDictionary(
-                    s => s.Code,
-                    s => s.Status.ToString(),
-                    StringComparer.Ordinal));
+                IReadOnlyList<DocumentSheetState> (g) => [.. g.Select(ToSheet)]);
     }
 
     /// <summary>Лічильники ОСТАННЬОГО підсумку перевірки для сторінки документів — одним запитом.</summary>
     /// <remarks>
     /// ⚠ Читання збереженого підсумку, не повторний прогін (<c>BE-09</c>).
     /// Документа без підсумку у словнику НЕМАЄ — і саме це дає <c>null</c>.
-    /// Два підсумки з однаковим <c>RunAt</c> — рідкість; береться будь-який із них.
+    /// Два підсумки з однаковим <c>RunAt</c> — рідкість; береться пізніше записаний (більший <c>Id</c>).
     /// </remarks>
     private async Task<IReadOnlyDictionary<long, LatestFindings>> LatestFindingsBatchAsync(
         IReadOnlyList<long> documentIds, PeriodKeyFilter period, CancellationToken ct)
@@ -493,6 +707,11 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
                         && v.RunAt == db.ValidationResults
                             .Where(x => x.DocumentId == v.DocumentId && x.PeriodKey == periodKey)
                             .Max(x => x.RunAt))
+            // ⚠ Порядок визначає, КОТРИЙ із двох підсумків з однаковим `RunAt`
+            // бере `g.First()` нижче: пізніше записаний (більший `Id`), а не
+            // той, що план запиту віддав першим (EF 10102).
+            .OrderBy(v => v.DocumentId)
+            .ThenByDescending(v => v.Id)
             .Select(v => new LatestFindings(v.DocumentId, v.ErrorCount, v.WarningCount))
             .Take(documentIds.Count * MaxRunTies)
             .ToListAsync(ct)
@@ -584,6 +803,7 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
 
         var late = await LateEditDocumentIds(period)
             .Where(id => ids.Contains(id))
+            .OrderBy(id => id)
             .Take(documentIds.Count)
             .ToListAsync(ct)
             .ConfigureAwait(false);

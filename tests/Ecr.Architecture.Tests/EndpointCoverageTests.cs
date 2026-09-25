@@ -402,7 +402,7 @@ public sealed partial class EndpointCoverageTests
                 "deny.NoGrant", "deny.PeriodNotOpenYet", "deny.PeriodClosed", "deny.OutOfAccessWindow",
                 "deny.DocumentSubmitted", "deny.DocumentApproved", "deny.ColumnReadOnly", "deny.RowReadOnly",
                 "deny.CalculatedCell", "deny.ProjectArchived", "deny.ArchivingInProgress", "deny.BusinessRule",
-                "deny.SimulationReadOnly", "deny.OutsidePermitWindow",
+                "deny.SimulationReadOnly", "deny.OutsidePermitWindow", "deny.InsufficientGrantLevel",
             ],
             "Підказка сірої комірки за причиною заборони."),
 
@@ -423,10 +423,46 @@ public sealed partial class EndpointCoverageTests
             ],
             "Підпис поля /health/db (FieldLabelKeys)."),
 
+        // ⚠ Запасний варіант — сам ідентифікатор (`hasText(key) ? t(key) : name`),
+        // тож перевірка без рядка в сіді не дає `⟦…⟧`; але три відомі — названі тут.
+        new("pages/admin/HealthPage.tsx", "key", 1, "pages/admin/HealthPage.tsx",
+            ["health.check.db", "health.check.jobs", "health.check.sources"],
+            "Назва картки перевірки стану (checkLabel, U-14): ім'я з AddCheck<…> у Program.cs."),
+
+        // ⚠ Ключі — увесь каталог sec.Permission із 09-seed.sql станом на 2026-09-23.
+        // Нове право без рядка тут цей сторож НЕ побачить (на екрані лишиться сам
+        // код, не `⟦…⟧`); повноту стереже permissionLabel.test.ts, що звіряє сід сам із собою.
+        new("features/security/permissionLabel.ts", "key", 1, "features/security/permissionLabel.ts",
+            PermissionLabelKeys, "Назва права в матриці /admin/security (U-11)."),
+
         new("features/projects/CreateProjectModal.tsx", "ProjectFieldLabelKey[field]", 1,
             "features/projects/CreateProjectModal.tsx",
             ["periods.code", "periods.name", "periods.timeZone", "periods.templateVersion", "periods.policy", "periods.customCount"],
             "Перелік бракуючих полів форми проєкту."),
+
+        // U-18: той самий рядок «Still needed» у діалозі нового довідника.
+        new("features/registries/CreateRegistryModal.tsx", "RegistryFieldLabelKey[field]", 1,
+            "features/registries/CreateRegistryModal.tsx",
+            ["registries.code", "registries.name"],
+            "Перелік бракуючих полів форми нового довідника."),
+
+        // ⚠ Опис функції в підказці редактора виразів (`hasText(key) ? t(key) : —`):
+        // функцію без рядка підказка показує самою сигнатурою, тож перелік — лише
+        // ті, що вже мають текст у сіді (діалекти Template і Methodology, `02b` §7–§8).
+        new("features/expressions/describe.ts", "key", 1, "features/expressions/describe.ts",
+            [
+                "expressions.fn.abs", "expressions.fn.average", "expressions.fn.convert",
+                "expressions.fn.count", "expressions.fn.if", "expressions.fn.iferror", "expressions.fn.max",
+                "expressions.fn.min", "expressions.fn.product", "expressions.fn.regfield",
+                "expressions.fn.round", "expressions.fn.sum", "expressions.fn.sumif", "expressions.fn.acos",
+                "expressions.fn.asin", "expressions.fn.atan", "expressions.fn.ceiling", "expressions.fn.cos",
+                "expressions.fn.exp", "expressions.fn.floor", "expressions.fn.ieeeremainder",
+                "expressions.fn.ln", "expressions.fn.log", "expressions.fn.log10", "expressions.fn.pow",
+                "expressions.fn.sign", "expressions.fn.sin", "expressions.fn.sqrt", "expressions.fn.tan",
+                "expressions.fn.truncate", "expressions.fn.substance", "expressions.fn.ifs",
+                "expressions.fn.in",
+            ],
+            "Короткий опис функції в переліку доповнення й при наведенні."),
 
         new("pages/admin/SnapshotsPage.tsx", "blockedReason", 1, "pages/admin/SnapshotsPage.tsx",
             ["snapshots.parametersUnknown", "snapshots.parametersBlocked"],
@@ -459,6 +495,15 @@ public sealed partial class EndpointCoverageTests
         new("pages/admin/ExpressionsPage.tsx", "`expressions.check.${check}`", 1, "pages/admin/ExpressionsPage.tsx",
             ["expressions.check.Cycle", "expressions.check.References", "expressions.check.Types", "expressions.check.Units"],
             "SkippedChecks перевірки виразу."),
+        new("pages/admin/RegistriesPage.tsx", "`registries.referenceKind.${kind}`", 1,
+            "pages/admin/RegistriesPage.tsx",
+            [
+                "registries.referenceKind.cells", "registries.referenceKind.headerValues",
+                "registries.referenceKind.registryValues", "registries.referenceKind.childEntries",
+                "registries.referenceKind.links", "registries.referenceKind.methodologyConstants",
+                "registries.referenceKind.methodologySubstances",
+            ],
+            "V-08: види посилань на запис довідника (RegistryEntryReferences.ByKind)."),
 
         new("shared/ui/StatusBadge.tsx", "statusKey(kind, state)", 1, "shared/ui/StatusBadge.tsx",
             [.. StatusKeys("sheet"), .. StatusKeys("period"), .. StatusKeys("job"), .. StatusKeys("version"),
@@ -484,9 +529,23 @@ public sealed partial class EndpointCoverageTests
         new("features/notifications/ChannelsPanel.tsx", "key", 1, null, [], "messageKey проби каналу."),
         new("features/integration/TestDataSourceModal.tsx", "key", 1, null, [], "messageKey проби джерела."),
         new("features/jobs/JobFacts.tsx", "errorKey(errorCode)", 1, null, [], "errorCode провалу фонової задачі — код каталогу помилок сервера."),
+        new("shared/ui/problemText.ts", "key", 1, null, [],
+            "errorCodeText (X-04): errorCode провалу задачі — код каталогу помилок сервера; без рядка — запасний текст викликача."),
         new("features/registries/RegistryImportPanel.tsx", "error.messageKey", 1, null, [],
             "messageKey рядка звіту імпорту записів довідника (BE-24, RegistryEntryImportError) — "
             + "реюзить відкритий набір ключів валідації UpsertRegistryEntryHandler, клієнт його не перелічує."),
+
+        // F-15/B-12 (четвертий раунд UX): перелік проблем публікації методології —
+        // закритий набір, що його породжує сервер (MethodologyPublishChecks).
+        new("features/methodologies/publishError.ts", "key", 1, "features/methodologies/publishError.ts",
+            [
+                "publish.problem.constantNotNumber", "publish.problem.constantNoText",
+                "publish.problem.categoryLabelInExpression", "publish.problem.textConstantInArithmetic",
+                "publish.problem.numberReturnsText", "publish.problem.textReturnsNumber",
+                "publish.problem.textOutput", "publish.problem.importNoVersion",
+                "publish.problem.libraryHasRules", "publish.problem.ambiguousReference",
+            ],
+            "Пункт переліку проблем публікації (PublishProblemKeys)."),
     ];
 
     // ⚠ Властивості, а не поля: `DynamicKeySites` вище ініціалізується раніше
@@ -498,6 +557,52 @@ public sealed partial class EndpointCoverageTests
         "nav.expressions", "nav.units", "nav.security", "nav.periods", "nav.sources", "nav.mapping",
         "nav.jobs", "nav.snapshots", "nav.campaign", "nav.audit", "nav.consistency", "nav.uiStrings",
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
+    ];
+
+    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 41 право каталогу <c>sec.Permission</c>.</summary>
+    private static string[] PermissionLabelKeys =>
+    [
+        "permission.Template.View",
+        "permission.Template.Edit",
+        "permission.Template.Publish",
+        "permission.Registry.View",
+        "permission.Registry.EditData",
+        "permission.Registry.EditDefinition",
+        "permission.Registry.Publish",
+        "permission.Document.View",
+        "permission.Document.Create",
+        "permission.Document.Delete",
+        "permission.Document.Import",
+        "permission.Document.Export",
+        "permission.Document.Reopen",
+        "permission.Document.ChangeKey",
+        "permission.Project.Manage",
+        "permission.Period.Configure",
+        "permission.Period.Reopen",
+        "permission.Calculation.View",
+        "permission.Calculation.EditFormula",
+        "permission.Calculation.EditConstant",
+        "permission.Calculation.EditRule",
+        "permission.Calculation.Publish",
+        "permission.Calculation.Recalculate",
+        "permission.Calculation.ManageRequiredInputs",
+        "permission.Report.ViewRegulatory",
+        "permission.Report.BuildSnapshot",
+        "permission.Report.Export",
+        "permission.Report.EditDefinition",
+        "permission.Report.ViewCampaign",
+        "permission.Integration.View",
+        "permission.Integration.Manage",
+        "permission.Integration.EditSchedule",
+        "permission.Uom.EditCatalog",
+        "permission.Security.ManageUsers",
+        "permission.Security.ManageRoles",
+        "permission.Security.ViewAudit",
+        "permission.Security.Simulate",
+        "permission.System.ViewHealth",
+        "permission.System.RunJob",
+        "permission.System.ManageLocalization",
+        "permission.System.ManageNotifications",
     ];
 
     private static string[] NotificationEventKeys =>

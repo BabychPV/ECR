@@ -248,6 +248,90 @@ public sealed class ArchiveJobTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task RowStore_після_архівації_не_фабрикує_нові_порожні_екземпляри_а_читає_архів()
+    {
+        var doc = await DocumentAsync(202608);
+        await CellAsync(doc, 33m);
+
+        // EnsureTableInstancesAsync читає аркуші документа (ФВ-3.2);
+        // TestDocumentBuilder їх не заводить, бо решті тестів вони не
+        // потрібні — без цього рядка метод вийшов би нуль-аркушевою гілкою,
+        // не архівною, і не перевіряв би те, що тут перевіряється.
+        await using (var seed = sql.CreateContext())
+        {
+            seed.DocumentSheets.Add(
+                new Ecr.Domain.Entities.Documents.DocumentSheet(doc.DocumentId, doc.SheetDefId));
+            await seed.SaveChangesAsync();
+        }
+
+        await ArchiveAsync(doc.ProjectId, 202608, 202608);
+
+        await using var db = sql.CreateContext();
+        var archive = new Ecr.Infrastructure.Persistence.ArchiveAwareCellReader(db);
+        var bulk = new Ecr.Infrastructure.Persistence.BulkCellLoader(sql.ConnectionString, 1000);
+        var clock = new TestClock(new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc));
+        var rowStore = new Ecr.Infrastructure.Persistence.RowStore(db, bulk, clock, archive);
+
+        // ⛔ ГОЛОВНИЙ баг F-13. Без фолбеку `existing` порожній читається як
+        // «жодної таблиці ще не створено», і виклик фабрикує НОВИЙ порожній
+        // TableInstance з НОВИМ Id замість того, щоб визнати період
+        // заархівованим і нічого не створювати.
+        var created = await rowStore.EnsureTableInstancesAsync(doc.DocumentId, doc.PeriodKey, default);
+        Assert.Equal(0, created);
+        Assert.Equal(0, await CountAsync("doc.TableInstance", doc.PeriodKey.Value));
+
+        // Фолбек на arc.TableInstance повертає ТОЙ САМИЙ Id, не новий.
+        var instances = await rowStore.GetTableInstancesAsync(doc.DocumentId, doc.PeriodKey, default);
+        var instance = Assert.Single(instances);
+        Assert.Equal(doc.TableInstanceId, instance.TableInstanceId);
+
+        // Ідентифікатори рядків — ті самі, не нові.
+        var rowIds = await rowStore.GetRowIdsAsync(doc.TableInstanceId, doc.PeriodKey, default);
+        Assert.Equal(doc.RowIds.Count, rowIds.Count);
+        Assert.All(doc.RowIds, id => Assert.Contains(id, rowIds.Values));
+
+        // Версія — порожній рядок (`arc.TableRow` не має `RowVersion`), а не
+        // виняток на неіснуючій колонці.
+        var versions = await rowStore.GetRowVersionsAsync(doc.TableInstanceId, doc.PeriodKey, default);
+        Assert.Equal(doc.RowIds.Count, versions.Count);
+        Assert.All(versions.Values, v => Assert.Equal(string.Empty, v));
+
+        // Прапорець осиротілості — завжди false: OrphanScanJob архіву не торкається.
+        var orphans = await rowStore.GetOrphanFlagsAsync(doc.TableInstanceId, doc.PeriodKey, default);
+        Assert.Equal(doc.RowIds.Count, orphans.Count);
+        Assert.All(orphans.Values, v => Assert.False(v));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task NormalizedCellStore_після_архівації_читає_arc_замість_порожнього_зрізу()
+    {
+        var doc = await DocumentAsync(202609);
+        await CellAsync(doc, 88.5m);
+
+        await ArchiveAsync(doc.ProjectId, 202609, 202609);
+
+        await using var db = sql.CreateContext();
+        var archive = new Ecr.Infrastructure.Persistence.ArchiveAwareCellReader(db);
+        var cellStore = new Ecr.Infrastructure.Persistence.NormalizedCellStore(db, archive);
+
+        // ⛔ `doc.TableInstance` теж truncate'ний разом із рештою партиції:
+        // без фолбеку join не знаходить НІЧОГО, і GetTableSliceHandler
+        // побачив би порожню сітку, наче в документі взагалі немає даних.
+        var cells = await cellStore.ReadSliceAsync(doc.TableInstanceId, default);
+        Assert.Equal(88.5m, Assert.Single(cells).Value.ValueNumeric);
+
+        // Той самий шлях батчем (DocumentDataExporter).
+        var slices = await cellStore.ReadSlicesAsync([doc.TableInstanceId], default);
+        var slice = Assert.Single(slices);
+        Assert.Equal(doc.TableInstanceId, slice.Key);
+        Assert.Equal(88.5m, Assert.Single(slice.Value).Value.ValueNumeric);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
     public async Task Архівація_одного_проєкту_не_робить_рік_сусіда_нечитним()
     {
         // Два проєкти в ОДНОМУ періоді — тобто в одній партиції. Це не

@@ -2,10 +2,19 @@ import { useRef, useState, type JSX } from 'react';
 import { Alert, Badge, Button, Group, Modal, Stack, Table, Text } from '@mantine/core';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { ImportApplyRequest, ImportPreview } from '@/api/types';
+import type {
+  ImportApplyRequest,
+  ImportChange,
+  ImportPreview,
+  ImportRejection,
+  JobAcceptedResponse,
+  PatchCellsResponse,
+} from '@/api/types';
+import { denyText } from '@/features/grid/permissions';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { localized } from '@/shared/i18n/localized';
 
 /** Куди імпортувати. */
 export interface ImportPanelProps {
@@ -52,11 +61,22 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
 
   const apply = useMutation({
     mutationFn: (previewToken: string) =>
-      apiFetch(`/api/v1/documents/${documentId}/import/apply`, {
+      apiFetch<PatchCellsResponse | JobAcceptedResponse>(`/api/v1/documents/${documentId}/import/apply`, {
         method: 'POST',
         body: JSON.stringify({ previewToken } satisfies ImportApplyRequest),
       }),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      // ⛔ F-01: понад поріг (`LargeImportThreshold`, 2000 комірок) сервер
+      // відповідає `202` з `jobId` — імпорт ЩЕ НЕ застосовано. «Imported»
+      // тут було б неправдою: зрізи перечитались би до запису, а людина
+      // вирішила б, що зміни вже в документі. Результат — у «My tasks».
+      if (isQueued(result)) {
+        setPreview(null);
+        await queryClient.invalidateQueries({ queryKey: ['jobs'] });
+        showDone(t('import.queued'));
+        return;
+      }
+
       // Зрізи таблиць перечитуються цілком: імпорт зачіпає рядки, яких немає
       // на екрані, і часткове оновлення показало б половину змін.
       //
@@ -148,6 +168,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
               <Table striped withTableBorder className="ecr-sticky-head">
                 <Table.Thead>
                   <Table.Tr>
+                    <Table.Th>{t('import.table')}</Table.Th>
                     <Table.Th>{t('import.row')}</Table.Th>
                     <Table.Th>{t('import.column')}</Table.Th>
                     <Table.Th>{t('import.was')}</Table.Th>
@@ -156,7 +177,8 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                 </Table.Thead>
                 <Table.Tbody>
                   {preview.changes.map((change) => (
-                    <Table.Tr key={`${change.rowKey}:${change.columnCode}`}>
+                    <Table.Tr key={`${change.tableCode ?? ''}:${change.rowKey}:${change.columnCode}`}>
+                      <Table.Td>{tableOf(change)}</Table.Td>
                       <Table.Td>{change.rowKey}</Table.Td>
                       <Table.Td>{change.columnCode}</Table.Td>
                       <Table.Td>{show(change.oldValue)}</Table.Td>
@@ -171,6 +193,7 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
               <Table striped withTableBorder>
                 <Table.Thead>
                   <Table.Tr>
+                    <Table.Th>{t('import.table')}</Table.Th>
                     <Table.Th>{t('import.row')}</Table.Th>
                     <Table.Th>{t('import.column')}</Table.Th>
                     <Table.Th>{t('import.reason')}</Table.Th>
@@ -178,11 +201,16 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
                 </Table.Thead>
                 <Table.Tbody>
                   {preview.rejected.map((rejection) => (
-                    <Table.Tr key={`${rejection.rowKey}:${rejection.columnCode}`}>
-                      <Table.Td>{rejection.rowKey}</Table.Td>
+                    <Table.Tr
+                      key={`${rejection.tableCode ?? ''}:${rejection.excelCell ?? rejection.rowKey}:${rejection.columnCode}`}
+                    >
+                      <Table.Td>{tableOf(rejection)}</Table.Td>
+                      {/* ⚠ Значення поза рядками таблиці рядка системи не має —
+                          людині показується адреса комірки книги (`V-10`). */}
+                      <Table.Td>{rejection.excelCell ?? rejection.rowKey}</Table.Td>
                       <Table.Td>{rejection.columnCode}</Table.Td>
                       <Table.Td>
-                        {rejection.message} ({rejection.reasonCode})
+                        {rejectionText(rejection)} ({rejection.reasonCode})
                       </Table.Td>
                     </Table.Tr>
                   ))}
@@ -209,6 +237,11 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
   );
 }
 
+/** Чи відповідь застосування — «поставлено в чергу», а не готовий результат. */
+function isQueued(result: PatchCellsResponse | JobAcceptedResponse): result is JobAcceptedResponse {
+  return 'jobId' in result && typeof result.jobId === 'string' && result.jobId !== '';
+}
+
 /**
  * Значення комірки в таблиці diff.
  *
@@ -220,4 +253,59 @@ function show(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
 
   return String(value);
+}
+
+/**
+ * Таблиця рядка переліку — назвою мовою інтерфейсу, а коли назви немає, кодом.
+ *
+ * ⛔ `V-10`: у 91 таблиці шаблону ключі рядків і колонок однакові
+ * (`R1`/`C1`), тож «R1 · C1 · 5 → 6» без таблиці не каже, ДЕ зміниться число.
+ * Прочерк — лише для плану, побудованого до цієї правки (поля ще не було).
+ */
+function tableOf(item: ImportChange | ImportRejection): string {
+  const name = localized(item.tableNameL10n);
+
+  return name !== '' ? name : (item.tableCode ?? '—');
+}
+
+/**
+ * Причина відмови мовою інтерфейсу — за `messageKey` відмови.
+ *
+ * ⛔ `V-10`: доти тут стояв `rejection.message` — готове українське речення
+ * сервера («Правило доступу: лише читання.») незалежно від мови інтерфейсу.
+ * `message` лишається діагностикою для журналу й тут більше не показується.
+ *
+ * ⚠ Літерали, а не `t(rejection.messageKey)`: сторож
+ * `EndpointCoverageTests.Кожен_рядок_якого_просить_клієнт_є_в_каталозі`
+ * перевіряє лише ключі-літерали. Відмова правами (`deny.<причина>`) бере
+ * ТОЙ САМИЙ текст, що підказка сірої комірки сітки (`denyText`).
+ */
+function rejectionText(rejection: ImportRejection): string {
+  const key = rejection.messageKey ?? '';
+
+  switch (key) {
+    case 'err.ECR-CELL-4221.importCalculated':
+      return t('err.ECR-CELL-4221.importCalculated');
+    case 'err.ECR-ROW-0404.importNoRow':
+      return t('err.ECR-ROW-0404.importNoRow');
+    case 'err.ECR-ROW-0404.importOutsideRows':
+      return t('err.ECR-ROW-0404.importOutsideRows');
+    case 'err.ECR-CELL-0422.importIntegerDigits':
+      return t('err.ECR-CELL-0422.importIntegerDigits');
+    case 'err.ECR-IMP-0422.importInstanceMissing':
+      return t('err.ECR-IMP-0422.importInstanceMissing');
+    case 'err.ECR-IMP-0422.importTableMissing':
+      return t('err.ECR-IMP-0422.importTableMissing');
+    // ⛔ F-06: відмова типу — у перегляді, а не 422 на Apply.
+    case 'err.ECR-CELL-0422.importExpectsNumber':
+      return t('err.ECR-CELL-0422.importExpectsNumber');
+    case 'err.ECR-CELL-0422.importExpectsBoolean':
+      return t('err.ECR-CELL-0422.importExpectsBoolean');
+    case 'err.ECR-CELL-0422.importExpectsDate':
+      return t('err.ECR-CELL-0422.importExpectsDate');
+    case 'err.ECR-CELL-0422.importExpectsIdentifier':
+      return t('err.ECR-CELL-0422.importExpectsIdentifier');
+    default:
+      return (key.startsWith('deny.') ? denyText(key.slice('deny.'.length)) : null) ?? t('import.rejectedCell');
+  }
 }

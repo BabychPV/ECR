@@ -190,6 +190,100 @@ public sealed class PublishChecksTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Фіксована_таблиця_без_жодного_рядка_відхиляє_публікацію()
+    {
+        // ⛔ Живий стенд, 2026-09-25: шаблон версії 1, 92 таблиці, 0 RowDef —
+        // нові документи з такого шаблону створювалися без жодного рядка у
+        // фіксованих таблицях. `Run` цього не бачив: формул тут нема на який
+        // рядок писатися, а публікація все одно проходила.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main", TableRowMode.Fixed);
+        builder.Column(table, "Jan", isMonthColumn: true);
+
+        var version = builder.Version();
+
+        var diagnostic = Assert.Single(PublishChecks.CheckStructure(version));
+        Assert.Equal("ECR-TMPL-4228", diagnostic.Code);
+        Assert.Contains("Main", diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Фіксована_таблиця_з_рядком_проходить_публікацію()
+    {
+        // Друга половина, без якої перша нічого не означає: перевірка
+        // дивиться на НАЯВНІСТЬ рядка, а не забороняє тип таблиці цілком.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main", TableRowMode.Fixed);
+        builder.Column(table, "Jan", isMonthColumn: true);
+        builder.Row(table, "7001001", 1);
+
+        var version = builder.Version();
+
+        Assert.Empty(PublishChecks.CheckStructure(version));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Фіксована_таблиця_з_УСІМА_видаленими_рядками_відхиляє_публікацію()
+    {
+        // ⚠ `!IsDeleted`, а не `Rows.Count == 0`: таблиця з рядком, який
+        // м'яко видалили і не замінили новим, — для оператора та сама
+        // порожня таблиця, що й таблиця без жодного рядка від початку.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main", TableRowMode.Fixed);
+        builder.Column(table, "Jan", isMonthColumn: true);
+        var row = builder.Row(table, "7001001", 1);
+
+        Assert.Empty(PublishChecks.CheckStructure(builder.Version()));
+
+        TemplateBuilder.Delete(row);
+
+        var diagnostic = Assert.Single(PublishChecks.CheckStructure(builder.Version()));
+        Assert.Equal("ECR-TMPL-4228", diagnostic.Code);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Динамічна_таблиця_без_рядків_НЕ_блокує_публікацію()
+    {
+        // ⚠ `TableDef.AddRow` сам забороняє рядок для `RowMode.Dynamic` — тож
+        // «нуль рядків» тут єдиний можливий стан на момент публікації, і він
+        // законний: рядки додає користувач під час роботи.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main", TableRowMode.Dynamic);
+        builder.Column(table, "Jan", isMonthColumn: true);
+
+        var version = builder.Version();
+
+        Assert.Empty(PublishChecks.CheckStructure(version));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public void Змішана_таблиця_без_попередньо_заведених_рядків_НЕ_блокує_публікацію()
+    {
+        // ⛔ Свідоме звуження перевірки, назване прямо: `Mixed` — фіксовані
+        // рядки ПЛЮС можливість додавати свої (`TableDef.AllowsDynamicRows`).
+        // Нуль рядків на момент публікації — стартовий стан таблиці, яку
+        // заповнюють з нуля, а не дефект структури. Перевірка, що вимагала б
+        // рядка й тут, відхиляла б легітимну конфігурацію.
+        var builder = new TemplateBuilder { TemplateVersionId = 1 };
+        var sheet = builder.Sheet("Water");
+        var table = builder.Table(sheet, "Main", TableRowMode.Mixed);
+        builder.Column(table, "Jan", isMonthColumn: true);
+
+        var version = builder.Version();
+
+        Assert.Empty(PublishChecks.CheckStructure(version));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Синтаксична_помилка_у_виразі_дає_зауваження()
     {
         var fixture = Structure();

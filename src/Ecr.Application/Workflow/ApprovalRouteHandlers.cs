@@ -41,7 +41,12 @@ public sealed class GetApprovalRouteHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         var route = await workflow.FindProjectRouteAsync(projectId, ct).ConfigureAwait(false);
@@ -92,7 +97,12 @@ public sealed class ReplaceApprovalRouteHandler(
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.");
+                "ECR-AUTH-0403", $"Немає гранта Manage на проєкт {projectId}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectManageGrant",
+                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         // ⛔ Ролі перевіряються ДО будь-якої зміни. Крок на неіснуючу роль дав
@@ -102,7 +112,13 @@ public sealed class ReplaceApprovalRouteHandler(
         {
             if (!await workflow.RoleExistsAsync(roleId, ct).ConfigureAwait(false))
             {
-                throw new NotFoundException("ECR-SEC-0404", $"Ролі {roleId} не існує.");
+                throw new NotFoundException(
+                    "ECR-SEC-0404", $"Ролі {roleId} не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                        ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
         }
 
@@ -117,7 +133,14 @@ public sealed class ReplaceApprovalRouteHandler(
                 throw new BusinessRuleException(
                     "ECR-DOC-0422",
                     $"Кроки {i} і {i + 1} мають ту саму роль {roleIds[i]}: другий пройде той самий "
-                    + "користувач одразу за першим, тобто погодження не додасться.");
+                    + "користувач одразу за першим, тобто погодження не додасться.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-DOC-0422.approvalRouteConsecutiveRole",
+                        ["stepA"] = i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["stepB"] = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["roleId"] = roleIds[i].ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
             }
         }
 

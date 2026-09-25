@@ -1,8 +1,9 @@
 import type { JSX } from 'react';
-import { Code, Skeleton, Stack, Table, Text } from '@mantine/core';
+import { Alert, Code, Skeleton, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import type { CalculationResultDto, UnitRef } from '@/api/types';
 import { apiFetch } from '@/api/client';
+import { formatDecimal } from '@/shared/format';
 import { t } from '@/shared/i18n';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
@@ -32,8 +33,12 @@ export function CalculationResultsPanel({
   readonly documentId: number;
   readonly periodKey: number;
 }): JSX.Element {
+  // ⛔ F-02 (четвертий раунд UX): ключ — ПІД префіксом `['document', id,
+  // period]`. Саме його інвалідує завершений перерахунок (`SheetActions`) і
+  // кожна зміна робочого процесу; доти панель жила під окремим ключем, і після
+  // перерахунку показувала старі числа до перезавантаження сторінки.
   const results = useQuery({
-    queryKey: ['calculation-results', documentId, periodKey],
+    queryKey: ['document', documentId, periodKey, 'calculation-results'],
     queryFn: () => calculationResults(documentId, periodKey),
   });
 
@@ -69,6 +74,17 @@ export function CalculationResultsPanel({
               щоб ДОВЕСТИ, що методологія порахувала те саме, двозначність тут
               коштує найдорожче.
             */}
+            {/*
+              ⛔ F-05: входи змінилися після прогону — числа вже не відповідають
+              даним. Доти панель показувала їх як чинні, і документ подавали з
+              результатами, що рахували інші входи.
+            */}
+            {list.some((result) => result.isStale) && (
+              <Alert color="statusWarning" data-results-stale="" title={t('documents.calculationResultsStale')}>
+                {t('documents.calculationResultsStaleHint')}
+              </Alert>
+            )}
+
             {units.error !== null && (
               <ErrorAlert error={units.error} onRetry={() => void units.refetch()} />
             )}
@@ -90,7 +106,8 @@ export function CalculationResultsPanel({
                   >
                     <Table.Td>{result.sourceRowKey ?? '—'}</Table.Td>
                     <Table.Td>{result.outputCode}</Table.Td>
-                    <Table.Td>{result.value}</Table.Td>
+                    {/* ⚠ F-21: без 16 хвостових нулів сховища (`2.5000000000000000`). */}
+                    <Table.Td>{formatDecimal(result.value) ?? String(result.value)}</Table.Td>
                     <Table.Td>
                       {/*
                         ⚠ Три різні стани, а не один: довідник ще їде (місце
@@ -109,7 +126,12 @@ export function CalculationResultsPanel({
                     </Table.Td>
                     {/* ⚠ Версія методології поруч із числом обов'язкова: без
                         неї результат неможливо ані пояснити, ані відтворити. */}
-                    <Table.Td>{result.methodologyVersionId}</Table.Td>
+                    {/* ⚠ F-21: номер версії й код методології, а не ідентифікатор. */}
+                    <Table.Td>
+                      {result.methodologyVersion === null || result.methodologyVersion === undefined
+                        ? String(result.methodologyVersionId)
+                        : `${result.methodologyCode ?? ''} ${result.methodologyVersion}`.trim()}
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>

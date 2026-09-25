@@ -1,5 +1,6 @@
 // src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs
 using System.Globalization;
+using System.Text.Json;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -157,6 +158,8 @@ public sealed class ListMethodologyConstantsHandler(
 /// </remarks>
 public sealed class SaveMethodologyConstantHandler(
     IMethodologyDraftStore drafts,
+    IRegistryStore registries,
+    IUnitCatalog units,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -201,6 +204,31 @@ public sealed class SaveMethodologyConstantHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ V-17(b): неіснуюча речовина доходила до бази і падала на
+        // `FK_MC_Substance` — 500 «зверніться до адміністратора» на описку в
+        // номері. Видалений логічно запис — теж «немає»: звужувати константу
+        // записом поза обігом означає звузити її до нічого.
+        if (request.SubstanceEntryId is { } substanceEntryId)
+        {
+            var substance = await registries.FindEntryAsync(substanceEntryId, ct).ConfigureAwait(false);
+            if (substance is null || substance.IsDeleted)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0422",
+                    $"Константа «{constantCode.Value}»: речовини (запису довідника) {substanceEntryId} не існує.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.constantSubstanceNotFound",
+                        ["constantCode"] = constantCode.Value,
+                        ["substanceEntryId"] = substanceEntryId.ToString(CultureInfo.InvariantCulture),
+                    });
+            }
+        }
+
+        // ⛔ B-01: неіснуюча одиниця — 422 з ключем, а не 500 на `FK_MC_Unit`.
+        await MethodologyUnitChecks.RequireKnownAsync(units, request.UnitId, constantCode.Value, ct)
+            .ConfigureAwait(false);
 
         var candidates = await drafts
             .GetConstantsByCodeAsync(methodologyVersionId, constantCode.Value, ct)
@@ -359,6 +387,25 @@ public sealed class SaveMethodologyRuleHandler(
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ V-18: предикат і узгодженість набору перевіряються ДО зміни
+        // сутності. Доти зберігалося будь-що — `{not json`, `[1,2]`, однакові
+        // пріоритети, `{}` попереду конкретних правил, — і публікація теж це
+        // пропускала (`MethodologyRuleChecks`).
+        MethodologyRuleChecks.RequireValidPredicate(ruleCode.Value, matchJson);
+
+        if (isActive)
+        {
+            var others = await drafts.GetAllRulesAsync(methodologyVersionId, ct).ConfigureAwait(false);
+
+            MethodologyRuleChecks.RequireConsistentSet(
+            [
+                .. others
+                    .Where(r => r.IsActive && !string.Equals(r.Code, ruleCode.Value, StringComparison.OrdinalIgnoreCase))
+                    .Select(r => new MethodologyRuleChecks.RuleSpec(r.Code, r.MatchJson, r.Priority)),
+                new MethodologyRuleChecks.RuleSpec(ruleCode.Value, matchJson, priority),
+            ]);
+        }
+
         var existing = await drafts
             .FindRuleAsync(methodologyVersionId, ruleCode.Value, ct)
             .ConfigureAwait(false);
@@ -425,8 +472,19 @@ public sealed class ListMethodologyRequiredInputsHandler(
             .Select(b => b.ColumnDefId)
             .ToHashSet();
 
+        // ⚠ F-21: колонка — кодом, а не голим `ColumnDefId`.
+        var columnCodes = new Dictionary<int, string>();
+        foreach (var columnDefId in requiredInputs.Select(r => r.ColumnDefId).Distinct())
+        {
+            if (await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false) is { } column)
+            {
+                columnCodes[columnDefId] = column.Code;
+            }
+        }
+
         return [.. requiredInputs.Select(
-            r => MethodologyAuthoringMap.RequiredInput(r, activeColumns.Contains(r.ColumnDefId)))];
+            r => MethodologyAuthoringMap.RequiredInput(r, activeColumns.Contains(r.ColumnDefId))
+                with { ColumnCode = columnCodes.GetValueOrDefault(r.ColumnDefId) })];
     }
 }
 
@@ -578,6 +636,7 @@ public sealed class ListMethodologyOutputsHandler(
 /// </remarks>
 public sealed class SaveMethodologyOutputHandler(
     IMethodologyDraftStore drafts,
+    IUnitCatalog units,
     IUnitOfWork uow,
     IAccessDecisionService access,
     ICurrentUser currentUser)
@@ -619,6 +678,10 @@ public sealed class SaveMethodologyOutputHandler(
                     ["messageKey"] = "err.ECR-CALC-0404.version",
                     ["methodologyVersionId"] = methodologyVersionId.ToString(CultureInfo.InvariantCulture),
                 });
+
+        // ⛔ B-01: неіснуюча одиниця — 422 з ключем, а не 500 на `FK_MO_Unit`.
+        await MethodologyUnitChecks.RequireKnownAsync(units, unitId, outputCode.Value, ct)
+            .ConfigureAwait(false);
 
         var existing = await drafts
             .FindOutputAsync(methodologyVersionId, outputCode.Value, ct)
@@ -815,6 +878,7 @@ public sealed class SetMethodologyModesHandler(
 /// <summary>Прив'язки методології до колонок документів (<c>D-69</c>).</summary>
 public sealed class ListCalculationBindingsHandler(
     ICalculationBindingStore bindings,
+    IMethodologyDraftStore drafts,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
@@ -825,6 +889,7 @@ public sealed class ListCalculationBindingsHandler(
     /// <param name="methodologyId">Методологія.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Прив'язки, включно з вимкненими.</returns>
+    /// <exception cref="NotFoundException">Методології немає.</exception>
     public async Task<IReadOnlyList<CalculationBindingDto>> HandleAsync(
         int methodologyId, CancellationToken ct)
     {
@@ -832,14 +897,46 @@ public sealed class ListCalculationBindingsHandler(
 
         var found = await bindings.ListAsync(methodologyId, ct).ConfigureAwait(false);
 
+        // ⛔ B-07: порожній перелік — ще не відповідь «прив'язок немає».
+        // Неіснуюча методологія давала `200 []`, і клієнт показував «жодної
+        // прив'язки» на адресі, якої не існує. Питаємо лише коли порожньо:
+        // методологія з прив'язками існує за побудовою (`FK_CalcBinding_Methodology`).
+        if (found.Count == 0 && await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                "ECR-CALC-0404",
+                $"Методології {methodologyId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0404.methodology",
+                    ["methodologyId"] = methodologyId.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
         // Назви таблиць — одним запитом на весь перелік, не по запиту на прив'язку.
         var tables = await bindings
             .ListTableNamesAsync([.. found.Select(b => b.TableDefId).Distinct()], ct)
             .ConfigureAwait(false);
 
-        return [.. found.Select(b => tables.TryGetValue(b.TableDefId, out var table)
-            ? MethodologyAuthoringMap.Binding(b) with { TableCode = table.Code, TableNameL10n = table.NameL10n }
-            :MethodologyAuthoringMap.Binding(b))];
+        // ⚠ F-21: колонка — кодом, а не голим `ColumnDefId` («193 / 6017»).
+        // Прив'язок у методології — одиниці, тож по запиту на колонку.
+        var columnCodes = new Dictionary<int, string>();
+        foreach (var columnDefId in found.Select(b => b.ColumnDefId).Distinct())
+        {
+            if (await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false) is { } column)
+            {
+                columnCodes[columnDefId] = column.Code;
+            }
+        }
+
+        return [.. found.Select(b =>
+        {
+            var dto = MethodologyAuthoringMap.Binding(b) with { ColumnCode = columnCodes.GetValueOrDefault(b.ColumnDefId) };
+
+            return tables.TryGetValue(b.TableDefId, out var table)
+                ? dto with { TableCode = table.Code, TableNameL10n = table.NameL10n }
+                : dto;
+        })];
     }
 }
 
@@ -864,9 +961,12 @@ public sealed class ListCalculationBindingsHandler(
 public sealed class SaveCalculationBindingHandler(
     ICalculationBindingStore bindings,
     IMethodologyDraftStore drafts,
+    IMethodologyStore methodologies,
     IUnitOfWork uow,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    Domain.Abstractions.IClock clock)
 {
     /// <summary>Право на редагування правил прив'язки (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -898,9 +998,14 @@ public sealed class SaveCalculationBindingHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
         var code = EcrCode.Create(outputCode);
 
-        _ = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
+        var methodology = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-CALC-0404",
                 $"Методології {methodologyId} не існує.",
@@ -924,11 +1029,29 @@ public sealed class SaveCalculationBindingHandler(
 
         var tableDefId = column.TableDefId;
 
+        // ⛔ F-09 (четвертий раунд UX): предикат перевіряється тим самим правилом,
+        // що й предикат правила відбору (`MethodologyRuleChecks`). Доти `"not json"`
+        // зберігався з `200`, а `MethodologyRuleMatcher` вважає битий предикат
+        // таким, що не збігається НІ З ЧИМ — колонка лишалася порожньою мовчки.
+        RequireValidBindingPredicate(code.Value, matchJson);
+
         var existing = await bindings
             .FindAsync(columnDefId, methodologyId, code.Value, ct)
             .ConfigureAwait(false);
 
+        // ⛔ F-09: вихід мусить бути оголошений хоч однією версією методології.
+        // `NO_SUCH_OUT` приймався з `200`, і прив'язка чекала числа, якого жодна
+        // версія не дасть. ⚠ Вимкнути наявну прив'язку дозволено й тоді, коли
+        // виходу вже немає: інакше осиротілу прив'язку неможливо прибрати з прогону.
+        if (existing is null || isActive)
+        {
+            await RequireDeclaredOutputAsync(methodologyId, code.Value, ct).ConfigureAwait(false);
+        }
+
         CalculationBinding binding;
+
+        // Стан ДО правки — половина запису журналу; після `Update` його вже немає.
+        var before = existing is null ? null : new { existing.MatchJson, existing.IsActive };
 
         binding = existing
                   ?? new CalculationBinding(tableDefId, columnDefId, methodologyId, code.Value, matchJson);
@@ -943,10 +1066,138 @@ public sealed class SaveCalculationBindingHandler(
         {
             bindings.Add(binding);
         }
+        else if (string.Equals(before!.MatchJson, binding.MatchJson, StringComparison.Ordinal)
+                 && before.IsActive == binding.IsActive)
+        {
+            // Повтор того самого PUT — нічого не змінилось, і журналювати нічого.
+            return MethodologyAuthoringMap.Binding(binding);
+        }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ F-10 (UX-прохід, четвертий раунд): зміна прив'язки — у журнал
+        // структурних змін, у ТІЙ САМІЙ транзакції. Прив'язка живе на
+        // методології, а не на версії (клоном не копіюється), тож для
+        // ОПУБЛІКОВАНОЇ методології правка тут одразу змінює, куди лягають
+        // уже пораховані числа, — без чотирьох очей публікації і доти без
+        // жодного сліду, хто це зробив і що було до того.
+        //
+        // ⚠ Рішення: журнал, а не заборона. Заборонити зміну прив'язок
+        // опублікованої методології означало б зачинити їх назавжди: окремої
+        // версії прив'язок немає, і виправити помилкову колонку не було б чим.
+        // Чи потрібне тут погодження другою людиною — питання продукту
+        // (відкрите, названо у звіті лінії A), журнал потрібен за будь-якої
+        // відповіді. `publishedMethodology` у записі каже, чи діяла правка на
+        // живі числа.
+        var published = methodology.Versions.Any(v => v.Status == TemplateVersionStatus.Published);
+
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
+
+                    // ⚠ Нуль, як і для довідників: прив'язка — властивість
+                    // методології, а не однієї версії шаблону; таблиця й колонка — у JSON.
+                    TemplateVersionId: 0,
+                    EntityType: "cfg.CalculationBinding",
+                    EntityId: binding.Id,
+                    ChangeClass: ChangeClass.Guarded,
+                    Operation: existing is null ? "Create" : "Update",
+                    OldJson: before is null ? null : JsonSerializer.Serialize(new
+                    {
+                        matchJson = before.MatchJson,
+                        isActive = before.IsActive,
+                    }),
+                    NewJson: JsonSerializer.Serialize(new
+                    {
+                        methodologyId,
+                        tableDefId = binding.TableDefId,
+                        columnDefId,
+                        outputCode = binding.OutputCode,
+                        matchJson = binding.MatchJson,
+                        isActive = binding.IsActive,
+                        publishedMethodology = published,
+                    }),
+                    ChangeReason: null,
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return MethodologyAuthoringMap.Binding(binding);
+    }
+
+    /// <summary>Предикат прив'язки — плаский JSON-об'єкт «колонка → значення».</summary>
+    /// <param name="outputCode">Вихід — для повідомлення.</param>
+    /// <param name="matchJson">Предикат.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>, <c>bindingMatchInvalid</c>.</exception>
+    /// <remarks>
+    /// ⚠ Порожній рядок лишається справою домену (<c>CalculationBinding.Update</c>,
+    /// <c>ECR-CFG-0422</c>) — тут лише той предикат, який домен пропускав.
+    /// </remarks>
+    private static void RequireValidBindingPredicate(string outputCode, string matchJson)
+    {
+        if (string.IsNullOrWhiteSpace(matchJson) || IsFlatObject(matchJson))
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Предикат прив'язки виходу «{outputCode}» не є пласким JSON-об'єктом «колонка → значення»: "
+            + "такий предикат не збігається з жодним рядком, і колонка лишилася б порожньою.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.bindingMatchInvalid",
+                ["outputCode"] = outputCode,
+            });
+    }
+
+    /// <summary>Чи є рядок пласким JSON-об'єктом зі скалярними значеннями.</summary>
+    private static bool IsFlatObject(string json)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && document.RootElement.EnumerateObject().All(p =>
+                       p.Value.ValueKind is not (System.Text.Json.JsonValueKind.Object
+                           or System.Text.Json.JsonValueKind.Array));
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Вихід оголошено хоч однією версією методології.</summary>
+    /// <param name="methodologyId">Методологія.</param>
+    /// <param name="outputCode">Код виходу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>, <c>bindingUnknownOutput</c>.</exception>
+    private async Task RequireDeclaredOutputAsync(int methodologyId, string outputCode, CancellationToken ct)
+    {
+        var versions = await drafts.GetAllVersionsAsync(methodologyId, ct).ConfigureAwait(false);
+
+        foreach (var version in versions)
+        {
+            var outputs = await methodologies.GetOutputsAsync(version.Id, ct).ConfigureAwait(false);
+            if (outputs.Any(o => string.Equals(o.Code, outputCode, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+        }
+
+        throw new BusinessRuleException(
+            "ECR-CALC-0422",
+            $"Методологія {methodologyId.ToString(CultureInfo.InvariantCulture)} не оголошує виходу «{outputCode}» "
+            + "у жодній версії: прив'язка чекала б числа, якого ніхто не порахує.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-CALC-0422.bindingUnknownOutput",
+                ["outputCode"] = outputCode,
+            });
     }
 
     /// <summary>

@@ -34,7 +34,12 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
             .ConfigureAwait(false)
            ?? throw new NotFoundException(
                "ECR-PRD-0422",
-               $"Політику періодів {periodPolicyId} не знайдено. Виконайте seed перед створенням проєкту.");
+               $"Політику періодів {periodPolicyId} не знайдено. Виконайте seed перед створенням проєкту.",
+               new Dictionary<string, object?>
+               {
+                   ["messageKey"] = "err.ECR-PRD-0422.policyNotFound",
+                   ["periodPolicyId"] = periodPolicyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+               });
 
     /// <summary>Стеля переліку політик.</summary>
     /// <remarks>

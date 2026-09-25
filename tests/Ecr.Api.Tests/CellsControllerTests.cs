@@ -52,7 +52,10 @@ public sealed class CellsControllerTests(SqlServerFixture sql)
         {
             tableInstanceId = 1L,
             periodKey = 202601,
-            origin = "Manual",
+            // ⚠ `UserEdit` — рівно те, що шле сітка (`useCellPatch.ts`).
+            // Тут стояло `Manual`, якого клієнт не надсилає ніколи; після B-05
+            // інше походження відхиляється 422 ще до резолву адреси.
+            origin = "UserEdit",
             rows = new[]
             {
                 new

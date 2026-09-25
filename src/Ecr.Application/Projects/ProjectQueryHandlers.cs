@@ -74,17 +74,33 @@ public sealed class ListProjectsHandler(
                 });
         }
 
-        var all = await projects.ListAsync(page, ct).ConfigureAwait(false);
-
-        // ⚠ Фільтр за грантами робиться ТУТ, а не запитом: гранти вже
-        // розгорнуті в профілі, і другий похід у базу за тим самим нічого не
-        // додав би. Але фільтр обов'язковий: перелік проєктів, до яких немає
-        // доступу, — це вже розвідка структури підприємства.
-        var visible = all.Items
-            .Where(p => profile.LevelFor(ResourceKind.Project, p.Id) >= GrantLevel.Read)
+        // ⛔ Фільтр за грантами — У ЗАПИТІ, не після сторінки (UX-прохід
+        // 2026-09-24). До цього `ListAsync` брав N перших проєктів БАЗИ, а
+        // грант перевірявся вже над ними: користувач із грантом лише на
+        // (N+1)-й проєкт бачив порожній перелік і курсор «є ще», тобто екран
+        // «немає проєктів» при наявному доступі. Гранти вже розгорнуті в
+        // профілі, тож множина id береться звідти, а не другим походом у базу.
+        // Перелік проєктів без доступу — розвідка структури підприємства,
+        // тому фільтр обов'язковий.
+        var visibleIds = profile.Grants.Keys
+            .Select(ProjectIdOf)
+            .OfType<int>()
+            .Where(id => profile.LevelFor(ResourceKind.Project, id) >= GrantLevel.Read)
             .ToList();
 
-        return new PagedResult<ProjectSummary>(visible, all.NextCursor, all.TotalCount);
+        return await projects.ListAsync(page, visibleIds, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Id проєкту з ключа гранта <c>"Project:{id}"</c>; інший ресурс — <c>null</c>.</summary>
+    private static int? ProjectIdOf(string grantKey)
+    {
+        const string prefix = nameof(ResourceKind.Project) + ":";
+
+        return grantKey.StartsWith(prefix, StringComparison.Ordinal)
+               && int.TryParse(grantKey.AsSpan(prefix.Length), System.Globalization.NumberStyles.None,
+                   System.Globalization.CultureInfo.InvariantCulture, out var id)
+            ? id
+            : null;
     }
 }
 
@@ -320,9 +336,18 @@ public sealed class CreateProjectHandler(
         // відкрити документ.
         if (templateVersionId <= 0)
         {
+            // ⛔ B-19 (UX-аудит, четвертий раунд): код був `ECR-TMPL-0404`
+            // («шаблон або версія не знайдені», §7 контракту — 404), хоча
+            // виняток — `BusinessRuleException`, який без власного арма в
+            // `ExceptionHandlingMiddleware.Map` доїжджає як 422. Клієнт, що
+            // читає HTTP-статус раніше за код, бачив 422 у відповіді на код,
+            // що обіцяє 404, — розбіжність між статус-рядком і кодом у тілі.
+            // Причина не «нічого не знайдено» — templateVersionId узагалі не
+            // обрано, це помилка ВВЕДЕННЯ форми створення проєкту, тобто той
+            // самий код, що й решта структурних відмов шаблону.
             throw new BusinessRuleException(
-                "ECR-TMPL-0404", "Проєкт неможливо створити без версії шаблону.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0404.versionRequired" });
+                ErrorCodes.TemplateInvalid, "Проєкт неможливо створити без версії шаблону.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.versionRequired" });
         }
 
         if (periodPolicyId <= 0)
@@ -664,6 +689,19 @@ public sealed class ArchiveProjectHandler(
                 });
         }
 
+        // ⛔ F-08: стан — на `clock.UtcNow`, а не збережений годинною задачею.
+        // Перевідкритий період, чий `ReopenedUntil` минув, ще до години
+        // блокував архівацію «незакритим періодом». Переходи, що вже мали
+        // статися, фіксуються тут же — інакше в архівному проєкті (його
+        // `PeriodStateJob` не обробляє) період назавжди лишився б `Grace`.
+        var now = clock.UtcNow;
+        var states = new Domain.Services.PeriodStateCalculator();
+
+        foreach (var period in project.Periods)
+        {
+            period.AdvanceTo(states.Effective(period, now), now);
+        }
+
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
         // текстом: людині треба знати, які саме періоди закрити, а не що
         // «щось відкрите».
@@ -686,7 +724,7 @@ public sealed class ArchiveProjectHandler(
                 });
         }
 
-        project.Archive(clock.UtcNow);
+        project.Archive(now);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

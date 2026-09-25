@@ -41,6 +41,17 @@ public interface ITemplateVersionStore
     public Task<bool> HasDocumentsAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>
+    /// Скільки документів прив'язано до цієї версії (X-12, четвертий раунд UX).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремо від <see cref="HasDocumentsAsync"/>: там питання про ФАКТ
+    /// (класифікація зміни), тут — про МАСШТАБ, який порівняння версій показує
+    /// людині перед рішенням про міграцію. Доти діалог порівняння показував
+    /// «1» для будь-якої кількості документів — прапорець, виданий за число.
+    /// </remarks>
+    public Task<int> CountDocumentsAsync(int templateVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Версія разом із <b>усією</b> структурою: аркуші → таблиці → колонки,
     /// рядки, формули, правила валідації.
     /// </summary>

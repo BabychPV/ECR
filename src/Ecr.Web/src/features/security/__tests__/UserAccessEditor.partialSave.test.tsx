@@ -78,7 +78,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function mockServer(): void {
+/**
+ * ⚠ `localized` — чи позначив сервер `detail` ключем каталогу (`messageKey`).
+ * Лише тоді подробицю можна показати людині (`problemText`, `X-08`).
+ */
+function mockServer({ localized = true }: { localized?: boolean } = {}): void {
   shown.length = 0;
 
   vi.stubGlobal(
@@ -89,11 +93,12 @@ function mockServer(): void {
       if (init?.method === 'PUT' && url.includes('/email')) {
         return jsonResponse(
           {
-            title: 'Помилка валідації',
+            title: 'Email already in use',
             status: 409,
             detail: EmailFailure,
             errorCode: 'ECR-USR-0409',
             correlationId: 'corr-1',
+            ...(localized ? { messageKey: 'err.ECR-USR-0409' } : {}),
           },
           409,
         );
@@ -186,6 +191,27 @@ describe('UserAccessEditor: часткова відмова двоетапног
     // вже змінено, і повторна спроба «виправляла» вже збережене.
     const message = shown.join(' | ');
     expect(message).toContain(EmailFailure);
+    expect(message).toContain('security.accessSaved');
+  });
+
+  it('X-08: подробиця БЕЗ messageKey (сире речення сервера) не показується — лише назва', async () => {
+    mockServer({ localized: false });
+    show();
+
+    await waitFor(() => expect(selectedRoles()).toEqual(['DataEntry']));
+
+    fireEvent.change(screen.getByLabelText(/security\.email/), {
+      target: { value: 'ivanov@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(shown.length).toBeGreaterThan(0));
+
+    // ⛔ Мутація «повернути `error.message`» (стара `messageOf`) дає тут саме
+    // сире українське речення.
+    const message = shown.join(' | ');
+    expect(message).not.toContain(EmailFailure);
+    expect(message).toContain('Email already in use');
     expect(message).toContain('security.accessSaved');
   });
 

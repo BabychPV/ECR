@@ -147,11 +147,9 @@ public sealed class PeriodPolicyCrudTests
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => handler.HandleAsync("NEW", 0, 15, 45, 45, CancellationToken.None));
 
-        // ⚠ Немає messageKey навмисно: `PermissionCheck.RequireAsync` уже
-        // локалізує цей код через окремий точковий шлях у
-        // `ExceptionHandlingMiddleware` (поле `permission`, не messageKey) —
-        // тому рядок лишається в `contracts/localization-debt.md`.
+        // messageKey доданий для узгодженості з рештою викликів того самого
+        // факту («бракує права X») після B-14 Security (adfbcf9d).
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
-        Assert.False(denied.Details!.ContainsKey("messageKey"));
+        Assert.Equal("err.ECR-AUTH-0403.permission", Assert.Contains("messageKey", denied.Details!));
     }
 }
