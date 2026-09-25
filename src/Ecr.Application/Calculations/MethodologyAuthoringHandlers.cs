@@ -1,5 +1,6 @@
 // src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs
 using System.Globalization;
+using System.Text.Json;
 using Ecr.Application.Calculations.Dto;
 using Ecr.Application.Common;
 using Ecr.Application.Errors;
@@ -925,7 +926,9 @@ public sealed class SaveCalculationBindingHandler(
     IMethodologyDraftStore drafts,
     IUnitOfWork uow,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    IAuditWriter audit,
+    Domain.Abstractions.IClock clock)
 {
     /// <summary>Право на редагування правил прив'язки (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -957,9 +960,14 @@ public sealed class SaveCalculationBindingHandler(
     {
         await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
         var code = EcrCode.Create(outputCode);
 
-        _ = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
+        var methodology = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-CALC-0404",
                 $"Методології {methodologyId} не існує.",
@@ -989,6 +997,9 @@ public sealed class SaveCalculationBindingHandler(
 
         CalculationBinding binding;
 
+        // Стан ДО правки — половина запису журналу; після `Update` його вже немає.
+        var before = existing is null ? null : new { existing.MatchJson, existing.IsActive };
+
         binding = existing
                   ?? new CalculationBinding(tableDefId, columnDefId, methodologyId, code.Value, matchJson);
 
@@ -1002,8 +1013,64 @@ public sealed class SaveCalculationBindingHandler(
         {
             bindings.Add(binding);
         }
+        else if (string.Equals(before!.MatchJson, binding.MatchJson, StringComparison.Ordinal)
+                 && before.IsActive == binding.IsActive)
+        {
+            // Повтор того самого PUT — нічого не змінилось, і журналювати нічого.
+            return MethodologyAuthoringMap.Binding(binding);
+        }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ F-10 (UX-прохід, четвертий раунд): зміна прив'язки — у журнал
+        // структурних змін, у ТІЙ САМІЙ транзакції. Прив'язка живе на
+        // методології, а не на версії (клоном не копіюється), тож для
+        // ОПУБЛІКОВАНОЇ методології правка тут одразу змінює, куди лягають
+        // уже пораховані числа, — без чотирьох очей публікації і доти без
+        // жодного сліду, хто це зробив і що було до того.
+        //
+        // ⚠ Рішення: журнал, а не заборона. Заборонити зміну прив'язок
+        // опублікованої методології означало б зачинити їх назавжди: окремої
+        // версії прив'язок немає, і виправити помилкову колонку не було б чим.
+        // Чи потрібне тут погодження другою людиною — питання продукту
+        // (відкрите, названо у звіті лінії A), журнал потрібен за будь-якої
+        // відповіді. `publishedMethodology` у записі каже, чи діяла правка на
+        // живі числа.
+        var published = methodology.Versions.Any(v => v.Status == TemplateVersionStatus.Published);
+
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    ChangedAt: clock.UtcNow,
+
+                    // ⚠ Нуль, як і для довідників: прив'язка — властивість
+                    // методології, а не однієї версії шаблону; таблиця й колонка — у JSON.
+                    TemplateVersionId: 0,
+                    EntityType: "cfg.CalculationBinding",
+                    EntityId: binding.Id,
+                    ChangeClass: ChangeClass.Guarded,
+                    Operation: existing is null ? "Create" : "Update",
+                    OldJson: before is null ? null : JsonSerializer.Serialize(new
+                    {
+                        matchJson = before.MatchJson,
+                        isActive = before.IsActive,
+                    }),
+                    NewJson: JsonSerializer.Serialize(new
+                    {
+                        methodologyId,
+                        tableDefId = binding.TableDefId,
+                        columnDefId,
+                        outputCode = binding.OutputCode,
+                        matchJson = binding.MatchJson,
+                        isActive = binding.IsActive,
+                        publishedMethodology = published,
+                    }),
+                    ChangeReason: null,
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
 
         return MethodologyAuthoringMap.Binding(binding);
     }

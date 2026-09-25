@@ -45,10 +45,17 @@ public sealed class SaveCalculationBindingTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
+    private readonly IClock _clock = Substitute.For<IClock>();
 
     public SaveCalculationBindingTests()
     {
         _user.UserId.Returns(9);
+        _clock.UtcNow.Returns(new DateTime(2026, 9, 25, 9, 0, 0, DateTimeKind.Utc));
+
+        // Транзакція виконує операцію, як справжня: інакше журнал усередині неї не видно.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
 
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
@@ -64,7 +71,7 @@ public sealed class SaveCalculationBindingTests
             .Returns((CalculationBinding?)null);
     }
 
-    private SaveCalculationBindingHandler Handler() => new(_bindings, _drafts, _uow, _access, _user);
+    private SaveCalculationBindingHandler Handler() => new(_bindings, _drafts, _uow, _access, _user, _audit, _clock);
 
     private void Column(CellDataType dataType)
         => _bindings.FindColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
@@ -124,5 +131,83 @@ public sealed class SaveCalculationBindingTests
         Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
         Assert.Equal("err.ECR-TMPL-0404.column", error.Details!["messageKey"]);
         Assert.Equal(ColumnDefId.ToString(System.Globalization.CultureInfo.InvariantCulture), error.Details!["columnDefId"]);
+    }
+
+    /// <summary>
+    /// Зміна прив'язки ОПУБЛІКОВАНОЇ методології лягає в журнал структурних
+    /// змін із автором і станом до/після (F-10, UX-прохід, четвертий раунд).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти будь-хто з <c>Calculation.EditRule</c> міг перевести вихід уже
+    /// опублікованої методології в іншу колонку — і журнал не знав про це
+    /// нічого: ні хто, ні що було до того.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "F-10")]
+    public async Task Зміна_прив_язки_опублікованої_методології_пишеться_в_журнал_з_автором_і_станом_до()
+    {
+        Column(CellDataType.Calculated);
+        PublishedMethodology();
+
+        var existing = new CalculationBinding(TableDefId, ColumnDefId, MethodologyId, "OUT1", "{}");
+        _bindings.FindAsync(ColumnDefId, MethodologyId, "OUT1", Arg.Any<CancellationToken>()).Returns(existing);
+
+        await Handler().HandleAsync(
+            MethodologyId, ColumnDefId, "OUT1", """{"kind":"stack"}""", isActive: false, CancellationToken.None);
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "cfg.CalculationBinding"
+                && r.Operation == "Update"
+                && r.ChangedByUserId == 9
+                && r.OldJson!.Contains("\"matchJson\":\"{}\"", StringComparison.Ordinal)
+                && r.OldJson.Contains("\"isActive\":true", StringComparison.Ordinal)
+                && r.NewJson!.Contains("\"isActive\":false", StringComparison.Ordinal)
+                && r.NewJson.Contains("\"publishedMethodology\":true", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait("Requirement", "F-10")]
+    public async Task Нова_прив_язка_теж_журналюється_а_повтор_без_змін_ні()
+    {
+        Column(CellDataType.Calculated);
+
+        await Save();
+
+        await _audit.Received(1).WriteStructureChangeAsync(
+            Arg.Is<StructureChangeRecord>(r =>
+                r.EntityType == "cfg.CalculationBinding"
+                && r.Operation == "Create"
+                && r.OldJson == null
+                && r.NewJson!.Contains("\"publishedMethodology\":false", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+
+        _audit.ClearReceivedCalls();
+        _uow.ClearReceivedCalls();
+
+        // Той самий PUT удруге — прив'язка вже така сама: ні запису, ні журналу.
+        var same = new CalculationBinding(TableDefId, ColumnDefId, MethodologyId, "OUT1", "{}");
+        _bindings.FindAsync(ColumnDefId, MethodologyId, "OUT1", Arg.Any<CancellationToken>()).Returns(same);
+
+        await Save();
+
+        await _audit.DidNotReceiveWithAnyArgs().WriteStructureChangeAsync(default!, default);
+        await _uow.DidNotReceiveWithAnyArgs().SaveChangesAsync(default);
+    }
+
+    /// <summary>Методологія з опублікованою версією 1.0.</summary>
+    private void PublishedMethodology()
+    {
+        var methodology = new Methodology(
+            EcrCode.Create("M1"), new LocalizedText(new Dictionary<string, string> { ["en"] = "M1" }));
+        var version = new MethodologyVersion(
+            methodology.Id, "1.0", CalculationLevel.Configuration, createdByUserId: 1, _clock.UtcNow);
+        methodology.AddVersion(version);
+        version.Publish(publishedByUserId: 2, "first", new DateOnly(2026, 1, 1), testsPassed: true, _clock.UtcNow);
+
+        _drafts.FindAsync(MethodologyId, Arg.Any<CancellationToken>()).Returns(methodology);
     }
 }

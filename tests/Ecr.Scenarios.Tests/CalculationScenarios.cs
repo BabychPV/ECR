@@ -430,6 +430,34 @@ public sealed class CalculationScenarios(SqlServerFixture sql)
         Assert.Equal(bindingId, updated.GetProperty("id").GetInt32());
         Assert.Equal("""{"kind":"stack"}""", updated.GetProperty("matchJson").GetString());
         Assert.False(updated.GetProperty("isActive").GetBoolean());
+
+        // ⛔ F-10: обидві зміни — у журналі структурних змін справжньої бази,
+        // створення й правка окремими рядками (див. `SaveCalculationBindingHandler`).
+        Assert.Equal(["Create", "Update"], await BindingJournalAsync(bindingId));
+    }
+
+    /// <summary>Операції журналу структурних змін однієї прив'язки — прямим ADO: <c>aud.*</c> поза моделлю EF.</summary>
+    private async Task<List<string>> BindingJournalAsync(int bindingId)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Operation FROM aud.StructureChange
+            WHERE EntityType = N'cfg.CalculationBinding' AND EntityId = @id
+            ORDER BY ChangedAt, Id;
+            """;
+        command.Parameters.AddWithValue("@id", bindingId);
+
+        var operations = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            operations.Add(reader.GetString(0));
+        }
+
+        return operations;
     }
 
     /// <summary>
