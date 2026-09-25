@@ -197,10 +197,10 @@ export function DocumentPage(): JSX.Element {
    * великому документі це три секунди й повний прогін правил заради списку,
    * який уже пораховано.
    *
-   * ⚠ `404` — це «ще не перевіряли», а не помилка: `retry: false` і `null` у
-   * стані. «Зауважень немає» показувати замість цього не можна — зелений
-   * напис під документом, якого ніхто не перевіряв, повідомляє неправду про
-   * готовність.
+   * ⚠ «Ще не перевіряли» — `validated: false` у відповіді (`X-32`; доти —
+   * `404`), і в стані це `null`. «Зауважень немає» показувати замість цього не
+   * можна — зелений напис під документом, якого ніхто не перевіряв,
+   * повідомляє неправду про готовність.
    */
   const lastValidation = useQuery({
     queryKey: ['validation', documentId, periodKey],
@@ -279,7 +279,8 @@ export function DocumentPage(): JSX.Element {
    * прочитане, інакше нічого.
    */
   const freshForScope = fresh?.scope === scope ? fresh.result : null;
-  const shownValidation = freshForScope ?? lastValidation.data ?? null;
+  const shownValidation =
+    freshForScope ?? (lastValidation.data?.validated === false ? null : (lastValidation.data ?? null));
 
   /*
    * ⛔ «Прочитати не вдалося» — це НЕ «ще не перевіряли», і до цього місця

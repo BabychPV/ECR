@@ -463,7 +463,9 @@ DELETE t
     -- неповних даних — попереджати «збереження зітре» нема про що. Обидва
     -- тексти, що побували в базах.
     (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.'),
-    (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.')
+    (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.'),
+    -- X-32: «ще не перевіряли» — `200` з `validated: false`, а не відмова `404`.
+    (N'err.ECR-DOC-0404.notValidated',             N'en', N'Document {documentId} has not been validated for period {periodKey} yet.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -765,11 +767,6 @@ USING (VALUES
     (N'err.ECR-DOC-0404.sheetNotInDocument', N'en', N'Sheet {sheetDefId} is not part of document {documentId}.', 1),
     (N'err.ECR-DOC-0404.periodEmpty',        N'en', N'Document {documentId} for period {periodKey} does not exist or is empty.', 1),
     (N'err.ECR-DOC-0404.exportExpired',      N'en', N'The workbook is gone or has expired: build the export again.', 1),
-    -- ⚠ «Ще не перевіряли» — окреме речення, а не `periodEmpty`. Той самий код
-    -- відповіді означає тут інше: документ є, період є, просто перевірку ще не
-    -- запускали. Підставити сюди «does not exist or is empty» означало б
-    -- повідомити неправду про дані (`DocumentsController.LastValidation`).
-    (N'err.ECR-DOC-0404.notValidated',        N'en', N'Document {documentId} has not been validated for period {periodKey} yet.', 1),
     (N'err.ECR-DOC-0404.version',             N'en', N'Version {versionId} of document {documentId} was not found.', 1),
     (N'err.ECR-DOC-0422.compareVersion',      N'en', N'A version must be a number or "current".', 1),
     (N'err.ECR-DOC-0422.comparePeriods',      N'en', N'Versions from different periods cannot be compared.', 1),

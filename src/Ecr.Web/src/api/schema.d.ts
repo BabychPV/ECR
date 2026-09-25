@@ -2956,8 +2956,7 @@ export interface paths {
          *     неправдою, що й «0 зауважень» у неперевіреного документа
          *     (`A7-28`): у клієнта має лишитися змога показати «—», а не
          *     зелений нуль. Сусідній `GET …/validation` тримає той самий поділ
-         *     кодом `404` (`err.ECR-DOC-0404.notValidated`); тут
-         *     `404` не годиться — заповненість відома й до першої перевірки.
+         *     полем `validated: false` (`X-32`).
          */
         get: {
             parameters: {
@@ -3062,9 +3061,17 @@ export interface paths {
          *     сторінки, і щоб побачити його знову, оператор мусив ЗАПУСТИТИ
          *     перевірку заново.
          *
-         *     ⚠ `404`, а не порожній перелік, коли перевірку ще не запускали:
-         *     «зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
-         *     першу замість другої означає повідомити неправду про готовність.
+         *     ⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді, і показувати
+         *     першу замість другої означає повідомити неправду про готовність. Тому
+         *     неперевірений документ віддає `validated: false`, а не порожній
+         *     перелік сам по собі.
+         *
+         *     ✎ `X-32`: доти це розрізнення несла відповідь `404`. Але «ще не
+         *     перевіряли» — звичайний стан кожного нового документа, а не помилка:
+         *     КОЖНЕ відкриття такого документа давало червоний рядок у консолі
+         *     браузера («Failed to load resource: 404») і невдалий запит у мережі —
+         *     шум, за яким справжні відмови перестають помічати. Тепер це `200`
+         *     з тим самим змістом, названим полем.
          */
         get: {
             parameters: {
@@ -3090,17 +3097,6 @@ export interface paths {
                         "application/json": components["schemas"]["ValidationResultResponse"];
                         "text/json": components["schemas"]["ValidationResultResponse"];
                         "text/plain": components["schemas"]["ValidationResultResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProblemDetails"];
-                        "text/json": components["schemas"]["ProblemDetails"];
-                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
             };
@@ -19744,6 +19740,10 @@ export interface components {
              * @description Період, за який виконано перевірку.
              */
             periodKey: number;
+            /** @description Чи документ за цей період узагалі перевіряли. `false` — перевірку ще не
+             *     запускали, і порожній `Messages` тоді НЕ означає «зауважень немає»
+             *     (`X-32`, `A7-28`). */
+            validated: boolean;
         };
         /** @description Правило валідації для відповіді API. */
         ValidationRuleDto: {

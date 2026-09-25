@@ -730,7 +730,7 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
     [Fact]
     [Trait("Category", "Integration")]
     [Trait("Scenario", "S-19")]
-    public async Task Непроведена_перевірка_це_404_а_не_порожній_перелік()
+    public async Task Непроведена_перевірка_каже_це_полем_а_не_порожнім_переліком()
     {
         using var app = new EcrApiFactory(sql);
         var admin = await Provisioning.AdministratorAsync(
@@ -746,7 +746,27 @@ public sealed class DataEntryScenarios(SqlServerFixture sql)
         // ⚠ «Зауважень немає» і «ще не перевіряли» — різні відповіді. Показати
         // першу замість другої означає повідомити неправду про готовність
         // документа рівно тоді, коли на неї спираються, подаючи звітність.
-        Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+        //
+        // ✎ `X-32`: цей поділ тепер несе поле `validated`, а не код `404` —
+        // «ще не перевіряли» є звичайним станом нового документа, і `404` на
+        // кожне його відкриття був червоним шумом у консолі браузера.
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+
+        var body = await read.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("validated").GetBoolean());
+        Assert.Empty(body.GetProperty("messages").EnumerateArray());
+
+        // ⛔ І дзеркало: після перевірки те саме поле — `true`. Без нього тест
+        // лишався б зеленим на полі, що завжди `false`.
+        var validate = await admin.Client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{doc.DocumentId}/validate", UriKind.Relative),
+            new { periodKey = doc.PeriodKey });
+        Assert.Equal(HttpStatusCode.OK, validate.StatusCode);
+
+        var after = await (await admin.Client.GetAsync(new Uri(
+                $"/api/v1/documents/{doc.DocumentId}/validation?periodKey={doc.PeriodKey}", UriKind.Relative)))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(after.GetProperty("validated").GetBoolean());
     }
 
     /// <remarks>
