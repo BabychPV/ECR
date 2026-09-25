@@ -125,18 +125,8 @@ async function pageThenType(seen: URLSearchParams[], label: string, text: string
 }
 
 describe('скидання курсора разом із відкладеним фільтром', () => {
-  it(
-    '/admin/audit: «By user» після «More» — один запит, перша сторінка нового фільтра',
-    async () => {
-      const seen = serve('/api/v1/audit/cells', cellRow);
-      show(<AuditPage />, '/admin/audit');
-
-      const after = await pageThenType(seen, '⟦audit.author⟧', '41');
-
-      expect(after.map((query) => [query.get('author'), query.get('cursor')])).toEqual([['41', null]]);
-    },
-    SlowEnvTimeout,
-  );
+  // ✎ `R-18`: «By user» став вибором за іменем (`Select`) — набору, який треба
+  // відкладати, у нього більше немає; скидання курсора стережуть поля нижче.
 
   it(
     '/admin/audit?view=structure: «Entity type» після «More» — один запит',

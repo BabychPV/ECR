@@ -110,16 +110,8 @@ describe('/admin/audit — журнал змін комірок', () => {
     SlowEnvTimeout,
   );
 
-  it(
-    '«By user» (число): набір 12345 — один запит',
-    async () => {
-      const seen = count('/api/v1/audit/cells', 'author');
-      show(<AuditPage />, '/admin/audit');
-
-      await typeAndCount('⟦audit.author⟧', '12345', seen);
-    },
-    SlowEnvTimeout,
-  );
+  // ✎ `R-18`: «By user» — більше не поле для набору номера, а вибір за іменем
+  // (`Select`): один вибір — один запит, відкладати нічого.
 
   it(
     '«Document» (число): набір 12345 — один запит',
@@ -152,17 +144,6 @@ describe('/admin/audit?view=structure — журнал структурних з
       show(<AuditPage />, '/admin/audit?view=structure');
 
       await typeAndCount('⟦audit.entityType⟧', 'Template', seen);
-    },
-    SlowEnvTimeout,
-  );
-
-  it(
-    '«By user» (число): набір 12345 — один запит',
-    async () => {
-      const seen = count('/api/v1/audit/structure', 'changedByUserId');
-      show(<AuditPage />, '/admin/audit?view=structure');
-
-      await typeAndCount('⟦audit.author⟧', '12345', seen);
     },
     SlowEnvTimeout,
   );
