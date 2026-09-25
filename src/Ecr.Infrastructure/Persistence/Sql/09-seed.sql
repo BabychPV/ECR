@@ -1023,6 +1023,11 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.maxDynamicRowsNotPositive', N'en', N'MaxDynamicRows must be positive; got {value}.', 1),
     (N'err.ECR-TMPL-0422.maxDynamicRowsNeedsDynamicMode', N'en', N'MaxDynamicRows only makes sense where users add rows; table "{tableCode}" is in {rowMode} mode.', 1),
     (N'err.ECR-TMPL-0422.tableIsDynamic',            N'en', N'Table "{tableCode}" is dynamic: its rows are created at runtime, not in the template.', 1),
+    -- B-14 (UX-аудит, четвертий раунд): FormulaDefHandlers.cs. `.table` вище
+    -- перевикористано (спільний SaveColumnDefHandler.FindTable), нижче — нові.
+    (N'err.ECR-TMPL-0422.formulaScopeInvalid',       N'en', N'Formula scope {scope} is not accepted here: only Column or Row (Cell combines both addresses and has no single address).', 1),
+    (N'err.ECR-TMPL-0404.row',                       N'en', N'Row "{rowKey}" does not exist in table {tableDefId}.', 1),
+    (N'err.ECR-TMPL-0404.formula',                   N'en', N'There is no formula on {scope} "{target}" in table {tableDefId}.', 1),
     (N'err.ECR-TMPL-0409.columnCodeTaken',           N'en', N'A column with code "{columnCode}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.rowKeyTaken',               N'en', N'A row with key "{rowKey}" already exists in table "{tableCode}".', 1),
     (N'err.ECR-TMPL-0409.headerFieldCodeTaken',      N'en', N'A header field with code "{headerFieldCode}" already exists in this template version.', 1),

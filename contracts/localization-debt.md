@@ -404,6 +404,33 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 
 Порівнювати 146 з 140 не можна — це різні заміри. Наступне порівняння — від 146.
 
+## ✎ 2026-09-25: UX-аудит, четвертий раунд, хвиля 3 — FormulaDefHandlers.cs закрито
+
+`FormulaDefHandlers.cs` (7) закрито повністю; 146 у 62 файлах → 139 у 61 файлі.
+Перший кластер лінії C (B-14): `RowDefHandlers.cs`, `TemplateVersionStore.cs`
+і PI-адаптери лишаються на наступні проходи того самого раунду.
+
+- `err.ECR-TMPL-0404.table` {tableDefId, versionId} — наявний ключ
+  (`SaveColumnDefHandler.FindTable`, заведений 2026-09-23): `FindTarget` тепер
+  ВИКЛИКАЄ цей спільний хелпер замість власного проходу по `version.Sheets`
+  — той самий факт «таблиці з таким Id немає», і код, не лише ключ, тепер
+  спільний.
+- `err.ECR-TMPL-0404.column` {columnDefId} — наявний ключ
+  (`ColumnUsageHandler`/`MethodologyAuthoringHandlers`), перевикористаний:
+  `target` при `scope=Column` — це `ColumnDefId`, підданий рядком через URL,
+  той самий факт «колонки з таким Id немає».
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  обох кидків «сесія не містить користувача» (Save/Delete).
+- Нові ключі: `err.ECR-TMPL-0422.formulaScopeInvalid` {scope} — область
+  формули поза Column/Row; `err.ECR-TMPL-0404.row` {rowKey, tableDefId} —
+  рядка з таким `RowKey` немає (дзеркало до `.column`, адреса рядка
+  бізнес-ключем, а не сурогатним Id — `FormulaDef` не має свого); `err.ECR-TMPL-0404.formula`
+  {scope, target, tableDefId} — на названій цілі формули немає
+  (`DeleteFormulaDefHandler`), одна назва факту для обох scope замість двох
+  українських слів «колонці»/«рядку», перекладених нарізно.
+- Заголовок коду не змінювався — `ECR-TMPL-0404`/`ECR-TMPL-0422`/
+  `ECR-AUTH-0401` уже були нейтральними.
+
 | Файл | Місць |
 |---|---|
 | `src/Ecr.Adapters.PiAf/CollectionRunner.cs` | 2 |
@@ -430,7 +457,6 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
 | `src/Ecr.Application/Security/PermissionCheck.cs` | 1 |
 | `src/Ecr.Application/Security/ResourceGrantHandlers.cs` | 4 |
 | `src/Ecr.Application/Security/StartSimulationHandler.cs` | 4 |
-| `src/Ecr.Application/Templates/FormulaDefHandlers.cs` | 7 |
 | `src/Ecr.Application/Templates/GetTemplateStructureHandler.cs` | 1 |
 | `src/Ecr.Application/Templates/PatchPresentationHandler.cs` | 4 |
 | `src/Ecr.Application/Templates/RowDefHandlers.cs` | 7 |
