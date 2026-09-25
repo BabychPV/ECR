@@ -192,7 +192,13 @@ public sealed class EntityFieldMap : Entity<int>
             throw new DomainException(
                 "ECR-INT-0422",
                 $"Мапінг поля «{SourceField}» називає рядок «{targetRowKey}», але не каже, "
-                + "як згортати точки періоду. Система не знає, величина миттєва чи накопичувальна.");
+                + "як згортати точки періоду. Система не знає, величина миттєва чи накопичувальна.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.materializationRequiresAggregation",
+                    ["sourceField"] = SourceField,
+                    ["targetRowKey"] = targetRowKey,
+                });
         }
 
         TargetRowKey = targetRowKey;

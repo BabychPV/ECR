@@ -45,7 +45,11 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
             throw new Application.Errors.ConcurrencyConflictException(
                 "ECR-CELL-0409",
                 "Дані змінилися після того, як ви їх прочитали.",
-                new Dictionary<string, object?> { ["conflicts"] = conflicts });
+                new Dictionary<string, object?>
+                {
+                    ["conflicts"] = conflicts,
+                    ["messageKey"] = "err.ECR-CELL-0409.concurrentChange",
+                });
         }
         catch (DbUpdateException ex) when (SqlConflict.IsUniqueConstraintViolation(ex))
         {
@@ -136,6 +140,7 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
                         {
                             ["businessKey"] = document.BusinessKey,
                             ["projectId"] = document.ProjectId,
+                            ["messageKey"] = "err.ECR-DOC-0409.businessKeyDuplicate",
                         });
 
                 case Domain.Entities.Documents.Project project:

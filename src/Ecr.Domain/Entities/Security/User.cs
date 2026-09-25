@@ -72,7 +72,12 @@ public sealed class User : Entity<int>
         {
             throw new Abstractions.DomainException(
                 ErrorCodes.UserInvalid,
-                $"Користувач «{UserName}» не має пошти: вмикати отримання алертів немає куди.");
+                $"Користувач «{UserName}» не має пошти: вмикати отримання алертів немає куди.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-USR-0422.receivesAlertsRequiresEmail",
+                    ["userName"] = UserName,
+                });
         }
 
         ReceivesAlerts = value;

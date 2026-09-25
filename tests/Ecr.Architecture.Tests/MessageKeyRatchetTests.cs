@@ -139,8 +139,9 @@ public sealed partial class MessageKeyRatchetTests
         var actual = Unkeyed();
         var ledger = Ledger();
 
-        Assert.NotEmpty(ledger);
-
+        // Порожній ledger легітимний, коли борг сплачено повністю (0) —
+        // цикли нижче однаково ловлять розбіжність в обидва боки
+        // незалежно від того, парсер це чи справжній нуль.
         var failures = new List<string>();
 
         foreach (var (path, lines) in actual.OrderBy(p => p.Key, StringComparer.Ordinal))

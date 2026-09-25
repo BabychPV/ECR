@@ -349,7 +349,21 @@ public sealed class RowStore(
                 // конкурентного запису — саме те зайве ускладнення, якого
                 // це виправлення уникає).
                 : $"Принаймні один ключ уже існує серед: {string.Join(", ", rowKeys)}.",
-            new Dictionary<string, object?> { ["rowKeys"] = rowKeys });
+            // ⚠ Той самий факт, що вже несуть CreateRowHandler/PatchCellsHandler
+            // (перевірка ДО запису): тут — програна гонитва проти бази, той
+            // самий код і ті самі ключі каталогу.
+            rowKeys.Count == 1
+                ? new Dictionary<string, object?>
+                {
+                    ["rowKeys"] = rowKeys,
+                    ["messageKey"] = "err.ECR-ROW-0409.rowKeyExists",
+                    ["rowKey"] = rowKeys[0],
+                }
+                : new Dictionary<string, object?>
+                {
+                    ["rowKeys"] = rowKeys,
+                    ["messageKey"] = "err.ECR-ROW-0409.rowKeysExist",
+                });
 
     /// <inheritdoc />
     /// <remarks>

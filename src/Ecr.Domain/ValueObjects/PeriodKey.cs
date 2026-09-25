@@ -53,7 +53,12 @@ public readonly record struct PeriodKey(int Value)
             ? key
             : throw new Abstractions.DomainException(
                 "ECR-PRD-0422",
-                $"Ключ періоду {value} не є періодом: очікується Рік*100 + Номер, напр. 202601.");
+                $"Ключ періоду {value} не є періодом: очікується Рік*100 + Номер, напр. 202601.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0422.keyInvalid",
+                    ["value"] = value.ToString(CultureInfo.InvariantCulture),
+                });
     }
 
     /// <summary>Створює ключ із року і порядкового номера.</summary>

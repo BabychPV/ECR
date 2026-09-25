@@ -567,7 +567,12 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             throw new ConcurrencyConflictException(
                 ErrorCodes.CellConflict,
                 $"Версія рядка змінилася між читанням і записом: рядків — {stale.Count}.",
-                new Dictionary<string, object?> { [CellChangeSet.StaleRowIdsDetail] = stale });
+                new Dictionary<string, object?>
+                {
+                    [CellChangeSet.StaleRowIdsDetail] = stale,
+                    ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+                    ["rowCount"] = stale.Count.ToString(CultureInfo.InvariantCulture),
+                });
         }
     }
 

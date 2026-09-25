@@ -333,7 +333,8 @@ public sealed class DocumentStore(EcrDbContext db) : IDocumentStore
         // Унікальність тримає індекс; сюди можна дійти лише якщо хтось створює
         // документи швидше, ніж ми перебираємо номери.
         throw new Application.Errors.BusinessRuleException(
-            "ECR-DOC-0409", "Не вдалося підібрати вільний бізнес-ключ документа.");
+            "ECR-DOC-0409", "Не вдалося підібрати вільний бізнес-ключ документа.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-DOC-0409.businessKeyExhausted" });
     }
 
     /// <summary>

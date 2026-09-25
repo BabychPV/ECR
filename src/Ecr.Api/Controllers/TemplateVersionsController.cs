@@ -714,7 +714,12 @@ public sealed class TemplateVersionsController(
         "row" => Ecr.Domain.Enums.FormulaScope.Row,
         _ => throw new Application.Errors.BusinessRuleException(
             ErrorCodes.TemplateInvalid,
-            $"Невідома область формули «{scope}»: очікується column або row."),
+            $"Невідома область формули «{scope}»: очікується column або row.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-0422.formulaScopeInvalid",
+                ["scope"] = scope,
+            }),
     };
 
     /// <summary>
@@ -882,7 +887,8 @@ public sealed class TemplateVersionsController(
     /// <summary>Поточний користувач; анонім сюди не доходить через [Authorize].</summary>
     private int UserId => currentUser.UserId
         ?? throw new Application.Errors.AccessDeniedException(
-            ErrorCodes.Unauthorized, "Сесія не містить користувача.");
+            ErrorCodes.Unauthorized, "Сесія не містить користувача.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 }
 
 /// <summary>Запит на публікацію версії.</summary>

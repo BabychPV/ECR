@@ -1372,6 +1372,33 @@ USING (VALUES
     (N'err.ECR-USR-0422.windowsSidRequired',      N'en', N'A domain account requires a SID.', 1),
     (N'err.ECR-USR-0422.initialPasswordRequired', N'en', N'A local account requires a one-time password.', 1),
 
+    -- B-14 (останній кластер: Api + Domain + Infra Persistence + Jobs) — 24
+    -- кидків, 18 файлів. Дрібні місця, розкидані по контролерах, доменних
+    -- сутностях і сховищах; частина перевикористала наявні ключі
+    -- (`err.ECR-AUTH-0401.anonymousWrite`, `.err.ECR-TMPL-0422.formulaScopeInvalid`,
+    -- `err.ECR-ROW-0409.rowKeyExists`/`.rowKeysExist`, `err.ECR-CELL-0409.batchStale`
+    -- — той самий факт, що вже несуть CreateRowHandler/PatchCellsHandler/
+    -- Project.cs/FormulaDefHandlers.cs), нижче — нові.
+    (N'err.ECR-AUTH-0401.securityStampStale', N'en', N'Your session is no longer valid: your permissions changed. Sign in again.', 1),
+    (N'err.ECR-REG-0422.selfParent',          N'en', N'Entry {entryId} cannot be its own parent.', 1),
+    (N'err.ECR-INT-0422.materializationRequiresAggregation', N'en', N'Mapping of field "{sourceField}" names row "{targetRowKey}", but does not say how to fold period points: the system does not know whether the value is instantaneous or cumulative.', 1),
+    (N'err.ECR-RPT-0409.versionNotDraft',           N'en', N'Report version {version} is {status}: there is nothing to publish.', 1),
+    (N'err.ECR-RPT-0409.snapshotSubmittedContent',  N'en', N'Snapshot {snapshotId} was submitted: its content is not rebuilt, a new snapshot is needed.', 1),
+    (N'err.ECR-RPT-0409.snapshotSubmittedStatus',   N'en', N'Snapshot {snapshotId} was submitted: its status does not change, a new snapshot is needed.', 1),
+    (N'err.ECR-USR-0422.receivesAlertsRequiresEmail', N'en', N'User "{userName}" has no email: there is nowhere to turn alerts on.', 1),
+    (N'err.ECR-PRD-4224.countOutOfRange',    N'en', N'The period count {count} is outside 1..{max}.', 1),
+    (N'err.ECR-PRD-4224.countNotDivisor',    N'en', N'The period count {count} does not divide the year evenly: 12 must be divisible by it, or part of the year would have no period.', 1),
+    (N'err.ECR-PRD-4224.sequenceOutOfRange', N'en', N'The period sequence number {sequence} is outside 1..{max}.', 1),
+    (N'err.ECR-PRD-0422.keyInvalid',         N'en', N'Period key {value} is not a period: expected Year*100 + Sequence, e.g. 202601.', 1),
+    (N'err.ECR-PRD-0422.policyNotFound',     N'en', N'Period policy {periodPolicyId} was not found. Run the seed before creating a project.', 1),
+    (N'err.ECR-PRD-0422.periodNotInProjectOfDocument', N'en', N'Period {periodKey} does not belong to the project of document {documentId}.', 1),
+    (N'err.ECR-CFG-0422.rowKeyInvalid',      N'en', N'Row key "{value}" is not allowed: it goes into formulas unescaped, so only letters, digits, dot, underscore and hyphen are accepted.', 1),
+    (N'err.ECR-CFG-4221.notIana',            N'en', N'Site time zone "{value}" is not a known IANA identifier (e.g. "Asia/Aqtau"). Windows identifiers such as "Central Asia Standard Time" and offsets such as "+05:00" are not accepted.', 1),
+    (N'err.ECR-SYS-0503.schedulerNotConfigured', N'en', N'Background jobs are not configured yet: the scheduler is not running. This operation requires a queue and is unavailable.', 0),
+    (N'err.ECR-DOC-0409.businessKeyExhausted', N'en', N'Could not find a free business key for the document.', 1),
+    (N'err.ECR-DOC-0409.businessKeyDuplicate', N'en', N'A document with key "{businessKey}" already exists in this project.', 1),
+    (N'err.ECR-CELL-0409.concurrentChange',  N'en', N'The data changed after you read it.', 1),
+
     -- ── ЗАГОЛОВКИ відмов: ключ рівно `err.<код>`, без суфікса ────────────
     --
     -- ⛔ Це рівно та форма ключа, яку читає

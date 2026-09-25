@@ -158,7 +158,12 @@ public sealed class RegistryEntry : Entity<long>
         if (parentEntryId is { } parent && IsPersisted && parent == Id)
         {
             throw new DomainException(
-                "ECR-REG-0422", $"Запис {Id} не може бути власним батьком.");
+                "ECR-REG-0422", $"Запис {Id} не може бути власним батьком.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.selfParent",
+                    ["entryId"] = Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
         }
 
         ParentEntryId = parentEntryId;

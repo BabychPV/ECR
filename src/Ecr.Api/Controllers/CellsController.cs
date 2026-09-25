@@ -133,7 +133,8 @@ public sealed class CellsController(
     private Task<AccessProfile> ProfileAsync(CancellationToken ct)
         => access.BuildProfileAsync(
             currentUser.UserId ?? throw new Application.Errors.AccessDeniedException(
-                ErrorCodes.Unauthorized, "Сесія не містить користувача."),
+                ErrorCodes.Unauthorized, "Сесія не містить користувача.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" }),
             ct);
 }
 

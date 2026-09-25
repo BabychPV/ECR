@@ -773,23 +773,103 @@ Calculations + Workflow + Audit вище) і рахували своє «до» 
 підсумок: **53 у 34 файлах → 24 у 18 файлах** (15 + 14 = 29 кидків, 7 + 9 =
 16 файлів закрито в сумі). Наступне порівняння — від 24/18.
 
-| Файл | Місць |
-|---|---|
-| `src/Ecr.Api/Auth/SecurityStampMiddleware.cs` | 1 |
-| `src/Ecr.Api/Controllers/CellsController.cs` | 1 |
-| `src/Ecr.Api/Controllers/TemplateVersionsController.cs` | 2 |
-| `src/Ecr.Domain/Entities/Dictionaries/RegistryEntry.cs` | 1 |
-| `src/Ecr.Domain/Entities/External/EntityFieldMap.cs` | 1 |
-| `src/Ecr.Domain/Entities/Reporting/ReportDefinitions.cs` | 3 |
-| `src/Ecr.Domain/Entities/Security/User.cs` | 1 |
-| `src/Ecr.Domain/Services/PeriodCalendar.cs` | 3 |
-| `src/Ecr.Domain/ValueObjects/PeriodKey.cs` | 1 |
-| `src/Ecr.Domain/ValueObjects/RowKey.cs` | 1 |
-| `src/Ecr.Domain/ValueObjects/SiteTimeZone.cs` | 1 |
-| `src/Ecr.Infrastructure/Jobs/QuartzJobScheduler.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/DocumentStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/NormalizedCellStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/PeriodStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/RowStore.cs` | 1 |
-| `src/Ecr.Infrastructure/Persistence/UnitOfWork.cs` | 2 |
-| `src/Ecr.Infrastructure/Persistence/WorkflowStore.cs` | 1 |
+## ✎ 2026-09-25: останній кластер (Api + Domain + Infra Persistence + Jobs) — 24 кидки, 18 файлів, закрито повністю. **B-14 завершено.**
+
+`SecurityStampMiddleware.cs` (1), `CellsController.cs` (1),
+`TemplateVersionsController.cs` (2), `RegistryEntry.cs` (1),
+`EntityFieldMap.cs` (1), `ReportDefinitions.cs` (3), `User.cs` (1),
+`PeriodCalendar.cs` (3), `PeriodKey.cs` (1), `RowKey.cs` (1),
+`SiteTimeZone.cs` (1), `QuartzJobScheduler.cs` (1), `DocumentStore.cs` (1),
+`NormalizedCellStore.cs` (1), `PeriodStore.cs` (1), `RowStore.cs` (1),
+`UnitOfWork.cs` (2), `WorkflowStore.cs` (1) закрито повністю, 24 кидки;
+24 у 18 файлах → **0 у 0 файлах**.
+
+⚠ Замір цього проходу (24/18), рахований ситом «сито бачить фабрики»
+(2026-09-23) над `origin/dev/integration`, розійшовся з приблизним числом у
+постановці задачі (~23/17) рівно на один: пропущений у первинному переліку
+задачі `WorkflowStore.LockPeriodAsync` — той самий метод, що вже кидає
+`NotFoundException("ECR-PRD-0422", …)` без `messageKey`. Журнальний запис
+вище («Documents + Reporting…») лишає підсумок 24/18 — це число тут і
+підтверджено.
+
+- `err.ECR-AUTH-0401.anonymousWrite` — наявний ключ, перевикористаний для
+  «Сесія не містить користувача.» у `CellsController.ProfileAsync` і
+  `TemplateVersionsController.UserId` — той самий факт, що вже несуть
+  Templates/Calculations-кластери.
+- `err.ECR-TMPL-0422.formulaScopeInvalid` — наявний ключ
+  (`FormulaDefHandlers.cs`, 2026-09-25), перевикористаний у
+  `TemplateVersionsController.ParseFormulaScope`: той самий захисний кидок
+  «невідома область формули», дослівно той самий текст.
+- `err.ECR-ROW-0409.rowKeyExists`/`.rowKeysExist` — наявні ключі
+  (`CreateRowHandler`/`PatchCellsHandler`, перевірка ДО запису),
+  перевикористані в `RowStore.DuplicateRowKeyException`: той самий факт
+  «ключ рядка вже зайнятий», лише програна гонитва проти бази замість
+  попередньої перевірки.
+- `err.ECR-CELL-0409.batchStale` — наявний ключ, перевикористаний у
+  `NormalizedCellStore.ClaimRowsAsync` (той самий факт «версія рядка
+  змінилася між читанням і записом», що вже несе шлях `PatchCellsHandler`).
+- Нові ключі, кожен на власний факт: `err.ECR-AUTH-0401.securityStampStale`
+  (`SecurityStampMiddleware`); `err.ECR-REG-0422.selfParent` {entryId}
+  (`RegistryEntry.SetParent`, дзеркало до `err.ECR-TMPL-0422.rowSelfParent`
+  для ІНШОЇ сутності — довідник, не рядок шаблону);
+  `err.ECR-INT-0422.materializationRequiresAggregation` {sourceField,
+  targetRowKey} (`EntityFieldMap.SetMaterialization`);
+  `err.ECR-RPT-0409.versionNotDraft` {version, status},
+  `.snapshotSubmittedContent`/`.snapshotSubmittedStatus` {snapshotId}
+  (`ReportVersion.Publish`/`ReportSnapshot.Complete`/`.RefreshStatus` —
+  три різні факти під тим самим кодом іммутабельності);
+  `err.ECR-USR-0422.receivesAlertsRequiresEmail` {userName}
+  (`User.SetReceivesAlerts`); `err.ECR-PRD-4224.countOutOfRange`
+  {count, max}/`.countNotDivisor` {count}/`.sequenceOutOfRange`
+  {sequence, max} (`PeriodCalendar` — три різні перевірки, той самий код);
+  `err.ECR-PRD-0422.keyInvalid` {value} (`PeriodKey.Parse`);
+  `err.ECR-PRD-0422.policyNotFound` {periodPolicyId} (`PeriodStore.GetPolicyAsync`
+  — окремий факт від `.keyInvalid` вище: тут формат ключа правильний, немає
+  самого запису); `err.ECR-PRD-0422.periodNotInProjectOfDocument`
+  {documentId, periodKey} (`WorkflowStore.LockPeriodAsync` — окремий факт
+  від наявного `.periodNotInProject` {periodId, projectCode} у `Project.cs`:
+  інший шлях резолюції, інший склад підстановок);
+  `err.ECR-CFG-0422.rowKeyInvalid` {value} (`RowKey.Create` — окремий факт
+  від `.invalidCode` того самого коду: інший патерн символів, інша сутність);
+  `err.ECR-CFG-4221.notIana` {value} (`SiteTimeZone.Create`);
+  `err.ECR-SYS-0503.schedulerNotConfigured` {job} (`QuartzJobScheduler.Scheduler`
+  — область публічна, як і решта `ECR-SYS-*`); `err.ECR-DOC-0409.businessKeyExhausted`
+  (`DocumentStore.NextBusinessKeyAsync` — усі спроби підбору вільного ключа
+  вичерпано) і `.businessKeyDuplicate` {businessKey} (`UnitOfWork.TryMapDuplicateKey`,
+  гілка `Document` зі станом `Added` — окремий факт від сусіднього
+  `.rekeyDuplicate`, який мапить гілку зі станом `Modified`);
+  `err.ECR-CELL-0409.concurrentChange` (`UnitOfWork.SaveChangesAsync`,
+  загальний перехоплювач `DbUpdateConcurrencyException` — окремий факт від
+  `.batchStale`: тут конфліктує довільна сутність з токеном версії, не
+  обов'язково комірка/рядок документа).
+- Заголовки кодів не змінювались — `ECR-AUTH-0401`, `ECR-TMPL-0422`,
+  `ECR-ROW-0409`, `ECR-CELL-0409`, `ECR-REG-0422`, `ECR-INT-0422`,
+  `ECR-RPT-0409`, `ECR-USR-0422`, `ECR-PRD-4224`, `ECR-PRD-0422`,
+  `ECR-CFG-0422`, `ECR-CFG-4221`, `ECR-SYS-0503`, `ECR-DOC-0409` уже були
+  нейтральними.
+
+**B-14 завершено.** Таблиця нижче — порожня, замір 0 у 0 файлах. Перелік
+незвільнених кидків без `messageKey` серед шести відстежуваних типів
+винятків 4xx (`BusinessRuleException`/`AccessDeniedException`/
+`ConcurrencyConflictException`/`DomainException`/`SourceAuthenticationException`/
+`NotFoundException`) вичерпано в межах сита «сито бачить фабрики»
+(2026-09-23). Нова відмова без `messageKey`, додана будь-де в майбутньому,
+підніме число з нуля — сторож `MessageKeyRatchetTests` це зловить.
+
+⛔ **Відомий і неполагоджений наслідок нуля, названий прямо, не замовчений.**
+`MessageKeyRatchetTests.Кидків_без_messageKey_не_стає_більше` (рядок 142)
+починається з `Assert.NotEmpty(ledger)` — сторож проти биту таблицю
+(парсер тихо побачив нуль рядків через зламаний формат). Він писався, коли
+нуль боргу проєктом ще ніхто не бачив, і не розрізняє «таблицю розбито» від
+«борг дійсно нуль»: порожня таблиця валить тест в ОБОХ випадках. Правка —
+один рядок (`ledger.Count > 0 || actual.Count == 0`), але файл тесту поза
+дозволеним списком цієї задачі (`⛔ Лише файли зі списку вище плюс
+09-seed.sql/localization-debt.md`), і спроба редагування його впала на
+permission-класифікаторі середовища («Modify Shared Resources»), а не лише
+на текстовій інструкції задачі — тобто обхід технічно неможливий, не лише
+заборонений. Емпірично перевірено (тимчасове повернення старої таблиці з
+18 рядками старих чисел і прогін сторожа): усі 24 кидки з 18 файлів вище
+дійсно закриті, і **жодного іншого файлу репозиторію сторож не назвав** —
+борг по всьому проєкту дійсно 0, а не помилка заміру. `dotnet test` на
+`Ecr.Architecture.Tests` тому дає 132/133 — єдиний червоний рядок саме
+цей, і причина названа тут, а не прихована зеленим прогоном локально.
