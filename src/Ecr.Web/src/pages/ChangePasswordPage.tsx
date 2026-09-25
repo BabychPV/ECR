@@ -9,6 +9,7 @@ import { MeQueryKey } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
 import { problemText } from '@/shared/ui/problemText';
+import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { t } from '@/shared/i18n';
 
 /**
@@ -37,15 +38,9 @@ import { t } from '@/shared/i18n';
  * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
  * для миші: клавіатура й читалка його не бачили взагалі.
  *
- * ⚠ Напис — ЛІТЕРАЛ, не `t()`. Рядки цього застосунку йдуть винятково із
- * серверного каталогу (`GET /api/v1/ui-strings/...`, сам каталог наповнює
- * `09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський. Ключа під
- * цей напис там ще немає, і завести його звідси не можна: голий `t()` без
- * рядка в каталозі показав би позначений ключ (`⟦...⟧`) читалці замість
- * опису кнопки — рівно той дефект, від якого рятує `Missing`-позначка в
- * `shared/i18n`.
+ * ✎ `X-26`: напис — із каталогу (`common.togglePasswordVisibility`) з
+ * англійським запасним (`a11yLabels.ts`); раніше — англійський літерал.
  */
-const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
 
 /**
  * Відмова «поточний пароль не підходить» (V-16).
@@ -119,7 +114,7 @@ export function ChangePasswordPage(): JSX.Element {
             onChange={(event) => setCurrent(event.currentTarget.value)}
             error={currentWrongText ?? undefined}
             autoComplete="current-password"
-            visibilityToggleButtonProps={passwordToggleProps}
+            visibilityToggleButtonProps={passwordToggleProps()}
           />
           <PasswordInput
             label={t('password.next')}
@@ -127,7 +122,7 @@ export function ChangePasswordPage(): JSX.Element {
             onChange={(event) => setNext(event.currentTarget.value)}
             error={tooShortText ?? undefined}
             autoComplete="new-password"
-            visibilityToggleButtonProps={passwordToggleProps}
+            visibilityToggleButtonProps={passwordToggleProps()}
           />
           <PasswordInput
             label={t('password.repeat')}
@@ -135,7 +130,7 @@ export function ChangePasswordPage(): JSX.Element {
             onChange={(event) => setRepeat(event.currentTarget.value)}
             error={mismatch ? t('password.mismatch') : undefined}
             autoComplete="new-password"
-            visibilityToggleButtonProps={passwordToggleProps}
+            visibilityToggleButtonProps={passwordToggleProps()}
           />
 
           <Button loading={busy} disabled={mismatch || next.length === 0} onClick={() => void submit()}>

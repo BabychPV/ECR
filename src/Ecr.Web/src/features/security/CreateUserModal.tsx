@@ -6,20 +6,12 @@ import type { RoleView, UserIdResponse } from '@/api/types';
 import { createUserBody } from '@/features/security/createUserBody';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import { t } from '@/shared/i18n';
 import { useOpenGeneration } from '@/features/security/useOpenGeneration';
 
-/**
- * Аргументи для кнопки-тумблера видимості пароля (`Q-260`).
- *
- * ⛔ Mantine ставить на цю кнопку `aria-hidden="true"` і `tabIndex={-1}` за
- * замовчуванням; сама наявність об'єкта знімає `aria-hidden`, а явний
- * `tabIndex: 0` повертає зупинку табом.
- *
- * ⚠ Напис — ЛІТЕРАЛ, не `t()`: ключа під нього в каталозі (`09-seed.sql`)
- * немає, і голий `t()` показав би читалці позначений ключ.
- */
-const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
+// ✎ `X-26`: пропи тумблера видимості пароля (`Q-260`) — `a11yLabels.passwordToggleProps()`:
+// напис із каталогу з англійським запасним, а не літерал для всіх мов.
 
 interface CreateUserModalProps {
   opened: boolean;
@@ -132,7 +124,7 @@ function CreateUserForm({ onClose, roles, rolesError, onRetry }: Omit<CreateUser
             description={t('security.oneTimePasswordHint')}
             value={oneTimePassword}
             onChange={(event) => setOneTimePassword(event.currentTarget.value)}
-            visibilityToggleButtonProps={passwordToggleProps}
+            visibilityToggleButtonProps={passwordToggleProps()}
           />
           <Text size="xs" c="dimmed" mt="xs">
             {t('security.localHint')}

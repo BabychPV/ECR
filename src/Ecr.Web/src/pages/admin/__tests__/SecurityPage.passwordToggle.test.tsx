@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 
 /**
  * Тумблер видимості пароля в діалозі створення локального користувача
@@ -47,13 +48,10 @@ const source = readFileSync(
 
 describe('SecurityPage: тумблер видимості разового пароля (Q-260)', () => {
   it('оголошує аргументи тумблера з ненульовим tabIndex і aria-label', () => {
-    const propsMatch = source.match(
-      /const passwordToggleProps = \{[^}]*'aria-label':\s*'([^']+)'[^}]*tabIndex:\s*(\d+)[^}]*\}/,
-    );
-
-    expect(propsMatch).not.toBeNull();
-    expect(propsMatch?.[1]).toBe('Toggle password visibility');
-    expect(propsMatch?.[2]).toBe('0');
+    // ✎ `X-26`: аргументи — спільні (`a11yLabels.passwordToggleProps()`), напис
+    // із каталогу з англійським запасним; каталог тут не завантажено.
+    expect(passwordToggleProps()).toEqual({ 'aria-label': 'Toggle password visibility', tabIndex: 0 });
+    expect(source).toContain("import { passwordToggleProps } from '@/shared/ui/a11yLabels';");
   });
 
   it('передає ці аргументи в PasswordInput разового пароля', () => {
@@ -62,7 +60,7 @@ describe('SecurityPage: тумблер видимості разового па�
     );
 
     expect(fieldMatch).not.toBeNull();
-    expect(fieldMatch?.[0]).toContain('visibilityToggleButtonProps={passwordToggleProps}');
+    expect(fieldMatch?.[0]).toContain('visibilityToggleButtonProps={passwordToggleProps()}');
   });
 
   it('МУТАЦІЯ (задокументовано, не в коміті): без рядка вище тест (2) падає', () => {
@@ -72,7 +70,7 @@ describe('SecurityPage: тумблер видимості разового па�
     // пароля валило тест (2) вище (RED), відновлення рядка повертало GREEN.
     // Перевірка тут — сторож РЕГРЕСІЇ формату, яким той доказ був знятий:
     // рядок, що встановлює проп, синтаксично один-єдиний для цього поля.
-    const occurrences = source.match(/visibilityToggleButtonProps={passwordToggleProps}/g) ?? [];
+    const occurrences = source.match(/visibilityToggleButtonProps={passwordToggleProps\(\)}/g) ?? [];
     expect(occurrences.length).toBe(1);
   });
 });

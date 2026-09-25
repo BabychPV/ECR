@@ -2,6 +2,7 @@ import { createElement, type ComponentType, type ReactNode } from 'react';
 import { Button, Group, Text, type ButtonProps, type GroupProps, type TextProps } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { isTransportErrorCode } from '@/api/client';
+import { closeNotificationButtonProps, undoLabel as catalogUndoLabel } from './a11yLabels';
 import { logSuppressedDetail, problemText } from './problemText';
 
 /*
@@ -33,10 +34,9 @@ const UndoButton = Button as ComponentType<
  * `aria-hidden`, тобто з дерева доступності їх прибрано), хрестик тоста
  * ДОСЯЖНИЙ — і це єдина дія, якою сповіщення можна прибрати з екрана.
  *
- * ⚠ Напис — ЛІТЕРАЛ, не `t()`, з тієї ж причини, що `passwordToggleProps` у
- * `pages/LoginPage.tsx`: рядки цього застосунку йдуть із серверного каталогу
- * (`09-seed.sql`), ключа під цей напис там ще немає, а голий `t()` без рядка
- * показав би читалці позначений ключ (`⟦…⟧`) замість опису кнопки.
+ * ✎ `X-26`: напис тепер із каталогу (`common.closeNotification`) з англійським
+ * запасним — див. `a11yLabels.ts`. Раніше тут стояв літерал: ключа не було, а
+ * голий `t()` без рядка показав би читалці позначений ключ (`⟦…⟧`).
  *
  * ⚠ Експортується навмисно: `notifications.show(...)` кличуть і повз цей
  * модуль (`features/workflow/SheetActions.tsx`, `pages/DocumentPage.tsx`,
@@ -46,7 +46,7 @@ const UndoButton = Button as ComponentType<
  * `pages/admin/GrantsPanel.tsx`), і другий літерал у кожному з них розійшовся
  * б із цим непомітно.
  */
-export const notificationCloseButtonProps = { 'aria-label': 'Close notification' } as const;
+export const notificationCloseButtonProps = closeNotificationButtonProps;
 
 /**
  * Показує причину відмови так, як її назвав сервер.
@@ -143,16 +143,15 @@ let undoSequence = 0;
  * розв'язує `Promise`, і лише потім ховає тост — інакше `onClose` від
  * власного ж `hide` прочитався б як «вікно збігло».
  *
- * ⚠ `undoLabel` — літерал із тієї самої причини, що й
- * `notificationCloseButtonProps` вище: ключа під цей напис у каталозі
- * (`09-seed.sql`) ще немає, а `t()` на неіснуючий ключ показав би `⟦…⟧`.
- * Викликач, у якого ключ уже є, передає підпис сам.
+ * ✎ `X-26`: `undoLabel` за замовчуванням — із каталогу (`common.undo`) з
+ * англійським запасним (`a11yLabels.ts`), а не літерал. Викликач, у якого
+ * свій підпис, і далі передає його сам.
  */
 export function showUndo(
   message: string,
   onUndo: () => void,
   ms: number = UndoWindowMs,
-  undoLabel = 'Undo',
+  undoLabel = catalogUndoLabel(),
 ): Promise<boolean> {
   undoSequence += 1;
 

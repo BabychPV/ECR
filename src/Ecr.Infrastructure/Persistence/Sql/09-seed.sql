@@ -4176,7 +4176,13 @@ USING (VALUES
     (N'err.http.timeout', N'en', N'The server took too long to answer. Try again.', 0),
     (N'err.http.unavailable', N'en', N'The server is not reachable right now. Try again in a minute.', 0),
     (N'err.http.serverError', N'en', N'The server could not complete the request.', 0),
-    (N'err.http.requestFailed', N'en', N'The request could not be completed.', 0)
+    (N'err.http.requestFailed', N'en', N'The request could not be completed.', 0),
+    -- X-26: доступні імена службових кнопок (були англійськими літералами).
+    (N'common.closeNotification', N'en', N'Close notification', 0),
+    (N'common.togglePasswordVisibility', N'en', N'Show or hide the password', 0),
+    (N'common.undo', N'en', N'Undo', 1),
+    (N'nav.skipToContent', N'en', N'Skip to main content', 1),
+    (N'nav.showAllCrumbs', N'en', N'Show the whole path', 1)
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)

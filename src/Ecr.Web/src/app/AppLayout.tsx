@@ -71,14 +71,10 @@ const MainContentId = 'main-content';
  * інакше воно виглядало б як зайвий текст перед шапкою для тих, хто його не
  * потребує.
  *
- * ⛔ Текст — не через `t()`. Каталог рядків живе в
- * `Ecr.Infrastructure/Persistence/Sql/09-seed.sql`, а ця картка (Q-263,
- * директива Хвилі 3) навмисно обмежена двома файлами
- * (`AppLayout.tsx`, `test/a11y.ts`) саме для паралельної ізоляції ліній —
- * файл сідів чіпають одразу кілька ліній, і зайва правка тут була б зайвим
- * ризиком конфлікту поза межами картки. Судження зафіксоване тут одним
- * рядком (`CLAUDE.md`): англійський літерал лишається доти, доки окрема
- * картка не заведе ключ у каталозі.
+ * ✎ `X-26`: текст — із каталогу (`nav.skipToContent`). Раніше тут був
+ * англійський літерал «до окремої картки з ключем»; ця картка його й завела.
+ * `t()` тут безпечний: каркас малюється лише після приватного каталогу
+ * (`catalogReady` нижче).
  */
 function SkipToContentLink(): JSX.Element {
   const [isFocused, setIsFocused] = useState(false);
@@ -140,7 +136,7 @@ function SkipToContentLink(): JSX.Element {
       onBlur={() => setIsFocused(false)}
       style={isFocused ? visibleStyle : hiddenStyle}
     >
-      Skip to main content
+      {t('nav.skipToContent')}
     </a>
   );
 }

@@ -28,6 +28,7 @@ import {
 } from '@/features/grid/lostEdits';
 import { safeReturnPath } from '@/shared/safeReturnPath';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
+import { passwordToggleProps } from '@/shared/ui/a11yLabels';
 import {
   isCatalogFailed,
   isCatalogResolved,
@@ -48,14 +49,16 @@ import { useEffect } from 'react';
  * (`⟦...⟧`) замість пояснення причини — рівно той дефект, від якого це
  * повідомлення й рятує. `EcrApiError` узято тому, що `ErrorAlert` показує
  * `problem.title`/`message` напряму, у ЦЕЙ каталог не заглядаючи.
+ *
+ * ✎ `X-26`: літерал англійською — мовою за замовчуванням (`DefaultLanguage`).
+ * Тут стояла українська, якої серед мов продукту немає взагалі (`D-95`).
  */
 const CATALOG_LOAD_FAILED = new EcrApiError({
-  title: 'Переклади інтерфейсу не завантажилися',
+  title: 'Interface texts could not be loaded',
   status: 0,
   errorCode: 'ECR-I18N-CATALOG-FAILED',
   correlationId: '-',
-  detail:
-    'Не вдалося завантажити текстовий каталог інтерфейсу. Перевірте з’єднання з мережею та оновіть сторінку.',
+  detail: 'The interface text catalogue did not load. Check the network connection and reload the page.',
 });
 
 /**
@@ -67,13 +70,10 @@ const CATALOG_LOAD_FAILED = new EcrApiError({
  * явний `tabIndex: 0` повертає зупинку табом. Без цього тумблер існував лише
  * для миші: клавіатура й читалка його не бачили взагалі.
  *
- * ⚠ Напис — ЛІТЕРАЛ, не `t()`, з тієї ж причини, що й `CATALOG_LOAD_FAILED`
- * вище: рядки цього застосунку йдуть із серверного каталогу
- * (`09-seed.sql`), а цей файл — DDL/сід, виключно оркестраторський. Ключа
- * під цей напис там ще немає; голий `t()` без рядка в каталозі показав би
- * читалці позначений ключ (`⟦...⟧`) замість опису кнопки.
+ * ✎ `X-26`: напис — із каталогу (`common.togglePasswordVisibility`, публічна
+ * область) з англійським запасним на випадок, коли каталог не доїхав
+ * (`a11yLabels.ts`); раніше — англійський літерал для всіх мов.
  */
-const passwordToggleProps = { 'aria-label': 'Toggle password visibility', tabIndex: 0 } as const;
 
 /**
  * Підпис перемикача мови на екрані входу (`BE-07`).
@@ -382,7 +382,7 @@ export function LoginPage(): JSX.Element {
                   value={password}
                   onChange={(event) => setPassword(event.currentTarget.value)}
                   autoComplete="current-password"
-                  visibilityToggleButtonProps={passwordToggleProps}
+                  visibilityToggleButtonProps={passwordToggleProps()}
                 />
 
                 <Button type="submit" variant="default" loading={busy}>
