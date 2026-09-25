@@ -336,9 +336,18 @@ public sealed class CreateProjectHandler(
         // відкрити документ.
         if (templateVersionId <= 0)
         {
+            // ⛔ B-19 (UX-аудит, четвертий раунд): код був `ECR-TMPL-0404`
+            // («шаблон або версія не знайдені», §7 контракту — 404), хоча
+            // виняток — `BusinessRuleException`, який без власного арма в
+            // `ExceptionHandlingMiddleware.Map` доїжджає як 422. Клієнт, що
+            // читає HTTP-статус раніше за код, бачив 422 у відповіді на код,
+            // що обіцяє 404, — розбіжність між статус-рядком і кодом у тілі.
+            // Причина не «нічого не знайдено» — templateVersionId узагалі не
+            // обрано, це помилка ВВЕДЕННЯ форми створення проєкту, тобто той
+            // самий код, що й решта структурних відмов шаблону.
             throw new BusinessRuleException(
-                "ECR-TMPL-0404", "Проєкт неможливо створити без версії шаблону.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0404.versionRequired" });
+                ErrorCodes.TemplateInvalid, "Проєкт неможливо створити без версії шаблону.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.versionRequired" });
         }
 
         if (periodPolicyId <= 0)

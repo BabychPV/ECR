@@ -329,9 +329,15 @@ conflict») і `ECR-PRD-0422` («Invalid period request») стали нейтр
   перевикористаний у тих самих трьох обробниках для «немає гранта Manage на
   проєкт».
 - Нові ключі: `err.ECR-PRD-4091.code` {code} (код політики періодів зайнято,
-  `CreatePeriodPolicyHandler`); `err.ECR-TMPL-0404.versionRequired` і
+  `CreatePeriodPolicyHandler`); ~~`err.ECR-TMPL-0404.versionRequired`~~ і
   `err.ECR-PRD-0422.periodPolicyRequired` — проєкт не можна створити без
   версії шаблону чи без політики періодів (`CreateProjectHandler`);
+  ✎ 2026-09-25 (B-19, UX-аудит раунд 4): перший ключ був заведений під кодом
+  `ECR-TMPL-0404` (404 за §7), хоча кидається `BusinessRuleException`, що без
+  власного арма в `ExceptionHandlingMiddleware.Map` доїжджає як 422 —
+  статус-рядок відповіді не збігався з кодом у тілі. Перенесено під
+  `ErrorCodes.TemplateInvalid` (`ECR-TMPL-0422`, 422 за §7): ключ тепер
+  `err.ECR-TMPL-0422.versionRequired`, суть повідомлення та сама.
   `err.ECR-PRJ-0422.notDraft` {status} і `.noPeriods` {projectId} —
   активація проєкту не в чернетці / календар без жодного періоду
   (`ActivateProjectHandler`); `err.ECR-PRD-0409.openPeriods` {projectId} —

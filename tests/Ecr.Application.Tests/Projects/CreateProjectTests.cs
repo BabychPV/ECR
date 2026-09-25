@@ -6,6 +6,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
 using NSubstitute;
@@ -228,8 +229,12 @@ public sealed class CreateProjectTests
                     PeriodKind.Monthly, year: 2026, templateVersionId: 0, periodPolicyId: PolicyId,
                     CancellationToken.None));
 
-        Assert.Equal("ECR-TMPL-0404", error.ErrorCode);
-        Assert.Equal("err.ECR-TMPL-0404.versionRequired", error.Details!["messageKey"]);
+        // B-19: був "ECR-TMPL-0404" (404 за §7), хоча кидається
+        // BusinessRuleException, що без власного арма в Map доїжджає як 422 —
+        // код обіцяв 404, відповідь несла 422. TemplateInvalid (0422) прибирає
+        // розбіжність: причина — не "не знайдено", а незаповнене поле форми.
+        Assert.Equal(ErrorCodes.TemplateInvalid, error.ErrorCode);
+        Assert.Equal("err.ECR-TMPL-0422.versionRequired", error.Details!["messageKey"]);
         await _periods.DidNotReceiveWithAnyArgs().AddProjectAsync(null!, default);
     }
 
