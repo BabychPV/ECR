@@ -4047,6 +4047,14 @@ USING (VALUES
     (N'notifications.saveRules',           N'en', N'Save rules', 1),
     (N'notifications.rulesSaved',          N'en', N'Rules saved.', 1),
 
+    -- ⚠ Власний текст блоку Rules, коли каналів нуль — НЕ той самий ключ, що
+    -- `notifications.noChannels`/`notifications.noChannelsHint` у `ChannelsPanel`
+    -- вище: ці два кажуть різні факти («каналів немає» проти «правил немає,
+    -- бо каналів немає»), і однаковий текст під різними заголовками виглядав
+    -- як зламаний рендер (`RulesMatrixPanel.tsx`).
+    (N'notifications.rulesNoChannels',     N'en', N'No rules yet', 1),
+    (N'notifications.rulesNoChannelsHint', N'en', N'Rules route events to channels; add a channel first, then rules can send to it.', 1),
+
     -- ⚠ `NotificationEventKind` — п'ять видів, усі приходять у `eventKinds`,
     -- навіть ті, на які правила ще немає.
     (N'notifications.event.JobFailed',              N'en', N'Background job failed', 1),
