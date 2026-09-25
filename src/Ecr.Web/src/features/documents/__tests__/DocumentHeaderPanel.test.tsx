@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeAll } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -209,6 +209,18 @@ afterEach(() => {
   vi.mocked(showDone).mockClear();
 });
 
+
+/**
+ * ⛔ Прогрів чанка поля дати. Холодний `import('@mantine/dates')` під
+ * навантаженням повного прогону — понад секунду, тобто довше за типовий
+ * `waitFor`, і тест «Date рендериться» падав не через код. Поле й далі
+ * монтується через `lazy()` — прогрівається модуль, не обхід (як у
+ * `PeriodsPage.reopenWindow.test.tsx`).
+ */
+beforeAll(async () => {
+  await import('@mantine/dates');
+});
+
 describe('DocumentHeaderPanel: порожній перелік полів', () => {
   it('панель не рендериться ВЗАГАЛІ — порожній масив не помилка', async () => {
     show({ fields: [] });
@@ -385,7 +397,7 @@ describe('DocumentHeaderPanel: збереження', () => {
 
     // `DateInput` — окремий чанк; дочекатись, доки Suspense розв'яжеться і
     // поле з'явиться.
-    await waitFor(() => expect(screen.queryByLabelText('Date')).not.toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText('Date')).not.toBeNull(), { timeout: 10_000 });
   });
 });
 
