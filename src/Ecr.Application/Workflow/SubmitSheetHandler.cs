@@ -243,7 +243,7 @@ public sealed class SubmitSheetHandler(
             if (table.ValidationRules.Count > 0)
             {
                 blocking.AddRange(Validation.TableValidation
-                    .Run(validation, table, cells, rowIds, headerValues)
+                    .Run(validation, table, cells, rowIds, headerValues, currentUser.Language)
                     .Where(m => m.Severity == ValidationSeverity.Error));
             }
 

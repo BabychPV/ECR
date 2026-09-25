@@ -86,6 +86,15 @@ public sealed class ValidateDocumentHandler(
         // нижче означало б піти в базу настільки ж зайвий раз.
         var headerValues = await headers.GetExpressionValuesAsync(documentId, ct).ConfigureAwait(false);
 
+        // ⚠ B-11: мова того, хто ЗАПУСТИВ перевірку — `ValidationSummary.MessagesJson`
+        // нижче зберігає РЕЗУЛЬТАТ, тобто вже готовий текст цією мовою. Читач
+        // із ІНШОЮ мовою інтерфейсу (`GetValidationResultHandler`) побачить
+        // збережений підсумок мовою того, хто востаннє натиснув «Перевірити»
+        // чи «Подати» — той самий компроміс, що вже був ДО цього фіксу (тоді
+        // мова була завжди `en`, тепер — мова автора запуску). Перерахунок
+        // підсумка під мову КОЖНОГО читача — окрема задача (передбачала б або
+        // повторну валідацію на читанні, або збереження messageKey замість
+        // готового тексту), не ця.
         var messages = new List<ValidationMessage>();
 
         foreach (var (instance, table) in toValidate)
@@ -97,7 +106,7 @@ public sealed class ValidateDocumentHandler(
                 ? foundRows
                 : new Dictionary<string, long>(StringComparer.Ordinal);
 
-            messages.AddRange(TableValidation.Run(engine, table, cells, rowIds, headerValues));
+            messages.AddRange(TableValidation.Run(engine, table, cells, rowIds, headerValues, currentUser.Language));
         }
 
         var summary = new ValidationSummary(

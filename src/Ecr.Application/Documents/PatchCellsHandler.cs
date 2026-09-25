@@ -1771,7 +1771,7 @@ public sealed class PatchCellsHandler(
             }
 
             var rowKey = byRowId.GetValueOrDefault(record.Address.TableRowId);
-            foreach (var message in validation.ValidateCell(column, record.Value, rules, headerValues))
+            foreach (var message in validation.ValidateCell(column, record.Value, rules, headerValues, currentUser.Language))
             {
                 messages.Add(message with { RowKey = rowKey });
             }
@@ -1782,7 +1782,7 @@ public sealed class PatchCellsHandler(
         foreach (var row in request.Rows)
         {
             messages.AddRange(validation
-                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row), headerValues)
+                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row), headerValues, currentUser.Language)
                 .Select(m => m with { RowKey = row.RowKey }));
         }
 
