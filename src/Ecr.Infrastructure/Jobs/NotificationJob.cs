@@ -113,10 +113,46 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⛔ ІНТ-3.3, D-118: ознака здоров'я — журнал покриття, а не тиша.
+        // Матеріалізація, що ПРОПУСТИЛА інтервал (період закрито, стеля точок),
+        // завершується успішно — у `JobProgress` вона не `Failed`, тож запит
+        // матеріалізації нижче її не бачить. Єдиний слід — рядок
+        // `itg.CollectionCoverage` зі статусом.
+        //
+        // ⚠ `ConflictKeptManual` свідомо поза зведенням: ручне значення в
+        // комірці перемогло зібране — це очікувана поведінка («людина має
+        // рацію»), її видно в стрічці подій UI, а не в листі про збої.
+        //
+        // ⚠ Групування (сутність, період, статус) — у базі: 5 000 пропусків
+        // того самого періоду — ОДИН рядок із лічильником, а не сто рядків,
+        // що витіснили б із зведення решту збоїв (`MaxDigestItems`).
+        var coverage = await db.CollectionCoverages
+            .AsNoTracking()
+            .Where(c => c.Status != null
+                        && c.CoveredFrom >= since
+                        && c.Status != CollectionCoverage.ConflictKeptManual)
+            .GroupBy(c => new { c.SourceEntityId, c.PeriodKey, c.Status })
+            .Select(g => new
+            {
+                g.Key.SourceEntityId,
+                g.Key.PeriodKey,
+                g.Key.Status,
+                Count = g.Count(),
+                At = g.Max(c => c.CoveredFrom),
+                Details = g.Min(c => c.Details),
+            })
+            .OrderByDescending(g => g.At)
+            .Take(MaxDigestItems)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
         // ⚠ Коди сутностей читаються ОДНИМ запитом на всі збої. Джерело у
         // зведенні має бути назване так, як його знає адміністратор, а не
         // числом: за `42` він не знайде нічого (`H-20`).
-        var sourceIds = failed.Select(r => r.SourceEntityId).Distinct().ToList();
+        var sourceIds = failed.Select(r => r.SourceEntityId)
+            .Concat(coverage.Select(c => c.SourceEntityId))
+            .Distinct()
+            .ToList();
 
         var sourceCodes = sourceIds.Count == 0
             ? []
@@ -124,7 +160,7 @@ public sealed class NotificationJob(
                 .AsNoTracking()
                 .Where(e => sourceIds.Contains(e.Id))
                 .OrderBy(e => e.Id)
-                .Take(MaxDigestItems)
+                .Take(sourceIds.Count)
                 .Select(e => new { e.Id, e.Code })
                 .ToDictionaryAsync(e => e.Id, e => e.Code, ct)
                 .ConfigureAwait(false);
@@ -167,7 +203,24 @@ public sealed class NotificationJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var items = collection.Concat(maintenance).Concat(materialization).Take(MaxDigestItems).ToList();
+        var coverageItems = coverage
+            .Select(c => new DigestItem(
+                CoverageKind,
+                sourceCodes.GetValueOrDefault(
+                    c.SourceEntityId, c.SourceEntityId.ToString(CultureInfo.InvariantCulture)),
+                c.Status!,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"період {c.PeriodKey}: {c.Count} подій; {c.Details}"),
+                c.At))
+            .ToList();
+
+        var items = collection
+            .Concat(maintenance)
+            .Concat(materialization)
+            .Concat(coverageItems)
+            .Take(MaxDigestItems)
+            .ToList();
 
         // ⛔ Нуль адресатів — не помилка, а СТАН, який має бути видно (`D-125`).
         // Мовчазна система без адресатів і мовчазна система без збоїв ззовні
@@ -234,7 +287,7 @@ public sealed class NotificationJob(
                 .DispatchAsync(
                     new NotificationEvent(
                         group.Key,
-                        NotificationSeverity.Error,
+                        group.Max(f => SeverityOf(f.Kind, f.Status)),
                         EventKeyOf(group.Key, group.Select(f => f.Subject)),
                         $"ECR: збоїв за період — {lines.Count}",
                         string.Join(Environment.NewLine, lines)),
@@ -322,9 +375,40 @@ public sealed class NotificationJob(
     /// лишається збоєм збору: адресат той самий, хоч дія і термінова.
     /// </remarks>
     public static NotificationEventKind EventKindOf(string digestKind)
-        => digestKind is CollectionKind or AuthenticationKind
+        => digestKind is CollectionKind or AuthenticationKind or CoverageKind
             ? NotificationEventKind.CollectionFailed
             : NotificationEventKind.JobFailed;
+
+    /// <summary>
+    /// Вид рядка зведення для події журналу покриття (<c>ІНТ-3.3</c>, <c>D-118</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Подія матриці — <see cref="NotificationEventKind.CollectionFailed"/>, а
+    /// не <see cref="NotificationEventKind.JobFailed"/>: задача відпрацювала, а
+    /// пропуск лікує той, хто відповідає за джерело й мапінг (стеля точок,
+    /// закритий період), а не той, хто за сервер.
+    /// </remarks>
+    public const string CoverageKind = "coverage";
+
+    /// <summary>
+    /// Серйозність рядка зведення для матриці правил (<c>BE-34</c>).
+    /// </summary>
+    /// <param name="digestKind">Вид рядка.</param>
+    /// <param name="status">Статус рядка.</param>
+    /// <remarks>
+    /// ⚠ Лише <see cref="CollectionCoverage.SkippedPeriodClosed"/> — попередження:
+    /// значення за закритий період не лягли в комірки навмисно (період
+    /// закрито), і людина вирішує, чи відкривати його. Стеля точок
+    /// (<see cref="CollectionCoverage.SkippedPointCeiling"/>) — помилка: інтервал
+    /// не згорнуто, і в комірці немає числа, яке мало там бути. Решта рядків
+    /// зведення — збої, як і раніше.
+    /// Серйозність групи — найвища серед її рядків.
+    /// </remarks>
+    public static NotificationSeverity SeverityOf(string digestKind, string status)
+        => digestKind == CoverageKind
+           && string.Equals(status, CollectionCoverage.SkippedPeriodClosed, StringComparison.Ordinal)
+            ? NotificationSeverity.Warning
+            : NotificationSeverity.Error;
 
     /// <summary>
     /// Ключ дедуплікації: той самий НАБІР збоїв дає той самий ключ.
