@@ -3,13 +3,15 @@
 | | |
 |---|---|
 | Дата | 2026-09-27 |
-| Статус | **Проєкт до виконання** — стартує після схвалення рішень `R-1…R-21` (§11.2) |
+| Статус | **Проєкт до виконання.** Рішення `R-1…R-21` **схвалені людиною 2026-09-27** («так, вноси D-149 в реєстр та Схвалено запропоновані рішення») і внесені в `docs/tz/10-decisions.md` як `D-150…D-170`; `R-22…R-27` ухвалені за делегуванням людини того ж дня («все інше на твій розсуд не обмежуй себе») — §11.2 |
+| Відповіді людини 2026-09-27 | про джерело властивостей компонентів (M, nC, nS, LHV): «це і є addstream» — перевірено на файлах, §11.4 і `R-27`: nC/nS — з хімічних формул Add Stream, M — значення HYSYS (у 301 відновлюються точно), LHV в Add Stream немає |
 | Питання замовника | «Чи є можливість в системі додати сутність, яка фактично є таблицею (або 3 таблицями зі зв'язками між собою) з контролем унікальності строк по певним стовпцям, та потім використовувати її в методологіях, формулах (expression)?» |
 | Спирається на | `ФВ-8.1…8.14`, `ФВ-9.*`, `D-13`, `D-14`, `D-50`, `D-66`, `D-75`, `I-3`; розбір Excel `excel-analysis.md` (§2.3, §3, §1.5, §6) — робочий артефакт сесії аналізу, **поза репозиторієм**: посилання `excel-analysis.md:рядок` нижче ведуть у нього; чи переносити його в `docs/` — разом із відповіддю на RQ-1 (дані з міткою MSIP «Internal») |
 | Суміжне | [FEATURE-HSE301-VIEW](FEATURE-HSE301-VIEW.md) — представлення форми 301, окремий документ; його кроки `RG1…RG3` чекають на `RT-22`, `RT-23a`, `RT-23b` цього плану (§9.3); [DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md) |
 
 Позначки: ⛔ — межа або заборона; ⚠ — застереження; **жирне** — ключове рішення; `R-n` — рішення
-цього документа (після схвалення переносяться в `docs/tz/10-decisions.md` як `D-…`); `RT-nn` — крок
+цього документа (`R-1…R-21` у реєстрі `docs/tz/10-decisions.md` — `D-(149+n)`: `R-1` → `D-150`, …,
+`R-21` → `D-170`); `RT-nn` — крок
 плану (§9); `RQ-n` — питання до замовника (§11.3; префікс `RQ-`, щоб не плутати з журналом проєкту
 `docs/build/questions/Q-NNN.md`); `файл:рядок` — перевірено читанням коду 2026-09-27.
 
@@ -63,7 +65,7 @@
 
 | # | Дефект | Доказ | Де виправляється |
 |---|---|---|---|
-| Д-1 | `REGFIELD` у правилах валідації документа завжди дає `#REF`: контексти створюються без знімка довідника | `ValidationEngine.cs:223`, `:235` (конструктор бази без `registryFields`, `ValidationEvaluationContext.cs:36-38`) | **не тут**: [DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md) — **виконано в `5f00b791`** (§5.12). Нові функції (§5) користуються **тим самим** механізмом передачі знімка; крок `RT-24` залежить від D16-04 |
+| Д-1 | `REGFIELD` у правилах валідації документа завжди дає `#REF`: контексти створюються без знімка довідника | `ValidationEngine.cs:223`, `:235` (конструктор бази без `registryFields`, `ValidationEvaluationContext.cs:36-38`) | **не тут**: [DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md) — **виконано в `5f00b791`** («Перевірити», подання) і **`400c58b1`** (шлях збереження, §5.12). Нові функції (§5) користуються **тим самим** механізмом передачі знімка; крок `RT-24` залежить від D16-04 |
 | Д-2 | Незаповнене поле довідника в `REGFIELD` дає `#REF` замість `null`, а це суперечить `02b` §6.3 (`docs/build/02b-expressions.md:356-365`) | `SliceEvaluationContext.cs:267-271` + пропуск при завантаженні `RecalculationService.cs:1265-1271` | `RT-24`, рішення `R-11` |
 | Д-3 | Гонку на унікальному індексі мапить лише гілка для `Code`; будь-який інший унікальний індекс довідника дасть голий 500 | `UnitOfWork.cs:158-180`, фолбек `:76-79` | `RT-10b` |
 | Д-4 | Правила `RequiredWhen`/`UniqueWithin`/`Expression`/`CrossRegistry` виглядають налаштованими, але не спрацьовують ніколи. Це той самий клас дефекту, від якого застерігає коментар самої сутності: «правило, якого рушій не знає, … виглядає налаштованим» | `RegistryRuleDef.cs:56-59`; виконавця немає (див. §1.1 п. 2) | `RT-17a` |
@@ -105,7 +107,7 @@
 | N-3 | Обчислювані поля всередині довідника (wt% тощо) | `RegistryValue.cs:122-131`: обчислене значення належить документу або методології |
 | N-4 | Редактор M:N (`RegistryEntryLink`) | замінює «довідник-зв'язка» (`R-7`) |
 | N-5 | Автоматичний перерахунок після зміни довідника | `D-39`: закриті періоди — ніколи; відкриті — явною дією (`R-14`) |
-| N-6 | Зворотна синхронізація з `FLERT.dbo` | `D-50`: master — ECR; див. питання RQ-9 |
+| N-6 | Зворотна синхронізація з `FLERT.dbo` | `D-50`: master — ECR; `R-26` |
 | N-7 | Функції довідників у версіях `Legacy` | чинний рушій їх не рахував: `ECR-CALC-0433` (`02b-expressions.md:726-731`) |
 | N-8 | Пошук запису на дату події (`REGFINDAT`) і зведений вигляд «компоненти в стовпцях» | наступна ітерація (§11.5, `RT-37`) |
 
@@ -579,8 +581,10 @@ field_path     = string ;          (* 'COMPONENT.MW' — сегменти чер
 Вхід події (рядок таблиці подій): `@Volume` (ст.м³, `C17`), `@Duration` (с, `C12`), `@Density`
 (кг/ст.м³, `C25`), `@Stream` (`Lookup` → `STREAM`), `@HmbCase` (текст «370 Winter», `C24`). Формули
 методології (`Strict`), коди формул — `!…`, константи — `CST.…`
-(`M_S` = 32.06, `M_CO2` = 44.01, `K_SO2` = 0.02, `ETA` = 0.9984, `OX` = 0.995 — як у
-`excel-analysis.md:220-249`). ⚠ Коди констант тут ілюстративні: у методології `HSE301.FLARE`
+(`M_S` = 32.064, `M_CO2` = 44.00, `K_SO2` = 0.02, `ETA` = 0.9984, `OX` = 0.995; розбір
+`excel-analysis.md:220-249` брав 32.06 і 44.01, але перевірка 2026-09-27 на самому файлі дала
+32.064 і 44.00 з округленням — [FEATURE-HSE301-VIEW §6.5](FEATURE-HSE301-VIEW.md#65-після-feature-registry-tables-крок-rg1),
+рішення HSE301 V-23). ⚠ Коди констант тут ілюстративні: у методології `HSE301.FLARE`
 вони інші (`K_S` задано по речовинах, `OX_CO2`), а остаточні формули кроку `RG1` —
 [FEATURE-HSE301-VIEW §6.5](FEATURE-HSE301-VIEW.md#65-після-feature-registry-tables-крок-rg1):
 
@@ -589,7 +593,7 @@ CASE    = REGFIND('STREAM_CASE', @Stream, @HmbCase)
 MU      = REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.MOL_PCT * ROW.COMPONENT.MW) / 100
 S_WT    = CST.M_S * REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.COMPONENT.N_S * ROW.MOL_PCT) / !MU
 EF_RAW  = CST.M_CO2 * REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.COMPONENT.N_C * ROW.MOL_PCT) / 100 / !MU
-EF      = Truncate(!EF_RAW * 1000) / 1000                           -- звіт обрізає до 3 знаків
+EF      = Round(!EF_RAW, 3)                                         -- звіт округлює до 3 знаків
 H2S_WT  = REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE && ROW.COMPONENT = REGFIND('COMPONENT', 'H2S'),
                  ROW.MOL_PCT * ROW.COMPONENT.MW) / !MU
 M       = CONVERT(@Volume * @Density, 'kg', 't')
@@ -601,13 +605,15 @@ W_SOUND = 91.5 * Sqrt(1.3 * (273 + REGFIELD(!CASE, 'T_C')) / !MU)
 ```
 
 - `EF_RAW` містить і CO₂ складу: у `COMPONENT` для CO₂ `N_C = 1`. Це та сама формула
-  `44.01·(Σ nC·x + x_CO2)/100/μ`, що в `excel-analysis.md:238`.
+  `K·(Σ nC·x + x_CO2)/100/μ`, що в `excel-analysis.md:238`, але з K = 44.00 і округленням, а не
+  обрізанням: лише так вона відтворює EF файлу на всіх 11 різних складах (FEATURE-HSE301-VIEW
+  §6.5). Псевдокомпоненти HYSYS (`CN1_35*`, `CN2_35*`, `CN3_16*`) мають `N_C = N_S = 0`.
 - `ROW.COMPONENT = REGFIND('COMPONENT','H2S')` порівнює `EntryRef` з `EntryRef`. У `COMPONENT`
   первинного ключа немає, тому пошук іде за кодом запису.
 - Одиниця змінюється лише `CONVERT` (`D-74`), як у формулах `HSE301.FLARE` (FEATURE-HSE301-VIEW
-  §6.3); множника `/1000` чи `·10⁶` у формулах немає. `1000` лишився тільки в `Truncate` для EF —
-  це обрізання до 3 знаків, а не зміна одиниці; `10^3` там писати не можна: у діалекті методологій
-  `^` — XOR (`DialectSyntax.cs:72-75`, `ECR-CALC-0431`).
+  §6.3); множника `/1000` чи `·10⁶` у формулах немає. EF округлює `Round(x, 3)` — функція
+  діалекту методологій (`DialectCatalog.cs:79`; у `Strict` середина — від нуля,
+  `MethodologyFunctions.cs:125-134`), тож і множника `1000` для обрізання більше немає.
 - Відсутній у складі компонент → порожня множина → `0`. Методології `IFERROR` недоступний
   (`DialectCatalog.cs:172`), тому агрегат з фільтром тут правильніший за `REGFIND` по рядку складу.
 
@@ -695,9 +701,14 @@ W_SOUND = 91.5 * Sqrt(1.3 * (273 + REGFIELD(!CASE, 'T_C')) / !MU)
   у цьому документі — стан **до** `5f00b791`;
 - RT-22/RT-24 **розширюють цей завантажувач** (або роблять його фасадом над
   `IRegistrySnapshotLoader`), а не заводять поруч другий;
-- ⚠ шлях **збереження** (`PatchCellsHandler.Validate`) знімка ще не має — файл зайнятий WR-04.
-  Правило з функцією довідника на збереженні й далі дасть `#REF`, доки WR-04 не підключить
-  `TableValidation.LoadRegistryFieldsAsync`; DoD RT-24 це враховує.
+- ✓ шлях **збереження** закрито в `400c58b1` (перевірено читанням коду на
+  `origin/dev/integration` 2026-09-27): `PatchCellsHandler` будує знімок тим самим
+  `TableValidation.LoadRegistryFieldsAsync` (`PatchCellsHandler.cs:151-152`) і передає його в
+  `ValidateCell`/`ValidateScope`. Записи довідника беруться лише з комірок самого батча, без
+  зрізу таблиці: правило комірки бачить своє значення, правило рядка — надіслане, рівні
+  таблиці й документа на PATCH не виконуються. Отже нові функції довідника в правилах
+  працюватимуть на всіх трьох шляхах, щойно RT-24 розширить завантажувач; у DoD RT-24 входить
+  і шлях збереження.
 
 ---
 
@@ -954,11 +965,13 @@ registry / Custom expression. Рівень задає `SegmentedControl`. Для
 │ Components  COMPONENT                                  [Export ▾] [Import…]  [+ Add entry]  [Save]      │
 │ [Search…]                                                                              46 entries      │
 │  Code    Name              Formula   HYSYS name     M, g/mol    nC   nS   LHV, MJ/Sm³                   │
-│  CH4     Methane           CH4       Methane        16.043      1    0    …                             │
-│  H2S     Hydrogen sulfide  H2S       H2S            34.081      0    1    …                             │
+│  CH4     Methane           CH4       Methane        16.0429     1    0    —                             │
+│  H2S     Hydrogen sulfide  H2S       H2S            34.076      0    1    —                             │
+│  C6      n-Hexane          C6H14     C6_1           85.36       6    0    —                             │
 ```
 
-(Числа ілюстративні, джерело властивостей компонентів — питання RQ-2.)
+Назви й формули — з Add Stream, `N_C`/`N_S` — з формули, M — значення HYSYS, відновлені з
+301; LHV у джерелах немає, тому поле порожнє (§11.4, `R-27`).
 
 | Взаємодія | Поведінка |
 |---|---|
@@ -1163,6 +1176,8 @@ registry / Custom expression. Рівень задає `SegmentedControl`. Для
 | `registries.import.orientationRows` / `.orientationColumns` | Each row is an entry / Each column is an entry (transposed, e.g. HYSYS) |
 | `registries.import.unpivot` | Turn {count} columns into {child} rows |
 | `registries.import.summary` | {new} new · {changed} changed · {unchanged} unchanged · {errors} errors |
+| `registries.import.formulaMismatch` | The file gives formula {fileFormula} for {component}, but the registry has {registryFormula}. The registry value is kept. |
+| `registries.import.formulaMissing` | {component} has no chemical formula in the file; carbon and sulphur atoms are set to 0. |
 | `expr.preview.title` / `.run` / `.reads` | Check on a record / Run / Registry reads |
 | `expr.registryUnknown` | Registry "{registry}" does not exist. |
 | `expr.registryFieldUnknown` | Registry "{registry}" has no field "{field}". |
@@ -1214,7 +1229,7 @@ append-only блоків).
 
 | # | Підзадача | Файли для запису | Залежить від | DoD (як перевіримо) | Режим |
 |---|---|---|---|---|---|
-| RT-00 | Контракт мови, рішення, вимоги | `docs/build/FEATURE-REGISTRY-TABLES.md` (перенесення цього файлу), `docs/build/02b-expressions.md` (§1 EBNF `row_ref`/`this_ref`, §5 `EntryRef`, §6.4 `#N/A`/`#MULTI`, §7/§8 рядки функцій зі статусом «RT-20a/b», §12 перевірки 15–21), `docs/tz/10-decisions.md` (схвалені `R-*` → `D-…`), `docs/tz/02-requirements.md` (`ФВ-8.15…8.19`, `ФВ-9.18`, `ФВ-9.19` — **лише за згодою людини**, бо це документ замовника, `RequirementCensus.cs:64-65`), `contracts/trace-exempt.md` (звільнення «до RT-…» для кожної нової ФВ) | схвалення `R-*` людиною | `RequirementTraceTests.Кожна_вимога_має_тест_або_явне_звільнення` зелений (нова ФВ або звільнена, або вже має тест); повний прогін зелений (02b структурно не читає жоден сторож: в `AggregateFunctionTests.cs:15,32` і `MethodologyOperatorTests.cs:106,133` — лише коментарі). Без згоди на нові ФВ тести кроків позначаються наявними ідентифікаторами (`ФВ-8.4`, `ФВ-8.5`, `ФВ-8.12`, `ФВ-8.14`, `ФВ-9.2`) | хв. 1 |
+| RT-00 | Контракт мови, рішення, вимоги | `docs/build/FEATURE-REGISTRY-TABLES.md` (перенесення цього файлу), `docs/build/02b-expressions.md` (§1 EBNF `row_ref`/`this_ref`, §5 `EntryRef`, §6.4 `#N/A`/`#MULTI`, §7/§8 рядки функцій зі статусом «RT-20a/b», §12 перевірки 15–21), `docs/tz/10-decisions.md` (`R-1…R-21` → `D-150…D-170` — ✓ внесено 2026-09-27; `R-22…R-27` — окремо), `docs/tz/02-requirements.md` (`ФВ-8.15…8.18`, `ФВ-9.18`, `ФВ-9.19` — вносяться 2026-09-27 паралельним кроком документації після схвалення людиною рішень `R-*`; `RequirementCensus.cs:64-65`), `contracts/trace-exempt.md` (звільнення «до RT-…» для кожної нової ФВ) | ✓ схвалення `R-1…R-21` людиною — виконано 2026-09-27 | `RequirementTraceTests.Кожна_вимога_має_тест_або_явне_звільнення` зелений (нова ФВ або звільнена, або вже має тест); повний прогін зелений (02b структурно не читає жоден сторож: в `AggregateFunctionTests.cs:15,32` і `MethodologyOperatorTests.cs:106,133` — лише коментарі) | хв. 1 |
 | RT-01 | M1: схема ключів | `Domain/Entities/Configuration/RegistryKeyDef.cs`, `RegistryKeyField.cs`, `Domain/Entities/Dictionaries/RegistryEntryKey.cs`, `Infrastructure/Persistence/Configurations/RegistryKeysConfiguration.cs`, `EcrDbContext.cs` (3 `DbSet`), міграція `RK01RegistryKeys` (+Designer, `EcrDbContextModelSnapshot.cs`), `docs/build/02a-db-schema.md` §3/§5, маркери в `09-seed.sql` і обох `DependencyInjection.cs`, `tests/Ecr.Infrastructure.Tests/Persistence/RegistryKeysSchemaTests.cs` | RT-00 | міграція вгору й униз на локальному SQL; `UX_RegistryEntryKey_Live` не пускає другий живий хеш, пропускає `IsLive = 0`; `UX_RegistryKeyDef_Primary` не пускає два первинні | хв. 2 |
 | RT-02 | Нормалізатор ключа: сервер + клієнт на одній фікстурі | `Domain/Services/RegistryKeyNormalizer.cs`, `tests/Ecr.TestKit/Fixtures/registry-key-normalization.json` (≥ 40 випадків: регістр, пробіли, NFC, кирилиця, `-0`, хвостові нулі, `Lookup`, `null`-частини), `tests/Ecr.Domain.Tests/Registries/RegistryKeyNormalizerTests.cs`, `src/Ecr.Web/src/features/registries/keys/normalizeKey.ts`, `…/keys/__tests__/normalizeKey.test.ts` | RT-00 | обидва набори проганяють **усю** фікстуру; однакові хеші | хв. 2 |
 | RT-07 | Мова: `ROW.`/`THIS`, інтерфейс знімка, значення помилок | `Ecr.Expressions/Ast/AstNode.cs`, `Ast/AstPrinter.cs`, `Parsing/Parser.cs`, `Evaluation/IRegistrySnapshot.cs`, `Binding/IRegistryShapeSource.cs`, `Evaluation/IEvaluationContext.cs` (член `Registries` з типовим `null`), `ExpressionErrors.cs`, `tests/Ecr.Expressions.Tests/Parsing/RowReferenceParsingTests.cs` | RT-00 | `ROW.COMPONENT.MW` → `RowFieldNode`; друк дерева повертає той самий текст; `THIS` поза режимом правил — діагностика; `CST.`/`HDR.` не зачеплені | хв. 2 |
@@ -1232,7 +1247,7 @@ append-only блоків).
 | RT-16 | Експорт CSV/XLSX | `Registries/Export/ExportRegistryHandler.cs`, `Ports/IRegistryWorkbookWriter.cs`, `Ecr.Adapters.Excel/RegistryWorkbookWriter.cs` (ClosedXML, `Directory.Packages.props:53`), `Ecr.Adapters.Excel/DependencyInjection.cs`, `RegistryRowsController.cs`, `02-contracts.md` §9 + порт, web споживач; регенерація | RT-15 | експорт → імпорт того самого файлу дає «0 changed»; `decimal` без втрати знаків | хв. 10 |
 | RT-17a | Рушій правил + інтеграція в запис | `Registries/Rules/RegistryRuleEngine.cs`, `RegistryRuleContext.cs`, `RegistryRuleTemplates.cs`, `UpsertRegistryEntryHandler.cs`, `Rows/RegistryBatchHandler.cs`, `RegistryEntryCsvHandlers.cs`, `RegistryDefinitionHandlers.cs` (компіляція виразів, відмова `UniqueWithin`, `RegistryUse` з `SourceKind = 2`), `ErrorCodes.cs` (`RegistryRuleViolation` 4221), `09-seed.sql`, `02-contracts.md` §7, `contracts/trace-exempt.md` (зняти `ФВ-8.18`), тести | RT-12, RT-14, RT-20b, RT-21, RT-22 | `Error` у пакеті → 422 з переліком; `Warning` → `warnings[]`; зміна дитини перевіряє правило батька | хв. 9 |
 | RT-17b | Перевірка правила на наявних даних | `Registries/Rules/CheckRegistryRuleHandler.cs`, `RegistryDefinitionToolsController.cs` (`POST rules/check`), `02-contracts.md` §9, `web features/registries/rules/api.ts`; регенерація | RT-17a | на фікстурі FLERT: 4 порушення `SUM_100` з правильними записами | хв. 10 |
-| RT-18a | Імпорт: специфікація, планувальник, прев'ю | `Registries/Import/RegistryImportSpec.cs`, `RegistryImportPlanner.cs`, `RegistryImportPreviewHandler.cs`, `Ports/IRegistryWorkbookReader.cs`, `Ecr.Adapters.Excel/RegistryWorkbookReader.cs`, `Api/Controllers/RegistryImportController.cs` (`POST import/preview`), `02-contracts.md` §9 + порт, `09-seed.sql`, `web features/registries/import/api.ts`, фікстури `tests/Ecr.TestKit/Fixtures/registry-import/{current-flat.csv,streams-offshore-transposed.xlsx}`; регенерація | RT-14, RT-06 | транспонований фрагмент розгортається в потоки/кейси/рядки складу; дублі `CO`/`Carbon_Monoxide` з різними значеннями → помилка рядка; 0-значення пропускаються за прапорцем | хв. 10 |
+| RT-18a | Імпорт: специфікація, планувальник, прев'ю | `Registries/Import/RegistryImportSpec.cs`, `RegistryImportPlanner.cs`, `RegistryImportPreviewHandler.cs`, `Ports/IRegistryWorkbookReader.cs`, `Ecr.Adapters.Excel/RegistryWorkbookReader.cs`, `Api/Controllers/RegistryImportController.cs` (`POST import/preview`), `02-contracts.md` §9 + порт, `09-seed.sql`, `web features/registries/import/api.ts`, фікстури `tests/Ecr.TestKit/Fixtures/registry-import/{current-flat.csv,streams-offshore-transposed.xlsx,components-addstream.xlsx}` (підписи компонентів — не дані замовника, §11.4; `component-mw-hysys.csv` з RT-23a перевикористовується); регенерація | RT-14, RT-06 | транспонований фрагмент розгортається в потоки/кейси/рядки складу; дублі `CO`/`Carbon_Monoxide` з різними значеннями → помилка рядка; 0-значення пропускаються за прапорцем; профіль `ADDSTREAM_COMPONENTS` з підписів `streams Onshore!A10:A54` дає `FORMULA`, `N_C`, `N_H`, `N_S` (кирилиця `С`/`Н` у «Toluene (С7Н8)» нормалізується; «Propyl mercaptan (C5H8S)» проти наявного `C3H8S` — попередження `registries.import.formulaMismatch`, значення не перезаписується); псевдокомпонент без формули (`CN1_35*`) — `N_C`/`N_S` = 0 з попередженням `registries.import.formulaMissing` | хв. 10 |
 | RT-18b | Імпорт: застосування | `Import/RegistryImportApplyHandler.cs`, `Import/RegistryImportJob.cs` (через `IBackgroundJobScheduler`), `RegistryImportController.cs`, `02-contracts.md` §9, web споживач; регенерація | RT-18a, RT-17a | > 5 000 рядків → 202 і задача; застаріле прев'ю → 409 `importPreviewStale`; `ApiConventionTests.Довга_операція_повертає_202…` | хв. 11 |
 | RT-18c | Профілі імпорту | `Import/RegistryImportProfileHandlers.cs`, `RegistryImportController.cs`, `02-contracts.md` §9, web споживач; регенерація | RT-18b | `If-Match` зі старим `rowVersion` → 409 `profileChanged` | хв. 12 |
 | RT-19 | «Де використано»: формули й правила | `RegistryStore.cs` (`FindDefinitionUsageAsync` + 3 види з `cfg.RegistryUse`), `Application/Common/UsageKinds` (константи), `09-seed.sql` (`registries.usageKind.*`), `web features/registries/RegistryUsage.tsx` (підписи), тести | RT-23b, RT-24, RT-17a | формула методології, формула шаблону й правило видно у відповіді з правильним посиланням | хв. 11 |
@@ -1240,9 +1255,9 @@ append-only блоків).
 | RT-20b | Агрегати й область `ROW` | `RegistryForms.cs`, `Evaluation/RowScopeContext.cs`, `DialectCatalog.cs`, `FunctionRegistry.cs`, `ClientServerEquivalenceTests.cs` (15 → 20), `tests/Ecr.Expressions.Tests/Functions/RegistryAggregateFunctionTests.cs` | RT-20a | порожня множина (`REGSUM` = 0, решта — `null`), `null` поглинаються, перша помилка; індексний шлях переглядає лише дітей (лічильник кроків); повний перегляд 30 тис. рядків → `#BUDGET` | хв. 4 |
 | RT-21 | Статична перевірка: довідники, поля, ключі, одиниці, `EntryRef`, залежності | `Binding/ReferenceResolver.cs`, `Binding/TypeChecker.cs`, `Binding/UnitChecker.cs`, `Binding/DependencyExtractor.cs`, `09-seed.sql` (блок expressions, `expr.*`), тести | RT-20b | перевірки 15–21 (§5.5) з позиціями; Д-5 закрито (описка в `REGFIELD` дає помилку публікації) | хв. 5 |
 | RT-22 | Завантажувач знімка | `Ports/IRegistrySnapshotLoader.cs`, `Application/Registries/RegistrySnapshot.cs`, `Infrastructure/Persistence/RegistrySnapshotLoader.cs`, DI (блок expressions), `02-contracts.md` (порт), `contracts/trace-exempt.md` (зняти `ФВ-8.17`), `tests/Ecr.Infrastructure.Tests/Persistence/RegistrySnapshotLoaderTests.cs` | RT-04, RT-05, RT-07 | дата: запис, закритий 15-го, невидимий на кінець місяця; `AS OF`: правка після моменту невидима; видалені й діти невидимого батька відсутні | хв. 4 |
-| RT-23a | Методологія бачить довідник + **золотий тест 301** | `Ecr.Calculations/CalculationInputBuilder.cs` (`Lookup` → `EntryRef`, лише `Strict`), `Application/Ports/ICalculationModule.cs` (`CalculationArgument` + `long? EntryId = null` у кінець), `MethodologyEvaluationContext.cs`, `GenericCalculationModule.cs` (знімок у `PrepareAsync`), `CalculationOrchestrator.cs` (`RegistryAsOfUtc`, кеш знімків на прогін), `tests/Ecr.Calculations.Tests/Registries/Hse301GoldenTests.cs`, `tests/Ecr.TestKit/Fixtures/flert-1d2-370-winter.json` (RQ-1), `contracts/trace-exempt.md` (зняти `ФВ-9.18`) | RT-20b, RT-22 | AC-1 (§10); версія `Legacy` дає побітно ті самі числа, що до кроку | хв. 5 |
+| RT-23a | Методологія бачить довідник + **золотий тест 301** | `Ecr.Calculations/CalculationInputBuilder.cs` (`Lookup` → `EntryRef`, лише `Strict`), `Application/Ports/ICalculationModule.cs` (`CalculationArgument` + `long? EntryId = null` у кінець), `MethodologyEvaluationContext.cs`, `GenericCalculationModule.cs` (знімок у `PrepareAsync`), `CalculationOrchestrator.cs` (`RegistryAsOfUtc`, кеш знімків на прогін), `tests/Ecr.Calculations.Tests/Registries/Hse301GoldenTests.cs`, `tests/Ecr.TestKit/Fixtures/flert-1d2-370-winter.json` (склад кейсу — за робочим припущенням RQ-1), `tests/Ecr.TestKit/Fixtures/registry-import/component-mw-hysys.csv` (новий: код, формула, `N_C`, `N_S`, M HYSYS для 33 компонентів моря, §11.4), `contracts/trace-exempt.md` (зняти `ФВ-9.18`) | RT-20b, RT-22 | AC-1 (§10); версія `Legacy` дає побітно ті самі числа, що до кроку | хв. 5 |
 | RT-23b | Публікація методології: перевірки й `RegistryUse` | `Calculations/MethodologyPublishChecks.cs`, `PublishMethodologyHandler.cs`, `Ports/IRegistryUseStore.cs`, `Infrastructure/Persistence/RegistryUseStore.cs`, тести | RT-21, RT-23a | описка в полі → 422 з позицією; `REGSUM` у `Legacy` → `ECR-CALC-0433`; `RegistryUse` переписано | хв. 6 |
-| RT-24 | Шаблони на знімку; `REGFIELD` читає `Lookup`/`Unit`; `null` для порожнього (Д-2) | `Registries/RegistryFieldSnapshotLoader.cs` (з D16-04: → `IRegistrySnapshotLoader`), `Recalculation/RecalculationService.cs`, `Recalculation/SliceEvaluationContext.cs`, публікація шаблону (`Templates/PublishChecks.cs`: перевірки + `RegistryUse`), тести | RT-22, RT-21, **D16-04** ([DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md), виконано в `5f00b791`) | формула шаблону з `REGSUM` рахується в перерахунку; правило валідації документа з функцією довідника рахується через механізм D16-04 на «Перевірити» й поданні (шлях збереження — після WR-04, §5.12) | хв. 7 |
+| RT-24 | Шаблони на знімку; `REGFIELD` читає `Lookup`/`Unit`; `null` для порожнього (Д-2) | `Registries/RegistryFieldSnapshotLoader.cs` (з D16-04: → `IRegistrySnapshotLoader`), `Recalculation/RecalculationService.cs`, `Recalculation/SliceEvaluationContext.cs`, публікація шаблону (`Templates/PublishChecks.cs`: перевірки + `RegistryUse`), тести | RT-22, RT-21, **D16-04** ([DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md), виконано в `5f00b791` і `400c58b1`) | формула шаблону з `REGSUM` рахується в перерахунку; правило валідації документа з функцією довідника рахується через механізм D16-04 на «Перевірити», поданні **і збереженні** (`PatchCellsHandler`, `400c58b1`, §5.12); храповик `PatchCellsQueryCountTests` без змін | хв. 7 |
 | RT-25 | Свіжість і перерахунок зачеплених | `Infrastructure/Persistence/MethodologyStore.cs` (`GetCalculationFreshnessAsync`), `Ports/IMethodologyStore.cs` (`ChangedRegistries` у кінець), `Documents/GetCalculationResultsHandler.cs`, `Registries/Impact/RegistryImpactHandlers.cs`, `Api/Controllers/RegistryImpactController.cs`, `02-contracts.md` §9, `09-seed.sql`, `contracts/trace-exempt.md` (зняти `ФВ-9.19`), `web features/registries/impact/api.ts`; регенерація | RT-05, RT-23b, RT-24 | правка складу → результат документа «застарілий» з назвою довідника; `impact` не повертає закритих періодів; `recalculate-impacted` → 202 | хв. 8 |
 | RT-26 | Метадані мови й прев'ю | `Expressions/GetExpressionMetadataHandler.cs` (`registries[]`), `Expressions/PreviewExpressionHandler.cs`, `Api/Controllers/ExpressionsController.cs` (`POST preview`), `02-contracts.md` §9, `web features/expressions/api.ts`; регенерація | RT-22, RT-21 | прев'ю μ для (1D-2, 370 Winter) = AC-1; без `Registry.View` → 403 | хв. 6 |
 | RT-30 | Сторінка даних: маршрут, каркас, читання | `app/routes.ts`, `pages/admin/RegistryEntriesPage.tsx`, `features/registries/editor/{RegistryGrid.tsx,columns.ts,useRegistryRows.ts}`, `pages/admin/RegistriesPage.tsx` (посилання), `api/queryKeys.ts` (append), `09-seed.sql` (блок ui-registries), `src/test/__tests__/a11yFixtures.tsx`, `accessibility.part3.a11y.test.tsx`, `e2e/screenshots.spec.ts` | RT-13 | 4 стани + лише читання; a11y обох тем; знімок e2e обох тем | хв. 6 |
@@ -1321,7 +1336,7 @@ append-only блоків).
 | 4 | RT-10a ‖ RT-20b ‖ RT-22 | довідники ‖ мова ‖ завантажувач |
 | 5 | RT-10b ‖ RT-13 ‖ RT-21 ‖ RT-23a | `UnitOfWork`/CSV ‖ новий контролер рядків ‖ Binding ‖ Calculations |
 | 6 | RT-11 ‖ RT-23b ‖ RT-26 ‖ RT-30 | опис ‖ публікація методології ‖ метадані ‖ UI-каркас |
-| 7 | RT-12 ‖ RT-24 (після D16-04 — виконано в `5f00b791`) ‖ RT-34 ‖ RT-40 | |
+| 7 | RT-12 ‖ RT-24 (після D16-04 — виконано в `5f00b791` і `400c58b1`) ‖ RT-34 ‖ RT-40 | |
 | 8 | RT-14 ‖ RT-25 ‖ RT-41 | |
 | 9 | RT-15 ‖ RT-17a ‖ RT-31 | |
 | 10 | RT-16 ‖ RT-17b ‖ RT-18a ‖ RT-32 | |
@@ -1340,10 +1355,10 @@ append-only блоків).
 ⚠ **Спільне з [FEATURE-HSE301-VIEW](FEATURE-HSE301-VIEW.md#113-хвилі-й-перетин-файлів)
 (узгоджено 2026-09-27).** Спільних **таблиць** немає: цей план змінює `cfg.Registry*`,
 `dic.Registry*` і `calc.CalculationRun` (`RegistryAsOfUtc`), HSE301 — `ext.EntityFieldMap`,
-`ext.RowWindow*`, `calc.MethodologyFormula`, `calc.MethodologyOutput`, `calc.CalculationResult`,
-`calc.CalculationStep` і `cfg.ViewDef`/`cfg.ViewVersion`. Серіалізується інше:
+`ext.RowWindow*`, `ext.SourceEvent*`, `calc.MethodologyFormula`, `calc.MethodologyOutput`,
+`calc.CalculationResult`, `calc.CalculationStep` і `cfg.ViewDef`/`cfg.ViewVersion`. Серіалізується інше:
 
-- **Міграції** обох документів (`RK01…RK05` тут, `HSE301M1…M4` там) переписують
+- **Міграції** обох документів (`RK01…RK05` тут, `HSE301M1…M5` там) переписують
   `EcrDbContextModelSnapshot.cs`, тож черга **одна на обидві сесії**: у польоті не більше однієї
   міграції, наступна генерується після rebase на попередню, у порядку готовності.
 - **Код розрахунку:** `ICalculationModule.cs` і `GenericCalculationModule.cs` (HSE301 A3a → A3b →
@@ -1364,7 +1379,7 @@ append-only блоків).
 
 | # | Критерій | Як перевіряється |
 |---|---|---|
-| AC-1 | **Золотий тест 301.** Методологія `Strict` з формулами §5.6 на даних `STREAM`/`STREAM_CASE`/`GAS_COMPOSITION`/`COMPONENT`, вхід події `AI_Int_SG_V8!C` (V = 269.258 ст.м³ `C17`, Duration = 930 с `C12`, ρ = 0.9589 `C25`, потік 1D-2, кейс 370 Winter; склад — `Current_20250805`, рядок 217), дає: **μ = 23.0544679** (`C26`) ± 1e-7; **S = 17.2965447 мас.%** (`C27`) ± 1e-7; **EF_RAW = 2.08743** ± 1e-5 і **EF = 2.087** точно (`C103`); **M = 0.2581915 т** (`C104`); **SO2 = 0.0891735 т** (`C112`); **SO2 = 95.885 г/с** (`C129`) ± 1e-3; **CO2 = 0.5361514 т** (`C105`) — з EF, **обрізаним** до 2.087 | `Hse301GoldenTests` (RT-23a, у пам'яті) + `FlertRegistryScenario` (RT-50, реальний SQL, імпорт → публікація → прогін). Числа — `excel-analysis.md:260-289`. ⚠ Формула S% підтверджена аналізом на FG (`excel-analysis.md:248`); якщо на SG вона не зійдеться, це питання до замовника (RQ-2), а не привід підганяти формулу |
+| AC-1 | **Золотий тест 301.** Методологія `Strict` з формулами §5.6 на даних `STREAM`/`STREAM_CASE`/`GAS_COMPOSITION`/`COMPONENT`, вхід події `AI_Int_SG_V8!C` (V = 269.258 ст.м³ `C17`, Duration = 930 с `C12`, ρ = 0.9589 `C25`, потік 1D-2, кейс 370 Winter; склад — `Current_20250805`, рядок 217), дає: **μ = 23.0544679165262** (`C26`) ± 1e-9 відносно; **S = 17.2965446772043 мас.%** (`C27`) ± 1e-9; **EF_RAW = 2.0869542** і **EF = 2.087** точно (`C103`); **M = 0.2581915 т** (`C104`); **SO2 = 0.0891735 т** (`C112`); **SO2 = 95.885 г/с** (`C129`) ± 1e-3; **CO2 = 0.5361514 т** (`C105`) — з EF, **округленим** до 2.087 | `Hse301GoldenTests` (RT-23a, у пам'яті) + `FlertRegistryScenario` (RT-50, реальний SQL, імпорт → публікація → прогін). **Джерело чисел:** входи й очікувані значення — `hse301.xlsx` (`AI_Int_SG_V8`, рядки 17–27, 30–63, 101–129; `excel-analysis.md:260-289`); властивості компонентів — фікстура `component-mw-hysys.csv` (формули й `N_C`/`N_S` — з підписів Add Stream `streams Onshore!A10:A54`; M = `wt% · μ / об.%` аркуша `AI_Int_SG_V8`, 33 компоненти моря), а в RT-50 — `COMPONENT`, імпортований профілем `ADDSTREAM_COMPONENTS`, з тими самими M; константи `M_S = 32.064`, `M_CO2 = 44.00` з `Round(…, 3)`. Перевірено 2026-09-27 на файлі: μ і S збігаються до 2e-14 на всіх трьох складах SG, EF — на всіх 11 складах (3 SG + 8 FG). Формула й точність не підганяються: розбіжність — дефект у даних фікстури або в рушії |
 | AC-2 | Складений ключ гарантує база: з двох одночасних записів рівно один успішний, другий — `409 ECR-REG-4092` з `keyText` і кодом конфліктного запису | інтеграційний тест RT-10b; `smoke.ps1` |
 | AC-3 | Ключ `' 370  winter'` дорівнює `'370 Winter'` за `IgnoreCase = true`; `Lookup` порівнюється за id | фікстура RT-02 |
 | AC-4 | Ключ не публікується на даних із дублікатами; конструктор показує приклади до збереження | RT-11, RT-34 |
@@ -1394,65 +1409,87 @@ append-only блоків).
 | Повний перегляд великого довідника впирається в бюджет | середня | низький | індексний шлях; попередження під час публікації; `#BUDGET` видно в трейсі |
 | Зміна семантики `REGFIELD` (порожнє → `null`) змінить числа наявних формул шаблону | низька | середній | перед RT-24 порахувати формули з `REGFIELD`; зміну показати в описі PR; `IFERROR`, що ловив `#REF`, тепер отримає `null` — перелічити такі місця |
 | Нові `@Arg` з `Lookup` у `Strict` змінять числа формул, які досі мовчки отримували `null` | низька | середній | лише `Strict` (`R-12`); перевірка публікації типу `EntryRef` не пускає арифметику |
-| Якість даних Excel (дублі стовпців, неповні склади, скопійовані ρ/MW/Z для 1D-1 — `excel-analysis.md:486-488`) потрапить у довідник | висока | середній | `MustMatch`, правило Σ як `Warning`, прев'ю імпорту; рішення по даних — RQ-5, RQ-6 |
+| Якість даних Excel (дублі стовпців, неповні склади, скопійовані ρ/MW/Z для 1D-1 — `excel-analysis.md:486-488`; хибна формула «Propyl mercaptan (C5H8S)» і кириличні `С`/`Н` у підписах Add Stream) потрапить у довідник | висока | середній | `MustMatch`, правило Σ як `Warning`, прев'ю імпорту (`R-23`, `R-24`); формула з файлу не перезаписує наявну (`registries.import.formulaMismatch`), кирилиця нормалізується (RT-18a) |
 | RevoGrid поза `DocumentGrid` — нова точка складності a11y | середня | середній | переюз утиліт сітки; a11y-тести з першого кроку (RT-30) |
 | Обсяг: ~35 кроків | висока | середній | хвилі; P2 (`RT-37`) окремо; кожен крок відвантажується в `dev/integration` зеленим |
-| Дані FLERT у фікстурах (мітка MSIP «Internal», `excel-analysis.md:331`) | середня | високий | RQ-1; до відповіді — синтетичні фікстури, а золотий тест бере дані з файлу поза репозиторієм і пропускається, якщо файлу немає |
+| Дані FLERT у фікстурах (мітка MSIP «Internal», `excel-analysis.md:331`) | середня | високий | робоче припущення RQ-1: у репозиторії — синтетичні фікстури й дані, що не належать замовнику (назви й формули компонентів, їхні молярні маси); склад реальних кейсів лежить поза репозиторієм, і золотий тест на ньому пропускається, якщо файлу немає |
+| Молярні маси компонентів суші (не 33 компоненти моря, відновлені з 301) узято з формули, а не з HYSYS | середня | низький (для 301 — нуль: на морі їх немає) | позначка джерела в полі `SOURCE` запису `COMPONENT`; значення HYSYS замінюють формульні одним імпортом, без зміни моделі (`R-27`) |
 
-### 11.2 Реєстр рішень (пропозиції)
+### 11.2 Реєстр рішень
 
-⚠ Це **пропозиції** архітектора. Після схвалення людиною їх треба перенести в `docs/tz/10-decisions.md`
-як `D-…` (RT-00). Реєстр — єдине джерело істини (`docs/tz/10-decisions.md:3-5`). Номери беруться
-наступні вільні на момент перенесення: станом на 2026-09-27 останній у реєстрі — `D-148`, а першим
-у черзі на перенесення стоїть V-1 FEATURE-HSE301-VIEW, схвалене людиною того ж дня.
+**`R-1…R-21` схвалені людиною 2026-09-27** («так, вноси D-149 в реєстр та Схвалено
+запропоновані рішення») і внесені в `docs/tz/10-decisions.md` як `D-150…D-170` (`R-n` →
+`D-(149+n)`). Реєстр — єдине джерело істини (`docs/tz/10-decisions.md:3-5`); тут лишаються
+обґрунтування й посилання на розділи. **`R-22…R-27` ухвалені за делегуванням людини
+2026-09-27** («все інше на твій розсуд не обмежуй себе»); у реєстр їх вносить оркестратор
+окремим кроком.
 
-| # | Рішення | Обґрунтування |
+| # | Статус | Рішення | Обґрунтування |
+|---|---|---|---|
+| R-1 | ✓ схвалено 2026-09-27 → `D-150` | Розширюємо Registry; нової сутності «таблиця» немає; обчислюваних полів у довіднику немає | `ФВ-8.1`; `D-13/14/66`; `RegistryValue.cs:122-131` |
+| R-2 | ✓ схвалено 2026-09-27 → `D-151` | Складений ключ = `cfg.RegistryKeyDef` + похідна `dic.RegistryEntryKey` з SHA-256 канонічного рядка + фільтрований `UNIQUE` | EAV не дає унікального індексу на значеннях; хеш фіксованої довжини обходить межу 900 байт ключа індексу |
+| R-3 | ✓ схвалено 2026-09-27 → `D-152` | Нормалізація: текст — NFC, обрізка, згортання пробілів, `IgnoreCase` за замовчуванням; число канонічне; `Lookup` — за id; тег типу | узгоджено з CI-зіставленням бази (`02a-db-schema.md:54-59`) і `ФВ-8.8` |
+| R-4 | ✓ схвалено 2026-09-27 → `D-153` | Поля первинного ключа обов'язкові; в альтернативних ключах `null`-частини не перевіряються | `REGFIND` мусить мати повну адресу; семантика `UNIQUE` з різними `NULL` |
+| R-5 | ✓ схвалено 2026-09-27 → `D-154` | `UniqueWithin` замінюється ключами, без автоконвертації; нові правила цього виду відхиляються | правило не виконувалось, на даних можуть бути дублікати |
+| R-6 | ✓ схвалено 2026-09-27 → `D-155` | Композиція — ознака `Lookup`-поля; один батько; дочірній довідник нетемпоральний і видимий разом із батьком; видалення `Restrict`/`Cascade` | 3 таблиці FLERT — дерево; версія кейсу несе свій склад |
+| R-7 | ✓ схвалено 2026-09-27 → `D-156` | M:N — довідник-зв'язка; `RegistryEntryLink` не розвивається | типізовані атрибути, ключі, правила, формули працюють однаково |
+| R-8 | ✓ схвалено 2026-09-27 → `D-157` | `CodeMode = Auto` (`E` + 9 цифр послідовності) для довідників із первинним ключем | `EcrCode` не приймає кирилицю ключа |
+| R-9 | ✓ схвалено 2026-09-27 → `D-158` | Системна історія SQL Server (`SYSTEM_VERSIONING`) через міграцію + `CalculationRun.RegistryAsOfUtc`; бізнес-дата знімка — останній день періоду | §3.6; пікер сітки вже бере кінець періоду (`DocumentGrid.tsx:766-776`) |
+| R-10 | ✓ схвалено 2026-09-27 → `D-159` | 7 нових функцій + розширений `REGFIELD`; імена ВЕЛИКИМИ; `Extension`; агрегати — спецформи; `ROW.`/`THIS`; статичний `EntryRef`, у рантаймі — `Number` | §5; прецедент спецформ — `Evaluator.cs:694-748`; прецедент числа-id — `RecalculationService.cs:1120-1128` |
+| R-11 | ✓ схвалено 2026-09-27 → `D-160` | Помилки `#N/A`/`#MULTI`; незаповнене поле → `null` (і в наявному `REGFIELD`) | `02b` §6.3; Д-2 |
+| R-12 | ✓ схвалено 2026-09-27 → `D-161` | `Lookup`-аргументи методології передаються як `EntryRef` лише у версіях `Strict` | `Legacy` зобов'язаний давати побітно ті самі числа (`02b-expressions.md:294-298`) |
+| R-13 | ✓ схвалено 2026-09-27 → `D-162` | Знімок довідників завантажується до прогону; жодних звернень до БД під час обчислення; повний перегляд — у межах бюджету | `02b-expressions.md:782-785`; `D-63` |
+| R-14 | ✓ схвалено 2026-09-27 → `D-163` | Зміна довідника позначає результати застарілими; перерахунок — явною дією, лише відкриті періоди | `D-39`; серії правок; `D-63` |
+| R-15 | ✓ схвалено 2026-09-27 → `D-164` | Правила `Expression`/`RequiredWhen`/`CrossRegistry` виконуються; `Error` блокує пакет; «Сума дочірніх» — шаблон `Expression` з параметрами | §6 |
+| R-16 | ✓ схвалено 2026-09-27 → `D-165` | Нових прав немає | наявні `Registry.*`/`Calculation.*` покривають усі дії |
+| R-17 | ✓ схвалено 2026-09-27 → `D-166` | Жетон конкуренції рядка — момент початку системного періоду (`PeriodStart`); конфлікт → `409 ECR-REG-4093` | temporal дає версію безкоштовно; сьогодні записи довідника конкуренції не мають |
+| R-18 | ✓ схвалено 2026-09-27 → `D-167` | Фізичні властивості компонентів (M, nC, nS, LHV) — у довіднику `COMPONENT`, а не в `calc.MethodologyConstant` | `D-75` (`docs/tz/10-decisions.md:126`) про **контекстні** коефіцієнти методології; властивості компонента — довідкові дані, спільні для методологій, версіюються історією довідника. Уточнення формулювання `D-75` — разом із внесенням. Джерело властивостей («це і є addstream») і що з нього фактично береться — `R-27` |
+| R-19 | ✓ схвалено 2026-09-27 → `D-168` | Редактор даних на RevoGrid (виняток із `DIRECTIVE-15-FRONTEND.md:122`); `DocumentGrid.tsx` не змінюється | редагована сітка, вставка блоком, `Lookup`-редактори вже є для RevoGrid |
+| R-20 | ✓ схвалено 2026-09-27 → `D-169` | XLSX читається й пишеться через ClosedXML в `Ecr.Adapters.Excel` за портами | `D-18` (`docs/tz/10-decisions.md:39`); пакет уже в стеку (`Directory.Packages.props:53`), нової залежності немає (`D-12`) |
+| R-21 | ✓ схвалено 2026-09-27 → `D-170` | Імпорт — прев'ю з токеном (`DataRevision`) → застосування; транспонування, розгортання стовпців, псевдоніми, `MustMatch` для дублів | реальна форма даних замовника (`excel-analysis.md:340-346`, `:382-391`) |
+| R-22 | ухвалено за делегуванням 2026-09-27 | RQ-3: допуск Σ складу й рівень правила — **параметри правила**, не константи: типово `SUM_100` = `Warning`, ± 0.5 мол.%; адміністратор довідника змінює їх у вкладці «Rules» без релізу | «допуски як налаштування»; у даних уже є 75 % і 99.6–100.2 %, і блок `Error` за замовчуванням зупинив би імпорт знімка |
+| R-23 | ухвалено за делегуванням 2026-09-27 | RQ-5: дублі стовпців (`CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen`): однакові значення (≤ 1e-12) зливаються мовчки; різні — помилка рядка `importDuplicateSourceMismatch`, людина обирає авторитетний стовпець у прев'ю, вибір зберігається в профілі (`duplicateSources: {"CO": "Carbon_Monoxide"}`) і далі діє без питань | політика імпорту; ні «перший виграє», ні «сума» не пояснюють число, а рішення людини відтворюване |
+| R-24 | ухвалено за делегуванням 2026-09-27 | RQ-6: неповні (`LPG Column Overhead` 75.4/80.6 %) і нульові (азот) склади імпортуються як є, з попередженням правила `SUM_100`; автонормалізації до 100 % немає | політика імпорту; нормалізація змінила б склад, який HYSYS дав саме таким, а попередження лишає рішення людині |
+| R-25 | ухвалено за делегуванням 2026-09-27 | RQ-8: `STREAM.LEGACY_ID` — необов'язкове `Int`, унікальне, коли заповнене (альтернативний ключ `BY_LEGACY_ID`); імпорт заповнює його з `StreamID`, нові потоки в ECR — без нього | трасування до FLERT коштує одне поле; вимагати його для нових потоків нема з чого — FLERT їх не видає |
+| R-26 | ухвалено за делегуванням 2026-09-27 | RQ-9: зворотної синхронізації в `FLERT.dbo` немає (`N-6`); до переходу форми 301 на представлення ECR (`D-149`) FLERT живе своєю копією, `Add Stream` — лише для читання (`I-3`) | `D-50`: master — ECR; `D-44`: у зовнішні системи не пишемо; напівміра «синхронізуємо обидва» дає розбіжності без відповідального (`B14-ecr-integration-and-data.md:315`) |
+| R-27 | ухвалено за делегуванням 2026-09-27 | Джерела властивостей `COMPONENT` (людина: «це і є addstream»; перевірено на файлах 2026-09-27, §11.4): `NAME`, `FORMULA` і з неї `N_C`/`N_H`/`N_S` — імпорт профілем `ADDSTREAM_COMPONENTS` з підписів Add Stream `streams Onshore!A10:A54`; `HYSYS_NAME` — з заголовків `Current_20250805!O2:BN2` і `streams Offshore!B12:B45`; `MW` — значення бібліотеки HYSYS: для 33 компонентів моря відновлені з 301 (`wt% · μ / об.%`), для решти — з формули до підтвердження (`SOURCE` запису каже, звідки); `LHV` — необов'язкове поле, а LHV суміші — необов'язкове поле кейсу `STREAM_CASE.LHV_STD` | в Add Stream немає ні M, ні LHV компонентів (перевірено по всіх 13 аркушах); маси з формул не відтворюють μ файлу (23.0572 проти 23.0544679), значення HYSYS — відтворюють до 2e-14; нейтральний дефолт для LHV замінюється одним імпортом без переробки |
+
+### 11.3 Питання до замовника
+
+**Закриті 2026-09-27.**
+
+| # | Питання | Як закрито |
 |---|---|---|
-| R-1 | Розширюємо Registry; нової сутності «таблиця» немає; обчислюваних полів у довіднику немає | `ФВ-8.1`; `D-13/14/66`; `RegistryValue.cs:122-131` |
-| R-2 | Складений ключ = `cfg.RegistryKeyDef` + похідна `dic.RegistryEntryKey` з SHA-256 канонічного рядка + фільтрований `UNIQUE` | EAV не дає унікального індексу на значеннях; хеш фіксованої довжини обходить межу 900 байт ключа індексу |
-| R-3 | Нормалізація: текст — NFC, обрізка, згортання пробілів, `IgnoreCase` за замовчуванням; число канонічне; `Lookup` — за id; тег типу | узгоджено з CI-зіставленням бази (`02a-db-schema.md:54-59`) і `ФВ-8.8` |
-| R-4 | Поля первинного ключа обов'язкові; в альтернативних ключах `null`-частини не перевіряються | `REGFIND` мусить мати повну адресу; семантика `UNIQUE` з різними `NULL` |
-| R-5 | `UniqueWithin` замінюється ключами, без автоконвертації; нові правила цього виду відхиляються | правило не виконувалось, на даних можуть бути дублікати |
-| R-6 | Композиція — ознака `Lookup`-поля; один батько; дочірній довідник нетемпоральний і видимий разом із батьком; видалення `Restrict`/`Cascade` | 3 таблиці FLERT — дерево; версія кейсу несе свій склад |
-| R-7 | M:N — довідник-зв'язка; `RegistryEntryLink` не розвивається | типізовані атрибути, ключі, правила, формули працюють однаково |
-| R-8 | `CodeMode = Auto` (`E` + 9 цифр послідовності) для довідників із первинним ключем | `EcrCode` не приймає кирилицю ключа |
-| R-9 | Системна історія SQL Server (`SYSTEM_VERSIONING`) через міграцію + `CalculationRun.RegistryAsOfUtc`; бізнес-дата знімка — останній день періоду | §3.6; пікер сітки вже бере кінець періоду (`DocumentGrid.tsx:766-776`) |
-| R-10 | 7 нових функцій + розширений `REGFIELD`; імена ВЕЛИКИМИ; `Extension`; агрегати — спецформи; `ROW.`/`THIS`; статичний `EntryRef`, у рантаймі — `Number` | §5; прецедент спецформ — `Evaluator.cs:694-748`; прецедент числа-id — `RecalculationService.cs:1120-1128` |
-| R-11 | Помилки `#N/A`/`#MULTI`; незаповнене поле → `null` (і в наявному `REGFIELD`) | `02b` §6.3; Д-2 |
-| R-12 | `Lookup`-аргументи методології передаються як `EntryRef` лише у версіях `Strict` | `Legacy` зобов'язаний давати побітно ті самі числа (`02b-expressions.md:294-298`) |
-| R-13 | Знімок довідників завантажується до прогону; жодних звернень до БД під час обчислення; повний перегляд — у межах бюджету | `02b-expressions.md:782-785`; `D-63` |
-| R-14 | Зміна довідника позначає результати застарілими; перерахунок — явною дією, лише відкриті періоди | `D-39`; серії правок; `D-63` |
-| R-15 | Правила `Expression`/`RequiredWhen`/`CrossRegistry` виконуються; `Error` блокує пакет; «Сума дочірніх» — шаблон `Expression` з параметрами | §6 |
-| R-16 | Нових прав немає | наявні `Registry.*`/`Calculation.*` покривають усі дії |
-| R-17 | Жетон конкуренції рядка — момент початку системного періоду (`PeriodStart`); конфлікт → `409 ECR-REG-4093` | temporal дає версію безкоштовно; сьогодні записи довідника конкуренції не мають |
-| R-18 | Фізичні властивості компонентів (M, nC, nS, LHV) — у довіднику `COMPONENT`, а не в `calc.MethodologyConstant` | `D-75` (`docs/tz/10-decisions.md:126`) про **контекстні** коефіцієнти методології; властивості компонента — довідкові дані, спільні для методологій, версіюються історією довідника. Пропонується уточнити формулювання `D-75` |
-| R-19 | Редактор даних на RevoGrid (виняток із `DIRECTIVE-15-FRONTEND.md:122`); `DocumentGrid.tsx` не змінюється | редагована сітка, вставка блоком, `Lookup`-редактори вже є для RevoGrid |
-| R-20 | XLSX читається й пишеться через ClosedXML в `Ecr.Adapters.Excel` за портами | `D-18` (`docs/tz/10-decisions.md:39`); пакет уже в стеку (`Directory.Packages.props:53`), нової залежності немає (`D-12`) |
-| R-21 | Імпорт — прев'ю з токеном (`DataRevision`) → застосування; транспонування, розгортання стовпців, псевдоніми, `MustMatch` для дублів | реальна форма даних замовника (`excel-analysis.md:340-346`, `:382-391`) |
+| RQ-2 | Джерело властивостей компонентів (M, nC, nS, LHV); які саме M дали μ = 23.0544679 | людина: «це і є addstream». Перевірено на файлах (§11.4, `R-27`): `N_C`/`N_S` — з хімічних формул у підписах Add Stream; M — значення бібліотеки HYSYS, які відновлюються з самого 301 і дають μ до 2e-14; **LHV компонентів в Add Stream немає** — це єдине, що лишається відкритим (RQ-2a нижче) |
+| RQ-3 | Допуск Σ складу і рівень правила | ухвалено за делегуванням — `R-22` |
+| RQ-5 | Яке значення дубльованих стовпців авторитетне | ухвалено за делегуванням — `R-23` |
+| RQ-6 | Неповні й нульові склади: як є чи виправити | ухвалено за делегуванням — `R-24` |
+| RQ-8 | Чи потрібен `LEGACY_ID` новим потокам | ухвалено за делегуванням — `R-25` |
+| RQ-9 | Чи мусить `FLERT.dbo` отримувати зміни словника | ухвалено за делегуванням — `R-26` |
 
-### 11.3 Відкриті питання до замовника
-
-Лише факти, яких система знати не може. Робота до відповіді не зупиняється, діє нейтральний дефолт.
+**Лишається відкритим — одне питання.**
 
 | # | Питання | Хто | Чому важливо | Нейтральний дефолт |
 |---|---|---|---|---|
-| RQ-1 | Чи можна класти в репозиторій фрагмент `Current_20250805` (3 кейси) як тестову фікстуру? Файл має мітку MSIP «Internal» | власник даних / ІБ | золотий тест у CI | синтетичні фікстури в репозиторії; золотий тест на реальних даних пропускається, якщо файлу поза репозиторієм немає |
-| RQ-2 | Джерело властивостей компонентів (M, nC, nS, LHV): таблиця FLERT, бібліотека HYSYS, ISO 6976? Які саме значення M дали μ = 23.0544679? | методолог | від цього залежить AC-1 з точністю 1e-7 | довідник `COMPONENT` заповнюється з таблиці, яку дасть замовник; до того — перевіряється лише структура формул |
-| RQ-3 | Допуск Σ складу і рівень правила (попередження чи блок) | методолог / еколог | зараз у даних є 75 % і 99.6–100.2 % | `Warning`, ± 0.5 % |
-| RQ-4 | Стандартна густина ρ (кг/ст.м³, 20 °C): звідки береться 0.9589 для 1D-2 зима? Окреме поле чи розрахунок (μ/24.04 дає 0.9590) | методолог | ρ входить у M і NCV | ρ — вхід події; у `STREAM_CASE` — необов'язкове поле `RHO_STD` |
-| RQ-5 | Дублі стовпців `CO`/`Carbon_Monoxide`, `H2`/`Hydrogen`, `O2`/`Oxygen`: яке значення авторитетне, коли вони різняться? | власник довідника | імпорт і Σ | помилка рядка (`MustMatch`), рішення людини в прев'ю |
-| RQ-6 | Неповні склади (`LPG Column Overhead` 75.4/80.6 %) і нульові (азот): імпортувати як є чи виправити? | власник довідника | правило Σ | імпорт як є з попередженням |
-| RQ-7 | Хто (роль, люди) веде довідник потоків в ECR після переходу? | замовник | ресурсні гранти `Write` | роль `TemplateAdministrator` з грантом на 4 довідники |
-| RQ-8 | Чи потрібен новим потокам ідентифікатор `FLERT.StreamID` (поле `LEGACY_ID`)? | власник FLERT | альтернативний ключ, трасування | необов'язкове поле, унікальне, коли заповнене |
-| RQ-9 | Чи мусить `FLERT.dbo` отримувати зміни словника до переходу форми 301 на ECR (SSRS читає FLERT)? | власник SSRS / FLERT | `N-6`, `D-50` | ні: master — ECR, звіт 301 переходить за [FEATURE-HSE301-VIEW](FEATURE-HSE301-VIEW.md) |
+| RQ-2a | З якого джерела замовник бере нижчу теплоту згоряння (LHV): бібліотека HYSYS, ISO 6976 чи інше — і для компонентів, чи вже для суміші кейсу? У 301 є лише LHV суміші (36.0412787449075 для 1D-2/370 Winter), в Add Stream — нічого | методолог | NCV і парникові CH4/N2O рахуються від LHV | LHV суміші — поле кейсу `STREAM_CASE.LHV_STD`, яке вводить чи імпортує методолог; `COMPONENT.LHV` — необов'язкове, і коли його заповнять, методологія перейде на `Σ x·LHV_i` без зміни моделі (`R-27`); не блокує |
+
+**Робочі припущення — до підтвердження на приймальному тестуванні, не блокують.** Факти
+світу замовника, яких система знати не може; діє нейтральний дефолт, заміна не потребує
+переробки.
+
+| # | Факт | Хто підтверджує | Робоче припущення |
+|---|---|---|---|
+| RQ-1 | Чи можна класти в репозиторій фрагмент `Current_20250805` (3 кейси) як тестову фікстуру (мітка MSIP «Internal») | власник даних / ІБ | у репозиторії — синтетичні фікстури й дані, що замовнику не належать (назви, формули й молярні маси компонентів); золотий тест на реальному складі пропускається, якщо файлу поза репозиторієм немає |
+| RQ-4 | Звідки береться стандартна густина ρ = 0.9589 для 1D-2 зима: окреме поле чи розрахунок (μ/24.04 дає 0.9590) | методолог | ρ — вхід події; у `STREAM_CASE` — необов'язкове поле `RHO_STD` |
+| RQ-7 | Хто (роль, люди) веде довідник потоків в ECR після переходу | замовник | роль `TemplateAdministrator` з грантом `Write` на 4 довідники |
 
 ### 11.4 Приклад налаштування «Потоки FLERT»
 
 | Довідник | Поля (тип, обов'язковість, одиниця) | Ключі | Зв'язки | Правила |
 |---|---|---|---|---|
-| `COMPONENT` (46 записів) | код запису = код компонента (`CH4`, `H2S`, `MEA`…), `CodeMode = Manual`; `FORMULA` String; `HYSYS_NAME` String (псевдонім імпорту: `Methane`, `IC4_1`, `nBMercaptan`…); `MW` Decimal, g/mol, обов'язкове; `N_C` Int, обов'язкове; `N_H` Int; `N_S` Int, обов'язкове; `LHV` Decimal, MJ/Sm³ | альтернативний `BY_HYSYS` (`HYSYS_NAME`); первинного немає → `REGFIND` за кодом | — | `CrossRegistry` не потрібне |
+| `COMPONENT` (46 записів) | код запису = код компонента (`CH4`, `H2S`, `MEA`…), `CodeMode = Manual`; назва en/ru — `DisplayL10n`; `FORMULA` String; `HYSYS_NAME` String (псевдонім імпорту: `Methane`, `IC4_1`, `nBMercaptan`…); `MW` Decimal, g/mol, обов'язкове; `N_C` Int, обов'язкове; `N_H` Int; `N_S` Int, обов'язкове; `LHV` Decimal, MJ/Sm³, необов'язкове (RQ-2a); `SOURCE` String — звідки M і LHV (`HYSYS, recovered from HSE301`, `formula`, …) | альтернативний `BY_HYSYS` (`HYSYS_NAME`); первинного немає → `REGFIND` за кодом | — | `CrossRegistry` не потрібне |
 | `STREAM` (126) | код `S{StreamID}` для імпортованих, `CodeMode = Manual`; `LEGACY_ID` Int; `NUMBER` String (`1D-2`, буває порожнім); назва — `DisplayL10n`; `IS_ONSHORE`, `IS_SOUR`, `IS_HMB`, `EXCLUDE_IN_LIST` Bool; `GROUP` Int; `HMB_DOC` String (`370`, `ПК-3 (370-220)`) | альтернативний `BY_LEGACY_ID` (`LEGACY_ID`); природного ключа немає (`excel-analysis.md:393-402`) | — | `NUMBER_REPEATS` (Info) §8.3 |
-| `STREAM_CASE` (220), `IsTemporal = true` | `STREAM` Lookup → `STREAM`, **Composition**, обов'язкове; `CASE_NAME` String, обов'язкове (`370 Winter`, `ПК-3 (370-220) лето`, `No composition`); `T_C` Decimal, °C; `DENSITY_OP` Decimal, кг/м³ (робоча, з HYSYS); `MW_HYSYS` Decimal; `Z` Decimal; `RHO_STD` Decimal, кг/ст.м³ (RQ-4); `CodeMode = Auto` | **PK (`STREAM`, `CASE_NAME`)**, `IgnoreCase`; 0 дублікатів на знімку (`excel-analysis.md:398`) | батько — `STREAM` | `SUM_100` (`childSum`, Warning ± 0.5) |
+| `STREAM_CASE` (220), `IsTemporal = true` | `STREAM` Lookup → `STREAM`, **Composition**, обов'язкове; `CASE_NAME` String, обов'язкове (`370 Winter`, `ПК-3 (370-220) лето`, `No composition`); `T_C` Decimal, °C; `DENSITY_OP` Decimal, кг/м³ (робоча, з HYSYS); `MW_HYSYS` Decimal; `Z` Decimal; `RHO_STD` Decimal, кг/ст.м³ (RQ-4); `LHV_STD` Decimal, MJ/Sm³, необов'язкове (LHV суміші, RQ-2a); `SEASON` String (`Winter`/`Summer`; імпорт виводить його із суфікса `CASE_NAME`: «370 Winter» → Winter, «ПК-3 (370-220) лето» → Summer; порожнє, якщо суфікса немає) — за ним FEATURE-HSE301-VIEW §4.7.6 обирає кейс потоку, коли подія з PI несе лише сезон; `CodeMode = Auto` | **PK (`STREAM`, `CASE_NAME`)**, `IgnoreCase`; 0 дублікатів на знімку (`excel-analysis.md:398`) | батько — `STREAM` | `SUM_100` (`childSum`, Warning ± 0.5) |
 | `GAS_COMPOSITION` (≤ 220 × 49) | `CASE` Lookup → `STREAM_CASE`, **Composition**, обов'язкове, `Cascade`; `COMPONENT` Lookup → `COMPONENT`, обов'язкове; `MOL_PCT` Decimal, %, обов'язкове; `CodeMode = Auto` | **PK (`CASE`, `COMPONENT`)** | батько — `STREAM_CASE`; посилання — `COMPONENT` | — |
 
 Нормалізація Excel → рядки: кожен рядок `Current_20250805` (потік × кейс) дає один `STREAM_CASE` і до
@@ -1462,6 +1499,40 @@ append-only блоків).
 один раз на `StreamID`. `Density`/`Molecular_Weight`/`Z` лягають у поля кейсу **з позначкою
 «HYSYS, робочі умови»**: для розрахунку 301 вони не використовуються, μ рахується зі складу
 (`excel-analysis.md:482-484`).
+
+**`COMPONENT` з Add Stream (відповідь людини «це і є addstream»; перевірено на копіях файлів
+2026-09-27 — openpyxl, дампи аркушів).**
+
+| Властивість | Що є в `Add Stream_v1_3.xlsx` | Звідки береться в `COMPONENT` |
+|---|---|---|
+| назва, формула | аркуш `streams Onshore`, стовпець A, рядки 10–54 (те саме — `TOx!A9:A53`): 45 двомовних підписів виду «Methane (CH4), vol% - Метан (CH4), % об.», «Butyl mercaptan (C4H10S), vol% - …». Формули немає у трьох псевдокомпонентів HYSYS: `CN1_35*`, `CN2_35*`, `CN3_16*` | профіль `ADDSTREAM_COMPONENTS` (нижче) |
+| `N_C`, `N_H`, `N_S` | прямо не записані; **виводяться з формули** підпису. Дві пастки файлу: «Toluene (С7Н8)» і «Ethylbenzene (С8H10)» пишуть `С`/`Н` кирилицею (U+0421, U+041D) — імпорт нормалізує їх до латиниці; «Propyl mercaptan (C5H8S)» — описка (у 301, `AI_Int_SG_V8!B58`, той самий компонент — `C3H8S`, і маса 76.15 саме його), тож формула з файлу не перезаписує наявну (`registries.import.formulaMismatch`) | з формули; псевдокомпоненти — 0 (так рахує файл: на 1D-1/370 Summer з 4.1 об.% псевдокомпонентів будь-яке `N_C ≥ 1` зламало б EF) |
+| `HYSYS_NAME` | заголовки складу `Current_20250805!O2:BN2` (`Methane`, `IC4_1`, `MMercaptan`…; 49 стовпців складу, бо `AX`, `AZ`, `BB` — `Density`, `Molecular_Weight`, `Z_CompressibilityFactor`) і рядки `streams Offshore!B12:B45` (`IC4_1*`, `M-Mercaptan`…); порядок і написання з підписами Onshore не збігаються, тож відповідність — явним переліком у профілі | профіль, перелік `aliases` |
+| `MW` | **немає** молярних мас компонентів: `Current_20250805!AZ` — `Molecular_Weight` кейсу (23.05 для 1D-2 зима), `streams Onshore` рядки 58, 64, 78 — `Molecular Weight` фаз потоку. Маси з формул (атомні маси IUPAC) дають μ = 23.0572 замість 23.0544679 | значення бібліотеки HYSYS, **відновлені з 301**: `M_i = wt%_i · μ / об.%_i` (`AI_Int_SG_V8`, рядки 30–63 і 66–99), для 33 з 34 компонентів моря (`TEG` має 0 об.% у всіх подіях). Приклади: CH4 16.0429, N2 28.013, H2S 34.076, `IC5_18*` 71.76, `C6_21*` 85.36, `CN1_35*` 230.85, `CN3_16*` 500.0. З ними μ збігається з файлом до 2e-14 на всіх трьох складах SG. Компоненти суші (`SO2`, `NH3`, `CO`, `MEA`, `DEA`, `Methanol`…) — з формули, `SOURCE = formula`, до значень HYSYS |
+| `LHV` | **немає** ні для компонентів, ні для суміші (пошук «Heating», «LHV», «теплота», «МДж» по всіх 13 аркушах — жодного змістовного збігу) | необов'язкове поле; LHV суміші — `STREAM_CASE.LHV_STD` (RQ-2a) |
+
+Профіль `ADDSTREAM_COMPONENTS` (`RegistryImportSpec`, §4.6):
+
+```jsonc
+{
+  "sheet": "streams Onshore", "orientation": "Rows", "firstData": 10, "lastData": 54,
+  "targets": [
+    { "registry": "COMPONENT", "match": "Key:BY_HYSYS",
+      "parse": { "column": "A", "pattern": "^(?<en>.+?) \\((?<formula>[^)]+)\\), vol% - (?<ru>.+?) \\(",
+                 "normalize": "cyrillicLookalikes" },
+      "fields": { "FORMULA": "$formula", "N_C": { "atoms": "C" }, "N_H": { "atoms": "H" }, "N_S": { "atoms": "S" },
+                  "DisplayL10n.en": "$en", "DisplayL10n.ru": "$ru" },
+      "onConflict": { "FORMULA": "KeepRegistry" } }
+  ],
+  "aliases": { "Methane (CH4)": ["Methane", "CH4"], "Methyl mercaptan (CH4S)": ["MMercaptan", "M-Mercaptan"] /* … 49 */ },
+  "massSource": "component-mw-hysys.csv"        // M і SOURCE — окремим файлом, бо в Add Stream їх немає
+}
+```
+
+⚠ `parse` (іменовані групи `$…`), `{ "atoms": … }`, `onConflict` і `massSource` — розширення
+`RegistryImportSpec` §4.6, яке робить RT-18a. `atoms` — перетворення під час імпорту, а не
+обчислюване поле довідника (`R-1`): у довіднику `N_C`/`N_H`/`N_S` — звичайні `Int`, які людина
+може виправити.
 
 ### 11.5 Поза обсягом / наступні кроки
 
@@ -1478,10 +1549,12 @@ append-only блоків).
 ### 11.6 Чек-лист
 
 **До старту**
-- [ ] Рішення `R-1…R-21` схвалені людиною й перенесені в `docs/tz/10-decisions.md` (RT-00).
-- [ ] Людина погодила нові `ФВ-8.15…8.19`, `ФВ-9.18`, `ФВ-9.19` у `docs/tz/02-requirements.md` (документ замовника) — або тести йдуть під наявними ФВ.
-- [x] D16-04 ([DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md)) — виконано в `5f00b791`; RT-24 може стартувати (шлях збереження — після WR-04, §5.12).
-- [ ] Відповіді на RQ-1…RQ-9 запитано (робота триває на дефолтах).
+- [x] Рішення `R-1…R-21` схвалені людиною 2026-09-27 й перенесені в `docs/tz/10-decisions.md` як `D-150…D-170` (RT-00).
+- [ ] `R-22…R-27` (ухвалені за делегуванням) внесено в реєстр — робить оркестратор.
+- [ ] Нові `ФВ-8.15…8.18`, `ФВ-9.18`, `ФВ-9.19` у `docs/tz/02-requirements.md` і звільнення «до RT-…» у `contracts/trace-exempt.md` — паралельний крок документації 2026-09-27.
+- [x] D16-04 ([DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md)) — виконано в `5f00b791` і `400c58b1` (шлях збереження); RT-24 може стартувати (§5.12).
+- [x] RQ-2, RQ-3, RQ-5, RQ-6, RQ-8, RQ-9 закрито 2026-09-27 (відповідь людини або `R-22…R-27`).
+- [ ] RQ-2a (джерело LHV) запитано; RQ-1, RQ-4, RQ-7 — робочі припущення до приймального тестування (робота на дефолтах не зупиняється).
 - [ ] `Get-PSDrive -Name H,F` — місця досить для стендів (`CLAUDE.md`, розділ про диски).
 
 **Кожен крок**

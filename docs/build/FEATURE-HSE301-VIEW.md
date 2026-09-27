@@ -1,8 +1,16 @@
 # FEATURE-HSE301-VIEW — PI → події → методологія → представлення «HSE301.Year»
 
-> **Дата:** 2026-09-27 · **Статус:** Проєкт до виконання; рішення V-1 (нова сутність
-> «представлення») **схвалене людиною 2026-09-27**, у реєстр `docs/tz/10-decisions.md` ще
-> не внесене (§13.2); решта V-… — пропозиції · **Мова продукту:** en/ru/kk · **Мова документа:** українська.
+> **Дата:** 2026-09-27 · **Статус:** Проєкт до виконання. Рішення **V-1…V-15 схвалені
+> людиною 2026-09-27** і вносяться в реєстр `docs/tz/10-decisions.md` як `D-149` (V-1) і
+> `D-171…D-184` (V-2…V-15); V-16… ухвалені за делегуванням людини того ж дня («все інше на
+> твій розсуд не обмежуй себе») — §13.2 · **Мова продукту:** en/ru/kk · **Мова документа:** українська.
+>
+> ✎ **2026-09-27, відповіді людини.** (1) «так погоджуюся на Подання» — V-1. (2) «так, вноси
+> D-149 в реєстр та Схвалено запропоновані рішення» — V-1…V-15. (3) Про теги, межі подій,
+> сезони Winter/Summer і категорії V6–V9: «це вже приходе з pi» — тому **подія (початок,
+> кінець), її категорія й сезон (кейс HMB) читаються з PI Event Frames** (§4.7), а не
+> вводяться вручну. (4) Про властивості компонентів: «це і є addstream» — §6.5 і
+> FEATURE-REGISTRY-TABLES §11.4. (5) «все інше на твій розсуд не обмежуй себе» — V-16…V-25.
 >
 > **Термін.** «Представлення» (View) — вигляд даних документа лише для читання (§8).
 > «Подання» в цьому документі, як і в коді, означає **лише** подачу аркуша на перевірку
@@ -22,9 +30,9 @@
 > 2026-09-27 на `dev/integration`. Доступ до складу газу (§6.5) записано синтаксисом
 > [FEATURE-REGISTRY-TABLES §5](FEATURE-REGISTRY-TABLES.md#5-мова-виразів).
 >
-> **Позначки:** кроки плану — `F0…F8`, `A1…A4`, `B0a…B7`, `I1…I3`, `RG1…RG3`, `F4b` (§11;
-> `RG` — кроки, що чекають на довідники); `V-n` — рішення (§13.2); `HQ-n` — питання до
-> замовника (§13.3); `HR-n` — ризики (§13.1); `G-…` — золоті тести (§12.1).
+> **Позначки:** кроки плану — `F0…F9`, `F4e`, `A1…A6`, `B0a…B7`, `I1…I3`, `RG1…RG3`, `F4b`
+> (§11; `RG` — кроки, що чекають на довідники); `V-n` — рішення (§13.2); `HQ-n` — питання до
+> замовника (§13.3); `HR-n` — ризики (§13.1); `G-…` — золоті тести (§12.1, §12.5).
 
 ---
 
@@ -41,20 +49,28 @@
   у **фіксовані** комірки документа. Шаблон уміє таблицю подій із динамічними рядками й
   формулою тривалості; методологія рахує кожен рядок із версіонованими константами й
   календарем періоду; результати видно в панелі розрахунків і у вивантаженні Excel.
-- **Чого бракує для 301.** (1) Запиту до PI **за вікном події** — Total чи середнє за
-  `[початок, кінець)` рядка: сьогодні лише сирі точки, а місячна згортка має дефект і
-  не зважена за часом. (2) Доступу методології до складу газу потоку — це закриває
-  FEATURE-REGISTRY-TABLES. (3) Збереження проміжних значень і відповіді «звідки це
+- **Чого бракує для 301.** (0) **Читання самих подій із PI.** Людина підтвердила: події
+  факелювання — початок і кінець до секунди, категорія V6–V9, сезон (кейс HMB Winter/Summer)
+  — «це вже приходе з pi», тобто лежать у PI AF як Event Frames з атрибутами. Сьогодні порт
+  джерела вміє лише каталог елементів і сирі точки атрибутів (`IExternalDataSource.cs:11-24`),
+  а інтеграція пише в комірки тільки числа (`ICellPatcher.cs:45`). (1) Запиту до PI **за
+  вікном події** — Total чи середнє за `[початок, кінець)` рядка: сьогодні лише сирі точки, а
+  місячна згортка не зважена за часом. (2) Доступу методології до складу газу потоку — це
+  закриває FEATURE-REGISTRY-TABLES. (3) Збереження проміжних значень і відповіді «звідки це
   число». (4) Самого **вигляду 301**: транспонування, багаторівневої шапки, групування
   подій за місяцями з `Total`, зведень `HP_LP` (Σ, max, YTD), річного виду й експорту з
   об'єднаними комірками.
-- **Що пропонуємо.** Виправити конвеєр PI, додати прив'язку «атрибут PI → колонка, вікно =
-  рядок», одну методологію `HSE301.FLARE` на рядок, збереження трейсу й новий шар
+- **Що пропонуємо.** Виправити конвеєр PI; додати **джерело подій «PI Event Frames → рядки
+  `FLARE_RECORD`»** (§4.7): мапінг «атрибут EF → колонка» з каталогу PI, синхронізація за
+  ідентифікатором EF зі збереженням ручних правок; об'єм — з атрибута EF або за вікном рядка
+  (прив'язка V-2); одну методологію `HSE301.FLARE` на рядок, збереження трейсу й новий шар
   **Представлення** (`cfg.ViewDef`) лише для читання — погоджено людиною 2026-09-27
-  (V-1: межа `D-52a` на представлення не поширюється). План — 29 кроків (§11). Перший робочий
-  аркуш `AI_Int_SG_V8` з об'ємами з PI з'явиться після foundation і хвиль A–B. Склад газу з
-  довідника підключається після FEATURE-REGISTRY-TABLES; до того властивості складу
-  (ρ, μ, S, T0…) вводяться чи імпортуються в рядок події — рівно так, як їх показує сам 301.
+  (V-1 → `D-149`: межа `D-52a` на представлення не поширюється). План — 35 власних кроків
+  (§11). Перший робочий аркуш `AI_Int_SG_V8` з подіями й об'ємами з PI з'явиться після
+  foundation і хвиль A–B. Склад газу з довідника підключається після
+  FEATURE-REGISTRY-TABLES; до того властивості складу (ρ, μ, S, T0…) вводяться чи
+  імпортуються в рядок події — рівно так, як їх показує сам 301. Ручне введення події
+  лишається — для виправлень і подій, яких у PI немає.
 
 ---
 
@@ -82,13 +98,21 @@
 Подія 28.01.2026 14:09:20–14:24:50, HP-факел, потік `1D-2` / кейс `370 Winter` (розбір §1.5 A).
 
 ```
-PI AF: атрибут «витрата на HP-факел» (Sm3/h)                         [§4.4]
-   │  ReadWindowAsync(Total, [14:09:20; 14:24:50) за TZ проєкту → UTC)
+PI AF: Event Frame шаблону подій факела — StartTime 09:09:20Z, EndTime 09:24:50Z,     [§4.7]
+       атрибути: категорія «V8», сезон/кейс «370 Winter», факел, потік (які саме — мапінг)
+   │  ReadEventsAsync(шаблон, вікно збору) → SourceEventSyncJob: upsert за ID події
    ▼
-ext.RowWindowValue  ← провенанс: шлях, вікно, точок, % Good, коефіцієнт одиниць   [§4.4]
-   │  PatchCellsHandler, origin = Integration (ручну правку не перетирає, D-118)
+ext.SourceEventLink  ← ID події, стан (Synced/Missing/Open/…), ручні правки   [§4.7]
+   │  ICellPatcher, origin = Integration: рядок EF-<id>, Start/End у TZ проєкту,
+   │  Category, HmbCase, Flare… (ручну правку не перетирає, D-118 → KeptManual)
    ▼
-doc.CellValue  FLARE_RECORD[E-…].Volume_Sm3 = 269.258                              [§5.2]
+doc.CellValue  FLARE_RECORD[EF-…].Start = 28.01 14:09:20, .End = 14:24:50, .Category = V8
+   │  об'єм — один із двох налаштованих режимів (§4.7.5):
+   │   а) атрибут EF «об'єм» → конверсія одиниць (§4.2) → Volume_Sm3
+   │   б) хук IRowWindowTrigger (Start/End змінилися) → ReadWindowAsync(Total,
+   │      [14:09:20; 14:24:50) за TZ проєкту → UTC) → ext.RowWindowValue           [§4.4]
+   ▼
+doc.CellValue  FLARE_RECORD[EF-…].Volume_Sm3 = 269.258                             [§5.2]
    │  CalculationTrigger → IRecalculationJob(документ, 202601)                     [§4.5]
    ▼
 HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 = 0.2581915
@@ -99,7 +123,7 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 Представлення «HSE301.Year»: аркуш AI_Int_SG_V8, стовпець JAN/1, рядок «SO2, g/sec» = 95.885
                              аркуш HP_LP_gsec, JAN · Intermittent · V8 · HP (max) SO2 = 142.525
                              YTD JAN SO2 = 142.525 + 0.000668 (FG continuous) = 142.5258    [§8]
-   │  клік на число → «Чому це число?» → формула → входи → точки PI / константа / запис
+   │  клік на число → «Чому це число?» → формула → входи → точки PI / подія PI / константа / запис
 ```
 
 ---
@@ -136,6 +160,7 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 | 24 | Річний вид (12 місяців разом) | **Немає** | `GET /documents/{id}/tables?periodKey=` (`DocumentsController.cs:382-385`) — один період | §8.8 |
 | 25 | «Дані актуальні на…» по джерелу | **Частково** | `LastRunAt`, `Watermark` розкладу (`ExternalConfiguration.cs:143-144`), журнал прогонів; у документі не показується | §8.8 |
 | 26 | Одиниці 301 (Sm3, м/с, об.%, мас.%, МДж/ст.м3, м²) | **Немає** | у сіді лише кг/м3/Дж/с/К/моль/one і похідні (`09-seed.sql:130-169`) | крок F1 |
+| 27 | Події з PI: Event Frames шаблону з часом і атрибутами → рядки таблиці | **Немає** | порт має лише `DiscoverAsync` і `ReadAsync` (`IExternalDataSource.cs:11-24`); PI SQL Client читає тільки `[Master].[Element].*` (`PiSqlClientDataSource.cs:64-69`, `:431-448`), хоча `[Master].[EventFrame].[EventFrame]`/`[Attribute]` чинне рішення вже читає через власну в'юху в базі AF (`B14-ecr-integration-and-data.md:30-40`); інтеграція пише лише числа — `IntegrationCellValue(RowKey, ColumnDefId, decimal Value)` (`ICellPatcher.cs:45`) — і лише створенням рядка (`BaseVersion: null`, `IntegrationCellPatcher.cs:103-106`); видалення рядка документа в системі немає (маршрутів у `CellsController.cs` немає) | порт `ReadEventsAsync`, мапінг «атрибут → колонка», синхронізація за ID події (§4.7) |
 
 ### 2.2 Дефекти, які зачіпають 301
 
@@ -148,7 +173,7 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 | ⚠ Д-5 | Трейс не прив'язаний до результату й рядка, у `TraceJson` — лише код помилки; входи не зберігаються | `CalculationResultStore.cs:154`, `GenericCalculationModule.cs:228-230` | §7, кроки F6, A3a, A3b |
 | ⚠ Д-6 | Lookup/Date/Bool не доходять у `@Arg` | `CalculationInputBuilder.cs:58-72` | обхід у моделі шаблону (§5.3); розіменування Lookup — FEATURE-REGISTRY-TABLES (`R-12`: `EntryRef` лише у версіях `Strict`, крок `RT-23a`) |
 | ⚠ Д-7 | `Scale` колонки **відхиляє** зайві знаки, а не округлює (`ColumnDef.cs:92-96`) — інтеграл PI у колонку зі `Scale 3` впаде на `ECR-CELL-0422` | `ColumnDef.cs:301-308` | у 301 об'єм має `Scale 6` + формат показу `0.000` (§5.2) |
-| ⚠ Д-8 | REGFIELD у правилах валідації | — | лише посиланням: [DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md) — виконано в `5f00b791` для «Перевірити» й подання аркуша; шлях **збереження** (`PatchCellsHandler.Validate`) знімка довідника ще не має (чекає WR-04) |
+| ✓ Д-8 | REGFIELD у правилах валідації | — | лише посиланням: [DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md) — виконано в `5f00b791` для «Перевірити» й подання аркуша, шлях **збереження** (`PatchCellsHandler.Validate`) — у `400c58b1` (знімок будує `TableValidation.LoadRegistryFieldsAsync`) |
 
 ---
 
@@ -156,8 +181,12 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 
 ### 3.1 Цілі (V1)
 
-1. Об'єм кожної події — з PI **за вікном рядка** (Total), з видимим провенансом і статусом
-   «підтягнуто / ручне / немає даних / частково».
+0. **Події — з PI.** Кожен Event Frame шаблону подій факела стає рядком `FLARE_RECORD`:
+   початок і кінець до секунди, категорія V6–V9, сезон (кейс HMB) і решта атрибутів — за
+   мапінгом, який адміністратор задає з каталогу PI (§4.7). Ручна правка поля не
+   перетирається наступною синхронізацією; подія, якої в PI немає, вводиться руками.
+1. Об'єм кожної події — з PI: з атрибута EF або **за вікном рядка** (Total), як налаштовано,
+   з видимим провенансом і статусом «підтягнуто / ручне / немає даних / частково».
 2. Одна методологія `HSE301.FLARE` відтворює 22 співвідношення розбору §1.4 з точністю
    ≤ 1e-9 відносно (золоті A, B, C).
 3. Будь-яке число в представленні пояснюється до першоджерела: формула → підставлені значення →
@@ -172,20 +201,22 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 
 | Не робимо | Чому | Коли |
 |---|---|---|
-| Автовиявлення подій у PI за порогом витрати | межі події — факт замовника (HQ-1, HQ-10) | V2 |
+| Автовиявлення подій у ECR за порогом витрати | події з межами до секунди вже формує PI («це вже приходе з pi», HQ-1); ECR їх читає, а не вгадує | не потрібне |
+| Запис у PI (створення чи правка Event Frame) | PI — лише джерело (`D-44`); виправлення живе в ECR як ручна правка | — |
 | Склад газу (34 компоненти vol%/wt%) на аркуші подій | потрібні довідники зі складеним ключем | кроки RG1–RG2, після FEATURE-REGISTRY-TABLES |
 | Лабораторний аналіз FG у мг/м3 → об.% | те саме | крок RG3 |
 | Діаграма Ганта дозволів | допоміжний вигляд; ліміти вже йдуть константами з вікнами | V2 |
-| PDF держформи, підписи, подання регулятору | лишається в SSRS (D-52a) | — |
-| Onshore-секції | у `Document map` лише Offshore (HQ-9) | за відповіддю |
+| PDF держформи, підписи, передача регулятору | лишається в SSRS (D-52a) | — |
+| Onshore-секції | у `Document map` лише Offshore (V-24) | аркушами-даними в конструкторі, коли знадобляться |
 | Зміни в `rpt.*` | публічний контракт SSRS (D-53, ФВ-10.12) | — |
 
 ### 3.3 Сценарії
 
 | Роль | Сценарій | Екран |
 |---|---|---|
-| **Методолог** (`Calculation.*`, `Template.Edit`) | заводить `HSE301.FLARE`, константи з вікнами чинності, позначає формули «показувати як проміжний результат», перевіряє на золотих прикладах; налаштовує прив'язку PI до колонки об'єму (атрибут на кожен факел, Total) і перевіряє її на реальній події; збирає представлення в конструкторі й публікує | методики (§10.5), вкладка «Дані з PI» таблиці (§10.6), конструктор представлення (§10.5) |
-| **Еколог-інженер** (доступ до документа) | вводить або імпортує події місяця (початок/кінець до секунди, факел, категорія, потік і кейс HMB); бачить, що об'єм підтягнувся з PI, і миттєвий попередній розрахунок; виправляє об'єм вручну, коли PI бреше; відкриває представлення й звіряє з очікуваним | реєстр подій (§10.4), переглядач (§10.2) |
+| **Методолог** (`Calculation.*`, `Template.Edit`) | заводить `HSE301.FLARE`, константи з вікнами чинності, позначає формули «показувати як проміжний результат», перевіряє на золотих прикладах; збирає представлення в конструкторі й публікує | методики (§10.5), конструктор представлення (§10.5) |
+| **Адміністратор інтеграції** (`Integration.Manage`) | обирає з каталогу PI шаблон Event Frame подій факела, зіставляє його атрибути з колонками `FLARE_RECORD` (початок, кінець, категорія, сезон/кейс, факел…), обирає режим об'єму (атрибут EF або вікно рядка) і перевіряє мапінг на реальних подіях; для режиму «вікно рядка» налаштовує прив'язку атрибута витрати до колонки об'єму | вкладки «Події з PI» і «Дані з PI» таблиці (§10.6) |
+| **Еколог-інженер** (доступ до документа) | бачить події місяця, що прийшли з PI, з об'ємом і миттєвим попереднім розрахунком; виправляє поле вручну, коли PI бреше (правка зберігається й позначається), або повертає значення з PI; додає вручну подію, якої в PI немає; вирішує долю події, що зникла з PI; відкриває представлення й звіряє з очікуваним | реєстр подій (§10.4), переглядач (§10.2) |
 | **Рецензент / погоджувач** (`Document.View`, `Calculation.View`) | відкриває річне представлення, фільтрує місяці, клацає підозріле число й іде ланцюжком до точок PI чи константи; бачить «розрахунок застарів» до подання; вивантажує XLSX | переглядач (§10.2), «Чому це число?» (§10.3) |
 
 ---
@@ -369,7 +400,7 @@ ext.RowWindowValue                     -- провенанс кожного пі
 
 | Тригер | Що робить |
 |---|---|
-| правка рядка, що зачепила Start/End/селектор (порт `IRowWindowTrigger`, одна точка виклику в `PatchCellsHandler`) | ставить задачу на рядок; дедуплікація за `(TableInstanceId, RowKey)` |
+| правка рядка, що зачепила Start/End/селектор (порт `IRowWindowTrigger`, одна точка виклику в `PatchCellsHandler`) — **і людиною, і синхронізацією подій** (§4.7): обидві пишуть тим самим обробником | ставить задачу на рядок; дедуплікація за `(TableInstanceId, RowKey)` |
 | `RowWindowRefetchJob` щогодини | повтор для `NoData`/`Partial`/`SourceError` у межах `RefetchWithinDays` і для рядків, у яких `ToUtc > RetrievedAt` (вікно на момент читання ще не закрилося) |
 | кнопка «Підтягнути з PI» (рядок/таблиця) | `POST /documents/{id}/row-windows/fetch` |
 
@@ -384,8 +415,8 @@ ext.RowWindowValue                     -- провенанс кожного пі
    origin `Integration`, ручна правка не перетирається — статус `KeptManual` (D-118).
 5. `RowWindowValue` (попередній `IsCurrent = 0`), далі `ICalculationTrigger` (§4.5).
 
-⚠ Подія належить екземпляру місяця свого **початку** за часом проєкту (V-10). Подія
-через північ 31-го числа не ділиться (HQ-13).
+⚠ Подія належить екземпляру місяця свого **початку** за часом проєкту (V-10 → `D-179`).
+Подія через північ 31-го числа не ділиться (HQ-13 закрито схваленням V-10).
 
 ### 4.5 Автоматичний перерахунок
 
@@ -409,6 +440,208 @@ ext.RowWindowValue                     -- провенанс кожного пі
 - Системні стани PI як текст (`I/O Timeout`) і далі лягають у `ValueString`
   (`PiSqlClientDataSource.cs:476-493`) і в число не перетворюються.
 
+### 4.7 Джерело подій: PI Event Frames → рядки `FLARE_RECORD`
+
+**Вихідне положення (відповідь людини 2026-09-27):** подія факелювання — початок і кінець,
+категорія V6–V9 і сезон (кейс HMB Winter/Summer) — «це вже приходе з pi». У PI AF це Event
+Frame (EF): запис із `StartTime`/`EndTime`, шаблоном, первинним елементом і атрибутами.
+Чинне рішення вже читає EF через RTQP: `[Master].[EventFrame].[EventFrame]` ⋈ `[Attribute]`
+⋈ `[AttributeCategory]` у в'юсі `EventFrameAttributes_V`, створеній у самій базі AF
+(`B14-ecr-integration-and-data.md:30-40`). FLERT має власні RTQP-об'єкти подій факела
+(`FlareEventFull_*`, `B20-source-configurator.md:101`), але їхніх визначень у репозиторії
+немає.
+
+**Рішення (V-16):** у ядрі — нейтральне поняття «подія джерела» (`SourceEvent`), а не «Event
+Frame»: слова PI AF за межами адаптера й схеми `ext` не живуть
+(`B06-integration-ports.md:28-32`). PI SQL Client — перша реалізація. FLERT
+(`Ecr.Adapters.Sql`) чи PI Web API (`eventframes/search`) реалізують той самий метод
+окремим кроком за потреби (F4b).
+
+#### 4.7.1 Порт
+
+```csharp
+// Адитивно до IExternalDataSource (§4.3): чинні реалізації не змінюються.
+public enum SourceEventAttributeScope : byte { Event = 0, PrimaryElement = 1 }
+
+public sealed record SourceEventAttributeRef(string Name, SourceEventAttributeScope Scope);
+
+public sealed record SourceEventQuery(
+    int DataSourceId, int SourceEntityId, string Template,      // шаблон — Code сутності з каталогу
+    DateTime FromUtc, DateTime ToUtc,                           // події, що ПЕРЕТИНАЮТЬ [from, to)
+    IReadOnlyList<SourceEventAttributeRef> Attributes,          // лише ті, що є в мапінгу
+    int MaxEvents);                                             // повний батч → Truncated
+
+public sealed record SourceEventAttributeValue(
+    string Name, SourceEventAttributeScope Scope,
+    decimal? ValueNumeric, string? ValueString, string? SourceUnitSymbol);
+
+public sealed record SourceEvent(
+    string Id,                                   // ID EF — ключ синхронізації
+    string? Name, string Template,
+    DateTime StartUtc, DateTime? EndUtc,         // EndUtc = null — подія ще триває
+    DateTime? ModifiedUtc, string? PrimaryElementPath,
+    IReadOnlyList<SourceEventAttributeValue> Attributes);
+
+public sealed record SourceEventResult(
+    IReadOnlyList<SourceEvent> Events, bool Truncated, string? ErrorCode);
+
+public sealed record SourceEventTemplate(
+    string Template, IReadOnlyList<SourceEntityDescriptor> Attributes);   // UOM і тип — як у каталозі точок
+
+public interface IExternalDataSource
+{
+    // … чинні члени, ReadWindowAsync (§4.3) …
+
+    /// Каталог шаблонів подій і їхніх атрибутів — для конфігуратора.
+    /// ⚠ Типова реалізація відмовляє ECR-INT-0422 (.eventQueryNotConfigured).
+    Task<IReadOnlyList<SourceEventTemplate>> DiscoverEventTemplatesAsync(int dataSourceId, CancellationToken ct);
+
+    /// Події шаблону, що перетинають вікно, з атрибутами мапінгу.
+    Task<SourceEventResult> ReadEventsAsync(SourceEventQuery query, CancellationToken ct);
+}
+```
+
+- Час — UTC: адаптер нормалізує його так само, як мітки точок (`PiSqlClientDataSource.cs:194`).
+- Значення атрибута — число **або** текст, тим самим правилом, що точки
+  (`PiSqlClientDataSource.cs:476-493`): `double` → `decimal` на межі (D-30).
+- Обидва методи мають типову реалізацію-відмову, тож `PiWebApiDataSource`, `SqlDataSource` і
+  тестові адаптери не змінюються.
+
+#### 4.7.2 PI SQL Client (крок F4e)
+
+| Що | Як |
+|---|---|
+| Запит подій | ключ `PiSqlClient:EventQuery`. **Типового тексту немає** (як V-3): імена RTQP-об'єктів подій факела в репозиторії не підтверджені — ні шаблон EF, ні його атрибути, ні в'юхи FLERT. Без ключа — `ECR-INT-0422` `err.ECR-INT-0422.eventQueryNotConfigured`, і вкладка «Події з PI» (§10.6) показує це станом, а не порожнім списком |
+| Каталог шаблонів | ключ `PiSqlClient:EventTemplateQuery`, так само без типового тексту |
+| Контракт нашого боку — жорсткий, як у FLERT (`Ts`, `Val`, `Uom`, `Quality`, `B14-ecr-integration-and-data.md:226-231`) | параметри `?` — від і до (вікно перетину напіввідкрите); заповнювач `{template}` — літералом через `Literal` (`PiSqlClientDataSource.cs:451-468`). Результат — **довга форма**, рядок на атрибут: `EventId`, `EventName`, `Template`, `StartTime`, `EndTime`, `Modified`, `PrimaryElement`, `AttrScope` (`E`/`P`), `AttrName`, `AttrValue`, `AttrUom`. Подія без атрибутів — рядок з `AttrName = NULL` |
+| Звідки текст запиту | зразок — форма чинної в'юхи (`B14-ecr-integration-and-data.md:33-39`), але **не сама в'юха**: адаптер не створює артефактів у базі джерела (ER-I-01, `PiSqlClientDataSource.cs:220-222`). Текст звіряється з AVEVA PI SQL DAS (RTQP Engine) Reference тією ж процедурою, що `Q-197`, і лише тоді потрапляє в налаштування середовища |
+| Атрибути елемента | `AttrScope = P` — атрибут первинного елемента EF, значення на момент початку події. Чи лежать категорія й сезон на самому EF, чи на елементі, — невідомо (HQ-18); запит, каталог і мапінг підтримують обидва |
+| Стеля | `MaxEvents` = 2 000 на запит; повний батч → `Truncated = true`, і позначку «зникла» за цей прогін не отримує ніхто (§4.7.4, крок 6) |
+| Повтори, автентифікація | ті самі `RetryAsync`, `ECR-INT-0502`, `ECR-INT-0503`, що в `ReadAsync` |
+
+#### 4.7.3 Модель мапінгу (міграція M5, крок F9)
+
+```sql
+ext.SourceEventMap                    -- «шаблон подій джерела → динамічна таблиця документа»
+    Id int PK,
+    SourceEntityId  int    FK ext.SourceEntity,   -- сутність = шаблон подій (Code — з каталогу, не руками)
+    DocumentId      bigint FK doc.Document,       -- документ ділянки (§5.1), куди лягають події
+    TableDefId      int    FK cfg.TableDef,       -- лише динамічна таблиця
+    FilterAttribute nvarchar(200) NULL, FilterScope tinyint NULL,
+    FilterValue     nvarchar(400) NULL,           -- звуження: події лише цієї ділянки чи факела
+    VolumeMode      tinyint,                      -- 0 None | 1 EventAttribute | 2 RowWindow (§4.7.5)
+    IsActive bit, RowVersion rowversion,
+    UQ(SourceEntityId, DocumentId, TableDefId)
+
+ext.SourceEventFieldMap               -- «атрибут → колонка»
+    Id int PK, SourceEventMapId int FK,
+    TargetColumnDefId int FK cfg.ColumnDef,
+    SourceAttribute   nvarchar(200),              -- ім'я з каталогу; зарезервовані: $start, $end, $name
+    AttributeScope    tinyint,                    -- 0 Event | 1 PrimaryElement
+    ValueKind         tinyint,                    -- 0 Direct | 1 LookupByCode | 2 LookupByName | 3 ValueMap
+    SourceUnitId int NULL FK uom.Unit, TargetUnitId int NULL FK uom.Unit,
+    UQ(SourceEventMapId, TargetColumnDefId)
+
+ext.SourceEventValueMap               -- явна відповідність «значення джерела → запис довідника»
+    Id int PK, SourceEventFieldMapId int FK,
+    SourceValue nvarchar(400), RegistryEntryId int FK dic.RegistryEntry,
+    UQ(SourceEventFieldMapId, SourceValue)
+
+ext.SourceEventLink                   -- подія джерела ↔ рядок: провенанс і стан
+    Id bigint PK, SourceEventMapId int FK, SourceEventId nvarchar(200),
+    PeriodKey int NULL, TableInstanceId bigint NULL, RowKey nvarchar(100) NULL,
+    EventName nvarchar(400) NULL, StartUtc datetime2(3), EndUtc datetime2(3) NULL,
+    SourceModifiedUtc datetime2(3) NULL,
+    Status nvarchar(32),   -- Synced | Open | Missing | PeriodClosed | PeriodChanged | PeriodNotOpen | Unmapped | RowLimit
+    KeptManualJson nvarchar(max) NULL,            -- коди колонок, лишених за людиною
+    UnmappedJson   nvarchar(max) NULL,            -- [{column, value}] без відповідника
+    FirstSeenAt, LastSeenAt, LastSyncAt datetime2(3), RowVersion rowversion,
+    UQ(SourceEventMapId, SourceEventId), IX(TableInstanceId, RowKey)
+```
+
+- Жодних зашитих імен: шаблон і атрибути обираються з каталогу
+  (`DiscoverEventTemplatesAsync`), як атрибути точок (`SourceEntity.cs:10-15`, ФВ-13.13).
+- `$start`/`$end` — час самої події; мапляться на Date-колонки `Start`/`End` і обов'язкові
+  (`err.ECR-INT-0422.eventMapStartEndRequired`). У комірку лягає час **у поясі проєкту**
+  (`Project.TimeZoneId`) — дзеркально до кроку 1 §4.4, тож вікно рядка повертає рівно UTC
+  події.
+- `ValueKind` для Lookup-колонки: за кодом запису, за назвою (без регістру, з обрізкою) або за
+  явною таблицею `SourceEventValueMap`. Для каскадної колонки (`HmbCase` від `Stream`, §5.2)
+  пошук обмежено записами батька, тож спершу резолвиться `Stream`.
+- Одиниці числових атрибутів — через `BoundaryUnitConversion` (V-4) з тим самим журналом.
+- `ext.EntityFieldMap` не змінюється: його фіксований адресат рядка (`EntityFieldMap.cs:113-128`)
+  — інша семантика, ніж «подія сама є рядком».
+
+#### 4.7.4 Синхронізація: `SourceEventSyncJob` (крок A5)
+
+Запуск — за розкладом сутності-шаблону (`ext.CollectionSchedule`: Cron, `LookbackDays` 7,
+`LastRunAt`, `ExternalConfiguration.cs:131-157`; `CollectionJob` після збору ставить цю задачу,
+якщо в сутності є активний `SourceEventMap`) і кнопкою «Отримати з PI зараз»
+(`POST …/source-events/sync`). Вікно — `[now − LookbackDays, now)`: пізні правки EF у PI
+доходять самі, а Watermark лишається оптимізацією (ER-I-03, `CollectionJob.cs:48-51`).
+
+1. **Читання.** `ReadEventsAsync` з атрибутами мапінгу; далі фільтр `FilterAttribute = FilterValue`.
+2. **Ключ рядка.** `EF-` + ID події, якщо разом вони проходять `RowKey.Pattern`
+   (`^[A-Za-z0-9_.\-]{1,100}$`, `RowKey.cs:14`; GUID RTQP проходить), інакше `EF-` + 32 hex
+   SHA-256 від ID. Ключ детермінований: повтор не дублює рядків. Ручні рядки мають ключ-GUID
+   без дефісів (`CreateRowHandler.cs:128-129`) і з ним не перетинаються.
+3. **Відкрита подія** (`EndUtc = null`) — рядка ще немає, `Status = Open`. Без кінця немає ні
+   тривалості, ні вікна об'єму, а напіврядок дав би розрахунку хибну тривалість.
+4. **Період** — місяць початку за TZ проєкту (V-10 → `D-179`). Екземпляра ще немає —
+   `PeriodNotOpen`, повтор наступним прогоном. Період закритий — **нічого не пишемо**,
+   `PeriodClosed`. Для прив'язаної події, чий початок у PI переїхав в інший місяць, —
+   `PeriodChanged` **без** автоматичного перенесення: видалити рядок документа в системі
+   нічим, а рядок у двох місяцях подвоїв би викиди.
+5. **Запис** — новим методом порту `ICellPatcher.ApplyIntegrationRowsAsync` (адитивно):
+   типізовані значення (дата, Lookup, текст, число), `BaseVersion` чинного рядка для
+   оновлення і `null` для нового (R-B2). Пише той самий `PatchCellsHandler` з
+   `origin = Integration`, тобто з аудитом, валідацією, хуком `IRowWindowTrigger` (§4.4) і
+   стелею `MaxDynamicRows` (`RowLimit`). Комірку, останню зміну якої зробила людина
+   (`aud.CellChange.Origin = UserEdit`, `IntegrationCellPatcher.cs:137-174`), **не
+   перезаписуємо**: вона йде в `KeptManualJson`, а реєстр показує «змінено вручну» (§10.4).
+   Значення, для якого не знайшовся запис довідника, у комірку не пишеться — `Unmapped` із
+   самим значенням у `UnmappedJson`; вгадування немає.
+6. **Зникла подія.** Прив'язка, чий `StartUtc` лежить у вікні прогону, а подію джерело цього
+   разу не повернуло, отримує `Status = Missing`; **рядок не видаляється й не змінюється**.
+   Позначка ставиться лише після повного прочитання вікна (`Truncated = false`,
+   `ErrorCode = null`). Подія повернулася — знову `Synced`.
+7. **Далі** — `ICalculationTrigger` (V-5) на кожен зачеплений `(документ, період)`; прогрес
+   `jobs.sourceEventsDone` з лічильниками `created`, `updated`, `keptManual`, `missing`,
+   `open`, `unmapped`, `closed`.
+
+Рядків **без** прив'язки (подія введена вручну) синхронізація не бачить і не чіпає ніколи.
+
+#### 4.7.5 Об'єм: два режими, налаштовуються на мапінгу
+
+| `VolumeMode` | Звідки | Коли обирати |
+|---|---|---|
+| `EventAttribute` | атрибут EF → `Volume_Sm3` через `SourceEventFieldMap` з конверсією одиниць (V-4) | PI зберігає об'єм події атрибутом EF |
+| `RowWindow` | прив'язка «атрибут витрати → колонка, вікно = рядок» (V-2, §4.4): синхронізація пише Start/End, хук `IRowWindowTrigger` ставить `RowWindowFetchJob`, той читає Total за вікном | в EF об'єму немає, а тег витрати факела є |
+| `None` | об'єм уводиться руками | перехідний стан |
+
+Режим — дані, не код: перемикання не потребує релізу. Провенанс (§7.3) каже, звідки число:
+«атрибут події PI» чи «PI Total за вікном».
+
+#### 4.7.6 Сезон і категорія — атрибути події
+
+- Категорія V6–V9 — Lookup `TugfCategory` (§5.3) з атрибута EF, за кодом або явною
+  відповідністю.
+- Сезон — атрибут EF. Мапінг задає, **що** в ньому лежить: повна назва кейсу («370 Winter»)
+  лягає в `HmbCase` за назвою; лише сезон («Winter», «Summer», «зима») — у прихований Lookup
+  `Season`, а `HmbCase` резолвиться як кейс потоку з цим сезоном (поле `Season` довідника
+  `HmbCase`; після RG1 — `STREAM_CASE.SEASON`, FEATURE-REGISTRY-TABLES §11.4).
+- ⛔ Правила «сезон за місяцем» немає ніде: ні у формулах, ні в дефолтах, ні в підказках.
+  Сезон, якого PI не дав, — порожня комірка й `Unmapped`, а не здогадка за датою.
+
+#### 4.7.7 Ручне введення лишається
+
+- Подія поза PI — «Нова подія» (§10.4): рядок без прив'язки.
+- Виправлення поля, що прийшло з PI, — явна дія «Виправити вручну» (§10.4). Правку захищає
+  D-118, і наступна синхронізація її не перетирає. «Повернути значення з PI» записує поточне
+  значення події з `origin = Integration`, і поле знову веде синхронізація.
+- Подія, що зникла з PI чи виявилася дублем, — колонка «Не враховувати» (`Exclude`, §5.2):
+  рядок лишається в реєстрі й аудиті, а методологія дає по ньому нулі (V-21).
+
 ---
 
 ## 5. Модель шаблону 301
@@ -429,29 +662,37 @@ ext.RowWindowValue                     -- провенанс кожного пі
 
 Аркуш `EVENTS`, таблиця `FLARE_RECORD`: `RowMode = Dynamic`, `MaxDynamicRows = 500`.
 
+«PI (EF)» у колонці «Звідки» — атрибут чи час події, **якщо** адміністратор зіставив його в
+мапінгу (§4.7.3); незіставлене поле рядка з PI людина вводить сама. Будь-яке поле з PI можна
+виправити вручну (§4.7.7).
+
 | Код | Заголовок en / ru | Тип | Звідки | Примітка |
 |---|---|---|---|---|
-| `RecordKind` | Record kind / Вид записи | Lookup `FlareRecordKind` | ввід | Event / Pilot / Purge |
+| `SourceEventId` | — | String | PI (EF), лише для читання | прихована; ID події для провенансу, авторитетна копія — `ext.SourceEventLink` |
+| `RecordKind` | Record kind / Вид записи | Lookup `FlareRecordKind` | PI (EF) або ввід | Event / Pilot / Purge |
 | `IsPilot` | — | Formula `REGFIELD([RecordKind], 'IsPilot')` | формула | прихована; 1/0 для `@IsPilot` (Д-6) |
 | `Regime` | Regime / Режим | Formula `REGFIELD([RecordKind], 'Regime')` | формула | `Intermittent`/`Continuous` |
-| `Region` | Offshore / На море | Lookup `Region` | ввід, типово Offshore | |
-| `Area` | Area / Район работ | Lookup `Area` | ввід, типово Island A | |
-| `Start` | Start / Начало | Date (з часом) | ввід | до секунди |
-| `End` | End / Окончание | Date (з часом) | ввід | виключно |
+| `Region` | Offshore / На море | Lookup `Region` | PI (EF) або ввід, типово Offshore | |
+| `Area` | Area / Район работ | Lookup `Area` | PI (EF) або ввід, типово Island A | |
+| `Start` | Start / Начало | Date (з часом) | PI (EF, `$start`) або ввід | до секунди, у поясі проєкту |
+| `End` | End / Окончание | Date (з часом) | PI (EF, `$end`) або ввід | виключно; подія без кінця не матеріалізується (§4.7.4) |
 | `DurationSec` | Duration, s / Длительность, с | Formula `ROUND(([End] - [Start]) * 86400, 0)` | формула | одиниця `s` |
-| `Flare` | Flare unit / Тип факельной установки | Lookup `FlareUnit` | ввід | HP / LP / HP Pilot, Island A |
+| `Flare` | Flare unit / Тип факельной установки | Lookup `FlareUnit` | PI (EF) або ввід | HP / LP / HP Pilot, Island A |
 | `FlareSide` | — | Formula `REGFIELD([Flare], 'Side')` | формула | HP/LP для зведень (HP Pilot → HP) |
 | `TipArea_m2` | — | Formula `REGFIELD([Flare], 'TipArea_m2')` | формула | прихована; площа оголовка (HQ-6) |
-| `SourceUnit` | Type of unit – source of discharge | Lookup `ProcessUnit` | ввід | |
-| `Description` | Description how the release occurred | String | ввід | |
-| `Category` | TUGF category / Категория ТНС | Lookup `TugfCategory` | ввід | V6…V9 (HQ-3) |
-| `GasType` | Type of gas / Тип газа | Lookup `FlareGasType` | ввід | FG / SG |
-| `Nitrogen` | Nitrogen event / Азот | Lookup `YesNo` | ввід, типово No | |
+| `SourceUnit` | Type of unit – source of discharge | Lookup `ProcessUnit` | PI (EF) або ввід | |
+| `Description` | Description how the release occurred | String | PI (EF, `$name` чи атрибут) або ввід | |
+| `Category` | TUGF category / Категория ТНС | Lookup `TugfCategory` | **PI (EF)**, за кодом або відповідністю; ввід — для подій поза PI | V6…V9 («це вже приходе з pi») |
+| `GasType` | Type of gas / Тип газа | Lookup `FlareGasType` | PI (EF) або ввід | FG / SG |
+| `Nitrogen` | Nitrogen event / Азот | Lookup `YesNo` | PI (EF) або ввід, типово No | |
 | `IsN2` | — | Formula `REGFIELD([Nitrogen], 'Flag')` | формула | прихована; 1/0 |
-| `Stream` | № Stream / № потока | Lookup `FlaringStream` | ввід (SG) | |
-| `HmbCase` | What is the HMB / Какой принят МТБ | Lookup `HmbCase`, каскад від `Stream` (`ColumnDef.CascadeFromColumnId`, `ColumnDef.cs:42-43`) | ввід (SG) | ⚠ на кроці I1 перевірити, що каскад фільтрує кейси потоку; якщо ні — одна Lookup-колонка «потік · кейс» |
+| `Exclude` | Do not count / Не учитывать | Lookup `YesNo` | ввід, типово No | ставить людина для події, що зникла з PI чи виявилася дублем (V-21) |
+| `IsExcluded` | — | Formula `REGFIELD([Exclude], 'Flag')` | формула | прихована; 1/0 для `@IsExcluded` |
+| `Stream` | № Stream / № потока | Lookup `FlaringStream` | PI (EF) або ввід (SG) | |
+| `Season` | — | Lookup `Season` (Winter / Summer) | **PI (EF)**, якщо атрибут несе лише сезон | прихована; обирає кейс потоку (§4.7.6) |
+| `HmbCase` | What is the HMB / Какой принят МТБ | Lookup `HmbCase`, каскад від `Stream` (`ColumnDef.CascadeFromColumnId`, `ColumnDef.cs:42-43`) | **PI (EF)**: повна назва кейсу або кейс потоку за `Season`; ввід — для подій поза PI | ⚠ на кроці I1 перевірити, що каскад фільтрує кейси потоку; якщо ні — одна Lookup-колонка «потік · кейс». Сезон за місяцем не виводиться ніде |
 | `PiSourceKey` | — | Formula `REGFIELD([RecordKind], 'Code') & '/' & REGFIELD([Flare], 'Code')` | формула | прихована; селектор прив'язки PI (§4.4) |
-| `Volume_Sm3` | Gas Volume, Sm3 (20°C, 1 atm) | Decimal, `Precision 28`, **`Scale 6`**, `DisplayFormat 0.000`, одиниця `Sm3` | **PI за вікном рядка** або ввід | Д-7: `Scale 3` відхилив би інтеграл |
+| `Volume_Sm3` | Gas Volume, Sm3 (20°C, 1 atm) | Decimal, `Precision 28`, **`Scale 6`**, `DisplayFormat 0.000`, одиниця `Sm3` | **PI**: атрибут EF або Total за вікном рядка (`VolumeMode`, §4.7.5); ввід | Д-7: `Scale 3` відхилив би інтеграл |
 | `Rho20` | Density, kg/Sm3 | Decimal, `Scale 4` | ввід/імпорт (V1) | → RG1 |
 | `Mu` | Molecular weight | Decimal, `Scale 7` | ввід/імпорт (V1) | → RG1 |
 | `S_wt` | Total sulphur content, wt% | Decimal, `Scale 7` | ввід/імпорт (V1) | → RG1 |
@@ -481,13 +722,15 @@ Lookup потрібен для зручного вводу, а числа для
 | `TugfCategory` | — | V6, V7, V8, V9 |
 | `FlareGasType` | — | FG, SG |
 | `YesNo` | `Flag` (0/1) | Yes, No |
+| `Season` | — | Winter, Summer (псевдоніми значень PI — у `ext.SourceEventValueMap`, §4.7.3) |
 | `ProcessUnit`, `Area`, `Region` | — | з 301 |
-| `FlaringStream`, `HmbCase` | — | V1 — лише для показу й ключа; склад — FEATURE-REGISTRY-TABLES: у шаблоні v2 (крок RG1) їх замінюють довідники `STREAM` і `STREAM_CASE` (FEATURE-REGISTRY-TABLES §11.4) |
+| `FlaringStream`, `HmbCase` | `HmbCase`: `Season` (Lookup `Season`) | V1 — для показу, ключа й вибору кейсу за сезоном з PI (§4.7.6); склад — FEATURE-REGISTRY-TABLES: у шаблоні v2 (крок RG1) їх замінюють довідники `STREAM` і `STREAM_CASE` (FEATURE-REGISTRY-TABLES §11.4) |
 
-⚠ `REGFIELD` у правилах валідації мав дефект — [DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md),
-виконано в `5f00b791` для «Перевірити» й подання аркуша; шлях збереження
-(`PatchCellsHandler.Validate`) знімка ще не має (WR-04). Тут `REGFIELD` і далі
-використовується лише у формулах колонок; правила §5.7 його не вживають.
+✓ `REGFIELD` у правилах валідації мав дефект — [DIRECTIVE-16 §2 D16-04](DIRECTIVE-16.md),
+виконано в `5f00b791` для «Перевірити» й подання аркуша і в `400c58b1` для шляху збереження
+(`PatchCellsHandler` будує знімок через `TableValidation.LoadRegistryFieldsAsync`,
+`PatchCellsHandler.cs:151-152`). Тут `REGFIELD` і далі використовується лише у формулах
+колонок; правила §5.7 його не вживають.
 
 ### 5.4 Безперервні джерела
 
@@ -495,8 +738,10 @@ Lookup потрібен для зручного вводу, а числа для
   1-ше наступного місяця 00:00). Об'єм рахує методологія: `CST.PILOT_RATE_SM3H × годин вікна`
   (розбір §1.5 B: 744 год → 7 216.8). Прив'язки PI немає — статус `NotApplicable`.
 - **Purge:** запис `RecordKind = Purge`, вікно = місяць, об'єм — PI Total за вікном
-  (`PiSourceKey = PURGE/HP_IA`, HQ-1).
+  (`PiSourceKey = PURGE/HP_IA`; атрибут витрати адміністратор обирає з каталогу, §10.6).
 - Дія «Додати безперервні джерела за місяць» (§10.4) створює обидва записи ідемпотентно.
+  Якщо PI веде продувку місячними Event Frames, вона приходить тим самим мапінгом подій
+  (`RecordKind` з атрибута, §4.7), а дія лишається для пілота, якого в PI немає.
 - ⚠ **Неповний місяць** (вересень до 25.09, розбір §1.3): вікно запису = фактичні дані;
   г/с на аркуші запису = т/тривалість вікна (як у файлі), а в зведенні — т/години
   **календарного** місяця (`perPeriodRate`, §8.7). Чи правильно це — HQ-8.
@@ -524,6 +769,7 @@ V1: властивості місячного аналізу (ρ, μ, S, wt% с�
 | `[DurationSec] <= 2764800` (32 доби) | Error |
 | `[GasType]` = SG → `Stream`, `HmbCase`, `S_wt`, `Rho20`, `Mu` заповнені | Error (через `MethodologyRequiredInput`, Block) |
 | `Volume_Sm3` порожній у записі не-Pilot | Warning (`MethodologyRequiredInput`, Warn) |
+| `Category` порожня (значення з PI не зіставилося — `Unmapped`) | Warning: подія не потрапить у жоден аркуш представлення, фільтри яких ідуть за категорією (§8.5) |
 
 ---
 
@@ -551,7 +797,7 @@ V1: властивості місячного аналізу (ρ, μ, S, wt% с�
 
 | Код | Значення | Одиниця | Речовина | Джерело (`MethodologyConstant.Source`) |
 |---|---|---|---|---|
-| `PILOT_RATE_SM3H` | 9.7 | Sm3/h | — | розбір §1.5 B; HQ-1 |
+| `PILOT_RATE_SM3H` | 9.7 | Sm3/h | — | розбір §1.5 B; робоче припущення HQ-1 (у PI пілот не вимірюється) |
 | `K_MASS` | 0.0024 / 0.00039 / 0.002 / 0.02 / 0.0005 | t/t | NO2 / NO / Soot / CO / CH4 | 0.003·0.8, 0.003·0.13 (розбір §1.4 р.2–6); HQ-2 |
 | `K_MASS` | 0 | t/t | SO2, H2S, 4 RSH | ⚠ **нуль задається явно**: відсутня константа дає `#REF` (`MethodologyEvaluationContext.cs:81-84`) |
 | `K_S` | 0.02 (SO2) · 0 (решта) | t/(t·wt%) | усі | 2·(64/32)/100 (розбір §1.4 р.7) |
@@ -565,8 +811,9 @@ V1: властивості місячного аналізу (ρ, μ, S, wt% с�
 | `OX_CO2` | 0.995 | one | — | HQ-2 |
 | `EF_CH4_KG_TJ` | 1 | kg/TJ | — | розбір §1.4 р.19 |
 | `EF_N2O_KG_TJ` | 0.1 | kg/TJ | — | розбір §1.4 р.20 |
-| `M_CO2` | 44.01 | g/mol | — | для EF у v1.1 (RG1) |
-| `M_S` | 32.06 | g/mol | — | для S wt% у v1.1 (RG1; розбір §1.4 р.27) |
+| `M_CO2` | **44.00** | g/mol | — | для EF у v1.1 (RG1). ⚠ Не 44.01: лише `Round(K·Σ(nC·x)/100/μ, 3)` з K ∈ [43.9987; 44.0018) відтворює EF файлу на всіх 11 різних складах (3 SG + 8 місяців FG), §6.5 |
+| `M_S` | **32.064** | g/mol | — | для S wt% у v1.1 (RG1). ⚠ Не 32.06: з 32.064 S мас.% SG відтворюється до 1e-14 на всіх трьох складах, з 32.06 — з відносною похибкою −1.25e-4 (§6.5) |
+| `M_S_LAB` | 32.06 | g/mol | — | для «мгS/м3 → об.%» лабораторії FG у RG3 (розбір §1.4 р.24; повторно не перевірялося) |
 | `V_MOLAR_0`, `V_MOLAR_20` | 22.414 / 24.04 | l/mol | — | для RG3 |
 
 **Рішення (V-11): селектор-константи.** Вираз не вміє обрати `@Arg` за кодом поточної
@@ -580,7 +827,7 @@ FEATURE-REGISTRY-TABLES §5.4 функції «поточна речовина»
 
 | # | Код | Scope | Видимий | Вираз | Одиниця |
 |---|---|---|---|---|---|
-| 1 | `V_Sm3` | Row | ✓ | `if(@IsPilot = 1, CST.PILOT_RATE_SM3H * CONVERT(@DurationSec, 's', 'h'), @Volume_Sm3)` | Sm3 |
+| 1 | `V_Sm3` | Row | ✓ | `if(@IsExcluded = 1, 0, if(@IsPilot = 1, CST.PILOT_RATE_SM3H * CONVERT(@DurationSec, 's', 'h'), @Volume_Sm3))` | Sm3 |
 | 2 | `M_t` | Row | ✓ (вихід) | `CONVERT(!V_Sm3 * @Rho20, 'kg', 't')` | t |
 | 3 | `NCV` | Row | ✓ | `@LHV_MJ_Sm3 / @Rho20` | MJ/kg (= TJ/тис. т) |
 | 4 | `W_SRC` | Row | ✓ | `!V_Sm3 / (@DurationSec * @TipArea_m2)` | m/s |
@@ -596,6 +843,8 @@ FEATURE-REGISTRY-TABLES §5.4 функції «поточна речовина»
 | 14 | `gsec` | Substance | вихід | `CONVERT(!tons, 't', 'g') / @DurationSec` | g/s |
 
 - ⛔ Множників `/1000` і `·10⁶` у формулах немає: зміна одиниці — лише `CONVERT` (D-74).
+- `@IsExcluded = 1` («Не враховувати», §5.2) дає `V_Sm3 = 0`, тож усі виходи рядка — нулі, як
+  в азотної події; рядок і його аудит лишаються (V-21).
 - ⚠ Для FG парникові гази теж рахуються, але представлення FG їх не показує: у файлі цих рядків
   у FG немає (розбір §1.2).
 - Прапорець «Анализ: превышение макс. расхода» — правило представлення (§8.5), бо його
@@ -639,25 +888,43 @@ C4H10S_wt  = REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE && ROW.COMPONENT.FORMULA
                     ROW.MOL_PCT * ROW.COMPONENT.MW) / !Mu        // ізомери сумуються (розбір §1.4 р.24)
 // CH4S_wt, C3H8S_wt, C2H6S_wt — те саме з 'CH4S', 'C3H8S', 'C2H6S'
 T0_C       = REGFIELD(!CASE, 'T_C')
-LHV_MJ_Sm3 = REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.MOL_PCT * ROW.COMPONENT.LHV) / 100
+LHV_MJ_Sm3 = REGFIELD(!CASE, 'LHV_STD')                          // LHV суміші — поле кейсу (див. нижче)
 NCV        = !LHV_MJ_Sm3 / @Rho20                                // формула №3 §6.3
 EF_RAW     = CST.M_CO2 * REGSUM('GAS_COMPOSITION', ROW.CASE = !CASE, ROW.COMPONENT.N_C * ROW.MOL_PCT) / 100 / !Mu
-EF_t_t     = Truncate(!EF_RAW * 1000) / 1000                     // звіт обрізає до 3 знаків (розбір §1.4 р.17)
+EF_t_t     = Round(!EF_RAW, 3)                                   // округлення, НЕ обрізання (див. нижче)
 ```
+
+**Звідки властивості компонентів (відповідь людини «це і є addstream», перевірено на файлах
+2026-09-27).** Детально — FEATURE-REGISTRY-TABLES §11.4 і `R-27`.
+
+| Властивість | Що фактично є | Звідки в `COMPONENT` |
+|---|---|---|
+| `N_C`, `N_S` | прямо не записані; **виводяться з хімічної формули** в підписах Add Stream `streams Onshore!A10:A54` (і тих самих у `TOx!A9:A53`): «Methane (CH4)…», «Butyl mercaptan (C4H10S)…» — 42 з 45 рядків. Без формули — три псевдокомпоненти HYSYS `CN1_35*`, `CN2_35*`, `CN3_16*` | імпорт профілем `ADDSTREAM_COMPONENTS`. Перевірка на 301: `S = 32.064·Σ(n_S·x)/μ` відтворює S мас.% до 1e-14 на трьох складах; EF (нижче) — на 11 складах, з `N_C = 0` у псевдокомпонентів (на 1D-1/370 Summer з 4.1 об.% псевдокомпонентів будь-яке `N_C ≥ 1` дало б EF ≥ 1.887 замість 1.85) |
+| `MW` | в Add Stream **немає** молярних мас компонентів: `Current_20250805` має лише `Molecular_Weight` кейсу (HYSYS, 23.05), `streams Onshore` — `Molecular Weight` фаз потоку (рядки 58, 64, 78). Маси з формул (атомні маси IUPAC) μ файлу **не** відтворюють: 23.0572 проти 23.0544679 — файл рахує масами бібліотеки HYSYS, зокрема гіпотетичних компонентів (`IC5_18*` 71.76, `C6_21*` 85.36, `CN1_35*` 230.85) | значення бібліотеки HYSYS, **відновлені з самого 301**: `M_i = wt%_i · μ / об.%_i` (`AI_Int_SG_V8`, рядки 30–63 і 66–99) для 33 із 34 компонентів моря; з ними μ збігається з файлом до 2e-14 на всіх трьох складах. Решта компонентів (суша й `TEG`) — з формули до підтвердження |
+| `LHV` | в Add Stream **немає** ні LHV компонентів, ні LHV суміші (пошук по всіх 13 аркушах). У 301 є лише LHV суміші: 36.0412787449075 (1D-2/370 Winter), 37.0428156330934 (1D-2/370 Summer), 56.7489145967575 (1D-1/370 Summer), рядок 101 аркушів SG, і щомісячний LHV FG (рядок 72). Відновити LHV компонентів із трьох сумішей неможливо (34 невідомі) | нейтральний дефолт: `LHV` у `COMPONENT` — необов'язкове поле; LHV суміші — необов'язкове поле кейсу `STREAM_CASE.LHV_STD`, його вводить чи імпортує методолог. Коли `COMPONENT.LHV` заповнять, методологія v1.2 може перейти на `REGSUM(… ROW.MOL_PCT * ROW.COMPONENT.LHV) / 100` без зміни моделі. **Відкрите лише одне:** з якого джерела замовник бере LHV (RQ-2a FEATURE-REGISTRY-TABLES) |
+
+**EF — округлення, а не обрізання (перевірено 2026-09-27).** Розбір §1.4 р.17 припускав
+`Truncate(44.01·…)`. На 11 різних складах файлу (3 SG і 8 місяців FG, де
+`Σ m·CmHn` дає сам файл, `AI_Cont_FG_V7` рядок 112) цьому суперечать два: 1D-1/370 Summer
+(сире 1.8499748 → у файлі 1.85) і FG квітня (2.7100073 → 2.709). Жодна стала K не робить
+`Truncate(K·…)` правильним для всіх 11, а `Round(K·Σ(nC·x)/100/μ, 3)` — для будь-якої
+K ∈ [43.9987; 44.0018), тому `CST.M_CO2 = 44.00` (§6.2); 44.01 цей інтервал не містить.
+Звідси `EF_RAW` = 2.0869542 для прикладу A, а EF = 2.087 — те саме число, що й раніше, тож
+`CO2_GHG_t` = 0.5361514 не змінюється.
 
 - `@Stream` приходить як `EntryRef` лише у версії `Strict` (R-12, крок `RT-23a`); `@HmbCase` —
   назва кейсу (`CASE_NAME`, «370 Winter»). Якщо шаблон v2 зробить `HmbCase` Lookup-колонкою на
   `STREAM_CASE`, то `CASE = @HmbCase` і `REGFIND` не потрібен.
 - Усі фільтри мають верхній кон'юнкт `ROW.CASE = !CASE`, тобто йдуть індексним шляхом
   (FEATURE-REGISTRY-TABLES §5.4, «Індексний шлях»), а не повним переглядом довідника.
-- `EF_RAW` містить і CO₂ складу: у `COMPONENT` для CO₂ `N_C = 1` (розбір §1.4 р.17).
-- `Rho20`: за нейтральним дефолтом RQ-4 FEATURE-REGISTRY-TABLES густина — **вхід події**, тож
+- `EF_RAW` містить і CO₂ складу: у `COMPONENT` для CO₂ `N_C = 1` (розбір §1.4 р.17);
+  псевдокомпоненти HYSYS мають `N_C = N_S = 0`.
+- `Rho20`: за робочим припущенням RQ-4 FEATURE-REGISTRY-TABLES густина — **вхід події**, тож
   колонка `Rho20` лишається й у шаблоні v2. Якщо замовник підтвердить збережене поле кейсу —
   `Rho20 = REGFIELD(!CASE, 'RHO_STD')` (розбір §1.4 р.15: `μ/24.04` дає 0.9590, а не 0.9589).
-- ⚠ `LHV_MJ_Sm3` як мольна суміш `Σ x·LHV_i/100` — **припущення**: розбір бере LHV готовим
-  (§1.4 р.16). Звірка — `LHV` = 36.0413 МДж/ст.м³ для (1D-2, 370 Winter) (розбір §1.5 C); не
-  зійдеться — це питання RQ-2 (джерело властивостей компонентів), а колонка `LHV_MJ_Sm3`
-  лишається вводом.
+- `LHV_MJ_Sm3` — поле кейсу `LHV_STD` (таблиця вище); для золотих A/C воно дорівнює LHV суміші
+  з файлу, 36.0412787449075. Порожнє поле кейсу дає `null` (R-11), і `MethodologyRequiredInput`
+  (§5.7) не пускає такий рядок у розрахунок мовчки.
 - `SEL_*` (V-11) лишаються: формула №12 бере `!H2S_wt … !C2H6S_wt` замість `@…`.
 - ⚠ Записи FG (Pilot, Purge, події FG) складу потоку не мають: `@Stream` порожній, `REGFIND`
   повертає `null`, і `Mu` дасть нуль у знаменнику. Тому v1.1 обирає джерело за видом газу:
@@ -665,16 +932,18 @@ EF_t_t     = Truncate(!EF_RAW * 1000) / 1000                     // звіт о�
   числова Formula-колонка `IsSG` за зразком `IsPilot`/`IsN2` (§5.2; поле `IsSG` у `FlareGasType`).
 
 Контрольні числа ті самі, що в AC-1 FEATURE-REGISTRY-TABLES і в §12.1: μ = 23.0544679,
-S = 17.2965447 мас.%, EF_RAW = 2.08743 → EF = 2.087, M = 0.2581915 т, SO2 = 0.0891735 т і
-95.885 г/с, CO2 = 0.5361514 т (розбір §1.5 A, C).
+S = 17.2965447 мас.%, EF_RAW = 2.0869542 → EF = 2.087, LHV = 36.0412787, M = 0.2581915 т,
+SO2 = 0.0891735 т і 95.885 г/с, CO2 = 0.5361514 т (розбір §1.5 A, C).
 
 Версія `1.1.0` читає склад SG із довідника. У шаблоні v2 колонки складу (`Mu`, `S_wt`, `T0_C`,
 wt% сполук, `LHV_MJ_Sm3`, `EF_t_t`) лишаються лише для FG до RG3; `Stream`/`HmbCase` переходять
 на `STREAM`/`STREAM_CASE` (§5.3); `Rho20` — за RQ-4.
 **DoD RG1:** ті самі числа A/B/C і нуль розбіжностей зі зведеннями. Для величин, які тепер
-рахуються зі складу, точність — як в AC-1 FEATURE-REGISTRY-TABLES (μ і S ± 1e-7, `EF_RAW` ± 1e-5,
-`EF` = 2.087 точно), доки RQ-2 не назве молярні маси, якими рахував файл; решта — до 1e-9, як у
-§12.1.
+рахуються зі складу, точність — до 1e-9 відносно, як у §12.1: μ і S (молярні маси — значення
+HYSYS, відновлені з файлу; `M_S = 32.064`); формула `EF` дає рівно значення файлу на всіх
+11 складах (3 SG + 8 місяців FG, для FG — як тест формули на складі лабораторії); `LHV` —
+рівно поле кейсу. **Мутація:** `Round` → `Truncate(…·1000)/1000` → червоніє 1D-1/370 Summer
+(1.849 ≠ 1.85); `M_S = 32.06` → червоніє S.
 
 ---
 
@@ -732,6 +1001,7 @@ wt% сполук, `LHV_MJ_Sm3`, `EF_t_t`) лишаються лише для FG 
 |---|---|---|
 | `UserEdit` | хто, коли, попереднє значення | `aud.CellChange` (остання зміна) |
 | `Import` | файл, рядок, коли | `aud.CellChange` + журнал імпорту |
+| `Integration` з події PI | шаблон, ID і назва події, атрибут (або `$start`/`$end`), сире значення й одиниця, стан (`Synced`, `Missing`, `PeriodChanged`…), остання синхронізація | `ext.SourceEventLink` + `ext.SourceEventFieldMap` (§4.7) |
 | `Integration` за вікном рядка | атрибут PI, вікно (час проєкту + UTC), тип summary, точок, % Good, `Server`/`Local`, коефіцієнт одиниць, коли | `ext.RowWindowValue` (`IsCurrent`) |
 | `Integration` за період | атрибут, період, спосіб згортки, точок | `ext.EntityFieldMap` + `itg.CollectionRun` |
 | `Formula` | вираз колонки; для `REGFIELD` — запис довідника, його код і вікно чинності | `cfg.FormulaDef`, `dic.RegistryEntry` |
@@ -780,8 +1050,8 @@ wt% сполук, `LHV_MJ_Sm3`, `EF_t_t`) лишаються лише для FG 
 колонками» стосується конструктора `rpt.*` і на представлення не поширюється; `D-52a`
 лишається чинним для `rpt.*`/SSRS, `rpt.*` не змінюється (`D-53`). Питання HQ-14 закрито.
 
-⚠ У реєстр `docs/tz/10-decisions.md` рішення **ще не внесене**, хоча правило `docs/README.md`
-вимагає вносити зміну рішення спершу туди, — відкритий пункт §13.4.
+✓ У реєстр `docs/tz/10-decisions.md` рішення внесене як `D-149` (2026-09-27, разом із V-2…V-15
+→ `D-171…D-184`), як того вимагає правило `docs/README.md`.
 
 ### 8.2 Модель даних
 
@@ -993,6 +1263,7 @@ cfg.ViewVersion   Id, ViewDefId FK, Version nvarchar(20), Status tinyint (Draft|
 
 | Джерело | Мітка |
 |---|---|
+| PI події | `LastRunAt` розкладу сутності-шаблону + лічильники `ext.SourceEventLink`: `Missing`, `Open`, `Unmapped`, `PeriodChanged`, змінені після закриття періоду |
 | PI за вікном рядка | `max(RetrievedAt)` поточних `ext.RowWindowValue` у межах аркуша + лічильники `NoData`/`Partial` |
 | PI за період | `LastRunAt`/`Watermark` розкладів сутностей, що живлять таблиці |
 | ручні правки | остання `aud.CellChange` з `UserEdit` |
@@ -1053,6 +1324,15 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 | `POST /api/v1/row-window-maps/{id}/pause`, `/resume` | `Integration.Manage` | → 200 | `ECR-INT-0409` (як `EntityFieldMap.cs:222-274`) |
 | `POST /api/v1/documents/{id}/row-windows/fetch` | `Document.View` + право запису в цільову колонку | `{tableInstanceId, rowKeys?}` → 202 `JobAcceptedResponse` | `ECR-DOC-0404`, `ECR-ACCS-0403`, `ECR-PRD-0409` (період закритий, `ErrorCodes.PeriodClosed`) |
 | `GET /api/v1/documents/{id}/row-windows?tableInstanceId=` | `Document.View` | → `[{rowKey, status, value, retrievedAt, fromLocal, toLocal, percentGood, errorCode}]` | `ECR-DOC-0404` |
+| `GET /api/v1/data-sources/{id}/event-templates` | `Integration.View` | → `[{template, attributes[{code, displayName, scope, sourceUnitSymbol, dataType}]}]` (каталог шаблонів подій, §4.7.1) | `ECR-INT-0422` (`.eventQueryNotConfigured`), `ECR-INT-0502`, `ECR-INT-0503` |
+| `POST /api/v1/data-sources/{id}/probe-events` | `Integration.Manage` | `{template, from, to, timeZone?, mapId?, max ≤ 50}` → `{events[{id, name, startLocal, endLocal, attributes[], resolved{column: value}, unmapped[]}], truncated}` — нічого не пише | `ECR-INT-0404` (шаблон; `suggestions`), `ECR-INT-0422` (`.eventQueryNotConfigured`, `.windowInvalid`), `ECR-INT-0502`, `ECR-INT-0503` |
+| `GET /api/v1/source-event-maps?tableDefId=` | `Integration.View` | → `SourceEventMapDto[]` (з полями й відповідностями значень) | — |
+| `POST /api/v1/source-event-maps` | `Integration.Manage` | `{sourceEntityId, documentId, tableDefId, filter?, volumeMode, fields[{targetColumn, sourceAttribute, scope, valueKind, sourceUnitId?, targetUnitId?, valueMap[]}]}` → 201 | `ECR-INT-0422` (`.eventMapStartEndRequired`, `.eventMapTableNotDynamic`, `.eventMapColumnNotInTable`, `.eventMapValueKindMismatch`, `.eventMapVolumeModeInvalid`), `ECR-INT-0409` (`.eventMapTaken`) |
+| `PUT /api/v1/source-event-maps/{id}` | `Integration.Manage` | те саме + `rowVersion` → 200 | + `ECR-INT-0404` (`.eventMapNotFound`), `ECR-INT-0409` (`.concurrency`) |
+| `POST /api/v1/source-event-maps/{id}/pause`, `/resume` | `Integration.Manage` | → 200 | `ECR-INT-0409` |
+| `POST /api/v1/documents/{id}/source-events/sync` | `Document.View` + право запису в таблицю | `{tableInstanceId?, from?, to?}` (без меж — вікно `LookbackDays`; з межами — завантаження історії, не довше року) → 202 `JobAcceptedResponse` | `ECR-DOC-0404`, `ECR-ACCS-0403`, `ECR-INT-0404` (`.eventMapNotFound`), `ECR-INT-0422` (`.windowInvalid`) |
+| `GET /api/v1/documents/{id}/source-events?tableInstanceId=` | `Document.View` | → `[{rowKey, sourceEventId, eventName, status, keptManual[], unmapped[{column, value}], lastSyncAt}]` | `ECR-DOC-0404` |
+| `POST /api/v1/documents/{id}/source-events/{linkId}/revert` | `Document.View` + право запису в колонки | `{columns[]}` → 200: пише поточні значення події з `origin = Integration` («Повернути значення з PI») | `ECR-DOC-0404`, `ECR-ACCS-0403`, `ECR-PRD-0409`, `ECR-INT-0404` (`.sourceEventNotFound`), `ECR-INT-0503` |
 | `POST /api/v1/entity-field-maps` (чинний) | `Integration.Manage` | + `aggregation: TimeWeightedAvg \| TimeIntegral`, `isStep` | чинні |
 | `GET /api/v1/documents/{id}/calculation-trace?periodKey=&rowKey=&output=&substance=` | `Document.View` + `Calculation.View` | → `CellTraceDto` (дерево вузлів §7.2 + провенанс §7.3 + `stale`) | `ECR-CALC-0404` (`.traceNotFound`, `.noCurrentRun`), `ECR-DOC-0404` |
 | `GET /api/v1/documents/{id}/cell-provenance?tableInstanceId=&rowKey=&column=` | `Document.View` | → `CellProvenanceDto` | `ECR-DOC-0404`, `ECR-ROW-0404` |
@@ -1101,9 +1381,9 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 | `ECR-VIEW-0404` | 404 | `err.ECR-VIEW-0404.viewNotFound`, `.versionNotFound` |
 | `ECR-VIEW-0409` | 409 | `err.ECR-VIEW-0409.codeTaken`, `.versionNotDraft`, `.draftExists`, `.concurrency` |
 | `ECR-VIEW-0422` | 422 | `err.ECR-VIEW-0422.layoutInvalid`, `.unknownAttribute`, `.expression`, `.aggregateNotNumeric`, `.tooLarge` |
-| `ECR-INT-0422` (чинний) | 422 | + `.queryKindNotConfigured`, `.windowColumnsNotDate`, `.targetNotDecimal`, `.targetScaleTooSmall`, `.selectorNotInTable`, `.windowInvalid` |
-| `ECR-INT-0409` (чинний) | 409 | + `.rowWindowTargetTaken`, `.concurrency` |
-| `ECR-INT-0404` (чинний) | 404 | + `.rowWindowMapNotFound` |
+| `ECR-INT-0422` (чинний) | 422 | + `.queryKindNotConfigured`, `.windowColumnsNotDate`, `.targetNotDecimal`, `.targetScaleTooSmall`, `.selectorNotInTable`, `.windowInvalid`; події (§4.7): `.eventQueryNotConfigured`, `.eventMapStartEndRequired`, `.eventMapTableNotDynamic`, `.eventMapColumnNotInTable`, `.eventMapValueKindMismatch`, `.eventMapVolumeModeInvalid` |
+| `ECR-INT-0409` (чинний) | 409 | + `.rowWindowTargetTaken`, `.concurrency`, `.eventMapTaken` |
+| `ECR-INT-0404` (чинний) | 404 | + `.rowWindowMapNotFound`, `.eventMapNotFound`, `.sourceEventNotFound` |
 | `ECR-CALC-0404` (чинний) | 404 | + `.traceNotFound`, `.noCurrentRun`, `.noBinding` |
 | `ECR-CALC-0422` (чинний) | 422 | + `.rowScopeReferencesSubstance`, `.previewInvalid` |
 
@@ -1238,9 +1518,41 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 
 ### 10.4 Реєстр подій
 
-Сітка аркуша `EVENTS` (чинний `DocumentGrid`) показує ≤ 10 ключових колонок: вид, початок,
-кінець, тривалість, факел, категорія, газ, потік, об'єм, `M_t`. Решта — у шухляді запису.
-Головна дія сторінки — **«Нова подія»**; «Додати безперервні джерела за місяць» — у «More».
+Сітка аркуша `EVENTS` (чинний `DocumentGrid`) показує ≤ 10 ключових колонок: походження,
+початок, кінець, тривалість, факел, категорія, газ, потік, об'єм, `M_t`. Решта — у шухляді
+запису. Події приходять із PI самі (§4.7), тож головна дія сторінки лишається для того, чого
+в PI немає, — **«Нова подія»**. «Отримати з PI зараз», «Отримати з PI за період…» і «Додати
+безперервні джерела за місяць» — у «More». `[PI]` у макеті нижче — позначка поля з PI,
+замкненого до «Виправити вручну»; `[edited]` — поле, виправлене людиною.
+
+**Походження рядка** — чіп у першій колонці (дані — `GET …/source-events`, §9.1):
+
+| Стан | Чіп | Тон | Що може людина |
+|---|---|---|---|
+| `Synced` | «PI» | без кольору | виправити поле вручну |
+| `Synced` + `KeptManual` | «PI · змінено вручну» з олівцем | без кольору | «Повернути значення з PI» для кожного поля |
+| `Missing` | «Зникла в PI» | `warn` | «Не враховувати» або лишити як є |
+| `PeriodChanged` | «У PI перенесена на {місяць}» | `warn` | перенести вручну (нова подія в тому місяці + «Не враховувати» тут) |
+| `Unmapped` | «PI: значення без відповідника» | `warn` | обрати значення вручну; адміністратору — посилання на мапінг |
+| рядок без прив'язки | «Вручну» | без кольору | усе, як у V1 |
+
+**Що лише для читання.** `SourceEventId` і формульні колонки — завжди. Поле, що прийшло з PI,
+показується з позначкою PI і **замкненим** до явної дії «Виправити вручну» (олівець у полі
+чи `F2` на комірці сітки): випадковий ввід не має мовчки відключати поле від PI. Після правки
+поле живе як ручне (D-118, `KeptManual`), доки людина не натисне «Повернути значення з PI».
+Рядок події поза PI редагується весь, як сьогодні.
+
+```
+┌ Flaring event · from PI ───────────────────────── ✕ ┐
+│ SOURCE  PI event HP_Flare_IA 2026-01-28 14:09:20    │
+│         synced 27.09 20:00 · 1 field edited manually│
+│ WHEN    Start 28.01.2026 14:09:20 [PI]  End 14:24:50 [PI]
+│ WHAT    Category V8 [PI]   HMB 370 Winter [PI]      │
+│         Flare HP Flare – Island A [edited]  [Revert to PI value]
+│ VOLUME  269.258 Sm3 ● From PI · Total over the row window
+│ ☐ Do not count this event                           │
+└─────────────────────────────────────────────────────┘
+```
 
 ```
 ┌ New flaring event ─────────────────────────────── ✕ ┐
@@ -1276,9 +1588,14 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 | попередній розрахунок | `preview-calculation` з debounce 400 мс; помилки входів — під полями, а не тостом |
 | клавіатура | `Ctrl+Enter` зберегти, `Esc` закрити (`UnsavedGuard`), `Alt+N` нова подія зі сторінки |
 | стани | новий / редагування / лише читання (поданий аркуш) / помилка збереження (`saveErrors.ts`) / конфлікт версії (`ConflictPanel.tsx`) |
+| подія з PI | заголовок «Flaring event · from PI» і секція SOURCE (подія, остання синхронізація, скільки полів виправлено); поля з PI замкнені до «Виправити вручну»; «Повернути значення з PI» — `POST …/source-events/{linkId}/revert` |
+| зникла в PI | банер `warn` «Подію не знайдено в PI під час синхронізації {time}. Рядок лишається» + прапорець «Не враховувати» (колонка `Exclude`) |
+| клавіатура (подія з PI) | `F2` на замкненому полі — «Виправити вручну»; `Alt+R` — «Повернути значення з PI» для поля під фокусом |
 
-Імпорт історії 2026: чинний імпорт Excel у динамічну таблицю з пласким шаблоном
-(рядок = подія); транспонований SSRS-файл напряму не імпортується.
+Історія 2026: «Отримати з PI за період…» (`POST …/source-events/sync` з `from`/`to`)
+підтягує події року тим самим шляхом, що щоденна синхронізація; для подій, яких у PI немає,
+лишається чинний імпорт Excel у динамічну таблицю з пласким шаблоном (рядок = подія).
+Транспонований SSRS-файл напряму не імпортується.
 
 ### 10.5 Конструктор представлення
 
@@ -1317,10 +1634,47 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 переліком попереджень. Стани: чернетки немає → «Створити чернетку з v1.0»; помилки макета —
 банер зі шляхами й фокус на перше хибне поле (L9).
 
-### 10.6 Прив'язка PI за вікном рядка
+### 10.6 Налаштування PI: події й вікно рядка
 
-Вкладка **«Дані з PI»** у редакторі таблиці версії шаблону (`features/templates/TableEditor.tsx`
-— лише підключення вкладки; сама вкладка — `features/integration/rowWindow/**`).
+Дві вкладки в редакторі таблиці версії шаблону (`features/templates/TableEditor.tsx` — лише
+підключення вкладок): **«Події з PI»** (`features/integration/sourceEvents/**`, крок A6) —
+звідки беруться самі рядки, і **«Дані з PI»** (`features/integration/rowWindow/**`, крок A2) —
+звідки об'єм за вікном рядка, якщо `VolumeMode = RowWindow`.
+
+#### «Події з PI»
+
+```
+┌ Table FLARE_RECORD · Events from PI ─────────────────────────── [ Save ] ┐
+│ Source     [PI SQL Client · NCOC ▾]   Template [ HP flare events ▾ ] (catalog…)
+│ Document   [DOC-000123 HSE301 Offshore Island A ▾]                         │
+│ Only events where  [Area (event) ▾] = [Island A      ]                     │
+│ ┌ Column ───────┬ PI attribute ───────────────┬ Where ──┬ How ──────────┐  │
+│ │ Start *       │ event start time            │ event   │ as is         │  │
+│ │ End *         │ event end time              │ event   │ as is         │  │
+│ │ Category      │ TUGF_Category  (catalog…)   │ event ▾ │ by code ▾     │  │
+│ │ HmbCase       │ HMB_Case       (catalog…)   │ event ▾ │ by name ▾     │  │
+│ │ Flare         │ Flare          (catalog…)   │ element▾│ value map (3) │  │
+│ │ Volume_Sm3    │ — row window (tab "PI data")│         │               │  │
+│ │ + Map a column                                                        │  │
+│ └───────────────┴─────────────────────────────┴─────────┴───────────────┘  │
+│ Volume   ( ) event attribute  (•) total over the row window  ( ) manual    │
+│ Schedule every 15 min · look back 7 days · last run 27.09 20:00 ✓  [Run now]│
+│ [ Test on recent events ▶ ]                                                │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+(Імена атрибутів у макеті ілюстративні: справжні обираються з каталогу, §4.7.3.)
+
+| Елемент | Поведінка |
+|---|---|
+| шаблон, атрибути | пікер каталогу `GET …/event-templates`; колонка «Where» — атрибут події чи первинного елемента (HQ-18); ручного введення імені немає |
+| «How» | `Direct` для дат, чисел, тексту; для Lookup — «за кодом», «за назвою» або «таблиця відповідностей» (редактор пар «значення PI → запис довідника», підказує незіставлені значення з останньої перевірки) |
+| обов'язкові | `Start` і `End`; без них «Save» вимкнено з поясненням |
+| «Test on recent events» | `probe-events` на реальних подіях за 7 днів: таблиця подій з розв'язаними значеннями; незіставлені значення — `warn` з дією «Додати відповідність». Нічого не пише |
+| стани | запит подій не налаштовано на середовищі (`.eventQueryNotConfigured`) — `Banner info` з назвою ключа `PiSqlClient:EventQuery` і посиланням на інструкцію; джерело недоступне (`ECR-INT-0503`, Retry); відмова автентифікації (`ECR-INT-0502`, без Retry); шаблон зник із каталогу (`ECR-INT-0404` + `suggestions`) |
+| клавіатура | таблиця мапінгу — `Tab` по полях, `Alt+↓` відкриває пікер, `Ctrl+Enter` — новий рядок мапінгу, `Ctrl+S` — зберегти |
+
+#### «Дані з PI»
 
 ```
 ┌ Table FLARE_RECORD · PI data by row window ───────────────────────── [ Save ] ┐
@@ -1336,6 +1690,8 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 │ ▸ Advanced: min % good 95 · refetch late data within 7 days                    │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+(Шляхи атрибутів у макеті ілюстративні: справжні обираються з каталогу, в пакеті I1 їх немає.)
 
 **«Перевірити на прикладі» (▶):** модальне вікно — обрати рядок реального документа або
 ввести вікно вручну → значення (`local`, і `server`, якщо налаштовано), одиниця й
@@ -1355,6 +1711,7 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 | `features/mapping/PiAfCatalogPicker.tsx`, `PiAfProbeAction.tsx` | `features/trace/WhyPanel.tsx`, `TraceNode.tsx`, `traceApi.ts` |
 | `features/methodologies/CalculationResultsPanel.tsx` (групування Output/Intermediate) | `features/events/EventEditorDrawer.tsx`, `VolumeStatusChip.tsx`, `eventsApi.ts` |
 | `features/documents/DocumentToolbar.tsx` (перемикач «Таблиці \| Представлення») | `features/integration/rowWindow/RowWindowTab.tsx`, `ProbeWindowModal.tsx`, `rowWindowApi.ts` |
+| `features/mapping/PiAfCatalogPicker.tsx` (зразок пікера каталогу) | `features/integration/sourceEvents/SourceEventsTab.tsx`, `EventTemplatePicker.tsx`, `ValueMapEditor.tsx`, `ProbeEventsModal.tsx`, `sourceEventsApi.ts`; `features/events/EventOriginChip.tsx`, `LockedPiField.tsx` |
 
 ### 10.8 Доступність і теми
 
@@ -1365,7 +1722,9 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 - Кольори — лише токени (`--danger`, `--warning`, `--sunken`, `--grid-line`), пари «текст/тло»
   нових станів — рядками в `contrast.test.ts` (4.5 для тексту, 3 для кільця фокуса).
 - a11y-гейти `a11y (dark)` і `a11y (light)`: новий файл `src/test/accessibility.part5.a11y.test.tsx`
-  з переглядачем, «Чому?», шухлядою події, конструктором і вкладкою PI.
+  з переглядачем, «Чому?», шухлядою події, конструктором і вкладками «Події з PI» й «Дані з PI».
+- Замкнене поле з PI — `aria-readonly="true"` і `aria-describedby` з текстом «From PI. Press F2
+  to edit manually»; чіп походження — текст, не лише колір.
 - Щільність `compact`/`comfortable` — висота рядка з `--row`.
 
 ### 10.9 Ключі текстів (сід — лише `en`, DIRECTIVE-15 §6)
@@ -1374,7 +1733,8 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 |---|---|
 | `viewer.*` | `viewer.switchTables` «Tables», `viewer.switchViews` «Views», `viewer.months` «Months», `viewer.findRow` «Find a row», `viewer.showIntermediate` «Show intermediate results», `viewer.export` «Export to Excel», `viewer.print` «Print», `viewer.total` «Total», `viewer.empty.noRecords` «No flaring records for {year}», `viewer.empty.openRegister` «Open the flaring register», `viewer.stale` «Inputs changed after the calculation of {time}», `viewer.recalculate` «Recalculate», `viewer.noCalcAccess` «You need Calculation.View to see calculated values», `viewer.freshness.piWindow` «PI {time}», `viewer.freshness.calc` «Calculated {time}», `viewer.freshness.edit` «Edited {time} ({user})», `viewer.collapseSection` «Collapse {name}» |
 | `why.*` | `why.title` «Why this number?», `why.formula` «Formula», `why.piWindow` «PI {summary} over {from}–{to}», `why.points` «{count} points · {good}% good», `why.computedLocal` «computed here from raw points», `why.computedServer` «PI server summary», `why.manual` «Entered by {user} on {time}», `why.constant` «Constant {code}, valid {from} → {to}», `why.changedAfter` «Changed after the calculation: was {old}, now {new}», `why.copy` «Copy explanation», `why.openRow` «Open row in register», `why.aggregate` «{fn} over {count} records» |
-| `events.*` | `events.new` «New event», `events.addContinuous` «Add continuous sources for {month}», `events.when` «When», `events.where` «Where», `events.what` «What», `events.volume` «Volume», `events.preview` «Preview», `events.volumeStatus.fetched` «From PI · {time}», `.partial` «Partial PI data ({good}%)», `.noData` «No PI data for this window», `.pending` «Fetching from PI…», `.manual` «Entered manually», `events.fetchAgain` «Fetch again», `events.enterManually` «Enter manually» |
+| `events.*` | `events.new` «New event», `events.addContinuous` «Add continuous sources for {month}», `events.when` «When», `events.where` «Where», `events.what` «What», `events.volume` «Volume», `events.preview` «Preview», `events.volumeStatus.fetched` «From PI · {time}», `.partial` «Partial PI data ({good}%)», `.noData` «No PI data for this window», `.pending` «Fetching from PI…», `.manual` «Entered manually», `events.fetchAgain` «Fetch again», `events.enterManually` «Enter manually»; походження: `events.origin.pi` «PI», `.piEdited` «PI · edited manually», `.missing` «Missing in PI», `.periodChanged` «Moved to {month} in PI», `.unmapped` «PI value without a match», `.manual` «Manual»; `events.syncNow` «Get from PI now», `events.syncRange` «Get from PI for a period…», `events.editManually` «Edit manually», `events.revertToPi` «Revert to PI value», `events.doNotCount` «Do not count this event», `events.missingBanner` «This event was not found in PI during the sync at {time}. The row stays.» |
+| `sourceEvents.*` | `sourceEvents.tab` «Events from PI», `.template` «Template», `.onlyWhere` «Only events where», `.where.event` «event», `.where.element` «element», `.how.direct` «as is», `.how.byCode` «by code», `.how.byName` «by name», `.how.valueMap` «value map», `.volume.eventAttribute` «Event attribute», `.volume.rowWindow` «Total over the row window», `.volume.manual` «Manual», `.test` «Test on recent events», `.addMatch` «Add a match», `.notConfigured` «The PI event query is not configured on this environment ({key}).» |
 | `rowWindow.*` | `rowWindow.tab` «PI data by row window», `rowWindow.target` «Target column», `rowWindow.window` «Window», `rowWindow.query.raw` «Raw points folded here», `rowWindow.query.summary` «Summary», `rowWindow.summary.Total` «Total (time integral)», `.Average` «Time-weighted average», `rowWindow.isStep` «Step values», `rowWindow.sourceBy` «Source by», `rowWindow.test` «Test on an example», `rowWindow.serverDiffers` «Server summary differs from the local integral by {pct}% — check the rate time unit» |
 | `viewDef.*` | `viewDef.step.source` «Source», `.orientation`, `.columnGroups`, `.sections`, `.totals`, `.format`, `.preview`; `viewDef.preset.tonsSummary` «Tons summary (as HP_LP_tons)», `viewDef.preset.gsecSummary` «g/s summary (as HP_LP_gsec)», `viewDef.preset.eventMatrix` «Event matrix» |
 | `err.*` | §9.3 |
@@ -1392,7 +1752,7 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 - ≤ 300–400 рядків diff на крок; «ендпоінт + споживач + тести» — до ~800 рядків, якщо тести
   ≥ 40 % (без `openapi.snapshot.json`, `schema.d.ts`, файлів міграцій). Розмір і частку
   тестів називати в коміті.
-- **Одна міграція на крок**, міграції строго по черзі (M1 → M4): кожна переписує
+- **Одна міграція на крок**, міграції строго по черзі (M1 → M5): кожна переписує
   `EcrDbContextModelSnapshot.cs`, і паралельні міграції конфліктують саме там. Черга **спільна**
   з міграціями FEATURE-REGISTRY-TABLES (`RK01…RK05`) — §11.3.
 - Нова таблиця чи колонка — рядок у `docs/build/02a-db-schema.md` **у тому самому кроці**, що
@@ -1418,15 +1778,20 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 | F2 | `TimeWeightedAvg`, `TimeIntegral`, `IsStep`: чиста згортка + **міграція M1** (`CK_EFM_Transform`, `EntityFieldMap.IsStep`) (~350 р.) | `src/Ecr.Application/Sources/PeriodFold.cs`, `src/Ecr.Domain/Entities/External/EntityFieldMap.cs`, `src/Ecr.Infrastructure/Persistence/Configurations/ExternalConfiguration.cs`, міграція `…_HSE301M1TimeWeighted.cs`, `docs/build/02a-db-schema.md`, `tests/Ecr.Application.Tests/Sources/PeriodFoldTimeWeightedTests.cs` | F0 | ряд `[0 @0 с, 10 @10 с, 10 @20 с]` на `[0,20)`: avg = 7.5, інтеграл = 150; ступінчастий — 100; межа з точкою до вікна; прогалина не входить. **Мутація:** трапеція → сума точок — 4 тести червоні | послідовно |
 | F3 | Конверсія на межі в Application + матеріалізація: точки на межах вікна, нові згортки, `Converted` у журналі (~380 р.) | `src/Ecr.Application/Sources/BoundaryUnitConversion.cs` (новий), `src/Ecr.Adapters.PiAf/SourceUnitConverter.cs` (делегує), `src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs`, `tests/Ecr.Application.Tests/Sources/BoundaryUnitConversionTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/MaterializeTimeWeightedTests.cs` | F1, F2 | місячний Total `Sm3/h` лягає в `Sm3`, коефіцієнт у `itg.CollectionCoverage`; `Avg` старих мапінгів не змінився. **Мутація:** прибрати виклик конверсії → тест «у комірці Sm3» червоний | послідовно |
 | F4 | Порт: `SourceQueryKind`, `SourceSummaryKind`, `WindowRequest/Result`, типовий `ReadWindowAsync` через `WindowFold`; PI SQL Client: `Quality`, ключі `InterpolatedQuery`/`SummaryQuery` без типового тексту (~400 р.) | `src/Ecr.Application/Ports/IExternalDataSource.cs`, `src/Ecr.Application/Sources/WindowFold.cs` (новий), `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs`, `tests/Ecr.Application.Tests/Sources/WindowFoldTests.cs`, `tests/Ecr.Adapters.Tests/PiSqlClientWindowTests.cs` | F2 | локальне вікно = `PeriodFold` на тих самих точках; без ключа `Interpolated` → `ECR-INT-0422`; точка `Quality=Bad` не входить. **Мутація:** типова реалізація без точки до вікна → тест «подія без точок усередині» дає 0 і червоніє | послідовно |
-| F5 | **Міграція M2:** `ext.RowWindowMap`, `RowWindowSource`, `RowWindowValue` + домен + конфігурації + партиція (~350 р.) | `src/Ecr.Domain/Entities/External/RowWindowMap.cs` (новий), `src/Ecr.Infrastructure/Persistence/Configurations/RowWindowConfiguration.cs` (новий), `src/Ecr.Infrastructure/Persistence/EcrDbContext.cs` (3 `DbSet`), `src/Ecr.Infrastructure/Persistence/Sql/07-partition-tables.sql` (рядок `RowWindowValue`), міграція `…_HSE301M2RowWindow.cs`, `docs/build/02a-db-schema.md` (3 `CREATE TABLE`), `tests/Ecr.Domain.Tests/External/RowWindowMapTests.cs` | F4 | інваріанти: Start/End — Date, ціль — Decimal, дубль селектора → доменна відмова; партиція за `PeriodKey`. **Мутація:** зняти перевірку типу Start → тест червоний | послідовно |
+| F4e | Порт подій: `DiscoverEventTemplatesAsync`, `ReadEventsAsync`, записи `SourceEvent*` з типовою реалізацією-відмовою; PI SQL Client: ключі `PiSqlClient:EventQuery`/`EventTemplateQuery` **без типового тексту**, розгортання довгої форми (рядок на атрибут) у події чистою функцією `SourceEventFolder`, `Literal` для `{template}`, стеля `MaxEvents`, UTC (~400 р., тести ≥ 40 %) | `src/Ecr.Application/Ports/IExternalDataSource.cs` (адитивно, після F4), `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs`, `src/Ecr.Adapters.PiAf/SourceEventFolder.cs` (новий), `09-seed.sql` (секція `-- HSE301:F4e`: `err.ECR-INT-0422.eventQueryNotConfigured` — ключ кидає вже цей крок), `tests/Ecr.Adapters.Tests/PiAf/PiSqlClientEventTests.cs`, `tests/Ecr.Adapters.Tests/PiAf/SourceEventFolderTests.cs` (нові) | F4 | без ключа → `ECR-INT-0422` `.eventQueryNotConfigured`; два EF з однаковою назвою, але різними ID — дві події; атрибути `E` і `P` розведені за областю; повний батч → `Truncated`; `SqlDataSource` і `PiWebApiDataSource` не змінені й компілюються. **Мутація:** групувати за `EventName` замість `EventId` → тест «однакові назви» червоний | послідовно |
+| F5 | **Міграція M2:** `ext.RowWindowMap`, `RowWindowSource`, `RowWindowValue` + домен + конфігурації + партиція (~350 р.) | `src/Ecr.Domain/Entities/External/RowWindowMap.cs` (новий), `src/Ecr.Infrastructure/Persistence/Configurations/RowWindowConfiguration.cs` (новий), `src/Ecr.Infrastructure/Persistence/EcrDbContext.cs` (3 `DbSet`), `src/Ecr.Infrastructure/Persistence/Sql/07-partition-tables.sql` (рядок `RowWindowValue`), міграція `…_HSE301M2RowWindow.cs`, `docs/build/02a-db-schema.md` (3 `CREATE TABLE`), `tests/Ecr.Domain.Tests/External/RowWindowMapTests.cs` | F4e | інваріанти: Start/End — Date, ціль — Decimal, дубль селектора → доменна відмова; партиція за `PeriodKey`. **Мутація:** зняти перевірку типу Start → тест червоний | послідовно |
 | F6 | **Міграція M3:** `MethodologyFormula.IsVisible/Scope`, `MethodologyOutput.IsPerSubstance`, `CalculationResult.Kind`, `CalculationStep.DocumentId/SourceRowKey/SubstanceEntryId`; дзеркало `arc.*` (~300 р.) | `src/Ecr.Domain/Entities/Calculations/MethodologyFormula.cs`, `MethodologyOutput.cs`, `CalculationResult.cs`, `CalculationTrace.cs`, `src/Ecr.Domain/Enums/Enums.cs` (у кінець: `MethodologyFormulaScope`, `CalculationResultKind`), `src/Ecr.Infrastructure/Persistence/Configurations/CalculationsConfiguration.cs`, `src/Ecr.Infrastructure/Persistence/Sql/12-archive-tables.sql`, міграція `…_HSE301M3Trace.cs`, `docs/build/02a-db-schema.md` (колонки), `tests/Ecr.Domain.Tests/Calculations/FormulaScopeTests.cs` | F5 | типові значення = поведінка сьогодні (`Substance`, `IsPerSubstance = 1`, `Kind = 0`); архівні таблиці мають нові колонки. **Мутація:** типове `Scope = Row` → чинний `GoldenCalculationTests` червоний | послідовно |
 | F7 | **Міграція M4:** `cfg.ViewDef`, `cfg.ViewVersion` (~250 р.) | `src/Ecr.Domain/Entities/Configuration/ViewDef.cs` (новий), `src/Ecr.Infrastructure/Persistence/Configurations/ViewConfiguration.cs` (новий), `EcrDbContext.cs` (2 `DbSet`), міграція `…_HSE301M4ViewDef.cs`, `docs/build/02a-db-schema.md` (2 `CREATE TABLE`), `tests/Ecr.Domain.Tests/Configuration/ViewVersionTests.cs` | F6 | публікація лише з `Draft`; `UQ(TemplateId, Code)`. **Мутація:** дозволити `Publish` з `Published` → тест червоний | послідовно |
-| F8 | Коди `ECR-VIEW-*`, нові `messageKey` §9.3, арми middleware (~250 р.) | `src/Ecr.Domain/Errors/ErrorCodes.cs`, `docs/build/02-contracts.md` §7, `09-seed.sql` (секція `-- HSE301:F8`), `src/Ecr.Api/Errors/ExceptionHandlingMiddleware.cs`, `tests/Ecr.Api.Tests/Errors/ViewErrorStatusTests.cs` | F7 | `ContractIntegrityTests`, `ErrorTitleCatalogTests`, `SeedCatalogTextTests` зелені; `ECR-VIEW-0404` віддається як 404. **Мутація:** прибрати арм → статус 422, тест червоний | послідовно |
+| F8 | Коди `ECR-VIEW-*`, нові `messageKey` §9.3 (разом із ключами подій `.eventMap*`, `.sourceEventNotFound`; `.eventQueryNotConfigured` уже заводить F4e), арми middleware (~280 р.) | `src/Ecr.Domain/Errors/ErrorCodes.cs`, `docs/build/02-contracts.md` §7, `09-seed.sql` (секція `-- HSE301:F8`), `src/Ecr.Api/Errors/ExceptionHandlingMiddleware.cs`, `tests/Ecr.Api.Tests/Errors/ViewErrorStatusTests.cs` | F7 | `ContractIntegrityTests`, `ErrorTitleCatalogTests`, `SeedCatalogTextTests` зелені; `ECR-VIEW-0404` віддається як 404. **Мутація:** прибрати арм → статус 422, тест червоний | послідовно |
+| F9 | **Міграція M5:** `ext.SourceEventMap`, `SourceEventFieldMap`, `SourceEventValueMap`, `SourceEventLink` + домен + конфігурації (~350 р.) | `src/Ecr.Domain/Entities/External/SourceEventMap.cs`, `SourceEventLink.cs` (нові), `src/Ecr.Domain/Enums/Enums.cs` (у кінець: `SourceEventVolumeMode`, `SourceEventValueKind`, `SourceEventLinkStatus`), `src/Ecr.Infrastructure/Persistence/Configurations/SourceEventConfiguration.cs` (новий), `EcrDbContext.cs` (4 `DbSet`), міграція `…_HSE301M5SourceEvents.cs`, `docs/build/02a-db-schema.md` (4 `CREATE TABLE`), `tests/Ecr.Domain.Tests/External/SourceEventMapTests.cs` | F8 | мапінг без `$start`/`$end` → доменна відмова; ціль — лише динамічна таблиця; `UQ(SourceEventMapId, SourceEventId)`; переходи стану зв'язку (`Synced ↔ Missing`, `Open → Synced`). **Мутація:** дозволити мапінг без `$end` → тест червоний | послідовно |
 | A4 | `ICalculationTrigger` + виклик із матеріалізації, дедуплікація (~300 р.) | `src/Ecr.Application/Calculations/CalculationTrigger.cs` (новий), `src/Ecr.Application/Ports/ICalculationTrigger.cs` (новий), `src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs`, `src/Ecr.Infrastructure/DependencyInjection.cs` (секція `// HSE301:A4`), `tests/Ecr.Infrastructure.Tests/Jobs/AutoRecalcAfterMaterializeTests.cs` | F3 | `Applied > 0` → рівно одна задача на `(doc, period)` за будь-якої кількості викликів; закритий період — нуль. **Мутація:** прибрати дедуплікацію → тест «3 виклики = 1 задача» червоний | паралельно з A2, A3a |
 | A2 | API прив'язки PI за вікном рядка + `probe-window` + вкладка «Дані з PI» (ендпоінт + споживач, ~750 р., тести ≥ 40 %) | `src/Ecr.Application/Integration/RowWindowMapHandlers.cs`, `ProbeWindowHandler.cs` (нові), `src/Ecr.Api/Controllers/RowWindowMapsController.cs` (новий; `probe-window` — абсолютним маршрутом, `DataSourcesController.cs` не чіпається), `src/Ecr.Web/src/features/integration/rowWindow/**` (нові), `src/Ecr.Web/src/features/templates/TableEditor.tsx` (лише підключення вкладки), `09-seed.sql` (`-- HSE301:A2`, ключі `rowWindow.*`), тести `tests/Ecr.Api.Tests/RowWindowMapsTests.cs`, `src/Ecr.Web/src/features/integration/rowWindow/__tests__/**`, `contracts/openapi.snapshot.json` + `schema.d.ts` (останнім) | F5, F8 | `EndpointCoverageTests`, `OpenApiSnapshotTests` зелені; probe повертає `local` для фейкового джерела; L1/L9 тестами. **Мутація:** не перевіряти `Scale` цілі → тест `targetScaleTooSmall` червоний | паралельно з A4, A3a |
 | A3a | Рушій: `Scope`, `IsPerSubstance`, `IsVisible` → `Kind = Intermediate`; перевірка публікації; `rpt` бере лише `Output`; прив'язка колонки до видимої формули (~400 р.) | `src/Ecr.Calculations/GenericCalculationModule.cs`, `src/Ecr.Application/Ports/ICalculationModule.cs`, `src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs` (`WriteResultsAsync`), `src/Ecr.Application/Calculations/PublishMethodologyHandler.cs`, `src/Ecr.Application/Calculations/MethodologyAuthoringHandlers.cs` (перевірка `OutputCode`), `src/Ecr.Infrastructure/Reporting/ReportSnapshotBuilder.cs` (фільтр `Kind`), тести `tests/Ecr.Calculations.Tests/RowScopeTests.cs`, `IntermediateResultsTests.cs`, `tests/Ecr.Infrastructure.Tests/Reporting/SnapshotIgnoresIntermediateTests.cs` | F6 | методологія з 11 речовинами пише `M_t` один раз; `ContentHash` зрізу не змінився від появи проміжних. **Мутація:** прибрати фільтр `Kind` у `ReportSnapshotBuilder` → хеш інший, тест червоний | паралельно з A4, A2 |
 | A1 | Виконання прив'язки: `RowWindowFetchJob`, щогодинний `RowWindowRefetchJob`, хук `IRowWindowTrigger` у `PatchCellsHandler`, TZ проєкту, `KeptManual`, виклик `ICalculationTrigger` (~450 р.; ⚠ `PatchCellsHandler.cs` — гарячий файл, лише одна точка виклику) | `src/Ecr.Application/Integration/RowWindowFetch.cs`, `src/Ecr.Application/Ports/IRowWindowTrigger.cs` (нові), `src/Ecr.Infrastructure/Jobs/RowWindowFetchJob.cs`, `RowWindowRefetchJob.cs` (нові), `src/Ecr.Application/Documents/PatchCellsHandler.cs` (1 виклик), `src/Ecr.Api/Startup/RecurringScheduleService.cs` (1 тригер), `DependencyInjection.cs` (`// HSE301:A1`), тести `tests/Ecr.Application.Tests/Integration/RowWindowFetchTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/RowWindowFetchJobTests.cs` | A4, F4, F5 | 14:09:20–14:24:50 Asia/Atyrau → вікно UTC 09:09:20–09:24:50; ручна правка лишається, статус `KeptManual`; `End ≤ Start` → `InvalidWindow` без звернення до PI; після запису — задача перерахунку. **Мутація:** вікно в UTC без TZ → тест червоний | паралельно з A3b |
 | A3b | Трейс: `ReferenceCollector`, `TraceJson v1`, `CalculationStep.ResultId/DocumentId/RowKey`, запис `calc.CalculationInput` (~400 р.) | `src/Ecr.Calculations/ReferenceCollector.cs` (новий), `src/Ecr.Calculations/TraceRecorder.cs`, `GenericCalculationModule.cs` (після A3a), `src/Ecr.Infrastructure/Persistence/CalculationResultStore.cs` (`WriteTraceAsync`, `:119-157`), `src/Ecr.Calculations/CalculationOutputWriter.cs`, тести `tests/Ecr.Calculations.Tests/TraceJsonTests.cs`, `tests/Ecr.Infrastructure.Tests/Persistence/CalculationInputWrittenTests.cs` | A3a | для `M_t` прикладу A `TraceJson.inputs` = {`V_Sm3`, `Rho20`}, `ResultId` не null; на `TraceLevel.Off` — нічого. **Мутація:** `resultId: null` → тест «крок має результат» червоний | паралельно з A1 |
+| A6 | API й вкладка «Події з PI»: каталог шаблонів, `probe-events`, `source-event-maps` (CRUD, пауза), редактор відповідностей значень (ендпоінт + споживач, ~780 р., тести ≥ 40 %) | `src/Ecr.Application/Integration/SourceEventMapHandlers.cs`, `ProbeEventsHandler.cs` (нові), `src/Ecr.Api/Controllers/SourceEventMapsController.cs` (новий; `event-templates` і `probe-events` — абсолютними маршрутами, `DataSourcesController.cs` не чіпається), `src/Ecr.Web/src/features/integration/sourceEvents/**` (нові), `src/Ecr.Web/src/features/templates/TableEditor.tsx` (лише підключення вкладки, після A2), `09-seed.sql` (`-- HSE301:A6`, `sourceEvents.*`), DI (`// HSE301:A6`), тести `tests/Ecr.Api.Tests/SourceEventMapsTests.cs`, `src/Ecr.Web/src/features/integration/sourceEvents/__tests__/**`, контракт — останнім | F4e, F9, A2 | `EndpointCoverageTests`, `OpenApiSnapshotTests` зелені; `probe-events` на фейковому джерелі повертає розв'язані значення й незіставлені; стан «запит не налаштовано» — банер, а не порожній список; «Run now» — чинний `POST /sources/{id}/collect` (`SourcesController.cs:43`). **Мутація:** не перевіряти обов'язковість `$start`/`$end` → тест `eventMapStartEndRequired` червоний | паралельно з A1, A3b |
+| A5a | Запис рядків від інтеграції: `ICellPatcher.ApplyIntegrationRowsAsync` — типізовані значення (дата, Lookup, текст, число), `BaseVersion` чинного рядка для оновлення й `null` для нового, відсів комірок `UserEdit` → `KeptManual` (~300 р.) | `src/Ecr.Application/Ports/ICellPatcher.cs` (адитивний метод і запис `IntegrationRowUpsert`), `src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs` (новий метод поруч із чинним), `tests/Ecr.Infrastructure.Tests/Integration/IntegrationRowUpsertTests.cs` (новий) | F9 | новий рядок створюється, наявний оновлюється без `ECR-ROW-0409 rowKeysExist`; комірка з останньою правкою людини не перезаписується й повертається в `KeptManual`; Lookup пишеться id запису; чинний `ApplyIntegrationAsync` поводиться як до кроку (його тести без правок). **Мутація:** надсилати `BaseVersion: null` і для наявного рядка → тест «оновлення наявного» червоний (`rowKeysExist`) | паралельно з A4, A2, A3a |
+| A5b | Синхронізація подій: `SourceEventSyncJob` (upsert за ID, ключ `EF-…`, TZ проєкту, `Missing` лише за повним прочитанням, закритий період, відкрита подія, `PeriodChanged`, `Unmapped`, фільтр мапінгу), постановка з `CollectionJob`, виклик `ICalculationTrigger` (~400 р.) | `src/Ecr.Application/Integration/SourceEventSync.cs`, `src/Ecr.Infrastructure/Jobs/SourceEventSyncJob.cs` (нові), `src/Ecr.Infrastructure/Jobs/CollectionJob.cs` (1 виклик після `SaveRunAsync`), DI (`// HSE301:A5b`), тести `tests/Ecr.Application.Tests/Integration/SourceEventSyncTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/SourceEventSyncJobTests.cs` | F4e, A5a, A1, A4 | фейкова подія 09:09:20Z–09:24:50Z з `Category = V8`, `HMB = 370 Winter` → рядок `EF-…` зі `Start` 14:09:20 (Asia/Atyrau), `Category`, `HmbCase`; повтор — нуль змін; ручна правка категорії лишається (`KeptManual`); подія зникла → `Missing`, рядок той самий; той самий прогін з `Truncated` — жодного `Missing`; закритий період — нуль записів; подія без кінця — рядка немає; запис Start/End поставив `RowWindowFetchJob` (хук A1). **Мутація:** ставити `Missing` і при `Truncated` → тест червоний; брати місяць за UTC замість TZ проєкту → подія 31.01 22:00 (UTC+5 — вже 01.02) лягає не в той період, тест червоний | послідовно, після хвилі A2 |
 | B0a | **Рефакторинг:** `ReportExpressionChecker` приймає каталог колонок (`IReportColumnCatalog`), поведінка та сама (~200 р.) | `src/Ecr.Expressions/Binding/ReportExpressionChecker.cs`, `src/Ecr.Expressions/Binding/IReportColumnCatalog.cs` (новий), місця створення каталогу `ReportSourceColumns` | F8 | чинні тести діалекту Report зелені **без правок** | послідовно |
 | B0b | **Рефакторинг:** `AggregateFunctions` винесено з `ReportLayout` (~150 р.) | `src/Ecr.Application/Reporting/ReportLayout.cs`, `src/Ecr.Application/Reporting/AggregateFunctions.cs` (новий) | B0a | чинні тести `ReportLayout` зелені без правок | послідовно |
 | B2 | Рушій представлення: `ViewLayout` (схема, компіляція, перевірка), `ViewRecordReader` (рік, права, результати з речовиною), `RecordMatrixRenderer`; `GET …/views`, `GET …/views/{code}`, `GET …/freshness` (~500 р. бекенд + мінімальний споживач `viewApi.ts`; ≤ 800, тести ≥ 40 %) | `src/Ecr.Application/Views/**` (нові), `src/Ecr.Api/Controllers/DocumentViewsController.cs` (новий), `src/Ecr.Web/src/features/views/viewApi.ts` (новий), тести `tests/Ecr.Application.Tests/Views/**`, `tests/Ecr.Api.Tests/DocumentViewsTests.cs`, контракт — останнім | A3a, F7, B0a | фікстура SG_V8 січень: шапка `JAN` зі `span = 9` + `Total`, `Total` об'єму = 1 177.766; рядок без права — замок. **Мутація:** `hideEmpty` ігнорується → тест «FEB–JUL сховані» червоний | послідовно |
@@ -1435,46 +1800,53 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 | B5 | Переглядач: `DocumentViewPage`, `ViewTable` (нативна, липка шапка, секції), навігатор, чіпи місяців, пошук, перемикач проміжних, смуга свіжості, банер застарілості, клавіатура, друк (~700 р., лише клієнт) | `src/Ecr.Web/src/pages/DocumentViewPage.tsx`, `src/Ecr.Web/src/features/views/viewer/**` (нові), `src/Ecr.Web/src/app/routes.ts` (запис `documentView`), `src/Ecr.Web/src/app/router.tsx`, `src/Ecr.Web/src/features/documents/DocumentToolbar.tsx` (перемикач), `src/Ecr.Web/src/test/accessibility.part5.a11y.test.tsx` (новий), `09-seed.sql` (`-- HSE301:B5`, `viewer.*`) | B2 | `a11y (dark)`, `a11y (light)`, `renderFeedback` зелені; клавіатурний шлях тестом; `th` шапки має `colspan`. **Мутація:** прибрати `scope="colgroup"` → a11y-тест червоний | паралельно з B1, B3 |
 | B6 | Експорт XLSX представлення: `ViewExcelWriter`, `POST …/export`, кнопка (~600 р., тести ≥ 40 %) | `src/Ecr.Adapters.Excel/ViewExcelWriter.cs` (новий), `src/Ecr.Application/Views/ExportDocumentViewHandler.cs` (новий), `DocumentViewsController.cs` (після B2), `src/Ecr.Web/src/features/views/viewer/ViewToolbar.tsx` (після B5), тести `tests/Ecr.Adapters.Tests/ViewExcelWriterTests.cs` | B2, B3, B5 | у книзі злиття `C3:K3`, закріплення `B5`, числа — числами, формат `0.000`, аркуш «Document map» з посиланнями. **Мутація:** писати значення текстом → тест «тип комірки Number» червоний | послідовно |
 | B7 | Реєстр подій: шухляда події + `preview-calculation` + «Додати безперервні джерела» + статус об'єму (~750 р., тести ≥ 40 %) | `src/Ecr.Application/Calculations/PreviewRowCalculationHandler.cs` (новий), `src/Ecr.Api/Controllers/RowCalculationPreviewController.cs` (новий), `src/Ecr.Web/src/features/events/**` (нові), `DocumentPage.tsx` (після B1), `09-seed.sql` (`-- HSE301:B7`, `events.*`) | B1, A1 | попередній розрахунок прикладу A = 95.885 г/с без запису в БД; закритий період — помилка до збереження. **Мутація:** preview пише результат → тест «нічого не записано» червоний | послідовно |
+| B8 | Реєстр подій: походження з PI — чіп стану, замкнені поля з PI з «Виправити вручну» (`F2`), «Повернути значення з PI», банер зниклої події й «Не враховувати», «Отримати з PI зараз / за період»; `GET …/source-events`, `POST …/source-events/sync`, `POST …/source-events/{linkId}/revert` (ендпоінт + споживач, ~750 р., тести ≥ 40 %) | `src/Ecr.Application/Integration/SourceEventLinkHandlers.cs` (новий), `src/Ecr.Api/Controllers/DocumentSourceEventsController.cs` (новий), `src/Ecr.Web/src/features/events/EventOriginChip.tsx`, `LockedPiField.tsx`, `sourceEventLinksApi.ts` (нові), `src/Ecr.Web/src/features/events/EventEditorDrawer.tsx` (після B7), `09-seed.sql` (`-- HSE301:B8`, `events.origin.*`, `events.*`), тести, `accessibility.part5.a11y.test.tsx` (дописати), контракт — останнім | B7, A5b | «Повернути значення з PI» пише значення з `origin = Integration`, і наступна синхронізація знову веде поле; замкнене поле не приймає ввід без `F2`; `Missing` — `warn` з текстом; `sync` з `from`/`to` довше року → `ECR-INT-0422`; a11y обох тем. **Мутація:** `revert` пише з `origin = UserEdit` → тест «після повернення поле знову веде PI» червоний | послідовно |
 | B4 | Конструктор представлення: API (`templates/{id}/views…`), сторінка-редактор, пресети зведень, перегляд на реальному документі (~800 р., тести ≥ 40 %) | `src/Ecr.Application/Views/ViewDefinitionHandlers.cs` (новий), `src/Ecr.Api/Controllers/TemplateViewsController.cs` (новий), `src/Ecr.Web/src/features/views/constructor/**` (нові), `routes.ts`/`router.tsx` (після B5), `09-seed.sql` (`-- HSE301:B4`, `viewDef.*`) | B5, B3 | пресет «як HP_LP_gsec» дає дерево листків §8.6; публікація з помилкою макета неможлива, фокус на полі (L9). **Мутація:** не перевіряти `aggregateNotNumeric` → тест червоний | послідовно |
-| I1 | Пакет HSE301: довідники §5.3, шаблон §5.2, методологія §6 (константи з вікнами), прив'язка PI (шляхи-заглушки до HQ-1), представлення 6 аркушів; фікстура 2026 з файлу; золоті тести | `tools/hse301/*.json`, `tools/hse301/Install-Hse301.ps1` (нові), `tests/Ecr.Scenarios.Tests/Hse301/**` (нові: фікстура 94 записів, `Hse301GoldenTests.cs`, `Hse301SummaryReconciliationTests.cs`) | B3, B4, B7 | §12: A/B/C, NO2 січня, 2 304 співвідношення зведень — 0 розбіжностей. **Мутація:** `ETA = 0.998` → SO2 A червоний | послідовно |
-| I2 | E2E і знімки: шлях «подія → PI (фейк) → перерахунок → представлення → Чому? → XLSX» | `src/Ecr.Web/e2e/hse301View.spec.ts` (новий), `src/Ecr.Web/e2e/screenshots.spec.ts` (2 знімки: SG_V8 світла/темна) | I1 | `tools/e2e-stand.ps1` і `tools/smoke.ps1` з окремого worktree — зелені; знімки в PR поруч з аркушем файлу | послідовно |
-| I3 | Документація: перенести V-1…V-15 у `docs/tz/10-decisions.md` (V-1 схвалено 2026-09-27; решта — після схвалення), рядок D-52a, `B24-hse301-view.md` | `docs/tz/10-decisions.md`, `docs/reference/backend/B24-hse301-view.md` | I2 | `git grep` посилань на цей документ зелений; `JournalIntegrityTests` зелений | послідовно |
-| RG1 | Методологія v1.1 зі складом SG із довідника (§6.5); шаблон v2: `Stream`/`HmbCase` на `STREAM`/`STREAM_CASE`, колонки складу лишаються лише для FG | методологія й шаблон — дані в `tools/hse301/*.json`; тести `Hse301GoldenTests.cs` | I1; FEATURE-REGISTRY-TABLES `RT-23a` (методологія бачить довідник), `RT-23b` (публікація з функціями довідників); дані `STREAM`…`GAS_COMPOSITION` — імпортом `RT-18b` або CSV | ті самі числа A/B/C з точністю DoD §6.5; зведення — 0 розбіжностей. **Мутація:** μ з поля кейсу `MW_HYSYS` (23.05, `Molecular_Weight` HYSYS) замість складу (23.0544679) → червоний (розбір §3) | послідовно |
+| I1 | Пакет HSE301: довідники §5.3 (з `Season`), шаблон §5.2, методологія §6 (константи з вікнами), **структура** мапінгу подій і прив'язки PI (колонки й режим об'єму; імена шаблону й атрибутів адміністратор обирає з каталогу на середовищі — у пакеті їх немає), представлення 6 аркушів; фікстура 2026 з файлу; золоті тести | `tools/hse301/*.json`, `tools/hse301/Install-Hse301.ps1` (нові), `tests/Ecr.Scenarios.Tests/Hse301/**` (нові: фікстура 94 записів, фейкове джерело подій, `Hse301GoldenTests.cs`, `Hse301SourceEventsScenarioTests.cs`, `Hse301SummaryReconciliationTests.cs`) | B3, B4, B8 | §12: A/B/C, NO2 січня, 2 304 співвідношення зведень — 0 розбіжностей; §12.5 G-E1…G-E6. **Мутація:** `ETA = 0.998` → SO2 A червоний; фейкова подія з `Category = V9` → рядок зникає з аркуша `AI_Int_SG_V8` і з'являється у V9 | послідовно |
+| I2 | E2E і знімки: шлях «подія PI (фейк) → рядок → об'єм PI за вікном (фейк) → перерахунок → представлення → Чому? → XLSX» і «виправити вручну → синхронізація не перетирає» | `src/Ecr.Web/e2e/hse301View.spec.ts` (новий), `src/Ecr.Web/e2e/screenshots.spec.ts` (2 знімки: SG_V8 світла/темна) | I1 | `tools/e2e-stand.ps1` і `tools/smoke.ps1` з окремого worktree — зелені; знімки в PR поруч з аркушем файлу | послідовно |
+| I3 | Документація: `B24-hse301-view.md`; позначки «реалізовано» в цьому документі. V-1…V-15 уже внесено в реєстр як `D-149`, `D-171…D-184` (2026-09-27); V-16… вносить оркестратор окремо | `docs/reference/backend/B24-hse301-view.md`, `docs/build/FEATURE-HSE301-VIEW.md` | I2 | `git grep` посилань на цей документ зелений; `JournalIntegrityTests` зелений | послідовно |
+| RG1 | Методологія v1.1 зі складом SG із довідника (§6.5); шаблон v2: `Stream`/`HmbCase` на `STREAM`/`STREAM_CASE`, колонки складу лишаються лише для FG | методологія й шаблон — дані в `tools/hse301/*.json`; тести `Hse301GoldenTests.cs` | I1; FEATURE-REGISTRY-TABLES `RT-23a` (методологія бачить довідник), `RT-23b` (публікація з функціями довідників); дані `STREAM`…`GAS_COMPOSITION` — імпортом `RT-18b` або CSV; `COMPONENT` — профілем `ADDSTREAM_COMPONENTS` (FEATURE-REGISTRY-TABLES §11.4) | ті самі числа A/B/C з точністю DoD §6.5; зведення — 0 розбіжностей; `EF` = значенню файлу на 11 складах. **Мутація:** μ з поля кейсу `MW_HYSYS` (23.05, `Molecular_Weight` HYSYS) замість складу (23.0544679) → червоний (розбір §3); `Round` → `Truncate` у `EF_t_t` → червоний 1D-1/370 Summer | послідовно |
 | RG2 | Секція «Склад» представлення: 34 компоненти vol%/wt%, контроль Σ = 100 | `src/Ecr.Application/Views/ViewRecordReader.cs` (атрибути `reg_*`), `tools/hse301/views.json` | RG1; FEATURE-REGISTRY-TABLES `RT-22` (знімок довідників) | рядок «Сумма должна быть равна 100» = 100.0000000000 для 1D-2/370 Winter | послідовно |
 | RG3 | Лабораторний аналіз FG: мг/м3 → об.% (22.414), N2 балансом, похідні властивості | `tools/hse301/*.json`, тести | RG1 | склад січня FG збігається з `AI_Cont_FG_V7` (похибка ≤ 0.05 %, розбір §1.4 р.24) | послідовно |
-| F4b | (за потреби) PI Web API `summary`/`interpolated` | `src/Ecr.Adapters.PiAf/PiWebApiDataSource.cs`, тести | F4 | серверний Total = локальному на фейковому транспорті | паралельно будь-коли після F4 |
+| F4b | (за потреби) PI Web API `summary`/`interpolated` і `ReadEventsAsync` через `eventframes/search` (форма запиту — `as-is/03-pi-af-integration.md` §4) | `src/Ecr.Adapters.PiAf/PiWebApiDataSource.cs`, тести | F4e | серверний Total = локальному на фейковому транспорті; події з фейкового `eventframes/search` = тим самим подіям із PI SQL Client | паралельно будь-коли після F4e |
 
-Разом 30 рядків: F0 — чужий крок (D16-03, виконано в `3e6d2efa`), власних — 29 (F1–F8, A1–A4 з A3a/A3b,
-B0a–B7, I1–I3, RG1–RG3, F4b); F4b — лише за потреби.
+Разом 36 рядків: F0 — чужий крок (D16-03, виконано в `3e6d2efa`), власних — 35 (F1–F9 і F4e,
+A1–A6 з A3a/A3b і A5a/A5b, B0a–B8, I1–I3, RG1–RG3, F4b); F4b — лише за потреби. Джерело подій
+(§4.7) додало шість кроків: F4e, F9, A5a, A5b, A6, B8.
 
 ### 11.3 Хвилі й перетин файлів
 
 ```
-F0 → F1 → F2 → F3 → F4 → F5 → F6 → F7 → F8                      (foundation, послідовно)
+F0 → F1 → F2 → F3 → F4 → F4e → F5 → F6 → F7 → F8 → F9          (foundation, послідовно)
                    │
-Хвиля A1:  A4 ‖ A2 ‖ A3a      файли не перетинаються: A4 — MaterializeCollectedDataJob+Trigger;
-                              A2 — rowWindow API/UI; A3a — рушій+rpt
-Хвиля A2:  A1 ‖ A3b           A1 — RowWindow*Job+PatchCellsHandler; A3b — TraceRecorder+ResultStore.Trace
-Хвиля B0:  B0a → B0b          (рефакторинг, послідовно)
-Хвиля B1:  B2                 (ядро представлення)
-Хвиля B2:  B3 ‖ B1 ‖ B5       B3 — Pivot*; B1 — trace/**+DocumentPage; B5 — viewer/**+routes
-Хвиля B3:  B6 → B7 → B4       (торкаються файлів B2/B5/B1 — послідовно)
+Хвиля A1:  A4 ‖ A2 ‖ A3a ‖ A5a   файли не перетинаються: A4 — MaterializeCollectedDataJob+Trigger;
+                                 A2 — rowWindow API/UI; A3a — рушій+rpt; A5a — ICellPatcher+IntegrationCellPatcher
+Хвиля A2:  A1 ‖ A3b ‖ A6         A1 — RowWindow*Job+PatchCellsHandler; A3b — TraceRecorder+ResultStore.Trace;
+                                 A6 — sourceEvents API/UI (TableEditor.tsx — після A2)
+Хвиля A3:  A5b                   SourceEventSync+CollectionJob (після A1, A4, A5a)
+Хвиля B0:  B0a → B0b             (рефакторинг, послідовно)
+Хвиля B1:  B2                    (ядро представлення)
+Хвиля B2:  B3 ‖ B1 ‖ B5          B3 — Pivot*; B1 — trace/**+DocumentPage; B5 — viewer/**+routes
+Хвиля B3:  B6 → B7 → B8 → B4     (торкаються файлів B2/B5/B1 і features/events/** — послідовно)
 Інтеграція: I1 → I2 → I3
 Після FEATURE-REGISTRY-TABLES (RT-22, RT-23a, RT-23b): RG1 → RG2 → RG3
 ```
 
 ⚠ Перетини, які план навмисно серіалізує: `MaterializeCollectedDataJob.cs` (F0 → F3 → A4),
-`GenericCalculationModule.cs` (A3a → A3b), `DocumentPage.tsx` (B1 → B7), `routes.ts`
-(B5 → B4), `DocumentViewsController.cs` (B2 → B6). Спільні дописування (`09-seed.sql`,
-`DependencyInjection.cs`, контракт) — лише у свої секції, з rebase перед пушем.
+`IExternalDataSource.cs` і `PiSqlClientDataSource.cs` (F4 → F4e), `GenericCalculationModule.cs`
+(A3a → A3b), `TableEditor.tsx` (A2 → A6), `ICellPatcher.cs`/`IntegrationCellPatcher.cs`
+(A5a → A5b), `CollectionJob.cs` (F0 → A5b), `DocumentPage.tsx` (B1 → B7),
+`features/events/EventEditorDrawer.tsx` (B7 → B8), `routes.ts` (B5 → B4),
+`DocumentViewsController.cs` (B2 → B6). Спільні дописування (`09-seed.sql`,
+`DependencyInjection.cs`, `Enums.cs`, контракт) — лише у свої секції, з rebase перед пушем.
 
 ⚠ **Спільне з [FEATURE-REGISTRY-TABLES](FEATURE-REGISTRY-TABLES.md#93-хвилі--4-паралельно-файли-не-перетинаються)
 (узгоджено 2026-09-27).** Спільних **таблиць** немає: тут — `ext.EntityFieldMap`,
-`ext.RowWindow*`, `calc.MethodologyFormula`, `calc.MethodologyOutput`, `calc.CalculationResult`,
-`calc.CalculationStep`, `cfg.ViewDef`/`cfg.ViewVersion`; там — `cfg.Registry*`, `dic.Registry*`,
-`calc.CalculationRun` (`RegistryAsOfUtc`). Серіалізується інше:
+`ext.RowWindow*`, `ext.SourceEvent*`, `calc.MethodologyFormula`, `calc.MethodologyOutput`,
+`calc.CalculationResult`, `calc.CalculationStep`, `cfg.ViewDef`/`cfg.ViewVersion`; там —
+`cfg.Registry*`, `dic.Registry*`, `calc.CalculationRun` (`RegistryAsOfUtc`). Серіалізується інше:
 
-- **Міграції** обох документів (`HSE301M1…M4` тут, `RK01…RK05` там) переписують
+- **Міграції** обох документів (`HSE301M1…M5` тут, `RK01…RK05` там) переписують
   `EcrDbContextModelSnapshot.cs`: у польоті не більше **однієї на обидві сесії**, наступна
   генерується після rebase на попередню, у порядку готовності.
 - **Код розрахунку:** `ICalculationModule.cs`, `GenericCalculationModule.cs` (тут A3a → A3b →
@@ -1501,7 +1873,7 @@ F0 → F1 → F2 → F3 → F4 → F5 → F6 → F7 → F8                      
 
 | Можна вже зараз | Чекає на FEATURE-REGISTRY-TABLES |
 |---|---|
-| F0–F8, A1–A4, B0–B7, I1–I3: весь конвеєр PI, прив'язка вікна, методологія на тимчасових колонках складу, прозорість, представлення, експорт, реєстр подій | RG1 (склад у методології), RG2 (секція складу в представленні), RG3 (лабораторія FG) |
+| F0–F9, F4e, A1–A6, B0–B8, I1–I3: весь конвеєр PI, події з PI, прив'язка вікна, методологія на тимчасових колонках складу, прозорість, представлення, експорт, реєстр подій | RG1 (склад у методології), RG2 (секція складу в представленні), RG3 (лабораторія FG) |
 | довідники з одним ключем (§5.3) — чинний конструктор довідників | довідники `STREAM` → `STREAM_CASE` (первинний ключ `STREAM` + `CASE_NAME`) → `GAS_COMPOSITION` (ключ `CASE` + `COMPONENT`) і `COMPONENT` (FEATURE-REGISTRY-TABLES §11.4) та імпорт HYSYS (`RT-18a…RT-18c`) |
 
 ⚠ **Точки дотику:** (1) атрибути `reg_*` представлення (RG2) читають довідник через знімок
@@ -1554,8 +1926,8 @@ FEATURE-REGISTRY-TABLES (`IRegistrySnapshotLoader`, §5.7, `RT-22`), а не в�
 - **Знімки** (`screenshots.spec.ts`): `AI_Int_SG_V8`, світла й темна; у PR — поруч зі знімком
   аркуша файлу.
 - **XLSX:** злиття шапки, закріплення, числа — числами, «Document map» з посиланнями.
-- **Прозорість:** для G-A3 «Чому?» показує PI-вікно (точки, % Good), `Rho20` (хто ввів),
-  `K_S` (вікно чинності) і формулу тривалості.
+- **Прозорість:** для G-A3 «Чому?» показує подію PI (шаблон, ID, атрибути `Start`/`End`),
+  PI-вікно (точки, % Good), `Rho20` (хто ввів), `K_S` (вікно чинності) і формулу тривалості.
 
 ### 12.4 Нефункціональні
 
@@ -1564,8 +1936,25 @@ FEATURE-REGISTRY-TABLES (`IRegistrySnapshotLoader`, §5.7, `RT-22`), а не в�
 | рендер річного представлення 301 | p95 ≤ 2 с на стенді |
 | попередній розрахунок у шухляді | p95 ≤ 400 мс |
 | від правки кінця події до нового числа в представленні (PI доступний) | ≤ 3 хв (дедуплікація 2 хв) |
+| від появи закритої події в PI до рядка з об'ємом і розрахунком | ≤ період розкладу сутності-шаблону + 5 хв |
+| синхронізація місяця подій (≤ 500 подій, 20 атрибутів) | ≤ 60 с на стенді з фейковим джерелом |
 | a11y | гейти `a11y (dark)`/`a11y (light)` зелені |
 | `smoke.ps1`, `e2e-stand.ps1` | зелені з окремого worktree |
+
+### 12.5 Події з PI (`tests/Ecr.Scenarios.Tests/Hse301/Hse301SourceEventsScenarioTests.cs`)
+
+Джерело — фейкова реалізація `IExternalDataSource` з подіями й атрибутами (жодних імен
+реальних тегів), далі весь шлях продукту: синхронізація → рядок → об'єм → розрахунок →
+представлення.
+
+| # | Що | Вхід | Очікувано |
+|---|---|---|---|
+| G-E1 | подія з EF → рядок → розрахунок = приклад A | EF 28.01.2026 09:09:20Z–09:24:50Z, `Category = V8`, кейс «370 Winter», факел HP; об'єм — (а) атрибут EF 269.258 Sm3, (б) `RowWindow` на фейкових точках з Total 269.258 | рядок `EF-…` зі `Start` 28.01 14:09:20 і `End` 14:24:50 (Asia/Atyrau), `DurationSec` 930; `M_t` 0.2581914962 т; `gsec[SO2]` 95.885 г/с; подія в аркуші `AI_Int_SG_V8`, стовпець JAN/1 — **однаково в обох режимах об'єму** |
+| G-E2 | повторна синхронізація | те саме вікно ще раз | нуль змінених комірок, нуль нових рядків, `aud.CellChange` не росте |
+| G-E3 | ручна правка не перетирається | людина змінила `Category` на V9, у PI лишилося V8 | після синхронізації — V9, стан `Synced` + `KeptManual = [Category]`; «Повернути значення з PI» → V8, і наступна синхронізація знову веде поле |
+| G-E4 | зникла подія | EF прибрали з фейкового джерела | `Missing`, рядок і числа ті самі; «Не враховувати» → усі виходи рядка 0, подія лишається в реєстрі; той самий прогін із `Truncated` — `Missing` не ставиться |
+| G-E5 | закритий період | січень закрито, у PI змінився кінець події | жодного запису в січень; стан `PeriodClosed`; смуга свіжості показує «змінено в PI після закриття» |
+| G-E6 | сезон і категорія без здогадок | атрибут сезону «Winter» (лише сезон) і невідоме значення категорії «V10» | `HmbCase` = кейс потоку з сезоном Winter; `Category` порожня, стан `Unmapped` зі значенням «V10»; жодного виводу сезону з місяця |
 
 ---
 
@@ -1575,7 +1964,7 @@ FEATURE-REGISTRY-TABLES (`IRegistrySnapshotLoader`, §5.7, `RT-22`), а не в�
 
 | # | Ризик | Наслідок | Пом'якшення |
 |---|---|---|---|
-| HR-1 | Невідомі теги й логіка меж подій (HQ-1, HQ-10) | об'єм з PI «не той» | V1 працює з ручним/імпортованим об'ємом; прив'язка налаштовується без релізу; «перевірити на прикладі» |
+| HR-1 | Події з PI («це вже приходе з pi»), але текст RTQP-запиту подій у репозиторії не підтверджений, і невідомо, де лежать категорія й сезон — на EF чи на елементі (HQ-18) | події не приходять або приходять без категорії | ключ `PiSqlClient:EventQuery` без типового тексту й видимий стан `.eventQueryNotConfigured`; мапінг підтримує обидві області; «Test on recent events» до збереження; ручне введення лишається |
 | HR-2 | PI Total «за добу» проти `Sm3/h` | ×24 правдоподібне число | еталон — локальний інтеграл; серверний лише за ключем і з банером розбіжності (§10.6) |
 | HR-3 | Стиснення PI: коротка подія без точок усередині | нуль замість об'єму | інтерполяція меж вікна (§4.1), статус `Partial`/`NoData` |
 | HR-4 | ~~Відмова D-52a не прийнята замовником~~ | — | **знято 2026-09-27:** людина погодила V-1 («так погоджуюся на Подання») |
@@ -1586,62 +1975,102 @@ FEATURE-REGISTRY-TABLES (`IRegistrySnapshotLoader`, §5.7, `RT-22`), а не в�
 | HR-9 | Неповний місяць: календарні проти фактичних годин (HQ-8) | інші г/с за вересень | поведінка файлу за замовчуванням, окремий параметр `perPeriodRate.divisor` |
 | HR-10 | Дати файлу в DD/MM при підписі MM/DD | плутанина на звірці | представлення показує дату форматом продукту, підпис виправлено (розбір §1.8) |
 | HR-11 | Статуси покриття збору (`SkippedPointCeiling`, `SkippedPeriodClosed`, `ConflictKeptManual`) адміністратору ніде не показуються; мапінги не звужуються до таблиці екземпляра, тож щопрогону з'являється хибний `ConflictKeptManual` (відомо після D16-03, `3e6d2efa`) | смуга свіжості «PI за період» (§8.8) і чіп статусу PI (§10.2) казали б «актуально» про поле, яке пропущено | ці статуси мають потрапити в смугу свіжості й чіп статусу PI; хибний `ConflictKeptManual` треба прибрати раніше, ніж його показувати, інакше позначка горітиме завжди |
+| HR-12 | Подію змінили в PI після закриття періоду | числа закритого періоду розходяться з PI | нічого не пишемо (`D-39`), стан `PeriodClosed` і позначка «змінено в PI після закриття» в смузі свіжості; далі — чинна процедура перевідкриття |
+| HR-13 | Дубль у PI: дві події з різними ID на один скид | подвоєний викид | у реєстрі дублі стоять поруч (сортування за початком); «Не враховувати» (V-21); однаковий ID дубля не дає за побудовою (G-E2) |
+| HR-14 | Подія довго лишається відкритою в PI (без кінця) | місяць без події, яка вже була | стан `Open` у лічильниках смуги свіжості й навігатора аркушів; ручне введення можливе, а коли подія закриється в PI, людина вирішує, яку з двох лишити («Не враховувати») |
+| HR-15 | `ApplyIntegrationRowsAsync` — другий метод запису від інтеграції | розбіжність адресації двох шляхів (клас A7-27) | обидва методи — поверх того самого `PatchCellsHandler`; тести чинного методу проходять без правок (DoD A5a) |
 
-### 13.2 Реєстр рішень (V-1 схвалено 2026-09-27; решта — пропозиції; після схвалення перенести в `docs/tz/10-decisions.md`)
+### 13.2 Реєстр рішень
 
-| # | Рішення | Обґрунтування |
+**V-1…V-15 схвалені людиною 2026-09-27** («так, вноси D-149 в реєстр та Схвалено
+запропоновані рішення») і внесені в `docs/tz/10-decisions.md` за відповідністю V-1 → `D-149`,
+V-n → `D-(169+n)` для n = 2…15. Реєстр — єдине джерело істини; тут лишаються обґрунтування й
+посилання на розділи. **V-16…V-25 ухвалені за делегуванням людини 2026-09-27** («все інше на
+твій розсуд не обмежуй себе»); у реєстр їх вносить оркестратор окремим кроком.
+
+| # | Статус | Рішення | Обґрунтування |
+|---|---|---|---|
+| **V-1** | ✓ схвалено 2026-09-27 → `D-149` | Дослівно: «так погоджуюся на Подання» (у документації — «представлення», бо «подання» = Submit). Представлення — нова сутність `cfg.ViewDef`/`cfg.ViewVersion` лише для читання; `rpt.*` не змінюється; виняток D-52a «матриці з динамічними колонками» стосується конструктора `rpt.*`, а не представлення документа | `rpt.*` — публічний контракт SSRS (D-53) зі знімками й хешем; джерело лише результати; D-52a прямо виключає матриці (`10-decisions.md:289`); мова умов, агрегати й ClosedXML перевикористовуються |
+| **V-2** | ✓ схвалено 2026-09-27 → `D-171` | Прив'язка «атрибут → колонка, вікно = рядок» — нова `ext.RowWindowMap` з провенансом `ext.RowWindowValue` | `UQ_EntityFieldMap` і фіксований адресат рядка (`EntityFieldMap.cs:113-122`) — інша семантика; один тег обслуговує багато рядків |
+| **V-3** | ✓ схвалено 2026-09-27 → `D-172` | Еталон згортки — локальний (з сирих точок, межі інтерпольовано); серверний summary — ключем конфігурації без типового тексту | імена RTQP-функцій у репозиторії не підтверджені; пастка «Total за добу»; принцип FLERT — без вигаданих дефолтів |
+| **V-4** | ✓ схвалено 2026-09-27 → `D-173` | Конверсія одиниць на межі — у `Ecr.Application` (`BoundaryUnitConversion`), `SourceUnitConverter` делегує | інфраструктура не бачить адаптера PI; одна арифметика замість двох |
+| **V-5** | ✓ схвалено 2026-09-27 → `D-174` | Автоперерахунок після матеріалізації й вікна рядка, з дедуплікацією, без прапорця | інакше нові дані лише блокують подання (F-05); ручна кнопка лишається. Синхронізація подій (V-18) кличе той самий `ICalculationTrigger` |
+| **V-6** | ✓ схвалено 2026-09-27 → `D-175` | Проміжні значення — `calc.CalculationResult` з `Kind = Intermediate`; `rpt` бере лише `Output` | один шлях читання, прив'язка колонки до проміжного; `ContentHash` зрізів не змінюється |
+| **V-7** | ✓ схвалено 2026-09-27 → `D-176` | `Scope` формули (`Row`/`Substance`) і `IsPerSubstance` виходу; типові значення = чинна поведінка | без цього Row-величини пишуться N разів |
+| **V-8** | ✓ схвалено 2026-09-27 → `D-177` | Входи трейсу збирає обхід AST, рушій не змінюється; `TraceJson` — схема v1 | немає другої семантики читання; детерміновано |
+| **V-9** | ✓ схвалено 2026-09-27 → `D-178` | Одна таблиця `FLARE_RECORD` для подій і безперервних джерел; властивості складу — тимчасові колонки до RG1 | шапка 1–16 спільна у файлі; одна методологія й одна прив'язка; золоті тести без довідників |
+| **V-10** | ✓ схвалено 2026-09-27 → `D-179` | Подія належить періоду свого початку за TZ проєкту, не ділиться | модель «екземпляр на період»; закриває HQ-13 і HQ-15 |
+| **V-11** | ✓ схвалено 2026-09-27 → `D-180` | Вибір wt% «своєї» сполуки — селектор-константами `SEL_*` | `SUBSTANCE()` не обирає `@Arg`; явність у трейсі |
+| **V-12** | ✓ схвалено 2026-09-27 → `D-181` | `Sm3` — окрема розмірність `StdVolume` | стандартний і робочий кубометри не конвертуються множником |
+| **V-13** | ✓ схвалено 2026-09-27 → `D-182` | Прапорець «превышение» — правило представлення (діалект Report), не формула методології | визначення не підтверджене (HQ-11); у V1 не показник звітності |
+| **V-14** | ✓ схвалено 2026-09-27 → `D-183` | Переглядач — нативна `<table>` зі sticky; RevoGrid — запасний шлях для > 60 000 клітинок | семантика шапки й друк; гарячий `DocumentGrid` не чіпається |
+| **V-15** | ✓ схвалено 2026-09-27 → `D-184` | Агрегації представлення — закритий перелік: `sum/count/avg/min/max` + іменовані `perPeriodRate`, `worstCaseRate` | B16 §3: правила агрегації — іменовані з автотестами, не мова |
+| **V-16** | ухвалено за делегуванням 2026-09-27 | Події — з джерела через нейтральний порт `DiscoverEventTemplatesAsync`/`ReadEventsAsync` (у ядрі немає слова «Event Frame»); PI SQL Client — ключі `PiSqlClient:EventQuery`/`EventTemplateQuery` без типового тексту, контракт колонок результату фіксує наш бік (§4.7.1–4.7.2) | факт від людини: «це вже приходе з pi»; межа ядра (`B06-integration-ports.md:28-32`); імена RTQP-об'єктів подій не підтверджені — той самий аргумент, що V-3 |
+| **V-17** | ухвалено за делегуванням 2026-09-27 | Мапінг «атрибут події → колонка» — `ext.SourceEventMap`/`FieldMap`/`ValueMap`: атрибут лише з каталогу, область `Event` або `PrimaryElement`, Lookup — за кодом, назвою чи явною відповідністю; `$start`/`$end` обов'язкові (§4.7.3) | ФВ-13.13 — жодних введених руками імен; де лежать атрибути, невідомо (HQ-18) — підтримуються обидва місця; `EntityFieldMap` має інший інваріант адресата |
+| **V-18** | ухвалено за делегуванням 2026-09-27 | Синхронізація: upsert за ID події (рядок `EF-…`); ручна правка не перетирається (`KeptManual`); зникла подія — `Missing` лише після повного прочитання вікна, без видалення; закритий період не чіпається; подія без кінця не матеріалізується; перенесення в інший місяць — `PeriodChanged` без автоперенесення; розклад — `ext.CollectionSchedule` сутності-шаблону з `LookbackDays` (§4.7.4) | D-118, D-39, ER-I-03; видалити рядок документа в системі нічим, а подвійний облік гірший за позначку |
+| **V-19** | ухвалено за делегуванням 2026-09-27 | Об'єм — `VolumeMode` мапінгу: атрибут події, Total за вікном рядка (V-2) або вручну (§4.7.5) | невідомо, чи зберігає PI об'єм в EF; обидва шляхи — дані, без релізу |
+| **V-20** | ухвалено за делегуванням 2026-09-27 | Сезон і категорія — атрибути події; правила «сезон за місяцем» немає ніде; незіставлене значення — порожня комірка й `Unmapped`, без здогадки (§4.7.6) | людина: «це вже приходе з pi»; вгадане значення гірше за назване відсутнє |
+| **V-21** | ухвалено за делегуванням 2026-09-27 | «Не враховувати» — Lookup `Exclude` і прихована `IsExcluded`, що обнуляє `V_Sm3` (§5.2, §6.3) | рядок документа видалити нічим; прийом той самий, що для азотних подій (`@IsN2`) |
+| **V-22** | ухвалено за делегуванням 2026-09-27 | Реєстр: поле з PI замкнене до явного «Виправити вручну» (`F2`); «Повернути значення з PI»; лише для читання — `SourceEventId` і формули (§10.4) | випадковий ввід не повинен мовчки відв'язувати поле від PI; явна дія й видимий стан (KIT L9) |
+| **V-23** | ухвалено за делегуванням 2026-09-27 | Для RG1: `CST.M_CO2 = 44.00` і `EF_t_t = Round(!EF_RAW, 3)`; `CST.M_S = 32.064`; молярні маси компонентів — значення HYSYS, відновлені з 301; LHV суміші — поле кейсу `LHV_STD` (§6.2, §6.5) | перевірено на файлі: EF — 11 складів, S і μ — 3 склади, збіг до 1e-14; `Truncate(44.01·…)` і `M_S = 32.06` дають розбіжності; LHV компонентів в Add Stream немає |
+| **V-24** | ухвалено за делегуванням 2026-09-27 | HQ-9: V1 — лише Offshore, як у `Document map` файлу; Onshore-аркуші додаються в конструкторі представлення як дані, без коду | рішення про обсяг, яке нічого не блокує й не потребує переробки |
+| **V-25** | ухвалено за делегуванням 2026-09-27 | HQ-17: підписи представлення — EN+RU білінгвально, як у файлі; KZ — третьою мовою `LocalizedText`, щойно з'явиться переклад; перемикає `labelMode` | UX-судження; мови продукту en/ru/kk уже підтримані |
+
+### 13.3 Питання до замовника
+
+**Закриті 2026-09-27.**
+
+| # | Питання | Як закрито |
 |---|---|---|
-| **V-1** | ✓ **Схвалено людиною 2026-09-27**, дослівно: «так погоджуюся на Подання» (у документації — «представлення», бо «подання» = Submit); у реєстр `docs/tz/10-decisions.md` ще не внесене. Представлення — нова сутність `cfg.ViewDef`/`cfg.ViewVersion` лише для читання; `rpt.*` не змінюється; виняток D-52a «матриці з динамічними колонками» стосується конструктора `rpt.*`, а не представлення документа | `rpt.*` — публічний контракт SSRS (D-53) зі знімками й хешем; джерело лише результати; D-52a прямо виключає матриці (`10-decisions.md:289`); мова умов, агрегати й ClosedXML перевикористовуються |
-| **V-2** | Прив'язка «атрибут → колонка, вікно = рядок» — нова `ext.RowWindowMap` з провенансом `ext.RowWindowValue` | `UQ_EntityFieldMap` і фіксований адресат рядка (`EntityFieldMap.cs:113-122`) — інша семантика; один тег обслуговує багато рядків |
-| **V-3** | Еталон згортки — локальний (з сирих точок, межі інтерпольовано); серверний summary — ключем конфігурації без типового тексту | імена RTQP-функцій у репозиторії не підтверджені; пастка «Total за добу»; принцип FLERT — без вигаданих дефолтів |
-| **V-4** | Конверсія одиниць на межі — у `Ecr.Application` (`BoundaryUnitConversion`), `SourceUnitConverter` делегує | інфраструктура не бачить адаптера PI; одна арифметика замість двох |
-| **V-5** | Автоперерахунок після матеріалізації й вікна рядка, з дедуплікацією, без прапорця | інакше нові дані лише блокують подання (F-05); ручна кнопка лишається |
-| **V-6** | Проміжні значення — `calc.CalculationResult` з `Kind = Intermediate`; `rpt` бере лише `Output` | один шлях читання, прив'язка колонки до проміжного; `ContentHash` зрізів не змінюється |
-| **V-7** | `Scope` формули (`Row`/`Substance`) і `IsPerSubstance` виходу; типові значення = чинна поведінка | без цього Row-величини пишуться N разів |
-| **V-8** | Входи трейсу збирає обхід AST, рушій не змінюється; `TraceJson` — схема v1 | немає другої семантики читання; детерміновано |
-| **V-9** | Одна таблиця `FLARE_RECORD` для подій і безперервних джерел; властивості складу — тимчасові колонки до RG1 | шапка 1–16 спільна у файлі; одна методологія й одна прив'язка; золоті тести без довідників |
-| **V-10** | Подія належить періоду свого початку за TZ проєкту, не ділиться | модель «екземпляр на період»; HQ-13 |
-| **V-11** | Вибір wt% «своєї» сполуки — селектор-константами `SEL_*` | `SUBSTANCE()` не обирає `@Arg`; явність у трейсі |
-| **V-12** | `Sm3` — окрема розмірність `StdVolume` | стандартний і робочий кубометри не конвертуються множником |
-| **V-13** | Прапорець «превышение» — правило представлення (діалект Report), не формула методології | визначення не підтверджене (HQ-11); у V1 не показник звітності |
-| **V-14** | Переглядач — нативна `<table>` зі sticky; RevoGrid — запасний шлях для > 60 000 клітинок | семантика шапки й друк; гарячий `DocumentGrid` не чіпається |
-| **V-15** | Агрегації представлення — закритий перелік: `sum/count/avg/min/max` + іменовані `perPeriodRate`, `worstCaseRate` | B16 §3: правила агрегації — іменовані з автотестами, не мова |
+| HQ-1 | Які теги/атрибути AF дають події й об'єми на HP/LP-факелах; як визначаються межі події (розбір §7 п.1) | людина: «це вже приходе з pi» — подія з межами до секунди є в PI (Event Frame), ECR її читає (§4.7, V-16…V-19). Хвіст питання — «чи пілот справді константа 9.7» — факт, переходить у робочі припущення нижче |
+| HQ-3 | Визначення категорій V6–V9 і їхня прив'язка до типів подій (п.3) | людина: «це вже приходе з pi» — категорія є атрибутом події (§4.7.6, V-20); вгадувати її за типом події не треба |
+| HQ-4 | Межі сезонів Winter/Summer для кейсу HMB (п.4) | людина: «це вже приходе з pi» — сезон (кейс HMB) є атрибутом події (§4.7.6, V-20); межі сезону системі не потрібні |
+| HQ-9 | Чи потрібні Onshore-секції в 301 (п.9) | ухвалено за делегуванням — V-24 |
+| HQ-10 | Де живуть події факелювання — FLERT чи PI; що master на 2026 | людина: «це вже приходе з pi» — master подій PI; історія 2026 — синхронізацією за період (§10.4) |
+| HQ-13 | Подія через межу місяця: до місяця початку чи ділити | схвалено V-10 → `D-179` |
+| HQ-14 | Зміна D-52a (V-1) | людина: «так погоджуюся на Подання» → `D-149` (§8.1) |
+| HQ-15 | Часовий пояс часу подій у звітності | схвалено V-10 → `D-179`: пояс проєкту (`Project.TimeZoneId`); час події з PI приходить в UTC і перекладається в пояс проєкту (§4.7.3) |
+| HQ-16 | UOM атрибута витрати в AF і налаштування PI Total «за добу» | питати не треба: UOM видно в каталозі на екрані налаштування (ФВ-16.9, §10.6), а еталон — локальний інтеграл (V-3 → `D-172`), серверний summary — лише з банером розбіжності |
+| HQ-17 | Мови підписів представлення | ухвалено за делегуванням — V-25 |
 
-### 13.3 Відкриті питання до замовника
+**Лишається відкритим — одне питання, яке не можна ні знати, ні побачити в каталозі PI з
+екрана налаштування.**
 
 | # | Питання | Хто | Чому важливо | Нейтральний дефолт |
 |---|---|---|---|---|
-| HQ-1 | Які теги/атрибути AF дають об'єми подій і продувки на HP/LP-факелах; як визначаються межі події (поріг, мінімальна тривалість); чи пілот справді константа 9.7 ст.м3/год? (розбір §7 п.1) | PI-адмін, еколог | без цього прив'язка PI не налаштовується | об'єм вводиться/імпортується; пілот — `CST.PILOT_RATE_SM3H = 9.7` |
-| HQ-2 | Методика й редакція (0.003/0.8/0.13/0.02/0.002/0.0005/0.9984, k = 1.3), чому коефіцієнти не залежать від Wист/Wзв < 0.2, що таке 0.995 (п.2) | методолог замовника | підстава для констант і `Source` | коефіцієнти з файлу, `Source` = «відновлено з HSE301.Year 2026» |
-| HQ-3 | Визначення категорій V6–V9 і їхня прив'язка до типів подій (п.3) | еколог | валідація категорії | вільний вибір з довідника |
-| HQ-4 | Межі сезонів Winter/Summer для кейсу HMB (п.4) | еколог | автопідказка кейсу | кейс обирає людина |
-| HQ-5 | Походження 102.6 ст.м3/с і 35 398.343 г/с; чи змінюються вони з дозволом 01.09.2026 (п.5) | еколог, юрист | вікна чинності констант | те саме значення в обох вікнах |
-| HQ-6 | Площі оголовків HP (0.200256 м²) і Pilot (0.00092 м²); площа LP (п.6) | технолог | Wист | значення з файлу; LP — порожньо, Wист LP = `#REF` з поясненням |
-| HQ-7 | Чи має «Average-weighted stream» бути зваженим (п.7) | еколог | склад у RG1 | як у файлі — просте середнє |
-| HQ-8 | Неповний місяць: ділити на фактичний чи календарний час (п.8) | еколог | г/с поточного місяця | календарний, як у файлі |
-| HQ-9 | Чи потрібні Onshore-секції в 301 (п.9) | еколог | обсяг представлення | лише Offshore |
-| HQ-10 | Де сьогодні живуть події факелювання: FLERT `FlareEventFull_*` (`B20-source-configurator.md:101`) чи PI? Що — master на 2026 | IT замовника | імпорт історії, V2 автовиявлення | ручне введення + імпорт Excel |
-| HQ-11 | Точне визначення «Анализ: превышение макс. расхода» (V > Vlim **або** SO2 > ліміт?) | еколог | прапорець | «да», якщо будь-яка з двох умов |
-| HQ-12 | Чи діє для 301 правило B16 A-2 (добова подія 86 300…86 500 с не йде в max) | еколог | max г/с | не діє |
-| HQ-13 | Подія через межу місяця: до місяця початку чи ділити | еколог | місячні суми | до місяця початку |
-| HQ-14 | ✓ **Закрито 2026-09-27.** ~~Чи погоджуєте ви зміну D-52a (V-1): представлення 301 у застосунку поруч із SSRS~~ Відповідь людини дослівно: «так погоджуюся на Подання» (V-1, §8.1); `D-52a` на представлення не поширюється, `rpt.*` не змінюється | замовник | — | — |
-| HQ-15 | Часовий пояс часу подій у звітності (місцевий, UTC+5?) | IT замовника | вікно PI | часовий пояс проєкту (`Project.TimeZoneId`) |
-| HQ-16 | UOM атрибута витрати в AF і налаштування PI Total (перерахунок за добу) | PI-адмін | ×24 | локальний інтеграл |
-| HQ-17 | Мови підписів представлення: EN+RU як у файлі чи потрібна KZ | замовник | `labelMode` | EN+RU білінгвально, KZ — за перекладом |
+| HQ-18 | Категорія V6–V9, сезон (кейс HMB) і, можливо, об'єм — це атрибути самого Event Frame події чи атрибути елемента (факела, установки), до якого EF прив'язано? | PI-адмін | де читати значення: на EF чи на елементі в момент початку події | мапінг задає адміністратор, і він підтримує обидва місця (`AttributeScope` = `Event` \| `PrimaryElement`, §4.7.3); не блокує |
+
+**Робочі припущення — до підтвердження на приймальному тестуванні, не блокують.** Це факти
+світу замовника, яких система знати не може. Діє нейтральний дефолт; кожне значення —
+константа з `Source` чи налаштування, тож заміна не потребує переробки.
+
+| # | Факт | Хто підтверджує | Робоче припущення |
+|---|---|---|---|
+| HQ-1a | Пілот не вимірюється й дорівнює 9.7 ст.м3/год (файл: V = 9.7 · години на всіх 9 місяцях) | еколог | `CST.PILOT_RATE_SM3H = 9.7` з вікном чинності |
+| HQ-2 | Методика й редакція (0.003/0.8/0.13/0.02/0.002/0.0005/0.9984, k = 1.3), чому коефіцієнти не залежать від Wист/Wзв < 0.2, що таке 0.995 | методолог замовника | коефіцієнти з файлу, `Source` = «відновлено з HSE301.Year 2026» |
+| HQ-5 | Походження 102.6 ст.м3/с і 35 398.343 г/с; чи змінюються вони з дозволом 01.09.2026 | еколог, юрист | те саме значення в обох вікнах чинності |
+| HQ-6 | Площі оголовків HP (0.200256 м²) і Pilot (0.00092 м²); площа LP | технолог | значення з файлу; LP — порожньо, Wист LP = `#REF` з поясненням |
+| HQ-7 | Чи має «Average-weighted stream» бути зваженим | еколог | як у файлі — просте середнє |
+| HQ-8 | Неповний місяць: ділити на фактичний чи календарний час | еколог | календарний, як у файлі; параметр `perPeriodRate.divisor` (HR-9) |
+| HQ-11 | Точне визначення «Анализ: превышение макс. расхода» | еколог | «да», якщо V > Vlim **або** SO2 > ліміту |
+| HQ-12 | Чи діє для 301 правило B16 A-2 (добова подія 86 300…86 500 с не йде в max) | еколог | не діє, бо файл його не показує |
 
 ### 13.4 Чек-лист
 
 - [x] HQ-14 (D-52a) поставлено першим; відповідь зафіксовано — V-1 схвалено людиною 2026-09-27 (§8.1).
-- [ ] V-1 внесено в реєстр `docs/tz/10-decisions.md` (наступним вільним `D-…`), разом із рядком біля D-52a.
+- [x] V-1…V-15 схвалені людиною 2026-09-27 і внесені в `docs/tz/10-decisions.md` як `D-149`, `D-171…D-184`.
+- [ ] V-16…V-25 (ухвалені за делегуванням) внесено в реєстр — робить оркестратор.
 - [x] D16-03 у `dev/integration` до старту F2 — виконано в `3e6d2efa`.
-- [ ] F1–F8 злиті послідовно; у польоті не більше однієї міграції.
+- [x] D16-04 на шляху збереження — виконано в `400c58b1`.
+- [ ] F1–F9 і F4e злиті послідовно; у польоті не більше однієї міграції.
+- [ ] На середовищі заданий і звірений з RTQP Reference `PiSqlClient:EventQuery`; мапінг подій
+      збережено з каталогу й перевірено «Test on recent events»; відповідь на HQ-18 внесена в мапінг.
 - [ ] Кожен крок: план-таблиця, DoD з мутаційним доказом, розмір і частка тестів у коміті,
       повний прогін перед пушем.
 - [ ] Нові коди — у п'яти місцях, включно з армом `ExceptionHandlingMiddleware`.
 - [ ] Нові ключі — у `09-seed.sql` (`en`), у своїй секції `-- HSE301:*`.
-- [ ] Золоті G-A1…G-N2 зелені; звірка зведень — 0 розбіжностей.
+- [ ] Золоті G-A1…G-N2 і G-E1…G-E6 зелені; звірка зведень — 0 розбіжностей.
 - [ ] `ContentHash` зрізів `rpt.*` не змінився (тест A3a).
 - [ ] Переглядач: L1–L10, `a11y (dark/light)`, клавіатурний шлях, друк.
 - [ ] `smoke.ps1` і `e2e-stand.ps1` — з окремого worktree, зелені.
 - [ ] Після FEATURE-REGISTRY-TABLES (RT-22, RT-23a, RT-23b): RG1 з тими самими числами, RG2, RG3.
-- [ ] V-2…V-15 перенесено в `docs/tz/10-decisions.md` після схвалення.
