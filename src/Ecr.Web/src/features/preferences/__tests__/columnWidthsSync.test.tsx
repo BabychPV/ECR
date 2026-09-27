@@ -146,6 +146,7 @@ describe('ФВ-14.29: відкладений запис на сервер', () =
   });
 
   it('ФВ-14.29: відмова PUT не кидає і не повторюється сама', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     put.mockRejectedValue(new Error('offline'));
     const { instance } = writer();
 
@@ -156,6 +157,10 @@ describe('ФВ-14.29: відкладений запис на сервер', () =
     await vi.advanceTimersByTimeAsync(10 * ColumnWidthsDebounceMs);
 
     expect(put).toHaveBeenCalledTimes(1);
+    // ⛔ Відмова ПІЙМАНА (тихий рядок розробнику), а не втекла необробленою:
+    // без `.catch` цей рядок не з'являється.
+    expect(warn).toHaveBeenCalledWith('Preference sync failed: grid.columnWidths.5', expect.any(Error));
+    warn.mockRestore();
 
     // Наступна зміна людини — нова спроба.
     instance.change({ NAME: 210 });
