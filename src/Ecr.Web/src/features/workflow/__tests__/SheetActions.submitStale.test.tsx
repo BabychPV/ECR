@@ -27,9 +27,9 @@ import { SheetActions } from '../SheetActions';
  * ключа там немає. Так тест ловить і розбіжність ключа між кодом і сідом, і
  * загальний тост на клієнті.
  *
- * ⚠ Заголовок `err.ECR-SUB-4221` у каталозі — «Orphaned rows block
- * submission», тобто для ЦІЄЇ причини він хибний. Тест перевіряє, що в тості
- * його НЕМАЄ: загальний шлях показав би людині неправдиву причину.
+ * ⚠ Заголовок `err.ECR-SUB-4221` у каталозі — загальний «Submission is
+ * blocked» (раніше «Orphaned rows block submission», хибний для цієї причини).
+ * Тест перевіряє, що в тості його НЕМАЄ: загальна назва не каже, що робити.
  */
 
 const StaleKey = 'err.ECR-SUB-4221.staleMethodologyResults';
@@ -38,7 +38,7 @@ const StaleKey = 'err.ECR-SUB-4221.staleMethodologyResults';
 const RawHandlerMessage =
   'Подання неможливе: результати методологій застаріли — входи документа змінилися після прогону розрахунку.';
 
-const GenericTitle = 'Orphaned rows block submission';
+const GenericTitle = 'Submission is blocked';
 
 /** Блок MERGE каталогу — той самий прийом, що в `sheet-fill-summary.label.test.ts`. */
 function seedMergeBlock(): string {

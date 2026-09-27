@@ -442,7 +442,11 @@ UPDATE t
     (N'periods.noProjectsHint',          N'en', N'A project defines the reporting calendar: without one there are no periods.',
                                                 N'The list shows only projects you have been granted access to. If a project should be here, ask an administrator for access.'),
     -- R-18: автор журналу обирається за іменем, а не набирається номером.
-    (N'audit.authorHint',                N'en', N'User id; leave empty for everyone.', N'Who made the change; leave empty for everyone.')
+    (N'audit.authorHint',                N'en', N'User id; leave empty for everyone.', N'Who made the change; leave empty for everyone.'),
+    -- ECR-SUB-4221 кидається з трьох причин (осиротілі рядки, застарілі
+    -- результати методологій, блокувальні помилки валідації); заголовок
+    -- показується завжди, тож мусить бути правдивим для кожної.
+    (N'err.ECR-SUB-4221',                N'en', N'Orphaned rows block submission', N'Submission is blocked')
   ) AS s ([Key], Lang, OldVal, NewVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -1461,7 +1465,7 @@ USING (VALUES
     (N'err.ECR-CELL-4223',  N'en', N'Reference to a missing registry entry or unit', 1),
     (N'err.ECR-HDR-0404',   N'en', N'Header field not found', 1),
     (N'err.ECR-HDR-0422',   N'en', N'Invalid header value', 1),
-    (N'err.ECR-SUB-4221',   N'en', N'Orphaned rows block submission', 1),
+    (N'err.ECR-SUB-4221',   N'en', N'Submission is blocked', 1),
 
     -- Періоди і проєкти.
     -- Фрази `ECR-PRD-0409` і `ECR-PRD-0422` нейтральні: у обох кодів кілька
