@@ -946,10 +946,40 @@ public sealed class AccessDecisionService(
         long documentId, PeriodKey periodKey, int? sheetDefId, int columnDefId,
         bool evaluateAccessWindow, CancellationToken ct)
     {
-        var document = await db.Documents
-            .AsNoTracking()
-            .Where(d => d.Id == documentId)
-            .Select(d => new { d.ProjectId })
+        // ⚠ `WR-04` п. 5: документ, проєкт, період і стан аркуша — ОДНИМ
+        // запитом. Доти це були чотири окремі звернення з тим самим ключем
+        // (`Documents` → `Projects` → `Periods` → `ApprovalStates`), і кожне
+        // рішення про доступ на шляху запису платило за всі чотири.
+        //
+        // ⚠ Стан аркуша читається завжди, але з `sheet = 0`, коли аркуша не
+        // названо: рядка з `SheetDefId = 0` не буває, тож підзапит дає `NULL`,
+        // а нижче значення однаково відкидається — поведінка та сама, що й
+        // доти, коли запит не виконувався зовсім.
+        var periodValue = periodKey.Value;
+        var sheetForStatus = sheetDefId ?? 0;
+
+        var state = await (
+                from d in db.Documents.AsNoTracking()
+                where d.Id == documentId
+                join p in db.Projects.AsNoTracking() on d.ProjectId equals p.Id
+                select new
+                {
+                    d.ProjectId,
+                    p.Status,
+                    p.IsArchiving,
+                    p.TemplateVersionId,
+                    Period = db.Periods
+                        .AsNoTracking()
+                        .Where(x => x.ProjectId == d.ProjectId && x.PeriodKeyValue == periodValue)
+                        .FirstOrDefault(),
+                    SheetStatus = db.ApprovalStates
+                        .AsNoTracking()
+                        .Where(a => a.DocumentId == documentId
+                                    && a.SheetDefId == sheetForStatus
+                                    && a.PeriodKey == periodValue)
+                        .Select(a => (DocumentStatus?)a.Status)
+                        .FirstOrDefault(),
+                })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false)
             ?? throw new NotFoundException(
@@ -961,18 +991,7 @@ public sealed class AccessDecisionService(
                     ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
-        var project = await db.Projects
-            .AsNoTracking()
-            .Where(p => p.Id == document.ProjectId)
-            .Select(p => new { p.Status, p.IsArchiving, p.TemplateVersionId })
-            .FirstAsync(ct)
-            .ConfigureAwait(false);
-
-        var period = await db.Periods
-            .AsNoTracking()
-            .Where(p => p.ProjectId == document.ProjectId && p.PeriodKeyValue == periodKey.Value)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+        var period = state.Period;
 
         // ⛔ F-08: стан для РІШЕННЯ — на `clock.UtcNow`, а не збережений.
         // Збережений змінює лише годинна задача, і перевідкритий період після
@@ -984,20 +1003,11 @@ public sealed class AccessDecisionService(
         // розрахунок тут відкрив би їх повз активацію.
         var periodState = period is null
             ? PeriodState.Scheduled
-            : project.Status == ProjectStatus.Active
+            : state.Status == ProjectStatus.Active
                 ? PeriodStates.Effective(period, clock.UtcNow)
                 : period.State;
 
-        var sheetStatus = sheetDefId is { } sheet
-            ? await db.ApprovalStates
-                .AsNoTracking()
-                .Where(a => a.DocumentId == documentId
-                            && a.SheetDefId == sheet
-                            && a.PeriodKey == periodKey.Value)
-                .Select(a => (DocumentStatus?)a.Status)
-                .FirstOrDefaultAsync(ct)
-                .ConfigureAwait(false)
-            : null;
+        var sheetStatus = sheetDefId is null ? null : state.SheetStatus;
 
         // ⚠ Метадані читаються ЛИШЕ коли рішення справді про комірку.
         // Подання і затвердження до колонок не звертаються, і зайвий похід у
@@ -1010,7 +1020,7 @@ public sealed class AccessDecisionService(
 
         if (columnDefId != 0)
         {
-            var snapshot = await metadata.GetAsync(project.TemplateVersionId, ct).ConfigureAwait(false);
+            var snapshot = await metadata.GetAsync(state.TemplateVersionId, ct).ConfigureAwait(false);
             column = snapshot.ColumnsById.TryGetValue(columnDefId, out var found) ? found : null;
             tableDefId = column?.TableDefId ?? 0;
             effectiveSheet = sheetDefId ?? SheetOf(snapshot, tableDefId);
@@ -1019,19 +1029,19 @@ public sealed class AccessDecisionService(
         var outOfWindow = evaluateAccessWindow
                           && period is not null
                           && await OutOfWindowAsync(
-                              project.TemplateVersionId, effectiveSheet, tableDefId, period.Sequence, ct)
+                              state.TemplateVersionId, effectiveSheet, tableDefId, period.Sequence, ct)
                               .ConfigureAwait(false);
 
         return new CellAccessContext(
-            document.ProjectId,
+            state.ProjectId,
             effectiveSheet,
             tableDefId,
             columnDefId,
 
             // Відсутній період трактується як Scheduled: «періоду ще немає» і
             // «період не відкрито» для користувача — та сама відмова.
-            project.Status,
-            project.IsArchiving,
+            state.Status,
+            state.IsArchiving,
             periodState,
             outOfWindow,
             sheetStatus ?? DocumentStatus.Draft,

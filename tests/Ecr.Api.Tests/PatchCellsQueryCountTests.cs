@@ -59,9 +59,9 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     /// <c>ApplyAsync</c>). 27 — п. 2 (екземпляр таблиці розв'язує лише
     /// контролер). 26 — п. 3 (стан рядків одним <c>GetRowsAsync</c>). 25 —
     /// п. 4 (нові версії з <c>OUTPUT inserted.RowVersion</c>, без читання після
-    /// коміту).
+    /// коміту). 22 — п. 5 (контекст доступу одним запитом замість чотирьох).
     /// </remarks>
-    private const int MaxCommands = 25;
+    private const int MaxCommands = 22;
 
     private const string Password = "Api-Patch-Ratchet-2026!";
 
