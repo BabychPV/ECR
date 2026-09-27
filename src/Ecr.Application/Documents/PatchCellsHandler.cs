@@ -796,6 +796,12 @@ public sealed class PatchCellsHandler(
         var profile = context.Profile;
         var denied = new List<EditDecision>();
 
+        // ⛔ `ФВ-2.16`, `AllowWithConfirmation`: дозволені комірки, правку яких
+        // людина мусить підтвердити. Доти підтвердження жило ЛИШЕ в діалозі
+        // клієнта (`DocumentGrid.onBeforeEdit`), а сервер про нього не питав —
+        // вставка, протягування чи прямий `PATCH` писали такі комірки мовчки.
+        var needsConfirmation = 0;
+
         var addresses = new List<CellAddress>();
         foreach (var row in context.Updates)
         {
@@ -847,6 +853,10 @@ public sealed class PatchCellsHandler(
                 {
                     denied.Add(decision);
                 }
+                else if (decision.RequiresConfirmation)
+                {
+                    needsConfirmation++;
+                }
             }
         }
 
@@ -888,6 +898,10 @@ public sealed class PatchCellsHandler(
                     {
                         denied.Add(decision);
                     }
+                    else if (decision is { RequiresConfirmation: true })
+                    {
+                        needsConfirmation++;
+                    }
                 }
             }
         }
@@ -915,6 +929,52 @@ public sealed class PatchCellsHandler(
                     ["reason"] = first.Reason.ToString(),
                 });
         }
+
+        EnsureConfirmed(request, needsConfirmation);
+    }
+
+    /// <summary>Причина відмови батчу без підтвердження — у <c>Details.reason</c>.</summary>
+    private const string ConfirmationRequiredReason = "ConfirmationRequired";
+
+    /// <summary>
+    /// Відхиляє ЦІЛИЙ батч правки людини, у якому є комірки
+    /// <c>AllowWithConfirmation</c>, якщо підтвердження не надіслано
+    /// (<c>ФВ-2.16</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Перевірка на СЕРВЕРІ, а не лише в діалозі: інакше діалог обходиться
+    /// прямим запитом або будь-яким шляхом клієнта, який про нього забув (саме
+    /// так і було з вставкою та протягуванням).
+    ///
+    /// ⚠ Лише для <c>UserEdit</c>. Підтвердження — дія людини; системні
+    /// походження (<c>Import</c>, <c>Integration</c>) кличуть обробник поза
+    /// HTTP, і їм нема кого питати. Через HTTP інше походження заявити не можна
+    /// (<see cref="CellChangeOrigins.RequireClientOrigin"/>), тож обійти
+    /// перевірку, підписавшись системою, клієнт не може.
+    ///
+    /// ⚠ Код — наявний <c>ECR-ACCS-0403</c>: це відмова доступу до комірки, як
+    /// і <c>deniedCells</c>; розрізняє їх <c>messageKey</c> і <c>reason</c>.
+    /// Порядок — ПІСЛЯ жорстких заборон: комірка, якої писати не можна взагалі,
+    /// важливіша за ту, яку можна з підтвердженням.
+    /// </remarks>
+    private static void EnsureConfirmed(PatchCellsRequest request, int needsConfirmation)
+    {
+        if (needsConfirmation == 0
+            || request.Confirmed == true
+            || !string.Equals(request.Origin, UserEditOrigin, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        throw new AccessDeniedException(
+            "ECR-ACCS-0403",
+            $"Комірок, що вимагають підтвердження, у батчі: {needsConfirmation}; підтвердження не надіслано.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ACCS-0403.confirmationRequired",
+                ["confirmationCount"] = needsConfirmation.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["reason"] = ConfirmationRequiredReason,
+            });
     }
 
     /// <summary>

@@ -9,11 +9,20 @@ namespace Ecr.Application.Documents.Dto;
 /// <param name="PeriodKey">Ключ періоду.</param>
 /// <param name="Origin">Джерело зміни: <c>UserEdit</c>, <c>Import</c>, <c>Recalculation</c>.</param>
 /// <param name="Rows">Рядки зі змінами.</param>
+/// <param name="Confirmed">
+/// Людина підтвердила правку комірок, що вимагають підтвердження
+/// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>). Без нього батч правки
+/// людини (<c>UserEdit</c>), у якому є хоч одна така комірка, відхиляється
+/// ЦІЛКОМ — <c>ECR-ACCS-0403</c> із причиною <c>ConfirmationRequired</c>.
+/// Один прапорець на батч, а не перелік адрес: діалог на клієнті теж один на
+/// пакет (вставка, протягування), а адреси батчу й так несе сам запит.
+/// </param>
 public sealed record PatchCellsRequest(
     long TableInstanceId,
     int PeriodKey,
     string Origin,
-    IReadOnlyList<PatchRow> Rows)
+    IReadOnlyList<PatchRow> Rows,
+    bool? Confirmed = null)
 {
     /// <summary>Стеля комірок на один батч — нових і наявних рядків разом (`WR-11`).</summary>
     /// <remarks>

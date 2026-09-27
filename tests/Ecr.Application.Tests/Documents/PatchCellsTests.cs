@@ -695,6 +695,114 @@ public sealed class PatchCellsTests
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
     }
 
+    /// <summary>Рішення на <c>Volume</c> наявного рядка — дозвіл із підтвердженням.</summary>
+    private void VolumeRequiresConfirmation()
+        => _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<CellAddress, EditDecision>
+               {
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] =
+                       EditDecision.AllowWithConfirmation("Поза вікном дозволу"),
+                   [new CellAddress(PeriodKey.Parse(Period), 1001L, RegistryLinkColumnId)] = EditDecision.Allow(),
+               });
+
+    /// <summary>
+    /// <c>ФВ-2.16</c>: комірка <c>AllowWithConfirmation</c> без прапорця
+    /// підтвердження — відмова ВСЬОГО батчу, і нічого не записано.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти підтвердження жило лише в діалозі клієнта: сервер рішення
+    /// <c>RequiresConfirmation</c> не читав, і вставка, протягування чи прямий
+    /// запит писали таку комірку мовчки. Мутація «прибрати
+    /// <c>EnsureConfirmed</c>» — цей тест червоний.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Комірка_з_підтвердженням_без_прапорця_відхиляє_весь_батч()
+    {
+        VolumeRequiresConfirmation();
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A",
+                [new PatchCell("Volume", 1m), new PatchCell("RegistryLink", 5L)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ACCS-0403", ex.ErrorCode);
+        Assert.Equal("ConfirmationRequired", ex.Details!["reason"]);
+        Assert.Equal("err.ECR-ACCS-0403.confirmationRequired", ex.Details["messageKey"]);
+        Assert.Equal("1", ex.Details["confirmationCount"]);
+
+        // ⛔ Батч відхилено ЦІЛКОМ — і звичайна комірка поруч теж не записана.
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Комірка_з_підтвердженням_і_прапорцем_записується()
+    {
+        VolumeRequiresConfirmation();
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])) with { Confirmed = true },
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Звичайна_комірка_без_прапорця_записується_як_і_раніше()
+    {
+        VolumeRequiresConfirmation();
+
+        // ⚠ Регрес: прапорець потрібен ЛИШЕ там, де рішення його вимагає.
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("RegistryLink", 5L)])),
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Створення_рядка_з_коміркою_з_підтвердженням_без_прапорця_відхиляється()
+    {
+        // ⚠ Створення питається окремим викликом (`CanCreateRowsAsync`) — друга
+        // половина `EnsureAccessAsync`, яку перевірка мусить покривати так само.
+        _access.CanCreateRowsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance,
+                   Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+               .Returns(call => NewRows(
+                   call.ArgAt<IReadOnlyCollection<string>>(2),
+                   EditDecision.Allow(),
+                   EditDecision.AllowWithConfirmation("Поза вікном дозволу")));
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            Request(new PatchRow("NEW-1", BaseVersion: null, [new PatchCell("Volume", 2m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ConfirmationRequired", ex.Details!["reason"]);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Системне_походження_не_вимагає_підтвердження()
+    {
+        // ⚠ Імпорт/інтеграція кличуть обробник поза HTTP — питати там нема кого.
+        // Через HTTP інше, ніж `UserEdit`, походження заявити не можна
+        // (`CellChangeOrigins.RequireClientOrigin`).
+        VolumeRequiresConfirmation();
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])) with { Origin = "Import" },
+            CancellationToken.None);
+
+        Assert.Equal(1, response.AppliedCells);
+    }
+
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait("Requirement", "ФВ-4.4")]
     public async Task Заборона_відхиляє_і_створення_рядка_а_не_лише_оновлення()

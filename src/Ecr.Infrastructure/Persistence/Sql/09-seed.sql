@@ -4477,7 +4477,11 @@ USING (VALUES
     (N'audit.columnGone', N'en', N'Column #{id} (deleted)', 1),
     -- X-07: перелік, що не вмістився в одну сторінку, про це каже.
     (N'common.shownOf', N'en', N'Showing {shown} of {total}', 1),
-    (N'common.shownSoFar', N'en', N'Showing the first {shown}; there are more', 1)
+    (N'common.shownSoFar', N'en', N'Showing the first {shown}; there are more', 1),
+    -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
+    -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
+    (N'err.ECR-ACCS-0403.confirmationRequired', N'en', N'{confirmationCount} cell(s) in this batch need confirmation before they can be changed. Repeat the change and confirm it.', 1)
+    -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
