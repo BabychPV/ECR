@@ -1,4 +1,6 @@
 // src/Ecr.Infrastructure/Jobs/MaterializationTargets.cs
+using System.Globalization;
+using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -164,9 +166,13 @@ internal static class MaterializationTargets
     /// <c>MaterializeCollectedDataJob</c>; власної арифметики меж тут немає.
     /// </para>
     /// <para>
-    /// ⚠ ОДИН запит: по гілці <c>EXISTS</c> на кожен закритий період, зведені
-    /// <c>UNION ALL</c>. Перелік сутностей спільний для всіх гілок — зайві пари
-    /// «сутність × чужий період» відсікає перетин з адресатами нижче.
+    /// ⛔ ОДИН запит з ОДНИМ параметром: пари «сутність × період» разом із межами
+    /// йдуть JSON-масивом через <c>OPENJSON</c> (як у <c>RuleCoverageReader</c>,
+    /// <c>MethodologyStore</c>), на кожну — <c>EXISTS</c> по
+    /// <c>ext.RawDataPoint</c>. Попередня форма (гілка <c>EXISTS</c> на період,
+    /// зведені <c>UNION ALL</c>) несла 5 параметрів на закритий період і текст,
+    /// що ріс лінійно, — активація проєкту з сотнями минулих періодів
+    /// наближалася до ліміту SQL Server у 2100 параметрів.
     /// </para>
     /// </remarks>
     public static async Task<List<MaterializationTarget>> KeepClosedWithRawPointsAsync(
@@ -183,29 +189,51 @@ internal static class MaterializationTargets
             return [.. targets];
         }
 
-        var entityIds = closed.Select(t => t.SourceEntityId).Distinct().ToList();
+        // ⚠ Мітки часу — рядком ISO без `Z`: `datetime2` у `OPENJSON ... WITH`
+        // не приймає суфікс зони. Межі й так UTC (`Period.UtcBounds`).
+        var boundsByPeriod = closed
+            .GroupBy(t => (t.ProjectId, t.PeriodKey))
+            .ToDictionary(g => g.Key, g => g.First().UtcBounds());
 
-        IQueryable<RawPointHit>? hits = null;
-        foreach (var period in closed.GroupBy(t => (t.ProjectId, t.PeriodKey)))
-        {
-            var bounds = period.First().UtcBounds();
-            var from = bounds.StartUtc;
-            var to = bounds.EndUtc;
-            var projectId = period.Key.ProjectId;
-            var periodKey = period.Key.PeriodKey;
+        var pairs = closed
+            .Select(t => (t.SourceEntityId, t.ProjectId, t.PeriodKey))
+            .Distinct()
+            .Select(pair =>
+            {
+                var bounds = boundsByPeriod[(pair.ProjectId, pair.PeriodKey)];
 
-            var branch = db.SourceEntities
-                .AsNoTracking()
-                .Where(e => entityIds.Contains(e.Id)
-                            && db.RawDataPoints.Any(p => p.SourceEntityId == e.Id
-                                                         && p.Timestamp >= from
-                                                         && p.Timestamp < to))
-                .Select(e => new RawPointHit { SourceEntityId = e.Id, ProjectId = projectId, PeriodKey = periodKey });
+                return new
+                {
+                    e = pair.SourceEntityId,
+                    p = pair.ProjectId,
+                    k = pair.PeriodKey,
+                    s = bounds.StartUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffffff", CultureInfo.InvariantCulture),
+                    t = bounds.EndUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffffff", CultureInfo.InvariantCulture),
+                };
+            })
+            .ToList();
 
-            hits = hits is null ? branch : hits.Concat(branch);
-        }
+        var pairsJson = JsonSerializer.Serialize(pairs);
 
-        var found = (await hits!.ToListAsync(ct).ConfigureAwait(false))
+        var hits = await db.Database
+            .SqlQuery<RawPointHit>($"""
+                SELECT b.SourceEntityId, b.ProjectId, b.PeriodKey
+                FROM OPENJSON({pairsJson})
+                     WITH (SourceEntityId int '$.e',
+                           ProjectId int '$.p',
+                           PeriodKey int '$.k',
+                           StartUtc datetime2(7) '$.s',
+                           EndUtc datetime2(7) '$.t') AS b
+                WHERE EXISTS (SELECT 1
+                              FROM ext.RawDataPoint AS r
+                              WHERE r.SourceEntityId = b.SourceEntityId
+                                AND r.[Timestamp] >= b.StartUtc
+                                AND r.[Timestamp] < b.EndUtc)
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var found = hits
             .Select(h => (h.SourceEntityId, h.ProjectId, h.PeriodKey))
             .ToHashSet();
 
@@ -214,7 +242,7 @@ internal static class MaterializationTargets
     }
 
     /// <summary>Сутність, у якої є сирі точки в межах періоду проєкту.</summary>
-    private sealed class RawPointHit
+    internal sealed class RawPointHit
     {
         public int SourceEntityId { get; init; }
 
