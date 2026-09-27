@@ -524,16 +524,22 @@ public static class ErrorCodes
 
     // Робочий процес
     /// <summary>
-    /// <c>Submit</c> неможливий: рядки <c>IsOrphaned</c> (ФВ-8.13), незакриті
-    /// помилки валідації аркуша, або застарілі результати прив'язаних
-    /// методологій (F-05 — <c>messageKey</c> = <c>staleMethodologyResults</c>).
+    /// <c>Submit</c> неможливий. Причину називає <c>messageKey</c>
+    /// (<c>SubmitSheetHandler</c>):
+    /// <list type="bullet">
+    /// <item><c>err.ECR-SUB-4221.orphanedRows</c> — рядки <c>IsOrphaned</c> (ФВ-8.13);</item>
+    /// <item><c>err.ECR-SUB-4221.staleMethodologyResults</c> — застарілі
+    /// результати прив'язаних методологій (F-05);</item>
+    /// <item><c>err.ECR-SUB-4221.validationBlocked</c> — незакриті блокувальні
+    /// помилки валідації аркуша.</item>
+    /// </list>
     /// </summary>
     /// <remarks>
     /// ⚠ Один код на три причини, той самий прийом, що
     /// <see cref="MethodologyConflict"/>: суб'єкт відмови той самий —
     /// «Подання неможливе», а ЯКА саме причина, каже <c>messageKey</c>.
     /// </remarks>
-    public const string SubmitBlockedByOrphans = "ECR-SUB-4221";
+    public const string SubmitBlocked = "ECR-SUB-4221";
 
     // Безпека: симуляція і зміна пароля
     /// <summary>
