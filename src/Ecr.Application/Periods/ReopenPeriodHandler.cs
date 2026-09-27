@@ -20,8 +20,13 @@ public sealed class ReopenPeriodHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IMaterializationScheduler? materialization = null)
 {
+    // ⚠ `materialization` необов'язковий лише заради наявних прямих
+    // конструювань обробника в тестах; у застосунку порт зареєстровано
+    // (`Ecr.Infrastructure.DependencyInjection`), і контейнер його передає.
+
     /// <summary>Право, без якого відкриття періоду неможливе.</summary>
     public const string Permission = "Period.Reopen";
 
@@ -67,8 +72,15 @@ public sealed class ReopenPeriodHandler(
         // ⚠ `ExecuteInTransactionAsync` приєднується до вже відкритої
         // зовнішньої транзакції (`UnitOfWork.cs:174-178`), тож це обгортка,
         // а не перехоплення чужого коміту.
+        var projectId = 0;
+        var periodKey = 0;
+        var requiresMaterialization = false;
+
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⚠ Стратегія повторів може виконати замикання вдруге.
+            requiresMaterialization = false;
+
             // ⚠ Період береться з UPDLOCK і перечитується В ТРАНЗАКЦІЇ: інакше
             // PeriodStateJob може закрити його посеред операції, і відкриття
             // застосується до стану, якого вже немає (ФВ-1.10a).
@@ -132,7 +144,12 @@ public sealed class ReopenPeriodHandler(
             // Closed → Grace, а не → Open: правки після закриття лишаються
             // ПІЗНІМИ і мають позначатися IsLateEdit (D-70). Відкриття «як було»
             // стерло б різницю між роботою в строк і після нього.
+            var before = period.State;
             period.Reopen(deadline, reason, now);
+
+            projectId = period.ProjectId;
+            periodKey = period.PeriodKeyValue;
+            requiresMaterialization = PeriodMaterializationTrigger.Requires(before, period.State);
 
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
@@ -151,6 +168,15 @@ public sealed class ReopenPeriodHandler(
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // ⛔ Матеріалізація — ПІСЛЯ коміту (черга не транзакційна): точки,
+        // пропущені поки період був `Closed` (`SkippedPeriodClosed`), інакше
+        // чекали б збору з вікном, що перетинає період, — а для давно минулого
+        // періоду такого вікна не буде ніколи.
+        if (requiresMaterialization && materialization is not null)
+        {
+            await materialization.EnqueueAfterTransitionAsync(projectId, [periodKey], ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Кінець поточної доби в поясі майданчика, у UTC (D-68).</summary>

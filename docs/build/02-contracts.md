@@ -2139,12 +2139,17 @@ public interface ICollectionRunner
 
 #### `IMaterializationScheduler`
 
-Постановка матеріалізації PI (D-118) з місця переходу періоду `Scheduled → Open/Grace`; викликати лише ПІСЛЯ коміту переходу (`PeriodStateJob`, `ActivateProjectHandler`).
+Постановка матеріалізації PI (D-118) з місця переходу періоду, для якого `PeriodMaterializationTrigger.Requires(before, after)`: `Scheduled → Open/Grace` (відкриття), `Scheduled → … → Closed` за один прогін (задача лишає `SkippedPeriodClosed` у журналі покриття — пропуск не мовчазний), `Closed → Grace` (перевідкриття підхоплює пропущені точки). Викликати лише ПІСЛЯ коміту переходу (`PeriodStateJob`, `ActivateProjectHandler`, `ReopenPeriodHandler`).
 
 ```csharp
 public interface IMaterializationScheduler
 {
-    public Task EnqueueForOpenedPeriodsAsync(int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
+    public Task EnqueueAfterTransitionAsync(int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
+}
+
+public static class PeriodMaterializationTrigger
+{
+    public static bool Requires(PeriodState before, PeriodState after);
 }
 ```
 

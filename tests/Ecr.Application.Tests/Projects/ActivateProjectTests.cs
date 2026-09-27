@@ -232,7 +232,7 @@ public sealed class ActivateProjectTests
 
         IReadOnlyCollection<int>? keys = null;
         _materialization
-            .When(m => m.EnqueueForOpenedPeriodsAsync(project.Id, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()))
+            .When(m => m.EnqueueAfterTransitionAsync(project.Id, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()))
             .Do(call => keys = [.. call.Arg<IReadOnlyCollection<int>>()]);
 
         await Handler().HandleAsync(project.Id, CancellationToken.None);
@@ -247,7 +247,7 @@ public sealed class ActivateProjectTests
         Received.InOrder(() =>
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
-            _materialization.EnqueueForOpenedPeriodsAsync(
+            _materialization.EnqueueAfterTransitionAsync(
                 project.Id, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
         });
     }
@@ -265,6 +265,6 @@ public sealed class ActivateProjectTests
             () => Handler().HandleAsync(project.Id, CancellationToken.None));
 
         await _materialization.DidNotReceiveWithAnyArgs()
-            .EnqueueForOpenedPeriodsAsync(default, default!, default);
+            .EnqueueAfterTransitionAsync(default, default!, default);
     }
 }

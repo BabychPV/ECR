@@ -5,7 +5,8 @@ using Ecr.Infrastructure.Persistence;
 namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
-/// Постановка матеріалізації з місця переходу періоду в <c>Open</c>/<c>Grace</c>.
+/// Постановка матеріалізації з місця переходу періоду
+/// (<see cref="PeriodMaterializationTrigger"/>).
 /// </summary>
 /// <remarks>
 /// ⚠ Адресатів добирає той самий <see cref="MaterializationTargets"/>, що й
@@ -21,7 +22,7 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class MaterializationScheduler(EcrDbContext db, IBackgroundJobScheduler jobs) : IMaterializationScheduler
 {
     /// <inheritdoc />
-    public async Task EnqueueForOpenedPeriodsAsync(
+    public async Task EnqueueAfterTransitionAsync(
         int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(periodKeys);
@@ -37,7 +38,7 @@ public sealed class MaterializationScheduler(EcrDbContext db, IBackgroundJobSche
         if (db.Database.CurrentTransaction is not null)
         {
             throw new InvalidOperationException(
-                "Матеріалізацію відкритих періодів ставлять лише після коміту переходу: транзакція ще відкрита.");
+                "Матеріалізацію з переходу періоду ставлять лише після коміту переходу: транзакція ще відкрита.");
         }
 
         var targets = await MaterializationTargets

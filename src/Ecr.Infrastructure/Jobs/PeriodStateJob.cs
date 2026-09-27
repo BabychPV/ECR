@@ -99,13 +99,13 @@ public sealed class PeriodStateJob(
             // ⚠ Коміт по одному проєкту, а не один фінальний: «довгі
             // транзакції заборонені» (D-29), а блокування, взяте на першому
             // проєкті, трималося б до кінця прогону по всіх.
-            var opened = new List<int>();
+            var toMaterialize = new List<int>();
 
             await uow.ExecuteInTransactionAsync(async innerCt =>
             {
                 // ⚠ Стратегія повторів може виконати замикання вдруге — перелік
-                // відкритих збирається заново, а не дописується.
-                opened.Clear();
+                // збирається заново, а не дописується.
+                toMaterialize.Clear();
 
                 // ⚠ UPDLOCK: Reopen бере той самий рядок так само (ФВ-1.10a).
                 // Тепер блокування справді тримається до кінця транзакції.
@@ -122,9 +122,13 @@ public sealed class PeriodStateJob(
                     var before = period.State;
                     period.AdvanceTo(target, utcNow);
 
-                    if (PeriodOpening.Opened(before, period.State))
+                    // ⚠ Зокрема `Scheduled → … → Closed` за один прогін (задача
+                    // простояла весь Open+Grace): задача нічого не запише, але
+                    // лишить `SkippedPeriodClosed` у журналі покриття — інакше
+                    // точки лишились би сирими мовчки.
+                    if (PeriodMaterializationTrigger.Requires(before, period.State))
                     {
-                        opened.Add(period.PeriodKeyValue);
+                        toMaterialize.Add(period.PeriodKeyValue);
                     }
                 }
 
@@ -139,14 +143,14 @@ public sealed class PeriodStateJob(
                 await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
 
-            // ⛔ Матеріалізація відкритих періодів — ПІСЛЯ коміту, не в
+            // ⛔ Матеріалізація з переходу — ПІСЛЯ коміту, не в
             // транзакції: черга не транзакційна, і задача, поставлена до коміту,
             // бачила б `Scheduled` або пережила б відкат переходу. Постановка
             // саме звідси, а не зі збору: за вимкненого або рідкого розкладу збір
             // відкриття не побачить ніколи, і точки, зібрані до нього, лишились би
             // сирими назавжди.
             await materialization
-                .EnqueueForOpenedPeriodsAsync(project.Id, opened, ct)
+                .EnqueueAfterTransitionAsync(project.Id, toMaterialize, ct)
                 .ConfigureAwait(false);
 
             await progress.ReportAsync(

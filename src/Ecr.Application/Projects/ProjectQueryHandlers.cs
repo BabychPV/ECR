@@ -616,16 +616,16 @@ public sealed class ActivateProjectHandler(
         // транзакції — а не побічним ефектом чужого маршруту.
         var zone = Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo();
 
-        var opened = new List<int>();
+        var toMaterialize = new List<int>();
 
         foreach (var (period, target) in periodStates.Plan(allPeriods, now, zone))
         {
             var before = period.State;
             period.AdvanceTo(target, now);
 
-            if (PeriodOpening.Opened(before, period.State))
+            if (PeriodMaterializationTrigger.Requires(before, period.State))
             {
-                opened.Add(period.PeriodKeyValue);
+                toMaterialize.Add(period.PeriodKeyValue);
             }
         }
 
@@ -641,13 +641,15 @@ public sealed class ActivateProjectHandler(
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        // ⛔ Матеріалізація PI для періодів, які відкрила сама активація, — ПІСЛЯ
+        // ⛔ Матеріалізація PI для періодів, які перевела сама активація, — ПІСЛЯ
         // коміту (черга не транзакційна). Точки, зібрані поки проєкт був
         // чернеткою, а період `Scheduled`, інакше чекали б збору з вікном, що
         // перетинає період, — а за вимкненого розкладу не дочекалися б ніколи.
+        // Для періодів, що активація одразу закрила, задача лишить
+        // `SkippedPeriodClosed` у журналі покриття замість мовчання.
         if (materialization is not null)
         {
-            await materialization.EnqueueForOpenedPeriodsAsync(projectId, opened, ct).ConfigureAwait(false);
+            await materialization.EnqueueAfterTransitionAsync(projectId, toMaterialize, ct).ConfigureAwait(false);
         }
     }
 }
