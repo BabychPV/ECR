@@ -84,6 +84,41 @@ public sealed class Period : Entity<int>
         ComputedCloseAt = ToUtc(PeriodEnd.AddDays(policy.HardCloseOffsetDays), siteTimeZone);
     }
 
+    /// <summary>
+    /// Межі періоду в UTC: <c>[опівніч periodStart, опівніч periodEnd + 1)</c> у
+    /// поясі майданчика (D-68, D16-03).
+    /// </summary>
+    /// <param name="periodStart">Перший день періоду (<see cref="PeriodStart"/>).</param>
+    /// <param name="periodEnd">Останній день періоду, включно (<see cref="PeriodEnd"/>).</param>
+    /// <param name="siteTimeZone">Пояс майданчика (проєкту).</param>
+    /// <remarks>
+    /// ⛔ Те саме перетворення <see cref="ToUtc"/>, що й у
+    /// <see cref="RecomputeBoundaries"/>, а не друга арифметика: згортка PI і
+    /// переходи станів не мають права мати різну думку про те, де кінчається
+    /// місяць. Статичний, бо споживачі (<c>CollectionJob</c>,
+    /// <c>MaterializeCollectedDataJob</c>) читають лише дати й пояс проєкцією,
+    /// без завантаження сутності.
+    ///
+    /// ⚠ Межі в UTC, а не в поясі сервера й не в UTC-датах: точка о 23:30
+    /// 31 січня місцевого часу належить січню, хоча в UTC це вже може бути
+    /// інша доба.
+    /// </remarks>
+    public static UtcRange UtcBounds(DateOnly periodStart, DateOnly periodEnd, TimeZoneInfo siteTimeZone)
+    {
+        ArgumentNullException.ThrowIfNull(siteTimeZone);
+
+        return new UtcRange(ToUtc(periodStart, siteTimeZone), ToUtc(periodEnd.AddDays(1), siteTimeZone));
+    }
+
+    /// <summary>Напіввідкритий інтервал <c>[StartUtc, EndUtc)</c> у UTC.</summary>
+    /// <param name="StartUtc">Початок, включно.</param>
+    /// <param name="EndUtc">Кінець, виключно.</param>
+    public readonly record struct UtcRange(DateTime StartUtc, DateTime EndUtc)
+    {
+        /// <summary>Чи перетинає інтервал напіввідкритий інтервал <c>[fromUtc, toUtc)</c>.</summary>
+        public bool Overlaps(DateTime fromUtc, DateTime toUtc) => StartUtc < toUtc && fromUtc < EndUtc;
+    }
+
     /// <summary>Опівніч указаної дати в поясі майданчика, переведена в UTC.</summary>
     private static DateTime ToUtc(DateOnly date, TimeZoneInfo siteTimeZone)
         => TimeZoneInfo.ConvertTimeToUtc(

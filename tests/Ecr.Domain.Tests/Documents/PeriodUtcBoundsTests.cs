@@ -1,24 +1,24 @@
-// tests/Ecr.Infrastructure.Tests/Integration/PeriodUtcRangeTests.cs
+// tests/Ecr.Domain.Tests/Documents/PeriodUtcBoundsTests.cs
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.ValueObjects;
-using Ecr.Infrastructure.Integration;
 using Ecr.TestKit;
 using Xunit;
 
-namespace Ecr.Infrastructure.Tests.Integration;
+namespace Ecr.Domain.Tests.Documents;
 
 /// <summary>
-/// Межі періоду для згортки PI збігаються з межами, які рахує сам період (D16-03).
+/// Межі періоду в UTC для згортки PI збігаються з межами, які рахує сам період (D16-03).
 /// </summary>
 /// <remarks>
-/// ⛔ Сторож проти ДРУГОЇ арифметики періодів. <see cref="PeriodUtcRange"/>
-/// повторює <c>Period.ToUtc</c>, бо той приватний; розійтися вони не мають
-/// права — інакше згортка й переходи станів мали б різну думку про те, де
-/// кінчається місяць. Еталон — <c>ComputedOpenAt</c> із відступом 0 (опівніч
-/// <c>PeriodStart</c>) і <c>ComputedGraceAt</c> із відступом 1 (опівніч
-/// <c>PeriodEnd + 1</c>).
+/// ⛔ Сторож проти ДРУГОЇ арифметики періодів. <see cref="Period.UtcBounds"/>
+/// і <see cref="Period.RecomputeBoundaries"/> мусять іти через одне
+/// перетворення — інакше згортка й переходи станів мали б різну думку про те,
+/// де кінчається місяць. Еталон — <c>ComputedOpenAt</c> із відступом 0
+/// (опівніч <c>PeriodStart</c>) і <c>ComputedGraceAt</c> із відступом 1
+/// (опівніч <c>PeriodEnd + 1</c>), а не константи: зсув поясу (напр.
+/// <c>Asia/Almaty</c>) залежить від бази tz на машині.
 /// </remarks>
-public sealed class PeriodUtcRangeTests
+public sealed class PeriodUtcBoundsTests
 {
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -32,14 +32,15 @@ public sealed class PeriodUtcRangeTests
     {
         var start = new DateOnly(year, month, 1);
         var end = new DateOnly(year, month, DateTime.DaysInMonth(year, month));
+        var zone = SiteTimeZone.Create(zoneId).ToTimeZoneInfo();
 
         var period = new Period(1, new PeriodKey(year * 100 + month), (byte)month, start, end);
         period.RecomputeBoundaries(
             new PeriodPolicy(EcrCode.Create("D1603"), openOffsetDays: 0, graceOffsetDays: 1,
                 hardCloseOffsetDays: 1, yearGraceOffsetDays: 0),
-            SiteTimeZone.Create(zoneId).ToTimeZoneInfo());
+            zone);
 
-        var range = PeriodUtcRange.Of(start, end, zoneId);
+        var range = Period.UtcBounds(start, end, zone);
 
         Assert.Equal(period.ComputedOpenAt, range.StartUtc);
         Assert.Equal(period.ComputedGraceAt, range.EndUtc);
@@ -50,7 +51,7 @@ public sealed class PeriodUtcRangeTests
     [Trait("Finding", "D16-03")]
     public void Перетин_напіввідкритий_з_обох_боків()
     {
-        var range = new PeriodUtcRange(
+        var range = new Period.UtcRange(
             new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             new DateTime(2026, 2, 1, 0, 0, 0, DateTimeKind.Utc));
 

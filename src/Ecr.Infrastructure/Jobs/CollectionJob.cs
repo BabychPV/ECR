@@ -202,7 +202,7 @@ public sealed class CollectionJob(
         // сирим». За станом НЕ фільтруємо: закритий період, що перетинає вікно,
         // і далі має отримати `SkippedPeriodClosed`.
         //
-        // ⚠ Точна межа — у поясі проєкту (`PeriodUtcRange`), тож у запиті лише
+        // ⚠ Точна межа — у поясі проєкту (`Period.UtcBounds`), тож у запиті лише
         // грубий фільтр за датами з запасом у добу в обидва боки (пояс ≤ ±14 год),
         // а точний — у пам'яті.
         var fromDate = DateOnly.FromDateTime(from).AddDays(-1);
@@ -236,7 +236,9 @@ public sealed class CollectionJob(
             .ConfigureAwait(false);
 
         var targets = candidates
-            .Where(t => Integration.PeriodUtcRange.Of(t.PeriodStart, t.PeriodEnd, t.TimeZoneId).Overlaps(from, to))
+            .Where(t => Domain.Entities.Documents.Period
+                .UtcBounds(t.PeriodStart, t.PeriodEnd, Domain.ValueObjects.SiteTimeZone.Create(t.TimeZoneId).ToTimeZoneInfo())
+                .Overlaps(from, to))
             .ToList();
 
         foreach (var target in targets)

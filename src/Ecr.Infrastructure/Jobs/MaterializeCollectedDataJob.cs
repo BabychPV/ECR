@@ -6,7 +6,6 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
-using Ecr.Infrastructure.Integration;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -127,7 +126,8 @@ public sealed class MaterializeCollectedDataJob(
 
         await progress.ReportKeyAsync(30, "jobs.materializeFolding", ct).ConfigureAwait(false);
 
-        var bounds = PeriodUtcRange.Of(period.PeriodStart, period.PeriodEnd, period.TimeZoneId);
+        var bounds = Domain.Entities.Documents.Period.UtcBounds(
+            period.PeriodStart, period.PeriodEnd, SiteTimeZone.Create(period.TimeZoneId).ToTimeZoneInfo());
 
         var (aggregated, overCeiling) = await AggregateAsync(task, maps, bounds, ct).ConfigureAwait(false);
 
@@ -205,7 +205,7 @@ public sealed class MaterializeCollectedDataJob(
     /// на всі поля віддав би один щільний тег за рахунок решти.
     /// </remarks>
     private async Task<(IReadOnlyList<IntegrationCellValue> Values, IReadOnlyList<string> OverCeiling)> AggregateAsync(
-        MaterializeTask task, List<EntityFieldMap> maps, PeriodUtcRange period, CancellationToken ct)
+        MaterializeTask task, List<EntityFieldMap> maps, Domain.Entities.Documents.Period.UtcRange period, CancellationToken ct)
     {
         var result = new List<IntegrationCellValue>(maps.Count);
         var overCeiling = new List<string>();
