@@ -3894,6 +3894,9 @@ USING (VALUES
     (N'expr.ref.rangeTableUnavailable',        N'en', N'The range cannot be expanded: its table is not available.', 1),
     -- Діалект Report (`02b` §8a): правило звіту бачить лише свій рядок і параметри.
     (N'expr.referenceForbiddenInReport',       N'en', N'The reference "{construct}" is not allowed in the report dialect: a report rule sees only the columns of its own row ("[Code]") and the report parameters ("@Name").', 1),
+    -- RT-07 (FEATURE-REGISTRY-TABLES §5.5, перевірка 18): `ROW.` лише в області агрегата/правила, `THIS` — лише в правилі довідника.
+    (N'expr.rowReferenceOutsideScope',         N'en', N'"{construct}" refers to a registry row and is allowed only inside a registry aggregate (REGSUM, REGAVG, REGMIN, REGMAX, REGCOUNT), REGONE or a registry rule.', 1),
+    (N'expr.thisOutsideRule',                  N'en', N'"THIS" is allowed only in a registry rule, where it stands for the entry being checked.', 1),
     -- V-20: діагностики зв'язувача, поради діалекту методологій і цикли — ключами каталогу.
     (N'expr.unknownFunctionCase', N'en', N'Function "{name}" is not available in the {dialect} dialect. In the legacy engine (NCalc 1.3.8) names are case-sensitive: write "{exact}".', 1),
     (N'expr.unknownFunctionReplacement.POWER', N'en', N'Function "{name}" is not available in the {dialect} dialect. In the legacy engine (NCalc 1.3.8) use Pow(a, b) instead.', 1),

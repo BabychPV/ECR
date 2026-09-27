@@ -98,6 +98,22 @@ public static class AstPrinter
                 text.Append(Period(period.PeriodOffset)).Append('.').Append(period.Property);
                 break;
 
+            // ⚠ Префікс друкується ВЕЛИКИМИ, як `CST.`/`HDR.`: регістр префікса
+            // не значущий (FEATURE-REGISTRY-TABLES §5.2), а коди полів — так, як
+            // їх написали.
+            case RowFieldNode row:
+                text.Append("ROW");
+                foreach (var segment in row.Path)
+                {
+                    text.Append('.').Append(segment);
+                }
+
+                break;
+
+            case ThisNode:
+                text.Append("THIS");
+                break;
+
             default:
                 text.Append("<?>");
                 break;

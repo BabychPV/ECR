@@ -37,6 +37,53 @@ public sealed record SymbolReferenceNode(SymbolKind Kind, string Name) : AstNode
 /// <summary>Календарний контекст: <c>[Period].Days</c> тощо.</summary>
 public sealed record PeriodPropertyNode(string Property, int PeriodOffset) : AstNode;
 
+/// <summary>
+/// Поле рядка довідника: <c>ROW.COMPONENT.MW</c> (FEATURE-REGISTRY-TABLES §5.2).
+/// </summary>
+/// <remarks>
+/// <see cref="Path"/> — коди полів від рядка області: <c>[COMPONENT, MW]</c>.
+/// Усі сегменти, крім останнього, мусять бути <c>Lookup</c>-полями, але це
+/// перевіряє публікація (перевірка 16 §5.5), а не парсер: форми довідника
+/// парсер не бачить.
+///
+/// ⛔ Шлях заморожується ТУТ, у конструкторі, а не лише в парсері: вузол іде в
+/// кеш розбору (`CAL-05`) і звідти — до всіх наступних прогонів. Копія в
+/// <see cref="System.Collections.ObjectModel.ReadOnlyCollection{T}"/> означає,
+/// що ні <c>(IList&lt;string&gt;)Path</c>, ні зміна списку, з якого вузол
+/// створено, не зіпсують чужий вираз. Властивість лише для читання, без
+/// <c>init</c>: <c>with { Path = … }</c> теж не пройде.
+/// </remarks>
+public sealed record RowFieldNode : AstNode
+{
+    /// <summary>Створює вузол із копії шляху.</summary>
+    /// <param name="path">Коди полів; принаймні один.</param>
+    /// <exception cref="ArgumentException">Шлях порожній.</exception>
+    public RowFieldNode(IReadOnlyList<string> path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        if (path.Count == 0)
+        {
+            throw new ArgumentException("Шлях ROW. мусить містити принаймні одне поле.", nameof(path));
+        }
+
+        Path = new System.Collections.ObjectModel.ReadOnlyCollection<string>([.. path]);
+    }
+
+    /// <summary>Коди полів від рядка області.</summary>
+    public IReadOnlyList<string> Path { get; }
+}
+
+/// <summary>
+/// Запис, який перевіряє правило довідника: <c>THIS</c> (FEATURE-REGISTRY-TABLES §5.2).
+/// </summary>
+/// <remarks>
+/// Статично — <c>EntryRef</c> довідника правила, у рантаймі — число (id
+/// запису), як <c>Lookup</c>-комірка (§5.3). Поза правилом довідника парсер
+/// дає діагностику <c>expr.thisOutsideRule</c>.
+/// </remarks>
+public sealed record ThisNode : AstNode;
+
 /// <summary>Селектор рядків: конкретний ключ, діапазон або предикат.</summary>
 public abstract record RowSelector
 {

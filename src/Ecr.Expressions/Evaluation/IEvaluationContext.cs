@@ -68,6 +68,24 @@ public interface IEvaluationContext
     public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
         => ExpressionValue.Error(ExpressionErrors.BadReference);
 
+    /// <summary>
+    /// Знімок довідників прогону для функцій <c>REG*</c> і полів <c>ROW.</c>
+    /// (FEATURE-REGISTRY-TABLES §5.7); <c>null</c> — знімка немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Замовчування — <c>null</c>, і з тієї самої причини, що в
+    /// <see cref="GetRegistryField"/>: член інтерфейсу за замовчуванням не ламає
+    /// жодної наявної реалізації, а контексти, що довідників не бачать (діалект
+    /// звітів, методологія до RT-23a), успадковують відмову без перевизначення.
+    /// Без знімка функції довідників дають <c>#REF</c>, а не виняток: одна
+    /// формула не сміє зірвати прогін.
+    ///
+    /// ⛔ Властивість, а не метод «завантаж»: знімок вантажиться ДО обчислення
+    /// (<c>GenericCalculationModule.PrepareAsync</c>, <c>RecalculationService</c>),
+    /// а контекст лише віддає вже готовий.
+    /// </remarks>
+    public IRegistrySnapshot? Registries => null;
+
     /// <summary>Календарний контекст. Значення залежать від <c>CalendarMode</c> (D-78).</summary>
     public PeriodContext Period { get; }
 
