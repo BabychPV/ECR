@@ -4,6 +4,7 @@ import { showApiError } from '@/shared/ui/notify';
 import { registerUnsavedSource, UnsavedSettleMs } from '@/shared/ui/unsavedSources';
 import { onBeforeLoginRedirect } from '@/api/client';
 import { recordLostEdits } from './lostEdits';
+import { resetConfirmed } from './confirmedEdits';
 import {
   cellKey,
   discardPendingRows,
@@ -420,6 +421,8 @@ export function useDocumentPending(documentId: number, ownerUserId?: number): vo
     return () => {
       cancelAutosave();
       resetPending();
+      // ⚠ Разом зі сховищем правок — і підтвердження до них (`ФВ-2.16`).
+      resetConfirmed();
     };
   }, [documentId]);
 

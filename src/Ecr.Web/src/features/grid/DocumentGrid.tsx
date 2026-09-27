@@ -28,7 +28,15 @@ import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
 import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
 import { createDateCellEditor } from './DateCellEditor';
 import { roundToScale, type RoundedCell } from './rounding';
-import { cellKey, confirmationOf, decide, guardOf, rowKeyOfCellKey } from './permissions';
+import {
+  cellKey,
+  cellsNeedingConfirmation,
+  confirmationOf,
+  decide,
+  guardOf,
+  rowKeyOfCellKey,
+} from './permissions';
+import { markConfirmed } from './confirmedEdits';
 import { UndoStack, type CellEdit } from './undo';
 import {
   buildRequest,
@@ -342,6 +350,15 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     hint: string;
   } | null>(null);
 
+  // ⛔ `ФВ-2.16`: пакетна правка (вставка, протягування), у якій є комірки
+  // `AllowWithConfirmation`, — ОДИН діалог на пакет. До кліку «Продовжити» пакет
+  // не застосований НІЯК: ні сховище, ні історія, ні сітка (протягування
+  // заблоковане в `onBeforeRangeEdit`), тож «Скасувати» не має чого відкочувати.
+  // `apply` — те, що пакет зробив би без діалогу, плюс позначка підтвердження.
+  const [batchConfirm, setBatchConfirm] = useState<{ count: number; apply: () => void } | null>(
+    null,
+  );
+
   /**
    * Комірки, чий PATCH зараз У ДОРОЗІ — з тим самим значенням, яке летить.
    *
@@ -636,6 +653,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // правки зрізу, з якого оператор щойно пішов і куди може повернутися.
     setOverrides(new Map());
     setConfirmRequest(null);
+    setBatchConfirm(null);
 
     // ⚠ Виділення теж належить ЦЬОМУ зрізу: індекси рядка 50 в іншій таблиці
     // вказують на інші дані, і вставка пішла б від чужого якоря.
@@ -1096,26 +1114,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         };
       });
 
-      // ⚠ Позначки попередньої вставки знімаються: інакше через десять вставок
-      // половина таблиці була б помічена, і лічильник перестав би щось значити.
-      setRounded(roundedNow);
+      const needing = cellsNeedingConfirmation(data, edits);
 
-      // ⚠ Уся вставка — ОДИН крок історії: інакше одне Ctrl+V з'їдало б усю
-      // глибину, а Ctrl+Z відкочував би її по комірці.
-      history.current.push({
-        label: t('grid.paste', { count: edits.length }),
-        edits: edits.map<CellEdit>((edit) => ({
-          rowKey: edit.rowKey,
-          columnCode: edit.columnCode,
-          before: valueOf(data, edit.rowKey, edit.columnCode),
-          after: edit.value,
-        })),
-      });
+      const commit = (): void => {
+        // ⚠ Позначка підтвердження — ДО `saveThroughStore`: той одразу будує
+        // запит, і прапорець `confirmed` читається саме в ту мить.
+        markConfirmed(tableInstanceId, periodKey, needing);
 
-      touchHistory();
-      saveThroughStore(edits);
+        // ⚠ Позначки попередньої вставки знімаються: інакше через десять вставок
+        // половина таблиці була б помічена, і лічильник перестав би щось значити.
+        setRounded(roundedNow);
+
+        // ⚠ Уся вставка — ОДИН крок історії: інакше одне Ctrl+V з'їдало б усю
+        // глибину, а Ctrl+Z відкочував би її по комірці.
+        history.current.push({
+          label: t('grid.paste', { count: edits.length }),
+          edits: edits.map<CellEdit>((edit) => ({
+            rowKey: edit.rowKey,
+            columnCode: edit.columnCode,
+            before: valueOf(data, edit.rowKey, edit.columnCode),
+            after: edit.value,
+          })),
+        });
+
+        touchHistory();
+        saveThroughStore(edits);
+      };
+
+      // ⛔ `ФВ-2.16`: вставка в комірки `AllowWithConfirmation` ішла повз діалог
+      // одиничної правки (`onBeforeEdit` бачить лише введення в комірку).
+      // Один діалог на весь пакет; «Скасувати» — пакет не застосовано ЦІЛКОМ.
+      if (needing.length > 0) {
+        setBatchConfirm({ count: needing.length, apply: commit });
+        return;
+      }
+
+      commit();
     },
-    [data, readOnly, saveThroughStore, touchHistory, pastedIdentifierOf],
+    [data, readOnly, saveThroughStore, touchHistory, pastedIdentifierOf, tableInstanceId, periodKey],
   );
 
   /**
@@ -1178,10 +1214,30 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * (`D16-02`).
    */
   const applyRangeEdit = useCallback(
-    (detail: RangeEditDetail) => {
+    (detail: RangeEditDetail, confirmed = false) => {
       if (data === undefined) return;
 
       const { captured, reverted } = captureRange(data, detail, rowKeyOf);
+
+      if (confirmed) {
+        // ⛔ Підтверджене протягування (`ФВ-2.16`) сітка НЕ намалювала:
+        // `onBeforeRangeEdit` заблокував його до діалогу. Тож значення кладуться
+        // поверх зрізу тут — як і в підтвердженої одиничної правки
+        // (`onConfirmEdit`), — інакше вони з'явилися б лише після збереження.
+        markConfirmed(
+          tableInstanceId,
+          periodKey,
+          cellsNeedingConfirmation(data, captured.map((edit) => edit.pending)),
+        );
+        setOverrides((current) => {
+          const next = new Map(current);
+          for (const edit of captured) {
+            next.set(cellKey(edit.pending.rowKey, edit.pending.columnCode), edit.pending.value);
+          }
+
+          return next;
+        });
+      }
 
       // ⛔ `V-01`: повернення до збереженого значення в комірці з незбереженою
       // правкою — скасування цієї правки, як і в ручного введення.
@@ -1279,6 +1335,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   const onConfirmEdit = useCallback(() => {
     if (confirmRequest === null) return;
 
+    // ⛔ Сервер відхиляє правку такої комірки без прапорця `confirmed`
+    // (`ФВ-2.16`); позначка — ДО захоплення, бо автозбереження може будувати
+    // запит будь-коли після нього.
+    markConfirmed(tableInstanceId, periodKey, [confirmRequest]);
+
     const captured = applyEditedValue({
       rowKey: confirmRequest.rowKey,
       columnCode: confirmRequest.columnCode,
@@ -1298,7 +1359,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     }
 
     setConfirmRequest(null);
-  }, [confirmRequest, applyEditedValue]);
+  }, [confirmRequest, applyEditedValue, tableInstanceId, periodKey]);
+
+  /**
+   * `beforerangeedit`: протягування маркером заповнення через комірки
+   * `AllowWithConfirmation` (`ФВ-2.16`).
+   *
+   * ⛔ Той самий прийом, що й `onBeforeEdit`: RevoGrid застосовує діапазон
+   * (`setRangeData`) одразу після цієї події, а діалог — асинхронний. Тому
+   * діапазон блокується СИНХРОННО (`preventDefault`), а застосовуємо його самі
+   * після «Продовжити» (`applyRangeEdit(…, true)`). «Скасувати» не має чого
+   * відкочувати: сітка значень так і не намалювала.
+   *
+   * ⚠ Протягування без таких комірок обробник не чіпає — воно йде звичайним
+   * шляхом `afteredit` → `applyRangeEdit`.
+   */
+  const onBeforeRangeEdit = useCallback(
+    (event: { detail: unknown; preventDefault: () => void }) => {
+      if (data === undefined || readOnly || !isRangeEdit(event.detail)) return;
+
+      const detail = event.detail;
+      const { captured } = captureRange(data, detail, rowKeyOf);
+      const needing = cellsNeedingConfirmation(
+        data,
+        captured.map((edit) => edit.pending),
+      );
+      if (needing.length === 0) return;
+
+      event.preventDefault();
+      setBatchConfirm({ count: needing.length, apply: () => applyRangeEdit(detail, true) });
+    },
+    [data, readOnly, applyRangeEdit],
+  );
+
+  const onConfirmBatch = useCallback(() => {
+    const request = batchConfirm;
+    setBatchConfirm(null);
+    request?.apply();
+  }, [batchConfirm]);
 
   /**
    * Ctrl+C: віддає ВИДІЛЕНЕ у форматі, який приймає Excel.
@@ -1820,6 +1918,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           pinnedBottomSource={pinnedTotals}
           readonly={readOnly}
           onBeforeedit={onBeforeEdit}
+          onBeforerangeedit={onBeforeRangeEdit}
           onAfteredit={onAfterEdit}
           onAftercolumnresize={onColumnResize}
           style={{ height: '70vh' }}
@@ -1875,6 +1974,29 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
             {t('grid.confirmCancel')}
           </Button>
           <Button size="xs" onClick={onConfirmEdit}>
+            {t('grid.confirmProceed')}
+          </Button>
+        </Group>
+      </Modal>
+
+      {/*
+       * ⛔ `ФВ-2.16` для ПАКЕТНИХ правок (вставка, протягування): один діалог на
+       * пакет із кількістю комірок, що вимагають підтвердження. Закриття без
+       * кнопки — скасування: пакет не застосовано взагалі (`batchConfirm`).
+       */}
+      <Modal
+        opened={batchConfirm !== null}
+        onClose={() => setBatchConfirm(null)}
+        title={t('grid.confirmTitle')}
+      >
+        <Text size="sm" mb="md">
+          {t('grid.batchConfirmBody', { count: batchConfirm?.count ?? 0 })}
+        </Text>
+        <Group justify="flex-end" gap="xs">
+          <Button size="xs" variant="default" onClick={() => setBatchConfirm(null)}>
+            {t('grid.confirmCancel')}
+          </Button>
+          <Button size="xs" onClick={onConfirmBatch}>
             {t('grid.confirmProceed')}
           </Button>
         </Group>

@@ -204,6 +204,17 @@ export function confirmationOf(
 }
 
 /**
+ * Комірки пакета (вставка, протягування), що вимагають підтвердження
+ * (`ФВ-2.16`) — один діалог на пакет називає саме їхню кількість.
+ */
+export function cellsNeedingConfirmation<T extends { rowKey: string; columnCode: string }>(
+  slice: TableSliceDto,
+  cells: readonly T[],
+): T[] {
+  return cells.filter((cell) => slice.cellConfirmations[cellKey(cell.rowKey, cell.columnCode)] !== undefined);
+}
+
+/**
  * Сторож для вставки: повертає причину відмови або <c>null</c>.
  *
  * Це той самий предикат, який використовує планувальник вставки — щоб
