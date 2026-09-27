@@ -18,7 +18,10 @@ public sealed class ValidateDocumentHandler(
     Domain.Abstractions.IClock clock,
     IUnitOfWork uow,
     Security.IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+
+    // ⛔ D16-04: знімок полів довідника для `REGFIELD` у правилах.
+    IRegistryStore registries)
 {
     /// <summary>Виконує валідацію всіх аркушів документа за період.</summary>
     /// <param name="documentId">Документ.</param>
@@ -49,7 +52,7 @@ public sealed class ValidateDocumentHandler(
         // з'ясовується з кешу метаданих (без походу в базу) ДО читання
         // комірок і рядків — так у пакетні запити нижче йдуть лише таблиці,
         // які реально валідуються, а не всі ~90 таблиць документа.
-        var toValidate = new List<(TableInstanceRef Instance, TableDef Table)>();
+        var toValidate = new List<(TableInstanceRef Instance, TableDef Table, TemplateVersionSnapshot Snapshot)>();
         foreach (var instance in instances)
         {
             var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
@@ -62,7 +65,7 @@ public sealed class ValidateDocumentHandler(
                 continue;
             }
 
-            toValidate.Add((instance, table));
+            toValidate.Add((instance, table, snapshot));
         }
 
         var instanceIds = toValidate.Select(t => t.Instance.TableInstanceId).ToList();
@@ -97,7 +100,7 @@ public sealed class ValidateDocumentHandler(
         // готового тексту), не ця.
         var messages = new List<ValidationMessage>();
 
-        foreach (var (instance, table) in toValidate)
+        foreach (var (instance, table, snapshot) in toValidate)
         {
             var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var found)
                 ? found
@@ -106,7 +109,9 @@ public sealed class ValidateDocumentHandler(
                 ? foundRows
                 : new Dictionary<string, long>(StringComparer.Ordinal);
 
-            messages.AddRange(TableValidation.Run(engine, table, cells, rowIds, headerValues, currentUser.Language));
+            messages.AddRange(await TableValidation
+                .RunAsync(engine, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
+                .ConfigureAwait(false));
         }
 
         var summary = new ValidationSummary(

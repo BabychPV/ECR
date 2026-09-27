@@ -183,6 +183,61 @@ public sealed class ValidateDocumentBoolDateRulesTests
         Assert.Equal(ValidationSeverity.Error, message.Severity);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "ФВ-5.1")]
+    [Trait("Finding", "D16-04")]
+    public async Task Правило_рядка_з_REGFIELD_на_Перевірити_читає_поле_довідника(int limit)
+    {
+        // ⛔ D16-04: Lookup-комірка зрізу дає `long`, а контекст правила — без
+        // знімка довідника. Разом це давало `#VALUE`/`#REF`, і Error-правило
+        // приходило як Warning `ECR-VAL-RULE` на кожному рядку.
+        Arrange("REGFIELD([Permit], 'Limit') > 0",
+        [
+            new CellRecord(
+                new CellAddress(new PeriodKey(Period), RowId, PermitColumnId), TableDefId,
+                new CellValueData { ValueRegistryEntryId = EntryId }),
+        ]);
+        RegistryTestData.PermitLimit(_registries, RegistryDefId, EntryId, limit);
+
+        var messages = await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        if (limit == 0)
+        {
+            var message = Assert.Single(messages);
+            Assert.Equal("REQ", message.RuleCode);
+            Assert.Equal(ValidationSeverity.Error, message.Severity);
+            Assert.Equal(RowKey, message.RowKey);
+        }
+        else
+        {
+            Assert.Empty(messages);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Finding", "D16-04")]
+    public async Task Правило_без_REGFIELD_не_звертається_до_довідника()
+    {
+        Arrange("[IncludeInReport] = FALSE",
+        [
+            new CellRecord(
+                new CellAddress(new PeriodKey(Period), RowId, PermitColumnId), TableDefId,
+                new CellValueData { ValueRegistryEntryId = EntryId }),
+        ]);
+
+        await Handler().HandleAsync(DocumentId, new PeriodKey(Period), CancellationToken.None);
+
+        Assert.Empty(_registries.ReceivedCalls());
+    }
+
+    private const int PermitColumnId = 44;
+    private const int RegistryDefId = 900;
+    private const long EntryId = 5001;
+
     /// <summary>Таблиця з правилом рівня рядка і зрізом значень.</summary>
     private void Arrange(string expression, IReadOnlyList<CellRecord> cells)
     {
@@ -198,6 +253,10 @@ public sealed class ValidateDocumentBoolDateRulesTests
         table.AddColumn(Column(VolumeColumnId, "Volume", CellDataType.Decimal));
         table.AddColumn(Column(MeasuredOnColumnId, "MeasuredOn", CellDataType.Date));
         table.AddColumn(Column(PeriodStartColumnId, "PeriodStart", CellDataType.Date));
+
+        var permit = Column(PermitColumnId, "Permit", CellDataType.Lookup);
+        permit.SetLookup(RegistryDefId);
+        table.AddColumn(permit);
 
         table.AddValidationRule(new ValidationRule(
             TableDefId, EcrCode.Create("REQ"), ValidationSeverity.Error, scope: 1,
@@ -230,5 +289,8 @@ public sealed class ValidateDocumentBoolDateRulesTests
     // правило бачить у комірці, а заглушка не обчислює виразу взагалі.
     private ValidateDocumentHandler Handler() => new(
         _cells, _rows, _metadata, _results, new ValidationEngine(new RealFormulaEngine()),
-        _headers, _clock, _uow, _access, _user);
+        _headers, _clock, _uow, _access, _user, _registries);
+
+    /// <summary>Довідник для <c>REGFIELD</c> (D16-04); у Bool/Date-тестах порожній.</summary>
+    private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
 }

@@ -182,9 +182,13 @@ public sealed class SubmitApproveTests
     /// Третій аркуш <c>Air</c> і формула <c>WasteFormula</c> у таблиці Waste
     /// (разом із <paramref name="withWasteSheet"/>).
     /// </param>
+    /// <param name="permitRegistryDefId">
+    /// Додати Lookup-колонку <c>Permit</c> на цей довідник — для <c>REGFIELD</c> у правилі (D16-04).
+    /// </param>
     private static Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot Snapshot(
         Ecr.Domain.Entities.Configuration.ValidationRule? rule = null, bool requiredColumn = false,
-        bool withWasteSheet = false, bool waterFormulaReadsWaste = false, bool withAirSheet = false)
+        bool withWasteSheet = false, bool waterFormulaReadsWaste = false, bool withAirSheet = false,
+        int? permitRegistryDefId = null)
     {
         var column = new Ecr.Domain.Entities.Configuration.ColumnDef(
             tableDefId: 3, EcrCode.Create("Volume"),
@@ -207,6 +211,18 @@ public sealed class SubmitApproveTests
         typeof(Entity<int>).GetProperty("Id")!.SetValue(table, 3);
 
         table.AddColumn(column);
+
+        // Lookup-колонка `Permit` (id 12) на довідник — для REGFIELD у правилі (D16-04).
+        if (permitRegistryDefId is { } registryDefId)
+        {
+            var permit = new Ecr.Domain.Entities.Configuration.ColumnDef(
+                tableDefId: 3, EcrCode.Create("Permit"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Permit" }), 2, CellDataType.Lookup);
+            typeof(Entity<int>).GetProperty("Id")!.SetValue(permit, PermitColumn);
+            permit.SetLookup(registryDefId);
+            table.AddColumn(permit);
+        }
+
         if (rule is not null)
         {
             table.AddValidationRule(rule);
@@ -330,7 +346,11 @@ public sealed class SubmitApproveTests
                Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
                NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
                _methodologies,
-               _versions);
+               _versions,
+               _registries);
+
+    /// <summary>Довідник для <c>REGFIELD</c> у правилах (D16-04); за замовчуванням порожній.</summary>
+    private readonly IRegistryStore _registries = Substitute.For<IRegistryStore>();
 
     /// <summary>
     /// Граф залежностей формул версії (<c>cfg.FormulaDependency</c>). За
@@ -635,6 +655,59 @@ public sealed class SubmitApproveTests
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
 
         Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+    }
+
+    /// <summary>Lookup-колонка <c>Permit</c> (лише в <c>Snapshot(permitRegistryDefId: …)</c>).</summary>
+    private const int PermitColumn = 12;
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(5, false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-5.4")]
+    [Trait("Finding", "D16-04")]
+    public async Task REGFIELD_у_правилі_рядка_читає_довідник_і_блокує_подання(int limit, bool blocked)
+    {
+        // ⛔ D16-04. Правило `Error` рівня рядка: поле `Limit` запису, на який
+        // показує Lookup-комірка `Permit`, має бути додатним. Доти контекст
+        // правила не мав знімка довідника (`#REF`), а Lookup-значення `long`
+        // ішло в `Text` (`#VALUE`) — правило деградувало у Warning
+        // `ECR-VAL-RULE`, і подання з `Limit = 0` проходило.
+        const int registryDefId = 900;
+        const long entryId = 5001;
+
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(
+            Snapshot(
+                new Ecr.Domain.Entities.Configuration.ValidationRule(
+                    tableDefId: 3, EcrCode.Create("PERMIT"), ValidationSeverity.Error, scope: 1,
+                    "REGFIELD([Permit], 'Limit') > 0",
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Permit limit is zero" })),
+                permitRegistryDefId: registryDefId));
+
+        _cells.ReadSliceAsync(TableInstance, Arg.Any<CancellationToken>())
+              .Returns(new List<CellRecord>
+              {
+                  new(new CellAddress(new PeriodKey(Period), 1001, PermitColumn), 3,
+                      new CellValueData { ValueRegistryEntryId = entryId }),
+              });
+
+        RegistryTestData.PermitLimit(_registries, registryDefId, entryId, limit);
+
+        if (blocked)
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+            Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+            Assert.Equal("1", error.Details!["messageCount"]);
+            Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+        }
+        else
+        {
+            await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+            Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        }
     }
 
     /// <summary>Підставляє знімок структури з одним правилом валідації рядка.</summary>

@@ -34,9 +34,15 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// (B-11, UX-аудит, четвертий раунд): ці повідомлення несуть готовий
     /// текст УЖЕ, і клієнт показує його як є.
     /// </param>
+    /// <param name="registryFields">
+    /// Знімок полів довідника для <c>REGFIELD</c> у правилі (D16-04) — будує
+    /// <see cref="TableValidation.LoadRegistryFieldsAsync"/>; <c>null</c> —
+    /// порожній знімок, <c>REGFIELD</c> дасть <c>#REF</c>.
+    /// </param>
     public IReadOnlyList<ValidationMessage> ValidateCell(
         ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyList<ValidationRule> rules,
-        IReadOnlyDictionary<string, ExpressionValue> headers, string language)
+        IReadOnlyDictionary<string, ExpressionValue> headers, string language,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
     {
         ArgumentNullException.ThrowIfNull(column);
         ArgumentNullException.ThrowIfNull(value);
@@ -68,7 +74,7 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
                 continue;
             }
 
-            Evaluate(rule, CellContext(column, value, headers), column.TableDefId, null, column.Code, language, messages);
+            Evaluate(rule, CellContext(column, value, headers, registryFields), column.TableDefId, null, column.Code, language, messages);
         }
 
         // ⚠ Повертаються ВСІ порушення, а не перше: користувач має побачити
@@ -85,9 +91,11 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     /// виразі правила; порожній словник — прогін без шапки.
     /// </param>
     /// <param name="language">Мова запиту (B-11) — див. <see cref="ValidateCell"/>.</param>
+    /// <param name="registryFields">Знімок довідника для <c>REGFIELD</c> — див. <see cref="ValidateCell"/>.</param>
     public IReadOnlyList<ValidationMessage> ValidateScope(
         byte scope, IReadOnlyList<ValidationRule> rules, IValidationContext context,
-        IReadOnlyDictionary<string, ExpressionValue> headers, string language)
+        IReadOnlyDictionary<string, ExpressionValue> headers, string language,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(context);
@@ -99,10 +107,69 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
 
         foreach (var rule in rules.Where(r => r.IsActive && r.Scope == scope))
         {
-            Evaluate(rule, new ScopeContext(context) { Headers = headers }, rule.TableDefId, null, null, language, messages);
+            Evaluate(rule, new ScopeContext(context, registryFields) { Headers = headers }, rule.TableDefId, null, null, language, messages);
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Які поля довідника читають правила таблиці через <c>REGFIELD</c>:
+    /// пари (Lookup-колонка, код поля).
+    /// </summary>
+    /// <param name="table">Таблиця з правилами.</param>
+    /// <param name="snapshot">Версія шаблону — для резолвінгу посилань.</param>
+    /// <remarks>
+    /// ⚠ Видобування — СПРАВЖНІЙ <see cref="Ecr.Expressions.Binding.DependencyExtractor"/>
+    /// (Registry-ребро, <c>KindRegistry</c>), той самий, що будує
+    /// <c>cfg.FormulaDependency</c> формул шаблону: у правил рядків там немає.
+    /// Правило без літерала <c>REGFIELD</c> навіть не розбирається — нуль
+    /// роботи для таблиць без нього.
+    ///
+    /// ⚠ Лише посилання на СВОЮ таблицю: контекст правила читає колонку за
+    /// кодом у своїй таблиці (<c>ScopeContext</c>), чужих таблиць він не бачить.
+    /// </remarks>
+    public IReadOnlyList<(int ColumnDefId, string FieldCode)> RegistryFieldReads(
+        TableDef table, Domain.Entities.Configuration.TemplateVersionSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var found = new HashSet<(int ColumnDefId, string FieldCode)>();
+        Ecr.Expressions.Binding.DependencyExtractor? extractor = null;
+
+        foreach (var rule in table.ValidationRules)
+        {
+            if (!rule.IsActive
+                || rule.Expression.IndexOf("REGFIELD", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                continue;
+            }
+
+            var parsed = formulaEngine.Parse(rule.Expression, ExpressionDialect.Template);
+            if (!parsed.IsSuccess || parsed.Expression is null)
+            {
+                // Зламане правило звітує `Evaluate` (ECR-VAL-RULE) — тут нема що читати.
+                continue;
+            }
+
+            extractor ??= new Ecr.Expressions.Binding.DependencyExtractor(
+                new Ecr.Expressions.Binding.ReferenceResolver(snapshot),
+                new Ecr.Expressions.Binding.RangeExpander());
+
+            foreach (var dependency in extractor.Extract(parsed.Expression.Root, table.Id, currentRowKey: null))
+            {
+                if (dependency.DependsOnKind == Ecr.Expressions.Binding.DependencyExtractor.KindRegistry
+                    && dependency.TableDefId == table.Id
+                    && dependency.ColumnDefId is { } columnDefId
+                    && dependency.FilterJson is { } fieldCode)
+                {
+                    found.Add((columnDefId, fieldCode));
+                }
+            }
+        }
+
+        return [.. found];
     }
 
     private void Evaluate(
@@ -213,14 +280,18 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     };
 
     private static SingleCellContext CellContext(
-        ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyDictionary<string, ExpressionValue> headers)
-        => new SingleCellContext(column.Code, CellValueMapping.ToExpressionValue(value, ExpressionValue.Null))
+        ColumnDef column, Domain.ValueObjects.CellValueData value, IReadOnlyDictionary<string, ExpressionValue> headers,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields)
+        => new SingleCellContext(column.Code, CellValueMapping.ToExpressionValue(value, ExpressionValue.Null), registryFields)
         {
             Headers = headers,
         };
 
     /// <summary>Контекст правила рівня комірки: видно рівно одну колонку.</summary>
-    private sealed class SingleCellContext(string columnCode, ExpressionValue value) : ValidationEvaluationContext
+    private sealed class SingleCellContext(
+        string columnCode, ExpressionValue value,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields)
+        : ValidationEvaluationContext(registryFields)
     {
         public override IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference)
         {
@@ -232,7 +303,10 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
     }
 
     /// <summary>Контекст правила рівня рядка і вище.</summary>
-    private sealed class ScopeContext(IValidationContext inner) : ValidationEvaluationContext
+    private sealed class ScopeContext(
+        IValidationContext inner,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, ExpressionValue>>? registryFields)
+        : ValidationEvaluationContext(registryFields)
     {
         public override IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference)
         {
@@ -245,11 +319,16 @@ public sealed class ValidationEngine(IFormulaEngine formulaEngine)
             return [FromObject(raw)];
         }
 
+        // ⛔ `long` — id запису довідника з Lookup-комірки
+        // (`CellValueMapping.ToRuleValue`). Без цієї гілки він ішов у `Text`, і
+        // `REGFIELD` на «Перевірити»/поданні давав `#VALUE` (D16-04). `int` —
+        // `ValueUnitId`; інших цілих `ToRuleValue` не віддає.
         private static ExpressionValue FromObject(object? raw)
             => raw switch
             {
                 null => ExpressionValue.Null,
                 decimal number => ExpressionValue.Number(number),
+                long number => ExpressionValue.Number(number),
                 int number => ExpressionValue.Number(number),
                 bool flag => ExpressionValue.Boolean(flag),
                 DateTime date => ExpressionValue.Date(date),

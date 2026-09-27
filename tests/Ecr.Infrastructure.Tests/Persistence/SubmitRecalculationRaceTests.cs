@@ -375,7 +375,8 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             // транзакції, під його винятковим блокуванням — як у DI-скоупі.
             BuildRecalculation(db, doc, beforeWrite: null),
             methodologies,
-            new TemplateVersionStore(db));
+            new TemplateVersionStore(db),
+            new RegistryStore(db));
     }
 
     /// <summary>

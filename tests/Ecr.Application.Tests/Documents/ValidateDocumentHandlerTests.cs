@@ -127,7 +127,7 @@ public sealed class ValidateDocumentHandlerTests
 
     private ValidateDocumentHandler Handler() => new(
         _cells, _rows, _metadata, _results, new ValidationEngine(Substitute.For<IFormulaEngine>()),
-        _headers, _clock, _uow, _access, _user);
+        _headers, _clock, _uow, _access, _user, Substitute.For<IRegistryStore>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]

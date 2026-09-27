@@ -249,7 +249,8 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
             new UnitOfWork(db), User(), new TestClock(Now), new SheetEditGate(db),
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies,
-            NSubstitute.Substitute.For<ITemplateVersionStore>());
+            NSubstitute.Substitute.For<ITemplateVersionStore>(),
+            NSubstitute.Substitute.For<IRegistryStore>());
     }
 
     private ApproveSheetHandler Approve(World world, EcrDbContext db, IReportSnapshotBuilder snapshots)

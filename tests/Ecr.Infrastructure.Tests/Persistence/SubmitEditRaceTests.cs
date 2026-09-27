@@ -269,7 +269,8 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
             new UnitOfWork(db), User(), clock, new SheetEditGate(db),
             NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
             methodologies,
-            new TemplateVersionStore(db));
+            new TemplateVersionStore(db),
+            new RegistryStore(db));
     }
 
     /// <summary>Правка на реальних сховищах; <paramref name="afterAccessCheck"/> — точка перемикання.</summary>

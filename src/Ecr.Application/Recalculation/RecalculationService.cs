@@ -1187,8 +1187,7 @@ public sealed class RecalculationService(
 
         // 2. entryId ← уже завантажені `values` (Lookup-комірка читається тим
         //    самим шляхом, що й будь-яка інша), + який довідник (з колонки).
-        var neededFieldsByEntry = new Dictionary<long, HashSet<string>>();
-        var registryDefByEntry = new Dictionary<long, int>();
+        var requests = new List<Registries.RegistryFieldRequest>();
 
         foreach (var (tableDefId, rowKey, columnDefId, fieldCode) in needed)
         {
@@ -1215,102 +1214,15 @@ public sealed class RecalculationService(
                     continue;
                 }
 
-                var entryId = (long)entryIdRaw;
-                registryDefByEntry[entryId] = registryDefId;
-
-                if (!neededFieldsByEntry.TryGetValue(entryId, out var fields))
-                {
-                    neededFieldsByEntry[entryId] = fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                }
-
-                fields.Add(fieldCode);
+                requests.Add(new Registries.RegistryFieldRequest((long)entryIdRaw, registryDefId, fieldCode));
             }
         }
 
-        if (neededFieldsByEntry.Count == 0)
-        {
-            return null;
-        }
-
-        // 3. Визначення полів — по одному запиту на УНІКАЛЬНИЙ довідник.
-        var fieldDefsByRegistry =
-            new Dictionary<int, IReadOnlyDictionary<string, Domain.Entities.Configuration.RegistryFieldDef>>();
-
-        foreach (var registryDefId in registryDefByEntry.Values.Distinct())
-        {
-            var definition = await registryStore.FindDefinitionByIdAsync(registryDefId, ct).ConfigureAwait(false);
-            fieldDefsByRegistry[registryDefId] = definition?.Fields
-                .ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase)
-                ?? new Dictionary<string, Domain.Entities.Configuration.RegistryFieldDef>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        // 4. Значення — по одному запиту на УНІКАЛЬНИЙ запис.
-        var snapshot = new Dictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>();
-
-        foreach (var (entryId, fieldCodes) in neededFieldsByEntry)
-        {
-            if (!fieldDefsByRegistry.TryGetValue(registryDefByEntry[entryId], out var fieldDefs))
-            {
-                continue;
-            }
-
-            var registryValues = await registryStore.ListValuesAsync(entryId, ct).ConfigureAwait(false);
-            var byFieldDefId = registryValues.ToDictionary(v => v.RegistryFieldDefId);
-
-            var perEntry = new Dictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>(
-                StringComparer.OrdinalIgnoreCase);
-
-            foreach (var fieldCode in fieldCodes)
-            {
-                if (!fieldDefs.TryGetValue(fieldCode, out var fieldDef)
-                    || !byFieldDefId.TryGetValue(fieldDef.Id, out var registryValue))
-                {
-                    // Немає такого поля або запис ще не заповнив його —
-                    // `GetRegistryField` віддасть #REF на відсутній ключ; тут
-                    // просто нема що покласти в знімок.
-                    continue;
-                }
-
-                if (ToExpressionValue(registryValue, fieldDef.DataType) is { } mapped)
-                {
-                    perEntry[fieldCode] = mapped;
-                }
-            }
-
-            if (perEntry.Count > 0)
-            {
-                snapshot[entryId] = perEntry;
-            }
-        }
-
-        return snapshot;
+        // 3–4. Визначення полів і значення — СПІЛЬНИЙ завантажувач (D16-04):
+        //      той самий, яким знімок будують правила валідації.
+        return await Registries.RegistryFieldSnapshotLoader
+            .LoadAsync(registryStore, requests, ct).ConfigureAwait(false);
     }
-
-    /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
-    /// <remarks>
-    /// ⚠ <c>Lookup</c>/<c>Unit</c>/<c>Formula</c>/<c>Calculated</c> тут
-    /// НЕМАЄ: перші два REGFIELD сьогодні не читає (задача — decimal/text/
-    /// bool/date), а останні два в довіднику взагалі не існують
-    /// (<c>RegistryValue.Set</c> їх забороняє при записі).
-    /// </remarks>
-    private static Ecr.Expressions.Evaluation.ExpressionValue? ToExpressionValue(
-        Domain.Entities.Dictionaries.RegistryValue value, Domain.Enums.CellDataType dataType)
-        => dataType switch
-        {
-            Domain.Enums.CellDataType.Decimal or Domain.Enums.CellDataType.Int => value.ValueNumeric is { } n
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Number(n)
-                : null,
-            Domain.Enums.CellDataType.String => value.ValueString is { } s
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Text(s)
-                : null,
-            Domain.Enums.CellDataType.Bool => value.ValueBool is { } b
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Boolean(b)
-                : null,
-            Domain.Enums.CellDataType.Date => value.ValueDate is { } d
-                ? Ecr.Expressions.Evaluation.ExpressionValue.Date(d)
-                : null,
-            _ => null,
-        };
 
     /// <summary>Значення виразу як значення комірки; <c>null</c> — записувати нічого.</summary>
     private static CellValueData? ToCellValue(Ecr.Expressions.Evaluation.ExpressionValue value)

@@ -64,7 +64,11 @@ public sealed class SubmitSheetHandler(
     // `RecalculationReadScope`). Потрібен, щоб перевірка застарілості
     // методологій бачила таблиці ІНШИХ аркушів, які формули цього аркуша
     // читають (див. `FreshnessTablesAsync`).
-    ITemplateVersionStore versions)
+    ITemplateVersionStore versions,
+
+    // ⛔ D16-04: знімок полів довідника для `REGFIELD` у правилах — той самий,
+    // що будує «Перевірити» (`TableValidation.RunAsync`).
+    IRegistryStore registries)
 {
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="documentId">Документ.</param>
@@ -354,9 +358,10 @@ public sealed class SubmitSheetHandler(
 
             if (table.ValidationRules.Count > 0)
             {
-                blocking.AddRange(Validation.TableValidation
-                    .Run(validation, table, cells, rowIds, headerValues, currentUser.Language)
-                    .Where(m => m.Severity == ValidationSeverity.Error));
+                var tableMessages = await Validation.TableValidation
+                    .RunAsync(validation, registries, snapshot, table, cells, rowIds, headerValues, currentUser.Language, ct)
+                    .ConfigureAwait(false);
+                blocking.AddRange(tableMessages.Where(m => m.Severity == ValidationSeverity.Error));
             }
 
             blocking.AddRange(MissingRequiredColumnMessages(table, requiredColumns, cells, rowIds));
