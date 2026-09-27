@@ -4,6 +4,7 @@ using Ecr.Application.Ports;
 using Ecr.Application.Sources;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
@@ -61,7 +62,7 @@ public sealed class MaterializeCollectedDataJob(
     public const int MaxPoints = 500_000;
 
     /// <summary>Статус рядка журналу покриття, коли поле перевищило стелю точок.</summary>
-    public const string PointCeilingStatus = "SkippedPointCeiling";
+    public const string PointCeilingStatus = CollectionCoverage.SkippedPointCeiling;
 
     /// <summary>Стеля точок на поле; змінюється лише тестами.</summary>
     /// <remarks>
@@ -154,7 +155,7 @@ public sealed class MaterializeCollectedDataJob(
         if (period is null || state is not (PeriodState.Open or PeriodState.Grace))
         {
             await coverage
-                .RecordAsync(task.SourceEntityId, periodKey, "SkippedPeriodClosed",
+                .RecordAsync(task.SourceEntityId, periodKey, CollectionCoverage.SkippedPeriodClosed,
                     $"Період у стані {state?.ToString() ?? "невідомо"}: пізній збір лишається сирим.", ct)
                 .ConfigureAwait(false);
 
@@ -206,7 +207,7 @@ public sealed class MaterializeCollectedDataJob(
             await coverage
                 .RecordManyAsync(
                     [.. written.KeptManual.Select(kept => new CoverageEvent(
-                        task.SourceEntityId, periodKey, "ConflictKeptManual",
+                        task.SourceEntityId, periodKey, CollectionCoverage.ConflictKeptManual,
                         $"Комірка {kept} має правку людини: значення збору не застосовано."))],
                     ct)
                 .ConfigureAwait(false);
