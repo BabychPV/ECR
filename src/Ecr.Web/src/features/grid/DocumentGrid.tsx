@@ -46,6 +46,7 @@ import {
   discardPendingRows,
   pendingSlice,
   putPendingEdit,
+  putPendingEdits,
   usePendingRejections,
   usePendingSlice,
 } from './pendingStore';
@@ -529,7 +530,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    */
   const saveThroughStore = useCallback(
     (edits: PendingEdit[]) => {
-      for (const edit of edits) putPendingEdit(tableInstanceId, periodKey, edit);
+      // ⛔ Пакетом, не циклом `putPendingEdit`: поштучно кожна комірка копіювала
+      // весь зріз і сповіщала підписників — вставка 30 000 комірок ставала
+      // квадратичною в синхронному `onPaste`.
+      putPendingEdits(tableInstanceId, periodKey, edits);
 
       void save(edits);
     },

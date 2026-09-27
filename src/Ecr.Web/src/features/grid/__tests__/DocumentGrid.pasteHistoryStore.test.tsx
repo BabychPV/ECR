@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ColumnRegular } from '@revolist/revogrid';
 import type { ColumnDto, TableSliceDto } from '@/api/types';
 import { cancelAutosave, useDocumentPending } from '../autosave';
-import { pendingSlice, resetPending } from '../pendingStore';
+import { pendingSlice, resetPending, subscribePending } from '../pendingStore';
 import { DocumentGrid } from '../DocumentGrid';
 
 /**
@@ -269,6 +269,27 @@ describe('вставка й Undo/Redo зберігаються через схо
     expect(patches[1]?.cells).toEqual([{ rowKey: 'r1', columnCode: 'C2', value: 7 }]);
     expect(patches[1]?.status).toBe(200);
     expect([...pendingSlice(Table, Period).keys()]).toEqual(['r1:C1']);
+  });
+
+  it('вставка блоку лягає в сховище ОДНИМ записом, а не комірка за коміркою', async () => {
+    // ⛔ Поштучний `putPendingEdit` у `saveThroughStore` копіював увесь зріз і
+    // сповіщав підписників на КОЖНУ комірку: 30 000 комірок з Excel —
+    // квадратична робота в синхронному `onPaste`. Рахуємо сповіщення рівно на
+    // час самої вставки: блок 2×2 має дати одне, а не чотири.
+    mockServer();
+    show();
+    await screen.findByTestId('revogrid-stub');
+
+    let notified = 0;
+    const unsubscribe = subscribePending(() => {
+      notified += 1;
+    });
+    paste('1\t2\n3\t4');
+    unsubscribe();
+
+    expect([...pendingSlice(Table, Period).keys()].sort()).toEqual(['r1:C1', 'r1:C2', 'r2:C1', 'r2:C2']);
+    expect(notified).toBe(1);
+    await wait(300);
   });
 
   it('прийнята вставка не лишає по собі незбережених правок', async () => {

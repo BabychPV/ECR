@@ -1,6 +1,6 @@
 import type { PendingEdit } from './useCellPatch';
 import type { RestoreSlice } from './lostEdits';
-import { putPendingEdit } from './pendingStore';
+import { putPendingEdits } from './pendingStore';
 import { scheduleAutosave } from './autosave';
 
 /**
@@ -115,8 +115,21 @@ export function planRestore(
  * @returns Скільки правок повернуто.
  */
 export function applyRestorePlan(plan: RestorePlan): number {
+  // ⚠ Пакетом на зріз, а не поштучно: поштучний запис копіює весь зріз на
+  // кожну правку (квадратично) і сповіщає підписників стільки ж разів.
+  const bySlice = new Map<string, { tableInstanceId: number; periodKey: number; edits: PendingEdit[] }>();
   for (const item of plan.applied) {
-    putPendingEdit(item.tableInstanceId, item.periodKey, item.edit);
+    const key = `${String(item.tableInstanceId)}:${String(item.periodKey)}`;
+    let group = bySlice.get(key);
+    if (group === undefined) {
+      group = { tableInstanceId: item.tableInstanceId, periodKey: item.periodKey, edits: [] };
+      bySlice.set(key, group);
+    }
+    group.edits.push(item.edit);
+  }
+
+  for (const group of bySlice.values()) {
+    putPendingEdits(group.tableInstanceId, group.periodKey, group.edits);
   }
 
   if (plan.applied.length > 0) scheduleAutosave();

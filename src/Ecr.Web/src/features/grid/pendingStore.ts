@@ -197,16 +197,47 @@ export function putPendingEdit(
   periodKey: number,
   edit: PendingEdit,
 ): void {
+  putPendingEdits(tableInstanceId, periodKey, [edit]);
+}
+
+/**
+ * Додає або оновлює кілька правок зрізу ОДНІЄЮ зміною: одна копія мапи зрізу,
+ * одне сповіщення підписників.
+ *
+ * ⛔ Що ламалося. Вставка з Excel (`saveThroughStore`) кликала `putPendingEdit`
+ * у циклі, а кожен виклик копіював УВЕСЬ зріз і сповіщав підписників: 30 000
+ * комірок — ~4.5·10⁸ скопійованих записів і 30 000 сповіщень у синхронному
+ * `onPaste`. Результат ідентичний послідовності поштучних викликів у тому ж
+ * порядку (дублікат комірки — перемагає остання правка).
+ */
+export function putPendingEdits(
+  tableInstanceId: number,
+  periodKey: number,
+  edits: readonly PendingEdit[],
+): void {
+  if (edits.length === 0) return;
+
   const key = sliceKey(tableInstanceId, periodKey);
   const next = new Map(pendingSlice(tableInstanceId, periodKey));
-  next.set(cellKey(edit), edit);
+  const cells = new Set<CellKey>();
+  const rows = new Set<string>();
+
+  for (const edit of edits) {
+    const cell = cellKey(edit);
+    next.set(cell, edit);
+    cells.add(cell);
+    rows.add(edit.rowKey);
+  }
 
   // ⛔ `V-01`: нова правка ЦІЄЇ комірки — явна дія, що відпускає відмову (тож і
   // однакове значення, набране вдруге, поїде знову). Відмову рівня рядка
   // (`ECR-CALC-0437`) відпускає будь-яка правка рядка: саме вона, найімовірніше,
-  // і заповнює те, чого бракувало.
-  releaseRejections(key, (cell, rejection) =>
-    cell === cellKey(edit) || (rejection.scope === 'row' && rejection.edit.rowKey === edit.rowKey),
+  // і заповнює те, чого бракувало. Правки лише ВІДПУСКАЮТЬ відмови, тож
+  // пакетна перевірка «будь-яка правка пакета» дорівнює поштучній.
+  releaseRejections(
+    key,
+    (cell, rejection) =>
+      cells.has(cell) || (rejection.scope === 'row' && rows.has(rejection.edit.rowKey)),
   );
 
   replacePendingSlice(tableInstanceId, periodKey, next);
@@ -222,8 +253,8 @@ function releaseRejections(
   const next = new Map([...current].filter(([cell, rejection]) => !release(cell, rejection)));
   if (next.size === current.size) return;
 
-  // ⚠ Без `notify()`: єдиний викликач (`putPendingEdit`) одразу замінює зріз,
-  // і сповіщення піде звідти — одне на правку, а не два.
+  // ⚠ Без `notify()`: єдиний викликач (`putPendingEdits`) одразу замінює зріз,
+  // і сповіщення піде звідти — одне на пакет, а не два.
   if (next.size === 0) rejections.delete(key);
   else rejections.set(key, next);
 }
