@@ -42,8 +42,9 @@ public enum FunctionTier : byte
 /// редактора, немає в рушії;</description></item>
 /// <item><description><b>2 Extension</b> — <c>CONVERT</c>, <c>SUBSTANCE</c>:
 /// наші, потрібні для одиниць і речовин;</description></item>
-/// <item><description><b>3 Extension</b> — <c>REGFIND</c>, <c>REGONE</c>,
-/// <c>REGFIELD</c>: наші, функції довідників (RT-20a).</description></item>
+/// <item><description><b>8 Extension</b> — <c>REGFIND</c>, <c>REGONE</c>,
+/// <c>REGFIELD</c> (RT-20a) і <c>REGSUM</c>, <c>REGAVG</c>, <c>REGMIN</c>,
+/// <c>REGMAX</c>, <c>REGCOUNT</c> (RT-20b): наші, функції довідників.</description></item>
 /// </list>
 ///
 /// ⚠ Наслідок, вартий уваги методолога: **натуральний логарифм у чинній
@@ -93,7 +94,7 @@ public static class DialectCatalog
     ];
 
     /// <summary>
-    /// Сім функцій, яких чинний рушій не обчислює.
+    /// Дванадцять функцій, яких чинний рушій не обчислює.
     /// </summary>
     /// <remarks>
     /// ⛔ <c>Ln</c> і <c>ifs</c> потрапили сюди **за заміром**, а не за
@@ -120,6 +121,15 @@ public static class DialectCatalog
         new("REGFIND", 2, null, false, ExpressionValueType.Number),
         new("REGONE", 2, 2, false, ExpressionValueType.Number),
         new("REGFIELD", 2, 2, false, ExpressionValueType.Null),
+
+        // ⚠ Агрегати по рядках довідника (RT-20b, §5.4) — той самий ярус і та
+        // сама спецформа. Це не повернення діапазонів у методологію (`02b`
+        // §8): перебираються рядки ДОВІДНИКА (склад потоку), не часовий ряд.
+        new("REGSUM", 3, 3, false, ExpressionValueType.Number),
+        new("REGAVG", 3, 3, false, ExpressionValueType.Number),
+        new("REGMIN", 3, 3, false, ExpressionValueType.Null),
+        new("REGMAX", 3, 3, false, ExpressionValueType.Null),
+        new("REGCOUNT", 2, 2, false, ExpressionValueType.Number),
     ];
 
     /// <summary>

@@ -14,8 +14,9 @@ namespace Ecr.Expressions.Tests.Parsing;
 /// правило (FEATURE-REGISTRY-TABLES §5.2, крок RT-07).
 /// </summary>
 /// <remarks>
-/// Функцій довідників (<c>REGSUM</c>, <c>REGFIND</c>…) до RT-20a/b немає, тому
-/// тут перевіряється лише мова: дерево, друк, область і діагностики з позицією.
+/// Тут перевіряється лише мова: дерево, друк, область і діагностики з позицією.
+/// Обчислення функцій довідників — <c>RegistryLookupFunctionTests</c> (RT-20a) і
+/// <c>RegistryAggregateFunctionTests</c> (RT-20b).
 /// </remarks>
 public sealed class RowReferenceParsingTests
 {
@@ -96,10 +97,10 @@ public sealed class RowReferenceParsingTests
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Аргументи_агрегату_з_другого_це_область_рядка()
     {
-        // `REGSUM` до RT-20b — невідома функція, і це єдина відмова: `ROW.` в
-        // умові й виразі агрегату стоїть у своїй області.
+        // `ROW.` в умові й виразі агрегату стоїть у своїй області — жодної
+        // відмови (з RT-20b `REGSUM` — відома функція).
         var inside = Expr.Parse("REGSUM('GAS_COMPOSITION', ROW.CASE = 1, ROW.MOL_PCT * ROW.COMPONENT.MW)");
-        Assert.Equal("expr.unknownFunction", Assert.Single(inside.Diagnostics).MessageKey);
+        Assert.Empty(inside.Diagnostics);
 
         // Перший аргумент — код довідника, і він ПОЗА областю; після дужки — теж.
         var code = Expr.Parse("REGCOUNT(ROW.X, TRUE)");

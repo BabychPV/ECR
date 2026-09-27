@@ -82,12 +82,15 @@ public sealed class ClientServerEquivalenceTests
         // REGFIELD, і розходитися тут нічому так само, як із CONVERT.
         // REGFIND і REGONE (RT-20a, 02b «Функції довідників») — з тієї самої
         // причини: даних довідника в клієнтської підказки немає й не буде.
+        // Агрегати REGSUM/REGAVG/REGMIN/REGMAX/REGCOUNT (RT-20b) — так само:
+        // перебирають рядки знімка довідника, якого клієнт не має.
         var shared = declared.Except(
-            ["CONVERT", "REGFIELD", "REGFIND", "REGONE"], StringComparer.OrdinalIgnoreCase);
+            ["CONVERT", "REGFIELD", "REGFIND", "REGONE", "REGSUM", "REGAVG", "REGMIN", "REGMAX", "REGCOUNT"],
+            StringComparer.OrdinalIgnoreCase);
 
         // Функція, якої немає в наборі, — це функція, чию поведінку клієнт і
         // сервер ніде не звіряють. Саме там і з'явиться перше розходження.
-        Assert.Equal(15, declared.Count);
+        Assert.Equal(20, declared.Count);
         Assert.Empty(shared.Except(covered, StringComparer.OrdinalIgnoreCase));
     }
 

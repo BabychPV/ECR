@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Ecr.Domain.Enums;
 using Ecr.Expressions.Ast;
 
@@ -5,7 +6,8 @@ namespace Ecr.Expressions.Evaluation;
 
 /// <summary>
 /// Функції довідників, що обчислюються як СПЕЦФОРМИ: <c>REGFIND</c>,
-/// <c>REGONE</c>, <c>REGFIELD</c> у методологіях (FEATURE-REGISTRY-TABLES §5.4,
+/// <c>REGONE</c>, агрегати <c>REGSUM</c>/<c>REGAVG</c>/<c>REGMIN</c>/<c>REGMAX</c>/<c>REGCOUNT</c>
+/// (RT-20b) і <c>REGFIELD</c> у методологіях (FEATURE-REGISTRY-TABLES §5.4,
 /// <c>02b</c> «Функції довідників»; <c>D-159</c>…<c>D-162</c>).
 /// </summary>
 /// <remarks>
@@ -37,6 +39,41 @@ public static class RegistryForms
     /// <summary>Поле запису, зокрема шляхом через <c>Lookup</c>-поля.</summary>
     public const string Field = "REGFIELD";
 
+    /// <summary>Сума виразу по рядках, що пройшли фільтр; порожньо — <c>0</c>.</summary>
+    public const string Sum = "REGSUM";
+
+    /// <summary>Середнє не-<c>null</c>; порожньо — <c>null</c>.</summary>
+    public const string Average = "REGAVG";
+
+    /// <summary>Мінімум не-<c>null</c> (число або дата); порожньо — <c>null</c>.</summary>
+    public const string Minimum = "REGMIN";
+
+    /// <summary>Максимум не-<c>null</c> (число або дата); порожньо — <c>null</c>.</summary>
+    public const string Maximum = "REGMAX";
+
+    /// <summary>Кількість рядків, що пройшли фільтр; порожньо — <c>0</c>.</summary>
+    public const string Count = "REGCOUNT";
+
+    /// <summary>
+    /// Функції, що відкривають область рядка: другий і наступні аргументи
+    /// обчислюються над кожним рядком довідника.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Той самий склад, що <c>Parser.RowScopeFunctions</c> (граматика
+    /// області): парсер знає його ще ДО того, як ім'я впізнано, а тут він
+    /// потрібен, щоб відрізнити <c>ROW.</c> вкладеної області від <c>ROW.</c>
+    /// поточної (<see cref="ReadsRow"/>). Розбіжність двох переліків ловить
+    /// <c>RegistryAggregateFunctionTests.Області_рядка_в_парсері_й_обчислювачі_збігаються</c>.
+    /// </remarks>
+    public static readonly FrozenSet<string> RowScopeNames =
+        new[] { One, Sum, Average, Minimum, Maximum, Count }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly FrozenSet<string> MethodologyNames =
+        new[] { Find, One, Field, Sum, Average, Minimum, Maximum, Count }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly FrozenSet<string> TemplateNames =
+        new[] { Find, One, Sum, Average, Minimum, Maximum, Count }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Чи обчислює цю функцію <see cref="RegistryForms"/>, а не каталог діалекту.
     /// </summary>
@@ -60,13 +97,8 @@ public static class RegistryForms
 
         return dialect switch
         {
-            ExpressionDialect.Methodology =>
-                string.Equals(name, Find, StringComparison.Ordinal)
-                || string.Equals(name, One, StringComparison.Ordinal)
-                || string.Equals(name, Field, StringComparison.Ordinal),
-            ExpressionDialect.Template =>
-                string.Equals(name, Find, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(name, One, StringComparison.OrdinalIgnoreCase),
+            ExpressionDialect.Methodology => MethodologyNames.Contains(name),
+            ExpressionDialect.Template => TemplateNames.Contains(name),
             _ => false,
         };
     }
@@ -89,24 +121,39 @@ public static class RegistryForms
         ArgumentNullException.ThrowIfNull(budget);
         ArgumentNullException.ThrowIfNull(evaluate);
 
-        if (string.Equals(node.Name, One, StringComparison.OrdinalIgnoreCase))
+        switch (node.Name.ToUpperInvariant())
         {
-            return RegOne(node.Arguments, context, budget, evaluate);
+            case One:
+                return RegOne(node.Arguments, context, budget, evaluate);
+
+            case Field:
+                if (node.Arguments.Count != 2)
+                {
+                    return ExpressionValue.Error(ExpressionErrors.BadValue);
+                }
+
+                var entry = evaluate(node.Arguments[0], context);
+                var path = evaluate(node.Arguments[1], context);
+                return FieldPath(entry, path, context);
+
+            case Sum:
+                return Aggregate(AggregateKind.Sum, node.Arguments, context, budget, evaluate);
+
+            case Average:
+                return Aggregate(AggregateKind.Average, node.Arguments, context, budget, evaluate);
+
+            case Minimum:
+                return Aggregate(AggregateKind.Minimum, node.Arguments, context, budget, evaluate);
+
+            case Maximum:
+                return Aggregate(AggregateKind.Maximum, node.Arguments, context, budget, evaluate);
+
+            case Count:
+                return Aggregate(AggregateKind.Count, node.Arguments, context, budget, evaluate);
+
+            default:
+                return RegFind(node.Arguments, context, evaluate);
         }
-
-        if (string.Equals(node.Name, Field, StringComparison.OrdinalIgnoreCase))
-        {
-            if (node.Arguments.Count != 2)
-            {
-                return ExpressionValue.Error(ExpressionErrors.BadValue);
-            }
-
-            var entry = evaluate(node.Arguments[0], context);
-            var path = evaluate(node.Arguments[1], context);
-            return FieldPath(entry, path, context);
-        }
-
-        return RegFind(node.Arguments, context, evaluate);
     }
 
     /// <summary>
@@ -180,10 +227,12 @@ public static class RegistryForms
     /// принцип, що в <c>Evaluator.EvaluateGroup</c>: повний перегляд довідника
     /// на 30 тис. записів мусить упертися в <c>#BUDGET</c>, а не тихо рахувати.
     ///
-    /// ⚠ Індексного шляху (§5.4, «якщо <c>f</c> рівностями покриває ключ») тут
-    /// ще немає: він лише прискорює і відповіді не змінює (контракт
-    /// <see cref="IRegistrySnapshot.FindReferencing"/>). Заводиться разом з
-    /// індексним шляхом агрегатів (RT-20b).
+    /// ⚠ Рядки — з <see cref="Rows"/>: той самий індексний шлях, що в
+    /// агрегатів (<c>ROW.&lt;Lookup&gt; = &lt;вираз без ROW&gt;</c>, RT-20b).
+    /// Шляху «рівностями покриває довільний ключ» (§5.4) немає: знімок не
+    /// відкриває складу ключів (<see cref="IRegistrySnapshot"/>), і без нового
+    /// методу інтерфейсу перевірити покриття нічим. Відповіді це не змінює —
+    /// лише ціну: такий фільтр іде повним переглядом у бюджет.
     ///
     /// ⚠ Умова, що дала <c>null</c>, рядок не бере — як в агрегатах (§5.4).
     /// Не-булева — <c>#VALUE</c>: публікацію обійшли.
@@ -205,7 +254,7 @@ public static class RegistryForms
             return codeFailure;
         }
 
-        if (context.Registries is not { } snapshot || snapshot.GetEntries(code) is not { } entries)
+        if (context.Registries is not { } snapshot || Rows(code, args[1], snapshot, context, evaluate) is not { } entries)
         {
             return ExpressionValue.Error(ExpressionErrors.BadReference);
         }
@@ -258,6 +307,279 @@ public static class RegistryForms
         return found is { } id
             ? ExpressionValue.Number(id)
             : ExpressionValue.Error(ExpressionErrors.NotAvailable);
+    }
+
+    /// <summary>
+    /// Агрегат по рядках довідника: <c>REGSUM/REGAVG/REGMIN/REGMAX(R, f, e)</c>,
+    /// <c>REGCOUNT(R, f)</c> (§5.4).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Порожня множина — НЕ однаково для всіх, і це не недогляд, а правило
+    /// <c>SUM</c>/<c>AVERAGE</c> (<c>02b</c> §6.1, <c>TemplateFunctions</c>):
+    /// сума й кількість «ні з чого» — нуль, а середнє, мінімум і максимум «ні з
+    /// чого» — <c>null</c>. Нуль там стверджував би виміряне значення, і
+    /// відсутній у складі компонент дав би «середня молярна маса 0».
+    ///
+    /// ⚠ <c>null</c> поглинається двічі: умова <c>f</c> = <c>null</c> — рядок не
+    /// входить (як у <c>REGONE</c>); вираз <c>e</c> = <c>null</c> — рядок входить
+    /// у фільтр, але не в суму й не в дільник <c>REGAVG</c>. <c>REGCOUNT</c>
+    /// рахує рядки за <c>f</c>, виразу не має.
+    ///
+    /// ⛔ Перша помилка — за порядком рядків <c>(Ordinal, Id)</c>, у межах рядка
+    /// спершу <c>f</c>, потім <c>e</c>, — і повертається одразу: помилка
+    /// поширюється, як скрізь (§6.4), а порядок рядків — частина контракту
+    /// знімка, тож відповідь та сама в кожному прогоні.
+    ///
+    /// ⚠ Кожен рядок коштує крок бюджету ПОНАД вузли <c>f</c>/<c>e</c>, як у
+    /// <c>REGONE</c>: повний перегляд 30 тис. рядків упирається в <c>#BUDGET</c>.
+    /// Індексний шлях (<see cref="Rows"/>) перебирає лише дітей і тому в бюджет
+    /// вкладається.
+    ///
+    /// ⚠ Арифметика — <see cref="decimal"/> без <c>IEvaluationArithmetic</c>:
+    /// агрегати мають ярус <c>Extension</c> і в <c>Legacy</c>-версії не
+    /// публікуються (<c>ECR-CALC-0433</c>), тож рахувати <c>double</c> їм нічого.
+    /// Переповнення — <c>#VALUE</c>, а не виняток: одна формула не сміє зірвати
+    /// прогін.
+    /// </remarks>
+    private static ExpressionValue Aggregate(
+        AggregateKind kind,
+        IReadOnlyList<AstNode> args,
+        IEvaluationContext context,
+        EvaluationBudget budget,
+        Func<AstNode, IEvaluationContext, ExpressionValue> evaluate)
+    {
+        if (args.Count != (kind == AggregateKind.Count ? 2 : 3))
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
+
+        var code = RegistryCode(evaluate(args[0], context), out var codeFailure);
+        if (code is null)
+        {
+            return codeFailure;
+        }
+
+        if (context.Registries is not { } snapshot || Rows(code, args[1], snapshot, context, evaluate) is not { } entries)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadReference);
+        }
+
+        var accumulator = new Accumulator(kind);
+        foreach (var entryId in entries)
+        {
+            if (!budget.TryConsume())
+            {
+                return ExpressionValue.Error(ExpressionErrors.BudgetExceeded);
+            }
+
+            var scope = new RegistryRowScope(context, entryId);
+            var verdict = evaluate(args[1], scope);
+            if (verdict.IsError)
+            {
+                return verdict;
+            }
+
+            if (verdict.IsNull)
+            {
+                continue;
+            }
+
+            if (verdict.Type != ExpressionValueType.Boolean)
+            {
+                return ExpressionValue.Error(ExpressionErrors.BadValue);
+            }
+
+            if (!(bool)verdict.Value!)
+            {
+                continue;
+            }
+
+            if (kind == AggregateKind.Count)
+            {
+                accumulator.CountRow();
+                continue;
+            }
+
+            var value = evaluate(args[2], scope);
+            if (value.IsError)
+            {
+                return value;
+            }
+
+            if (value.IsNull)
+            {
+                continue;
+            }
+
+            if (!accumulator.TryAdd(value))
+            {
+                return ExpressionValue.Error(ExpressionErrors.BadValue);
+            }
+        }
+
+        return accumulator.Outcome();
+    }
+
+    /// <summary>
+    /// Рядки, які перебирає агрегат чи <c>REGONE</c>: за індексом, якщо фільтр
+    /// це дозволяє, інакше — усі видимі.
+    /// </summary>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="filter">Умова <c>f</c>.</param>
+    /// <param name="snapshot">Знімок.</param>
+    /// <param name="context">Зовнішній контекст (НЕ область рядка).</param>
+    /// <param name="evaluate">Делегат обчислювача.</param>
+    /// <returns>Рядки в порядку <c>(Ordinal, Id)</c>; <c>null</c> — довідника немає.</returns>
+    /// <remarks>
+    /// ⚠ **Індексний шлях (§5.4).** Верхній кон'юнкт <c>f</c> (гілки <c>AND</c>)
+    /// виду <c>ROW.&lt;поле&gt; = &lt;вираз без ROW&gt;</c> (у будь-якому порядку
+    /// сторін) з полем в ОДИН сегмент: вираз обчислюється ОДИН раз у зовнішньому
+    /// контексті, і якщо дає id запису, а поле — <c>Lookup</c> цього довідника,
+    /// кандидати — лише записи, що на нього посилаються
+    /// (<see cref="IRegistrySnapshot.FindReferencing"/>). Усю умову <c>f</c> потім
+    /// однаково рахують на кожному кандидаті — індекс звужує перегляд, а не
+    /// замінює перевірку.
+    ///
+    /// ⚠ Будь-що інше — повний перегляд, і це завжди безпечно: вираз дав
+    /// помилку, <c>null</c> (тоді <c>ROW.X = null</c> істинне саме для
+    /// НЕзаповнених, а їх індекс не тримає) чи не id; поле не <c>Lookup</c>
+    /// (знімок дає <c>null</c>); кон'юнкт під <c>OR</c>/<c>NOT</c>.
+    ///
+    /// ⚠ Єдина різниця з повним переглядом, названа, а не прихована: помилку
+    /// ІНШОГО кон'юнкта на рядку, що не посилається на ціль, індексний шлях не
+    /// бачить — рядка він не відкриває. Відповідь на рядках, які агрегат
+    /// справді бере, та сама.
+    /// </remarks>
+    private static IReadOnlyList<long>? Rows(
+        string code,
+        AstNode filter,
+        IRegistrySnapshot snapshot,
+        IEvaluationContext context,
+        Func<AstNode, IEvaluationContext, ExpressionValue> evaluate)
+    {
+
+        foreach (var conjunct in TopConjuncts(filter))
+        {
+            if (conjunct is not BinaryNode { Operator: BinaryOperator.Equal } equality)
+            {
+                continue;
+            }
+
+            var (field, target) = equality switch
+            {
+                { Left: RowFieldNode { Path.Count: 1 } left } when !ReadsRow(equality.Right) => (left.Path[0], equality.Right),
+                { Right: RowFieldNode { Path.Count: 1 } right } when !ReadsRow(equality.Left) => (right.Path[0], equality.Left),
+                _ => ((string?)null, (AstNode?)null),
+            };
+
+            if (field is null || target is null)
+            {
+                continue;
+            }
+
+            if (AsEntryId(evaluate(target, context)) is { } targetId
+                && snapshot.FindReferencing(code, field, targetId) is { } children)
+            {
+                return children;
+            }
+        }
+
+        return snapshot.GetEntries(code);
+    }
+
+    /// <summary>Верхні кон'юнкти умови: гілки <c>AND</c> зліва направо.</summary>
+    /// <remarks>
+    /// ⚠ Обхід — явним стеком, а не рекурсією: дерево довгого ланцюга
+    /// <c>a AND b AND …</c> — лівий гребінь (<c>Evaluator.EvaluateScalar</c>,
+    /// сторож глибини), і рекурсивний обхід мав би власну, ніким не обмежену
+    /// глибину.
+    /// </remarks>
+    private static List<AstNode> TopConjuncts(AstNode filter)
+    {
+        var conjuncts = new List<AstNode>();
+        var pending = new Stack<AstNode>();
+        pending.Push(filter);
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            if (node is BinaryNode { Operator: BinaryOperator.And } and)
+            {
+                pending.Push(and.Right);
+                pending.Push(and.Left);
+            }
+            else
+            {
+                conjuncts.Add(node);
+            }
+        }
+
+        return conjuncts;
+    }
+
+    /// <summary>
+    /// Чи читає вираз рядок ПОТОЧНОЇ області (<c>ROW.</c> поза вкладеним агрегатом).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>ROW.</c> усередині умови чи виразу вкладеного <c>REGONE</c>/<c>REGSUM</c>
+    /// належить ЙОГО області (§5.2) і від поточного рядка не залежить, тож
+    /// <c>ROW.STREAM = REGONE('STREAM', ROW.NAME = '1D-2')</c> — індексний. Перший
+    /// аргумент вкладеного агрегату (код) — у поточній області, як і будь-який
+    /// інший вузол.
+    ///
+    /// ⛔ Невідомий вид вузла — «читає»: помилитися в бік повного перегляду
+    /// коштує бюджету, в інший бік — хибної відповіді.
+    /// </remarks>
+    private static bool ReadsRow(AstNode root)
+    {
+        var pending = new Stack<AstNode>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            switch (pending.Pop())
+            {
+                case RowFieldNode:
+                    return true;
+
+                case LiteralNode or SymbolReferenceNode or PeriodPropertyNode or ThisNode:
+                    break;
+
+                case CellReferenceNode { Row: not RowSelector.Predicate }:
+                    break;
+
+                case CellReferenceNode { Row: RowSelector.Predicate predicate }:
+                    pending.Push(predicate.Condition);
+                    break;
+
+                case UnaryNode unary:
+                    pending.Push(unary.Operand);
+                    break;
+
+                case BinaryNode binary:
+                    pending.Push(binary.Left);
+                    pending.Push(binary.Right);
+                    break;
+
+                case ConditionalNode conditional:
+                    pending.Push(conditional.Condition);
+                    pending.Push(conditional.WhenTrue);
+                    pending.Push(conditional.WhenFalse);
+                    break;
+
+                case FunctionNode function:
+                    var own = RowScopeNames.Contains(function.Name) ? Math.Min(1, function.Arguments.Count) : function.Arguments.Count;
+                    for (var i = 0; i < own; i++)
+                    {
+                        pending.Push(function.Arguments[i]);
+                    }
+
+                    break;
+
+                default:
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -424,63 +746,99 @@ public static class RegistryForms
            && number <= long.MaxValue
             ? (long)number
             : null;
-}
 
-/// <summary>
-/// Область рядка довідника: контекст, у якому <c>ROW.</c> означає запис
-/// <see cref="EntryId"/>; решту делегує зовнішньому контексту.
-/// </summary>
-/// <remarks>
-/// ⚠ Декоратор, а не змінюване поле контексту: область — властивість ОДНОГО
-/// спуску обчислювача, і вкладені <c>REGONE</c> отримують кожен свою, не
-/// відновлюючи нічого в <c>finally</c>. Зовнішній контекст лишається незмінним.
-///
-/// ⚠ Делегує ВСЕ, зокрема члени інтерфейсу з типовою реалізацією
-/// (<see cref="GetRegistryField"/>, <see cref="Registries"/>): без явного
-/// делегування вони мовчки взяли б замовчування інтерфейсу, і всередині умови
-/// <c>REGONE</c> <c>REGFIELD</c> і вкладений пошук давали б <c>#REF</c>.
-/// </remarks>
-/// <param name="inner">Зовнішній контекст.</param>
-/// <param name="entryId">Запис, що перебирається.</param>
-internal sealed class RegistryRowScope(IEvaluationContext inner, long entryId) : IEvaluationContext
-{
-    /// <summary>Запис області.</summary>
-    public long EntryId { get; } = entryId;
+    private enum AggregateKind : byte
+    {
+        Sum,
+        Average,
+        Minimum,
+        Maximum,
+        Count,
+    }
 
-    /// <inheritdoc />
-    public IRegistrySnapshot? Registries => inner.Registries;
+    /// <summary>Накопичувач агрегату: одне значення на рядок, що пройшов фільтр.</summary>
+    /// <remarks>
+    /// ⚠ <c>REGSUM</c>/<c>REGAVG</c> приймають лише числа; <c>REGMIN</c>/<c>REGMAX</c>
+    /// — числа АБО дати (§5.4), але не суміш: «менше» між числом і датою не
+    /// визначене, і <c>#VALUE</c> тут чесніший за будь-яке впорядкування.
+    /// </remarks>
+    private sealed class Accumulator(AggregateKind kind)
+    {
+        private decimal _total;
+        private int _count;
+        private ExpressionValue? _best;
 
-    /// <inheritdoc />
-    public PeriodContext Period => inner.Period;
+        public void CountRow() => _count++;
 
-    /// <inheritdoc />
-    public IReadOnlyList<ExpressionValue> Read(CellReferenceNode reference) => inner.Read(reference);
+        public bool TryAdd(ExpressionValue value)
+        {
+            switch (kind)
+            {
+                case AggregateKind.Sum or AggregateKind.Average:
+                    if (value.AsNumber() is not { } number)
+                    {
+                        return false;
+                    }
 
-    /// <inheritdoc />
-    public ExpressionValue GetCell(int tableDefId, string rowKey, int columnDefId, int periodOffset)
-        => inner.GetCell(tableDefId, rowKey, columnDefId, periodOffset);
+                    try
+                    {
+                        _total += number;
+                    }
+                    catch (OverflowException)
+                    {
+                        return false;
+                    }
 
-    /// <inheritdoc />
-    public IReadOnlyList<ExpressionValue> GetCellsByPredicate(int tableDefId, string filterJson, int columnDefId)
-        => inner.GetCellsByPredicate(tableDefId, filterJson, columnDefId);
+                    _count++;
+                    return true;
 
-    /// <inheritdoc />
-    public ExpressionValue GetArgument(string name) => inner.GetArgument(name);
+                case AggregateKind.Minimum or AggregateKind.Maximum:
+                    if (value.Type is not (ExpressionValueType.Number or ExpressionValueType.Date))
+                    {
+                        return false;
+                    }
 
-    /// <inheritdoc />
-    public ExpressionValue GetConstant(string name) => inner.GetConstant(name);
+                    if (_best is not { } best)
+                    {
+                        _best = value;
+                        return true;
+                    }
 
-    /// <inheritdoc />
-    public ExpressionValue GetFormulaResult(string name) => inner.GetFormulaResult(name);
+                    if (best.Type != value.Type)
+                    {
+                        return false;
+                    }
 
-    /// <inheritdoc />
-    public ExpressionValue GetHeader(string name) => inner.GetHeader(name);
+                    var order = value.Type == ExpressionValueType.Date
+                        ? ((DateTime)value.Value!).CompareTo((DateTime)best.Value!)
+                        : value.AsNumber() is { } candidate && best.AsNumber() is { } current
+                            ? candidate.CompareTo(current)
+                            : 0;
 
-    /// <inheritdoc />
-    public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
-        => inner.GetRegistryField(registryEntryId, fieldCode);
+                    if (kind == AggregateKind.Minimum ? order < 0 : order > 0)
+                    {
+                        _best = value;
+                    }
 
-    /// <inheritdoc />
-    public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)
-        => inner.Convert(value, fromUnitCode, toUnitCode);
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>Значення агрегату після перебору.</summary>
+        /// <remarks>
+        /// ⚠ Ім'я не «Result»: сторож <c>LayerRulesTests.Правило_5</c> читає
+        /// текст джерел, і виклик через крапку він приймає за блокування задачі.
+        /// </remarks>
+        public ExpressionValue Outcome()
+            => kind switch
+            {
+                AggregateKind.Sum => ExpressionValue.Number(_total),
+                AggregateKind.Count => ExpressionValue.Number(_count),
+                AggregateKind.Average => _count == 0 ? ExpressionValue.Null : ExpressionValue.Number(_total / _count),
+                _ => _best ?? ExpressionValue.Null,
+            };
+    }
 }

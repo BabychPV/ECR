@@ -32,6 +32,39 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
     private readonly Dictionary<string, RegistryDef> _registries = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<long, Entry> _entries = [];
 
+    /// <summary>
+    /// Індекси, побудовані ліниво при першому читанні після зміни знімка:
+    /// видимі записи довідника в порядку <c>(Ordinal, Id)</c> і діти за
+    /// <c>(довідник, Lookup-поле) → ціль → записи</c> (§5.7).
+    /// </summary>
+    private Indexes? _indexes;
+
+    private int _rowsHandedOut;
+    private int _fieldReads;
+
+    /// <summary>
+    /// Скільки записів знімок ВІДДАВ на перебір (<see cref="GetEntries"/> і
+    /// <see cref="FindReferencing"/>, сумарно з моменту створення чи
+    /// <see cref="ResetCounters"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лічильник кроків для доказу індексного шляху (§5.4): агрегат, що йде
+    /// за індексом, отримує лише дітей; повний перегляд — усі видимі записи
+    /// довідника. Бойовий знімок такого лічильника не має — він тут, бо тест
+    /// доводить поведінку РУШІЯ, а не знімка.
+    /// </remarks>
+    public int RowsHandedOut => Volatile.Read(ref _rowsHandedOut);
+
+    /// <summary>Скільки разів рушій прочитав поле (<see cref="GetField"/>).</summary>
+    public int FieldReads => Volatile.Read(ref _fieldReads);
+
+    /// <summary>Обнуляє обидва лічильники.</summary>
+    public void ResetCounters()
+    {
+        Interlocked.Exchange(ref _rowsHandedOut, 0);
+        Interlocked.Exchange(ref _fieldReads, 0);
+    }
+
     /// <summary>Оголошує довідник.</summary>
     /// <param name="code">Код довідника.</param>
     /// <param name="fields">Коди полів (усі, включно з ключовими й <c>Lookup</c>).</param>
@@ -59,6 +92,7 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
         }
 
         _registries[code] = new RegistryDef(declared, key, lookups);
+        _indexes = null;
         return this;
     }
 
@@ -93,6 +127,7 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
         }
 
         _entries.Add(id, new Entry(id, registryCode, code, ordinal, visible, own));
+        _indexes = null;
         return this;
     }
 
@@ -117,7 +152,14 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
     {
         ArgumentNullException.ThrowIfNull(registryCode);
 
-        return _registries.ContainsKey(registryCode) ? Visible(registryCode).Select(e => e.Id).ToList() : null;
+        if (!_registries.ContainsKey(registryCode))
+        {
+            return null;
+        }
+
+        var rows = Index().Ordered.GetValueOrDefault(registryCode) ?? [];
+        Interlocked.Add(ref _rowsHandedOut, rows.Count);
+        return rows;
     }
 
     /// <inheritdoc />
@@ -160,16 +202,23 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
             return null;
         }
 
-        return Visible(registryCode)
-            .Where(e => e.Value(lookupFieldCode).AsNumber() == targetEntryId)
-            .Select(e => e.Id)
-            .ToList();
+        // ⚠ Справжній індекс, а не перегляд із фільтром: лічильник
+        // `RowsHandedOut` мусить бачити лише дітей, і 30 тис. рядків у тесті
+        // бюджету не мають коштувати сортування на кожен виклик.
+        var rows = Index().Children.TryGetValue(ChildKey(registryCode, lookupFieldCode), out var byTarget)
+                   && byTarget.TryGetValue(targetEntryId, out var children)
+            ? children
+            : [];
+
+        Interlocked.Add(ref _rowsHandedOut, rows.Count);
+        return rows;
     }
 
     /// <inheritdoc />
     public ExpressionValue GetField(long entryId, string fieldCode)
     {
         ArgumentNullException.ThrowIfNull(fieldCode);
+        Interlocked.Increment(ref _fieldReads);
 
         if (!_entries.TryGetValue(entryId, out var entry)
             || !entry.Visible
@@ -180,6 +229,46 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
 
         return entry.Value(fieldCode);
     }
+
+    /// <summary>Індекси знімка; будуються при першому читанні після зміни.</summary>
+    /// <remarks>
+    /// ⚠ Лінивість — лише для наповнення в тесті (<c>AddEntry</c> × 30 тис.).
+    /// Після наповнення знімок читається, як і бойовий, без змін — тож
+    /// паралельне читання безпечне; змінювати знімок під час обчислення тест не
+    /// повинен.
+    /// </remarks>
+    private Indexes Index()
+    {
+        if (_indexes is { } built)
+        {
+            return built;
+        }
+
+        var ordered = new Dictionary<string, IReadOnlyList<long>>(StringComparer.OrdinalIgnoreCase);
+        var children = new Dictionary<(string, string), Dictionary<long, IReadOnlyList<long>>>();
+        foreach (var (code, registry) in _registries)
+        {
+            var visible = Visible(code).ToList();
+            ordered[code] = visible.Select(e => e.Id).ToList();
+
+            foreach (var field in registry.LookupFields)
+            {
+                // ⚠ Ключ — ціле id: `ROW.F = id` істинне лише для числа, що
+                // дорівнює id; дробове значення Lookup-поля не посилається ні на що.
+                children[ChildKey(code, field)] = visible
+                    .Select(e => (e.Id, Target: e.Value(field).AsNumber()))
+                    .Where(p => p.Target is { } t && t == decimal.Truncate(t) && t >= long.MinValue && t <= long.MaxValue)
+                    .GroupBy(p => (long)p.Target!.Value)
+                    .ToDictionary(g => g.Key, g => (IReadOnlyList<long>)g.Select(p => p.Id).ToList());
+            }
+        }
+
+        _indexes = new Indexes(ordered, children);
+        return _indexes;
+    }
+
+    private static (string, string) ChildKey(string registryCode, string fieldCode)
+        => (registryCode.ToUpperInvariant(), fieldCode.ToUpperInvariant());
 
     private IEnumerable<Entry> Visible(string registryCode)
         => _entries.Values
@@ -202,6 +291,10 @@ public sealed class InMemoryRegistrySnapshot : IRegistrySnapshot
 
         return stored.Type == part.Type && Equals(stored.Value, part.Value);
     }
+
+    private sealed record Indexes(
+        Dictionary<string, IReadOnlyList<long>> Ordered,
+        Dictionary<(string, string), Dictionary<long, IReadOnlyList<long>>> Children);
 
     private sealed record RegistryDef(
         HashSet<string> Fields, IReadOnlyList<string> PrimaryKey, HashSet<string> LookupFields);

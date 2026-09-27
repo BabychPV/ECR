@@ -118,6 +118,11 @@ public sealed class DialectCatalogTests
     [InlineData("REGFIND")]
     [InlineData("REGONE")]
     [InlineData("REGFIELD")]
+    [InlineData("REGSUM")]
+    [InlineData("REGAVG")]
+    [InlineData("REGMIN")]
+    [InlineData("REGMAX")]
+    [InlineData("REGCOUNT")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Наші_розширення_недоступні_в_Legacy(string name)
     {
