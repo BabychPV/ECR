@@ -28,6 +28,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// ⚠ Правила з `D-118`, і кожне з них про те, щоб не втратити дані мовчки:
 /// <list type="table">
 /// <item><term>період <c>Open</c>/<c>Grace</c></term><description>записати</description></item>
+/// <item><term>період <c>Scheduled</c></term><description><b>не</b> писати і <b>не</b> журналювати: ще не відкритий, точки згорне перший прогін після відкриття</description></item>
 /// <item><term>період закритий</term><description><b>не</b> писати; рядок у журналі покриття зі статусом <c>SkippedPeriodClosed</c></description></item>
 /// <item><term>комірка правлена людиною</term><description><b>не</b> перезаписувати; <c>ConflictKeptManual</c></description></item>
 /// <item><term>комірка порожня або від інтеграції</term><description>записати</description></item>
@@ -82,12 +83,26 @@ public sealed class MaterializeCollectedDataJob(
 
         // ⚠ Беруться лише МАТЕРІАЛІЗОВАНІ мапінги: `TargetRowKey IS NULL`
         // означає «точки лишаються сирими для звірки», і це легальний стан.
+        //
+        // ⛔ Суміжне D16-03: лише мапінги ТАБЛИЦІ цього екземпляра. Сутність
+        // може живити кілька таблиць, і кожна отримує власну задачу
+        // (`CollectionJob`); без звуження задача таблиці A несла й колонки
+        // таблиці B, патчер повертав їх у `KeptManual`, і журнал покриття
+        // щопрогону отримував хибний `ConflictKeptManual` «правка людини».
+        // Видалені колонки своєї таблиці НЕ відсіюються тут навмисно: це
+        // справжня помилка конфігурації, і патчер про неї звітує.
+        var instanceTable = db.TableInstances
+            .Where(t => t.Id == task.TableInstanceId && t.PeriodKeyValue == task.PeriodKey)
+            .Select(t => t.TableDefId);
+
         var maps = await db.EntityFieldMaps
             .AsNoTracking()
             .Where(m => m.SourceEntityId == task.SourceEntityId
                         && m.IsActive
                         && m.TargetRowKey != null
-                        && m.TargetColumnDefId != null)
+                        && m.TargetColumnDefId != null
+                        && db.ColumnDefs.Any(c => c.Id == m.TargetColumnDefId
+                                                  && instanceTable.Contains(c.TableDefId)))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -112,6 +127,29 @@ public sealed class MaterializeCollectedDataJob(
             .ConfigureAwait(false);
 
         var state = period?.State;
+
+        // ⛔ Суміжне D16-03: `Scheduled` — не «закритий». Період ще не відкрито
+        // (`OpenOffsetDays > 0` або задача станів ще не пройшла), збір не
+        // пізній, і нічого не втрачається: точки лежать у `ext.RawDataPoint`,
+        // а згортка йде за межами ПЕРІОДУ, тож перший прогін після відкриття
+        // згорне їх усі. Тут стояв `SkippedPeriodClosed` «пізній збір
+        // лишається сирим» — хибний рядок у журналі покриття щопрогону.
+        if (state is PeriodState.Scheduled)
+        {
+            await progress
+                .ReportKeyAsync(
+                    100,
+                    "jobs.materializeDone",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["applied"] = "0",
+                        ["keptManual"] = "0",
+                        ["overCeiling"] = "0",
+                    },
+                    ct)
+                .ConfigureAwait(false);
+            return;
+        }
 
         if (period is null || state is not (PeriodState.Open or PeriodState.Grace))
         {

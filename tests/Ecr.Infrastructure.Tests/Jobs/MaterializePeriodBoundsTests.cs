@@ -42,7 +42,7 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
     /// з UTC+6 на UTC+5 у 2024-му, і база поясів на різних машинах (Windows ICU,
     /// Linux tzdata) може мати будь-яку з двох редакцій. Константа 19:00 UTC
     /// виявилась хибною вже на першій машині (там +6). Незалежність від
-    /// <c>PeriodUtcRange</c> збережено: тут пряме <c>ConvertTimeToUtc</c>.
+    /// <c>Period.UtcBounds</c> збережено: тут пряме <c>ConvertTimeToUtc</c>.
     /// </remarks>
     private static readonly DateTime JanStartUtc = LocalMidnightUtc(new DateTime(2026, 1, 1));
 
