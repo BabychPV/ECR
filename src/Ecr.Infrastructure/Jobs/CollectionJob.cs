@@ -195,21 +195,49 @@ public sealed class CollectionJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var targets = await db.TableInstances
-            .AsNoTracking()
-            .Where(t => tableDefIds.Contains(t.TableDefId))
-            .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new
-            {
-                t.Id,
-                t.DocumentId,
-                t.PeriodKeyValue,
-                d.ProjectId,
-            })
-            .OrderBy(t => t.PeriodKeyValue)
+        // ⛔ D16-03: задача — лише в екземпляри, чий ПЕРІОД перетинає вікно
+        // збору. Раніше її отримував кожен екземпляр усіх періодів, і всі вони
+        // згортали одне вікно — одне й те саме число в січень і лютий, а
+        // `Scheduled`-періоди щопрогону писали хибне «пізній збір лишається
+        // сирим». За станом НЕ фільтруємо: закритий період, що перетинає вікно,
+        // і далі має отримати `SkippedPeriodClosed`.
+        //
+        // ⚠ Точна межа — у поясі проєкту (`PeriodUtcRange`), тож у запиті лише
+        // грубий фільтр за датами з запасом у добу в обидва боки (пояс ≤ ±14 год),
+        // а точний — у пам'яті.
+        var fromDate = DateOnly.FromDateTime(from).AddDays(-1);
+        var toDate = DateOnly.FromDateTime(to).AddDays(1);
+
+        var candidates = await (
+                from t in db.TableInstances.AsNoTracking()
+                join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
+                join p in db.Periods.AsNoTracking()
+                    on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }
+                join project in db.Projects.AsNoTracking() on d.ProjectId equals project.Id
+                where tableDefIds.Contains(t.TableDefId)
+                      && p.PeriodStart <= toDate
+                      && p.PeriodEnd >= fromDate
+                select new
+                {
+                    t.Id,
+                    t.DocumentId,
+                    t.PeriodKeyValue,
+                    d.ProjectId,
+                    p.PeriodStart,
+                    p.PeriodEnd,
+                    project.TimeZoneId,
+                })
+            // ⚠ Найсвіжіші першими: за переповнення стелі відсікатися мають
+            // найстаріші періоди, а не поточний.
+            .OrderByDescending(t => t.PeriodKeyValue)
             .ThenBy(t => t.Id)
             .Take(MaxMaterializationTargets)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        var targets = candidates
+            .Where(t => Integration.PeriodUtcRange.Of(t.PeriodStart, t.PeriodEnd, t.TimeZoneId).Overlaps(from, to))
+            .ToList();
 
         foreach (var target in targets)
         {

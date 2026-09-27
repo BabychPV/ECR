@@ -6,6 +6,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
+using Ecr.Infrastructure.Integration;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -42,14 +43,33 @@ public sealed class MaterializeCollectedDataJob(
     public static string Code => "materialize-collected";
 
     /// <summary>
-    /// Стеля точок на прогін.
+    /// Стеля точок на одне поле за період.
     /// </summary>
     /// <remarks>
-    /// Півмільйона — це вже не «інтервал збору», а наслідок помилки
+    /// Півмільйона на поле — це вже не «період збору», а наслідок помилки
     /// конфігурації; переносити їх усі означало б покласти запис документів на
     /// час, коли з ними працюють.
+    /// <para>
+    /// ⛔ D16-03: стеля — на ПОЛЕ, не на сутність, і досягнута стеля НЕ обрізає
+    /// хвіст мовчки. Раніше спільний <c>Take</c> за зростанням часу відрізав
+    /// останні точки: <c>Last</c> брав не останню, <c>Sum</c> був занижений, і
+    /// ніде про це не лишалося сліду. Тепер поле, що перевищило стелю, у комірку
+    /// не пишеться зовсім (часткова сума — хибне число, а не «приблизне»), а в
+    /// журналі покриття з'являється рядок <see cref="PointCeilingStatus"/>.
+    /// </para>
     /// </remarks>
     public const int MaxPoints = 500_000;
+
+    /// <summary>Статус рядка журналу покриття, коли поле перевищило стелю точок.</summary>
+    public const string PointCeilingStatus = "SkippedPointCeiling";
+
+    /// <summary>Стеля точок на поле; змінюється лише тестами.</summary>
+    /// <remarks>
+    /// ⚠ Властивість, а не параметр конструктора: контейнер створює задачу за
+    /// конструктором, і примітив у ньому або не розв'язався б, або вимагав би
+    /// реєстрації заради тестів.
+    /// </remarks>
+    public int PointCeilingPerField { get; init; } = MaxPoints;
 
     /// <inheritdoc />
     public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
@@ -81,14 +101,20 @@ public sealed class MaterializeCollectedDataJob(
         // ⛔ Стан періоду перевіряється ОДИН раз і до роботи. Пізній збір за
         // закритий період не втрачається тихо: він лишається сирим, а в
         // журналі покриття з'являється причина.
-        var state = await db.Periods
-            .AsNoTracking()
-            .Where(p => p.ProjectId == task.ProjectId && p.PeriodKeyValue == task.PeriodKey)
-            .Select(p => (PeriodState?)p.State)
+        //
+        // ⛔ D16-03: разом зі станом читаються МЕЖІ періоду і пояс проєкту —
+        // згортка йде за періодом екземпляра, а не за вікном збору.
+        var period = await (
+                from p in db.Periods.AsNoTracking()
+                join project in db.Projects.AsNoTracking() on p.ProjectId equals project.Id
+                where p.ProjectId == task.ProjectId && p.PeriodKeyValue == task.PeriodKey
+                select new { p.State, p.PeriodStart, p.PeriodEnd, project.TimeZoneId })
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        if (state is not (PeriodState.Open or PeriodState.Grace))
+        var state = period?.State;
+
+        if (period is null || state is not (PeriodState.Open or PeriodState.Grace))
         {
             await coverage
                 .RecordAsync(task.SourceEntityId, periodKey, "SkippedPeriodClosed",
@@ -101,7 +127,23 @@ public sealed class MaterializeCollectedDataJob(
 
         await progress.ReportKeyAsync(30, "jobs.materializeFolding", ct).ConfigureAwait(false);
 
-        var aggregated = await AggregateAsync(task, maps, ct).ConfigureAwait(false);
+        var bounds = PeriodUtcRange.Of(period.PeriodStart, period.PeriodEnd, period.TimeZoneId);
+
+        var (aggregated, overCeiling) = await AggregateAsync(task, maps, bounds, ct).ConfigureAwait(false);
+
+        // ⛔ Перевищена стеля — не мовчки: рядок у журнал покриття, як і решта
+        // причин «зібрано, але не записано» (`D-118`).
+        if (overCeiling.Count > 0)
+        {
+            await coverage
+                .RecordManyAsync(
+                    [.. overCeiling.Select(field => new CoverageEvent(
+                        task.SourceEntityId, periodKey, PointCeilingStatus,
+                        $"Поле {field}: понад {PointCeilingPerField.ToString(CultureInfo.InvariantCulture)} "
+                        + "точок за період — значення не записано, бо згортка неповного ряду дала б хибне число."))],
+                    ct)
+                .ConfigureAwait(false);
+        }
 
         if (aggregated.Count == 0)
         {
@@ -140,59 +182,81 @@ public sealed class MaterializeCollectedDataJob(
                 {
                     ["applied"] = written.Applied.ToString(CultureInfo.InvariantCulture),
                     ["keptManual"] = written.KeptManual.Count.ToString(CultureInfo.InvariantCulture),
+                    ["overCeiling"] = overCeiling.Count.ToString(CultureInfo.InvariantCulture),
                 },
                 ct)
             .ConfigureAwait(false);
     }
 
-    /// <summary>Згортає сирі точки в одне значення на мапінг.</summary>
-    private async Task<IReadOnlyList<IntegrationCellValue>> AggregateAsync(
-        MaterializeTask task, List<EntityFieldMap> maps, CancellationToken ct)
+    /// <summary>Згортає сирі точки ПЕРІОДУ екземпляра в одне значення на мапінг.</summary>
+    /// <param name="task">Завдання.</param>
+    /// <param name="maps">Матеріалізовані мапінги сутності.</param>
+    /// <param name="period">Межі періоду екземпляра в UTC, <c>[початок, кінець)</c>.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Значення для запису і поля, що перевищили стелю точок.</returns>
+    /// <remarks>
+    /// ⛔ D16-03: точки беруться за межами ПЕРІОДУ — усі, що є в
+    /// <c>ext.RawDataPoint</c>, — а не за вікном збору <c>task.FromUtc/ToUtc</c>.
+    /// Вікно лише вирішує, які періоди зачеплено (<c>CollectionJob</c>). Згортка
+    /// за вікном давала «Sum за місяць» = сума останніх 7 діб, одне й те саме
+    /// число в кожен відкритий період і точки сусіднього місяця через межу.
+    ///
+    /// ⚠ Окремий запит на кожне поле: стеля — на поле, і спільний <c>Take</c>
+    /// на всі поля віддав би один щільний тег за рахунок решти.
+    /// </remarks>
+    private async Task<(IReadOnlyList<IntegrationCellValue> Values, IReadOnlyList<string> OverCeiling)> AggregateAsync(
+        MaterializeTask task, List<EntityFieldMap> maps, PeriodUtcRange period, CancellationToken ct)
     {
-        var fields = maps.Select(m => m.SourceField).ToList();
-
-        var points = await db.RawDataPoints
-            .AsNoTracking()
-            .Where(p => p.SourceEntityId == task.SourceEntityId
-                        && p.Timestamp >= task.FromUtc
-                        && p.Timestamp < task.ToUtc
-                        && fields.Contains(p.SourcePath))
-            .OrderBy(p => p.Timestamp)
-            .Take(MaxPoints)
-            .Select(p => new { p.SourcePath, p.Timestamp, p.ValueNumeric })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
         var result = new List<IntegrationCellValue>(maps.Count);
+        var overCeiling = new List<string>();
+        var ceiling = PointCeilingPerField;
 
-        foreach (var map in maps)
+        foreach (var field in maps.Select(m => m.SourceField).Distinct(StringComparer.Ordinal))
         {
-            var series = points
-                .Where(p => string.Equals(p.SourcePath, map.SourceField, StringComparison.Ordinal)
-                            && p.ValueNumeric is not null)
+            // ⚠ `Take(ceiling + 1)`: зайва точка — єдиний дешевий спосіб знати,
+            // що ряд ДОВШИЙ за стелю, а не рівно такий.
+            var series = await db.RawDataPoints
+                .AsNoTracking()
+                .Where(p => p.SourceEntityId == task.SourceEntityId
+                            && p.SourcePath == field
+                            && p.Timestamp >= period.StartUtc
+                            && p.Timestamp < period.EndUtc
+                            && p.ValueNumeric != null)
+                .OrderBy(p => p.Timestamp)
+                .Take(ceiling + 1)
                 .Select(p => p.ValueNumeric!.Value)
-                .ToList();
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+
+            if (series.Count > ceiling)
+            {
+                overCeiling.Add(field);
+                continue;
+            }
 
             if (series.Count == 0)
             {
                 continue;
             }
 
-            // ⚠ `Aggregation` не може бути null: пара «рядок + агрегація»
-            // нерозривна і на рівні домену, і обмеженням у базі.
-            //
-            // ⛔ Згортка винесена в `PeriodFold` і НЕ дублюється: другий її
-            // споживач — попередній перегляд мапінгу (`ФВ-13.14`), і власна
-            // копія там показувала б число, якого ця задача не запише.
-            var value = map.Aggregation is { } kind
-                ? PeriodFold.Fold(kind, series)
-                : throw new InvalidOperationException(
-                    $"Мапінг {map.Id} не називає способу згортання: конфігурація неповна.");
+            foreach (var map in maps.Where(m => string.Equals(m.SourceField, field, StringComparison.Ordinal)))
+            {
+                // ⚠ `Aggregation` не може бути null: пара «рядок + агрегація»
+                // нерозривна і на рівні домену, і обмеженням у базі.
+                //
+                // ⛔ Згортка винесена в `PeriodFold` і НЕ дублюється: другий її
+                // споживач — попередній перегляд мапінгу (`ФВ-13.14`), і власна
+                // копія там показувала б число, якого ця задача не запише.
+                var value = map.Aggregation is { } kind
+                    ? PeriodFold.Fold(kind, series)
+                    : throw new InvalidOperationException(
+                        $"Мапінг {map.Id} не називає способу згортання: конфігурація неповна.");
 
-            result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, value));
+                result.Add(new IntegrationCellValue(map.TargetRowKey!, map.TargetColumnDefId!.Value, value));
+            }
         }
 
-        return result;
+        return (result, overCeiling);
     }
 }
 
@@ -224,8 +288,8 @@ internal static class MaterializePayload
 /// <param name="DocumentId">Документ.</param>
 /// <param name="TableInstanceId">Екземпляр таблиці.</param>
 /// <param name="PeriodKey">Період.</param>
-/// <param name="FromUtc">Початок інтервалу збору.</param>
-/// <param name="ToUtc">Кінець інтервалу, виключно.</param>
+/// <param name="FromUtc">Початок інтервалу збору (довідково: згортка йде за межами періоду, D16-03).</param>
+/// <param name="ToUtc">Кінець інтервалу збору, виключно (довідково, як і <c>FromUtc</c>).</param>
 public sealed record MaterializeTask(
     int SourceEntityId,
     int ProjectId,
