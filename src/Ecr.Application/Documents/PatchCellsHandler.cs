@@ -1695,7 +1695,12 @@ public sealed class PatchCellsHandler(
                     context.UserId, isLateEdit, changes.ExpectedRowVersions),
                 innerCt).ConfigureAwait(false);
 
-            await rowStore.TouchRowsAsync(changes.Touched, context.PeriodKey, now, innerCt).ConfigureAwait(false);
+            // ⚠ `WR-04` п. 1: окремого `rowStore.TouchRowsAsync` тут більше
+            // НЕМАЄ. `ApplyAsync` уже «торкнувся» ВСІХ рядків `changes.Touched`
+            // у цій самій транзакції: рядки із заявленою версією — захопленням
+            // (`ClaimRowsAsync`, `UPDATE … SET ModifiedAt`), решту (нові рядки
+            // батчу й рядки без версії) — власним `TouchRowsAsync` сховища.
+            // Другий `UPDATE` тих самих рядків нічого не додавав, крім звернення.
 
             // ⛔ Документ теж «торкається» (`H-23d`). До цього рядка `ModifiedAt` і
             // `ModifiedByUserId` документа назавжди лишалися моментом створення:
