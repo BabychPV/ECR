@@ -7,6 +7,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Workflow;
@@ -167,7 +168,7 @@ public sealed class SubmitSheetHandler(
         if (orphaned.Count > 0)
         {
             throw new BusinessRuleException(
-                "ECR-SUB-4221",
+                ErrorCodes.SubmitBlocked,
                 $"Подання неможливе: рядків із втраченим посиланням на реєстр — {orphaned.Count}.",
                 new Dictionary<string, object?>
                 {
@@ -258,7 +259,7 @@ public sealed class SubmitSheetHandler(
             if (freshness.IsStale)
             {
                 throw new BusinessRuleException(
-                    "ECR-SUB-4221",
+                    ErrorCodes.SubmitBlocked,
                     "Подання неможливе: результати методологій застаріли — "
                     + "входи документа змінилися після прогону розрахунку.",
                     new Dictionary<string, object?>
@@ -364,7 +365,7 @@ public sealed class SubmitSheetHandler(
         if (blocking.Count > 0)
         {
             throw new BusinessRuleException(
-                "ECR-SUB-4221",
+                ErrorCodes.SubmitBlocked,
                 $"Подання неможливе: блокувальних помилок валідації — {blocking.Count}.",
                 new Dictionary<string, object?>
                 {
