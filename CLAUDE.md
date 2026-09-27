@@ -51,6 +51,7 @@
 | `ErrorCodes.cs` + `ExceptionHandlingMiddleware.cs` + `02-contracts.md` §7 | append у кінець, один код = один коміт |
 | `shared/ui/**`, `queryKeys.ts`, `test/setup.ts`, `DependencyInjection.cs` ×2 | попередження листом перед правкою |
 | `CLAUDE.md`, `.github/**`, `package-lock.json`, `Directory.Packages.props` | лише інтегратор, окремим комітом |
+| `docs/tz/**` | базова версія ТЗ зафіксована 2026-09-27 рішенням людини: тест `SpecificationBaselineTests` (Ecr.Architecture.Tests) звіряє `docs/CHECKSUMS.txt`; зміна ТЗ = оновлення суми в тому ж коміті (готовий рядок суми — у повідомленні падіння тесту) |
 
 **Навантаження:** ≤ 4 важких .NET-агенти на **всі** сесії разом (облік —
 листом на старті/кінці важкого прогону, `MSBUILDDISABLENODEREUSE=1`).
