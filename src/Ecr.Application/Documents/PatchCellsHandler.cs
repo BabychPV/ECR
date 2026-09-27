@@ -178,7 +178,7 @@ public sealed class PatchCellsHandler(
             }
         }
 
-        return await BuildResponseAsync(request, context.PeriodKey, changes, messages, recalculationJobId, ct)
+        return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
             .ConfigureAwait(false);
     }
 
@@ -240,12 +240,17 @@ public sealed class PatchCellsHandler(
     /// сховище, щоб звірка версії сталася ТИМ САМИМ запитом, що й запис
     /// (<see cref="CellChangeSet.ExpectedRowVersions"/>).
     /// </param>
+    /// <param name="NewRowVersions">
+    /// <c>TableRow.Id</c> → нова версія після запису — те, що повернуло сховище
+    /// (<see cref="ICellStore.ApplyAsync"/>); <c>null</c> до запису.
+    /// </param>
     private sealed record CellChangeLists(
         List<CellRecord> Upserts,
         List<CellAddress> Deletes,
         List<long> Touched,
         Dictionary<long, string> RowKeyById,
-        Dictionary<long, string> ExpectedRowVersions);
+        Dictionary<long, string> ExpectedRowVersions,
+        IReadOnlyDictionary<long, string>? NewRowVersions = null);
 
     /// <summary>
     /// Розв'язує особу користувача, структуру таблиці зі знімка метаданих і
@@ -1715,13 +1720,17 @@ public sealed class PatchCellsHandler(
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
             // у цій самій транзакції. Див. <see cref="MaterializeNewRowsAsync"/>.
             var changes = await MaterializeNewRowsAsync(request, context, planned, innerCt).ConfigureAwait(false);
-            applied = changes;
 
-            await cellStore.ApplyAsync(
+            var newVersions = await cellStore.ApplyAsync(
                 new CellChangeSet(
                     request.TableInstanceId, changes.Upserts, changes.Deletes, changes.Touched,
                     context.UserId, isLateEdit, changes.ExpectedRowVersions),
                 innerCt).ConfigureAwait(false);
+
+            // ⚠ `WR-04` п. 4: нові версії «торкнутих» рядків — із самого запису
+            // (див. <see cref="BuildResponseAsync"/>).
+            changes = changes with { NewRowVersions = newVersions };
+            applied = changes;
 
             // ⚠ `WR-04` п. 1: окремого `rowStore.TouchRowsAsync` тут більше
             // НЕМАЄ. `ApplyAsync` уже «торкнувся» ВСІХ рядків `changes.Touched`
@@ -1876,16 +1885,51 @@ public sealed class PatchCellsHandler(
             .ToList();
 
     /// <summary>Підсумкова відповідь: застосовані комірки, нові версії рядків, повідомлення валідації.</summary>
+    /// <remarks>
+    /// ⚠ `WR-04` п. 4: версії рядків більше НЕ перечитуються після коміту.
+    /// Відповідь — це стан рядків, прочитаний на початку (<c>GetRowsAsync</c>),
+    /// поверх якого лягають нові версії «торкнутих» рядків, що повернуло саме
+    /// сховище (<c>OUTPUT inserted.RowVersion</c>): і захоплених, і нових, і
+    /// рядків без заявленої версії. Форма та сама — усі живі рядки таблиці.
+    ///
+    /// ⚠ Різниця з перечитуванням одна, і її названо: рядок, якого батч НЕ
+    /// торкався, а хтось інший змінив паралельно, у відповіді має версію на
+    /// початок запиту, а не на кінець. Клієнт від цього нічого не втрачає: з
+    /// такою версією його наступна правка того рядка отримає звичайний
+    /// <c>ECR-CELL-0409</c>, як отримала б і без відповіді.
+    ///
+    /// ⚠ Читання лишається запасним шляхом рівно для випадку, коли сховище не
+    /// назвало версію хоч одного «торкнутого» рядка (рядок зник між записом і
+    /// «дотиком»), — тоді відповідь збирається так само, як до `WR-04`.
+    /// </remarks>
     private async Task<PatchCellsResponse> BuildResponseAsync(
         PatchCellsRequest request,
-        PeriodKey periodKey,
+        RequestContext context,
         CellChangeLists changes,
         List<Validation.ValidationMessage> messages,
         string? recalculationJobId,
         CancellationToken ct)
     {
-        var newVersions = await rowStore.GetRowVersionsAsync(request.TableInstanceId, periodKey, ct)
+        IReadOnlyDictionary<string, string> newVersions;
+
+        if (changes.NewRowVersions is { } written && changes.Touched.TrueForAll(written.ContainsKey))
+        {
+            var merged = new Dictionary<string, string>(context.Versions, StringComparer.Ordinal);
+            foreach (var id in changes.Touched)
+            {
+                if (changes.RowKeyById.TryGetValue(id, out var rowKey))
+                {
+                    merged[rowKey] = written[id];
+                }
+            }
+
+            newVersions = merged;
+        }
+        else
+        {
+            newVersions = await rowStore.GetRowVersionsAsync(request.TableInstanceId, context.PeriodKey, ct)
                                         .ConfigureAwait(false);
+        }
 
         return new PatchCellsResponse(
             AppliedCells: changes.Upserts.Count + changes.Deletes.Count,

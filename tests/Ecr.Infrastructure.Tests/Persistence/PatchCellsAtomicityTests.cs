@@ -250,7 +250,7 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)
             => inner.ReadCellsAsync(addresses, ct);
 
-        public async Task ApplyAsync(CellChangeSet changes, CancellationToken ct)
+        public async Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct)
         {
             await inner.ApplyAsync(changes, ct).ConfigureAwait(false);
             throw new InvalidOperationException(FaultMarker);

@@ -41,7 +41,18 @@ public interface ICellStore
     /// заборонене: або весь батч, або нічого (B04 §2.3).
     /// Бюджет: p95 &lt; 150 мс на 100 комірок.
     /// </summary>
-    public Task ApplyAsync(CellChangeSet changes, CancellationToken ct);
+    /// <returns>
+    /// Нові версії «торкнутих» рядків: <c>TableRow.Id</c> → <c>RowVersion</c> у
+    /// Base64 — ті самі, що зафіксує коміт (тригерів на <c>doc.TableRow</c>
+    /// немає, а після «дотику» транзакція рядків не змінює).
+    /// </returns>
+    /// <remarks>
+    /// ⚠ <c>WR-04</c> п. 4: версії повертаються з самих <c>UPDATE</c> «дотику»
+    /// (<c>OUTPUT inserted.RowVersion</c>), тож викликачеві не треба
+    /// перечитувати їх після коміту. Рядка, якого «дотик» не знайшов (зник
+    /// паралельно), у результаті немає — викликач вирішує, чи дочитувати.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct);
 }
 
 /// <summary>Комірка з адресою і значенням.</summary>

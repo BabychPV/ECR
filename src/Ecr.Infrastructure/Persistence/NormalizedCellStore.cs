@@ -408,7 +408,7 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// <c>RecalculationService</c>, який власної транзакції не відкриває) —
     /// поведінка та сама, що й раніше: коротка власна транзакція, свій коміт.
     /// </remarks>
-    public async Task ApplyAsync(CellChangeSet changes, CancellationToken ct)
+    public async Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(changes);
 
@@ -420,15 +420,19 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
 
         LastUpsertRowsAffected = 0;
 
+        // ⚠ `WR-04` п. 4: нові версії рядків збирають самі «дотики» —
+        // захоплення і `TouchRowsAsync` — через `OUTPUT inserted.RowVersion`.
+        var versions = new Dictionary<long, string>();
+
         var ambient = db.Database.CurrentTransaction;
         if (ambient is not null)
         {
             var joined = (SqlTransaction)ambient.GetDbTransaction();
-            await ClaimRowsAsync(connection, joined, changes, ct).ConfigureAwait(false);
+            await ClaimRowsAsync(connection, joined, changes, versions, ct).ConfigureAwait(false);
             await DeleteAsync(connection, joined, changes.Deletes, ct).ConfigureAwait(false);
             LastUpsertRowsAffected = await UpsertAsync(connection, joined, changes.Upserts, ct).ConfigureAwait(false);
-            await TouchRowsAsync(connection, joined, changes, ct).ConfigureAwait(false);
-            return;
+            await TouchRowsAsync(connection, joined, changes, versions, ct).ConfigureAwait(false);
+            return versions;
         }
 
         // ⚠ Транзакція коротка навмисно. Під RCSI кожна відкрита транзакція
@@ -436,12 +440,14 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
         // store так, що страждає вся база, а не лише цей запит (D-29).
         await using var tx = (SqlTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        await ClaimRowsAsync(connection, tx, changes, ct).ConfigureAwait(false);
+        await ClaimRowsAsync(connection, tx, changes, versions, ct).ConfigureAwait(false);
         await DeleteAsync(connection, tx, changes.Deletes, ct).ConfigureAwait(false);
         LastUpsertRowsAffected = await UpsertAsync(connection, tx, changes.Upserts, ct).ConfigureAwait(false);
-        await TouchRowsAsync(connection, tx, changes, ct).ConfigureAwait(false);
+        await TouchRowsAsync(connection, tx, changes, versions, ct).ConfigureAwait(false);
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
+
+        return versions;
     }
 
     /// <summary>
@@ -490,7 +496,11 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// <c>TableRow.Id</c>.
     /// </exception>
     private static async Task ClaimRowsAsync(
-        SqlConnection connection, SqlTransaction tx, CellChangeSet changes, CancellationToken ct)
+        SqlConnection connection,
+        SqlTransaction tx,
+        CellChangeSet changes,
+        Dictionary<long, string> newVersions,
+        CancellationToken ct)
     {
         var expected = changes.ExpectedRowVersions;
         if (expected is null || expected.Count == 0)
@@ -536,15 +546,18 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                 AddInt32(command, "@pk", periodKey.Value);
             }
 
+            // ⚠ `WR-04` п. 4: `inserted.RowVersion` — НОВА версія рядка, яку
+            // клієнт отримає у відповіді; доти її перечитували окремим запитом
+            // після коміту.
             command.CommandText = $"""
-                DECLARE @claimed TABLE (Id bigint PRIMARY KEY);
+                DECLARE @claimed TABLE (Id bigint PRIMARY KEY, RowVersion binary(8) NOT NULL);
                 UPDATE r SET ModifiedAt = SYSUTCDATETIME()
-                OUTPUT inserted.Id INTO @claimed (Id)
+                OUTPUT inserted.Id, inserted.RowVersion INTO @claimed (Id, RowVersion)
                 FROM doc.TableRow AS r
                 INNER JOIN (VALUES {values}) AS source (Id, RowVersion)
                     ON r.Id = source.Id AND r.RowVersion = source.RowVersion
                 {periodFilter};
-                SELECT Id FROM @claimed;
+                SELECT Id, RowVersion FROM @claimed;
                 """;
 
             var claimed = new HashSet<long>();
@@ -552,7 +565,9 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
             {
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    claimed.Add(reader.GetInt64(0));
+                    var id = reader.GetInt64(0);
+                    claimed.Add(id);
+                    newVersions[id] = Convert.ToBase64String(reader.GetFieldValue<byte[]>(1));
                 }
             }
 
@@ -848,7 +863,11 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
     /// версії від чого відштовхуватись не було, а «дотик» потрібен так само.
     /// </remarks>
     private static async Task TouchRowsAsync(
-        SqlConnection connection, SqlTransaction tx, CellChangeSet changes, CancellationToken ct)
+        SqlConnection connection,
+        SqlTransaction tx,
+        CellChangeSet changes,
+        Dictionary<long, string> newVersions,
+        CancellationToken ct)
     {
         var claimed = changes.ExpectedRowVersions;
         IReadOnlyList<long> pending = claimed is null || claimed.Count == 0
@@ -885,10 +904,23 @@ public sealed class NormalizedCellStore(EcrDbContext db, ArchiveAwareCellReader?
                 AddInt32(command, "@pk", periodKey.Value);
             }
 
-            command.CommandText =
-                $"UPDATE doc.TableRow SET ModifiedAt = SYSUTCDATETIME() WHERE {periodFilter}Id IN ({ids});";
+            // ⚠ `WR-04` п. 4: `OUTPUT … INTO` (як у захопленні вище, з тієї ж
+            // причини — голий OUTPUT ламається від першого тригера) — нові версії
+            // нових рядків і рядків без заявленої версії приходять тим самим
+            // зверненням, без читання після коміту.
+            command.CommandText = $"""
+                DECLARE @touched TABLE (Id bigint PRIMARY KEY, RowVersion binary(8) NOT NULL);
+                UPDATE doc.TableRow SET ModifiedAt = SYSUTCDATETIME()
+                OUTPUT inserted.Id, inserted.RowVersion INTO @touched (Id, RowVersion)
+                WHERE {periodFilter}Id IN ({ids});
+                SELECT Id, RowVersion FROM @touched;
+                """;
 
-            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                newVersions[reader.GetInt64(0)] = Convert.ToBase64String(reader.GetFieldValue<byte[]>(1));
+            }
         }
     }
 

@@ -208,9 +208,10 @@ public sealed class PatchCellsTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Значення_записується_і_повертається_нова_версія_рядка()
     {
-        // Стан до запису — 0x0A (конструктор, `GetRowsAsync`); після — 0x0B.
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string> { ["7001001"] = "0x0B" });
+        // Стан до запису — 0x0A (конструктор, `GetRowsAsync`); нову версію
+        // називає саме сховище, тим самим зверненням, що й записує (`WR-04` п. 4).
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B" });
 
         var response = await Handler().HandleAsync(
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
@@ -224,6 +225,66 @@ public sealed class PatchCellsTests
 
         await _cells.Received(1).ApplyAsync(
             Arg.Is<CellChangeSet>(c => c.Upserts.Count == 1 && c.Deletes.Count == 0), Arg.Any<CancellationToken>());
+
+        // ⛔ `WR-04` п. 4: після коміту версії НЕ перечитуються. Мутація «лишити
+        // перечитування» — цей рядок червоний.
+        await _rows.DidNotReceive().GetRowVersionsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>WR-04</c> п. 4: нові рядки батчу теж отримують версію з самого запису,
+    /// а рядки, яких батч не торкався, — ту, що була на початку запиту.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Новий_рядок_отримує_версію_з_запису_без_перечитування()
+    {
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A"), ("7001002", 1002L, "0x0C")));
+        _rows.CreateRowsAsync(
+                 TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(),
+                 Arg.Any<CancellationToken>())
+             .Returns(new List<long> { 2001L });
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B", [2001L] = "0x0D" });
+
+        var response = await Handler().HandleAsync(
+            Request(
+                new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)]),
+                new PatchRow("NEW-1", BaseVersion: null, [new PatchCell("Volume", 2m)])),
+            CancellationToken.None);
+
+        Assert.Equal("0x0B", response.RowVersions["7001001"]);
+        Assert.Equal("0x0D", response.RowVersions["NEW-1"]);
+
+        // Рядок поза батчем лишається у відповіді — форма та сама, що й до WR-04.
+        Assert.Equal("0x0C", response.RowVersions["7001002"]);
+
+        await _rows.DidNotReceive().GetRowVersionsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>WR-04</c> п. 4: сховище не назвало версію «торкнутого» рядка — тоді
+    /// й лише тоді відповідь збирається перечитуванням, як до <c>WR-04</c>.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Без_версії_від_сховища_відповідь_перечитує_версії()
+    {
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string>());
+        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, string> { ["7001001"] = "0x0E" });
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        Assert.Equal("0x0E", response.RowVersions["7001001"]);
+        await _rows.Received(1).GetRowVersionsAsync(
+            TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
     /// <summary>
