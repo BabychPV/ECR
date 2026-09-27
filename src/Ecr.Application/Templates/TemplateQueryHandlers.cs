@@ -168,18 +168,13 @@ public sealed class ListTemplateVersionsHandler(
     /// рядок переліку (`TemplatesPage.tsx`, `useQueries`) — підтверджений
     /// 2026-09-25 пробіл продуктивності.
     ///
-    /// ⚠ Порт (<see cref="ITemplateVersionStore"/>) свідомо БЕЗ нового методу:
-    /// цикл нижче й далі робить по одному виклику <see cref="ITemplateVersionStore.
-    /// ListVersionsAsync"/> НА ШАБЛОН — тобто на рівні SQL це й далі N запитів,
-    /// просто в межах ОДНОГО HTTP-виклику, а не N. Справжній `WHERE TemplateId IN
-    /// (...)` одним SQL-запитом вимагає нового методу порту й EF-реалізації
-    /// (`Ecr.Infrastructure`) — свідомо залишено як борг (межа файлів задачі не
-    /// охоплює <c>Ecr.Application/Ports</c> і <c>Ecr.Infrastructure</c>).
-    ///
-    /// ⚠ Виклики — ПОСЛІДОВНІ, не `Task.WhenAll`: <c>EcrDbContext</c> не є
-    /// потокобезпечним для одночасних операцій у межах одного scoped-екземпляра,
-    /// і паралельні виклики впали б винятком «A second operation was started on
-    /// this context before a previous operation completed».
+    /// ⛔ І на рівні SQL теж: версії всіх шаблонів беруться ОДНИМ викликом
+    /// <see cref="ITemplateVersionStore.ListVersionsForTemplatesAsync"/>
+    /// (`WHERE TemplateId IN (...)`). Раніше тут був цикл
+    /// <see cref="ITemplateVersionStore.ListVersionsAsync"/> по одному на
+    /// шаблон — N SQL-запитів в одному HTTP-виклику. Порядок відповіді —
+    /// порядок <paramref name="templateIds"/> (без повторів), його відновлює
+    /// цей обробник, не сховище.
     ///
     /// ⛔ На відміну від <see cref="HandleAsync"/>, невідомий <paramref
     /// name="templateIds"/> НЕ дає `404`: пакетний запит адресує МНОЖИНУ
@@ -200,24 +195,22 @@ public sealed class ListTemplateVersionsHandler(
             .RequireAsync(access, currentUser, ListTemplatesHandler.Permission, ct)
             .ConfigureAwait(false);
 
-        var result = new List<TemplateVersionsForTemplate>(templateIds.Count);
-        var seen = new HashSet<int>();
-
-        foreach (var templateId in templateIds)
+        var unique = templateIds.Distinct().ToList();
+        if (unique.Count == 0)
         {
-            if (!seen.Add(templateId))
-            {
-                continue;
-            }
-
-            var page = await templates
-                .ListVersionsAsync(templateId, new CursorRequest(PerTemplateVersionLimit), ct)
-                .ConfigureAwait(false);
-
-            result.Add(new TemplateVersionsForTemplate(templateId, page.Items));
+            return [];
         }
 
-        return result;
+        var byTemplate = await templates
+            .ListVersionsForTemplatesAsync(unique, PerTemplateVersionLimit, ct)
+            .ConfigureAwait(false);
+
+        return
+        [
+            .. unique.Select(templateId => new TemplateVersionsForTemplate(
+                templateId,
+                byTemplate.TryGetValue(templateId, out var versions) ? versions : [])),
+        ];
     }
 }
 

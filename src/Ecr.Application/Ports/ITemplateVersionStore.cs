@@ -109,6 +109,26 @@ public interface ITemplateVersionStore
     public Task<Common.PagedResult<TemplateVersionSummary>> ListVersionsAsync(
         int templateId, Common.CursorRequest page, CancellationToken ct);
 
+    /// <summary>
+    /// Перші <paramref name="perTemplateLimit"/> версій КОЖНОГО з
+    /// <paramref name="templateIds"/> — одним зверненням до бази (`BR-07`).
+    /// </summary>
+    /// <param name="templateIds">Шаблони; повтори й невідомі ідентифікатори допустимі.</param>
+    /// <param name="perTemplateLimit">Скільки версій на один шаблон (від 1).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Версії за шаблоном, у порядку <see cref="ListVersionsAsync"/> (за
+    /// <c>Id</c>). Шаблону без версій або невідомого в словнику просто немає.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Окремий метод, а не <see cref="ListVersionsAsync"/> у циклі: цикл
+    /// давав N SQL-запитів на один пакетний HTTP-виклик. Тут запит один, і
+    /// його число не залежить від N. Порядок відповіді відновлює викликач:
+    /// сховище не знає, чому запит упорядкований саме так.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<int, IReadOnlyList<TemplateVersionSummary>>> ListVersionsForTemplatesAsync(
+        IReadOnlyCollection<int> templateIds, int perTemplateLimit, CancellationToken ct);
+
     /// <summary>Створює шаблон і повертає його ідентифікатор.</summary>
     public Task<int> CreateTemplateAsync(
         string code,

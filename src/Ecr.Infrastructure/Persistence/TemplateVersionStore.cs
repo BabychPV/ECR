@@ -277,6 +277,50 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Ліміт на шаблон — у SQL (корельований `Take` на шаблон дає
+    /// `ROW_NUMBER() OVER (PARTITION BY TemplateId ...)`), а не в пам'яті:
+    /// інакше один шаблон із тисячею версій тягнув би їх усі заради сотні.
+    /// `GroupBy(...).SelectMany(g => g.Take(n))` EF не перекладає — звідси
+    /// корень запиту від <c>Templates</c>.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<TemplateVersionSummary>>> ListVersionsForTemplatesAsync(
+        IReadOnlyCollection<int> templateIds, int perTemplateLimit, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(templateIds);
+        ArgumentOutOfRangeException.ThrowIfLessThan(perTemplateLimit, 1);
+
+        if (templateIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<TemplateVersionSummary>>();
+        }
+
+        var ids = templateIds.Distinct().ToList();
+
+        var rows = await db.Templates
+            .AsNoTracking()
+            .Where(t => ids.Contains(t.Id))
+            .SelectMany(t => db.TemplateVersions
+                .Where(v => v.TemplateId == t.Id)
+                .OrderBy(v => v.Id)
+                .Take(perTemplateLimit))
+            .Select(v => new
+            {
+                v.TemplateId,
+                Summary = new TemplateVersionSummary(
+                    v.Id, v.Version, v.Status, v.PresentationRevision, v.ClonedFromVersionId, v.PublishedAt),
+            })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .GroupBy(r => r.TemplateId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<TemplateVersionSummary>)[.. g.Select(r => r.Summary).OrderBy(s => s.Id)]);
+    }
+
+    /// <inheritdoc />
     public async Task<int> CreateTemplateAsync(
         string code,
         IReadOnlyDictionary<string, string> name,

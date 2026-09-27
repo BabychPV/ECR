@@ -14,18 +14,14 @@ namespace Ecr.Application.Tests.Templates;
 /// tsx</c>) читав версії ОКРЕМИМ HTTP-запитом на КОЖЕН рядок — підтверджений
 /// 2026-09-25 пробіл продуктивності (N+1 запитів замість одного).
 /// <see cref="ListTemplateVersionsHandler.HandleBatchAsync"/> закриває його
-/// на РІВНІ HTTP: один виклик обробника обслуговує весь перелік шаблонів.
+/// і на рівні HTTP, і на рівні SQL.
 /// </summary>
 /// <remarks>
-/// ⚠ На відміну від <c>ListMethodologiesBatchTests</c> (`RD-06`), тут
-/// свідомо НЕ перевіряється «один виклик сховища на весь пакет»: порт
-/// <see cref="ITemplateVersionStore"/> лишився БЕЗ нового методу навмисно
-/// (межа файлів задачі не охоплює <c>Ecr.Application/Ports</c> і
-/// <c>Ecr.Infrastructure</c> — див. коментар над <c>HandleBatchAsync</c>).
-/// Обробник і далі кличе <see cref="ITemplateVersionStore.ListVersionsAsync"/>
-/// ПО ОДНОМУ на кожен УНІКАЛЬНИЙ шаблон — це й перевіряється нижче: рівно
-/// один виклик НА шаблон, не більше (не N+1 і не 2×N), і жодного зайвого
-/// виклику на повторний ідентифікатор.
+/// ⚠ Два рівні доказу, як у <c>ListMethodologiesBatchTests</c> (`RD-06`):
+/// тут — «один виклик порту на весь пакет» (обробник не повернувся до циклу
+/// по <see cref="ITemplateVersionStore.ListVersionsAsync"/>); число самих
+/// SQL-команд міряє <c>TemplateVersionStoreBatchQueryCountTests</c>
+/// (<c>Ecr.Infrastructure.Tests</c>) на живій базі.
 /// </remarks>
 public sealed class ListTemplateVersionsBatchTests
 {
@@ -44,36 +40,31 @@ public sealed class ListTemplateVersionsBatchTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission(ListTemplatesHandler.Permission).Build());
 
-        _store.ListVersionsAsync(First, Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new PagedResult<TemplateVersionSummary>(
-                [new TemplateVersionSummary(1, "1.0", TemplateVersionStatus.Published, 0, null, null)],
-                null,
-                null));
-
-        _store.ListVersionsAsync(Second, Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new PagedResult<TemplateVersionSummary>(
-                [new TemplateVersionSummary(2, "2.0", TemplateVersionStatus.Draft, 0, null, null)],
-                null,
-                null));
-
-        _store.ListVersionsAsync(Missing, Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>())
-            .Returns(new PagedResult<TemplateVersionSummary>([], null, null));
+        // ⚠ Сховище віддає словник у «своєму» порядку (First раніше за Second) —
+        // порядок відповіді мусить відновити обробник за запитом.
+        _store.ListVersionsForTemplatesAsync(
+                Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<int, IReadOnlyList<TemplateVersionSummary>>
+            {
+                [First] = [new TemplateVersionSummary(1, "1.0", TemplateVersionStatus.Published, 0, null, null)],
+                [Second] = [new TemplateVersionSummary(2, "2.0", TemplateVersionStatus.Draft, 0, null, null)],
+            });
     }
 
     private ListTemplateVersionsHandler Handler() => new(_store, _access, _user);
 
     /// <summary>
-    /// Рівно один виклик сховища НА шаблон — не N+1, і відповідь несе версії
-    /// КОЖНОГО шаблону, у порядку ЗАПИТУ.
+    /// ОДИН виклик порту на весь пакет, і відповідь несе версії КОЖНОГО
+    /// шаблону, у порядку ЗАПИТУ.
     /// </summary>
     /// <remarks>
-    /// ⛔ Мутаційний доказ: якби `HandleBatchAsync` викликав `ListVersionsAsync`
-    /// ще й для переліку шаблонів самого (зайвий похідний запит) — число
-    /// викликів на `First`/`Second` зросло б до 2, і перша перевірка впала б.
+    /// ⛔ Мутаційний доказ: поверніть у `HandleBatchAsync` цикл
+    /// `ListVersionsAsync` по одному на шаблон — `Received(1)` на пакетному
+    /// методі й `DidNotReceive` на одиничному впадуть.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    public async Task Рівно_один_виклик_сховища_на_шаблон_і_порядок_відповіді_той_самий_що_й_запиту()
+    public async Task Один_виклик_порту_на_весь_пакет_і_порядок_відповіді_той_самий_що_й_запиту()
     {
         var result = await Handler().HandleBatchAsync([Second, First], CancellationToken.None);
 
@@ -83,24 +74,26 @@ public sealed class ListTemplateVersionsBatchTests
         Assert.Equal("2.0", Assert.Single(result[0].Versions).Version);
         Assert.Equal("1.0", Assert.Single(result[1].Versions).Version);
 
-        await _store.Received(1).ListVersionsAsync(First, Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>());
-        await _store.Received(1).ListVersionsAsync(Second, Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>());
+        await _store.Received(1).ListVersionsForTemplatesAsync(
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.Count == 2 && ids.Contains(First) && ids.Contains(Second)),
+            100,
+            Arg.Any<CancellationToken>());
+        await _store.DidNotReceive().ListVersionsAsync(
+            Arg.Any<int>(), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>());
     }
 
-    /// <summary>Повтор ідентифікатора в запиті звужується до ОДНОГО виклику сховища.</summary>
-    /// <remarks>
-    /// ⛔ Мутаційний доказ: приберіть `seen.Add(...)`/`continue` у
-    /// `HandleBatchAsync` — і `ListVersionsAsync(First, ...)` отримає ТРИ
-    /// виклики замість одного, а `Received(1)` нижче впаде.
-    /// </remarks>
+    /// <summary>Повтор ідентифікатора в запиті дає ОДИН запис відповіді й не доходить до порту.</summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    public async Task Повтор_ідентифікатора_у_запиті_дає_ОДИН_запис_відповіді_і_ОДИН_виклик_сховища()
+    public async Task Повтор_ідентифікатора_у_запиті_дає_ОДИН_запис_відповіді_і_ОДИН_ідентифікатор_у_порт()
     {
         var result = await Handler().HandleBatchAsync([First, First, First], CancellationToken.None);
 
         Assert.Single(result);
-        await _store.Received(1).ListVersionsAsync(First, Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>());
+        await _store.Received(1).ListVersionsForTemplatesAsync(
+            Arg.Is<IReadOnlyCollection<int>>(ids => ids.Count == 1 && ids.Contains(First)),
+            Arg.Any<int>(),
+            Arg.Any<CancellationToken>());
     }
 
     /// <summary>Невідомий шаблон не кидає 404 — пакетний запит адресує МНОЖИНУ.</summary>
@@ -109,17 +102,18 @@ public sealed class ListTemplateVersionsBatchTests
     /// (одиничний запит, де відсутність шаблону — 404), тут відсутність
     /// одного шаблону в множині — це просто порожній перелік версій, а не
     /// відмова всього запиту (той самий патерн, що `ListMethodologiesHandler`,
-    /// `RD-06`).
+    /// `RD-06`). Сховище такого шаблону у словник не кладе взагалі.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     public async Task Невідомий_шаблон_не_кидає_404_а_дає_порожній_перелік_версій()
     {
-        var result = await Handler().HandleBatchAsync([Missing], CancellationToken.None);
+        var result = await Handler().HandleBatchAsync([Missing, First], CancellationToken.None);
 
-        var entry = Assert.Single(result);
-        Assert.Equal(Missing, entry.TemplateId);
-        Assert.Empty(entry.Versions);
+        Assert.Equal(2, result.Count);
+        Assert.Equal(Missing, result[0].TemplateId);
+        Assert.Empty(result[0].Versions);
+        Assert.Equal(First, result[1].TemplateId);
     }
 
     /// <summary>Порожній перелік ідентифікаторів не звертається до сховища взагалі.</summary>
@@ -130,6 +124,8 @@ public sealed class ListTemplateVersionsBatchTests
         var result = await Handler().HandleBatchAsync([], CancellationToken.None);
 
         Assert.Empty(result);
+        await _store.DidNotReceive().ListVersionsForTemplatesAsync(
+            Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
         await _store.DidNotReceive().ListVersionsAsync(
             Arg.Any<int>(), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>());
     }
