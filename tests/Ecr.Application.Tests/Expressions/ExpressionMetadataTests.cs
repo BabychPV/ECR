@@ -46,7 +46,7 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-9.15a")]
-    public async Task Діалект_шаблону_дає_рівно_свої_тринадцять_функцій()
+    public async Task Діалект_шаблону_дає_рівно_свої_пʼятнадцять_функцій()
     {
         await using var db = Context();
         var result = await Handler(db)
@@ -55,9 +55,13 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         // ⚠ Набір закритий (`02b` §7): розширення — зміна контракту. Число тут
         // не «поточне», а домовлене, і його зміна мусить бути помічена.
         // 2026-09-23: тринадцять, REGFIELD додано прямим дорученням задачі.
-        Assert.Equal(13, result.Functions.Count);
+        // 2026-09-27: п'ятнадцять, REGFIND і REGONE — функції довідників
+        // (RT-20a, D-159; 02b «Функції довідників»).
+        Assert.Equal(15, result.Functions.Count);
         Assert.Contains(result.Functions, f => f.Name == "CONVERT");
         Assert.Contains(result.Functions, f => f.Name == "REGFIELD");
+        Assert.Contains(result.Functions, f => f.Name == "REGFIND");
+        Assert.Contains(result.Functions, f => f.Name == "REGONE");
 
         // ⛔ `VLOOKUP` відсутній НАВМИСНО: усі 429 його входжень у чинному
         // шаблоні — звернення до довідників, замінені посиланням на реєстр.
@@ -99,7 +103,9 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var result = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, null, CancellationToken.None);
 
-        Assert.Equal(26, result.Functions.Count);
+        // ⚠ 22 ядра + 7 розширень: Ln, ifs, CONVERT, SUBSTANCE і з RT-20a
+        // REGFIND, REGONE, REGFIELD (функції довідників, ярус Extension).
+        Assert.Equal(29, result.Functions.Count);
         Assert.Equal(22, result.Functions.Count(f => f.Tier == "Core"));
 
         Assert.Contains(result.Functions, f => f.Name == "SUBSTANCE");
@@ -148,7 +154,8 @@ public sealed class ExpressionMetadataTests(SqlServerFixture sql)
         var strict = await Handler(db)
             .HandleAsync(ExpressionDialect.Methodology, null, strictVersion.VersionId, CancellationToken.None);
 
-        Assert.Equal(26, strict.Functions.Count);
+        Assert.Equal(29, strict.Functions.Count);
+        Assert.DoesNotContain(legacy.Functions, f => f.Name == "REGFIND");
         Assert.Equal("Extension", Assert.Single(strict.Functions, f => f.Name == "Ln").Tier);
         Assert.Equal("Core", Assert.Single(strict.Functions, f => f.Name == "Pow").Tier);
     }
