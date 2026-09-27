@@ -112,10 +112,36 @@ public sealed class PeriodStateCalculator
     /// </remarks>
     public IReadOnlyList<PeriodTransition> Plan(
         IReadOnlyList<Period> periods, DateTime utcNow, TimeZoneInfo siteTimeZone)
+        => PlanTransitions(periods, utcNow, siteTimeZone).Transitions;
+
+    /// <summary>
+    /// Те саме, що <see cref="Plan"/>, плюс перелік переходів, які розрахунок
+    /// дав би НАЗАД і які тому пропущено.
+    /// </summary>
+    /// <param name="periods">Періоди одного проєкту з уже обчисленими межами.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="siteTimeZone">Пояс майданчика (<c>D-68</c>).</param>
+    /// <remarks>
+    /// ⛔ Пропускалися лише переходи з <c>Closed</c>. Але зворотний розрахунок
+    /// дає будь-яка зміна політики, що відсуває межу: подовжили пільговий
+    /// строк — період у <c>Grace</c> «мав би» бути <c>Open</c>; відсунули
+    /// відкриття — <c>Open</c> «мав би» бути <c>Scheduled</c>. Такий перехід
+    /// потрапляв у план, <c>Period.TransitionTo</c> кидав <c>ECR-PRD-0409</c>,
+    /// і <c>PeriodStateJob</c> падав на цьому проєкті щогодини, доки дати не
+    /// наздоганяли збережений стан.
+    /// <para>
+    /// ⚠ Пропуск — не тиша: викликач отримує його в
+    /// <see cref="PeriodTransitionPlan.Skipped"/> і мусить показати
+    /// адміністраторові (задача станів — журналом і <c>itg.MaintenanceRun</c>).
+    /// </para>
+    /// </remarks>
+    public PeriodTransitionPlan PlanTransitions(
+        IReadOnlyList<Period> periods, DateTime utcNow, TimeZoneInfo siteTimeZone)
     {
         ArgumentNullException.ThrowIfNull(periods);
 
         var transitions = new List<PeriodTransition>();
+        var skipped = new List<SkippedPeriodTransition>();
 
         foreach (var period in periods)
         {
@@ -129,18 +155,22 @@ public sealed class PeriodStateCalculator
                 continue;
             }
 
-            // ⚠ Назад не переводимо НІКОЛИ. `Closed → Grace` — виключно
-            // рішення адміністратора через Reopen; збій розрахунку не має
-            // тихо відкривати закритий період.
-            if (period.State == PeriodState.Closed)
+            // ⚠ Назад не переводимо НІКОЛИ — ні з `Closed`, ні з будь-якого
+            // іншого стану (`Scheduled < Open < Grace < Closed`, як і дозволені
+            // переходи `Period.TransitionTo`). `Closed → Grace` — виключно
+            // рішення адміністратора через Reopen; збій або зміна розрахунку не
+            // мають тихо відкривати закритий період чи повертати пільговий у
+            // відкритий.
+            if (target < period.State)
             {
+                skipped.Add(new SkippedPeriodTransition(period, period.State, target));
                 continue;
             }
 
             transitions.Add(new PeriodTransition(period, target));
         }
 
-        return transitions;
+        return new PeriodTransitionPlan(transitions, skipped);
     }
 
     /// <summary>
@@ -177,3 +207,23 @@ public sealed class PeriodStateCalculator
 /// <param name="Period">Період.</param>
 /// <param name="Target">Цільовий стан.</param>
 public readonly record struct PeriodTransition(Period Period, PeriodState Target);
+
+/// <summary>
+/// Перехід, який розрахунок дав би НАЗАД і який тому не застосовано.
+/// </summary>
+/// <param name="Period">Період.</param>
+/// <param name="Current">Збережений стан — він лишається.</param>
+/// <param name="Computed">Стан за поточними межами (раніший за збережений).</param>
+public readonly record struct SkippedPeriodTransition(Period Period, PeriodState Current, PeriodState Computed)
+{
+    /// <summary>Пояснення для адміністратора: чому стан не змінено і що з цим робити.</summary>
+    public const string Reason =
+        "Межі змінились після зміни політики, стан лишається; зворотний перехід — лише ручним Reopen.";
+}
+
+/// <summary>Результат планування переходів набору періодів.</summary>
+/// <param name="Transitions">Переходи вперед, які треба застосувати.</param>
+/// <param name="Skipped">Зворотні переходи, пропущені навмисно.</param>
+public sealed record PeriodTransitionPlan(
+    IReadOnlyList<PeriodTransition> Transitions,
+    IReadOnlyList<SkippedPeriodTransition> Skipped);
