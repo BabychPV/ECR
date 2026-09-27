@@ -45,4 +45,17 @@ public interface ICurrentUser
     /// вдавати, що мають (V-06).
     /// </remarks>
     public long? SimulationSessionId => null;
+
+    /// <summary>
+    /// Код виконується у фоновій задачі ІНТЕГРАЦІЇ від імені технічного запису
+    /// (<c>JobActorScope.EnterIntegration</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Тіло за замовчуванням — <c>false</c>, і перевизначає його лише
+    /// <see cref="JobAwareCurrentUser"/> зі стану тримача задачі. HTTP-вхід
+    /// (cookie) і тестові двійники цієї ознаки не мають: право запису
+    /// інтеграції (<c>AccessProfile.IsIntegrationWriter</c>) не можна отримати
+    /// ні іменем користувача, ні запитом.
+    /// </remarks>
+    public bool IsIntegrationJob => false;
 }

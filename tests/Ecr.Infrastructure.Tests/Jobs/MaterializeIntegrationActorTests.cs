@@ -86,8 +86,150 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         // → задача падає `ECR-AUTH-0401` «Анонімний запит не може змінювати дані».
         // ⛔ МУТАЦІЙНИЙ ДОКАЗ (2): `BaseVersion: null` у `IntegrationCellPatcher`
         // для наявного рядка → `ECR-ROW-0409` «Рядки з такими ключами вже існують».
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ (3): `scope.Enter` замість `scope.EnterIntegration`
+        // в `IntegrationActor` → `ECR-DOC-0404`: грантів у svc-integration немає.
         Assert.Equal(7m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[0])));
         Assert.Equal($"{stand.SvcId}|Integration", await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+
+        // (а) Записано БЕЗ жодного гранта: у svc-integration немає ні ролі, ні
+        // призначення — право дає контекст задачі, а не адміністрування.
+        Assert.Equal(0, await SvcAssignmentsAsync(stand.SvcId));
+    }
+
+    /// <summary>
+    /// (б) Той самий <c>svc-integration</c> поза задачею інтеграції права
+    /// запису без грантів НЕ має — ні з HTTP-запиту, ні з задачі людини.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>AccessDecisionService.BuildProfileAsync</c>
+    /// замінити <c>currentUser.IsIntegrationJob</c> перевіркою ІМЕНІ
+    /// (<c>svc-integration</c>) → обидва варіанти пишуть, тест червоний.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P0-integration-writer")]
+    [InlineData("http")]
+    [InlineData("human-job")]
+    public async Task Svc_integration_поза_задачею_інтеграції_не_пише_без_грантів(string context)
+    {
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false);
+
+        try
+        {
+            // HTTP: користувач ЗАПИТУ — svc-integration (ніби cookie), задачі немає.
+            // Задача людини: svc-integration автор через звичайний `Enter`.
+            ICurrentUser request = context == "http" ? new HttpRequestUser(stand.SvcId) : new NoHttpRequestUser();
+            await using var provider = BuildProvider(new RowStoreHook(), request);
+            await using var scope = provider.CreateAsyncScope();
+
+            using var author = context == "http"
+                ? null
+                : scope.ServiceProvider.GetRequiredService<JobActorScope>()
+                    .Enter(new JobActor(stand.SvcId, IntegrationActor.UserName, "en", [], Guid.NewGuid().ToString("N")));
+
+            var rows = await scope.ServiceProvider.GetRequiredService<IRowStore>()
+                .GetRowsAsync(stand.Chain.TableInstanceId, stand.Chain.PeriodKey, CancellationToken.None);
+            var version = rows.Single(r => r.RowKey == stand.RowKey).RowVersion;
+
+            var error = await Assert.ThrowsAsync<Ecr.Application.Errors.NotFoundException>(
+                () => scope.ServiceProvider.GetRequiredService<PatchCellsHandler>().HandleAsync(
+                    new PatchCellsRequest(
+                        stand.Chain.TableInstanceId, stand.Chain.PeriodKey.Value, CellChangeOrigins.UserEdit,
+                        [new PatchRow(stand.RowKey, version, [new PatchCell(stand.ColumnCodes[0], 5m)])]),
+                    CancellationToken.None));
+
+            // Та сама відповідь, що будь-кому без гранта: документа «немає».
+            Assert.Equal("ECR-DOC-0404", error.ErrorCode);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        Assert.Null(await CellAsync(stand, stand.ColumnDefIds[0]));
+        Assert.Null(await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+    }
+
+    /// <summary>(д) Комірку, яку людина правила ДО прогону, інтеграція не переписує.</summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати відсіювання <c>manual</c> у
+    /// <c>IntegrationCellPatcher.PlanAsync</c> → у комірці 7 від svc-integration.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-118")]
+    public async Task Правка_людини_до_прогону_лишається_а_в_журналі_покриття_рядок()
+    {
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false);
+        var humanId = await AddHumanAsync(stand.RoleId);
+
+        try
+        {
+            await using var provider = BuildProvider(new RowStoreHook());
+            await HumanEditAsync(provider, stand, humanId, 42m);
+
+            await using var scope = provider.CreateAsyncScope();
+            await RunJobAsync(scope, stand);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        Assert.Equal(42m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[0])));
+        Assert.Equal($"{humanId}|UserEdit", await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+
+        var coverage = Assert.Single(await CoverageAsync(stand));
+        Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
+    }
+
+    /// <summary>
+    /// Комірку під правилом «дозволено з підтвердженням» (<c>ФВ-2.16</c>)
+    /// інтеграція не пише: підтвердження — дія людини.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати фільтр <c>AwaitingConfirmationAsync</c> у
+    /// <c>IntegrationCellPatcher</c> → комірка записана (обробник запису
+    /// підтвердження поки не вимагає — це паралельна робота над ФВ-2.16), тобто
+    /// інтеграція «підтвердила» сама.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-2.16")]
+    public async Task Комірку_що_вимагає_підтвердження_інтеграція_не_пише_а_журналює()
+    {
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false);
+
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            db.PeriodAccessRules.Add(
+                PeriodAccessRuleDef
+                    .AlwaysReadOnly(stand.Chain.TemplateVersionId, OutOfWindowBehavior.AllowWithConfirmation)
+                    .ForTable(stand.Chain.TableDefId));
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        try
+        {
+            await using var provider = BuildProvider(new RowStoreHook());
+            await using var scope = provider.CreateAsyncScope();
+            await RunJobAsync(scope, stand);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        Assert.Null(await CellAsync(stand, stand.ColumnDefIds[0]));
+        Assert.Null(await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+
+        var coverage = Assert.Single(await CoverageAsync(stand));
+        Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
+        Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
+        Assert.Contains("підтвердження", coverage.Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -281,15 +423,15 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         IReadOnlyList<string> ColumnCodes);
 
     /// <summary>
-    /// Ланцюг із відкритим періодом, сутність із мапінгами в рядок і грант
-    /// <c>Write</c> для <c>svc-integration</c>.
+    /// Ланцюг із відкритим періодом, сутність із мапінгами в рядок і роль із
+    /// грантом <c>Write</c> на проєкт — для ЛЮДЕЙ тестів, не для <c>svc-integration</c>.
     /// </summary>
     /// <remarks>
-    /// ⚠ Грант заводить ТЕСТ, і це свідомо: предмет тесту — АВТОР і шлях запису,
-    /// а не права. У сіді <c>svc-integration</c> без ролей і грантів, і шлях
-    /// доступу для нього (зона «Аудит»: <c>AccessDecisionService</c>) ще не
-    /// зроблено — без гранта задача за автором падає далі, на <c>ECR-DOC-0404</c>.
-    /// Грант знімається у <c>finally</c> кожного тесту: база спільна для всієї колекції.
+    /// ⛔ <c>svc-integration</c> гранта НЕ отримує: право запису інтеграції дає
+    /// контекст задачі (<c>JobActorScope.EnterIntegration</c> →
+    /// <c>AccessProfile.IsIntegrationWriter</c>). Доти тест тимчасово
+    /// призначав йому цю роль — без неї задача падала на <c>ECR-DOC-0404</c>.
+    /// Роль знімається у <c>finally</c> кожного тесту: база спільна для всієї колекції.
     /// </remarks>
     private async Task<Stand> ArrangeAsync(TableRowMode rowMode, bool newRow, bool twoColumns = false)
     {
@@ -318,7 +460,7 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
 
         var entityId = await ArrangeMappingAsync(db, rowKey, columnIds);
         var svcId = await SvcIntegrationIdAsync();
-        var roleId = await GrantSvcWriteAsync(db, svcId, chain.ProjectId);
+        var roleId = await CreateWriterRoleAsync(db, chain.ProjectId);
 
         return new Stand(chain, entityId, svcId, roleId, rowKey, columnIds, codes);
     }
@@ -340,7 +482,8 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
 
     /// <summary>Контейнер як у проді: застосунок + інфраструктура + обгортка автора задачі.</summary>
     /// <param name="hook">Перехоплювач читань версій рядків (без дії — прозорий).</param>
-    private ServiceProvider BuildProvider(RowStoreHook hook)
+    /// <param name="request">Користувач «запиту»; за замовчуванням — поза запитом.</param>
+    private ServiceProvider BuildProvider(RowStoreHook hook, ICurrentUser? request = null)
     {
         var configuration = Substitute.For<IConfiguration>();
         configuration[Arg.Any<string>()].Returns((string?)null);
@@ -356,7 +499,7 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         // Те саме, що `Program.cs` (F-01): автор задачі поверх користувача запиту.
         services.AddScoped<JobActorScope>();
         services.AddScoped<ICurrentUser>(sp => new JobAwareCurrentUser(
-            new NoHttpRequestUser(), sp.GetRequiredService<JobActorScope>()));
+            request ?? new NoHttpRequestUser(), sp.GetRequiredService<JobActorScope>()));
 
         // ⚠ Справжнє сховище рядків, обгорнуте перехоплювачем: і патчер, і
         // обробник отримують ТОЙ САМИЙ `RowStore`, лише з дією після читання.
@@ -445,16 +588,15 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         return entity.Id;
     }
 
-    /// <summary>Тестова роль із грантом <c>Write</c> на проєкт, призначена <c>svc-integration</c>.</summary>
-    private static async Task<int> GrantSvcWriteAsync(EcrDbContext db, int svcId, int projectId)
+    /// <summary>Тестова роль із грантом <c>Write</c> на проєкт — без жодного призначення.</summary>
+    private static async Task<int> CreateWriterRoleAsync(EcrDbContext db, int projectId)
     {
         var role = new Role(
             EcrCode.Create($"P0SVC{Guid.NewGuid():N}"[..16]),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "P0 integration writer (test)" }));
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "P0 human writer (test)" }));
         db.Roles.Add(role);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        db.RoleAssignments.Add(new RoleAssignment(role.Id, svcId, principalSid: null));
         db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, projectId, GrantLevel.Write));
         await db.SaveChangesAsync(CancellationToken.None);
 
@@ -526,6 +668,11 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
 
         return result;
     }
+
+    private async Task<int> SvcAssignmentsAsync(int svcId)
+        => Convert.ToInt32(
+            await ScalarAsync($"SELECT COUNT(*) FROM sec.RoleAssignment WHERE UserId = {svcId}"),
+            System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task<int> SvcIntegrationIdAsync()
         => Convert.ToInt32(
@@ -649,6 +796,26 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
 
         public string CorrelationId
             => throw new InvalidOperationException("ICurrentUser використано поза запитом: HttpContext немає.");
+
+        public string Language => "en";
+
+        public IReadOnlyList<string> GroupSids => [];
+    }
+
+    /// <summary>
+    /// <c>Ecr.Api.Auth.CurrentUser</c> у запиті з cookie заданого користувача.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>IsIntegrationJob</c> НЕ перевизначено — як і в справжньому: HTTP-запит
+    /// цієї ознаки не має.
+    /// </remarks>
+    private sealed class HttpRequestUser(int userId) : ICurrentUser
+    {
+        public int? UserId => userId;
+
+        public string? UserName => IntegrationActor.UserName;
+
+        public string CorrelationId => "http-request";
 
         public string Language => "en";
 

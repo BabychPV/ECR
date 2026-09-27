@@ -47,7 +47,13 @@ public sealed record IntegrationCellValue(string RowKey, int ColumnDefId, decima
 /// <summary>Наслідок запису від інтеграції.</summary>
 /// <param name="Applied">Скільки комірок записано.</param>
 /// <param name="KeptManual">Комірки, лишені за людиною: <c>rowKey:columnCode</c>.</param>
-public sealed record IntegrationWriteResult(int Applied, IReadOnlyList<string> KeptManual);
+/// <param name="AwaitingConfirmation">
+/// Комірки, на які правило періоду вимагає підтвердження людини
+/// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>): інтеграція підтверджувати не
+/// може, тож їх не записано. <c>null</c> — таких немає.
+/// </param>
+public sealed record IntegrationWriteResult(
+    int Applied, IReadOnlyList<string> KeptManual, IReadOnlyList<string>? AwaitingConfirmation = null);
 
 /// <summary>
 /// Журнал покриття збору (<c>itg.CollectionCoverage</c>).

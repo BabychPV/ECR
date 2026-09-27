@@ -68,7 +68,11 @@ public sealed class IntegrationActor(EcrDbContext db, JobActorScope scope)
         // ⚠ Груп немає: токена входу в технічного запису не буває. Мова — `en`,
         // базова мова продукту: читачів у цього автора немає, а тексти відмов
         // ідуть у журнал задачі.
-        return scope.Enter(new JobActor(
+        // ⛔ `EnterIntegration`, а не `Enter`: саме це (контекст задачі, а не
+        // логін) дає профілю `IsIntegrationWriter` — право писати значення
+        // збору в будь-який проєкт без грантів, у межах усіх заборон
+        // (`AccessDecisionService.BuildProfileAsync`, `EditRules.Effective`).
+        return scope.EnterIntegration(new JobActor(
             account.Id, UserName, "en", [], Guid.NewGuid().ToString("N")));
     }
 }

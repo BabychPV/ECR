@@ -41,6 +41,19 @@ public sealed class JobActorScope
     /// <summary>Автор, від імені якого зараз виконується задача; <c>null</c> — поза задачею.</summary>
     public JobActor? Current { get; private set; }
 
+    /// <summary>
+    /// Автора встановила задача ІНТЕГРАЦІЇ (<see cref="EnterIntegration"/>), а не
+    /// задача, поставлена людиною.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ознака живе в САМОМУ тримачі, а не в <see cref="JobActor"/>: автор
+    /// задачі людини серіалізується в завдання черги (<c>ExcelImportTask.Actor</c>),
+    /// і поле в записі означало б, що право «інтеграція пише без грантів»
+    /// можна принести ззовні вмістом завдання. Тримач scoped, у завдання не
+    /// потрапляє і ставиться лише кодом задачі.
+    /// </remarks>
+    public bool IsIntegration { get; private set; }
+
     /// <summary>Встановлює автора до кінця виконання задачі.</summary>
     /// <param name="actor">Автор.</param>
     /// <returns>Звільнення повертає попередній стан.</returns>
@@ -64,9 +77,32 @@ public sealed class JobActorScope
         return new Exit(this);
     }
 
+    /// <summary>
+    /// Встановлює автора задачі ІНТЕГРАЦІЇ — технічний запис, що пише значення
+    /// збору без власних грантів (<c>IntegrationActor</c>).
+    /// </summary>
+    /// <param name="actor">Технічний автор.</param>
+    /// <returns>Звільнення повертає стан «поза задачею».</returns>
+    /// <remarks>
+    /// ⛔ Єдиний, хто це кличе, — <c>IntegrationActor.EnterAsync</c>. Право, яке
+    /// звідси випливає (<c>AccessProfile.IsIntegrationWriter</c>), визначається
+    /// КОНТЕКСТОМ виконання, а не іменем користувача: той самий запис у
+    /// HTTP-запиті чи в задачі людини цього права не має.
+    /// </remarks>
+    public IDisposable EnterIntegration(JobActor actor)
+    {
+        var exit = Enter(actor);
+        IsIntegration = true;
+        return exit;
+    }
+
     private sealed class Exit(JobActorScope owner) : IDisposable
     {
-        public void Dispose() => owner.Current = null;
+        public void Dispose()
+        {
+            owner.Current = null;
+            owner.IsIntegration = false;
+        }
     }
 }
 
@@ -100,4 +136,11 @@ public sealed class JobAwareCurrentUser(ICurrentUser request, JobActorScope scop
 
     /// <inheritdoc />
     public long? SimulationSessionId => scope.Current is null ? request.SimulationSessionId : null;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Лише з тримача задачі, НІКОЛИ з <c>request</c>: HTTP-запит цієї
+    /// ознаки не має й мати не може.
+    /// </remarks>
+    public bool IsIntegrationJob => scope.Current is not null && scope.IsIntegration;
 }

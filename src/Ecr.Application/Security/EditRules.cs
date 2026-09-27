@@ -166,6 +166,11 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
         }
 
+        if (profile.IsIntegrationWriter)
+        {
+            return IntegrationIsNotAWorkflowActor("подання");
+        }
+
         if (context.ProjectStatus == ProjectStatus.Archived)
         {
             return EditDecision.Deny(EditDenyReason.ProjectArchived);
@@ -228,6 +233,11 @@ public static class EditRules
         if (profile.IsSimulation)
         {
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
+        }
+
+        if (profile.IsIntegrationWriter)
+        {
+            return IntegrationIsNotAWorkflowActor("затвердження");
         }
 
         if (context.ProjectStatus == ProjectStatus.Archived)
@@ -297,6 +307,11 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.SimulationReadOnly);
         }
 
+        if (profile.IsIntegrationWriter)
+        {
+            return IntegrationIsNotAWorkflowActor("повернення в роботу");
+        }
+
         if (context.ProjectStatus == ProjectStatus.Archived)
         {
             return EditDecision.Deny(EditDenyReason.ProjectArchived);
@@ -327,6 +342,19 @@ public static class EditRules
 
         return EditDecision.Allow();
     }
+
+    /// <summary>Відмова інтеграції в дії робочого процесу.</summary>
+    /// <param name="action">Назва дії для подробиці.</param>
+    /// <remarks>
+    /// ⛔ Окремо й ДО гранта, а не «через» <see cref="Effective"/> (там у
+    /// інтеграції <c>Write</c>, нижче порога цих дій): поріг — властивість
+    /// рівнів, яку можна переставити, а відповідальність за звіт перед
+    /// перевіряльником — ні. Подати, затвердити чи повернути може лише людина.
+    /// </remarks>
+    private static EditDecision IntegrationIsNotAWorkflowActor(string action)
+        => EditDecision.Deny(
+            EditDenyReason.NoGrant,
+            $"Технічний запис інтеграції лише пише значення збору; {action} — дія людини.");
 
     /// <summary>
     /// Ефективний рівень: найдрібніший оголошений рівень перемагає, заборона —
@@ -362,6 +390,21 @@ public static class EditRules
             {
                 return GrantLevel.None;
             }
+        }
+
+        // ⛔ Інтеграція: `Write` — і рівно `Write`, ПІСЛЯ заборон. Сюди рішення
+        // доходить лише тоді, коли всі заборони комірки (закритий період,
+        // поданий/затверджений аркуш, обчислювана чи readonly колонка, вікно
+        // доступу) уже пропустили — у `CanEdit` рівень рахується ОСТАННІМ, а
+        // правила періоду (`PeriodAccessRules`) застосовує служба поверх
+        // дозволу. Явна заборона на ресурс (`IsDeny` вище) діє й на інтеграцію:
+        // це спосіб адміністратора вимкнути запис збору в конкретний проєкт.
+        //
+        // ⚠ Не вище за `Write`, навіть якщо в запису є ширший грант: подання,
+        // затвердження й повернення в роботу — дії людини.
+        if (profile.IsIntegrationWriter)
+        {
+            return GrantLevel.Write;
         }
 
         // Від найдрібнішого до найширшого: перший оголошений і виграє.

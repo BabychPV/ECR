@@ -62,12 +62,49 @@ public sealed class AccessDecisionService(
         var groupSids = GroupSidsFor(userId);
         var groupsFingerprint = await GroupsFingerprintAsync(groupSids, ct).ConfigureAwait(false);
 
-        return await profileCache
+        var profile = await profileCache
             .GetOrCreateAsync(
                 userId, account.SecurityStamp, groupsFingerprint,
                 token => LoadAsync(userId, account.SecurityStamp, groupSids, groupsFingerprint, token), ct)
             .ConfigureAwait(false);
+
+        // ⛔ Право запису інтеграції — ПОВЕРХ кешованого профілю, на кожен
+        // виклик, і лише коли профіль будується для самого автора задачі
+        // інтеграції. У кеш (`LoadAsync`) воно не потрапляє ніколи: ключ кешу —
+        // `userId`, і прапорець усередині нього означав би, що той, хто першим
+        // зігрів кеш (HTTP-запит чи задача), визначає права іншого.
+        return currentUser.IsIntegrationJob && currentUser.UserId == userId
+            ? IntegrationWriter(profile)
+            : profile;
     }
+
+    /// <summary>Профіль автора задачі інтеграції поверх його звичайного профілю.</summary>
+    /// <param name="own">Звичайний (кешований) профіль технічного запису.</param>
+    /// <remarks>
+    /// ⚠ Новий об'єкт, а не зміна кешованого: кешований спільний для всіх
+    /// викликів цього <c>userId</c>.
+    ///
+    /// ⚠ Від звичайного профілю лишаються лише ЗАБОРОНИ (<c>IsDeny</c>) — ними
+    /// адміністратор вимикає запис збору в конкретний проєкт. Гранти, ролі й
+    /// функціональні права — порожні: у задачі інтеграції права визначає
+    /// контекст, а не те, що комусь спало на думку призначити технічному
+    /// запису (саме так тест «Аналізу» тимчасово давав йому `Write`).
+    ///
+    /// ⚠ Окремий <c>CacheKey</c> — щоб жоден споживач, що колись закешує щось
+    /// за ключем профілю, не змішав два профілі того самого запису.
+    /// </remarks>
+    private static AccessProfile IntegrationWriter(AccessProfile own)
+        => new()
+        {
+            CacheKey = own.CacheKey + "|integration-job",
+            UserId = own.UserId,
+            SecurityStamp = own.SecurityStamp,
+            Permissions = new HashSet<string>(StringComparer.Ordinal),
+            Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
+            Denies = own.Denies,
+            RoleIds = new HashSet<int>(),
+            IsIntegrationWriter = true,
+        };
 
     /// <summary>Відбиток груп сесії РАЗОМ із ревізією призначень на них.</summary>
     /// <remarks>
@@ -315,7 +352,13 @@ public sealed class AccessDecisionService(
         // Читання не залежить ні від стану періоду, ні від статусу аркуша:
         // закритий період і подана форма лишаються видимими — інакше звіт
         // неможливо було б навіть переглянути після подання.
-        return profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read
+        //
+        // ⚠ Інтеграція читає документ будь-якого проєкту, куди пише (грантів у
+        // неї немає за задумом), — крім проєкту з явною забороною.
+        var integrationReads = profile.IsIntegrationWriter
+                               && !profile.Denies.Contains($"{ResourceKind.Project}:{projectId}");
+
+        return integrationReads || profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read
             ? EditDecision.Allow()
             : EditDecision.Deny(EditDenyReason.NoGrant);
     }

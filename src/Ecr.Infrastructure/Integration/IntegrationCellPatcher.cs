@@ -1,6 +1,8 @@
 // src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs
+using Ecr.Application.Common;
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Security;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -48,7 +50,12 @@ namespace Ecr.Infrastructure.Integration;
 /// змінилося.
 /// </remarks>
 public sealed class IntegrationCellPatcher(
-    EcrDbContext db, IRowStore rowStore, ICellStore cellStore, PatchCellsHandler patch) : ICellPatcher
+    EcrDbContext db,
+    IRowStore rowStore,
+    ICellStore cellStore,
+    PatchCellsHandler patch,
+    IAccessDecisionService access,
+    ICurrentUser currentUser) : ICellPatcher
 {
     /// <summary>Скільки разів пробувати запис, якщо рядок змінили між читанням і записом.</summary>
     public const int MaxAttempts = 3;
@@ -107,7 +114,7 @@ public sealed class IntegrationCellPatcher(
 
             if (plan.Rows.Count == 0)
             {
-                return new IntegrationWriteResult(0, plan.Kept);
+                return new IntegrationWriteResult(0, plan.Kept, plan.AwaitingConfirmation);
             }
 
             try
@@ -118,7 +125,7 @@ public sealed class IntegrationCellPatcher(
                         ct)
                     .ConfigureAwait(false);
 
-                return new IntegrationWriteResult(plan.Applied, plan.Kept);
+                return new IntegrationWriteResult(plan.Applied, plan.Kept, plan.AwaitingConfirmation);
             }
             catch (EcrException ex) when (IsRowRace(ex))
             {
@@ -131,14 +138,15 @@ public sealed class IntegrationCellPatcher(
                 {
                     return new IntegrationWriteResult(
                         0,
-                        [.. plan.Kept, .. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}{RetriesExhaustedNote}"))]);
+                        [.. plan.Kept, .. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}{RetriesExhaustedNote}"))],
+                        plan.AwaitingConfirmation);
                 }
             }
         }
     }
 
     /// <summary>Те, що піде в обробник за одну спробу, і те, що лишено.</summary>
-    private sealed record WritePlan(List<PatchRow> Rows, List<string> Kept, int Applied);
+    private sealed record WritePlan(List<PatchRow> Rows, List<string> Kept, int Applied, List<string> AwaitingConfirmation);
 
     /// <summary>
     /// Чи це гонка за рядок, яку знімає перечитування: версію змінили
@@ -201,15 +209,23 @@ public sealed class IntegrationCellPatcher(
 
         var current = await CurrentValuesAsync(periodKey, candidates, existing, ct).ConfigureAwait(false);
 
+        var changed = candidates
+            .Where(c => !existing.TryGetValue(c.Cell.RowKey, out var row)
+                        || !Unchanged(c.Cell, c.Column, row.Id, periodKey, current))
+            .ToList();
+
+        var awaiting = await AwaitingConfirmationAsync(tableInstanceId, periodKey, changed, existing, ct)
+            .ConfigureAwait(false);
+
         var rows = new List<PatchRow>();
         var applied = 0;
 
-        foreach (var group in candidates.GroupBy(c => c.Cell.RowKey, StringComparer.Ordinal))
+        foreach (var group in changed.GroupBy(c => c.Cell.RowKey, StringComparer.Ordinal))
         {
             existing.TryGetValue(group.Key, out var row);
 
             var patchCells = group
-                .Where(c => row is null || !Unchanged(c.Cell, c.Column, row.Id, periodKey, current))
+                .Where(c => !awaiting.Contains($"{c.Cell.RowKey}:{c.Column.Code}"))
                 .Select(c => new PatchCell(c.Column.Code, c.Cell.Value))
                 .ToList();
 
@@ -225,7 +241,90 @@ public sealed class IntegrationCellPatcher(
             applied += patchCells.Count;
         }
 
-        return new WritePlan(rows, kept, applied);
+        return new WritePlan(rows, kept, applied, [.. awaiting.Order(StringComparer.Ordinal)]);
+    }
+
+    /// <summary>
+    /// Комірки, запис у які правило періоду дозволяє лише з підтвердженням
+    /// людини (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>): <c>rowKey:columnCode</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Підтвердження — дія людини, а інтеграція підтверджувати не може і не
+    /// повинна: запис у таку комірку від технічного запису означав би
+    /// автоматичне підтвердження, якого ніхто не давав. Тому такі комірки НЕ
+    /// пишуться, а повертаються окремим переліком — задача кладе їх у журнал
+    /// покриття (<c>D-118</c>: «зібрано, але не записано» — не мовчки).
+    ///
+    /// ⚠ Питаємо ту саму службу доступу з тим самим профілем, яким рішення
+    /// ухвалить обробник запису, — не повторюємо правила тут. Решту відмов
+    /// (закритий період, поданий аркуш, обчислювана колонка) дає обробник, як
+    /// і доти: тут відсіюється лише те, що обробник ДОЗВОЛИВ би без
+    /// підтвердження, якого не було.
+    ///
+    /// ⚠ Нуль запитів, коли писати нічого: сторож області мапінгів
+    /// (<c>MaterializeMappingScopeTests</c>) ганяє патчер без служб доступу.
+    /// </remarks>
+    private async Task<HashSet<string>> AwaitingConfirmationAsync(
+        long tableInstanceId,
+        PeriodKey periodKey,
+        List<(IntegrationCellValue Cell, ColumnDef Column)> changed,
+        Dictionary<string, RowState> existing,
+        CancellationToken ct)
+    {
+        var awaiting = new HashSet<string>(StringComparer.Ordinal);
+
+        if (changed.Count == 0)
+        {
+            return awaiting;
+        }
+
+        var userId = currentUser.UserId
+                     ?? throw new InvalidOperationException(
+                         "Запис інтеграції поза задачею: автора немає (IntegrationActor.EnterAsync не викликано).");
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+
+        var inExisting = changed
+            .Where(c => existing.ContainsKey(c.Cell.RowKey))
+            .Select(c => (c.Cell.RowKey, c.Column.Code, Address: new CellAddress(periodKey, existing[c.Cell.RowKey].Id, c.Column.Id)))
+            .ToList();
+
+        if (inExisting.Count > 0)
+        {
+            var decisions = await access
+                .CanEditCellsAsync(profile, tableInstanceId, periodKey, [.. inExisting.Select(c => c.Address).Distinct()], ct)
+                .ConfigureAwait(false);
+
+            foreach (var (rowKey, code, address) in inExisting)
+            {
+                if (decisions.TryGetValue(address, out var decision) && decision.RequiresConfirmation)
+                {
+                    awaiting.Add($"{rowKey}:{code}");
+                }
+            }
+        }
+
+        var inNew = changed.Where(c => !existing.ContainsKey(c.Cell.RowKey)).ToList();
+
+        if (inNew.Count > 0)
+        {
+            var decisions = await access
+                .CanCreateRowsAsync(
+                    profile, tableInstanceId, [.. inNew.Select(c => c.Cell.RowKey).Distinct(StringComparer.Ordinal)], ct)
+                .ConfigureAwait(false);
+
+            foreach (var (cell, column) in inNew)
+            {
+                if (decisions.TryGetValue(cell.RowKey, out var row)
+                    && row.Columns.TryGetValue(column.Id, out var decision)
+                    && decision.RequiresConfirmation)
+                {
+                    awaiting.Add($"{cell.RowKey}:{column.Code}");
+                }
+            }
+        }
+
+        return awaiting;
     }
 
     /// <summary>Чинні значення комірок-кандидатів у наявних рядках.</summary>

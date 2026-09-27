@@ -220,6 +220,26 @@ public sealed class MaterializeCollectedDataJob(
                 .ConfigureAwait(false);
         }
 
+        // ⛔ Комірки під правилом «дозволено з підтвердженням» (`ФВ-2.16`):
+        // підтвердження — дія людини, інтеграція його не дає і не пише. Не
+        // мовчки — рядок у журнал на кожну.
+        //
+        // ⚠ Статус — той самий `ConflictKeptManual` («лишено чинне значення»):
+        // окремий статус тягне бейдж, фільтр, ключ каталогу й контракт клієнта,
+        // а подія для адміністратора та сама — значення збору не застосовано,
+        // рішення за людиною. Причину розрізняє текст.
+        if (written.AwaitingConfirmation is { Count: > 0 } awaiting)
+        {
+            await coverage
+                .RecordManyAsync(
+                    [.. awaiting.Select(cell => new CoverageEvent(
+                        task.SourceEntityId, periodKey, CollectionCoverage.ConflictKeptManual,
+                        $"Комірка {cell}: правило періоду вимагає підтвердження людини — "
+                        + "інтеграція не підтверджує, значення збору не застосовано."))],
+                    ct)
+                .ConfigureAwait(false);
+        }
+
         await progress
             .ReportKeyAsync(
                 100,

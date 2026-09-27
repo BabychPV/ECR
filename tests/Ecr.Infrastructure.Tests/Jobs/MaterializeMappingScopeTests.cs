@@ -114,10 +114,11 @@ public sealed class MaterializeMappingScopeTests(SqlServerFixture sql)
         // ⚠ Справжній `IntegrationCellPatcher`: саме він повертає `KeptManual`.
         // Обробник запису — `null!` навмисно: єдина комірка своєї таблиці
         // правлена людиною, тож до запису справа дійти НЕ має; спроба запису
-        // впала б тут `NullReferenceException`, а не пройшла б мовчки.
+        // впала б тут `NullReferenceException`, а не пройшла б мовчки. Так само
+        // служба доступу й автор: питати про підтвердження нема про що.
         var rows = new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now));
         var job = new MaterializeCollectedDataJob(
-            db, new IntegrationCellPatcher(db, rows, new NormalizedCellStore(db), null!), coverage, Actor(db));
+            db, new IntegrationCellPatcher(db, rows, new NormalizedCellStore(db), null!, null!, null!), coverage, Actor(db));
 
         await job.ExecuteAsync(MaterializeFor(stand.SourceEntityId, chain), Substitute.For<IJobProgress>(), CancellationToken.None);
 

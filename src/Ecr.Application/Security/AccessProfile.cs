@@ -50,6 +50,22 @@ public sealed class AccessProfile
     /// </summary>
     public bool IsSimulation { get; init; }
 
+    /// <summary>
+    /// Профіль технічного автора задачі інтеграції: пише значення збору в
+    /// будь-який проєкт БЕЗ грантів, але в межах усіх заборон (<see cref="EditRules"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ставиться ЛИШЕ поверх кешованого профілю, у мить побудови, з
+    /// контексту виконання (<c>ICurrentUser.IsIntegrationJob</c>) — ніколи не
+    /// кладеться в кеш профілів за <c>userId</c>. Інакше хто перший зігрів би
+    /// кеш (HTTP чи задача), той і визначив би права іншого.
+    ///
+    /// ⚠ Не дає ні функціональних прав (<see cref="Permissions"/> порожні), ні
+    /// подання, затвердження чи повернення в роботу: інтеграція лише ПИШЕ
+    /// значення, відповідальність за звіт лишається на людині.
+    /// </remarks>
+    public bool IsIntegrationWriter { get; init; }
+
     /// <summary>Чиїми очима; <c>null</c> поза симуляцією.</summary>
     public int? SimulatedForUserId { get; init; }
 
