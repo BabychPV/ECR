@@ -277,7 +277,8 @@ public static class TemplateFunctions
     }
 
     /// <summary>
-    /// Значення поля запису довідника — <c>REGFIELD(lookup, 'код')</c>.
+    /// Значення поля запису довідника — <c>REGFIELD(lookup, 'код')</c> або шляхом
+    /// через <c>Lookup</c>-поля — <c>REGFIELD(lookup, 'STREAM.GROUP')</c>.
     /// </summary>
     /// <remarks>
     /// ⚠ Аргументи приходять НЕ пласким списком, а власними групами (як
@@ -307,32 +308,12 @@ public static class TemplateFunctions
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        var entryValue = entry[0];
-        var fieldValue = field[0];
-
-        if (entryValue.IsError)
-        {
-            return entryValue;
-        }
-
-        if (fieldValue.IsError)
-        {
-            return fieldValue;
-        }
-
-        // Lookup-комірку ще не заповнили — це легітимна порожнеча (02b §6.3),
-        // а не помилка: запис довідника просто ще не обрали.
-        if (entryValue.IsNull)
-        {
-            return ExpressionValue.Null;
-        }
-
-        if (entryValue.AsNumber() is not { } entryId || fieldValue.Type != ExpressionValueType.Text)
-        {
-            return ExpressionValue.Error(ExpressionErrors.BadValue);
-        }
-
-        return context.GetRegistryField((long)entryId, (string)fieldValue.Value!);
+        // ⚠ Решта — спільна з методологіями (RT-20a): помилка аргументу
+        // поширюється, порожня Lookup-комірка дає null (02b §6.3 — запис ще не
+        // обрали), а код поля з крапками проходить через Lookup-поля
+        // (`'COMPONENT.MW'`). Однокрокова форма читає ТЕ САМЕ джерело, що й
+        // раніше, доки контекст не має знімка довідників (RT-24).
+        return RegistryForms.FieldPath(entry[0], field[0], context);
     }
 
     /// <summary>

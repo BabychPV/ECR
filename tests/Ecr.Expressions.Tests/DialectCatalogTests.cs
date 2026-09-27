@@ -115,6 +115,9 @@ public sealed class DialectCatalogTests
     [Theory]
     [InlineData("CONVERT")]
     [InlineData("SUBSTANCE")]
+    [InlineData("REGFIND")]
+    [InlineData("REGONE")]
+    [InlineData("REGFIELD")]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Наші_розширення_недоступні_в_Legacy(string name)
     {

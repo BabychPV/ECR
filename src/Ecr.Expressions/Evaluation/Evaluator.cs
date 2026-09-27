@@ -273,6 +273,7 @@ public sealed class Evaluator(
                 FunctionNode function => Function(function, context, dialect, budget),
                 SymbolReferenceNode symbol => Symbol(symbol, context),
                 PeriodPropertyNode period => Period(period, context),
+                RowFieldNode row => RegistryForms.RowField(row, context),
                 CellReferenceNode reference => Evaluate(reference, context, dialect, budget),
                 _ => ExpressionValue.Error(ExpressionErrors.BadValue),
             };
@@ -665,11 +666,38 @@ public sealed class Evaluator(
             : EvaluateScalar(node.WhenFalse, context, dialect, budget);
     }
 
+    /// <remarks>
+    /// ⛔ Функції довідників (<see cref="RegistryForms"/>) перехоплюються ДО
+    /// обох каталогів і в обох діалектах: <c>REGONE</c> обчислює умову над
+    /// кожним рядком довідника ліниво, у власній області <c>ROW</c>, тож
+    /// обчислити аргументи заздалегідь, як для звичайної функції, не можна.
+    /// </remarks>
     private ExpressionValue Function(
         FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
-        => dialect == ExpressionDialect.Methodology
+    {
+        if (RegistryForms.Handles(node.Name, dialect))
+        {
+            return RegistryCall(node, context, dialect, budget);
+        }
+
+        return dialect == ExpressionDialect.Methodology
             ? MethodologyCall(node, context, budget)
             : TemplateCall(node, context, dialect, budget);
+    }
+
+    /// <summary>
+    /// Виклик спецформи довідника (FEATURE-REGISTRY-TABLES §5.4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Підвирази обчислюються через <see cref="EvaluateScalar"/> з ТИМ САМИМ
+    /// бюджетом: кожен спуск проходить крізь сторожа глибини, а кожен рядок
+    /// <c>REGONE</c> — крізь лічильник кроків. Контекст підвиразу може бути
+    /// іншим — областю рядка, яку будує <see cref="RegistryForms"/>.
+    /// </remarks>
+    private ExpressionValue RegistryCall(
+        FunctionNode node, IEvaluationContext context, ExpressionDialect dialect, EvaluationBudget budget)
+        => RegistryForms.Invoke(
+            node, context, budget, (argument, scope) => EvaluateScalar(argument, scope, dialect, budget));
 
     /// <remarks>
     /// ⚠ Діалект ПЕРЕДАЄТЬСЯ далі, а не підміняється на <c>Template</c>: цим

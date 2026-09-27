@@ -80,11 +80,14 @@ public sealed class ClientServerEquivalenceTests
         // («клієнт не резолвить посилань на комірки» — коментар нижче,
         // `evaluate.ts`), тож підказка під час введення однаково не порахує
         // REGFIELD, і розходитися тут нічому так само, як із CONVERT.
-        var shared = declared.Except(["CONVERT", "REGFIELD"], StringComparer.OrdinalIgnoreCase);
+        // REGFIND і REGONE (RT-20a, 02b «Функції довідників») — з тієї самої
+        // причини: даних довідника в клієнтської підказки немає й не буде.
+        var shared = declared.Except(
+            ["CONVERT", "REGFIELD", "REGFIND", "REGONE"], StringComparer.OrdinalIgnoreCase);
 
         // Функція, якої немає в наборі, — це функція, чию поведінку клієнт і
         // сервер ніде не звіряють. Саме там і з'явиться перше розходження.
-        Assert.Equal(13, declared.Count);
+        Assert.Equal(15, declared.Count);
         Assert.Empty(shared.Except(covered, StringComparer.OrdinalIgnoreCase));
     }
 

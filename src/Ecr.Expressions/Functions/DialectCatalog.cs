@@ -41,7 +41,9 @@ public enum FunctionTier : byte
 /// <item><description><b>2 Extension</b> — <c>Ln</c>, <c>ifs</c>: є в каталозі
 /// редактора, немає в рушії;</description></item>
 /// <item><description><b>2 Extension</b> — <c>CONVERT</c>, <c>SUBSTANCE</c>:
-/// наші, потрібні для одиниць і речовин.</description></item>
+/// наші, потрібні для одиниць і речовин;</description></item>
+/// <item><description><b>3 Extension</b> — <c>REGFIND</c>, <c>REGONE</c>,
+/// <c>REGFIELD</c>: наші, функції довідників (RT-20a).</description></item>
 /// </list>
 ///
 /// ⚠ Наслідок, вартий уваги методолога: **натуральний логарифм у чинній
@@ -91,7 +93,7 @@ public static class DialectCatalog
     ];
 
     /// <summary>
-    /// Чотири функції, яких чинний рушій не обчислює.
+    /// Сім функцій, яких чинний рушій не обчислює.
     /// </summary>
     /// <remarks>
     /// ⛔ <c>Ln</c> і <c>ifs</c> потрапили сюди **за заміром**, а не за
@@ -109,6 +111,15 @@ public static class DialectCatalog
         new("ifs", 2, null, false, ExpressionValueType.Null),
         new("CONVERT", 3, 3, false, ExpressionValueType.Number),
         new("SUBSTANCE", 1, 1, false, ExpressionValueType.Number),
+
+        // ⚠ Функції довідників (RT-20a, `D-159`): чинний рушій довідників не
+        // бачив зовсім, тож у `Legacy`-версії їм нічого відтворювати —
+        // `IsAllowedIn` відхиляє їх там тим самим механізмом, що й `Ln`
+        // (`ECR-CALC-0433`, перевірка 21 `02b` §12). Обчислює їх не
+        // `MethodologyFunctions`, а спецформа `RegistryForms`.
+        new("REGFIND", 2, null, false, ExpressionValueType.Number),
+        new("REGONE", 2, 2, false, ExpressionValueType.Number),
+        new("REGFIELD", 2, 2, false, ExpressionValueType.Null),
     ];
 
     /// <summary>
