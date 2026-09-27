@@ -216,6 +216,12 @@ public sealed class UnitTable
     /// Використовується там, де прогін іде без бази — у симуляції й тестах.
     /// Коефіцієнти збігаються з seed навмисно: інакше «те саме» обчислення
     /// давало б різні числа залежно від того, звідки взяли довідник.
+    /// <para>
+    /// ⚠ Дзеркало ПОВНЕ, і це звіряє <c>Hse301UnitsTests</c> по тексту сіду.
+    /// Множники — такі, як їх зберігає <c>decimal(38,18)</c>: літерал
+    /// <c>t_per_year</c> у сіді має 19 знаків і в базі округлюється, а
+    /// <c>Sm3_per_h</c> (1/3600) там записано вже округленим до 18.
+    /// </para>
     /// </remarks>
     public static UnitTable Seed()
     {
@@ -227,9 +233,43 @@ public sealed class UnitTable
         table.Add("mg", dimension: 1, factorToBase: 0.000001m);
         table.Add("m3", dimension: 2, factorToBase: 1m);
         table.Add("l", dimension: 2, factorToBase: 0.001m);
+        table.Add("J", dimension: 3, factorToBase: 1m);
+        table.Add("GJ", dimension: 3, factorToBase: 1_000_000_000m);
+        table.Add("MWh", dimension: 3, factorToBase: 3_600_000_000m);
         table.Add("s", dimension: 4, factorToBase: 1m);
+        table.Add("min", dimension: 4, factorToBase: 60m);
+        table.Add("h", dimension: 4, factorToBase: 3600m);
+        table.Add("day", dimension: 4, factorToBase: 86_400m);
+        table.Add("year", dimension: 4, factorToBase: 31_536_000m);
         table.Add("K", dimension: 5, factorToBase: 1m);
         table.Add("degC", dimension: 5, factorToBase: 1m, offsetToBase: 273.15m);
+        table.Add("mol", dimension: 6, factorToBase: 1m);
+        table.Add("one", dimension: 7, factorToBase: 1m);
+        table.Add("g_per_s", dimension: 8, factorToBase: 0.001m);
+        table.Add("t_per_year", dimension: 8, factorToBase: 0.000031709791983765m);
+        table.Add("kg_per_t", dimension: 9, factorToBase: 0.001m);
+        table.Add("g_per_GJ", dimension: 10, factorToBase: 0.000000000001m);
+        table.Add("mg_per_m3", dimension: 11, factorToBase: 0.000001m);
+        table.Add("kg_per_m3", dimension: 11, factorToBase: 1m);
+
+        // HSE301:F1 — секція `-- HSE301:F1` сіду. ⛔ Sm3 — розмірність 12
+        // (StdVolume), а не 2 (Volume): V-12.
+        table.Add("kt", dimension: 1, factorToBase: 1_000_000m);
+        table.Add("MJ", dimension: 3, factorToBase: 1_000_000m);
+        table.Add("TJ", dimension: 3, factorToBase: 1_000_000_000_000m);
+        table.Add("pct_vol", dimension: 7, factorToBase: 0.01m);
+        table.Add("pct_wt", dimension: 9, factorToBase: 0.01m);
+        table.Add("t_per_t", dimension: 9, factorToBase: 1m);
+        table.Add("kg_per_TJ", dimension: 10, factorToBase: 0.000000000001m);
+        table.Add("Sm3", dimension: 12, factorToBase: 1m);
+        table.Add("Sm3_per_s", dimension: 13, factorToBase: 1m);
+        table.Add("Sm3_per_h", dimension: 13, factorToBase: 0.000277777777777778m);
+        table.Add("m_per_s", dimension: 14, factorToBase: 1m);
+        table.Add("m2", dimension: 15, factorToBase: 1m);
+        table.Add("kg_per_Sm3", dimension: 16, factorToBase: 1m);
+        table.Add("MJ_per_Sm3", dimension: 17, factorToBase: 1_000_000m);
+        table.Add("MJ_per_kg", dimension: 18, factorToBase: 1_000_000m);
+        table.Add("g_per_mol", dimension: 19, factorToBase: 0.001m);
 
         return table;
     }

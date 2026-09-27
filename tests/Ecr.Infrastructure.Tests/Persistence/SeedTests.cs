@@ -312,10 +312,11 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-16.2")]
     public async Task Кожна_розмірність_має_рівно_одну_базову_одиницю()
     {
-        // Базові розмірності (1..7) мають базову одиницю; похідні (8..11) —
+        // Первинні розмірності (1..7; 12, 14, 15 — HSE301 F1: StdVolume,
+        // Velocity, Area) мають базову одиницю; похідні (8..11, 13, 16..19) —
         // ні, бо складаються з чисельника і знаменника.
-        Assert.Equal(7, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
-        Assert.Equal(7, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
+        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Unit WHERE IsBase = 1"));
+        Assert.Equal(10, await ScalarAsync("SELECT COUNT(*) FROM uom.Dimension WHERE BaseUnitId IS NOT NULL"));
 
         // Двох базових в одній розмірності бути не може — це тримає
         // фільтрований унікальний індекс UX_Unit_BasePerDimension, тобто
@@ -333,7 +334,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     {
         // Складаються ПОСИЛАННЯМИ, а не розбором рядка «g_per_s» (ФВ-16.2):
         // розбір коду означав би, що перейменування одиниці ламає конверсію.
-        Assert.Equal(6, await ScalarAsync(
+        Assert.Equal(14, await ScalarAsync(
             "SELECT COUNT(*) FROM uom.Unit WHERE NumeratorUnitId IS NOT NULL AND DenominatorUnitId IS NOT NULL"));
 
         // Половина посилання — це не похідна одиниця, а зіпсований запис.

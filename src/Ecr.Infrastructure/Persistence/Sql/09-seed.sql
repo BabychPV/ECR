@@ -174,6 +174,89 @@ JOIN uom.Unit u ON u.DimensionId = d.Id AND u.IsBase = 1
 WHERE d.BaseUnitId IS NULL;
 GO
 
+-- HSE301:F1 ── Одиниці й розмірності методології HSE301.FLARE ─────────────
+-- FEATURE-HSE301-VIEW §4.2, §6.2–6.3. Лише дописування: розмірності 1–11 і
+-- одиниці вище не змінюються. Дзеркало в пам'яті воркера —
+-- `UnitTable.Seed` (Ecr.Calculations), звіряє `Hse301UnitsTests`.
+--
+-- ⛔ V-12: стандартний кубометр — ОКРЕМА розмірність StdVolume, а не Volume.
+-- Ст. м³ і робочий м³ множником не перераховуються (потрібні тиск і
+-- температура), тож CONVERT між ними відмовляє (#UNIT), а не дає
+-- правдоподібне число. Так само kg_per_Sm3 не стає kg_per_m3.
+-- ⚠ Velocity і Area — первинні (IsDerived = 0): довжини в довіднику немає,
+-- а похідна розмірність тут лише частка, не добуток (m²).
+-- ⚠ MassPerEnergy (10) уже є — kg_per_TJ іде в неї. MassPerAmount — поза
+-- переліком кроку: без неї g_per_mol (M_CO2, M_S, §6.2) нікуди покласти.
+MERGE uom.Dimension AS t
+USING (VALUES
+  (12, N'StdVolume',          0, NULL, NULL),
+  (13, N'StdVolumeFlow',      1, 12,   4),      -- StdVolume / Time
+  (14, N'Velocity',           0, NULL, NULL),
+  (15, N'Area',               0, NULL, NULL),
+  (16, N'MassPerStdVolume',   1, 1,    12),     -- Mass / StdVolume
+  (17, N'EnergyPerStdVolume', 1, 3,    12),     -- Energy / StdVolume
+  (18, N'EnergyPerMass',      1, 3,    1),      -- Energy / Mass
+  (19, N'MassPerAmount',      1, 1,    6)       -- Mass / Amount
+) AS s (Id, Code, IsDerived, Num, Den)
+ON t.Id = s.Id
+WHEN NOT MATCHED THEN INSERT (Id, Code, NameL10n, IsDerived, NumeratorDimensionId, DenominatorDimensionId)
+     VALUES (s.Id, s.Code, N'{"en":"' + s.Code + N'"}', s.IsDerived, s.Num, s.Den);
+GO
+
+-- Базові нових первинних розмірностей і кратні наявних. MJ і TJ — поза
+-- переліком кроку: на них посилаються MJ_per_Sm3, MJ_per_kg і kg_per_TJ
+-- (похідні складаються посиланнями, ФВ-16.2). pct_wt — частка маси
+-- (1 wt% = 10 kg/t), pct_vol — безрозмірна: об.% і мас.% без складу газу
+-- не перераховуються, і різні розмірності саме це й тримають.
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'Sm3',     12, 1, 1.0,             0.0),
+  (N'm_per_s', 14, 1, 1.0,             0.0),
+  (N'm2',      15, 1, 1.0,             0.0),
+  (N'kt',       1, 0, 1000000.0,       0.0),
+  (N'MJ',       3, 0, 1000000.0,       0.0),
+  (N'TJ',       3, 0, 1000000000000.0, 0.0),
+  (N'pct_wt',   9, 0, 0.01,            0.0),
+  (N'pct_vol',  7, 0, 0.01,            0.0)
+) AS s (Code, DimensionId, IsBase, Factor, [Offset])
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, s.IsBase, s.Factor, s.[Offset]);
+GO
+
+-- ⚠ Sm3_per_h: 1/3600 скінченного десяткового запису не має. Тут рівно те,
+-- що зберігає decimal(38,18), і той самий літерал — у `UnitTable.Seed`;
+-- відносна похибка ~8e-16. Точний шлях інтеграла — через знаменник (h):
+-- потік × CONVERT(тривалість, 's', 'h'), як у формулі V_Sm3 (§6.3 №1).
+MERGE uom.Unit AS t
+USING (VALUES
+  (N'Sm3_per_s',  13, N'Sm3', N's',   1.0),
+  (N'Sm3_per_h',  13, N'Sm3', N'h',   0.000277777777777778),   -- 1 / 3600
+  (N'kg_per_Sm3', 16, N'kg',  N'Sm3', 1.0),
+  (N'MJ_per_Sm3', 17, N'MJ',  N'Sm3', 1000000.0),
+  (N'MJ_per_kg',  18, N'MJ',  N'kg',  1000000.0),
+  (N't_per_t',     9, N't',   N't',   1.0),
+  (N'kg_per_TJ',  10, N'kg',  N'TJ',  0.000000000001),
+  (N'g_per_mol',  19, N'g',   N'mol', 0.001)
+) AS s (Code, DimensionId, NumCode, DenCode, Factor)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT
+     (Code, SymbolL10n, NameL10n, DimensionId, IsBase, FactorToBase, OffsetToBase,
+      NumeratorUnitId, DenominatorUnitId)
+     VALUES (s.Code, N'{"en":"' + s.Code + N'"}', N'{"en":"' + s.Code + N'"}',
+             s.DimensionId, 0, s.Factor, 0,
+             (SELECT Id FROM uom.Unit WHERE Code = s.NumCode),
+             (SELECT Id FROM uom.Unit WHERE Code = s.DenCode));
+GO
+
+UPDATE d SET BaseUnitId = u.Id
+FROM uom.Dimension d
+JOIN uom.Unit u ON u.DimensionId = d.Id AND u.IsBase = 1
+WHERE d.BaseUnitId IS NULL AND d.Id IN (12, 14, 15);
+GO
+-- HSE301:F1 ── кінець секції ───────────────────────────────────────────────
+
 -- Політика паролів і вбудовані ролі
 MERGE sec.PasswordPolicy AS t USING (VALUES (N'Default')) AS s (Code) ON t.Code = s.Code
 WHEN NOT MATCHED THEN INSERT (Code) VALUES (s.Code);
