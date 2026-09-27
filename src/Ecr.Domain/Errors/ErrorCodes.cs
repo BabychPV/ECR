@@ -695,4 +695,15 @@ public static class ErrorCodes
     // Система
     public const string Internal = "ECR-SYS-0500";
     public const string Archiving = "ECR-SYS-0503";
+
+    /// <summary>
+    /// Старт зупинено: база чи сервер несумісні зі збіркою (ФВ-7.9,
+    /// <c>SchemaValidator</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Код журналу старту, а не відповіді API: виняток кидається до того, як
+    /// застосунок почав приймати запити. <c>5031</c> — «сервіс недоступний»,
+    /// окремий від архівації (<see cref="Archiving"/>), бо причина й дія інші.
+    /// </remarks>
+    public const string StartupSchemaIncompatible = "ECR-SYS-5031";
 }

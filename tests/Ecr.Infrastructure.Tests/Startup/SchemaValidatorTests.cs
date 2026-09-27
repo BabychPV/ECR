@@ -31,7 +31,7 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         {
             var validator = new SchemaValidator(db, Capabilities(), Clock);
 
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
                 () => validator.ValidateAsync("Validate", CancellationToken.None));
 
             // Повідомлення має називати, ЩО саме не застосовано: «схема не
@@ -64,7 +64,7 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
             await using var db = CreateContext();
             var validator = new SchemaValidator(db, Capabilities(), Clock);
 
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
                 () => validator.ValidateAsync("Migrate", CancellationToken.None));
 
             Assert.Contains(Ghost, error.Message, StringComparison.Ordinal);
@@ -87,12 +87,16 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         await using var db = CreateContext(await CreateBareDatabaseAsync());
         var validator = new SchemaValidator(db, Capabilities(), Clock);
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+        var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
             () => validator.ValidateAsync("Migrate", CancellationToken.None));
 
         // ⚠ Повідомлення мусить називати СКРИПТ. Інакше адміністратор знає, що
         // зламано, і не знає, що виконати.
         Assert.Contains(".sql", error.Message, StringComparison.Ordinal);
+
+        // Код зупинки старту — і у властивості, і першим у тексті журналу.
+        Assert.Equal(Ecr.Domain.Errors.ErrorCodes.StartupSchemaIncompatible, error.ErrorCode);
+        Assert.StartsWith("ECR-SYS-5031: ", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -136,7 +140,7 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         await using var db = CreateContext();
         var validator = new SchemaValidator(db, Capabilities(mode: SqlEditionMode.Standard, major: 12), Clock);
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+        var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
             () => validator.ValidateAsync("Validate", CancellationToken.None));
 
         // ⛔ До 2016 SP1 партиціонування, columnstore і компресія — лише

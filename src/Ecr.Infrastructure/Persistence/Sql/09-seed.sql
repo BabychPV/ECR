@@ -1656,6 +1656,9 @@ USING (VALUES
     -- і до входу (`GET /ui-strings`, `/health`).
     (N'err.ECR-SYS-0500',   N'en', N'Internal error', 0),
     (N'err.ECR-SYS-0503',   N'en', N'The system is archiving', 0),
+    -- COLL:startup — зупинка старту (ФВ-7.9). Живе в журналі старту, до HTTP не
+    -- доходить; заголовок заведено, бо код — у каталозі.
+    (N'err.ECR-SYS-5031',   N'en', N'The database or server is incompatible with this build', 0),
 
     -- Приватна область: усе, що видно лише після входу.
     (N'app.simulating',                  N'en', N'Viewing as {user}', 1),
