@@ -453,7 +453,7 @@ public sealed class GateBenchmark
     /// правили б ті самі сто комірок, і замір показував би чергу на одному
     /// ключі — тобто конкуренцію генератора з собою, а не роботу моделі.
     /// </remarks>
-    private static Task ApplyOnceAsync(
+    private static Task<IReadOnlyDictionary<long, string>> ApplyOnceAsync(
         NormalizedCellStore store, SliceTarget target, int offset, CancellationToken ct)
     {
         const int Cells = 100;
