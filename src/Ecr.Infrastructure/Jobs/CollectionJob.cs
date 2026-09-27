@@ -87,13 +87,18 @@ public sealed class CollectionJob(
             throw;
         }
 
+        // ⚠ Читається ДО `SaveRunAsync`, який його перезапише: це межа «періоди,
+        // що відкрилися з попереднього прогону». Без розкладу (ручний збір) —
+        // початок вікна.
+        var openedSince = schedule?.LastRunAt ?? from;
+
         if (schedule is not null)
         {
             // Watermark рухається лише за успішним прогоном і лише вперед.
             await SaveRunAsync(db, schedule, now, to, ct).ConfigureAwait(false);
         }
 
-        await EnqueueMaterializationAsync(request.SourceEntityId, from, to, ct).ConfigureAwait(false);
+        await EnqueueMaterializationAsync(request.SourceEntityId, from, to, openedSince, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -150,6 +155,10 @@ public sealed class CollectionJob(
     /// <param name="sourceEntityId">Сутність джерела.</param>
     /// <param name="from">Початок зібраного інтервалу.</param>
     /// <param name="to">Кінець інтервалу, виключно.</param>
+    /// <param name="openedSince">
+    /// Період, що перейшов у <c>Open</c>/<c>Grace</c> не раніше цієї миті, отримує
+    /// задачу, навіть якщо вікна не перетинає.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⛔ ОКРЕМА задача, а не продовження цієї. Збір і матеріалізація мають
@@ -166,7 +175,7 @@ public sealed class CollectionJob(
     /// одному документі зупиняє перенесення в решту.
     /// </remarks>
     private async Task EnqueueMaterializationAsync(
-        int sourceEntityId, DateTime from, DateTime to, CancellationToken ct)
+        int sourceEntityId, DateTime from, DateTime to, DateTime openedSince, CancellationToken ct)
     {
         // ⚠ Мапінги без `TargetRowKey` не матеріалізуються — і це легальний
         // стан (`D-118`): тег може збиратися для звірки, а не для форми.
@@ -205,6 +214,14 @@ public sealed class CollectionJob(
         // ⚠ Точна межа — у поясі проєкту (`Period.UtcBounds`), тож у запиті лише
         // грубий фільтр за датами з запасом у добу в обидва боки (пояс ≤ ±14 год),
         // а точний — у пам'яті.
+        //
+        // ⛔ Друга умова — період, що ВІДКРИВСЯ з попереднього прогону
+        // (`StateChangedAt >= openedSince`). Для `Scheduled` задача законно
+        // нічого не пише — точки чекають відкриття; але коли `OpenOffsetDays`
+        // більший за довжину періоду + `LookbackDays`, після відкриття вікно
+        // його вже не перетинає, і без цієї умови точки лишались сирими
+        // назавжди, а журнал покриття мовчав. `Grace` — бо задача станів
+        // після простою проходить `Scheduled → Open → Grace` за один прогін.
         var fromDate = DateOnly.FromDateTime(from).AddDays(-1);
         var toDate = DateOnly.FromDateTime(to).AddDays(1);
 
@@ -215,8 +232,9 @@ public sealed class CollectionJob(
                     on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }
                 join project in db.Projects.AsNoTracking() on d.ProjectId equals project.Id
                 where tableDefIds.Contains(t.TableDefId)
-                      && p.PeriodStart <= toDate
-                      && p.PeriodEnd >= fromDate
+                      && ((p.PeriodStart <= toDate && p.PeriodEnd >= fromDate)
+                          || ((p.State == Domain.Enums.PeriodState.Open || p.State == Domain.Enums.PeriodState.Grace)
+                              && p.StateChangedAt >= openedSince))
                 select new
                 {
                     t.Id,
@@ -225,6 +243,8 @@ public sealed class CollectionJob(
                     d.ProjectId,
                     p.PeriodStart,
                     p.PeriodEnd,
+                    p.State,
+                    p.StateChangedAt,
                     project.TimeZoneId,
                 })
             // ⚠ Найсвіжіші першими: за переповнення стелі відсікатися мають
@@ -235,10 +255,14 @@ public sealed class CollectionJob(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // ⚠ Екземпляр — один раз, навіть якщо підпадає під обидві умови: кожен
+        // рядок `candidates` — окремий екземпляр (join періоду один до одного).
         var targets = candidates
-            .Where(t => Domain.Entities.Documents.Period
-                .UtcBounds(t.PeriodStart, t.PeriodEnd, Domain.ValueObjects.SiteTimeZone.Create(t.TimeZoneId).ToTimeZoneInfo())
-                .Overlaps(from, to))
+            .Where(t => (t.State is Domain.Enums.PeriodState.Open or Domain.Enums.PeriodState.Grace
+                         && t.StateChangedAt >= openedSince)
+                        || Domain.Entities.Documents.Period
+                            .UtcBounds(t.PeriodStart, t.PeriodEnd, Domain.ValueObjects.SiteTimeZone.Create(t.TimeZoneId).ToTimeZoneInfo())
+                            .Overlaps(from, to))
             .ToList();
 
         foreach (var target in targets)
