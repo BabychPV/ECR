@@ -374,7 +374,8 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
             // ⛔ ТОЙ САМИЙ контекст, що й у подання: перерахунок має йти в його
             // транзакції, під його винятковим блокуванням — як у DI-скоупі.
             BuildRecalculation(db, doc, beforeWrite: null),
-            methodologies);
+            methodologies,
+            new TemplateVersionStore(db));
     }
 
     /// <summary>

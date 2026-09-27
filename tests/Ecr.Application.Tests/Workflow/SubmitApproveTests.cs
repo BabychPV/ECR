@@ -136,6 +136,33 @@ public sealed class SubmitApproveTests
     /// <summary>Таблиця аркуша <c>Waste</c> (лише в <c>Snapshot(withWasteSheet: true)</c>).</summary>
     private const int WasteTable = 4;
 
+    /// <summary>Третій аркуш (лише в <c>Snapshot(withAirSheet: true)</c>).</summary>
+    private const int Air = 22;
+
+    /// <summary>Таблиця аркуша <c>Air</c>.</summary>
+    private const int AirTable = 5;
+
+    /// <summary>Формула таблиці Water (3), що читає таблицю Waste (4).</summary>
+    private const int WaterFormula = 90;
+
+    /// <summary>Формула таблиці Waste (4), що читає таблицю Air (5).</summary>
+    private const int WasteFormula = 91;
+
+    /// <summary>Формула шаблону з заданим ідентифікатором.</summary>
+    private static Ecr.Domain.Entities.Configuration.FormulaDef Formula(int id, int tableDefId, string expression)
+    {
+        var formula = new Ecr.Domain.Entities.Configuration.FormulaDef(
+            tableDefId, FormulaScope.Column, expression, ExpressionDialect.Template);
+        typeof(Entity<int>).GetProperty("Id")!.SetValue(formula, id);
+        return formula;
+    }
+
+    /// <summary>Ребро графа: формула читає колонку таблиці (динамічний діапазон — без рядка).</summary>
+    private static Ecr.Domain.Entities.Configuration.FormulaDependency Reads(int formulaId, int tableDefId)
+        => Ecr.Domain.Entities.Configuration.FormulaDependency.ForFormula(
+            formulaId, dependsOnKind: 0, tableDefId, rowKey: null, columnDefId: 11,
+            filterJson: null, periodOffset: null, sortOrder: 0);
+
     /// <summary>
     /// Знімок структури: аркуш <c>Water</c> з однією таблицею й колонкою.
     /// </summary>
@@ -148,9 +175,16 @@ public sealed class SubmitApproveTests
     /// Додати аркуш <c>Waste</c> із таблицею <c>WasteTable</c> — для тестів
     /// звуження застарілості методологій до таблиць аркуша (F-05).
     /// </param>
+    /// <param name="waterFormulaReadsWaste">
+    /// Таблиця Water отримує формулу <c>WaterFormula</c> (ребра — у графі <c>_versions</c>).
+    /// </param>
+    /// <param name="withAirSheet">
+    /// Третій аркуш <c>Air</c> і формула <c>WasteFormula</c> у таблиці Waste
+    /// (разом із <paramref name="withWasteSheet"/>).
+    /// </param>
     private static Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot Snapshot(
         Ecr.Domain.Entities.Configuration.ValidationRule? rule = null, bool requiredColumn = false,
-        bool withWasteSheet = false)
+        bool withWasteSheet = false, bool waterFormulaReadsWaste = false, bool withAirSheet = false)
     {
         var column = new Ecr.Domain.Entities.Configuration.ColumnDef(
             tableDefId: 3, EcrCode.Create("Volume"),
@@ -199,6 +233,35 @@ public sealed class SubmitApproveTests
 
             waste.AddTable(wasteTable);
             sheets.Add(waste);
+
+            if (withAirSheet)
+            {
+                var air = new Ecr.Domain.Entities.Configuration.SheetDef(
+                    TemplateVersion, EcrCode.Create("AIR"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Air" }), 3);
+                typeof(Entity<int>).GetProperty("Id")!.SetValue(air, Air);
+
+                var airTable = new Ecr.Domain.Entities.Configuration.TableDef(
+                    sheetDefId: Air, EcrCode.Create("AIRMAIN"),
+                    new LocalizedText(new Dictionary<string, string> { ["en"] = "Air main" }), 1,
+                    TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+                typeof(Entity<int>).GetProperty("Id")!.SetValue(airTable, AirTable);
+
+                air.AddTable(airTable);
+                sheets.Add(air);
+
+                // Формула таблиці Waste, що читає таблицю аркуша Air.
+                wasteTable.AddFormula(Formula(WasteFormula, WasteTable, "[AIR].[AIRMAIN].[Volume]"));
+            }
+        }
+
+        // ⚠ Формула таблиці Water, що читає таблицю ІНШОГО аркуша (Waste) —
+        // предмет крос-аркушевого замикання застарілості (F-05). Сам вираз
+        // обробник не розбирає: ребра дає граф `cfg.FormulaDependency`
+        // (`_versions`), вираз тут — лише для читабельності.
+        if (waterFormulaReadsWaste)
+        {
+            table.AddFormula(Formula(WaterFormula, 3, "[WASTE].[WASTEMAIN].[Volume]"));
         }
 
         return new Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot(
@@ -266,7 +329,14 @@ public sealed class SubmitApproveTests
                _headers,
                Reports(), _uow, _user, _clock, Substitute.For<ISheetEditGate>(),
                NSubstitute.Substitute.For<Ecr.Application.Recalculation.ISubmitRecalculation>(),
-               _methodologies);
+               _methodologies,
+               _versions);
+
+    /// <summary>
+    /// Граф залежностей формул версії (<c>cfg.FormulaDependency</c>). За
+    /// замовчуванням у знімку формул немає, тож обробник його й не питає.
+    /// </summary>
+    private readonly ITemplateVersionStore _versions = Substitute.For<ITemplateVersionStore>();
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -713,6 +783,126 @@ public sealed class SubmitApproveTests
         Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
         Assert.Empty(_snapshots);
         Assert.Equal(DocumentStatus.Draft, _sheets[Waste].Status);
+    }
+
+    /// <summary>
+    /// Входи змінилися лише в таблиці <paramref name="staleTable"/>; порт
+    /// відповідає як справжній стор: застаріло, якщо фільтра немає або він
+    /// містить цю таблицю.
+    /// </summary>
+    private void WithStaleOnlyIn(
+        int staleTable,
+        Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        params Ecr.Domain.Entities.Configuration.FormulaDependency[] graph)
+    {
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(snapshot);
+        _versions.ListFormulaDependenciesAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns((IReadOnlyList<Ecr.Domain.Entities.Configuration.FormulaDependency>)graph);
+        _methodologies.GetCalculationFreshnessAsync(
+                Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var tables = call.ArgAt<IReadOnlyCollection<int>?>(2);
+                return tables is null || tables.Contains(staleTable)
+                    ? new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))
+                    : new CalculationFreshness(Now.AddHours(-2), null);
+            });
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_чия_формула_читає_застарілу_таблицю_іншого_аркуша_відхиляється()
+    {
+        // ⛔ Пропущене блокування після звуження до таблиць аркуша (9159a8e7).
+        // Таблиця Water (прив'язана) має формульну колонку, що читає таблицю
+        // аркуша Waste. Правка в Waste пише `aud.CellChange` у ЧУЖУ таблицю
+        // (відсіює фільтр таблиць), а каскад переписує похідну клітинку в
+        // Water з `Origin = Recalculation` (відсіює фільтр походження). Обидва
+        // фільтри правильні поодинці — а разом пропускали подання Water із
+        // застарілим результатом методології.
+        WithStaleOnlyIn(
+            WasteTable,
+            Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true),
+            Reads(WaterFormula, WasteTable));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+
+        // Питали саме замикання {Water, Waste}, а не весь документ (null).
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 2 && t.Contains(3) && t.Contains(WasteTable)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Замикання_залежностей_транзитивне_через_проміжний_аркуш()
+    {
+        // Water читає Waste, Waste читає Air; змінилося лише в Air. Правка в
+        // Air каскадом переписує Waste, потім Water — усе `Recalculation`.
+        WithStaleOnlyIn(
+            AirTable,
+            Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true, withAirSheet: true),
+            Reads(WaterFormula, WasteTable),
+            Reads(WasteFormula, AirTable));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 3
+                && t.Contains(3) && t.Contains(WasteTable) && t.Contains(AirTable)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Формула_що_читає_лише_свою_таблицю_не_тягне_чужий_аркуш_у_перевірку()
+    {
+        // Контроль до двох тестів вище: формула в Water є, але читає лише
+        // власну таблицю — застарілість Waste аркуш Water і далі не блокує
+        // (звуження 9159a8e7 не скасоване).
+        WithStaleOnlyIn(
+            WasteTable,
+            Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true),
+            Reads(WaterFormula, 3));
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 1 && t.Contains(3)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Формули_без_графа_залежностей_перевіряються_по_всьому_документу()
+    {
+        // ⚠ Версія, для якої граф `cfg.FormulaDependency` не наповнювали:
+        // формули є, що вони читають — невідомо. Звужувати за мовчанням графа
+        // означало б знову пропустити крос-аркушеве читання; перевірка йде
+        // по всьому документу (null), як до 9159a8e7.
+        WithStaleOnlyIn(WasteTable, Snapshot(withWasteSheet: true, waterFormulaReadsWaste: true));
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period, null, Arg.Any<CancellationToken>());
     }
 
     [Fact]

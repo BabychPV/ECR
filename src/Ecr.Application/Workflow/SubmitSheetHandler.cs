@@ -56,7 +56,14 @@ public sealed class SubmitSheetHandler(
     // ✎ Той самий порт тепер дає й `GetMethodologyIdsBoundToTableAsync` —
     // звуження перевірки `IsStale` до аркушів, що мають хоч одну методологічну
     // прив'язку (див. коментар над перевіркою нижче).
-    IMethodologyStore methodologies)
+    IMethodologyStore methodologies,
+
+    // ⛔ Граф залежностей формул версії (`cfg.FormulaDependency`) — той самий,
+    // яким живе каскадний перерахунок (`RecalculationService`,
+    // `RecalculationReadScope`). Потрібен, щоб перевірка застарілості
+    // методологій бачила таблиці ІНШИХ аркушів, які формули цього аркуша
+    // читають (див. `FreshnessTablesAsync`).
+    ITemplateVersionStore versions)
 {
     /// <summary>Подає аркуш на погодження.</summary>
     /// <param name="documentId">Документ.</param>
@@ -212,6 +219,8 @@ public sealed class SubmitSheetHandler(
         // методології (консервативно — блокувати зайве, ніж подати застаріле).
         // Дисплей (`GetCalculationResultsHandler`) і далі питає по всьому
         // документу (`null`).
+        // ⚠ До таблиць аркуша додається замикання міжтабличних (зокрема
+        // крос-аркушевих) залежностей їхніх формул — див. `FreshnessTablesAsync`.
         //
         // ⚠ Результат методології НЕ входить у зріз подання (`D-69`,
         // `SnapshotPayloadAsync` нижче копіює лише клітинки), тобто застаріле
@@ -234,8 +243,17 @@ public sealed class SubmitSheetHandler(
 
         if (sheetHasMethodologyBinding)
         {
+            // ⛔ Не лише таблиці аркуша, а їхнє ЗАМИКАННЯ за графом формул.
+            // Формула таблиці цього аркуша може читати таблицю ІНШОГО аркуша
+            // (`FormulaDef.IsCrossSheet`); похідна клітинка тоді — вхід
+            // методології, але її перезапис каскадом має `Origin =
+            // Recalculation`, який стор навмисно не рахує, а сама правка лежить
+            // у чужій таблиці. Без замикання подання проходило із застарілим
+            // числом методології.
+            var freshnessTables = await FreshnessTablesAsync(
+                snapshot, templateVersionId, tables.Keys, ct).ConfigureAwait(false);
             var freshness = await methodologies
-                .GetCalculationFreshnessAsync(documentId, periodKey, [.. tables.Keys], ct)
+                .GetCalculationFreshnessAsync(documentId, periodKey, freshnessTables, ct)
                 .ConfigureAwait(false);
             if (freshness.IsStale)
             {
@@ -513,6 +531,76 @@ public sealed class SubmitSheetHandler(
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Таблиці, зміна входів у яких робить результат методології аркуша
+    /// застарілим: таблиці аркуша плюс транзитивне замикання того, що читають
+    /// їхні формули (<c>cfg.FormulaDependency</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Замикання будується тим самим <see cref="Recalculation.RecalculationReadScope.Compute"/>,
+    /// що звужує читання каскадного перерахунку, — другого графа тут немає.
+    /// Один крок <c>Compute</c> дає прямі читання формул; повторюємо, доки
+    /// набір таблиць росте (A читає B, B читає C → правка в C каскадом
+    /// переписує B, потім A, і всі перезаписи — <c>Recalculation</c>).
+    ///
+    /// ⚠ Граф версії порожній, а формули в замиканні Є — версія, для якої граф
+    /// не наповнювали (до <c>A7-63</c>): що формули читають, невідомо, тож
+    /// перевірка йде по всьому документу (<c>null</c>), як до звуження.
+    /// </remarks>
+    private async Task<IReadOnlyCollection<int>?> FreshnessTablesAsync(
+        Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
+        int templateVersionId,
+        IEnumerable<int> sheetTableIds,
+        CancellationToken ct)
+    {
+        var scope = new HashSet<int>(sheetTableIds);
+
+        var tableByFormula = snapshot.Sheets
+            .SelectMany(s => s.Tables)
+            .Where(t => !t.IsDeleted)
+            .SelectMany(t => t.Formulas.Where(f => !f.IsDeleted).Select(f => (FormulaId: f.Id, TableId: t.Id)))
+            .ToDictionary(p => p.FormulaId, p => p.TableId);
+
+        IReadOnlyList<Domain.Entities.Configuration.FormulaDependency>? dependencies = null;
+
+        while (true)
+        {
+            var targets = tableByFormula
+                .Where(p => scope.Contains(p.Value))
+                .Select(p => p.Key)
+                .ToList();
+            if (targets.Count == 0)
+            {
+                break;
+            }
+
+            // Граф читається лише тоді, коли в замиканні взагалі є формули.
+            dependencies ??= await versions
+                .ListFormulaDependenciesAsync(templateVersionId, ct)
+                .ConfigureAwait(false) ?? [];
+            if (dependencies.Count == 0)
+            {
+                return null;
+            }
+
+            var reads = Recalculation.RecalculationReadScope.Compute(
+                dependencies, targets, tableByFormula, targetsWithUnknownReads: []);
+            if (reads.TableDefIds is null)
+            {
+                return null;
+            }
+
+            var before = scope.Count;
+            scope.UnionWith(reads.TableDefIds);
+            if (scope.Count == before)
+            {
+                break;
+            }
+        }
+
+        return [.. scope.Order()];
     }
 
     /// <summary>Версія шаблону, за якою живе документ.</summary>
