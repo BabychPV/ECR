@@ -61,7 +61,7 @@ public sealed class MaterializeMappingScopeTests(SqlServerFixture sql)
 
         var patcher = RecordingPatcher();
         var coverage = Substitute.For<ICoverageJournal>();
-        var job = new MaterializeCollectedDataJob(db, patcher, coverage);
+        var job = new MaterializeCollectedDataJob(db, patcher, coverage, Actor(db));
 
         await job.ExecuteAsync(MaterializeFor(stand.SourceEntityId, chain), Substitute.For<IJobProgress>(), CancellationToken.None);
 
@@ -115,7 +115,7 @@ public sealed class MaterializeMappingScopeTests(SqlServerFixture sql)
         // Обробник запису — `null!` навмисно: єдина комірка своєї таблиці
         // правлена людиною, тож до запису справа дійти НЕ має; спроба запису
         // впала б тут `NullReferenceException`, а не пройшла б мовчки.
-        var job = new MaterializeCollectedDataJob(db, new IntegrationCellPatcher(db, null!), coverage);
+        var job = new MaterializeCollectedDataJob(db, new IntegrationCellPatcher(db, null!), coverage, Actor(db));
 
         await job.ExecuteAsync(MaterializeFor(stand.SourceEntityId, chain), Substitute.For<IJobProgress>(), CancellationToken.None);
 
@@ -153,7 +153,7 @@ public sealed class MaterializeMappingScopeTests(SqlServerFixture sql)
 
         var patcher = RecordingPatcher();
         var coverage = Substitute.For<ICoverageJournal>();
-        var job = new MaterializeCollectedDataJob(db, patcher, coverage);
+        var job = new MaterializeCollectedDataJob(db, patcher, coverage, Actor(db));
 
         await job.ExecuteAsync(MaterializeFor(stand.SourceEntityId, chain), Substitute.For<IJobProgress>(), CancellationToken.None);
 
@@ -185,7 +185,7 @@ public sealed class MaterializeMappingScopeTests(SqlServerFixture sql)
 
         var patcher = RecordingPatcher();
         var coverage = Substitute.For<ICoverageJournal>();
-        var job = new MaterializeCollectedDataJob(db, patcher, coverage);
+        var job = new MaterializeCollectedDataJob(db, patcher, coverage, Actor(db));
 
         await job.ExecuteAsync(MaterializeFor(stand.SourceEntityId, chain), Substitute.For<IJobProgress>(), CancellationToken.None);
 
@@ -292,6 +292,9 @@ public sealed class MaterializeMappingScopeTests(SqlServerFixture sql)
 
         return new Stand(entity.Id, ownRowKey.Value);
     }
+
+    /// <summary>Технічний автор задачі — як у контейнері (P0, <c>IntegrationActor</c>).</summary>
+    private static IntegrationActor Actor(EcrDbContext db) => new(db, new Ecr.Application.Common.JobActorScope());
 
     private static ICellPatcher RecordingPatcher()
     {

@@ -38,7 +38,8 @@ namespace Ecr.Infrastructure.Jobs;
 public sealed class MaterializeCollectedDataJob(
     EcrDbContext db,
     ICellPatcher patcher,
-    ICoverageJournal coverage) : IMaterializeCollectedDataJob
+    ICoverageJournal coverage,
+    IntegrationActor actor) : IMaterializeCollectedDataJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "materialize-collected";
@@ -79,6 +80,12 @@ public sealed class MaterializeCollectedDataJob(
 
         var task = MaterializePayload.Parse(payload);
         var periodKey = new PeriodKey(task.PeriodKey);
+
+        // ⛔ P0: задача пише ВІД ІМЕНІ `svc-integration` (`IntegrationActor`).
+        // Без цього входу `PatchCellsHandler` у фоні бачив анонімного
+        // користувача (HTTP-запиту немає) і відмовляв `ECR-AUTH-0401` — у
+        // проді матеріалізація не записувала жодної комірки.
+        using var author = await actor.EnterAsync(ct).ConfigureAwait(false);
 
         await progress.ReportKeyAsync(10, "jobs.materializeReadingMappings", ct).ConfigureAwait(false);
 

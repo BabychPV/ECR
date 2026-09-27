@@ -80,7 +80,7 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
         ]);
 
         var patcher = RecordingPatcher();
-        var job = new MaterializeCollectedDataJob(db, patcher, Substitute.For<ICoverageJournal>());
+        var job = new MaterializeCollectedDataJob(db, patcher, Substitute.For<ICoverageJournal>(), Actor(db));
 
         // Вікно збору — останній тиждень січня. Воно НЕ має обмежувати згортку:
         // «Sum за місяць» — це сума за місяць, а не за останні 7 діб.
@@ -168,7 +168,7 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
 
         var patcher = RecordingPatcher();
         var coverage = Substitute.For<ICoverageJournal>();
-        var job = new MaterializeCollectedDataJob(db, patcher, coverage);
+        var job = new MaterializeCollectedDataJob(db, patcher, coverage, Actor(db));
 
         foreach (var task in tasks)
         {
@@ -212,7 +212,7 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
 
         var patcher = RecordingPatcher();
         var coverage = Substitute.For<ICoverageJournal>();
-        var job = new MaterializeCollectedDataJob(db, patcher, coverage) { PointCeilingPerField = 3 };
+        var job = new MaterializeCollectedDataJob(db, patcher, coverage, Actor(db)) { PointCeilingPerField = 3 };
 
         await job.ExecuteAsync(
             new MaterializeTask(
@@ -330,6 +330,9 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
     }
 
     /// <summary>Замінник запису в комірки, що відповідає «записано все».</summary>
+    /// <summary>Технічний автор задачі — як у контейнері (P0, <c>IntegrationActor</c>).</summary>
+    private static IntegrationActor Actor(EcrDbContext db) => new(db, new Ecr.Application.Common.JobActorScope());
+
     private static ICellPatcher RecordingPatcher()
     {
         var patcher = Substitute.For<ICellPatcher>();

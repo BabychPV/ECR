@@ -218,6 +218,11 @@ public static class DependencyInjection
         services.AddScoped<Application.Ports.ICoverageJournal, Integration.CoverageJournal>();
         services.AddScoped<Application.Ports.IMaterializeCollectedDataJob, Jobs.MaterializeCollectedDataJob>();
 
+        // ⛔ P0: технічний автор задач інтеграції (`svc-integration`). Сам
+        // `JobActorScope` реєструє `Program.cs` разом з обгорткою
+        // `ICurrentUser` — обидва мусять бути ОДНИМ екземпляром на scope.
+        services.AddScoped<Jobs.IntegrationActor>();
+
         // ⚠ Планувальник тепер справжній. Quartz піднімається як hosted
         // service, а порт лишається тим самим: заміна на Hangfire, якщо ІБ
         // погодить LGPL, коштує день (D-09).
