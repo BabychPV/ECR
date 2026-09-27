@@ -2137,6 +2137,17 @@ public interface ICollectionRunner
 }
 ```
 
+#### `IMaterializationScheduler`
+
+Постановка матеріалізації PI (D-118) з місця переходу періоду `Scheduled → Open/Grace`; викликати лише ПІСЛЯ коміту переходу (`PeriodStateJob`, `ActivateProjectHandler`).
+
+```csharp
+public interface IMaterializationScheduler
+{
+    public Task EnqueueForOpenedPeriodsAsync(int projectId, IReadOnlyCollection<int> periodKeys, CancellationToken ct);
+}
+```
+
 #### `ICollectionScheduleStore`
 
 Розклади збору (`ext.CollectionSchedule`) для редагування з інтерфейсу (`BE-21b`, ФВ-14.3). Окремо від `ICollectionStore`: той обслуговує ПРОГІН збору і живе в адаптерах джерела, а цей — конфігурацію, яку править людина. Розклад завжди віддається разом із кодом і підписом сутності джерела (`ScheduledSourceEntity`): сам по собі він має лише `SourceEntityId`, і перелік із голими числами не каже, ЩО збирається за цим cron.
