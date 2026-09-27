@@ -17,6 +17,7 @@ SQL / CLR / PI AF / SSRS. Замовник — NCOC; мови продукту `
 | Хочете знати, **що ще не зроблено** | → **[`build/OPEN-ITEMS.md`](build/OPEN-ITEMS.md)** |
 | Хочете знати, **що стоїть між нинішнім станом і стабільним продуктом** | → **[`build/DIRECTIVE-14-ARCH.md`](build/DIRECTIVE-14-ARCH.md)** (зведений перелік виправлень із порядком — починати звідси), [`build/DIRECTIVE-14.md`](build/DIRECTIVE-14.md) (аудит, рішення) і [`build/DIRECTIVE-14-UIUX.md`](build/DIRECTIVE-14-UIUX.md) (інтерфейс) |
 | Переносите **новий інтерфейс** або розширюєте API під нього | → **[`build/DIRECTIVE-15.md`](build/DIRECTIVE-15.md)** (рішення, питання, порядок), [`build/DIRECTIVE-15-FRONTEND.md`](build/DIRECTIVE-15-FRONTEND.md), [`build/DIRECTIVE-15-BACKEND.md`](build/DIRECTIVE-15-BACKEND.md); еталон — робочий макет [`design/hybrid/`](design/hybrid/README.md) |
+| Проектуєте **довідники-таблиці з ключами** у формулах або **представлення HSE301** (PI → події → методологія) | → [`build/FEATURE-REGISTRY-TABLES.md`](build/FEATURE-REGISTRY-TABLES.md), [`build/FEATURE-HSE301-VIEW.md`](build/FEATURE-HSE301-VIEW.md) |
 | Маєте відповісти як замовник | → **[`build/CUSTOMER-QUESTIONS.md`](build/CUSTOMER-QUESTIONS.md)** |
 | Приймаєте рішення про обсяг, строк, бюджет | → [`tz/00-README.md`](tz/00-README.md) |
 | Хочете знати, **що вирішено і чому** | → [`tz/10-decisions.md`](tz/10-decisions.md) |
