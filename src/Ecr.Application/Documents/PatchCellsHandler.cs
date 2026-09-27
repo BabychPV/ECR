@@ -142,7 +142,17 @@ public sealed class PatchCellsHandler(
         // мали дати ОДНАКОВИЙ результат, TableValidation.cs, R-B3).
         var headerValues = await headers.GetExpressionValuesAsync(context.Instance.DocumentId, ct)
             .ConfigureAwait(false);
-        var messages = EnsureValidationPasses(context, request, changes, requiredInputMessages, headerValues);
+
+        // ⛔ D16-04: знімок полів довідника для `REGFIELD` у правилах — той
+        // самий код, що на «Перевірити» й поданні (`TableValidation`). Без
+        // нього правило давало `#REF`, деградувало у Warning `ECR-VAL-RULE`, і
+        // коміркове `Error`-правило не блокувало збереження. Шаблон без
+        // `REGFIELD` у правилах — нуль звернень до довідника.
+        var registryFields = await Validation.TableValidation
+            .LoadRegistryFieldsAsync(validation, registries, context.Snapshot, context.Table, changes.Upserts, ct)
+            .ConfigureAwait(false);
+        var messages = EnsureValidationPasses(
+            context, request, changes, requiredInputMessages, headerValues, registryFields);
         await EnsureRegistryReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
@@ -1341,10 +1351,12 @@ public sealed class PatchCellsHandler(
         PatchCellsRequest request,
         CellChangeLists changes,
         IReadOnlyList<Validation.ValidationMessage> requiredInputMessages,
-        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues)
+        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? registryFields)
     {
         var messages = Validate(
-            context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, changes.RowKeyById, headerValues);
+            context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, changes.RowKeyById, headerValues,
+            registryFields);
         var blocking = messages.Where(m => m.BlocksSave).ToList();
         if (blocking.Count > 0)
         {
@@ -1947,13 +1959,22 @@ public sealed class PatchCellsHandler(
     }
 
     /// <summary>Валідує змінені комірки і правила рівня рядка.</summary>
+    /// <remarks>
+    /// <c>registryFields</c> — знімок полів довідника для <c>REGFIELD</c> (D16-04). Будується з
+    /// Lookup-комірок самого батчу (<c>upserts</c>), а не зі зрізу бази: правило
+    /// комірки бачить лише своє значення, правило рядка —
+    /// <see cref="PatchRowValidationContext"/>, тобто лише надіслане. Ключ —
+    /// id ЗАПИСУ довідника, тож тимчасові від'ємні id нових рядків (`DAT-04`)
+    /// на знімок не впливають.
+    /// </remarks>
     private List<Validation.ValidationMessage> Validate(
         Domain.Entities.Configuration.TemplateVersionSnapshot snapshot,
         int tableDefId,
         PatchCellsRequest request,
         List<CellRecord> upserts,
         IReadOnlyDictionary<long, string> byRowId,
-        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues)
+        IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues,
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? registryFields)
     {
         var table = snapshot.Sheets
             .SelectMany(s => s.Tables)
@@ -1975,7 +1996,8 @@ public sealed class PatchCellsHandler(
             }
 
             var rowKey = byRowId.GetValueOrDefault(record.Address.TableRowId);
-            foreach (var message in validation.ValidateCell(column, record.Value, rules, headerValues, currentUser.Language))
+            foreach (var message in validation.ValidateCell(
+                         column, record.Value, rules, headerValues, currentUser.Language, registryFields))
             {
                 messages.Add(message with { RowKey = rowKey });
             }
@@ -1986,7 +2008,9 @@ public sealed class PatchCellsHandler(
         foreach (var row in request.Rows)
         {
             messages.AddRange(validation
-                .ValidateScope(scope: 1, rules, new PatchRowValidationContext(row), headerValues, currentUser.Language)
+                .ValidateScope(
+                    scope: 1, rules, new PatchRowValidationContext(row), headerValues, currentUser.Language,
+                    registryFields)
                 .Select(m => m with { RowKey = row.RowKey }));
         }
 
