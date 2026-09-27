@@ -642,3 +642,57 @@ public enum RegistryRuleKind : byte
     /// </summary>
     CrossRegistry = 3,
 }
+
+/// <summary>
+/// Відношення поля-посилання <see cref="CellDataType.Lookup"/> до довідника-цілі
+/// (<c>D-155</c>, FEATURE-REGISTRY-TABLES §4.8).
+/// </summary>
+/// <remarks>
+/// ⛔ Композиція — ознака <b>поля</b>, а не окремої сутності зв'язку: рядок
+/// дочірнього довідника має рівно одного батька, і його <c>ValueRefEntryId</c>
+/// уже зберігається в <c>dic.RegistryValue</c>. Друга таблиця «батько → діти»
+/// була б другим джерелом істини про те саме. Обмеження
+/// <c>CK_RegField_Composition</c> не пускає композицію на поле іншого типу.
+/// </remarks>
+public enum RegistryRelationKind : byte
+{
+    /// <summary>Просте посилання: <c>GAS_COMPOSITION.COMPONENT</c> → <c>COMPONENT</c>.</summary>
+    Reference = 0,
+
+    /// <summary>
+    /// Запис <b>є частиною</b> батька: рядок складу належить кейсу, видимий разом
+    /// із ним і видаляється за <see cref="ParentDeletePolicy"/>.
+    /// </summary>
+    Composition = 1,
+}
+
+/// <summary>
+/// Що стається з дочірніми записами композиції, коли видаляють батька
+/// (<c>D-155</c>, FEATURE-REGISTRY-TABLES §4.8).
+/// </summary>
+public enum ParentDeletePolicy : byte
+{
+    /// <summary>Видалення батька з дітьми відхиляється (<c>ECR-REG-0409</c>).</summary>
+    Restrict = 0,
+
+    /// <summary>Діти логічно видаляються в тій самій транзакції, рекурсивно.</summary>
+    Cascade = 1,
+}
+
+/// <summary>
+/// Звідки береться код нового запису довідника (<c>D-157</c>).
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="Auto"/> існує тому, що <c>EcrCode</c> приймає лише латиницю, а
+/// природний ключ довідника буває кириличним («ПК-3 (370-220) лето») — код із
+/// нього не зібрати. Тоді код — <c>E</c> + 9 цифр послідовності
+/// <c>dic.RegistryEntryCodeSeq</c>, а запис знаходять за первинним ключем.
+/// </remarks>
+public enum RegistryCodeMode : byte
+{
+    /// <summary>Код задає користувач або імпорт.</summary>
+    Manual = 0,
+
+    /// <summary>Код видає послідовність <c>dic.RegistryEntryCodeSeq</c>.</summary>
+    Auto = 1,
+}

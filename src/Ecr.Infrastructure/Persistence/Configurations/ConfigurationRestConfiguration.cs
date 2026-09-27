@@ -262,6 +262,14 @@ public sealed class RegistryDefConfiguration : IEntityTypeConfiguration<Registry
         builder.Property(x => x.DataRevision).HasDefaultValue(0, "DF_RegDef_Rev");
         builder.Property(x => x.DefinitionVersion).HasDefaultValue(1, "DF_RegDef_Ver");
         builder.Property(x => x.IsActive).HasDefaultValue(true, "DF_RegDef_Act");
+
+        // RK02 (D-157, D-163). `ValueGeneratedNever` — з тієї самої причини, що
+        // й `SourceKind` вище: значення завжди йде з коду, DEFAULT лише для
+        // вставок повз EF.
+        builder.Property(x => x.CodeMode).HasConversion<byte>()
+               .HasDefaultValueSql("0", "DF_RegDef_CodeMode").ValueGeneratedNever();
+        builder.Property(x => x.DataChangedAt).HasColumnType("datetime2(3)");
+
         builder.HasIndex(x => x.Code).IsUnique().HasDatabaseName("UQ_RegistryDef");
         builder.Navigation(x => x.Fields).UsePropertyAccessMode(PropertyAccessMode.Field);
     }
@@ -275,7 +283,17 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("RegistryFieldDef", "cfg");
+        // ⛔ Композиція — лише на полі `Lookup` (`DataType = 5`, D-155): база
+        // тримає інваріант і для вставок повз домен (імпорт, скрипти). Без
+        // нього «частиною батька» ставало б поле, в якому батька немає, — і
+        // каскад видалення та видимість дітей шукали б посилання в порожнечі.
+        builder.ToTable("RegistryFieldDef", "cfg", t =>
+        {
+            t.HasCheckConstraint(
+                "CK_RegField_Rel",
+                "RelationKind BETWEEN 0 AND 1 AND OnParentDelete BETWEEN 0 AND 1");
+            t.HasCheckConstraint("CK_RegField_Composition", "RelationKind = 0 OR DataType = 5");
+        });
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
         builder.Property(x => x.DataType).HasConversion<byte>();
@@ -285,6 +303,10 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
         // випадкове ім'я на конкретній базі.
         builder.Property(x => x.IsRequired).HasDefaultValue(false, "DF_RegField_Req");
         builder.Property(x => x.IsKey).HasDefaultValue(false, "DF_RegField_Key");
+        builder.Property(x => x.RelationKind).HasConversion<byte>()
+               .HasDefaultValueSql("0", "DF_RegField_Rel").ValueGeneratedNever();
+        builder.Property(x => x.OnParentDelete).HasConversion<byte>()
+               .HasDefaultValueSql("0", "DF_RegField_OnDel").ValueGeneratedNever();
         builder.HasIndex(x => new { x.RegistryDefId, x.Code })
                .IsUnique().HasDatabaseName("UQ_RegistryFieldDef");
         // .WithMany(r => r.Fields) обов'язково: інакше RegistryDef.Fields стає

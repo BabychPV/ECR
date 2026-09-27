@@ -1,5 +1,7 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Errors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -18,11 +20,18 @@ namespace Ecr.Infrastructure.Persistence;
 /// інакше воркер починає читати рядки, яких ще не видно, і отримує або старі
 /// значення, або блокування на піку останнього дня періоду.
 /// </remarks>
-public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
+public sealed class UnitOfWork(EcrDbContext db, IClock? clock = null) : IUnitOfWork
 {
+    // ⚠ Годинник необов'язковий лише для тестів, що будують одиницю роботи
+    // руками (`new UnitOfWork(db)`, їх десятки); контейнер завжди підставляє
+    // зареєстрований `IClock`.
+    private readonly IClock _clock = clock ?? new SystemClock();
+
     /// <inheritdoc />
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
+        StampRegistryDataChanges();
+
         try
         {
             return await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -77,6 +86,40 @@ public sealed class UnitOfWork(EcrDbContext db) : IUnitOfWork
             // повідомлення, — краще необроблений 500 із CorrelationId, ніж
             // вигадана відповідь про те, чого перевірка тут не знає.
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Ставить <see cref="RegistryDef.DataChangedAt"/> кожному довіднику, чия
+    /// <see cref="RegistryDef.DataRevision"/> зросла в цьому збереженні
+    /// (<c>D-163</c>, FEATURE-REGISTRY-TABLES §5.10).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Умова — саме ЗРОСТАННЯ ревізії, а не «сутність змінена»: той самий
+    /// рядок <c>cfg.RegistryDef</c> змінюється й від опису
+    /// (<c>DefinitionVersion</c>, перейменування), і мітка від такої зміни
+    /// оголосила б застарілими результати всіх документів, що читають
+    /// довідник, хоча жодне значення в ньому не змінилося.
+    ///
+    /// ⚠ Одна мітка на все збереження: кілька довідників, змінених разом,
+    /// отримують однаковий момент, як і належить одній транзакції.
+    /// </remarks>
+    private void StampRegistryDataChanges()
+    {
+        DateTime? now = null;
+        foreach (var entry in db.ChangeTracker.Entries<RegistryDef>())
+        {
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            var revision = entry.Property(r => r.DataRevision);
+            if (revision.CurrentValue > revision.OriginalValue)
+            {
+                now ??= _clock.UtcNow;
+                entry.Entity.MarkDataChanged(now.Value);
+            }
         }
     }
 

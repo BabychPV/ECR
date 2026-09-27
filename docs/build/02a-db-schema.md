@@ -734,6 +734,13 @@ CREATE TABLE cfg.RegistryDef
     DataRevision     int           NOT NULL CONSTRAINT DF_RegDef_Rev  DEFAULT(0),
     DefinitionVersion int          NOT NULL CONSTRAINT DF_RegDef_Ver  DEFAULT(1),
     IsActive         bit           NOT NULL CONSTRAINT DF_RegDef_Act  DEFAULT(1),
+    -- RK02 (D-157): 0 Manual, 1 Auto — код запису «E» + 9 цифр
+    -- dic.RegistryEntryCodeSeq. Задається лише при створенні довідника.
+    CodeMode         tinyint       NOT NULL CONSTRAINT DF_RegDef_CodeMode DEFAULT(0),
+    -- RK02 (D-163): момент останнього зростання DataRevision. Ставить
+    -- UnitOfWork, а не обробники; NULL — даних не змінювали після міграції.
+    -- Свіжість результату розрахунку порівнює його з початком прогону.
+    DataChangedAt    datetime2(3)  NULL,
     CONSTRAINT PK_RegistryDef PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryDef UNIQUE (Code)
 );
@@ -751,10 +758,19 @@ CREATE TABLE cfg.RegistryFieldDef
     IsKey          bit           NOT NULL CONSTRAINT DF_RegField_Key DEFAULT(0),
     UnitId         int           NULL,       -- одиниця поля (ФВ-16.1)
     RefRegistryDefId int         NULL,       -- вкладений реєстр / M:N
+    -- RK02 (D-155): композиція — ознака Lookup-поля; обидва задаються лише
+    -- при створенні поля.
+    RelationKind   tinyint       NOT NULL CONSTRAINT DF_RegField_Rel   DEFAULT(0), -- 0 Reference, 1 Composition
+    OnParentDelete tinyint       NOT NULL CONSTRAINT DF_RegField_OnDel DEFAULT(0), -- 0 Restrict, 1 Cascade
     CONSTRAINT PK_RegistryFieldDef PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryFieldDef UNIQUE (RegistryDefId, Code),
     CONSTRAINT FK_RegField_Reg  FOREIGN KEY (RegistryDefId)    REFERENCES cfg.RegistryDef (Id),
-    CONSTRAINT FK_RegField_Ref  FOREIGN KEY (RefRegistryDefId) REFERENCES cfg.RegistryDef (Id)
+    CONSTRAINT FK_RegField_Ref  FOREIGN KEY (RefRegistryDefId) REFERENCES cfg.RegistryDef (Id),
+    CONSTRAINT CK_RegField_Rel CHECK (RelationKind BETWEEN 0 AND 1 AND OnParentDelete BETWEEN 0 AND 1),
+    -- ⛔ Композиція лише на полі Lookup (DataType = 5): база тримає інваріант і
+    -- для вставок повз домен — інакше «частиною батька» ставало б поле, в
+    -- якому батька немає.
+    CONSTRAINT CK_RegField_Composition CHECK (RelationKind = 0 OR DataType = 5)
 );
 GO
 
@@ -999,6 +1015,13 @@ GO
 CREATE INDEX IX_RegistryEntry_Lookup
     ON dic.RegistryEntry (RegistryDefId, IsActive, IsDeleted)
     INCLUDE (Code, Ordinal, ValidFrom, ValidTo) ON [INDEXES];
+GO
+
+-- RK02 (D-157): коди записів довідників із CodeMode = 1 (Auto) — «E» + 9 цифр
+-- («E000012345»), бо EcrCode приймає лише латиницю, а природний ключ буває
+-- кириличним. Одна на всі довідники: код унікальний лише в межах довідника,
+-- а послідовність на кожен довідник вимагала б DDL від застосунку (D-66).
+CREATE SEQUENCE dic.RegistryEntryCodeSeq AS bigint START WITH 1 INCREMENT BY 1;
 GO
 
 CREATE TABLE dic.RegistryValue

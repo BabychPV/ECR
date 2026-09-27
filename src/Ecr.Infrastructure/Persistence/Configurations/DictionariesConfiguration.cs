@@ -64,6 +64,22 @@ public sealed class RegistryEntryConfiguration : IEntityTypeConfiguration<Regist
                .HasConstraintName("FK_RegEntry_Def");
         builder.HasOne<RegistryEntry>().WithMany().HasForeignKey(x => x.ParentEntryId)
                .HasConstraintName("FK_RegEntry_Parent");
+
+        // RK02 (D-157): коди записів довідників із `CodeMode = Auto` — `E` + 9
+        // цифр цієї послідовності (§4.8). Одна на всі довідники: код унікальний
+        // лише в межах довідника, тож пропуски між довідниками нічого не
+        // ламають, а окрема послідовність на кожен довідник означала б DDL
+        // під час створення довідника (D-66: застосунок DDL-прав не має).
+        //
+        // ⚠ Оголошена тут, а не поруч із `TableRowSeq` в `EcrDbContext` під
+        // `IsSqlServer()`: це послідовність саме записів довідника, а
+        // провайдера, крім SQL Server, у дереві немає (див. коментар там).
+        var model = builder.Metadata.Model;
+        var codeSequence = model.FindSequence("RegistryEntryCodeSeq", "dic")
+                           ?? model.AddSequence("RegistryEntryCodeSeq", "dic");
+        codeSequence.Type = typeof(long);
+        codeSequence.StartValue = 1;
+        codeSequence.IncrementBy = 1;
     }
 }
 

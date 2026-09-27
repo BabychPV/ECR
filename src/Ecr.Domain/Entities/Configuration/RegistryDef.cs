@@ -46,8 +46,52 @@ public sealed class RegistryDef : Entity<int>
     public bool IsActive { get; private set; }
     public IReadOnlyList<RegistryFieldDef> Fields => _fields;
 
+    /// <summary>Звідки береться код нового запису (<c>D-157</c>).</summary>
+    public RegistryCodeMode CodeMode { get; private set; }
+
+    /// <summary>
+    /// Момент (UTC) останньої зміни <b>даних</b> — те саме, що зростання
+    /// <see cref="DataRevision"/>, але в шкалі часу (<c>D-163</c>, §5.10).
+    /// <c>null</c> — дані не змінювалися з моменту міграції <c>RK02</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ставить <c>UnitOfWork</c>, а не обробники: ревізію піднімають
+    /// чотири різні шляхи запису (upsert, CSV, вікно чинності, видалення,
+    /// далі — пакет і імпорт), і мітка, яку кожен ставить сам, розійшлася б
+    /// з ревізією рівно в тому шляху, де її забули. Свіжість результату
+    /// порівнює цю мітку з початком прогону — пропущена мітка означала б
+    /// «результат свіжий» після правки довідника.
+    /// </remarks>
+    public DateTime? DataChangedAt { get; private set; }
+
     /// <summary>Інкремент ревізії даних після зміни записів.</summary>
     public void BumpDataRevision() => DataRevision++;
+
+    /// <summary>Фіксує момент зміни даних (<see cref="DataChangedAt"/>).</summary>
+    /// <param name="utcNow">Момент у UTC.</param>
+    /// <remarks>
+    /// ⚠ Викликає <c>UnitOfWork</c> рівно тоді, коли зросла
+    /// <see cref="DataRevision"/>; напряму з обробника не викликати.
+    /// </remarks>
+    public void MarkDataChanged(DateTime utcNow)
+    {
+        if (utcNow.Kind != DateTimeKind.Utc)
+        {
+            throw new ArgumentException("Момент зміни даних має бути в UTC.", nameof(utcNow));
+        }
+
+        DataChangedAt = utcNow;
+    }
+
+    /// <summary>Задає режим коду записів.</summary>
+    /// <param name="mode">Ручний чи з послідовності.</param>
+    /// <remarks>
+    /// ⚠ Лише під час створення довідника (як <see cref="RegistryFieldDef.PointTo"/>):
+    /// перемикання на наявних записах лишило б дві шкали кодів в одному
+    /// довіднику, і пошук запису за кодом при імпорті перестав би бути
+    /// однозначним.
+    /// </remarks>
+    public void UseCodeMode(RegistryCodeMode mode) => CodeMode = mode;
 
     /// <summary>
     /// Інкремент версії <b>визначення</b> — складу полів і правил (ФВ-8.12).
