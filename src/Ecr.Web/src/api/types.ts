@@ -137,6 +137,9 @@ export type TemplateVersionSummary = Schemas['TemplateVersionSummary'];
 /** Сторінка версій шаблону. */
 export type TemplateVersionPage = Schemas['PagedResultOfTemplateVersionSummary'];
 
+/** Версії одного шаблону в пакетній відповіді `GET /api/v1/templates/versions?ids=` (`BR-07`). */
+export type TemplateVersionsForTemplate = Schemas['TemplateVersionsForTemplate'];
+
 /**
  * Картка шаблону разом із лічильником залежних (директива №15, `BE-26`).
  *

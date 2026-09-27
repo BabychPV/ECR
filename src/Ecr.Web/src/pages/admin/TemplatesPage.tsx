@@ -4,12 +4,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
-import type { components } from '@/api/schema';
 import type {
   CreateTemplateRequest,
   TemplateIdResponse,
   TemplatePage,
   TemplateSummary,
+  TemplateVersionsForTemplate,
   TemplateVersionSummary,
 } from '@/api/types';
 import { NewTemplateVersionModal } from '@/features/templates/NewTemplateVersionModal';
@@ -48,18 +48,6 @@ export function TemplatesPage(): JSX.Element {
   const items = templates.data?.items ?? [];
   const templateIds = items.map((template) => template.id);
 
-  /**
-   * Відповідь `GET /api/v1/templates/versions` — версії, ЗГРУПОВАНІ по
-   * шаблону (`TemplateQueryHandlers.TemplateVersionsForTemplate`).
-   *
-   * ⚠ Тип береться напряму зі згенерованої схеми (`components['schemas']`),
-   * а не через псевдонім у `@/api/types` (як заведено для решти DTO цього
-   * файлу, `D-137`): межа дозволених файлів цієї задачі не охоплювала
-   * `@/api/types` (лише сама сторінка, тести й перелічені файли бекенда).
-   * Перенесення в спільний файл типів лишається боргом (Next steps).
-   */
-  type TemplateVersionsForTemplate = components['schemas']['TemplateVersionsForTemplate'];
-
   /*
    * ⛔ BR-07: до цього тут стояв `useQueries` — ОКРЕМИЙ HTTP-запит версій на
    * КОЖЕН шаблон переліку (N шаблонів → N запитів; підтверджений 2026-09-25
@@ -71,18 +59,14 @@ export function TemplatesPage(): JSX.Element {
    * `GET /api/v1/templates/versions?ids=...` (`TemplatesController.
    * ListVersionsForTemplates` → `ListTemplateVersionsHandler.HandleBatchAsync`).
    *
-   * ⚠ Ключ кешу — літерал, а не через `queryKeys.templates.*`: він
-   * навмисно НЕ префікс і не суфікс `versionsOf(id)`/`allVersionsOf()` —
-   * ті лишаються ОКРЕМИМ записом, бо на них і далі спираються ІНШІ екрани
+   * ⚠ Ключ кешу — `queryKeys.templates.versionsBatch(ids)`: навмисно НЕ
+   * префікс і не суфікс `versionsOf(id)`/`allVersionsOf()` — ті лишаються
+   * ОКРЕМИМ записом, бо на них і далі спираються ІНШІ екрани
    * (`TemplateVersionsSection`, `ExpressionsPage`, `TemplateVersionPage`,
-   * `CreateProjectModal`, `breadcrumbResolvers`), яких ця задача не чіпає.
-   * Додати сюди новий запис фабрики (`api/queryKeys.ts`) не можна було в
-   * межах дозволених файлів — перенесення туди лишається боргом.
+   * `CreateProjectModal`, `breadcrumbResolvers`).
    */
-  const versionsBatchKey = ['templates', 'versionsBatch', ...templateIds] as const;
-
   const versionsBatch = useQuery({
-    queryKey: versionsBatchKey,
+    queryKey: queryKeys.templates.versionsBatch(templateIds),
     queryFn: () => {
       const idsQuery = templateIds.map((id) => `ids=${id}`).join('&');
       return apiFetch<readonly TemplateVersionsForTemplate[]>(
@@ -336,13 +320,13 @@ export function TemplatesPage(): JSX.Element {
           /*
            * ⚠ `NewTemplateVersionModal.onSuccess` інвалідовує
            * `queryKeys.templates.versionsOf(templateId)` — запис кешу ІНШИХ
-           * екранів (див. коментар над `versionsBatchKey` вище). Пакетний
+           * екранів (див. коментар над `versionsBatch` вище). Пакетний
            * запит цієї сторінки має ВЛАСНИЙ ключ і під ту інвалідацію не
            * потрапляє, тож оновлюємо його тут явно — і на «Скасувати» теж
            * (зайвий повторний запит дешевший за застарілий перелік версій
            * після успішного створення).
            */
-          void queryClient.invalidateQueries({ queryKey: ['templates', 'versionsBatch'] });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.templates.allVersionsBatch() });
         }}
       />
     </>

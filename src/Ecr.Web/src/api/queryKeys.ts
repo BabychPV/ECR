@@ -50,6 +50,21 @@ const templates = {
   /** Префікс {@link templates.versionsOf} для БУДЬ-ЯКОГО шаблону одразу. */
   allVersionsOf: () => ['templates', 'versionsOf'] as const,
 
+  /**
+   * `GET /api/v1/templates/versions?ids=...` — версії ДЕКІЛЬКОХ шаблонів
+   * одним запитом (`BR-07`, перелік `/admin/templates`).
+   *
+   * ⚠ Окремий запис, а НЕ префікс чи суфікс {@link templates.versionsOf}:
+   * на `versionsOf(id)` спираються інші екрани, і інвалідація одного
+   * шаблону не скидає весь пакет (і навпаки) — пакет інвалідовується явно
+   * через {@link templates.allVersionsBatch}.
+   */
+  versionsBatch: (templateIds: readonly number[]) =>
+    ['templates', 'versionsBatch', ...templateIds] as const,
+
+  /** Префікс {@link templates.versionsBatch} для будь-якого набору шаблонів. */
+  allVersionsBatch: () => ['templates', 'versionsBatch'] as const,
+
   /** `GET /api/v1/template-versions/{versionId}/structure` — одна версія. */
   version: (versionId: number) => ['templates', 'version', versionId] as const,
 

@@ -43,6 +43,8 @@ describe('queryKeys — фабрика ключів TanStack Query', () => {
       [...queryKeys.templates.list()],
       [...queryKeys.templates.versionsOf(sample)],
       [...queryKeys.templates.allVersionsOf()],
+      [...queryKeys.templates.versionsBatch([sample])],
+      [...queryKeys.templates.allVersionsBatch()],
       [...queryKeys.templates.version(sample)],
       [...queryKeys.templates.versionDiff(sample, sample + 1)],
       [...queryKeys.templates.accessMatrix(sample)],
@@ -99,6 +101,22 @@ describe('queryKeys — фабрика ключів TanStack Query', () => {
     // «перелік версій шаблону» і «одна версія» — різні сутності, і широка
     // інвалідація першої не повинна зачепити кеш другої.
     expect(isPrefixOf(allVersionsOf, queryKeys.templates.version(1))).toBe(false);
+  });
+
+  it('templates.versionsBatch — окремий від versionsOf запис; allVersionsBatch() — його префікс для будь-якого набору', () => {
+    // ⚠ Форма ключа та сама, що була літералом у `TemplatesPage.tsx` до
+    // перенесення у фабрику (`['templates', 'versionsBatch', ...ids]`) —
+    // рефакторинг не змінює записів кешу.
+    expect(queryKeys.templates.versionsBatch([3, 1, 2])).toEqual(['templates', 'versionsBatch', 3, 1, 2]);
+
+    const allBatch = queryKeys.templates.allVersionsBatch();
+    expect(isPrefixOf(allBatch, queryKeys.templates.versionsBatch([1]))).toBe(true);
+    expect(isPrefixOf(allBatch, queryKeys.templates.versionsBatch([7, 8, 9]))).toBe(true);
+    expect(isPrefixOf(queryKeys.templates.all(), queryKeys.templates.versionsBatch([1]))).toBe(true);
+
+    // Інвалідація версій ОДНОГО шаблону не скидає пакет, і навпаки.
+    expect(isPrefixOf(queryKeys.templates.allVersionsOf(), queryKeys.templates.versionsBatch([1]))).toBe(false);
+    expect(isPrefixOf(allBatch, queryKeys.templates.versionsOf(1))).toBe(false);
   });
 
   it('registries.all() і methodologies.all() — той самий інваріант широкої інвалідації', () => {
