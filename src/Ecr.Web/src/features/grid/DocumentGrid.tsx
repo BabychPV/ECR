@@ -18,6 +18,7 @@ import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
 import { captureEdit, coerce, revertsToSaved, valueOf, withKnownVersions } from './edits';
+import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
@@ -1168,6 +1169,44 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   );
 
   /**
+   * Протягування маркером заповнення — тим самим шляхом, що й вставка.
+   *
+   * ⚠ Правила комірки ті самі, що в ручного введення (`captureEdit`: право,
+   * read-only, приведення типу, «нічого не змінилось»); збереження — як у
+   * вставки: ОДИН крок історії і ОДИН пакет у сховище (`saveThroughStore`,
+   * `putPendingEdits`) — поштучний цикл повернув би квадратичну вартість
+   * (`D16-02`).
+   */
+  const applyRangeEdit = useCallback(
+    (detail: RangeEditDetail) => {
+      if (data === undefined) return;
+
+      const { captured, reverted } = captureRange(data, detail, rowKeyOf);
+
+      // ⛔ `V-01`: повернення до збереженого значення в комірці з незбереженою
+      // правкою — скасування цієї правки, як і в ручного введення.
+      const slice = pendingSlice(tableInstanceId, periodKey);
+      for (const signal of reverted) {
+        if (slice.has(pendingCellKey(signal))) discardPendingEdit(tableInstanceId, periodKey, signal);
+      }
+
+      if (captured.length === 0) return;
+
+      // ⚠ Окремого ключа каталогу для протягування немає — підпис кроку
+      // `grid.edit` з переліком колонок (новий ключ = рядок сіду).
+      const headers = [...new Set(captured.map((edit) => edit.columnHeader))].join(', ');
+      history.current.push({
+        label: t('grid.edit', { column: headers }),
+        edits: captured.map((edit) => edit.step),
+      });
+
+      touchHistory();
+      saveThroughStore(captured.map((edit) => edit.pending));
+    },
+    [data, saveThroughStore, touchHistory, tableInstanceId, periodKey],
+  );
+
+  /**
    * Правка з клавіатури.
    *
    * ⛔ Без цього обробника grid показував би введене значення і **не зберігав
@@ -1179,6 +1218,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     (event: { detail: unknown }) => {
       if (data === undefined || readOnly) return;
 
+      // ⛔ Протягування маркером заповнення приходить ДІАПАЗОННОЮ формою
+      // (`rangeEdit.ts`) — без `prop`/`val`. Доти воно малювалось у сітці й не
+      // доходило ні до сховища, ні до PATCH.
+      if (isRangeEdit(event.detail)) {
+        applyRangeEdit(event.detail);
+        return;
+      }
+
       const detail = event.detail as
         | { prop?: string | number; model?: unknown; val?: unknown }
         | undefined;
@@ -1189,7 +1236,7 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         raw: String(detail?.val ?? ''),
       });
     },
-    [data, readOnly, applyEditedValue],
+    [data, readOnly, applyEditedValue, applyRangeEdit],
   );
 
   /**
