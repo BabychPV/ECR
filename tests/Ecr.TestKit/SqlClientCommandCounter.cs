@@ -44,6 +44,7 @@ public sealed class SqlClientCommandCounter : IObserver<DiagnosticListener>, IDi
 
     private readonly List<IDisposable> _subscriptions = [];
     private readonly IDisposable _allListeners;
+    private readonly Func<DbCommand, bool>? _include;
     private int _unreadable;
 
     /// <summary>Підрахунок.</summary>
@@ -67,9 +68,30 @@ public sealed class SqlClientCommandCounter : IObserver<DiagnosticListener>, IDi
     /// <summary>Підписується і пише у спільний підрахунок.</summary>
     /// <param name="tally">Куди складати.</param>
     public SqlClientCommandCounter(CommandTally tally)
+        : this(tally, include: null)
+    {
+    }
+
+    /// <summary>Підписується і рахує лише команди, які пропускає фільтр.</summary>
+    /// <param name="tally">Куди складати.</param>
+    /// <param name="include">
+    /// Чи зараховувати команду; <c>null</c> — усі. Кличеться синхронно в
+    /// потоці, що виконує команду, тож бачить <c>AsyncLocal</c> викликача.
+    /// </param>
+    /// <remarks>
+    /// ⚠ Навіщо: обсяг лічильника — увесь процес, а в сценарному тесті поруч
+    /// із виміряним запитом працюють фонові задачі застосунку (перерахунок,
+    /// поставлений ПОПЕРЕДНІМ записом, періодичні задачі). Без фільтра їхні
+    /// команди потрапили б у число храповика і зробили б його плаваючим.
+    ///
+    /// ⛔ Фільтр, що відкидає все, дає «нуль звернень» — тому
+    /// <see cref="AssertObserved"/> рахує саме ВІДФІЛЬТРОВАНИЙ підсумок.
+    /// </remarks>
+    public SqlClientCommandCounter(CommandTally tally, Func<DbCommand, bool>? include)
     {
         ArgumentNullException.ThrowIfNull(tally);
         Tally = tally;
+        _include = include;
         Tally.Declare("sqlclient-diagnostics");
         _allListeners = DiagnosticListener.AllListeners.Subscribe(this);
     }
@@ -170,6 +192,11 @@ public sealed class SqlClientCommandCounter : IObserver<DiagnosticListener>, IDi
         if (property?.GetValue(payload) is not DbCommand command)
         {
             Interlocked.Increment(ref _unreadable);
+            return;
+        }
+
+        if (_include is not null && !_include(command))
+        {
             return;
         }
 
