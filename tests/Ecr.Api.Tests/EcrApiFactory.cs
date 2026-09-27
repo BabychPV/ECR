@@ -2,11 +2,13 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using Ecr.Adapters.PiAf;
+using Ecr.Infrastructure.Caching;
 using Ecr.Infrastructure.Notifications;
 using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +25,14 @@ namespace Ecr.Api.Tests;
 /// ⚠ Файла немає в дереві `05-skeleton.md` §1 (`Q-053`): без нього жоден
 /// тест `Ecr.Api.Tests` не може підняти застосунок із реальною базою.
 /// </remarks>
-public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 0)
+/// <param name="sql">Фікстура бази.</param>
+/// <param name="stampCacheSeconds">Кеш штампа сеансу, с (<c>Auth:StampCacheSeconds</c>).</param>
+/// <param name="revisionWindow">
+/// Вікно мемоїзації ревізії шаблону (<see cref="CacheLifetimes.Revision"/>);
+/// <c>null</c> — продуктивне (5 с). Ручки в конфігурації в нього немає, тому
+/// підміняється реєстрація <see cref="CacheLifetimes"/>.
+/// </param>
+public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 0, TimeSpan? revisionWindow = null)
     : WebApplicationFactory<Program>
 {
     /// <summary>
@@ -159,6 +168,17 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             services
                 .AddHttpClient<PiWebApiDataSource>()
                 .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls));
+
+            // ⚠ Решта строків — з конфігурації, як у проді; підмінюється лише
+            // вікно ревізії. Пізніша реєстрація виграє в `GetRequiredService`.
+            if (revisionWindow is { } window)
+            {
+                services.AddSingleton(sp =>
+                {
+                    var configured = CacheLifetimes.FromConfiguration(sp.GetRequiredService<IConfiguration>());
+                    return new CacheLifetimes(configured.Metadata, configured.AccessProfile, window);
+                });
+            }
         });
     }
 

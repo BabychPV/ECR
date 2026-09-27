@@ -45,6 +45,15 @@ namespace Ecr.Api.Tests;
 /// 300 с замість продуктивних 5: інакше повільна машина між двома запитами
 /// додала б одне читання штампа, і храповик червонів би не від коду.
 /// </para>
+/// <para>
+/// ⛔ Те саме — вікно мемоїзації ревізії шаблону (<c>CacheLifetimes.Revision</c>,
+/// 5 с, `RD-05`): 300 с замість продуктивних 5. Без цього храповик блимав
+/// 22/23 — раунд, на який випадав сплив вікна за НАСТІННИМ годинником,
+/// платив зайве <c>SELECT PresentationRevision FROM cfg.TemplateVersion</c>
+/// у <c>MetadataCache.RevisionAsync</c>. Перечитування законне (так задумано),
+/// але не має відношення до шляху запису, і хто за нього заплатить, вирішував
+/// таймінг, а не код.
+/// </para>
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
@@ -84,7 +93,7 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     {
         var scenario = await ArrangeAsync().ConfigureAwait(true);
 
-        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300);
+        using var app = new EcrApiFactory(sql, stampCacheSeconds: 300, revisionWindow: TimeSpan.FromMinutes(5));
         app.Server.PreserveExecutionContext = true;
         using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
 
@@ -148,6 +157,13 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
         // ⚠ Суворо: береться НАЙБІЛЬШЕ з теплих замірів, а не найменше. Шлях
         // детермінований, і розкид між ними — сам по собі знахідка.
         var worst = rounds.MaxBy(r => r.Total);
+
+        // ⛔ Теплі раунди мусять збігатися: розкид означає, що в шлях знову
+        // протекла залежність від часу, і стеля знову ловила б таймінг.
+        Assert.True(
+            rounds.All(r => r.Total == worst.Total),
+            $"Теплі заміри розходяться: {string.Join(", ", rounds.Select(r => r.Total))}.\n"
+            + string.Join("\n", rounds.Select(r => r.Detail)));
 
         Assert.True(
             worst.Total <= MaxCommands,
