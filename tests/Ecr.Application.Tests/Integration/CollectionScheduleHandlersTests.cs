@@ -177,6 +177,7 @@ public sealed class CollectionScheduleHandlersTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "BE-21c")]
+    [Trait("Requirement", "ФВ-13.11")]
     public async Task Створення_заводить_розклад_ставить_його_в_планувальник_а_другий_на_ту_саму_сутність_дає_409()
     {
         _store.Entities[77] = ("ENT-77", "Entity 77");
@@ -200,6 +201,34 @@ public sealed class CollectionScheduleHandlersTests
         Assert.Equal("err.ECR-JOB-0409.collectionScheduleExists", duplicate.Details!["messageKey"]);
         Assert.Single(_store.Rows);
         Assert.Single(_scheduler.Scheduled);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-13.15")]
+    [Trait("Requirement", "ФВ-12.8")]
+    public async Task Дві_сутності_отримують_два_незалежні_тригери_кожна_зі_своєю_частотою()
+    {
+        // ⛔ Розклад — на сутність, не один на систему: частота опитування
+        // «природна для класу даних» (ФВ-12.8), тож концентрація й добовий
+        // обсяг мають різні cron, і кожен тригер збирає лише СВОЮ сутність.
+        _store.Entities[77] = ("STACK-77", null);
+        _store.Entities[78] = ("FLOW-78", null);
+
+        await Create().HandleAsync(77, Hourly, isEnabled: true, CancellationToken.None);
+        await Create().HandleAsync(78, Nightly, isEnabled: true, CancellationToken.None);
+
+        // МУТАЦІЙНИЙ ДОКАЗ: у `CollectionScheduleApplier.ApplyAsync` ставити
+        // один сталий cron замість `schedule.CronExpression` (одна частота на
+        // систему) → твердження червоніє на другому тригері.
+        Assert.Equal(
+            new (string Cron, object? Payload)[]
+            {
+                (Hourly, CollectionScheduleApplier.PayloadOf(77)),
+                (Nightly, CollectionScheduleApplier.PayloadOf(78)),
+            },
+            _scheduler.Scheduled);
+        Assert.NotEqual(CollectionScheduleApplier.PayloadOf(77), CollectionScheduleApplier.PayloadOf(78));
     }
 
     [Fact]

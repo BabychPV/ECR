@@ -192,7 +192,6 @@ public sealed class SharedDataProtectionKeyRingTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.9")]
     public async Task Health_db_називає_незахищені_ключі_коли_сертифіката_немає()
     {
         // ⛔ `D14-08`: тимчасове рішення не має права стати невидимим постійним.

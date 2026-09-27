@@ -65,6 +65,7 @@ public sealed class CreateEntityFieldMapTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.11")]
     public async Task Мапінг_на_колонку_заводиться_і_повертається()
     {
         var dto = await Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None);
@@ -85,6 +86,7 @@ public sealed class CreateEntityFieldMapTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
     public async Task Мапінг_на_поле_реєстру_заводиться()
     {
         var command = new CreateEntityFieldMapCommand(

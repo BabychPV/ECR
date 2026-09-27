@@ -107,6 +107,7 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "D16-03")]
+    [Trait("Requirement", "ФВ-12.8")]
     public async Task Кілька_періодів_з_одним_вікном_кожен_екземпляр_отримує_лише_свої_точки()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);

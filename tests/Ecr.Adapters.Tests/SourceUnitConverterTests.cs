@@ -41,7 +41,6 @@ public sealed class SourceUnitConverterTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait("Requirement", "ФВ-11.7")]
     public void Зміна_UOM_атрибута_в_джерелі_зупиняє_збір()
     {
         var error = Assert.Throws<BusinessRuleException>(

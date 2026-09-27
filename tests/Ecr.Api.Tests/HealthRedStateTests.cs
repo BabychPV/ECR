@@ -42,7 +42,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-12.9")]
     public async Task Задачі_червоніють_коли_планувальника_немає_в_контейнері()
     {
         var check = Jobs(factory: null);
@@ -54,7 +53,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-12.9")]
     public async Task Задачі_червоніють_коли_планувальник_зупинений()
     {
         // ⛔ Зупинений планувальник — найгірший стан із можливих: процес живий,
@@ -73,7 +71,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-12.9")]
     public async Task Задачі_жовтіють_коли_жодного_розкладу_не_зареєстровано()
     {
         var scheduler = StartedScheduler(jobs: 7, triggers: 0);
@@ -88,7 +85,6 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    [Trait("Requirement", "ФВ-12.9")]
     public async Task Задачі_зелені_коли_планувальник_працює_з_розкладами()
     {
         // ⚠ Без цього тесту попередні три довели б лише, що перевірка вміє
@@ -180,7 +176,6 @@ public sealed class HealthRedStateTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-12.9")]
     public async Task База_червоніє_коли_вона_недоступна()
     {
         // ⛔ Ламається саме з'єднання, а не служба SQL Server: зупиняти службу

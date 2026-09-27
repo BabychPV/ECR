@@ -126,6 +126,7 @@ public sealed class EntityFieldMapLifecycleTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-16.9")]
+    [Trait("Requirement", "ФВ-12.9")]
     [Trait("Finding", "BE-27")]
     public void Ручне_відновлення_не_знімає_паузи_через_зміну_одиниці()
     {
