@@ -48,7 +48,7 @@ function slice(
 }
 
 describe('Права по комірках', () => {
-  it('ФВ-14.3: read-only комірки візуально відрізняються', () => {
+  it('read-only комірки візуально відрізняються', () => {
     const decision = decide(slice({}), 'R1', column({ isReadOnly: true }));
 
     expect(decision.editable).toBe(false);

@@ -134,7 +134,7 @@ afterEach(() => {
 });
 
 describe('V-15: Ctrl+Z / Ctrl+Y з клавіатури зберігають', () => {
-  it('правка → Ctrl+Z → Ctrl+Y: кожен крок — запит з актуальною версією рядка', async () => {
+  it('ФВ-3.3: правка → Ctrl+Z → Ctrl+Y: кожен крок — запит з актуальною версією рядка', async () => {
     mockServer();
     render(
       <MantineProvider>

@@ -605,7 +605,6 @@ public sealed class PatchCellsTests
     /// рівно таку пару.
     /// </remarks>
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
-    [Trait("Requirement", "ФВ-14.29")]
     public async Task Чужий_період_у_тілі_відхиляється_кодом_а_не_падінням()
     {
         // Екземпляр таблиці належить періоду 202601 (див. `_rows.Resolve…`),
