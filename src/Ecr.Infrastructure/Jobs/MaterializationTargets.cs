@@ -1,8 +1,10 @@
 // src/Ecr.Infrastructure/Jobs/MaterializationTargets.cs
+using System.Data;
 using System.Globalization;
 using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Jobs;
@@ -213,12 +215,15 @@ internal static class MaterializationTargets
             })
             .ToList();
 
-        var pairsJson = JsonSerializer.Serialize(pairs);
+        var pairsJson = new SqlParameter("@pairs", SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(pairs) };
 
+        // ⚠ Результат обмежений входом (не більше рядка на пару), а не `Take`:
+        // `Take` без `OrderBy` над сирим SQL дає попередження EF, а порядок тут
+        // не має значення. Параметр — `SqlParameter`, тексту з даних у запиті немає.
         var hits = await db.Database
-            .SqlQuery<RawPointHit>($"""
+            .SqlQueryRaw<RawPointHit>("""
                 SELECT b.SourceEntityId, b.ProjectId, b.PeriodKey
-                FROM OPENJSON({pairsJson})
+                FROM OPENJSON(@pairs)
                      WITH (SourceEntityId int '$.e',
                            ProjectId int '$.p',
                            PeriodKey int '$.k',
@@ -229,7 +234,8 @@ internal static class MaterializationTargets
                               WHERE r.SourceEntityId = b.SourceEntityId
                                 AND r.[Timestamp] >= b.StartUtc
                                 AND r.[Timestamp] < b.EndUtc)
-                """)
+                """,
+                pairsJson)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
