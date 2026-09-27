@@ -113,7 +113,7 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 | 1 | Підключення PI SQL Client, каталог, розклад, ручний збір | **Є** | `PiSqlClientDataSource.cs:106-142` (каталог), `ExternalConfiguration.cs:131-157` (`ext.CollectionSchedule`, Cron, `LookbackDays` 7), `SourcesController.cs:43` (`POST /sources/{id}/collect`) | — |
 | 2 | Читання значень атрибута AF | **Частково** | `PiSqlClientDataSource.cs:431-448` — лише сирі `[Master].[Element].[Value]` у `[from,to)`; ≤ 5 000 точок за запит (`CollectionRunner.cs:37`), хвіст дозбирається (`PiSqlClientDataSource.cs:201-211`) | якість завжди `"Good"` (`:198`) |
 | 3 | Інтерпольовані значення, summary (Total/середнє), крок | **Немає** | `IExternalDataSource.cs:77-83` — `CollectionRequest` без типу запиту, кроку й агрегації; PI Web API теж лише `streams/{webId}/recorded` (`PiWebApiDataSource.cs:208`) | новий тип запиту в порті (§4.3) |
-| 4 | Згортка точок у значення періоду | **Є** — виправлено [D16-03](DIRECTIVE-16.md) (виконано в `3e6d2efa`) | до `3e6d2efa` — `CollectionJob.cs:168-229`, `MaterializeCollectedDataJob.cs:149-196` (згортка за вікном збору). Тепер: ряд — усі точки `ext.RawDataPoint` поля в межах періоду екземпляра `[опівніч PeriodStart, опівніч PeriodEnd+1)` у поясі проєкту (`PeriodUtcRange`, `src/Ecr.Infrastructure/Integration/PeriodUtcRange.cs`, дзеркало `Period.ToUtc`, D-68); вікно збору лише обирає екземпляри (`CollectionJob`: періоди, що перетинають вікно, за спаданням, стеля 200 цілей відсікає найстаріші). Стеля матеріалізації — **500 000 точок на поле** (`MaterializeCollectedDataJob.MaxPoints`): поле понад неї в комірку не пишеться, у `itg.CollectionCoverage` — `SkippedPointCeiling` з кодом поля, у `jobs.materializeDone` — `overCeiling`. ⚠ Не плутати з 5 000 точок на **запит** у `CollectionRunner` (рядок 2). `PeriodFold` не змінено | зважене середнє й інтеграл (рядок 5), конверсія (рядок 6) |
+| 4 | Згортка точок у значення періоду | **Є** — виправлено [D16-03](DIRECTIVE-16.md) (виконано в `3e6d2efa`) | до `3e6d2efa` — `CollectionJob.cs:168-229`, `MaterializeCollectedDataJob.cs:149-196` (згортка за вікном збору). Тепер: ряд — усі точки `ext.RawDataPoint` поля в межах періоду екземпляра `[опівніч PeriodStart, опівніч PeriodEnd+1)` у поясі проєкту (`Period.UtcBounds` → `Period.UtcRange`, `src/Ecr.Domain/Entities/Documents/Period.cs`, та сама арифметика `Period.ToUtc`, D-68; у `3e6d2efa` це була копія `PeriodUtcRange`, прибрана в `3e96e0d3`); вікно збору лише обирає екземпляри (`CollectionJob`: періоди, що перетинають вікно, за спаданням, стеля 200 цілей відсікає найстаріші). Стеля матеріалізації — **500 000 точок на поле** (`MaterializeCollectedDataJob.MaxPoints`): поле понад неї в комірку не пишеться, у `itg.CollectionCoverage` — `SkippedPointCeiling` з кодом поля, у `jobs.materializeDone` — `overCeiling`. ⚠ Не плутати з 5 000 точок на **запит** у `CollectionRunner` (рядок 2). `PeriodFold` не змінено | зважене середнє й інтеграл (рядок 5), конверсія (рядок 6) |
 | 5 | Середнє, зважене за часом; інтеграл (Total) | **Немає** | `PeriodFold.cs:53` — `Avg` = сума / кількість точок; перелік закритий `CK_EFM_Transform` (`ExternalConfiguration.cs:81-87`) | §4.1 |
 | 6 | Конверсія одиниць при завантаженні (06-integration §6.4 п.3, ФВ-16.10) | **Немає** | `SourceUnitConverter.Convert` (`SourceUnitConverter.cs:109-133`) не викликає ніхто; збір лише перевіряє одиницю (`CollectionRunner.cs:486`). `Ecr.Infrastructure` не посилається на `Ecr.Adapters.PiAf`, тож задача матеріалізації цей клас і не бачить | §4.2 |
 | 7 | Атрибут PI → колонка, **вікно = рядок** | **Немає** | `UQ_EntityFieldMap(SourceEntityId, SourceField)` (`ExternalConfiguration.cs:114-115`) — один атрибут дає одну комірку; адресат рядка фіксований і «ключ рядка з джерела» заборонений навмисно (`EntityFieldMap.cs:110-128`) | нова сутність `ext.RowWindowMap` (§4.4) |
@@ -199,15 +199,16 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 дублює: крок F2 не починався, доки D16-03 не в `dev/integration`, бо обидва правлять
 `MaterializeCollectedDataJob.cs`.
 
-✓ **D16-03 виконано в `3e6d2efa`** (перевірено читанням коду на `origin/dev/integration`
-2026-09-27):
+✓ **D16-03 виконано в `3e6d2efa`**, уточнено в `3e96e0d3` (перевірено читанням коду на
+`origin/dev/integration` 2026-09-27):
 
 - `PeriodFold` **не змінено** — та сама сигнатура й семантика (`Avg` досі просте середнє,
   `PeriodFold.cs:53`). Змінився **вхідний ряд**: усі точки `ext.RawDataPoint` поля в межах
-  періоду екземпляра `[опівніч PeriodStart, опівніч PeriodEnd+1)` у поясі проєкту — через новий
-  `PeriodUtcRange` (`src/Ecr.Infrastructure/Integration/PeriodUtcRange.cs`, дзеркало
-  `Period.ToUtc`, D-68). Межі періоду для F2/F3 беруться саме з нього — другої реалізації не
-  пишемо.
+  періоду екземпляра `[опівніч PeriodStart, опівніч PeriodEnd+1)` у поясі проєкту — через
+  `Period.UtcBounds` → `Period.UtcRange` (`src/Ecr.Domain/Entities/Documents/Period.cs`; той
+  самий приватний `Period.ToUtc`, D-68). У `3e6d2efa` це була копія
+  `Infrastructure/Integration/PeriodUtcRange.cs`, яку `3e96e0d3` прибрав. Межі періоду для
+  F2/F3 беруться саме з `Period.UtcBounds` — другої реалізації не пишемо.
 - Вікно збору лише **обирає** екземпляри: `CollectionJob` ставить задачу тільки періодам, що
   перетинають вікно, за спаданням ключа періоду; стеля 200 цілей відсікає найстаріші.
 - Стеля матеріалізації — **500 000 точок на поле** (`MaterializeCollectedDataJob.MaxPoints`):
