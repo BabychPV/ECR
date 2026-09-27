@@ -119,7 +119,12 @@ public sealed class PatchCellsHandler(
         await EnsureNoVersionConflictsAsync(context, ct).ConfigureAwait(false);
         await EnsureAccessAsync(request, context, ct).ConfigureAwait(false);
 
-        var changes = await BuildCellChangesAsync(request, context, ct).ConfigureAwait(false);
+        // ⛔ `DAT-04` п. 1: нові рядки тут ЩЕ НЕ створюються — їхні комірки
+        // адресуються тимчасовими від'ємними ідентифікаторами
+        // (<see cref="PlaceholderRowId"/>), і вся валідація нижче йде по них.
+        // Справжні `TableRow.Id` з'являються лише всередині транзакції запису
+        // (<see cref="MaterializeNewRowsAsync"/>).
+        var changes = BuildCellChanges(context);
         var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, ct).ConfigureAwait(false);
 
         // ⛔ Шапка документа читається РЕАЛЬНО (раніше HDR.X у правилах
@@ -137,7 +142,11 @@ public sealed class PatchCellsHandler(
         var isLateEdit = await DetermineIsLateEditAsync(context.Instance.DocumentId, request.PeriodKey, ct)
             .ConfigureAwait(false);
 
-        await PersistChangesAsync(request, context, changes, now, isLateEdit, previous, ct).ConfigureAwait(false);
+        // ⚠ Далі — лише `changes` із СПРАВЖНІМИ ідентифікаторами нових рядків:
+        // насіння перерахунку з тимчасовими від'ємними адресами вказувало б у
+        // нікуди.
+        changes = await PersistChangesAsync(request, context, changes, now, isLateEdit, previous, ct)
+            .ConfigureAwait(false);
 
         var seeds = BuildRecalculationSeeds(changes);
 
@@ -381,7 +390,7 @@ public sealed class PatchCellsHandler(
         var creations = request.Rows.Where(r => r.BaseVersion is null).ToList();
         //
         // ⛔ Оновлення без жодної комірки — не оновлення (V-02): прав на нього
-        // перевірити нема на чому (адрес немає), а `BuildCellChangesAsync`
+        // перевірити нема на чому (адрес немає), а `BuildCellChanges`
         // однаково «торкнувся» б рядка й документа. Такий рядок просто не
         // входить у батч.
         var updates = request.Rows.Where(r => r.BaseVersion is not null && r.Cells is { Count: > 0 }).ToList();
@@ -865,11 +874,26 @@ public sealed class PatchCellsHandler(
     /// Розкладка на три операції (R-B4): значення → upsert, value = null →
     /// delete, isEmpty → upsert з IsEmpty = 1. Поле, ВІДСУТНЄ в запиті, сюди
     /// не потрапляє взагалі — саме тому «не чіпати» і «стерти» лишаються
-    /// різними намірами. Тут-таки створюються нові рядки, бо їхній
-    /// <c>TableRow.Id</c> потрібен, щоб побудувати адреси комірок.
+    /// різними намірами.
     /// </summary>
-    private async Task<CellChangeLists> BuildCellChangesAsync(
-        PatchCellsRequest request, RequestContext context, CancellationToken ct)
+    /// <remarks>
+    /// ⛔ `DAT-04` п. 1. Тут-таки раніше СТВОРЮВАЛИСЯ нові рядки
+    /// (<c>rowStore.CreateRowsAsync</c> із власним автокомітним
+    /// <c>SaveChangesAsync</c>) — ДО валідації, до обов'язкових входів, до
+    /// перевірки посилань і поза транзакцією запису. Будь-яка відмова батчу,
+    /// що створює рядок (<c>ECR-CELL-0422</c>, <c>ECR-CALC-0437</c>,
+    /// <c>ECR-CELL-4223</c>, <c>ECR-CELL-0409</c> зі сховища), давала клієнтові
+    /// відмову, а в <c>doc.TableRow</c> лишала порожній рядок-сироту; повтор
+    /// того самого батчу падав уже на <c>ECR-ROW-0409</c>.
+    ///
+    /// ⚠ Тепер нові рядки адресуються тимчасовими від'ємними ідентифікаторами
+    /// (<see cref="PlaceholderRowId"/>): уся перевірка працює з адресами так
+    /// само, як і з наявними рядками, а справжні <c>TableRow.Id</c> підставляє
+    /// <see cref="MaterializeNewRowsAsync"/> — всередині транзакції запису.
+    /// Від'ємні — бо <c>doc.TableRowSeq</c> видає лише додатні, і сплутати
+    /// тимчасову адресу зі справжньою неможливо.
+    /// </remarks>
+    private static CellChangeLists BuildCellChanges(RequestContext context)
     {
         var upserts = new List<CellRecord>();
         var deletes = new List<CellAddress>();
@@ -892,25 +916,16 @@ public sealed class PatchCellsHandler(
         // змінили (директива №09 `W8` п.4).
         var rowKeyById = context.RowIds.ToDictionary(pair => pair.Value, pair => pair.Key);
 
-        // ⛔ Q-164 (аудит фази 2, продуктивність): ОДИН пакетний виклик на
-        // весь батч, а не `CreateRowAsync` у циклі — той коштував двох
-        // походів у базу НА КОЖЕН новий рядок (`ReserveIdsAsync` +
-        // `SaveChangesAsync`), той самий прийом, що вже застосований для
-        // екземплярів таблиць (`MaterializeFixedRowsAsync`).
+        // ⚠ Порядок розбору значень лишається тим самим, що й до `DAT-04`:
+        // спершу нові рядки, потім наявні — тож і перша відмова батчу та сама.
         if (context.Creations.Count > 0)
         {
             EnsureCreationValuesReadable(context.Creations, context.ColumnDefs);
 
-            var newIds = await rowStore
-                .CreateRowsAsync(
-                    request.TableInstanceId, context.PeriodKey,
-                    [.. context.Creations.Select(row => RowKey.Create(row.RowKey))], ordinal: 0, ct)
-                .ConfigureAwait(false);
-
             for (var i = 0; i < context.Creations.Count; i++)
             {
                 var row = context.Creations[i];
-                var id = newIds[i];
+                var id = PlaceholderRowId(i);
                 touched.Add(id);
                 rowKeyById[id] = row.RowKey;
                 Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes);
@@ -933,6 +948,74 @@ public sealed class PatchCellsHandler(
         }
 
         return new CellChangeLists(upserts, deletes, touched, rowKeyById, expectedRowVersions);
+    }
+
+    /// <summary>
+    /// Тимчасовий ідентифікатор <paramref name="creationIndex"/>-го нового рядка
+    /// батчу — до того, як рядок з'явиться в базі (`DAT-04` п. 1).
+    /// </summary>
+    private static long PlaceholderRowId(int creationIndex) => -(creationIndex + 1L);
+
+    /// <summary>Чи адреса вказує на рядок, якого в базі ще немає.</summary>
+    private static bool IsPlaceholder(long rowId) => rowId < 0;
+
+    /// <summary>
+    /// Створює нові рядки батчу і повертає зміни, у яких тимчасові адреси
+    /// замінено справжніми <c>TableRow.Id</c>. Кличеться ЛИШЕ всередині
+    /// транзакції запису.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ `DAT-04` п. 1: рядки створюються тією самою транзакцією, що й
+    /// значення, аудит і «дотик» документа, — після всіх відмов, які можна
+    /// дати без <c>rowId</c>. <c>RowStore.CreateRowsAsync</c> робить власний
+    /// <c>SaveChangesAsync</c>, але через той самий <c>DbContext</c>, тож він
+    /// ПРИЄДНУЄТЬСЯ до відкритої транзакції, а не комітить сам. Відкат батчу
+    /// (конфлікт версії зі сховища, закритий аркуш) тепер відкочує і рядки.
+    ///
+    /// ⛔ Q-164 (аудит фази 2, продуктивність): ОДИН пакетний виклик на весь
+    /// батч, а не <c>CreateRowAsync</c> у циклі — той коштував двох походів у
+    /// базу НА КОЖЕН новий рядок.
+    ///
+    /// ⚠ Результат — НОВИЙ набір списків, а вхідний <paramref name="planned"/>
+    /// не змінюється: стратегія повторів (<c>EnableRetryOnFailure</c>) може
+    /// виконати замикання транзакції вдруге, і друга спроба мусить знову
+    /// бачити тимчасові адреси, а не вже підмінені першою.
+    /// </remarks>
+    private async Task<CellChangeLists> MaterializeNewRowsAsync(
+        PatchCellsRequest request, RequestContext context, CellChangeLists planned, CancellationToken ct)
+    {
+        if (context.Creations.Count == 0)
+        {
+            return planned;
+        }
+
+        var newIds = await rowStore
+            .CreateRowsAsync(
+                request.TableInstanceId, context.PeriodKey,
+                [.. context.Creations.Select(row => RowKey.Create(row.RowKey))], ordinal: 0, ct)
+            .ConfigureAwait(false);
+
+        var realIds = new Dictionary<long, long>(context.Creations.Count);
+        for (var i = 0; i < context.Creations.Count; i++)
+        {
+            realIds[PlaceholderRowId(i)] = newIds[i];
+        }
+
+        long Real(long rowId) => IsPlaceholder(rowId) ? realIds[rowId] : rowId;
+        CellAddress RealAddress(CellAddress address) => IsPlaceholder(address.TableRowId)
+            ? new CellAddress(address.PeriodKey, Real(address.TableRowId), address.ColumnDefId)
+            : address;
+
+        return new CellChangeLists(
+            [.. planned.Upserts.Select(u => IsPlaceholder(u.Address.TableRowId)
+                ? u with { Address = RealAddress(u.Address) }
+                : u)],
+            [.. planned.Deletes.Select(RealAddress)],
+            [.. planned.Touched.Select(Real)],
+            planned.RowKeyById.ToDictionary(pair => Real(pair.Key), pair => pair.Value),
+
+            // Версії заявляються лише для наявних рядків — підміняти нічого.
+            planned.ExpectedRowVersions);
     }
 
     /// <summary>
@@ -1014,8 +1097,12 @@ public sealed class PatchCellsHandler(
             .Distinct()
             .ToList();
 
+        // ⚠ Нові рядки (тимчасові від'ємні адреси, `DAT-04` п. 1) у базі ще не
+        // існують — питати про них сховище нема сенсу: їхній стан — це рівно
+        // те, що несе сам батч.
         var addresses = (
             from rowId in changes.Touched
+            where !IsPlaceholder(rowId)
             from columnId in neededColumnIds
             select new CellAddress(context.PeriodKey, rowId, columnId))
             .ToList();
@@ -1220,7 +1307,7 @@ public sealed class PatchCellsHandler(
         IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues)
     {
         var messages = Validate(
-            context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, context.RowIds, headerValues);
+            context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, changes.RowKeyById, headerValues);
         var blocking = messages.Where(m => m.BlocksSave).ToList();
         if (blocking.Count > 0)
         {
@@ -1401,7 +1488,12 @@ public sealed class PatchCellsHandler(
     private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadPreviousValuesAsync(
         CellChangeLists changes, CancellationToken ct)
     {
-        var addressesToWrite = changes.Upserts.Select(u => u.Address).Concat(changes.Deletes).ToList();
+        // ⚠ Комірки нових рядків (тимчасові адреси, `DAT-04` п. 1) пропускаються:
+        // рядка ще немає, отже й попереднього значення немає — так само, як і
+        // тоді, коли рядок створювався до цього читання.
+        var addressesToWrite = changes.Upserts.Select(u => u.Address).Concat(changes.Deletes)
+            .Where(a => !IsPlaceholder(a.TableRowId))
+            .ToList();
         return addressesToWrite.Count == 0
             ? new Dictionary<CellAddress, CellValueData>()
             : (IReadOnlyDictionary<CellAddress, CellValueData>)await cellStore
@@ -1499,7 +1591,7 @@ public sealed class PatchCellsHandler(
     /// <c>Ecr.Api</c>. Звідси <c>ExecuteInTransactionAsync</c> замість пари
     /// Begin/Commit — див. коментар порту в <c>IUnitOfWork.cs</c>.
     /// </remarks>
-    private async Task PersistChangesAsync(
+    private async Task<CellChangeLists> PersistChangesAsync(
         PatchCellsRequest request,
         RequestContext context,
         CellChangeLists changes,
@@ -1510,7 +1602,8 @@ public sealed class PatchCellsHandler(
     {
         try
         {
-            await PersistCoreAsync(request, context, changes, now, isLateEdit, previous, ct).ConfigureAwait(false);
+            return await PersistCoreAsync(request, context, changes, now, isLateEdit, previous, ct)
+                .ConfigureAwait(false);
         }
         catch (ConcurrencyConflictException ex) when (StaleRowIds(ex) is { Count: > 0 } staleRowIds)
         {
@@ -1568,18 +1661,29 @@ public sealed class PatchCellsHandler(
             ? value as IReadOnlyList<long>
             : null;
 
-    /// <summary>Сама транзакція: значення, «дотик» рядків, «дотик» документа й аудит.</summary>
-    private Task PersistCoreAsync(
+    /// <summary>
+    /// Сама транзакція: нові рядки, значення, «дотик» рядків, «дотик» документа
+    /// й аудит. Повертає зміни зі справжніми ідентифікаторами нових рядків.
+    /// </summary>
+    private async Task<CellChangeLists> PersistCoreAsync(
         PatchCellsRequest request,
         RequestContext context,
-        CellChangeLists changes,
+        CellChangeLists planned,
         DateTime now,
         bool isLateEdit,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         CancellationToken ct)
-        => uow.ExecuteInTransactionAsync(async innerCt =>
+    {
+        var applied = planned;
+
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            await EnsureSheetStillEditableAsync(context, changes, innerCt).ConfigureAwait(false);
+            await EnsureSheetStillEditableAsync(context, planned, innerCt).ConfigureAwait(false);
+
+            // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
+            // у цій самій транзакції. Див. <see cref="MaterializeNewRowsAsync"/>.
+            var changes = await MaterializeNewRowsAsync(request, context, planned, innerCt).ConfigureAwait(false);
+            applied = changes;
 
             await cellStore.ApplyAsync(
                 new CellChangeSet(
@@ -1602,7 +1706,10 @@ public sealed class PatchCellsHandler(
             await WriteAuditAsync(request, context, changes, now, isLateEdit, previous, innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-        }, ct);
+        }, ct).ConfigureAwait(false);
+
+        return applied;
+    }
 
     /// <summary>
     /// Перша дія транзакції запису: спільне блокування аркуша × періоду і стан
@@ -1764,7 +1871,7 @@ public sealed class PatchCellsHandler(
         int tableDefId,
         PatchCellsRequest request,
         List<CellRecord> upserts,
-        IReadOnlyDictionary<string, long> rowIds,
+        IReadOnlyDictionary<long, string> byRowId,
         IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues)
     {
         var table = snapshot.Sheets
@@ -1773,7 +1880,10 @@ public sealed class PatchCellsHandler(
 
         IReadOnlyList<Domain.Entities.Configuration.ValidationRule> rules =
             table?.ValidationRules ?? [];
-        var byRowId = rowIds.ToDictionary(p => p.Value, p => p.Key);
+
+        // ⚠ Мапа — з `CellChangeLists.RowKeyById`, а не з прочитаних до запису
+        // `RowIds`: там є і нові рядки батчу (під тимчасовими адресами,
+        // `DAT-04` п. 1), тож відмова тепер називає рядок, а не лише колонку.
         var messages = new List<Validation.ValidationMessage>();
 
         foreach (var record in upserts)
@@ -1824,6 +1934,12 @@ public sealed class PatchCellsHandler(
     /// Читає значення нових рядків ДО того, як рядки з'являться в базі.
     /// </summary>
     /// <remarks>
+    /// ✎ `DAT-04` п. 1: рядки тепер створюються всередині транзакції запису
+    /// (<see cref="MaterializeNewRowsAsync"/>), тож сирота від відмови вже не
+    /// лишається за будь-якого порядку перевірок. Ранній розбір лишається —
+    /// він задає ПОРЯДОК відмов (значення нових рядків — першими), на який
+    /// спираються тести. Абзац нижче — історія, чому він з'явився.
+    ///
     /// ⛔ <c>rowStore.CreateRowsAsync</c> пише рядок одразу й поза транзакцією
     /// <see cref="PersistChangesAsync"/>, а значення комірок розбирає лише
     /// <see cref="Distribute"/> — ПІСЛЯ вставки. Тож будь-яка відмова значення

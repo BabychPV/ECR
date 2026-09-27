@@ -455,15 +455,13 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
         // ⚠ І колонка названа поіменно — інакше клієнт знав би, що «щось у
         // батчі не так», але не яка саме клітинка.
         //
-        // ⛔ А от `rowKey` тут `null`, і це зафіксовано як Є, а не обійдено:
-        // `PatchCellsHandler` бере ключ рядка з мапи `byRowId`, а рядок цього
-        // батчу щойно СТВОРЮЄТЬСЯ і в ній його ще немає. Тобто на шляху
-        // «новий рядок + погане значення» відмова називає колонку, але не
-        // рядок. Це не в межах `DAT-03` (файл обробника — чужий), тож тут
-        // лише закріплено поточну поведінку, щоб її зміну було видно.
+        // ✎ `DAT-04` п. 1: і рядок названо теж. Доти тут стояв `null` — ключ
+        // брався з мапи рядків, прочитаної ДО створення, і нового рядка в ній
+        // не було. Тепер валідація йде по тимчасових адресах нових рядків, які
+        // знають свій ключ.
         var cell = problem.GetProperty("cells").EnumerateArray().Single();
         Assert.Equal(textColumn, cell.GetProperty("columnCode").GetString());
-        Assert.Equal(JsonValueKind.Null, cell.GetProperty("rowKey").ValueKind);
+        Assert.Equal(rowKey, cell.GetProperty("rowKey").GetString());
 
         // ⛔ І головне: у базі НІЧОГО. Це те твердження, яке падало до
         // виправлення, — тоді тут лежав огризок на 1000 символів.
@@ -476,21 +474,28 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
                 .ConfigureAwait(true);
 
             Assert.Equal(0, stored);
+
+            // ⛔ `DAT-04` п. 1: і рядка теж немає. Доти відхилений батч усе одно
+            // СТВОРЮВАВ рядок — `CreateRowsAsync` із власним комітом ішов ДО
+            // валідації, — і повтор нижче впирався в `ECR-ROW-0409`.
+            var orphanRows = await db.TableRows
+                .AsNoTracking()
+                .CountAsync(r => r.TableInstanceId == scenario.Document.TableInstanceId && r.RowKeyValue == rowKey)
+                .ConfigureAwait(true);
+
+            Assert.Equal(0, orphanRows);
         }
 
         // ⚠ Контроль межі: рівно 1000 символів приймаються, доїжджають до бази
         // цілими і читаються назад БЕЗ утрати. Без цієї половини тест доводив
         // би лише «текст не пишеться», а не «межа там, де стовпець».
         //
-        // ⛔ Ключ рядка тут ІНШИЙ, і це не косметика. Відхилений батч вище
-        // усе одно СТВОРИВ рядок: `PatchCellsHandler` кличе `CreateRowsAsync`
-        // всередині `BuildCellChangesAsync`, тобто ДО відмов — це окремий
-        // дефект `DAT-04`, і він не в межах цієї зміни. Повторний `PATCH` із
-        // тим самим ключем і `baseVersion = null` через це впирається в
-        // `ECR-ROW-0409` (виміряно прогоном). Обходити чужий дефект мовчки не
-        // можна, тож він названий тут прямо.
+        // ⛔ Ключ рядка — ТОЙ САМИЙ, що й у відхиленому батчі (`DAT-04` п. 1):
+        // користувач виправляє значення й надсилає той самий рядок ще раз, і
+        // це має пройти, а не впертися в `ECR-ROW-0409` від рядка-сироти. Доти
+        // тут стояв інший ключ — обхід саме цього дефекту.
         var atLimit = new string('я', 1000);
-        var secondRow = $"LEN{Guid.NewGuid():N}"[..12];
+        var secondRow = rowKey;
 
         var accepted = await client.PatchAsJsonAsync(patchUri, new
         {
