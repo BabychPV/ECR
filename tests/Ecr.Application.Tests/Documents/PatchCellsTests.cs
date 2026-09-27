@@ -222,6 +222,48 @@ public sealed class PatchCellsTests
     }
 
     /// <summary>
+    /// <c>WR-04</c> п. 2: екземпляр, розв'язаний контролером, не розв'язується
+    /// вдруге.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Мутація, від якої тест падає: ігнорувати <c>resolvedInstance</c> і
+    /// завжди кликати <c>ResolveTableInstanceAsync</c> — <c>DidNotReceive</c>
+    /// стає червоним.
+    /// </remarks>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Переданий_екземпляр_таблиці_не_розвязується_вдруге()
+    {
+        var instance = new TableInstanceRef(TableInstance, DocumentId: 700, TableDefId: 3, TemplateVersionId: 2, PeriodKey: Period);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None,
+            resolvedInstance: instance);
+
+        Assert.Equal(1, response.AppliedCells);
+        await _rows.DidNotReceive().ResolveTableInstanceAsync(Arg.Any<long>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// <c>WR-04</c> п. 2: переданий екземпляр чужої таблиці — помилка
+    /// викликача, а не тихий запис за правами іншого екземпляра.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "WR-04")]
+    public async Task Переданий_екземпляр_іншої_таблиці_відхиляється_до_запису()
+    {
+        var other = new TableInstanceRef(TableInstance + 1, DocumentId: 700, TableDefId: 3, TemplateVersionId: 2, PeriodKey: Period);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None,
+            resolvedInstance: other));
+
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
     /// <c>BE-06</c>: подробиці конфлікту коштують запитів ЛИШЕ на шляху відмови.
     /// </summary>
     /// <remarks>

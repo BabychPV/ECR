@@ -56,9 +56,10 @@ public sealed class PatchCellsQueryCountTests(SqlServerFixture sql)
     ///
     /// Історія: 29 — на <c>782b7add</c> (до WR-04), тобто точка відліку
     /// храповика. 28 — п. 1 (без другого «дотику» рядків після
-    /// <c>ApplyAsync</c>).
+    /// <c>ApplyAsync</c>). 27 — п. 2 (екземпляр таблиці розв'язує лише
+    /// контролер).
     /// </remarks>
-    private const int MaxCommands = 28;
+    private const int MaxCommands = 27;
 
     private const string Password = "Api-Patch-Ratchet-2026!";
 

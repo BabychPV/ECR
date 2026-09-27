@@ -70,6 +70,10 @@ public sealed class PatchCellsHandler(
     /// колекцію, і поставити одну задачу зобов'язаний викликач — ПІСЛЯ коміту
     /// СВОЄЇ, ширшої транзакції.
     /// </param>
+    /// <param name="resolvedInstance">
+    /// Екземпляр таблиці, уже розв'язаний викликачем (`WR-04` п. 2 —
+    /// <c>CellsController</c>); <c>null</c> — розв'язати тут.
+    /// </param>
     /// <remarks>
     /// Орієнтир — тільки послідовність кроків: увесь контекст рішень,
     /// порядок і межі транзакції описані в коментарях відповідних
@@ -94,7 +98,8 @@ public sealed class PatchCellsHandler(
     public async Task<PatchCellsResponse> HandleAsync(
         PatchCellsRequest request,
         CancellationToken ct,
-        ICollection<RecalculationSeed>? deferRecalculationUntilMi02 = null)
+        ICollection<RecalculationSeed>? deferRecalculationUntilMi02 = null,
+        TableInstanceRef? resolvedInstance = null)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -102,7 +107,7 @@ public sealed class PatchCellsHandler(
         // Контролер перевіряє те саме ще раніше; тут — для викликачів поза HTTP.
         request.EnsureWithinCellLimit();
 
-        var context = await LoadContextAsync(request, ct).ConfigureAwait(false);
+        var context = await LoadContextAsync(request, resolvedInstance, ct).ConfigureAwait(false);
 
         // ⛔ Порожній пакет — no-op (V-02, третій раунд UX-проходу). До цього
         // `PATCH` з `rows: []` не мав жодної адреси для перевірки прав, тож
@@ -247,7 +252,8 @@ public sealed class PatchCellsHandler(
     /// поточний стан рядків — усе, без чого решта кроків не може почати
     /// вирішувати.
     /// </summary>
-    private async Task<RequestContext> LoadContextAsync(PatchCellsRequest request, CancellationToken ct)
+    private async Task<RequestContext> LoadContextAsync(
+        PatchCellsRequest request, TableInstanceRef? resolvedInstance, CancellationToken ct)
     {
         var periodKey = new PeriodKey(request.PeriodKey);
 
@@ -281,7 +287,24 @@ public sealed class PatchCellsHandler(
         // 1. Структура зі знімка метаданих — без звернення до БД (D-16).
         //    Потрібна, щоб резолвити коди колонок у ColumnDefId; вигадувати
         //    їх не можна, це частина первинного ключа комірки.
-        var instance = await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
+        //
+        // ⚠ `WR-04` п. 2: контролер уже розв'язав екземпляр (перевіряючи його
+        // належність документу з URL) і передає його сюди — другий такий самий
+        // запит був зайвим. Викликачі поза HTTP (`ExcelImporter`) передають
+        // `null`, і тоді екземпляр розв'язується тут, як і раніше.
+        //
+        // ⛔ Переданий екземпляр мусить бути ТИМ, про який запит: інакше права
+        // й структура рахувалися б для одного екземпляра, а запис ішов би в
+        // інший. Розбіжність — помилка викликача, не користувача.
+        if (resolvedInstance is not null && resolvedInstance.TableInstanceId != request.TableInstanceId)
+        {
+            throw new ArgumentException(
+                $"Розв'язаний екземпляр {resolvedInstance.TableInstanceId} не збігається із запитом {request.TableInstanceId}.",
+                nameof(resolvedInstance));
+        }
+
+        var instance = resolvedInstance
+                       ?? await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
 
         // ⛔ Видимість документа — ПЕРШОЮ, до будь-якої відмови, що щось
         // розповідає про таблицю (V-02). Далі по шляху відмови називають ключі

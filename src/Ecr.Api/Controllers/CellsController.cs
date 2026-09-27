@@ -103,7 +103,12 @@ public sealed class CellsController(
 
         // Винятки перетворює ExceptionHandlingMiddleware — ловити їх тут не
         // треба: конфлікт baseVersion має піти клієнту як 409 із переліком.
-        var response = await patchHandler.HandleAsync(request, ct).ConfigureAwait(false);
+        //
+        // ⚠ `WR-04` п. 2: розв'язаний тут екземпляр іде в обробник — другого
+        // такого самого запиту там немає.
+        var response = await patchHandler
+            .HandleAsync(request, ct, resolvedInstance: owner)
+            .ConfigureAwait(false);
 
         // Кількість записаних комірок — у метрику бюджету (аудит §9).
         Observability.EcrMetrics.ReportCount(HttpContext, response.AppliedCells);
