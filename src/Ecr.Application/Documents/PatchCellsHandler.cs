@@ -98,6 +98,10 @@ public sealed class PatchCellsHandler(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ⛔ `WR-11`: стеля батчу — ПЕРШОЮ, до будь-якого читання бази.
+        // Контролер перевіряє те саме ще раніше; тут — для викликачів поза HTTP.
+        request.EnsureWithinCellLimit();
+
         var context = await LoadContextAsync(request, ct).ConfigureAwait(false);
 
         // ⛔ Порожній пакет — no-op (V-02, третій раунд UX-проходу). До цього

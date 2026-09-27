@@ -13,7 +13,49 @@ public sealed record PatchCellsRequest(
     long TableInstanceId,
     int PeriodKey,
     string Origin,
-    IReadOnlyList<PatchRow> Rows);
+    IReadOnlyList<PatchRow> Rows)
+{
+    /// <summary>Стеля комірок на один батч — нових і наявних рядків разом (`WR-11`).</summary>
+    /// <remarks>
+    /// ⚠ Найбільша законна вставка — 500 рядків × 60 колонок = 30 000 комірок;
+    /// стеля дає запас над нею і водночас не пускає запит, який тримав би
+    /// транзакцію запису й пам'ять сервера без меж.
+    /// </remarks>
+    public const int MaxCells = 50_000;
+
+    /// <summary>
+    /// Відхиляє батч понад <see cref="MaxCells"/> — ДО будь-якої роботи з базою.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ `WR-11`: до цього межі не було ніде — ні в запиті, ні в контролері,
+    /// ні в обробнику. Кличуть і контролер (до першого читання), і обробник
+    /// (його кличе ще й імпорт Excel напряму).
+    ///
+    /// ⚠ Числа — рядками: <c>ResolveGenericMessageAsync</c> підставляє в шаблон
+    /// каталогу лише поля типу <c>string</c>.
+    /// </remarks>
+    /// <exception cref="Errors.BusinessRuleException"><c>ECR-REQ-0422</c>.</exception>
+    public void EnsureWithinCellLimit()
+    {
+        // ⚠ `?.`: тіло з JSON може прийти без `rows` чи `cells` — це не
+        // привід для `500` саме тут; порожній батч — no-op далі по шляху.
+        var count = Rows?.Sum(row => row?.Cells?.Count ?? 0) ?? 0;
+        if (count <= MaxCells)
+        {
+            return;
+        }
+
+        throw new Errors.BusinessRuleException(
+            Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
+            $"Батч несе {count} комірок; стеля — {MaxCells}.",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["messageKey"] = "err.ECR-REQ-0422.patchTooLarge",
+                ["count"] = count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["max"] = MaxCells.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+    }
+}
 
 /// <summary>
 /// Рядок у пакетній зміні.

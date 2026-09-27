@@ -67,6 +67,10 @@ public sealed class CellsController(
         // іншими шляхами, і через HTTP заявити їх означало б підробити журнал.
         CellChangeOrigins.RequireClientOrigin(request.Origin);
 
+        // ⛔ `WR-11`: стеля комірок батчу — до першого звернення до бази
+        // (`ResolveTableInstanceAsync` нижче).
+        request.EnsureWithinCellLimit();
+
         // ⚠ Належність екземпляра таблиці документові перевіряється ТУТ і до
         // будь-якої роботи. Без цієї перевірки шлях у URL стає декоративним:
         // клієнт указав би чужий TableInstanceId і писав би в чужий документ,

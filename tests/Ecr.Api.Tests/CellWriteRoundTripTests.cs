@@ -526,6 +526,99 @@ public sealed class CellWriteRoundTripTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// `WR-11`: стеля 50 000 комірок на один <c>PATCH …/cells</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Обидва батчі однакові за формою — один рядок із неіснуючим ключем і
+    /// заявленою версією, — різниця рівно в одну комірку. На 50 000 запит
+    /// проходить стелю й доходить до звірки версій (<c>409 ECR-CELL-0409</c>:
+    /// рядка немає); на 50 001 — <c>422</c> зі стелі. Тобто межа стоїть саме на
+    /// 50 000, а не «десь нижче».
+    ///
+    /// ⛔ Третій запит — з неіснуючим екземпляром таблиці: він мусить отримати
+    /// ту саму <c>422</c>, а не <c>404</c>. Це доводить, що стеля стоїть ДО
+    /// першого звернення до бази (<c>ResolveTableInstanceAsync</c>).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-11")]
+    public async Task Батч_понад_50000_комірок_відхиляється_422_до_роботи_з_базою()
+    {
+        var scenario = await ArrangeAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, scenario.UserName).ConfigureAwait(true);
+
+        var patchUri = new Uri(
+            $"/api/v1/documents/{scenario.Document.DocumentId}/cells", UriKind.Relative);
+
+        // Код колонки для цієї перевірки байдужий: відмови стелі й версії
+        // настають раніше за розбір колонок.
+        const string anyColumn = "C1";
+        var missingRow = $"LIM{Guid.NewGuid():N}"[..12];
+
+        object Batch(long tableInstanceId, int cellCount) => new
+        {
+            tableInstanceId,
+            periodKey = scenario.PeriodKey,
+            origin = "UserEdit",
+            rows = new[]
+            {
+                new
+                {
+                    rowKey = missingRow,
+                    baseVersion = "0x0000000000000001",
+                    cells = Enumerable.Range(0, cellCount)
+                        .Select(_ => new { columnCode = anyColumn, value = (object)1 })
+                        .ToArray(),
+                },
+            },
+        };
+
+        // ── 50 000 — стелю проходить ─────────────────────────────────────
+        var atLimit = await client
+            .PatchAsJsonAsync(patchUri, Batch(scenario.Document.TableInstanceId, 50_000))
+            .ConfigureAwait(true);
+        var atLimitBody = await atLimit.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(
+            atLimit.StatusCode == HttpStatusCode.Conflict,
+            $"PATCH на 50 000 комірок: очікували 409 від звірки версій, отримали {atLimit.StatusCode}\n"
+            + $"{atLimitBody[..Math.Min(atLimitBody.Length, 2000)]}\n{app.ErrorsText}");
+        Assert.Equal(
+            "ECR-CELL-0409", JsonDocument.Parse(atLimitBody).RootElement.GetProperty("errorCode").GetString());
+
+        // ── 50 001 — відмова стелі ───────────────────────────────────────
+        var overLimit = await client
+            .PatchAsJsonAsync(patchUri, Batch(scenario.Document.TableInstanceId, 50_001))
+            .ConfigureAwait(true);
+        AssertPatchTooLarge(overLimit, await overLimit.Content.ReadAsStringAsync().ConfigureAwait(true), app);
+
+        // ── 50 001 у неіснуючий екземпляр — та сама 422, а не 404 ────────
+        var beforeDatabase = await client
+            .PatchAsJsonAsync(patchUri, Batch(long.MaxValue, 50_001))
+            .ConfigureAwait(true);
+        AssertPatchTooLarge(
+            beforeDatabase, await beforeDatabase.Content.ReadAsStringAsync().ConfigureAwait(true), app);
+    }
+
+    /// <summary>Відмова стелі батчу: код, ключ каталогу і обидва числа.</summary>
+    private static void AssertPatchTooLarge(HttpResponseMessage response, string body, EcrApiFactory app)
+    {
+        Assert.True(
+            response.StatusCode == HttpStatusCode.UnprocessableEntity,
+            $"PATCH на 50 001 комірку: очікували 422, отримали {response.StatusCode}\n"
+            + $"{body[..Math.Min(body.Length, 2000)]}\n{app.ErrorsText}");
+
+        var problem = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REQ-0422.patchTooLarge", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("50001", problem.GetProperty("count").GetString());
+        Assert.Equal("50000", problem.GetProperty("max").GetString());
+    }
+
+    /// <summary>
     /// `U-22` + `U-23` наскрізно, рівно сценарієм живого стенда: число з
     /// хвостом за межею сховища відхиляється, а повтор незмінного значення не
     /// дає рядка в журналі.
