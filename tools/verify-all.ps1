@@ -173,8 +173,26 @@ function Step {
 # ⚠ Знайдено аудитом: прогін показав ✗ на кроці складання при цілком
 # справному дереві, і на з'ясування причини пішло більше часу, ніж на цей
 # рядок.
+#
+# ⛔ 2026-09-27: тут стояло `Get-Process -Name 'Ecr.Api' | Stop-Process -Force`
+# — вбивало БУДЬ-ЯКИЙ `Ecr.Api` на машині, зокрема чужий стенд іншої сесії з
+# іншого worktree, що прямо суперечить правилу «чужий піднятий Ecr.Api не
+# вбивай» (CLAUDE.md). Сам цей скрипт `Ecr.Api` не запускає (стенди
+# `smoke.ps1`/`e2e-stand.ps1` піднімають і гасять свій), тож «свого» PID, який
+# можна було б зберегти й загасити, тут немає. Тому нічого не вбиваємо:
+# складанню заважає лише процес, запущений із ЦЬОГО чекауту (тримає саме
+# нашу DLL), — його називаємо і зупиняємося з поясненням замість MSB3027.
 if (-not $ListSteps) {
-    Get-Process -Name 'Ecr.Api' -ErrorAction SilentlyContinue | Stop-Process -Force
+    $rootFull = [System.IO.Path]::GetFullPath($root).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $ours = @(Get-Process -Name 'Ecr.Api' -ErrorAction SilentlyContinue | Where-Object {
+            $_.Path -and $_.Path.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)
+        })
+    if ($ours.Count -gt 0) {
+        Write-Host "Ecr.Api запущено з цього чекауту — складання впаде з MSB3027 (файл зайнятий):" -ForegroundColor Red
+        $ours | ForEach-Object { Write-Host "  PID $($_.Id)  $($_.Path)" -ForegroundColor Red }
+        Write-Host 'Зупини його сам, якщо він твій (Stop-Process -Id <PID>), або запускай перевірку з окремого worktree.' -ForegroundColor Red
+        exit 3
+    }
 }
 
 # ⚠ При переліку прапорці пропуску знімаються: питання «які кроки взагалі
