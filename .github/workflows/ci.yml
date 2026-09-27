@@ -70,8 +70,41 @@ jobs:
   #
   # ⚠ `services:` цього не вміє: службу оголошують до того, як виконався
   # перший крок, отже значення, обчислене в прогоні, туди не потрапляє.
-  server:
+  #
+  # ⛔ Серверні гейти — ЧОТИРИ паралельні частини, а не одне завдання. Замір
+  # 2026-09-27 (23 зелені прогони `dev/integration`): черга ≈ 0, підготовка
+  # ≈ 0.7 хв, а 9–15 хв — один крок «Складання, тести, розгортання», і в ньому
+  # хвіст — `Ecr.Api.Tests` (колекція `SqlServer`, послідовно, 5.7–9.2 хв),
+  # ПІСЛЯ якого ще послідовно йшли сценарії (2.0–3.5 хв). Решта проєктів
+  # закінчувала за ~2 хв. Тепер кожна частина складає рішення сама (~1–2 хв)
+  # і бере свій шматок; вердикт ≈ складання + найдовша частина.
+  #
+  # ⚠ Кожна частина — власний агент і власний контейнер SQL Server, тож бази
+  # частин не перетинаються. Збірка НЕ передається між завданнями
+  # артефактом: вивантажити й завантажити `bin/` коштує стільки ж, скільки
+  # скласти, а додає ще один шлях, яким у тест може приїхати не та DLL.
+  #
+  # ⛔ `fail-fast: false` — з тієї ж причини, що й `Step` у `verify-all.ps1`:
+  # перевірки не зупиняють одна одну, інакше червона частина ховала б стан
+  # решти.
+  server-part:
+    name: server-part (${{ matrix.part }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # ⛔ Перелік кроків — ЛІТЕРАЛОМ `-Only '…'` у кожному рядку: саме так
+        # його читає `CiPipelineTests`. Об'єднання чотирьох рядків мусить
+        # дорівнювати колишньому одному, інакше сторож червоний.
+        include:
+          - part: core
+            only: "-Only 'Складання','Ліцензії NuGet','Тести .NET','Розгортання під sqlcmd'"
+          - part: scenarios
+            only: "-Only 'Складання','Сценарії директиви №09 (довідково)'"
+          - part: api-1
+            only: "-Only 'Складання','Тести API (частина 1)'"
+          - part: api-2
+            only: "-Only 'Складання','Тести API (частина 2)'"
 
     steps:
       - uses: actions/checkout@v4
@@ -172,7 +205,28 @@ jobs:
         env:
           ECR_SQL_PASSWORD: ${{ env.ECR_SQL_PASSWORD }}
           ECR_TEST_SQL: 'Server=localhost,1433;User Id=sa;Password=${{ env.ECR_SQL_PASSWORD }};TrustServerCertificate=true'
-        run: pwsh -File tools/verify-all.ps1 -SkipClient -Only 'Складання','Ліцензії NuGet','Тести .NET','Сценарії директиви №09 (довідково)','Розгортання під sqlcmd' -SqlServer 'localhost,1433' -SqlLogin sa
+        run: pwsh -File tools/verify-all.ps1 -SkipClient ${{ matrix.only }} -SqlServer 'localhost,1433' -SqlLogin sa
+
+  # ⛔ Обов'язкова перевірка гілки називається `server` — і саме це завдання її
+  # дає, зводячи чотири частини в один вердикт. Без нього захист гілки чекав
+  # би `server`, якого більше немає, або (гірше) ім'я перенесли б на одну
+  # частину, і три інші перестали б блокувати мерж.
+  #
+  # ⚠ `if: always()` — НЕ прикраса. Без нього при червоній частині це
+  # завдання було б `skipped`, а пропущена обов'язкова перевірка GitHub
+  # зараховує як пройдену: червона частина дала б зелений `server`.
+  server:
+    needs: server-part
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Усі частини server зелені
+        run: |
+          echo "server-part: ${{ needs.server-part.result }}"
+          if [ "${{ needs.server-part.result }}" != "success" ]; then
+            echo "::error::Щонайменше одна частина server не зелена (${{ needs.server-part.result }})."
+            exit 1
+          fi
 
   client:
     runs-on: ubuntu-latest

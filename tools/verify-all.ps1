@@ -248,9 +248,39 @@ Step 'Тести .NET' {
     # марна робота, це прилад». Гейт, який червоніє від очікуваного, — гейт,
     # який вимкнуть за тиждень. Прогрес сценаріїв — окремий, довідковий крок
     # нижче; те, що блокує збірку, лишається тут.
+    #
+    # ⛔ `Ecr.Api.Tests` теж виключений тут — і НЕ вимкнений: він іде двома
+    # кроками нижче («Тести API (частина 1/2)»). Причина — замір конвеєра
+    # 2026-09-27: у `Ecr.Api.Tests` усі тести в одній колекції `SqlServer`,
+    # тобто ПОСЛІДОВНО, ~1 с на тест, 479 тестів — 9.2 хв; решта проєктів
+    # закінчує за ~2 хв. Одне завдання тримало весь вердикт на цьому хвості.
     & dotnet test (Join-Path $root 'Ecr.sln') --no-build -v q --nologo `
         --logger 'console;verbosity=normal' `
-        --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests'
+        --filter 'FullyQualifiedName!~Ecr.Scenarios.Tests&FullyQualifiedName!~Ecr.Api.Tests.'
+}
+
+# ⛔ `Ecr.Api.Tests` — двома кроками за першою літерою класу, щоб конвеєр
+# гнав їх ПАРАЛЕЛЬНО на двох агентах (кожен зі своїм SQL Server). Частина 2 —
+# ТОЧНЕ доповнення частини 1: той самий перелік префіксів, заперечений. Тож
+# тест не може випасти з обох частин і не може потрапити в обидві, хоч би
+# які класи додавалися; новий клас лише зсуне баланс, а не покриття.
+#
+# ⚠ Межа A–M / N–Z — за заміром часу 2026-09-27 (49 % / 51 %). Перекіс
+# лагодиться перенесенням літери між частинами, а не новим кроком.
+$apiPart1 = [char[]]'ABCDEFGHIJKLM' | ForEach-Object { "FullyQualifiedName~Ecr.Api.Tests.$_" }
+
+Step 'Тести API (частина 1)' {
+    if ($TestSql) { $env:ECR_TEST_SQL = $TestSql }
+    & dotnet test (Join-Path $root 'tests/Ecr.Api.Tests') --no-build -v q --nologo `
+        --logger 'console;verbosity=normal' `
+        --filter ($apiPart1 -join '|')
+}
+
+Step 'Тести API (частина 2)' {
+    if ($TestSql) { $env:ECR_TEST_SQL = $TestSql }
+    & dotnet test (Join-Path $root 'tests/Ecr.Api.Tests') --no-build -v q --nologo `
+        --logger 'console;verbosity=normal' `
+        --filter (($apiPart1 -replace '~', '!~') -join '&')
 }
 
 Step 'Сценарії директиви №09 (довідково)' {
