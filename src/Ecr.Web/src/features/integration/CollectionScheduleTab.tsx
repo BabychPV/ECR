@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Code, Group, Loader, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Code, Group, Loader, NumberInput, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError } from '@/api/client';
@@ -86,10 +86,10 @@ export function CollectionScheduleTab({
   };
 
   const save = useMutation({
-    mutationFn: ({ base, cron, isEnabled }: { base: CollectionSchedule | null; cron: string; isEnabled: boolean }) =>
+    mutationFn: ({ base, draft }: { base: CollectionSchedule | null; draft: ScheduleDraft }) =>
       base === null
-        ? createCollectionSchedule({ sourceEntityId, cron, isEnabled })
-        : updateCollectionSchedule(base.id, { cron, isEnabled }, base.rowVersion),
+        ? createCollectionSchedule({ sourceEntityId, ...draft })
+        : updateCollectionSchedule(base.id, draft, base.rowVersion),
     onMutate: () => setFailure(null),
     onSuccess: (saved) => {
       replaceRow(saved);
@@ -143,7 +143,7 @@ export function CollectionScheduleTab({
         base={schedule}
         busy={save.isPending || remove.isPending}
         blocked={conflict}
-        onSave={(cron, isEnabled) => save.mutate({ base: schedule, cron, isEnabled })}
+        onSave={(draft) => save.mutate({ base: schedule, draft })}
         onRemove={() => {
           if (schedule !== null) remove.mutate(schedule);
         }}
@@ -151,6 +151,24 @@ export function CollectionScheduleTab({
     </Stack>
   );
 }
+
+/** Те, що форма посилає: cron, стан і вікно збору (ФВ-13.15). */
+interface ScheduleDraft {
+  cron: string;
+  isEnabled: boolean;
+  lookbackDays: number;
+}
+
+/*
+ * Межі вікна збору, днів — ті самі, що `CollectionSchedule.Min/MaxLookbackDays`
+ * на сервері. ⚠ Повтор, а не джерело правди: сервер однаково відповість `422`,
+ * тут межі лише для того, щоб причину було видно ДО кліку.
+ */
+const LOOKBACK_MIN = 1;
+const LOOKBACK_MAX = 366;
+
+/** Вікно, з яким сервер заводить розклад, якщо поле не прийшло. */
+const LOOKBACK_DEFAULT = 7;
 
 function ScheduleForm({
   base,
@@ -163,15 +181,24 @@ function ScheduleForm({
   busy: boolean;
   /** Конфлікт версій не розв'язаний — зберігати поверх нього не можна. */
   blocked: boolean;
-  onSave: (cron: string, isEnabled: boolean) => void;
+  onSave: (draft: ScheduleDraft) => void;
   onRemove: () => void;
 }): JSX.Element {
   const [cron, setCron] = useState(base?.cron ?? '');
   const [isEnabled, setEnabled] = useState(base?.isEnabled ?? true);
+  // ⚠ `NumberInput` віддає '' на порожньому полі — це не нуль, а «не введено».
+  const [lookback, setLookback] = useState<number | string>(base?.lookbackDays ?? LOOKBACK_DEFAULT);
   const [confirming, setConfirming] = useState(false);
 
   const problem = checkCron(cron);
-  const dirty = base === null || cron !== base.cron || isEnabled !== base.isEnabled;
+  const lookbackDays = typeof lookback === 'number' ? lookback : Number.NaN;
+  const lookbackValid =
+    Number.isInteger(lookbackDays) && lookbackDays >= LOOKBACK_MIN && lookbackDays <= LOOKBACK_MAX;
+  const dirty =
+    base === null ||
+    cron !== base.cron ||
+    isEnabled !== base.isEnabled ||
+    lookbackDays !== base.lookbackDays;
 
   return (
     <Stack gap="sm">
@@ -194,6 +221,21 @@ function ScheduleForm({
         spellCheck={false}
         autoComplete="off"
         ff="monospace"
+      />
+
+      <NumberInput
+        label={t('schedule.lookbackDays')}
+        description={t('schedule.lookbackHint')}
+        value={lookback}
+        onChange={setLookback}
+        min={LOOKBACK_MIN}
+        max={LOOKBACK_MAX}
+        // ⚠ Без підрізання: мовчки замінити 400 на 366 означало б зберегти не
+        // те, що людина ввела. Причина видима, кнопка недоступна.
+        clampBehavior="none"
+        allowDecimal={false}
+        allowNegative={false}
+        error={lookbackValid ? undefined : t('schedule.lookbackRange', { min: LOOKBACK_MIN, max: LOOKBACK_MAX })}
       />
 
       <Switch
@@ -231,10 +273,10 @@ function ScheduleForm({
         <Button
           ml="auto"
           loading={busy}
-          disabled={problem !== null || !dirty || blocked}
+          disabled={problem !== null || !lookbackValid || !dirty || blocked}
           // ⛔ Шле рівно те, що в полі: обрізання — справа сервера, і тоді
           // збережене значення збігається з тим, що людина бачила.
-          onClick={() => onSave(cron, isEnabled)}
+          onClick={() => onSave({ cron, isEnabled, lookbackDays })}
         >
           {base === null ? t('schedule.create') : t('common.save')}
         </Button>

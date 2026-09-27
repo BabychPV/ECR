@@ -37,7 +37,8 @@ public sealed class CollectionSchedulesController(
     /// <summary>Заводить розклад для сутності джерела, у якої його ще немає.</summary>
     /// <remarks>
     /// ⚠ <c>If-Match</c> тут не потрібен: створення нічого не перезаписує.
-    /// Невалідний cron — <c>422 ECR-REQ-0422</c> ДО запису; сутності немає —
+    /// Невалідний cron, вікно поза 1–366 днів або сутність — власна форма ECR
+    /// (ФВ-12.8) — <c>422 ECR-REQ-0422</c> ДО запису; сутності немає —
     /// <c>404 ECR-INT-0404</c>; розклад у неї вже є — <c>409 ECR-JOB-0409</c>.
     /// </remarks>
     [HttpPost]
@@ -51,7 +52,7 @@ public sealed class CollectionSchedulesController(
         ArgumentNullException.ThrowIfNull(request);
 
         var created = await create
-            .HandleAsync(request.SourceEntityId, request.Cron, request.IsEnabled, ct)
+            .HandleAsync(request.SourceEntityId, request.Cron, request.IsEnabled, request.LookbackDays, ct)
             .ConfigureAwait(false);
 
         return Created(new Uri("/api/v1/collection-schedules", UriKind.Relative), created);
@@ -78,7 +79,7 @@ public sealed class CollectionSchedulesController(
         var ifMatch = Request.Headers[HeaderNames.IfMatch].ToString();
 
         return Ok(await save
-            .HandleAsync(id, request.Cron, request.IsEnabled, ifMatch, ct)
+            .HandleAsync(id, request.Cron, request.IsEnabled, request.LookbackDays, ifMatch, ct)
             .ConfigureAwait(false));
     }
 
@@ -103,9 +104,16 @@ public sealed class CollectionSchedulesController(
 /// <param name="SourceEntityId">Сутність джерела, яку збиратимуть за цим розкладом.</param>
 /// <param name="Cron">Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — <c>?</c>.</param>
 /// <param name="IsEnabled">Чи має розклад одразу стояти в планувальнику.</param>
-public sealed record CreateCollectionScheduleRequest(int SourceEntityId, string Cron, bool IsEnabled);
+/// <param name="LookbackDays">
+/// Вікно збору назад, днів (ФВ-13.15), 1–366; <c>null</c> — типове (7).
+/// </param>
+public sealed record CreateCollectionScheduleRequest(
+    int SourceEntityId, string Cron, bool IsEnabled, int? LookbackDays = null);
 
 /// <summary>Тіло зміни розкладу.</summary>
 /// <param name="Cron">Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — <c>?</c>.</param>
 /// <param name="IsEnabled">Чи має розклад стояти в планувальнику.</param>
-public sealed record UpdateCollectionScheduleRequest(string Cron, bool IsEnabled);
+/// <param name="LookbackDays">
+/// Вікно збору назад, днів (ФВ-13.15), 1–366; <c>null</c> — лишити наявне.
+/// </param>
+public sealed record UpdateCollectionScheduleRequest(string Cron, bool IsEnabled, int? LookbackDays = null);

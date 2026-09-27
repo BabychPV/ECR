@@ -1438,6 +1438,11 @@
               "string"
             ]
           },
+          "lookbackDays": {
+            "description": "Вікно збору назад від моменту запуску, днів (ФВ-13.15): кожен прогін перечитує\nсаме стільки, і пропущені вікна закриваються повтором, а не станом.",
+            "format": "int32",
+            "type": "integer"
+          },
           "rowVersion": {
             "description": "Версія рядка в Base64 — її ж клієнт повертає заголовком `If-Match`.",
             "type": "string"
@@ -1471,7 +1476,8 @@
           "lastErrorAt",
           "rowVersion",
           "dataSourceId",
-          "dataSourceCode"
+          "dataSourceCode",
+          "lookbackDays"
         ],
         "type": "object"
       },
@@ -1931,6 +1937,14 @@
           "isEnabled": {
             "description": "Чи має розклад одразу стояти в планувальнику.",
             "type": "boolean"
+          },
+          "lookbackDays": {
+            "description": "Вікно збору назад, днів (ФВ-13.15), 1–366; `null` — типове (7).",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           },
           "sourceEntityId": {
             "description": "Сутність джерела, яку збиратимуть за цим розкладом.",
@@ -12312,6 +12326,14 @@
           "isEnabled": {
             "description": "Чи має розклад стояти в планувальнику.",
             "type": "boolean"
+          },
+          "lookbackDays": {
+            "description": "Вікно збору назад, днів (ФВ-13.15), 1–366; `null` — лишити наявне.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
           }
         },
         "required": [
@@ -13894,7 +13916,7 @@
         ]
       },
       "post": {
-        "description": "⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.\nНевалідний cron — `422 ECR-REQ-0422` ДО запису; сутності немає —\n`404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.",
+        "description": "⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.\nНевалідний cron, вікно поза 1–366 днів або сутність — власна форма ECR\n(ФВ-12.8) — `422 ECR-REQ-0422` ДО запису; сутності немає —\n`404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.",
         "requestBody": {
           "content": {
             "application/*+json": {

@@ -2300,6 +2300,14 @@ USING (VALUES
     (N'schedule.cronFieldCount',         N'en', N'Expected 6 or 7 fields separated by spaces, got {count}.', 1),
     (N'schedule.cronField',              N'en', N'Field {position} is not valid: {value}', 1),
     (N'schedule.cronDayQuestion',        N'en', N'Exactly one of day-of-month and day-of-week must be ?.', 1),
+    -- COLL:schedule ── Вікно збору (ФВ-13.15) і заборона розкладу власних форм (ФВ-12.8) ──
+    -- ⚠ Межі 1–366 днів — `CollectionSchedule.Min/MaxLookbackDays`; у ТЗ їх немає.
+    (N'schedule.lookbackDays',           N'en', N'Collection window (days)', 1),
+    (N'schedule.lookbackHint',           N'en', N'Each run re-reads this many days back, so a missed run is covered by the next one.', 1),
+    (N'schedule.lookbackRange',          N'en', N'Enter a whole number of days from {min} to {max}.', 1),
+    (N'err.ECR-REQ-0422.collectionScheduleLookback', N'en', N'The collection window must be between {min} and {max} days.', 1),
+    (N'err.ECR-REQ-0422.scheduleForLocalEntity',     N'en', N'"{code}" is an ECR form: its data arrives when it is entered, so it cannot have a collection schedule.', 1),
+    -- COLL:schedule ── кінець секції ──
     (N'jobs.title',                      N'en', N'Jobs', 1),
     (N'jobs.id',                         N'en', N'Job id', 1),
     (N'jobs.watch',                      N'en', N'Watch', 1),

@@ -658,7 +658,8 @@ export interface paths {
         /**
          * Заводить розклад для сутності джерела, у якої його ще немає.
          * @description ⚠ `If-Match` тут не потрібен: створення нічого не перезаписує.
-         *     Невалідний cron — `422 ECR-REQ-0422` ДО запису; сутності немає —
+         *     Невалідний cron, вікно поза 1–366 днів або сутність — власна форма ECR
+         *     (ФВ-12.8) — `422 ECR-REQ-0422` ДО запису; сутності немає —
          *     `404 ECR-INT-0404`; розклад у неї вже є — `409 ECR-JOB-0409`.
          */
         post: {
@@ -14918,6 +14919,12 @@ export interface components {
              * @description Коли збір за цим розкладом відпрацював востаннє.
              */
             lastRunAt: null | string;
+            /**
+             * Format: int32
+             * @description Вікно збору назад від моменту запуску, днів (ФВ-13.15): кожен прогін перечитує
+             *     саме стільки, і пропущені вікна закриваються повтором, а не станом.
+             */
+            lookbackDays: number;
             /** @description Версія рядка в Base64 — її ж клієнт повертає заголовком `If-Match`. */
             rowVersion: string;
             /** @description Код сутності в джерелі. */
@@ -15118,6 +15125,11 @@ export interface components {
             cron: string;
             /** @description Чи має розклад одразу стояти в планувальнику. */
             isEnabled: boolean;
+            /**
+             * Format: int32
+             * @description Вікно збору назад, днів (ФВ-13.15), 1–366; `null` — типове (7).
+             */
+            lookbackDays?: null | number;
             /**
              * Format: int32
              * @description Сутність джерела, яку збиратимуть за цим розкладом.
@@ -19966,6 +19978,11 @@ export interface components {
             cron: string;
             /** @description Чи має розклад стояти в планувальнику. */
             isEnabled: boolean;
+            /**
+             * Format: int32
+             * @description Вікно збору назад, днів (ФВ-13.15), 1–366; `null` — лишити наявне.
+             */
+            lookbackDays?: null | number;
         };
         /** @description Тіло зміни каналу. */
         UpdateNotificationChannelRequest: {
