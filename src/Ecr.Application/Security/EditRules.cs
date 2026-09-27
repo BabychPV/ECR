@@ -136,9 +136,21 @@ public static class EditRules
             return EditDecision.Deny(EditDenyReason.RowReadOnly);
         }
 
-        return Effective(profile, context) >= GrantLevel.Write
-            ? EditDecision.Allow()
-            : EditDecision.Deny(EditDenyReason.NoGrant);
+        // ⛔ Та сама різниця причин, що в CanSubmit/CanApprove: грант
+        // ВІДСУТНІЙ (None, включно із забороною на будь-якому рівні) і грант
+        // Є, але нижчий за Write (Read), — різні відповіді для користувача:
+        // «просити грант» проти «просити підвищення рівня».
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Write)
+        {
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для редагування потрібен {GrantLevel.Write}.");
+        }
+
+        return EditDecision.Allow();
     }
 
     /// <summary>Чи можна подати аркуш на погодження.</summary>
@@ -301,9 +313,19 @@ public static class EditRules
                 EditDenyReason.BusinessRule, $"Аркуш у стані {context.SheetStatus}, а не Submitted/Approved.");
         }
 
-        return Effective(profile, context) >= GrantLevel.Approve
-            ? EditDecision.Allow()
-            : EditDecision.Deny(EditDenyReason.NoGrant);
+        // ⛔ Та сама різниця причин, що в CanApprove: грант ВІДСУТНІЙ і грант
+        // Є, але нижчий за Approve, — не одне й те саме для користувача.
+        var effective = Effective(profile, context);
+        if (effective < GrantLevel.Approve)
+        {
+            return effective == GrantLevel.None
+                ? EditDecision.Deny(EditDenyReason.NoGrant)
+                : EditDecision.Deny(
+                    EditDenyReason.InsufficientGrantLevel,
+                    $"Наявний рівень гранта — {effective}; для повернення в роботу потрібен {GrantLevel.Approve}.");
+        }
+
+        return EditDecision.Allow();
     }
 
     /// <summary>

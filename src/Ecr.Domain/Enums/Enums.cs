@@ -256,7 +256,7 @@ public enum EditDenyReason : byte
 
     /// <summary>
     /// Грант на ресурс Є, але його рівень нижчий за потрібний дії
-    /// (<c>EditRules.CanSubmit</c>/<c>CanApprove</c>).
+    /// (<c>EditRules.CanEdit</c>/<c>CanSubmit</c>/<c>CanApprove</c>/<c>CanReopen</c>).
     /// </summary>
     /// <remarks>
     /// ⚠ Раніше обидва випадки — «гранта немає взагалі» і «грант є, але

@@ -33,11 +33,12 @@ import { expect, test, type Page } from '@playwright/test';
  * `DocumentGrid.onPaste` (`features/grid/DocumentGrid.tsx`) читає
  * `cellPermissions` зрізу, який рахує `EditRules.CanEdit`
  * (`Ecr.Application/Security/EditRules.cs`) за порогом `GrantLevel.Write`
- * (`Effective(profile, context) >= GrantLevel.Write`) — тобто саме тим
+ * (`Effective(profile, context)` проти `GrantLevel.Write`) — тобто саме тим
  * рішенням, яке міняє PUT `/roles/{id}/grants`. Рівня `Write` немає — вставка
  * відхиляється ЦІЛИМ пакетом (`ФВ-4.1`, "Some cells were not saved") із
- * причиною `deny.NoGrant` (вона й для «зовсім немає гранта», і для
- * «є, але нижче порогу» — `EditRules.CanEdit` не розрізняє); є — комірка
+ * причиною `deny.InsufficientGrantLevel`: грант `Read` Є, але нижчий за
+ * поріг (`deny.NoGrant` `EditRules.CanEdit` лишає для СПРАВЖНЬОЇ відсутності
+ * гранта, `Effective == None`); є — комірка
  * зберігається, і панель показує `data-save-status="saved"`
  * (`useCellPatch.ts`).
  *
@@ -126,7 +127,8 @@ test.describe('Гранти на /admin/security діють на сесію оп
    * за алфавітом, тож наступний у черзі `zz-walkthrough.spec.ts` відкривав той
    * самий документ БЕЗ права запису. Наслідок було видно за десять хвилин і в
    * іншому місці: `DocumentGrid.onPaste` відхиляв вставку цілим пакетом
-   * (`deny.NoGrant`), лишав відкритою модалку «Some cells were not saved», і
+   * (тоді — `deny.NoGrant`; відтоді грант `Read` дає
+   * `deny.InsufficientGrantLevel`), лишав відкритою модалку «Some cells were not saved», і
    * `validate.click()` у WALK 2 чекав 579.8 с, доки оверлей перестане
    * перехоплювати вказівник. Продукт при цьому поводився ПРАВИЛЬНО: документ
    * справді був лише для читання, і система це чесно пояснила.
@@ -417,15 +419,19 @@ async function expectPasteDenied(page: Page): Promise<void> {
   // комірок — не мовчазний збій і не той самий екран, що показує успіх.
   await expect(
     page.getByText('Some cells were not saved'),
-    'вставку мали відхилити — гранта немає, а модалка відмови не з\'явилася',
+    'вставку мали відхилити — рівня Write немає, а модалка відмови не з\'явилася',
   ).toBeVisible({ timeout: 15_000 });
 
-  // ⚠ Причина — рівно `deny.NoGrant`, а не будь-яка відмова: перевіряємо
-  // текст, а не лише факт модалки, інакше цей самий тест пройшов би і на
-  // геть іншій, непов'язаній причині заборони.
+  // ⚠ Причина — рівно `deny.InsufficientGrantLevel` (`09-seed.sql`), а не
+  // будь-яка відмова: у оператора грант `Read` Є, але нижчий за `Write`.
+  // Перевіряємо текст, а не лише факт модалки, інакше цей самий тест пройшов
+  // би і на геть іншій причині — зокрема на `deny.NoGrant`, яка означала б,
+  // що `EditRules.CanEdit` знову злив «немає гранта» і «грант замалий».
   await expect(
-    page.getByText('You do not have permission to edit this cell.'),
-    'причина відмови не збігається з очікуваною (deny.NoGrant)',
+    page.getByText(
+      'Your grant level is too low for this action: ask for a higher grant level, not a new grant.',
+    ),
+    'причина відмови не збігається з очікуваною (deny.InsufficientGrantLevel)',
   ).toBeVisible();
 
   await page.keyboard.press('Escape');

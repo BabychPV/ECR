@@ -56,15 +56,48 @@ public sealed class AccessDecisionTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    public void A04_переглядач_без_гранта_Write_отримує_причину_NoGrant()
+    public void A04_переглядач_із_грантом_Read_отримує_причину_InsufficientGrantLevel()
     {
+        // ⚠ Грант Є (Read), просто закороткий для Write: причина —
+        // InsufficientGrantLevel, а не NoGrant (той самий розподіл причин, що
+        // в CanSubmit/CanApprove, A11/A12). Пара — A04a нижче.
         var viewer = new AccessBuilder()
             .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read).Build();
 
         var decision = EditRules.CanEdit(viewer, AccessBuilder.Cell());
 
         Assert.False(decision.IsAllowed);
+        Assert.Equal(EditDenyReason.InsufficientGrantLevel, decision.Reason);
+        Assert.Contains(nameof(GrantLevel.Read), decision.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A04a_редагування_без_будь_якого_гранта_дає_причину_NoGrant()
+    {
+        // ⛔ Mutation-proof пара до A04: профіль без жодного гранта мусить
+        // лишитися на NoGrant — інакше перевірку на GrantLevel.None прибрали.
+        var stranger = new AccessBuilder { UserId = 99 }.Build();
+
+        var decision = EditRules.CanEdit(stranger, AccessBuilder.Cell());
+
+        Assert.False(decision.IsAllowed);
         Assert.Equal(EditDenyReason.NoGrant, decision.Reason);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A04b_редагування_з_рівно_Write_і_вищим_дозволене()
+    {
+        // Межа порогу: рівно Write — уже достатньо; вищі рівні — теж.
+        foreach (var level in new[] { GrantLevel.Write, GrantLevel.Submit, GrantLevel.Approve, GrantLevel.Manage })
+        {
+            var profile = new AccessBuilder()
+                .Grant(ResourceKind.Project, AccessBuilder.ProjectId, level).Build();
+
+            var decision = EditRules.CanEdit(profile, AccessBuilder.Cell());
+
+            Assert.True(decision.IsAllowed, $"рівень {level} мав дозволяти редагування");
+            Assert.Equal(EditDenyReason.None, decision.Reason);
+        }
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -320,6 +353,58 @@ public sealed class AccessDecisionTests
         Assert.Equal(EditDenyReason.ArchivingInProgress, decision.Reason);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A19_повернення_у_Draft_із_грантом_нижче_Approve_дає_InsufficientGrantLevel()
+    {
+        // ⚠ Грант Є (Submit), але поріг Reopen — Approve (Q-173): причина —
+        // InsufficientGrantLevel, не NoGrant. Для обох станів, які Reopen
+        // скасовує.
+        var submitter = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Submit).Build();
+
+        foreach (var sheet in new[] { DocumentStatus.Submitted, DocumentStatus.Approved })
+        {
+            var decision = EditRules.CanReopen(submitter, AccessBuilder.Cell(sheet: sheet));
+
+            Assert.False(decision.IsAllowed);
+            Assert.Equal(EditDenyReason.InsufficientGrantLevel, decision.Reason);
+            Assert.Contains(nameof(GrantLevel.Submit), decision.Detail, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A19a_повернення_у_Draft_без_будь_якого_гранта_дає_NoGrant()
+    {
+        // ⛔ Mutation-proof пара до A19: і відсутній грант, і заборона на
+        // проєкті (Effective == None) лишаються NoGrant.
+        var stranger = new AccessBuilder { UserId = 99 }.Build();
+        var denied = new AccessBuilder()
+            .Grant(ResourceKind.Column, AccessBuilder.ColumnId, GrantLevel.Manage)
+            .Deny(ResourceKind.Project, AccessBuilder.ProjectId)
+            .Build();
+
+        var submitted = AccessBuilder.Cell(sheet: DocumentStatus.Submitted);
+
+        Assert.Equal(EditDenyReason.NoGrant, EditRules.CanReopen(stranger, submitted).Reason);
+        Assert.Equal(EditDenyReason.NoGrant, EditRules.CanReopen(denied, submitted).Reason);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    public void A19b_повернення_у_Draft_із_грантом_Approve_і_вище_дозволене()
+    {
+        foreach (var level in new[] { GrantLevel.Approve, GrantLevel.Manage })
+        {
+            var profile = new AccessBuilder()
+                .Grant(ResourceKind.Project, AccessBuilder.ProjectId, level).Build();
+
+            foreach (var sheet in new[] { DocumentStatus.Submitted, DocumentStatus.Approved })
+            {
+                var decision = EditRules.CanReopen(profile, AccessBuilder.Cell(sheet: sheet));
+                Assert.True(decision.IsAllowed, $"рівень {level}, стан {sheet} мав дозволяти Reopen");
+            }
+        }
+    }
+
     // ——— Додаткові з tz/07 §7.6 ———
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -346,8 +431,9 @@ public sealed class AccessDecisionTests
 
         // Точкове ЗВУЖЕННЯ прав: інакше заради однієї колонки довелося б
         // переоформлювати грант на всю таблицю.
+        // Звужений до Read грант — усе ще грант: причина InsufficientGrantLevel.
         Assert.Equal(GrantLevel.Read, EditRules.Effective(profile, AccessBuilder.Cell()));
-        Assert.Equal(EditDenyReason.NoGrant, EditRules.CanEdit(profile, AccessBuilder.Cell()).Reason);
+        Assert.Equal(EditDenyReason.InsufficientGrantLevel, EditRules.CanEdit(profile, AccessBuilder.Cell()).Reason);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
