@@ -83,8 +83,10 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
                 // ⛔ Перелік закритий (`D-118`). Довільний код перетворення —
                 // це можливість вписати щось, чого обробник не знає, і
                 // дізнатися про це під час збору, а не при налаштуванні.
+                // HSE301 M1: + згортки за часом (`D-172`), у кінець переліку.
                 "TransformCode IS NULL OR TransformCode IN "
-                + "(N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First')"));
+                + "(N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First', "
+                + "N'TimeWeightedAvg', N'TimeIntegral')"));
 
         builder.ToTable("EntityFieldMap", "ext", t => t.HasCheckConstraint(
                 "CK_EFM_Materialization",
@@ -103,6 +105,9 @@ public sealed class EntityFieldMapConfiguration : IEntityTypeConfiguration<Entit
         // довший за той, на який він посилається, не знайшов би нічого.
         builder.Property(x => x.TargetRowKey).HasMaxLength(100);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
+
+        // HSE301 §4.1: форма ряду між точками; наявні мапінги — лінійні.
+        builder.Property(x => x.IsStep).HasDefaultValue(false);
 
         // ФВ-16.9: позначка «чекає рішення про одиницю». Id без FK навмисно:
         // одиницю можуть прибрати з довідника до рішення, і тоді «прийняти»

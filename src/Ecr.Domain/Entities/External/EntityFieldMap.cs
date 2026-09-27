@@ -42,6 +42,25 @@ public enum AggregationKind : byte
 
     /// <summary>Перша точка: показник на початок періоду.</summary>
     First = 5,
+
+    /// <summary>
+    /// Середнє, зважене за часом: <c>∫ₐᵇ v(t) dt / (b − a)</c> (HSE301 §4.1, <c>D-172</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не те саме, що <see cref="Avg"/>: PI стискає ряд, і точок більше там,
+    /// де величина змінюється. Просте середнє точок зважує саме ці ділянки.
+    /// </remarks>
+    TimeWeightedAvg = 6,
+
+    /// <summary>
+    /// Інтеграл за часом (аналог PI Total) в «одиниця значення × секунда»
+    /// (HSE301 §4.1, <c>D-172</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перерахунок у цільову одиницю (<c>Sm3/h × s → Sm3</c>) — на межі
+    /// (§4.2), не тут: секунди лишаються секундами до кінцевого кроку.
+    /// </remarks>
+    TimeIntegral = 7,
 }
 
 /// <summary>
@@ -141,6 +160,24 @@ public sealed class EntityFieldMap : Entity<int>
     /// точки в <c>ext.RawDataPoint</c> без жодного пояснення.
     /// </remarks>
     public bool IsActive { get; private set; }
+
+    /// <summary>
+    /// Чи ряд ступінчастий: значення тримається до наступної точки, а не
+    /// змінюється лінійно між ними (як «Step» атрибута AF; HSE301 §4.1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Це властивість СИГНАЛУ джерела, а не способу згортання, тому
+    /// окремо від <see cref="Aggregation"/>. Впливає лише на згортки за часом
+    /// (<see cref="AggregationKind.TimeWeightedAvg"/>,
+    /// <see cref="AggregationKind.TimeIntegral"/>); згортки точок
+    /// (<see cref="AggregationKind.Sum"/> тощо) від форми між точками не
+    /// залежать.
+    /// </remarks>
+    public bool IsStep { get; private set; }
+
+    /// <summary>Задає форму ряду між точками (<see cref="IsStep"/>).</summary>
+    /// <param name="isStep"><c>true</c> — ступінчастий; <c>false</c> — лінійний.</param>
+    public void SetStep(bool isStep) => IsStep = isStep;
 
     /// <summary>
     /// Код одиниці, яку джерело віддає замість оголошеної; не <c>null</c> —

@@ -1806,6 +1806,10 @@ CREATE TABLE ext.EntityFieldMap
     -- сирими в ext.RawDataPoint для звірки — і це легальний стан.
     TargetRowKey     nvarchar(100) NULL,
     IsActive       bit           NOT NULL CONSTRAINT DF_EFM_Act DEFAULT(1),
+    -- HSE301 §4.1 (міграція HSE301M1): форма ряду між точками для згорток за
+    -- часом — 1 ступінчастий («Step» атрибута AF), 0 лінійний (трапеція).
+    -- Властивість сигналу, а не згортки; згортки точок (Sum…First) її не читають.
+    IsStep         bit           NOT NULL DEFAULT(0),
     CONSTRAINT PK_EntityFieldMap PRIMARY KEY (Id),
     CONSTRAINT UQ_EntityFieldMap UNIQUE (SourceEntityId, SourceField),
     CONSTRAINT FK_EFM_Entity FOREIGN KEY (SourceEntityId)  REFERENCES ext.SourceEntity (Id),
@@ -1819,8 +1823,11 @@ CREATE TABLE ext.EntityFieldMap
 ,
     -- Перелік згортань закритий: довільний код дав би можливість вписати те,
     -- чого обробник не знає, і дізнатися про це під час збору.
+    -- HSE301M1 (D-172): + TimeWeightedAvg (∫v dt / покритий час) і
+    -- TimeIntegral (∫v dt в «одиниця × секунда»), у кінець переліку.
     CONSTRAINT CK_EFM_Transform CHECK (TransformCode IS NULL OR TransformCode IN
-        (N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First')),
+        (N'Sum', N'Avg', N'Min', N'Max', N'Last', N'First',
+         N'TimeWeightedAvg', N'TimeIntegral')),
     -- ⛔ Рядок і агрегація нерозривні (D-118): система не знає, величина
     -- миттєва (концентрація → Last) чи накопичувальна (обсяг → Sum).
     CONSTRAINT CK_EFM_Materialization CHECK (TargetRowKey IS NULL OR TransformCode IS NOT NULL)
