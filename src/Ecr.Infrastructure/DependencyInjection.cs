@@ -265,6 +265,10 @@ public static class DependencyInjection
         // як «дуже довго рахує».
         services.AddScoped<Jobs.OrphanScanJob>();
         services.AddScoped<Jobs.PeriodStateJob>();
+
+        // ⚠ Матеріалізація PI з місця переходу періоду в Open/Grace — її кличуть
+        // `PeriodStateJob` і `ActivateProjectHandler` після коміту.
+        services.AddScoped<IMaterializationScheduler, Jobs.MaterializationScheduler>();
         services.AddScoped<Jobs.ArchiveJob>();
         services.AddScoped<Jobs.ConsistencyCheckJob>();
         services.AddScoped<Jobs.PartitionCheckJob>();

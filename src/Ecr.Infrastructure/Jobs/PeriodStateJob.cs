@@ -21,7 +21,8 @@ public sealed class PeriodStateJob(
     EcrDbContext db,
     PeriodStateCalculator calculator,
     IUnitOfWork uow,
-    IClock clock) : IBackgroundJob
+    IClock clock,
+    IMaterializationScheduler materialization) : IBackgroundJob
 {
     /// <summary>Перехід, який задача має застосувати.</summary>
     /// <param name="Period">Період.</param>
@@ -98,8 +99,14 @@ public sealed class PeriodStateJob(
             // ⚠ Коміт по одному проєкту, а не один фінальний: «довгі
             // транзакції заборонені» (D-29), а блокування, взяте на першому
             // проєкті, трималося б до кінця прогону по всіх.
+            var opened = new List<int>();
+
             await uow.ExecuteInTransactionAsync(async innerCt =>
             {
+                // ⚠ Стратегія повторів може виконати замикання вдруге — перелік
+                // відкритих збирається заново, а не дописується.
+                opened.Clear();
+
                 // ⚠ UPDLOCK: Reopen бере той самий рядок так само (ФВ-1.10a).
                 // Тепер блокування справді тримається до кінця транзакції.
                 var periods = await db.Periods
@@ -112,7 +119,13 @@ public sealed class PeriodStateJob(
 
                 foreach (var (period, target) in Plan(periods, utcNow, zone, calculator))
                 {
+                    var before = period.State;
                     period.AdvanceTo(target, utcNow);
+
+                    if (PeriodOpening.Opened(before, period.State))
+                    {
+                        opened.Add(period.PeriodKeyValue);
+                    }
                 }
 
                 // Pinned не чіпається: «пін» — рішення людини, і задача не має
@@ -125,6 +138,16 @@ public sealed class PeriodStateJob(
 
                 await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
             }, ct).ConfigureAwait(false);
+
+            // ⛔ Матеріалізація відкритих періодів — ПІСЛЯ коміту, не в
+            // транзакції: черга не транзакційна, і задача, поставлена до коміту,
+            // бачила б `Scheduled` або пережила б відкат переходу. Постановка
+            // саме звідси, а не зі збору: за вимкненого або рідкого розкладу збір
+            // відкриття не побачить ніколи, і точки, зібрані до нього, лишились би
+            // сирими назавжди.
+            await materialization
+                .EnqueueForOpenedPeriodsAsync(project.Id, opened, ct)
+                .ConfigureAwait(false);
 
             await progress.ReportAsync(
                 (i + 1) * 100 / Math.Max(1, projects.Count), project.Code, ct).ConfigureAwait(false);

@@ -42,6 +42,7 @@ public sealed class ActivateProjectTests
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly IMaterializationScheduler _materialization = Substitute.For<IMaterializationScheduler>();
 
     public ActivateProjectTests()
     {
@@ -216,5 +217,54 @@ public sealed class ActivateProjectTests
             _uow,
             new PeriodStateCalculator(),
             _clock,
-            new Application.Periods.PeriodCalendarMaterializer(_periods));
+            new Application.Periods.PeriodCalendarMaterializer(_periods),
+            _materialization);
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "D16-03")]
+    public async Task Активація_ставить_матеріалізацію_відкритих_нею_періодів_після_збереження()
+    {
+        // ⛔ Точки PI, зібрані поки період був `Scheduled`, матеріалізація не
+        // пише. Активація відкриває період сама — отже й задачу ставить вона,
+        // інакше за вимкненого розкладу збору ці точки лишились би сирими.
+        var project = Arrange();
+
+        IReadOnlyCollection<int>? keys = null;
+        _materialization
+            .When(m => m.EnqueueForOpenedPeriodsAsync(project.Id, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>()))
+            .Do(call => keys = [.. call.Arg<IReadOnlyCollection<int>>()]);
+
+        await Handler().HandleAsync(project.Id, CancellationToken.None);
+
+        // Січень пройшов Scheduled → Open → Grace за один раз, лютий — Scheduled → Open;
+        // березень і далі лишились Scheduled.
+        Assert.NotNull(keys);
+        Assert.Equal([202601, 202602], keys!.Order());
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ (після коміту): виклик порту перед
+        // `SaveChangesAsync` → порядок порушено, тест червоний.
+        Received.InOrder(() =>
+        {
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _materialization.EnqueueForOpenedPeriodsAsync(
+                project.Id, Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "D16-03")]
+    public async Task Збій_збереження_активації_не_ставить_матеріалізацію()
+    {
+        var project = Arrange();
+        _uow.SaveChangesAsync(Arg.Any<CancellationToken>())
+            .Returns<int>(_ => throw new InvalidOperationException("збій коміту"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Handler().HandleAsync(project.Id, CancellationToken.None));
+
+        await _materialization.DidNotReceiveWithAnyArgs()
+            .EnqueueForOpenedPeriodsAsync(default, default!, default);
+    }
 }

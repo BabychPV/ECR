@@ -58,7 +58,9 @@ public sealed class PeriodStateJobTransactionTests(SqlServerFixture sql)
             .AddInterceptors(watcher)
             .Options);
 
-        var job = new PeriodStateJob(db, new PeriodStateCalculator(), new UnitOfWork(db), new TestClock(Now));
+        var job = new PeriodStateJob(
+            db, new PeriodStateCalculator(), new UnitOfWork(db), new TestClock(Now),
+            Substitute.For<IMaterializationScheduler>());
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 
         Assert.True(watcher.Seen, "Запит із UPDLOCK не спостерігався — тест нічого не довів.");

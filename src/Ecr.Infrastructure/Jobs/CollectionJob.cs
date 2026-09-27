@@ -87,18 +87,13 @@ public sealed class CollectionJob(
             throw;
         }
 
-        // ⚠ Читається ДО `SaveRunAsync`, який його перезапише: це межа «періоди,
-        // що відкрилися з попереднього прогону». Без розкладу (ручний збір) —
-        // початок вікна.
-        var openedSince = schedule?.LastRunAt ?? from;
-
         if (schedule is not null)
         {
             // Watermark рухається лише за успішним прогоном і лише вперед.
             await SaveRunAsync(db, schedule, now, to, ct).ConfigureAwait(false);
         }
 
-        await EnqueueMaterializationAsync(request.SourceEntityId, from, to, openedSince, ct).ConfigureAwait(false);
+        await EnqueueMaterializationAsync(request.SourceEntityId, from, to, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -155,10 +150,6 @@ public sealed class CollectionJob(
     /// <param name="sourceEntityId">Сутність джерела.</param>
     /// <param name="from">Початок зібраного інтервалу.</param>
     /// <param name="to">Кінець інтервалу, виключно.</param>
-    /// <param name="openedSince">
-    /// Період, що перейшов у <c>Open</c>/<c>Grace</c> не раніше цієї миті, отримує
-    /// задачу, навіть якщо вікна не перетинає.
-    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
     /// ⛔ ОКРЕМА задача, а не продовження цієї. Збір і матеріалізація мають
@@ -175,35 +166,8 @@ public sealed class CollectionJob(
     /// одному документі зупиняє перенесення в решту.
     /// </remarks>
     private async Task EnqueueMaterializationAsync(
-        int sourceEntityId, DateTime from, DateTime to, DateTime openedSince, CancellationToken ct)
+        int sourceEntityId, DateTime from, DateTime to, CancellationToken ct)
     {
-        // ⚠ Мапінги без `TargetRowKey` не матеріалізуються — і це легальний
-        // стан (`D-118`): тег може збиратися для звірки, а не для форми.
-        var columnIds = await db.EntityFieldMaps
-            .AsNoTracking()
-            .Where(m => m.SourceEntityId == sourceEntityId
-                        && m.IsActive
-                        && m.TargetRowKey != null
-                        && m.TargetColumnDefId != null)
-            .Select(m => m.TargetColumnDefId!.Value)
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        if (columnIds.Count == 0)
-        {
-            return;
-        }
-
-        // Таблиці, яких стосуються ці колонки, і живі екземпляри цих таблиць.
-        var tableDefIds = await db.ColumnDefs
-            .AsNoTracking()
-            .Where(c => columnIds.Contains(c.Id))
-            .Select(c => c.TableDefId)
-            .Distinct()
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
         // ⛔ D16-03: задача — лише в екземпляри, чий ПЕРІОД перетинає вікно
         // збору. Раніше її отримував кожен екземпляр усіх періодів, і всі вони
         // згортали одне вікно — одне й те саме число в січень і лютий, а
@@ -215,71 +179,28 @@ public sealed class CollectionJob(
         // грубий фільтр за датами з запасом у добу в обидва боки (пояс ≤ ±14 год),
         // а точний — у пам'яті.
         //
-        // ⛔ Друга умова — період, що ВІДКРИВСЯ з попереднього прогону
-        // (`StateChangedAt >= openedSince`). Для `Scheduled` задача законно
-        // нічого не пише — точки чекають відкриття; але коли `OpenOffsetDays`
-        // більший за довжину періоду + `LookbackDays`, після відкриття вікно
-        // його вже не перетинає, і без цієї умови точки лишались сирими
-        // назавжди, а журнал покриття мовчав. `Grace` — бо задача станів
-        // після простою проходить `Scheduled → Open → Grace` за один прогін.
-        var fromDate = DateOnly.FromDateTime(from).AddDays(-1);
-        var toDate = DateOnly.FromDateTime(to).AddDays(1);
-
-        var candidates = await (
-                from t in db.TableInstances.AsNoTracking()
-                join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
-                join p in db.Periods.AsNoTracking()
-                    on new { d.ProjectId, t.PeriodKeyValue } equals new { p.ProjectId, p.PeriodKeyValue }
-                join project in db.Projects.AsNoTracking() on d.ProjectId equals project.Id
-                where tableDefIds.Contains(t.TableDefId)
-                      && ((p.PeriodStart <= toDate && p.PeriodEnd >= fromDate)
-                          || ((p.State == Domain.Enums.PeriodState.Open || p.State == Domain.Enums.PeriodState.Grace)
-                              && p.StateChangedAt >= openedSince))
-                select new
-                {
-                    t.Id,
-                    t.DocumentId,
-                    t.PeriodKeyValue,
-                    d.ProjectId,
-                    p.PeriodStart,
-                    p.PeriodEnd,
-                    p.State,
-                    p.StateChangedAt,
-                    project.TimeZoneId,
-                })
-            // ⚠ Найсвіжіші першими: за переповнення стелі відсікатися мають
-            // найстаріші періоди, а не поточний.
-            .OrderByDescending(t => t.PeriodKeyValue)
-            .ThenBy(t => t.Id)
-            .Take(MaxMaterializationTargets)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        // ⚠ Екземпляр — один раз, навіть якщо підпадає під обидві умови: кожен
-        // рядок `candidates` — окремий екземпляр (join періоду один до одного).
-        var targets = candidates
-            .Where(t => (t.State is Domain.Enums.PeriodState.Open or Domain.Enums.PeriodState.Grace
-                         && t.StateChangedAt >= openedSince)
-                        || Domain.Entities.Documents.Period
-                            .UtcBounds(t.PeriodStart, t.PeriodEnd, Domain.ValueObjects.SiteTimeZone.Create(t.TimeZoneId).ToTimeZoneInfo())
-                            .Overlaps(from, to))
+        // ⛔ Період, що ВІДКРИВСЯ поза вікном, тут НЕ добирається (була гілка
+        // `StateChangedAt >= LastRunAt`, 8d1929e1). Задачу йому ставить сам
+        // перехід — `IMaterializationScheduler` після коміту `PeriodStateJob` і
+        // активації проєкту; друга постановка звідси давала б дубль на кожне
+        // відкриття, а за вимкненого розкладу не спрацювала б узагалі. Тут
+        // лишається постановка за перетином вікна — для точок, зібраних уже
+        // під час `Open`.
+        var targets = (await MaterializationTargets
+                .FindAsync(
+                    db,
+                    sourceEntityId,
+                    projectId: null,
+                    periodKeys: null,
+                    periodEndNotBefore: DateOnly.FromDateTime(from).AddDays(-1),
+                    periodStartNotAfter: DateOnly.FromDateTime(to).AddDays(1),
+                    MaxMaterializationTargets,
+                    ct)
+                .ConfigureAwait(false))
+            .Where(t => t.UtcBounds().Overlaps(from, to))
             .ToList();
 
-        foreach (var target in targets)
-        {
-            await jobs
-                .EnqueueAsync<IMaterializeCollectedDataJob>(
-                    new MaterializeTask(
-                        sourceEntityId,
-                        target.ProjectId,
-                        target.DocumentId,
-                        target.Id,
-                        target.PeriodKeyValue,
-                        from,
-                        to),
-                    ct)
-                .ConfigureAwait(false);
-        }
+        await MaterializationTargets.EnqueueAsync(jobs, targets, (from, to), ct).ConfigureAwait(false);
     }
 
     /// <summary>
