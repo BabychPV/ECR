@@ -360,7 +360,7 @@ public sealed class SubmitRecalculationRaceTests(SqlServerFixture sql)
         // подання, не свіжість методологій; прогону розрахунку тут немає,
         // тож `IsStale` завжди `false`.
         var methodologies = Substitute.For<IMethodologyStore>();
-        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
             .Returns(new CalculationFreshness(null, null));
 
         return new SubmitSheetHandler(

@@ -74,8 +74,10 @@ public sealed class GetCalculationResultsHandler(
         // показувала старі числа як чинні, і документ подавали з результатами,
         // що вже не відповідали даним. Тепер кожне число каже, чи змінилися
         // входи після прогону, що його дав.
+        // ⚠ `tableDefIds: null` навмисно: панель показує результати ВСЬОГО
+        // документа, тож і свіжість — по всіх таблицях, не по аркушу.
         var freshness = await methodologies
-            .GetCalculationFreshnessAsync(documentId, periodKey, ct)
+            .GetCalculationFreshnessAsync(documentId, periodKey, tableDefIds: null, ct)
             .ConfigureAwait(false);
 
         // ⚠ F-21: номер версії й код методології замість голого ідентифікатора.

@@ -96,7 +96,7 @@ public sealed class SubmitApproveTests
         // цього файлу не про методології, і застосовувати їм застарілість
         // навмисно не потрібно. Тест на застарілість підставляє інше значення
         // сам (`WithStaleMethodologyResults`).
-        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
              .Returns(new CalculationFreshness(null, null));
 
         // ⚠ Звуження застарілості до аркуша з прив'язкою (наступний крок над
@@ -133,6 +133,9 @@ public sealed class SubmitApproveTests
     /// <summary>Версія шаблону, за якою живе документ цих тестів.</summary>
     private const int TemplateVersion = 2;
 
+    /// <summary>Таблиця аркуша <c>Waste</c> (лише в <c>Snapshot(withWasteSheet: true)</c>).</summary>
+    private const int WasteTable = 4;
+
     /// <summary>
     /// Знімок структури: аркуш <c>Water</c> з однією таблицею й колонкою.
     /// </summary>
@@ -141,8 +144,13 @@ public sealed class SubmitApproveTests
     /// Колонка <c>Volume</c> обов'язкова (<c>ColumnDef.IsRequired</c>) — предмет
     /// перевірки «рядок, чиєї обов'язкової клітинки НІКОЛИ не торкались».
     /// </param>
+    /// <param name="withWasteSheet">
+    /// Додати аркуш <c>Waste</c> із таблицею <c>WasteTable</c> — для тестів
+    /// звуження застарілості методологій до таблиць аркуша (F-05).
+    /// </param>
     private static Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot Snapshot(
-        Ecr.Domain.Entities.Configuration.ValidationRule? rule = null, bool requiredColumn = false)
+        Ecr.Domain.Entities.Configuration.ValidationRule? rule = null, bool requiredColumn = false,
+        bool withWasteSheet = false)
     {
         var column = new Ecr.Domain.Entities.Configuration.ColumnDef(
             tableDefId: 3, EcrCode.Create("Volume"),
@@ -172,8 +180,29 @@ public sealed class SubmitApproveTests
 
         sheet.AddTable(table);
 
+        // ⚠ Другий аркуш (Waste, таблиця WasteTable) — лише на запит: предмет
+        // тестів звуження застарілості до таблиць аркуша (F-05). Решта тестів
+        // живе з одним аркушем, як і раніше.
+        List<Ecr.Domain.Entities.Configuration.SheetDef> sheets = [sheet];
+        if (withWasteSheet)
+        {
+            var waste = new Ecr.Domain.Entities.Configuration.SheetDef(
+                TemplateVersion, EcrCode.Create("WASTE"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Waste" }), 2);
+            typeof(Entity<int>).GetProperty("Id")!.SetValue(waste, Waste);
+
+            var wasteTable = new Ecr.Domain.Entities.Configuration.TableDef(
+                sheetDefId: Waste, EcrCode.Create("WASTEMAIN"),
+                new LocalizedText(new Dictionary<string, string> { ["en"] = "Waste main" }), 1,
+                TableLayoutKind.PerPeriodInstance, TableRowMode.Fixed);
+            typeof(Entity<int>).GetProperty("Id")!.SetValue(wasteTable, WasteTable);
+
+            waste.AddTable(wasteTable);
+            sheets.Add(waste);
+        }
+
         return new Ecr.Domain.Entities.Configuration.TemplateVersionSnapshot(
-            TemplateVersion, PresentationRevision: 0, Sheets: [sheet],
+            TemplateVersion, PresentationRevision: 0, Sheets: sheets,
             ColumnsById: new Dictionary<int, Ecr.Domain.Entities.Configuration.ColumnDef> { [11] = column },
             RowsByKey: new Dictionary<(int, string), Ecr.Domain.Entities.Configuration.RowDef>());
     }
@@ -559,7 +588,7 @@ public sealed class SubmitApproveTests
         // закриває — інший механізм (D-69).
         var calculatedAt = Now.AddHours(-2);
         var inputsChangedAt = Now.AddHours(-1);
-        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
              .Returns(new CalculationFreshness(calculatedAt, inputsChangedAt));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
@@ -585,7 +614,7 @@ public sealed class SubmitApproveTests
         // null — на відміну від дефолту фікстури, де методологій не рахували
         // взагалі), але входи після нього НЕ мінялися (`InputsChangedAt =
         // null`) — числа актуальні, і подання не має відмовляти.
-        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
              .Returns(new CalculationFreshness(Now.AddHours(-2), null));
 
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
@@ -608,7 +637,7 @@ public sealed class SubmitApproveTests
         // його блокувати.
         _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
              .Returns(new List<int>());
-        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>())
+        _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
              .Returns(new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))); // IsStale = true
 
         await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
@@ -622,7 +651,68 @@ public sealed class SubmitApproveTests
         // не потрібно (реалізація мусить пропускати виклик, а не лише
         // ігнорувати його результат).
         await _methodologies.DidNotReceive()
-            .GetCalculationFreshnessAsync(Document, Period, Arg.Any<CancellationToken>());
+            .GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Два аркуші з прив'язками одного документа+періоду: входи змінилися лише
+    /// в таблиці аркуша <c>Waste</c>. Підставний порт відповідає так, як
+    /// відповідає справжній (<c>MethodologyStore</c>): застаріло, якщо
+    /// фільтра немає (<c>null</c> — увесь документ) або фільтр містить таблицю
+    /// <c>Waste</c>.
+    /// </summary>
+    private void WithStaleOnlyInWasteTable()
+    {
+        _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>())
+                 .Returns(Snapshot(withWasteSheet: true));
+        _methodologies.GetCalculationFreshnessAsync(
+                Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var tables = call.ArgAt<IReadOnlyCollection<int>?>(2);
+                return tables is null || tables.Contains(WasteTable)
+                    ? new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))
+                    : new CalculationFreshness(Now.AddHours(-2), null);
+            });
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_з_привязкою_ігнорує_застарілість_привязаної_таблиці_іншого_аркуша()
+    {
+        // ⛔ Залишок F-05: доти аркуш З прив'язкою блокувався застарілістю
+        // ЧУЖОЇ прив'язаної таблиці того самого документа+періоду — порт
+        // рахував свіжість на документ×період. Тепер обробник питає лише про
+        // таблиці свого аркуша.
+        WithStaleOnlyInWasteTable();
+
+        await Submit().HandleAsync(Document, Water, Period, CancellationToken.None);
+
+        Assert.Equal(DocumentStatus.Submitted, _sheets[Water].Status);
+        Assert.Single(_snapshots);
+        await _methodologies.Received(1).GetCalculationFreshnessAsync(
+            Document, Period,
+            Arg.Is<IReadOnlyCollection<int>?>(t => t != null && t.Count == 1 && t.Contains(3)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Finding", "F-05")]
+    public async Task Подання_аркуша_чия_привязана_таблиця_застаріла_відхиляється()
+    {
+        // Контрольний випадок до теста вище: той самий стан, але подають
+        // САМЕ аркуш, чия таблиця застаріла, — звуження не має його пропустити.
+        WithStaleOnlyInWasteTable();
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Waste, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.staleMethodologyResults", error.Details!["messageKey"]);
+        Assert.Empty(_snapshots);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Waste].Status);
     }
 
     [Fact]

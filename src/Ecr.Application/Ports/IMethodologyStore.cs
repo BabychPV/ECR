@@ -127,10 +127,17 @@ public interface IMethodologyStore
     /// </summary>
     /// <param name="documentId">Документ.</param>
     /// <param name="periodKey">Період.</param>
+    /// <param name="tableDefIds">
+    /// Лише зміни входів у колонках цих таблиць рахуються зміною входів;
+    /// <c>null</c> — увесь документ (дисплей F-05). Порожній перелік — жодна
+    /// зміна не рахується. ⚠ Потрібно поданню аркуша: застарілість прив'язаної
+    /// таблиці ІНШОГО аркуша того самого документа+періоду не мусить блокувати
+    /// цей аркуш.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Свіжість; <c>CalculatedAt = null</c> — актуальних чисел немає.</returns>
     public Task<CalculationFreshness> GetCalculationFreshnessAsync(
-        long documentId, int periodKey, CancellationToken ct);
+        long documentId, int periodKey, IReadOnlyCollection<int>? tableDefIds, CancellationToken ct);
 
     /// <summary>Код методології й номер версії — для підпису числа (F-21).</summary>
     /// <param name="methodologyVersionIds">Версії.</param>

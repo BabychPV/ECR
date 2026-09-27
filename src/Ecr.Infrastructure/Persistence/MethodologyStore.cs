@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Enums;
@@ -381,10 +382,21 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
     ///
     /// ⚠ Сирий SQL: <c>aud.*</c> немає в моделі EF (журнал пише
     /// <c>AuditWriter</c> через TVP).
+    ///
+    /// ⚠ Фільтр таблиць — через <c>cfg.ColumnDef.TableDefId</c> колонки зміни
+    /// (<c>aud.CellChange.ColumnDefId</c> NOT NULL), перелік іде одним
+    /// JSON-параметром (<c>OPENJSON</c>), як у <c>RuleCoverageReader</c>: число
+    /// параметрів не залежить від кількості таблиць. Вибір прогону від фільтра
+    /// НЕ залежить — прогін належить документу, не таблиці.
     /// </remarks>
     public async Task<CalculationFreshness> GetCalculationFreshnessAsync(
-        long documentId, int periodKey, CancellationToken ct)
+        long documentId, int periodKey, IReadOnlyCollection<int>? tableDefIds, CancellationToken ct)
     {
+        // ⚠ Прапорець окремим параметром, а не NULL у JSON: параметр без
+        // значення не має типу, і план для двох форм запиту розійшовся б.
+        var filterTables = tableDefIds is not null;
+        var tablesJson = JsonSerializer.Serialize(tableDefIds ?? []);
+
         var rows = await db.Database
             .SqlQuery<FreshnessRow>($"""
                 SELECT TOP (1)
@@ -394,7 +406,13 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
                          WHERE c.DocumentId = {documentId}
                            AND c.PeriodKey = {periodKey}
                            AND c.ChangedAt > r.StartedAt
-                           AND c.Origin <> N'Recalculation') AS InputsChangedAt
+                           AND c.Origin <> N'Recalculation'
+                           AND ({filterTables} = CAST(0 AS bit)
+                                OR EXISTS (SELECT 1
+                                             FROM cfg.ColumnDef AS cd
+                                            WHERE cd.Id = c.ColumnDefId
+                                              AND cd.TableDefId IN (SELECT CAST(j.value AS int)
+                                                                      FROM OPENJSON({tablesJson}) AS j)))) AS InputsChangedAt
                   FROM calc.CalculationRun AS r
                  WHERE r.Status = N'Current'
                    AND r.PeriodKey = {periodKey}

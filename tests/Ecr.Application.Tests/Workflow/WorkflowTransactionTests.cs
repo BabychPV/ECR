@@ -238,7 +238,7 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         // прогону розрахунку методологій тут немає, тож свіжість завжди
         // «числа актуальні» (`CalculatedAt = null` → `IsStale = false`).
         var methodologies = Substitute.For<IMethodologyStore>();
-        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
             .Returns(new CalculationFreshness(null, null));
 
         return new SubmitSheetHandler(

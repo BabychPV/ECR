@@ -125,7 +125,7 @@ public sealed class OrphanScanTests
         // (`CalculatedAt = null` → `IsStale = false`), інакше без стабу
         // NSubstitute повернув би `null` замість запису, і подання впало б
         // на NRE в КОЖНОМУ тесті цього класу, не лише в тих, що про свіжість.
-        _methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        _methodologies.GetCalculationFreshnessAsync(Arg.Any<long>(), Arg.Any<int>(), Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
                       .Returns(new CalculationFreshness(null, null));
     }
 
