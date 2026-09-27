@@ -13,6 +13,8 @@ import type {
 import { denyText } from '@/features/grid/permissions';
 import { invalidateSlices } from '@/features/grid/sliceCache';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { useDurationIndicator } from '@/shared/ui/useDurationIndicator';
+import { DurationProgress } from '@/shared/ui/DurationProgress';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 
@@ -96,6 +98,16 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
     onError: showApiError,
   });
 
+  /*
+   * ⚠ `ФВ-14.26`: розбір книги й застосування тривають від десятків мілісекунд
+   * до кількох секунд — залежно від розміру файлу. Доти кнопка вмикала спінер
+   * з першої мілісекунди (блимання на швидкому файлі) і нічого не казала на
+   * повільному. Тепер: до 100 мс — нічого, далі — стан кнопки, від 1 с —
+   * текст. Понад поріг `LargeImportThreshold` сервер сам іде у фон (`202`).
+   */
+  const loadPhase = useDurationIndicator(load.isPending);
+  const applyPhase = useDurationIndicator(apply.isPending);
+
   const blocked = (preview?.conflicts.length ?? 0) > 0 || (preview?.rejected.length ?? 0) > 0;
 
   return (
@@ -123,11 +135,17 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
       <Button
         size="xs"
         variant="default"
-        loading={load.isPending}
-        onClick={() => picker.current?.click()}
+        loading={loadPhase !== 'none'}
+        onClick={() => {
+          // ⛔ Перші 100 мс кнопка не в стані `loading` (`ФВ-14.26`), тож
+          // повторне натискання відсікає обробник, а не вигляд кнопки.
+          if (!load.isPending) picker.current?.click();
+        }}
       >
         {t('import.pick')}
       </Button>
+
+      <DurationProgress phase={loadPhase} label={t('common.loading')} />
 
       <Modal
         opened={preview !== null}
@@ -219,13 +237,16 @@ export function ImportPanel({ documentId, periodKey }: ImportPanelProps): JSX.El
             )}
 
             <Group justify="flex-end">
+              <DurationProgress phase={applyPhase} label={t('grid.saving')} />
               <Button variant="default" onClick={() => setPreview(null)}>
                 {t('common.cancel')}
               </Button>
               <Button
                 disabled={blocked || preview.changes.length === 0}
-                loading={apply.isPending}
-                onClick={() => apply.mutate(preview.previewToken)}
+                loading={applyPhase !== 'none'}
+                onClick={() => {
+                  if (!apply.isPending) apply.mutate(preview.previewToken);
+                }}
               >
                 {t('import.apply')}
               </Button>

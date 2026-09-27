@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -159,6 +159,107 @@ describe('ImportPanel: перелік змін і відмов', () => {
     // Відмова блокує застосування — і діалог НЕ каже «файл збігається з аркушем».
     expect(screen.queryByText('⟦import.noChanges⟧')).toBeNull();
     expect(screen.getByRole('button', { name: '⟦import.apply⟧' }).hasAttribute('disabled')).toBe(true);
+  });
+});
+
+describe('ImportPanel: індикація за тривалістю розбору книги (ФВ-14.26)', () => {
+  /**
+   * Прев'ю, відповідь якого тест віддає тоді, коли сам вирішить.
+   *
+   * ⚠ `fireEvent`, а не `userEvent`: під фейковими таймерами `userEvent` чекає
+   * власних затримок і завис би.
+   */
+  function slowPreview(): { finish: () => void; pick: () => void } {
+    let finish = (): void => undefined;
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = () =>
+              resolve(
+                new Response(
+                  JSON.stringify({ previewToken: 'tok', changes: [], rejected: [], conflicts: [] } satisfies ImportPreview),
+                  { status: 200, headers: { 'Content-Type': 'application/json' } },
+                ),
+              );
+          }),
+      ),
+    );
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <MantineProvider theme={testTheme}>
+        <QueryClientProvider client={client}>
+          <ImportPanel documentId={1} periodKey={202609} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    const input = container.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error('немає поля вибору файлу');
+
+    return {
+      finish: () => finish(),
+      pick: () => fireEvent.change(input, { target: { files: [new File(['x'], 'book.xlsx')] } }),
+    };
+  }
+
+  const pickButton = (): HTMLElement => screen.getByRole('button', { name: '⟦import.pick⟧' });
+
+  async function advance(ms: number): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('ФВ-14.26: повільний розбір — 99 мс нічого, 150 мс стан кнопки, 1.5 с текст', async () => {
+    const preview = slowPreview();
+    preview.pick();
+
+    await advance(99);
+    expect(pickButton().hasAttribute('data-loading')).toBe(false);
+    expect(screen.queryByTestId('duration-progress')).toBeNull();
+
+    await advance(51);
+    expect(pickButton().hasAttribute('data-loading')).toBe(true);
+    expect(screen.queryByTestId('duration-progress')).toBeNull();
+
+    await advance(1350);
+    expect(screen.getByTestId('duration-progress').textContent).toBe('⟦common.loading⟧');
+
+    preview.finish();
+    await advance(10);
+
+    // Відповідь прийшла — індикація згасла, перегляд відкрито.
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.queryByTestId('duration-progress')).toBeNull();
+    expect(pickButton().hasAttribute('data-loading')).toBe(false);
+  });
+
+  it('ФВ-14.26: швидкий розбір (50 мс) не блимає спінером на кнопці', async () => {
+    const preview = slowPreview();
+    preview.pick();
+
+    await advance(50);
+    // ⛔ Мутація: `loading={load.isPending}` (як було доти) — тут `true`.
+    expect(pickButton().hasAttribute('data-loading')).toBe(false);
+
+    preview.finish();
+    await advance(2000);
+
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(pickButton().hasAttribute('data-loading')).toBe(false);
+    expect(screen.queryByTestId('duration-progress')).toBeNull();
   });
 });
 
