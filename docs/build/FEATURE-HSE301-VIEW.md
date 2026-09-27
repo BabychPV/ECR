@@ -247,8 +247,9 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
   `itg.CollectionCoverage` іде `SkippedPointCeiling` з кодом поля, у `jobs.materializeDone` —
   параметр `overCeiling`. ⚠ Це не ліміт 5 000 точок на **запит** у `CollectionRunner`
   (`CollectionRunner.cs:37`, §2.1 рядок 2).
-- **Не зроблено й лишається кроками цього документа:** зважене `Avg` і інтеграл `Total` (F2),
-  конверсія на межі через `SourceUnitConverter` (F3).
+- **Не зроблено й лишається кроками цього документа:** конверсія на межі через
+  `SourceUnitConverter` і перехід матеріалізації на згортки за часом (F3). Зважене `Avg` і
+  інтеграл `Total` як чиста згортка — ✓ F2 (§4.1).
 - Відоме й не виправлене: статуси покриття адміністратору не показуються, а хибний
   `ConflictKeptManual` з'являється щопрогону — ризик HR-11 (§13.1).
 
@@ -259,8 +260,23 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
 
 | Код | Значення | Формула на вікні `[a, b)` |
 |---|---|---|
-| `TimeWeightedAvg = 6` | середнє, зважене за часом | `∫ₐᵇ v(t) dt / (b − a)` |
-| `TimeIntegral = 7` | інтеграл (аналог PI Total) | `∫ₐᵇ v(t) dt` у «одиниця × секунда», далі конверсія в цільову (§4.2) |
+| `TimeWeightedAvg = 6` | середнє, зважене за часом | `∫ v(t) dt / T_покр` — інтеграл по покритих відрізках, поділений на **покритий** час `T_покр`; при повному покритті це `∫ₐᵇ v(t) dt / (b − a)` |
+| `TimeIntegral = 7` | інтеграл (аналог PI Total) | `∫ v(t) dt` по покритих відрізках у «одиниця × секунда», далі конверсія в цільову (§4.2) |
+
+✓ **F2 виконано** (`PeriodFold.Fold(kind, TimedPoint[], from, to, isStep, maxGap)` →
+`TimeFoldResult(Value, PercentGood)`; міграція `HSE301M1TimeWeighted`). Уточнення семантики
+за реалізацією:
+
+- **Знаменник середнього — покритий час, а не довжина вікна.** Прогалина не входить ні в
+  інтеграл, ні в знаменник: інакше вікно, покрите наполовину, дало б удвічі менше середнє —
+  правдоподібне й хибне. Частку покриття (0–100) повертає `PercentGood`.
+- **Без покриття `Value = null`, а не 0**: «даних не було» і «інтеграл нуль» — різні стани.
+- **Без екстраполяції**: частина вікна до першої точки чи після останньої — прогалина.
+- **`maxGap` — параметр функції** (`null` — поріг не застосовується). Числа порогу в цьому
+  документі немає; його обирає викликач (F3/F4) з конфігурації, не з коду.
+- Точка з `IsGood = false` робить прогалиною відрізки, що на неї спираються (для
+  ступінчастого — лише той, де вона ліва: саме її значення тримається). Тлумачення якості
+  джерела в `IsGood` — справа викликача (§4.6).
 
 - **Інтерполяція між точками** — лінійна (аналогова величина) або ступінчаста
   (`IsStep`, як «Step» атрибута AF). Нове поле `ext.EntityFieldMap.IsStep bit NOT NULL
@@ -270,7 +286,7 @@ HSE301.FLARE v1.0 (рядок): V_Sm3 = 269.258 → M_t = 269.258·0.9589/1000 =
   короткої події, в якій стиснення PI не лишило жодної точки, дав би нуль, а не об'єм.
 - **Прогалини** (точки якості ≠ Good, розрив понад `MaxGap`) у інтеграл не входять;
   частка покриття повертається як `PercentGood` і дає статус `Partial` (§4.4).
-- Функція одна на обидва споживачі: `PeriodFold.Fold(kind, series, from, to, isStep)` для
+- Функція одна на обидва споживачі: `PeriodFold.Fold(kind, series, from, to, isStep, maxGap)` для
   місячної матеріалізації й `WindowFold` для вікна рядка (§4.3). Період — теж вікно.
   ⛔ Друга копія інтеграла розійшлася б із першою на межах — той самий клас, що A7-27,
   від якого `PeriodFold` і винесено (`PeriodFold.cs:10-16`).
@@ -1775,7 +1791,7 @@ RevoGrid 4.11 такий вигляд теж уміє: `ColumnGrouping` (`interf
 |---|---|---|---|---|---|
 | F0 | **D16-03 — згортка в межах періоду** (чужий крок) — ✓ **виконано в `3e6d2efa`** (§4.0) | за [DIRECTIVE-16 §1 D16-03](DIRECTIVE-16.md) | — | за D16-03 | послідовно, передумова (знята) |
 | F1 | Одиниці 301 у сіді: розмірності `StdVolume`, `StdVolumeFlow`, `Velocity`, `Area`, `MassPerStdVolume`, `EnergyPerStdVolume`, `EnergyPerMass`, `MassPerEnergy`; одиниці `Sm3`, `Sm3_per_h`, `Sm3_per_s`, `kt`, `m_per_s`, `m2`, `pct_vol`, `pct_wt`, `MJ_per_Sm3`, `MJ_per_kg`, `kg_per_Sm3`, `t_per_t`, `kg_per_TJ`, `g_per_mol` (~150 р.) | `src/Ecr.Infrastructure/Persistence/Sql/09-seed.sql` (секція `-- HSE301:F1`), `src/Ecr.Calculations/MethodologyEvaluationContext.cs` (лише `UnitTable.Seed`, `:220-235`), `tests/Ecr.Calculations.Tests/Hse301UnitsTests.cs` | — | `Sm3/h × 930 s → Sm3`, `kg → t`, `t → g`, `s → h` точні; `Sm3 ↔ m3` — `#UNIT`. **Мутація:** `FactorToBase` для `Sm3_per_h` = 1/60 → тест червоний. `verify-sql-scripts.ps1` зелений | послідовно |
-| F2 | `TimeWeightedAvg`, `TimeIntegral`, `IsStep`: чиста згортка + **міграція M1** (`CK_EFM_Transform`, `EntityFieldMap.IsStep`) (~350 р.) | `src/Ecr.Application/Sources/PeriodFold.cs`, `src/Ecr.Domain/Entities/External/EntityFieldMap.cs`, `src/Ecr.Infrastructure/Persistence/Configurations/ExternalConfiguration.cs`, міграція `…_HSE301M1TimeWeighted.cs`, `docs/build/02a-db-schema.md`, `tests/Ecr.Application.Tests/Sources/PeriodFoldTimeWeightedTests.cs` | F0 | ряд `[0 @0 с, 10 @10 с, 10 @20 с]` на `[0,20)`: avg = 7.5, інтеграл = 150; ступінчастий — 100; межа з точкою до вікна; прогалина не входить. **Мутація:** трапеція → сума точок — 4 тести червоні | послідовно |
+| F2 | ✓ **виконано** (§4.1) — `TimeWeightedAvg`, `TimeIntegral`, `IsStep`: чиста згортка + **міграція M1** (`CK_EFM_Transform`, `EntityFieldMap.IsStep`) (~350 р.) | `src/Ecr.Application/Sources/PeriodFold.cs`, `src/Ecr.Domain/Entities/External/EntityFieldMap.cs`, `src/Ecr.Infrastructure/Persistence/Configurations/ExternalConfiguration.cs`, міграція `…_HSE301M1TimeWeighted.cs`, `docs/build/02a-db-schema.md`, `tests/Ecr.Application.Tests/Sources/PeriodFoldTimeWeightedTests.cs` | F0 | ряд `[0 @0 с, 10 @10 с, 10 @20 с]` на `[0,20)`: avg = 7.5, інтеграл = 150; ступінчастий — 100; межа з точкою до вікна; прогалина не входить. **Мутація:** трапеція → сума точок — 4 тести червоні | послідовно |
 | F3 | Конверсія на межі в Application + матеріалізація: точки на межах вікна, нові згортки, `Converted` у журналі (~380 р.) | `src/Ecr.Application/Sources/BoundaryUnitConversion.cs` (новий), `src/Ecr.Adapters.PiAf/SourceUnitConverter.cs` (делегує), `src/Ecr.Infrastructure/Jobs/MaterializeCollectedDataJob.cs`, `tests/Ecr.Application.Tests/Sources/BoundaryUnitConversionTests.cs`, `tests/Ecr.Infrastructure.Tests/Jobs/MaterializeTimeWeightedTests.cs` | F1, F2 | місячний Total `Sm3/h` лягає в `Sm3`, коефіцієнт у `itg.CollectionCoverage`; `Avg` старих мапінгів не змінився. **Мутація:** прибрати виклик конверсії → тест «у комірці Sm3» червоний | послідовно |
 | F4 | Порт: `SourceQueryKind`, `SourceSummaryKind`, `WindowRequest/Result`, типовий `ReadWindowAsync` через `WindowFold`; PI SQL Client: `Quality`, ключі `InterpolatedQuery`/`SummaryQuery` без типового тексту (~400 р.) | `src/Ecr.Application/Ports/IExternalDataSource.cs`, `src/Ecr.Application/Sources/WindowFold.cs` (новий), `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs`, `tests/Ecr.Application.Tests/Sources/WindowFoldTests.cs`, `tests/Ecr.Adapters.Tests/PiSqlClientWindowTests.cs` | F2 | локальне вікно = `PeriodFold` на тих самих точках; без ключа `Interpolated` → `ECR-INT-0422`; точка `Quality=Bad` не входить. **Мутація:** типова реалізація без точки до вікна → тест «подія без точок усередині» дає 0 і червоніє | послідовно |
 | F4e | Порт подій: `DiscoverEventTemplatesAsync`, `ReadEventsAsync`, записи `SourceEvent*` з типовою реалізацією-відмовою; PI SQL Client: ключі `PiSqlClient:EventQuery`/`EventTemplateQuery` **без типового тексту**, розгортання довгої форми (рядок на атрибут) у події чистою функцією `SourceEventFolder`, `Literal` для `{template}`, стеля `MaxEvents`, UTC (~400 р., тести ≥ 40 %) | `src/Ecr.Application/Ports/IExternalDataSource.cs` (адитивно, після F4), `src/Ecr.Adapters.PiAf/PiSqlClientDataSource.cs`, `src/Ecr.Adapters.PiAf/SourceEventFolder.cs` (новий), `09-seed.sql` (секція `-- HSE301:F4e`: `err.ECR-INT-0422.eventQueryNotConfigured` — ключ кидає вже цей крок), `tests/Ecr.Adapters.Tests/PiAf/PiSqlClientEventTests.cs`, `tests/Ecr.Adapters.Tests/PiAf/SourceEventFolderTests.cs` (нові) | F4 | без ключа → `ECR-INT-0422` `.eventQueryNotConfigured`; два EF з однаковою назвою, але різними ID — дві події; атрибути `E` і `P` розведені за областю; повний батч → `Truncated`; `SqlDataSource` і `PiWebApiDataSource` не змінені й компілюються. **Мутація:** групувати за `EventName` замість `EventId` → тест «однакові назви» червоний | послідовно |
