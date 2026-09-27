@@ -3392,6 +3392,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `DELETE` | `/api/v1/collection-schedules/{id}` | `Integration.EditSchedule` | 7 |
 | `GET` | `/api/v1/collection-runs` | `Integration.View` | 7 |
 | `GET` | `/api/v1/collection-runs/{id}` | `Integration.View` | 7 |
+| `GET` | `/api/v1/collection-runs/coverage-events` | `Integration.View` | 7 |
 | `GET` | `/api/v1/data-sources` | `Integration.View` | 7 |
 | `POST` | `/api/v1/data-sources` | `Integration.Manage` | 7 |
 | `PUT` | `/api/v1/data-sources/{id}` | `Integration.Manage` | 7 |

@@ -477,6 +477,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/collection-runs/coverage-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Події журналу покриття: пропуск закритого періоду, конфлікт із ручним
+         *     значенням, стеля точок (ІНТ-3.3, `D-118`). Новіші першими.
+         * @description ⚠ Літеральний сегмент, а не `{id}`: обмеження `{id:long}` у
+         *     деталі прогону не дає цим двом маршрутам збігтися.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише події сутностей цього з'єднання. */
+                    dataSource?: number;
+                    /** @description Лише події цієї сутності збору. */
+                    entity?: number;
+                    /** @description `SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`; інше — `422`. */
+                    status?: string;
+                    /** @description Лише події цього періоду. */
+                    periodKey?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..200; `0` — типове 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfCoverageEventView"];
+                        "text/json": components["schemas"]["PagedResultOfCoverageEventView"];
+                        "text/plain": components["schemas"]["PagedResultOfCoverageEventView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/collection-runs/{id}": {
         parameters: {
             query?: never;
@@ -15001,6 +15079,39 @@ export interface components {
              */
             value: string;
         };
+        /** @description Подія журналу покриття: інтервал зібрано, але в комірки він не ліг. */
+        CoverageEventView: {
+            /**
+             * Format: date-time
+             * @description Коли подію записано (UTC).
+             */
+            at: string;
+            /** @description Код з'єднання. */
+            dataSourceCode: string;
+            /** @description Пояснення сервера для людини; `null` — не записано. */
+            details: null | string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор рядка покриття.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Період; `null` — не записано.
+             */
+            periodKey: null | number;
+            /** @description Код сутності. */
+            sourceEntityCode: string;
+            /**
+             * Format: int32
+             * @description Сутність збору.
+             */
+            sourceEntityId: number;
+            /** @description Назва сутності; `null` — не задана. */
+            sourceEntityName: null | string;
+            /** @description `SkippedPeriodClosed`, `ConflictKeptManual` або `SkippedPointCeiling`. */
+            status: string;
+        };
         /** @description Тіло створення розкладу. */
         CreateCollectionScheduleRequest: {
             /** @description Вираз cron у форматі Quartz: 6–7 полів, одне з полів дня — `?`. */
@@ -16900,6 +17011,19 @@ export interface components {
         PagedResultOfConsistencyIssueView: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["ConsistencyIssueView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
+        PagedResultOfCoverageEventView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["CoverageEventView"][];
             /** @description Курсор наступної сторінки; `null` — кінець. */
             nextCursor: null | string;
             /**

@@ -991,6 +991,7 @@ USING (VALUES
     (N'err.ECR-INT-0404.collectionRun',                   N'en', N'Collection run {id} does not exist.', 1),
     (N'err.ECR-REQ-0422.collectionRunState',              N'en', N'There is no collection run state "{state}".', 1),
     (N'err.ECR-REQ-0422.collectionRunRange',              N'en', N'The start of the period must be earlier than its end.', 1),
+    (N'err.ECR-REQ-0422.coverageEventStatus',             N'en', N'There is no coverage event status "{status}".', 1),
 
     -- ⛔ Узагальнений репозиторій (`Repository<T,TId>.GetAsync`) будував
     -- повідомлення з ІМЕНІ КЛАСУ .NET: «TemplateVersion з ідентифікатором 5
@@ -2342,6 +2343,18 @@ USING (VALUES
     (N'collectionRuns.coverage',         N'en', N'Covered intervals', 1),
     (N'collectionRuns.coverageEmpty',    N'en', N'The run covered no interval: nothing was collected.', 1),
     (N'collectionRuns.coverageTruncated', N'en', N'Only part of the intervals is shown; the run covered more.', 1),
+    -- ІНТ-3.3, D-118: події журналу покриття — зібране, що НЕ лягло в комірки.
+    (N'coverageEvents.title',            N'en', N'Collected but not applied', 1),
+    (N'coverageEvents.hint',             N'en', N'Values that were collected but did not reach the cells: the period was closed, a manual value was kept, or the field had too many points.', 1),
+    (N'coverageEvents.empty',            N'en', N'No skipped or conflicting values', 1),
+    (N'coverageEvents.emptyHint',        N'en', N'Everything collected so far has reached the cells.', 1),
+    (N'coverageEvents.entity',           N'en', N'Entity', 1),
+    (N'coverageEvents.period',           N'en', N'Period', 1),
+    (N'coverageEvents.status',           N'en', N'Reason', 1),
+    (N'coverageEvents.details',          N'en', N'Details', 1),
+    (N'coverageEvents.at',               N'en', N'Recorded', 1),
+    (N'coverageEvents.filterStatus',     N'en', N'Reason', 1),
+    (N'coverageEvents.more',             N'en', N'Show more', 1),
     (N'sources.connectionsEmpty',        N'en', N'No connections configured', 1),
     (N'sources.connectionsEmptyHint',    N'en', N'A connection says where data is collected from; entities and schedules are attached to it.', 1),
     (N'sources.closeDetails',            N'en', N'Close connection details', 1),
@@ -3992,6 +4005,11 @@ USING (VALUES
     (N'status.collectionRun.Succeeded',    N'en', N'Succeeded', 1),
     (N'status.collectionRun.Degraded',     N'en', N'Completed with warnings', 1),
     (N'status.collectionRun.Failed',       N'en', N'Failed', 1),
+
+    -- Події журналу покриття (`CollectionCoverage.KnownStatuses`, D-118).
+    (N'status.coverage.SkippedPointCeiling', N'en', N'Too many points', 1),
+    (N'status.coverage.SkippedPeriodClosed', N'en', N'Period closed', 1),
+    (N'status.coverage.ConflictKeptManual',  N'en', N'Manual value kept', 1),
 
     -- `SnapshotStatus` (Enums.cs, D-65). Словник окремий від `status.sheet.*`:
     -- `Rejected` у зрізі немає, а `Submitted` — кінцевий іммутабельний стан.

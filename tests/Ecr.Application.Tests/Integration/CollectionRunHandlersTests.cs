@@ -24,6 +24,8 @@ public sealed class CollectionRunHandlersTests
         _user.UserId.Returns(Actor);
         _runs.ListAsync(Arg.Any<CollectionRunFilter>(), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>())
             .Returns(new PagedResult<CollectionRunView>([], null, null));
+        _runs.ListCoverageEventsAsync(Arg.Any<CoverageEventFilter>(), Arg.Any<CursorRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PagedResult<CoverageEventView>([], null, null));
     }
 
     [Theory]
@@ -104,6 +106,58 @@ public sealed class CollectionRunHandlersTests
         Assert.Equal("err.ECR-INT-0404.collectionRun", missing.Details!["messageKey"]);
     }
 
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ІНТ-3.3")]
+    [InlineData("Integration.View")]
+    [InlineData("Integration.Manage")]
+    public async Task Події_покриття_відкривають_View_або_Manage_і_статус_зводиться_до_канонічного(string permission)
+    {
+        Allow(permission);
+
+        await Events().HandleAsync(new CoverageEventFilter(null, 5, " skippedpointceiling ", 202609), new CursorRequest(), default);
+
+        // Рядок статусу — дослівно той, що пише MaterializeCollectedDataJob.
+        await _runs.Received(1).ListCoverageEventsAsync(
+            Arg.Is<CoverageEventFilter>(f => f.Status == "SkippedPointCeiling" && f.SourceEntityId == 5 && f.PeriodKey == 202609),
+            Arg.Any<CursorRequest>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ІНТ-3.3")]
+    public async Task Події_покриття_без_прав_відмова_а_сховище_не_читається()
+    {
+        Allow("Integration.EditSchedule");
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Events().HandleAsync(new CoverageEventFilter(null, null, null, null), new CursorRequest(), default));
+
+        Assert.Equal("Integration.View", denied.Details!["permission"]);
+        await _runs.DidNotReceiveWithAnyArgs().ListCoverageEventsAsync(default!, default!, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ІНТ-3.3")]
+    public async Task Невідомий_статус_події_422_а_не_порожній_перелік()
+    {
+        Allow("Integration.View");
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Events().HandleAsync(new CoverageEventFilter(null, null, "Skipped", null), new CursorRequest(), default));
+
+        Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.coverageEventStatus", refused.Details!["messageKey"]);
+        Assert.Equal("Skipped", refused.Details!["status"]);
+
+        var page = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Events().HandleAsync(new CoverageEventFilter(null, null, null, null), new CursorRequest(201), default));
+        Assert.Equal("200", page.Details!["max"]);
+        await _runs.DidNotReceiveWithAnyArgs().ListCoverageEventsAsync(default!, default!, default);
+    }
+
     private static CollectionRunFilter Filter(string? status = null, DateTime? from = null, DateTime? to = null)
         => new(null, null, status, from, to);
 
@@ -122,4 +176,6 @@ public sealed class CollectionRunHandlersTests
     private ListCollectionRunsHandler List() => new(_runs, _access, _user);
 
     private GetCollectionRunHandler Get() => new(_runs, _access, _user);
+
+    private ListCoverageEventsHandler Events() => new(_runs, _access, _user);
 }

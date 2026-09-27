@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { apiEnqueue, apiFetch } from '@/api/client';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
+import { CoverageEventsPanel } from '@/features/integration/CoverageEventsPanel';
 import { DataSourcesTable } from '@/features/integration/DataSourcesTable';
 import { listDataSources } from '@/features/integration/dataSourceApi';
 import { DataSourcesQueryKey } from '@/features/integration/dataSourcesKey';
@@ -253,6 +254,10 @@ export function SourcesPage(): JSX.Element {
           прогін не існує без сутності, сутність не існує без з'єднання. Доки
           з'єднань немає, свого порожнього стану він не показує. */}
       {showSubordinate && <CollectionRunsPanel />}
+
+      {/* ІНТ-3.3, D-118: зібране, що не лягло в комірки. Підпорядковане тим
+          самим умовам, що й журнал прогонів: події без сутності не буває. */}
+      {showSubordinate && <CoverageEventsPanel />}
     </ListPage>
   );
 }

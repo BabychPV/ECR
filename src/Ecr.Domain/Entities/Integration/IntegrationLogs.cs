@@ -81,6 +81,27 @@ public sealed class CollectionCoverage : Entity<long>
 {
     private CollectionCoverage() { }
 
+    /// <summary>Період уже закрито — значення за нього не перенесено в комірки.</summary>
+    public const string SkippedPeriodClosed = "SkippedPeriodClosed";
+
+    /// <summary>У комірці ручне значення — зібране не перезаписало його.</summary>
+    public const string ConflictKeptManual = "ConflictKeptManual";
+
+    /// <summary>Точок на поле більше за стелю — інтервал не згорнуто (<c>D16-03</c>).</summary>
+    public const string SkippedPointCeiling = "SkippedPointCeiling";
+
+    /// <summary>
+    /// Усі статуси подій журналу покриття (<c>D-118</c>, ФВ-5.23).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Рядки дослівно ті, що пише <c>MaterializeCollectedDataJob</c>: фільтр
+    /// журналу відмовляє на всьому поза цим переліком, тож новий статус без
+    /// рядка тут був би невидимим для адміністратора — саме тим мовчазним
+    /// пропуском, від якого цей перелік і рятує.
+    /// </remarks>
+    public static readonly IReadOnlyList<string> KnownStatuses =
+        [SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling];
+
     /// <summary>Записує покритий інтервал.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
     /// <param name="coveredFrom">Початок покриття.</param>

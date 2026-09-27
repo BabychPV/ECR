@@ -352,6 +352,7 @@ public static class DependencyInjection
         // Журнал прогонів збору (ФВ-5.23).
         services.AddScoped<Integration.ListCollectionRunsHandler>();
         services.AddScoped<Integration.GetCollectionRunHandler>();
+        services.AddScoped<Integration.ListCoverageEventsHandler>();
 
         // Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).
         services.AddScoped<Sources.PreviewMappingHandler>();

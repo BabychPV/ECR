@@ -76,6 +76,62 @@ public sealed class CollectionRunReader(EcrDbContext db) : ICollectionRunReader
             coverage.Count > MaxCoverage);
     }
 
+    /// <inheritdoc />
+    public async Task<PagedResult<CoverageEventView>> ListCoverageEventsAsync(
+        CoverageEventFilter filter, CursorRequest page, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(page);
+
+        var decoded = Cursor.Decode(page.Cursor);
+        var before = decoded == 0 ? long.MaxValue : decoded;
+
+        var dataSourceId = filter.DataSourceId;
+        var sourceEntityId = filter.SourceEntityId;
+        var status = filter.Status;
+        var periodKey = filter.PeriodKey;
+
+        var rows = await (
+                from c in db.CollectionCoverages.AsNoTracking()
+                join e in db.SourceEntities.AsNoTracking() on c.SourceEntityId equals e.Id
+                join s in db.DataSources.AsNoTracking() on e.DataSourceId equals s.Id
+                select new EventRow
+                {
+                    Id = c.Id,
+                    SourceEntityId = c.SourceEntityId,
+                    SourceEntityCode = e.Code,
+                    SourceEntityName = e.DisplayName,
+                    DataSourceId = e.DataSourceId,
+                    DataSourceCode = s.Code,
+                    PeriodKey = c.PeriodKey,
+                    Status = c.Status,
+                    Details = c.Details,
+                    At = c.CoveredFrom,
+                })
+
+            // ⛔ Лише рядки зі статусом: звичайне покриття — не подія.
+            .Where(r => r.Status != null)
+            .Where(r => r.Id < before)
+            .Where(r => dataSourceId == null || r.DataSourceId == dataSourceId)
+            .Where(r => sourceEntityId == null || r.SourceEntityId == sourceEntityId)
+            .Where(r => status == null || r.Status == status)
+            .Where(r => periodKey == null || r.PeriodKey == periodKey)
+            .OrderByDescending(r => r.Id)
+            .Take(page.Limit + 1)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var items = rows
+            .Take(page.Limit)
+            .Select(r => new CoverageEventView(
+                r.Id, r.SourceEntityId, r.SourceEntityCode, r.SourceEntityName, r.DataSourceCode,
+                r.PeriodKey, r.Status!, r.Details, Utc(r.At)))
+            .ToList();
+
+        return new PagedResult<CoverageEventView>(
+            items, rows.Count > page.Limit ? Cursor.Encode(items[^1].Id) : null, TotalCount: null);
+    }
+
     private IQueryable<Row> Rows()
         => from r in db.CollectionRuns.AsNoTracking()
            join e in db.SourceEntities.AsNoTracking() on r.SourceEntityId equals e.Id
@@ -126,5 +182,20 @@ public sealed class CollectionRunReader(EcrDbContext db) : ICollectionRunReader
         public bool IsCatchUp { get; init; }
         public string? ErrorMessage { get; init; }
         public int? TriggeredByUserId { get; init; }
+    }
+
+    /// <summary>Проєкція події журналу покриття — з тієї самої причини, що й <see cref="Row"/>.</summary>
+    private sealed class EventRow
+    {
+        public long Id { get; init; }
+        public int SourceEntityId { get; init; }
+        public string SourceEntityCode { get; init; } = null!;
+        public string? SourceEntityName { get; init; }
+        public int DataSourceId { get; init; }
+        public string DataSourceCode { get; init; } = null!;
+        public int? PeriodKey { get; init; }
+        public string? Status { get; init; }
+        public string? Details { get; init; }
+        public DateTime At { get; init; }
     }
 }

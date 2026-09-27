@@ -96,6 +96,7 @@ export type StatusKind =
   | 'health'
   | 'severity'
   | 'collectionRun'
+  | 'coverage'
   | 'snapshot'
   | 'notificationDelivery';
 
@@ -217,6 +218,21 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     Succeeded: 'neutral',
     Degraded: 'warning',
     Failed: 'danger',
+  },
+
+  /**
+   * Подія журналу покриття (`CollectionCoverage.KnownStatuses`, `D-118`):
+   * інтервал зібрано, але в комірки він не ліг.
+   *
+   * ⚠ `SkippedPointCeiling` — `danger`: значення за поле не лягло зовсім, і
+   * виправити це може лише людина. `SkippedPeriodClosed` — `warning`: період
+   * закрито навмисно, але пізні дані все одно треба звірити. `ConflictKeptManual`
+   * — `info`: ручне значення збережено за правилом, це не збій.
+   */
+  coverage: {
+    SkippedPointCeiling: 'danger',
+    SkippedPeriodClosed: 'warning',
+    ConflictKeptManual: 'info',
   },
 
   /**
