@@ -17,6 +17,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// <param name="PeriodStart">Перший день періоду.</param>
 /// <param name="PeriodEnd">Останній день періоду, включно.</param>
 /// <param name="TimeZoneId">Пояс проєкту.</param>
+/// <param name="State">Стан періоду в мить добору.</param>
 internal sealed record MaterializationTarget(
     int SourceEntityId,
     int ProjectId,
@@ -25,7 +26,8 @@ internal sealed record MaterializationTarget(
     int PeriodKey,
     DateOnly PeriodStart,
     DateOnly PeriodEnd,
-    string? TimeZoneId)
+    string? TimeZoneId,
+    Domain.Enums.PeriodState State)
 {
     /// <summary>Межі періоду в UTC у поясі проєкту (<c>D-68</c>, <c>D16-03</c>).</summary>
     public Domain.Entities.Documents.Period.UtcRange UtcBounds()
@@ -96,6 +98,7 @@ internal static class MaterializationTargets
                 p.PeriodStart,
                 p.PeriodEnd,
                 project.TimeZoneId,
+                p.State,
             };
 
         if (sourceEntityId is { } entity)
@@ -140,7 +143,84 @@ internal static class MaterializationTargets
 
         return [.. rows.Select(x => new MaterializationTarget(
             x.SourceEntityId, x.ProjectId, x.DocumentId, x.TableInstanceId,
-            x.PeriodKeyValue, x.PeriodStart, x.PeriodEnd, x.TimeZoneId))];
+            x.PeriodKeyValue, x.PeriodStart, x.PeriodEnd, x.TimeZoneId, x.State))];
+    }
+
+    /// <summary>
+    /// Лишає адресатів закритих періодів лише тоді, коли в сутності є сирі точки
+    /// в межах періоду; решту адресатів повертає без змін.
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="targets">Адресати.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Для <c>Closed</c> задача нічого не пише, а лише лишає рядок
+    /// <c>SkippedPeriodClosed</c> у журналі покриття. Без точок цей рядок — шум:
+    /// активація проєкту з минулими періодами дала б по рядку на кожну пару
+    /// «сутність × закритий період» і сховала б справжні пропуски.
+    /// <para>
+    /// ⚠ Межі — <see cref="MaterializationTarget.UtcBounds"/>, тобто
+    /// <c>Period.UtcBounds</c> у поясі проєкту, як у
+    /// <c>MaterializeCollectedDataJob</c>; власної арифметики меж тут немає.
+    /// </para>
+    /// <para>
+    /// ⚠ ОДИН запит: по гілці <c>EXISTS</c> на кожен закритий період, зведені
+    /// <c>UNION ALL</c>. Перелік сутностей спільний для всіх гілок — зайві пари
+    /// «сутність × чужий період» відсікає перетин з адресатами нижче.
+    /// </para>
+    /// </remarks>
+    public static async Task<List<MaterializationTarget>> KeepClosedWithRawPointsAsync(
+        EcrDbContext db,
+        IReadOnlyList<MaterializationTarget> targets,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(targets);
+
+        var closed = targets.Where(t => t.State == Domain.Enums.PeriodState.Closed).ToList();
+        if (closed.Count == 0)
+        {
+            return [.. targets];
+        }
+
+        var entityIds = closed.Select(t => t.SourceEntityId).Distinct().ToList();
+
+        IQueryable<RawPointHit>? hits = null;
+        foreach (var period in closed.GroupBy(t => (t.ProjectId, t.PeriodKey)))
+        {
+            var bounds = period.First().UtcBounds();
+            var from = bounds.StartUtc;
+            var to = bounds.EndUtc;
+            var projectId = period.Key.ProjectId;
+            var periodKey = period.Key.PeriodKey;
+
+            var branch = db.SourceEntities
+                .AsNoTracking()
+                .Where(e => entityIds.Contains(e.Id)
+                            && db.RawDataPoints.Any(p => p.SourceEntityId == e.Id
+                                                         && p.Timestamp >= from
+                                                         && p.Timestamp < to))
+                .Select(e => new RawPointHit { SourceEntityId = e.Id, ProjectId = projectId, PeriodKey = periodKey });
+
+            hits = hits is null ? branch : hits.Concat(branch);
+        }
+
+        var found = (await hits!.ToListAsync(ct).ConfigureAwait(false))
+            .Select(h => (h.SourceEntityId, h.ProjectId, h.PeriodKey))
+            .ToHashSet();
+
+        return [.. targets.Where(t => t.State != Domain.Enums.PeriodState.Closed
+                                      || found.Contains((t.SourceEntityId, t.ProjectId, t.PeriodKey)))];
+    }
+
+    /// <summary>Сутність, у якої є сирі точки в межах періоду проєкту.</summary>
+    private sealed class RawPointHit
+    {
+        public int SourceEntityId { get; init; }
+
+        public int ProjectId { get; init; }
+
+        public int PeriodKey { get; init; }
     }
 
     /// <summary>Ставить по одній задачі матеріалізації на кожного адресата.</summary>

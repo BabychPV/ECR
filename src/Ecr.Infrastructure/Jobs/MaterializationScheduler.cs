@@ -45,6 +45,13 @@ public sealed class MaterializationScheduler(EcrDbContext db, IBackgroundJobSche
             .FindAsync(db, sourceEntityId: null, projectId, periodKeys, null, null, int.MaxValue, ct)
             .ConfigureAwait(false);
 
+        // ⚠ Закритий період без сирих точок задачі не отримує: вона лише
+        // записала б `SkippedPeriodClosed` — шум, а не пропуск. Open/Grace — без
+        // змін: там задача пише значення.
+        targets = await MaterializationTargets
+            .KeepClosedWithRawPointsAsync(db, targets, ct)
+            .ConfigureAwait(false);
+
         await MaterializationTargets.EnqueueAsync(jobs, targets, range: null, ct).ConfigureAwait(false);
     }
 }
