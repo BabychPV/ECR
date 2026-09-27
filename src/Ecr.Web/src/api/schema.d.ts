@@ -14284,7 +14284,7 @@ export interface components {
             steps: number;
         };
         /** @enum {unknown} */
-        AggregationKind: "Sum" | "Avg" | "Min" | "Max" | "Last" | "First" | null;
+        AggregationKind: "Sum" | "Avg" | "Min" | "Max" | "Last" | "First" | "TimeWeightedAvg" | "TimeIntegral" | null;
         /** @description Маршрут погодження проєкту. */
         ApprovalRouteDto: {
             /** @description Чи налаштований власний маршрут. `false` — затвердження одноетапне:

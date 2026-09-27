@@ -264,6 +264,8 @@
           "Max",
           "Last",
           "First",
+          "TimeWeightedAvg",
+          "TimeIntegral",
           null
         ]
       },
