@@ -1744,6 +1744,12 @@ USING (VALUES
     (N'unsaved.body',                    N'en', N'{count} cell(s) could not be saved. If you leave now, they are lost.', 1),
     (N'unsaved.stay',                    N'en', N'Stay on this page', 1),
     (N'unsaved.leave',                   N'en', N'Leave without saving', 1),
+    -- ⚠ Банер застарілої збірки (`DAT-08`, `app/staleVersion.tsx`): незбережене
+    -- зберігається ДО пропозиції перезавантажитись, і банер чесно каже, чим
+    -- це скінчилось. `staleFailed` — про факт втрати, а не «можливо».
+    (N'unsaved.staleSaving',             N'en', N'Saving your changes before reload...', 1),
+    (N'unsaved.staleSaved',              N'en', N'Your changes have been saved.', 1),
+    (N'unsaved.staleFailed',             N'en', N'{count} cell(s) could not be saved. Reloading now will lose them.', 1),
 
     (N'deny.NoGrant',                    N'en', N'You do not have permission to edit this cell.', 1),
     (N'deny.PeriodNotOpenYet',           N'en', N'The period is not open yet: data entry starts on the opening date.', 1),

@@ -1,5 +1,12 @@
 import { useEffect, useSyncExternalStore, type JSX } from 'react';
 import { Alert, Button, Group, Text } from '@mantine/core';
+import { t } from '@/shared/i18n';
+import {
+  flushUnsaved,
+  hasUnsavedChanges,
+  UnsavedSettleMs,
+  unsavedCount,
+} from '@/shared/ui/unsavedSources';
 
 /**
  * Застаріла збірка у відкритій вкладці (`DAT-08`, клієнтська половина).
@@ -27,14 +34,36 @@ import { Alert, Button, Group, Text } from '@mantine/core';
  * читає `isStaleVersion()` і показує «встановлено нову версію» замість
  * загального «сталася помилка».
  *
- * ⚠ Збереження незбережених правок при цій події (перша половина пункту (1)
- * `DAT-08`) НЕ реалізовано тут: сховище правок рівня документа — це
- * `D14-12`, якого ще немає. Робити «збереження» поверх стану, що живе в
- * сітці, означало б повторити той самий дефект, який `D14-12` і закриває.
+ * ✎ `DIRECTIVE-16` §1, «DAT-08 залишок»: при цій події незбережене СПЕРШУ
+ * зберігається — тим самим реєстром джерел (`shared/ui/unsavedSources.ts`,
+ * `flushUnsaved`), що й при виході з документа (`UnsavedGuard`). Раніше тут
+ * стояло «неможливо, бо `D14-12` ще немає»; сховище рівня документа давно є,
+ * а банер пропонував «Reload» поверх незбережених правок — тобто перезавантаження
+ * мовчки їх викидало.
+ *
+ * ⚠ Збереження не потребує жодного нового чанка: `PATCH` — це `fetch` до API,
+ * а зберігачі (сітка, безхазяйний зріз) уже в пам'яті. Тому воно можливе саме
+ * тоді, коли підвантажити частину застосунку вже не можна.
  */
 
 /** Чи вже відомо, що на сервері інша збірка. */
 let stale = false;
+
+/**
+ * Що сталося з незбереженим, коли збірка виявилась застарілою.
+ *
+ * - `none` — зберігати не було чого (банер про це мовчить);
+ * - `saving` — збереження йде; кнопки перезавантаження ще НЕМАЄ;
+ * - `saved` — усе незбережене прийнято сервером;
+ * - `failed` — щось лишилось (відмова або таймаут): перезавантаження його
+ *   викине, і банер каже це прямо.
+ */
+export type StaleSaveState = 'none' | 'saving' | 'saved' | 'failed';
+
+let saveState: StaleSaveState = 'none';
+
+/** Скільки правок не вдалося зберегти — знімок на момент відмови. */
+let unsavedLeft = 0;
 
 /** Підписники (`useSyncExternalStore` — той самий прийом, що й в i18n). */
 const listeners = new Set<() => void>();
@@ -65,9 +94,21 @@ function markStaleVersion(): void {
   for (const listener of listeners) listener();
 }
 
+/** Знімок стану збереження для `useSyncExternalStore`. */
+export function staleSaveState(): StaleSaveState {
+  return saveState;
+}
+
+function setSaveState(next: StaleSaveState): void {
+  saveState = next;
+  for (const listener of listeners) listener();
+}
+
 /** Скидає стан — лише для тестів (модульний стан переживає розмонтування). */
 export function resetStaleVersion(): void {
   stale = false;
+  saveState = 'none';
+  unsavedLeft = 0;
   for (const listener of listeners) listener();
 }
 
@@ -77,10 +118,43 @@ export function resetStaleVersion(): void {
  * ⚠ Слухач саме на `window`: подію кидає рантайм Vite поза деревом React, і
  * в момент відмови жодного компонента, якому вона «належить», може не бути
  * взагалі (прогрів за наведенням стається без переходу).
+ *
+ * ⛔ Збереження запускається СИНХРОННО в обробнику, до будь-якого рендера:
+ * `__vitePreload` кидає подію раніше, ніж відхиляє `import()`, тобто раніше,
+ * ніж межа маршруту встигне щось розмонтувати. `flushUnsaved` при цьому
+ * відразу кличе зберігачів (`flushAutosave`) — запити вже летять.
+ *
+ * ⚠ Лише ОДИН раз на застарілу збірку: повторні відмови чанків не мають
+ * запускати друге збереження тих самих комірок (два паралельні `PATCH` — той
+ * самий аргумент, що в `UnsavedGuard`).
+ *
+ * @param settleTimeoutMs Скільки чекати на результат збереження — див.
+ *   `UnsavedSettleMs`; проп існує заради тестів.
  */
-export function watchPreloadErrors(): () => void {
+export function watchPreloadErrors(settleTimeoutMs: number = UnsavedSettleMs): () => void {
   const onPreloadError = (): void => {
+    if (stale) return;
+
+    const dirty = hasUnsavedChanges();
+
+    // ⚠ Стан збереження ставиться ДО `markStaleVersion`: перший же кадр банера
+    // має бути «зберігаємо» без кнопки, а не «перезавантажте» на мить.
+    saveState = dirty ? 'saving' : 'none';
     markStaleVersion();
+
+    if (!dirty) return;
+
+    void flushUnsaved(settleTimeoutMs).then(
+      (saved) => {
+        unsavedLeft = saved ? 0 : unsavedCount();
+        setSaveState(saved ? 'saved' : 'failed');
+      },
+      () => {
+        // ⚠ Безпечний бік помилки той самий, що й у таймауту: «не збережено».
+        unsavedLeft = unsavedCount();
+        setSaveState('failed');
+      },
+    );
   };
 
   window.addEventListener('vite:preloadError', onPreloadError);
@@ -97,21 +171,28 @@ export function watchPreloadErrors(): () => void {
  * стається без жодного переходу, тож банер має жити незалежно від того, який
  * маршрут зараз відкритий і чи він узагалі змонтувався.
  *
- * ⛔ Написи — ЛІТЕРАЛИ, не `t()`, за прецедентом `CATALOG_LOAD_FAILED` і
- * `passwordToggleProps` (`pages/LoginPage.tsx`): рядки інтерфейсу живуть у
- * СЕРВЕРНОМУ каталозі (`09-seed.sql`), ключів під ці написи там немає, а
- * `t()` без рядка в каталозі показав би позначений ключ (`⟦...⟧`) — тобто
- * саме той нерозбірливий екран, від якого банер і рятує. Англійською, як усі
- * інші запасні тексти клієнта (`D14-13`).
+ * ⛔ Заголовок, основний текст і кнопка — ЛІТЕРАЛИ, не `t()`, за прецедентом
+ * `CATALOG_LOAD_FAILED` і `passwordToggleProps` (`pages/LoginPage.tsx`): подія
+ * може статися й до того, як каталог доїхав (відмова чанка сторінки входу), а
+ * `t()` без каталогу показав би позначений ключ (`⟦...⟧`) — тобто саме той
+ * нерозбірливий екран, від якого банер і рятує. Англійською, як усі інші
+ * запасні тексти клієнта (`D14-13`).
  *
- * ⚠ Банер не пропонує «зберегти перед перезавантаженням»: правки зараз живуть
- * у стані сітки, і зберегти їх звідси нема як (`D14-12`). Обіцянка, якої код
- * не виконує, гірша за її відсутність.
+ * ⚠ Рядок про збереження — навпаки, `t()` з ключами `unsaved.stale*`
+ * (`09-seed.sql`, приватна область): він з'являється ЛИШЕ тоді, коли
+ * незбережені правки були, а правок без входу й завантаженого каталогу не
+ * буває.
+ *
+ * ⛔ Кнопка перезавантаження — лише ПІСЛЯ спроби збереження: натиснута під час
+ * `saving`, вона обірвала б запит, заради якого спроба й робилась.
  */
-export function NewVersionBanner(): JSX.Element | null {
+export function NewVersionBanner({
+  settleTimeoutMs = UnsavedSettleMs,
+}: { readonly settleTimeoutMs?: number } = {}): JSX.Element | null {
   const outdated = useSyncExternalStore(subscribeStaleVersion, isStaleVersion, isStaleVersion);
+  const save = useSyncExternalStore(subscribeStaleVersion, staleSaveState, staleSaveState);
 
-  useEffect(watchPreloadErrors, []);
+  useEffect(() => watchPreloadErrors(settleTimeoutMs), [settleTimeoutMs]);
 
   if (!outdated) return null;
 
@@ -130,9 +211,18 @@ export function NewVersionBanner(): JSX.Element | null {
           This tab is running an older build and can no longer load parts of the application. Reload
           to get the new version.
         </Text>
-        <Button size="xs" onClick={() => window.location.reload()}>
-          Reload page
-        </Button>
+        {save !== 'none' && (
+          <Text size="sm" fw={600} data-testid="new-version-save-state" data-state={save}>
+            {save === 'saving' && t('unsaved.staleSaving')}
+            {save === 'saved' && t('unsaved.staleSaved')}
+            {save === 'failed' && t('unsaved.staleFailed', { count: unsavedLeft })}
+          </Text>
+        )}
+        {save !== 'saving' && (
+          <Button size="xs" onClick={() => window.location.reload()}>
+            Reload page
+          </Button>
+        )}
       </Group>
     </Alert>
   );
