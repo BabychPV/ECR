@@ -243,6 +243,15 @@ public static class DependencyInjection
         services.AddScoped<Registries.GetRegistryUsageHandler>();
         services.AddScoped<Registries.ImportRegistryEntriesHandler>();
 
+        // ── FEATURE-REGISTRY-TABLES: append-only блоки треків (RT-01) ──
+        // Крок дописує реєстрації ЛИШЕ під свій маркер; власники —
+        // docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
+        // RT: keys
+
+        // RT: data
+
+        // RT: expressions
+
         // Редактор виразів (`ФВ-9.15a`): перевірка тексту і склад мови.
         services.AddScoped<Expressions.ValidateExpressionHandler>();
         services.AddScoped<Expressions.GetExpressionMetadataHandler>();

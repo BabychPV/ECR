@@ -800,6 +800,44 @@ CREATE TABLE cfg.RegistryDefinitionDraft
 );
 GO
 
+-- Складені ключі довідника (FEATURE-REGISTRY-TABLES §3.2, §4.1, міграція
+-- RK01RegistryKeys): упорядкований набір 1–8 полів, комбінація значень яких
+-- унікальна серед живих записів. Склад, IgnoreCase і IsPrimary після
+-- створення не змінюються — інший ключ заводять новим, старий вимикають.
+CREATE TABLE cfg.RegistryKeyDef
+(
+    Id              int           IDENTITY(1,1) NOT NULL,
+    RegistryDefId   int           NOT NULL,
+    Code            nvarchar(64)  NOT NULL,          -- EcrCode: PK, BY_LEGACY_ID
+    NameL10n        nvarchar(max) NOT NULL,
+    IsPrimary       bit           NOT NULL CONSTRAINT DF_RegKey_Pri  DEFAULT(0),
+    IgnoreCase      bit           NOT NULL CONSTRAINT DF_RegKey_Case DEFAULT(1),
+    IsActive        bit           NOT NULL CONSTRAINT DF_RegKey_Act  DEFAULT(1),
+    CreatedAt       datetime2(3)  NOT NULL,
+    CreatedByUserId int           NOT NULL,
+    CONSTRAINT PK_RegistryKeyDef PRIMARY KEY (Id),
+    CONSTRAINT UQ_RegistryKeyDef UNIQUE (RegistryDefId, Code),
+    CONSTRAINT FK_RegKey_Def FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
+-- ⛔ Первинний ключ — рівно один АКТИВНИЙ на довідник: ним шукає REGFIND.
+CREATE UNIQUE INDEX UX_RegistryKeyDef_Primary ON cfg.RegistryKeyDef (RegistryDefId)
+    WHERE IsPrimary = 1 AND IsActive = 1;
+GO
+
+CREATE TABLE cfg.RegistryKeyField
+(
+    RegistryKeyDefId   int     NOT NULL,
+    Ordinal            tinyint NOT NULL,              -- від 1; порядок = порядок аргументів REGFIND
+    RegistryFieldDefId int     NOT NULL,
+    CONSTRAINT PK_RegistryKeyField PRIMARY KEY (RegistryKeyDefId, Ordinal),
+    CONSTRAINT UQ_RegistryKeyField_Field UNIQUE (RegistryKeyDefId, RegistryFieldDefId),
+    CONSTRAINT FK_RegKeyField_Key   FOREIGN KEY (RegistryKeyDefId)   REFERENCES cfg.RegistryKeyDef (Id),
+    CONSTRAINT FK_RegKeyField_Field FOREIGN KEY (RegistryFieldDefId) REFERENCES cfg.RegistryFieldDef (Id)
+);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding
@@ -1012,6 +1050,45 @@ CREATE TABLE dic.RegistryExternalKey
     CONSTRAINT UQ_RegistryExternalKey UNIQUE (DataSourceId, ExternalId),
     CONSTRAINT FK_RegExtKey_Entry FOREIGN KEY (RegistryEntryId) REFERENCES dic.RegistryEntry (Id)
 );
+GO
+
+-- Похідні рядки унікальності складених ключів (FEATURE-REGISTRY-TABLES §3.2,
+-- §4.2, міграція RK01RegistryKeys). Відтворювані дані (D-71): будує їх лише
+-- служба ключів зі значень dic.RegistryValue. EAV не дає унікального індексу
+-- на значеннях, тому унікальність тримає SHA-256 канонічного рядка (D-151):
+-- фіксована довжина обходить межу 900 байт ключа індексу.
+CREATE TABLE dic.RegistryEntryKey
+(
+    Id               bigint        IDENTITY(1,1) NOT NULL,
+    RegistryEntryId  int           NOT NULL,
+    RegistryKeyDefId int           NOT NULL,
+    KeyHash          binary(32)    NOT NULL,          -- SHA-256 канонічного рядка (§4.2)
+    KeyText          nvarchar(900) NOT NULL,          -- «1D-2 · 370 Winter» — для повідомлень
+    -- ⛔ NOT NULL навмисно: ISNULL(ValidFrom, '0001-01-01'). Два NULL в
+    -- унікальному індексі SQL Server вважає рівними; сентинел дає
+    -- нетемпоральному довіднику повну унікальність.
+    ValidFromKey     date          NOT NULL,
+    ValidTo          date          NULL,              -- виключна межа, як у dic.RegistryEntry
+    IsLive           bit           NOT NULL,          -- NOT IsDeleted запису
+    CONSTRAINT PK_RegistryEntryKey PRIMARY KEY (Id),
+    CONSTRAINT UQ_RegistryEntryKey_Entry UNIQUE (RegistryKeyDefId, RegistryEntryId),
+    CONSTRAINT FK_RegEntryKey_Entry FOREIGN KEY (RegistryEntryId)  REFERENCES dic.RegistryEntry (Id),
+    CONSTRAINT FK_RegEntryKey_Key   FOREIGN KEY (RegistryKeyDefId) REFERENCES cfg.RegistryKeyDef (Id)
+);
+GO
+
+-- Гарантія бази: другий живий рядок із тим самим (ключ, хеш, початок вікна)
+-- не вставляється; видалений запис (IsLive = 0) ключ звільняє. Для
+-- темпорального довідника гарантія часткова — перетин вікон перевіряє служба
+-- ключів під діапазонним блокуванням (§4.4).
+CREATE UNIQUE INDEX UX_RegistryEntryKey_Live
+    ON dic.RegistryEntryKey (RegistryKeyDefId, KeyHash, ValidFromKey)
+    WHERE IsLive = 1 ON [INDEXES];
+GO
+
+CREATE INDEX IX_RegistryEntryKey_Hash
+    ON dic.RegistryEntryKey (RegistryKeyDefId, KeyHash)
+    INCLUDE (RegistryEntryId, ValidFromKey, ValidTo, IsLive) ON [INDEXES];
 GO
 ```
 

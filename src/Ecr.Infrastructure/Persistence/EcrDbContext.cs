@@ -45,6 +45,10 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryFieldDef> RegistryFieldDefs => Set<RegistryFieldDef>();
     public DbSet<RegistryRuleDef> RegistryRuleDefs => Set<RegistryRuleDef>();
     public DbSet<RegistryDefinitionDraft> RegistryDefinitionDrafts => Set<RegistryDefinitionDraft>();
+
+    /// <summary>Складені ключі довідників і їхні частини (FEATURE-REGISTRY-TABLES, RT-01).</summary>
+    public DbSet<RegistryKeyDef> RegistryKeyDefs => Set<RegistryKeyDef>();
+    public DbSet<RegistryKeyField> RegistryKeyFields => Set<RegistryKeyField>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom
@@ -57,6 +61,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RegistryValue> RegistryValues => Set<RegistryValue>();
     public DbSet<RegistryEntryLink> RegistryEntryLinks => Set<RegistryEntryLink>();
     public DbSet<RegistryExternalKey> RegistryExternalKeys => Set<RegistryExternalKey>();
+
+    /// <summary>Похідні рядки унікальності ключів (RT-01); пише лише служба ключів.</summary>
+    public DbSet<RegistryEntryKey> RegistryEntryKeys => Set<RegistryEntryKey>();
 
     // doc
     public DbSet<Project> Projects => Set<Project>();

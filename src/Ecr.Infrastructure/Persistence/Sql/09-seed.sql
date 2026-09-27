@@ -4427,6 +4427,21 @@ USING (VALUES
     (N'methodologies.publicationReason', N'en', N'Reason for the change', 1),
     (N'methodologies.publicationChanges', N'en', N'Changed values on the golden set', 1),
 
+    -- ── FEATURE-REGISTRY-TABLES: append-only секції треків (RT-01) ──────
+    -- Крок дописує рядки ЛИШЕ під свій маркер, кожен рядок — з комою в
+    -- кінці: після секцій ідуть наявні рядки, тож VALUES лишається цілим, хоч
+    -- би які секції були заповнені. Власники секцій —
+    -- docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
+    -- RT: keys
+
+    -- RT: data
+
+    -- RT: expressions
+
+    -- RT: ui-registries
+
+    -- RT: ui-expressions
+
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,

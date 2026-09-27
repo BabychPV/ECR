@@ -364,6 +364,15 @@ public static class DependencyInjection
         services.AddScoped<IImportPreviewStore, ImportPreviewStore>();
         services.AddScoped<IExportStore, ExportStore>();
 
+        // ── FEATURE-REGISTRY-TABLES: append-only блоки треків (RT-01) ──
+        // Крок дописує реєстрації ЛИШЕ під свій маркер; власники —
+        // docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
+        // RT: keys
+
+        // RT: data
+
+        // RT: expressions
+
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();
 
