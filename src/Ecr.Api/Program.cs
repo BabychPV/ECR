@@ -342,7 +342,7 @@ app.MapFallback("/scalar/{**_}", () => Results.NotFound());
 // реально відсутній статичний файл (наприклад, видалену картинку) так
 // само лишається 404 від UseStaticFiles вище, а не підміняється
 // сторінкою застосунку.
-app.MapFallbackToFile("index.html");
+app.MapFallbackToFile("index.html", staticFileOptions);
 
 app.Run();
 

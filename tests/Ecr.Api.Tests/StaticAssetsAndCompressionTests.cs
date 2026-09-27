@@ -148,4 +148,74 @@ public sealed class StaticAssetsAndCompressionTests(SqlServerFixture sql)
             File.Delete(chunk);
         }
     }
+
+    /// <summary>
+    /// Оболонка, віддана <b>фолбеком</b> SPA (<c>/</c>, глибоке посилання), теж
+    /// <c>no-cache</c> — <c>DIRECTIVE-16.md</c> §1, «DAT-08 залишок».
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Тест вище питає <c>/index.html</c> напряму — той запит обслуговує
+    /// <c>UseStaticFiles(staticFileOptions)</c>. Але користувач майже ніколи
+    /// не відкриває <c>/index.html</c>: він відкриває <c>/</c> або закладку
+    /// <c>/documents/…</c>, і ту саму оболонку віддає
+    /// <c>MapFallbackToFile</c> — ОКРЕМИЙ екземпляр статичного middleware зі
+    /// своїми опціями. Без них оболонка з фолбека йшла без <c>Cache-Control</c>,
+    /// і браузер евристично тримав стару оболонку зі старими хешами чанків.
+    /// </remarks>
+    [Theory]
+    [InlineData("/")]
+    [InlineData("/documents/1")]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Оболонка_з_фолбека_SPA_теж_no_cache(string route)
+    {
+        // ⚠ Той самий двохостовий прийом, що й вище: провайдер статики
+        // прив'язується до `WebRootPath` на старті.
+        string contentRoot;
+
+        using (var probe = new EcrApiFactory(sql))
+        {
+            contentRoot = ((Microsoft.AspNetCore.Hosting.IWebHostEnvironment)
+                probe.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.IWebHostEnvironment))!)
+                .ContentRootPath;
+        }
+
+        var root = Path.Combine(contentRoot, "wwwroot");
+
+        Directory.CreateDirectory(root);
+
+        var shell = Path.Combine(root, "index.html");
+        var marker = "<!doctype html><title>shell-" + Guid.NewGuid().ToString("N") + "</title>";
+
+        await File.WriteAllTextAsync(shell, marker).ConfigureAwait(true);
+
+        try
+        {
+            using var app = new EcrApiFactory(sql);
+            using var client = app.CreateClient();
+
+            var response = await client
+                .GetAsync(new Uri(route, UriKind.Relative))
+                .ConfigureAwait(true);
+
+            // ⚠ Спершу — що це справді оболонка з фолбека, а не 404 чи
+            // відповідь якогось контролера: інакше твердження про заголовок
+            // було б про чужу відповідь.
+            Assert.True(response.IsSuccessStatusCode, $"{route}: {response.StatusCode}");
+
+            var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+            Assert.Equal(marker, body);
+
+            // ⛔ Мутаційний доказ: `app.MapFallbackToFile("index.html")` без
+            // `staticFileOptions` — заголовка немає взагалі, тест червоний.
+            Assert.True(
+                response.Headers.CacheControl?.NoCache,
+                $"{route}: оболонка з фолбека мусить бути no-cache, а має: {response.Headers.CacheControl}");
+        }
+        finally
+        {
+            File.Delete(shell);
+        }
+    }
 }
