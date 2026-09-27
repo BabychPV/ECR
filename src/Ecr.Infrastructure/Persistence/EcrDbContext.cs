@@ -231,6 +231,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
         // значення потрібне ДО вставки, щоб завантажити TableRow і CellValue
         // одним проходом SqlBulkCopy (B02 §2.3). CACHE 1000 — компроміс між
         // круглими втратами при перезапуску і зверненнями до системних таблиць.
+        // ⚠ Кеш задає міграція `WR09SequenceCache` сирим ALTER SEQUENCE: EF
+        // Core 10 не має API кешу послідовності, тож у моделі його не видно.
+        // Прибереш міграцію — `SequenceCacheTests` почервоніє.
         //
         // Оголошуються лише для SQL Server. Послідовність тут — фізичний
         // об'єкт SQL Server, який читається через sp_sequence_get_range, і в
