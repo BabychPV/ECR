@@ -1,10 +1,13 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/MaterializeIntegrationActorTests.cs
 using Ecr.Application;
 using Ecr.Application.Common;
+using Ecr.Application.Documents;
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -39,6 +42,12 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <see cref="JobAwareCurrentUser"/>, що в <c>Program.cs</c>, поверх
 /// користувача «поза запитом» (<see cref="NoHttpRequestUser"/> повторює
 /// <c>Ecr.Api.Auth.CurrentUser</c> без <c>HttpContext</c>).
+///
+/// ⚠ Запис у НАЯВНИЙ рядок (фіксовані рядки є з відкриття періоду; і кожен
+/// повторний прогін) — основний випадок, а не виняток: патчер шле версію
+/// рядка, а не <c>null</c> «створити». Гонки з людиною між читанням і записом
+/// відтворюються перехоплювачем <see cref="IRowStore"/> — справжнє сховище, у
+/// яке вставлено дію ПІСЛЯ читання версій.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
@@ -50,50 +59,18 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "P0-integration-actor")]
-    public async Task Задача_без_HTTP_пише_комірку_від_імені_svc_integration_з_походженням_Integration()
+    public async Task Задача_без_HTTP_пише_у_наявний_фіксований_рядок_від_імені_svc_integration()
     {
-        var builder = new TestDocumentBuilder(sql.ConnectionString);
-        var chain = await builder.BuildAsync(rowMode: TableRowMode.Mixed, ct: CancellationToken.None);
-
-        await using (var db = builder.CreateContext())
-        {
-            var period = await db.Periods.SingleAsync(p => p.ProjectId == chain.ProjectId && p.PeriodKeyValue == chain.PeriodKey.Value);
-            period.TransitionTo(PeriodState.Open, Now);
-            await db.SaveChangesAsync(CancellationToken.None);
-        }
-
-        // ⚠ Адресат — НОВИЙ рядок таблиці `Mixed`, і це обхід, а не задум.
-        // Запис у НАЯВНИЙ рядок (типовий випадок: фіксовані рядки заводяться при
-        // відкритті періоду, і будь-який другий прогін) сьогодні падає далі за
-        // автором — `ECR-ROW-0409` «рядки з такими ключами вже існують»:
-        // `IntegrationCellPatcher` шле `BaseVersion = null`, тобто «створити».
-        // Це окремий дефект, поза предметом цього тесту.
-        var rowKey = $"PI_{Guid.NewGuid():N}"[..20];
-        var entityId = await ArrangeMappingAsync(builder, chain, rowKey);
-        var svcId = await SvcIntegrationIdAsync();
-
-        // ⚠ Грант заводить ТЕСТ, і це свідомо: предмет тесту — АВТОР запису, а
-        // не права. У сіді `svc-integration` без ролей і грантів, і шлях доступу
-        // для нього (зона «Аудит»: `AccessDecisionService`) ще не зроблено — без
-        // гранта задача за автором падає далі, на `ECR-DOC-0404`. Грант знімається
-        // у `finally`: база спільна для всієї колекції.
-        var roleId = await GrantSvcWriteAsync(builder, svcId, chain.ProjectId);
+        // ⚠ Таблиця `Fixed`, рядок заведено будівником — як при відкритті періоду.
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false);
 
         try
         {
-            await using var provider = BuildProvider();
+            await using var provider = BuildProvider(new RowStoreHook());
 
             await using (var scope = provider.CreateAsyncScope())
             {
-                var job = scope.ServiceProvider.GetRequiredService<IMaterializeCollectedDataJob>();
-
-                await job.ExecuteAsync(
-                    new MaterializeTask(
-                        entityId, chain.ProjectId, chain.DocumentId, chain.TableInstanceId, chain.PeriodKey.Value,
-                        new DateTime(2026, 1, 9, 0, 0, 0, DateTimeKind.Utc),
-                        new DateTime(2026, 1, 16, 0, 0, 0, DateTimeKind.Utc)),
-                    Substitute.For<IJobProgress>(),
-                    CancellationToken.None);
+                await RunJobAsync(scope, stand);
 
                 // ⚠ Після задачі scope знову «поза задачею»: автор не протікає в
                 // наступну роботу того самого scope.
@@ -102,21 +79,166 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         }
         finally
         {
-            await RevokeAsync(roleId);
+            await RevokeAsync(stand.RoleId);
         }
 
-        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати вхід у scope з `MaterializeCollectedDataJob`
-        // → задача падає `ECR-AUTH-0401` «Анонімний запит не може змінювати дані»,
-        // комірки немає.
-        var value = await ScalarAsync(
-            $"SELECT v.ValueNumeric FROM doc.CellValue v JOIN doc.TableRow r ON r.PeriodKey = v.PeriodKey AND r.Id = v.TableRowId "
-            + $"WHERE r.TableInstanceId = {chain.TableInstanceId} AND r.RowKey = N'{rowKey}' AND v.ColumnDefId = {chain.ColumnDefIds[1]}");
-        Assert.Equal(7m, Assert.IsType<decimal>(value));
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ (1): прибрати вхід у scope з `MaterializeCollectedDataJob`
+        // → задача падає `ECR-AUTH-0401` «Анонімний запит не може змінювати дані».
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ (2): `BaseVersion: null` у `IntegrationCellPatcher`
+        // для наявного рядка → `ECR-ROW-0409` «Рядки з такими ключами вже існують».
+        Assert.Equal(7m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[0])));
+        Assert.Equal($"{stand.SvcId}|Integration", await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+    }
 
-        var author = await ScalarAsync(
-            $"SELECT TOP 1 CONCAT(ChangedByUserId, N'|', Origin) FROM aud.CellChange "
-            + $"WHERE DocumentId = {chain.DocumentId} AND RowKey = N'{rowKey}' AND ColumnDefId = {chain.ColumnDefIds[1]} ORDER BY Id DESC");
-        Assert.Equal($"{svcId}|Integration", author);
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P0-integration-actor")]
+    public async Task Відсутній_рядок_таблиці_Mixed_і_далі_створюється()
+    {
+        var stand = await ArrangeAsync(TableRowMode.Mixed, newRow: true);
+
+        try
+        {
+            await using var provider = BuildProvider(new RowStoreHook());
+            await using var scope = provider.CreateAsyncScope();
+            await RunJobAsync(scope, stand);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        // Контроль: `null` лишився для рядка, якого немає (R-B2 «створити»).
+        Assert.Equal(7m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[0])));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P0-integration-actor")]
+    public async Task Повторний_прогін_тих_самих_точок_не_дає_ні_нової_версії_рядка_ні_аудиту()
+    {
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false);
+
+        try
+        {
+            await using var provider = BuildProvider(new RowStoreHook());
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                await RunJobAsync(scope, stand);
+            }
+
+            var versionAfterFirst = await RowVersionAsync(stand);
+            var auditAfterFirst = await AuditCountAsync(stand);
+            Assert.Equal(1, auditAfterFirst);
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
+                await RunJobAsync(scope, stand);
+            }
+
+            // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати відсіювання незмінних значень у
+            // `IntegrationCellPatcher` → обробник пише ту саму комірку вдруге:
+            // аудиту не додається (`U-22`), але версія рядка росте — нова
+            // ревізія на кожен прогін, у якому нічого не змінилося.
+            Assert.Equal(versionAfterFirst, await RowVersionAsync(stand));
+            Assert.Equal(auditAfterFirst, await AuditCountAsync(stand));
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-118")]
+    public async Task Правка_людини_між_читанням_і_записом_лишається_а_решта_рядка_записана()
+    {
+        // Дві комірки одного рядка: людина правитиме першу, другу — ні.
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false, twoColumns: true);
+        var humanId = await AddHumanAsync(stand.RoleId);
+
+        try
+        {
+            var hook = new RowStoreHook();
+            await using var provider = BuildProvider(hook);
+
+            // ⚠ Правка людини — СПРАВЖНІЙ запис через `PatchCellsHandler` з
+            // `UserEdit`, у своєму scope, одразу ПІСЛЯ того, як патчер прочитав
+            // версії рядків: саме те вікно, у якому інтеграція інакше затерла б її.
+            hook.AfterRead = async () =>
+            {
+                hook.AfterRead = null;
+                await HumanEditAsync(provider, stand, humanId, 42m);
+            };
+
+            await using var scope = provider.CreateAsyncScope();
+            await RunJobAsync(scope, stand);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати повтор у `IntegrationCellPatcher`
+        // (перша ж `ECR-CELL-0409` — виняток) → прогін падає, друга комірка
+        // не записана, рядка в журналі покриття немає.
+        Assert.Equal(42m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[0])));
+        Assert.Equal($"{humanId}|UserEdit", await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+
+        Assert.Equal(7m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[1])));
+        Assert.Equal($"{stand.SvcId}|Integration", await LastChangeAsync(stand, stand.ColumnDefIds[1]));
+
+        var coverage = Assert.Single(await CoverageAsync(stand));
+        Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
+        Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain(IntegrationCellPatcher.RetriesExhaustedNote, coverage.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-118")]
+    public async Task Постійний_конфлікт_версії_три_спроби_рядок_у_журналі_прогін_завершується()
+    {
+        var stand = await ArrangeAsync(TableRowMode.Fixed, newRow: false);
+
+        var hook = new RowStoreHook();
+
+        // Хтось інший піднімає версію рядка після КОЖНОГО читання — конфлікт,
+        // який перечитування не знімає.
+        hook.AfterRead = () => BumpRowAsync(stand);
+
+        try
+        {
+            await using var provider = BuildProvider(hook);
+            await using var scope = provider.CreateAsyncScope();
+
+            // ⛔ Прогін НЕ падає: виняток тут означав би, що один «гарячий»
+            // рядок зупиняє перенесення всієї сутності.
+            await RunJobAsync(scope, stand);
+        }
+        finally
+        {
+            await RevokeAsync(stand.RoleId);
+        }
+
+        // ⚠ Кожна спроба читає рядки двічі: патчер (план) і обробник (контекст).
+        // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати повтор → одна спроба (2 читання) і
+        // виняток; прибрати стелю → перехоплювач зупиняє нескінченний цикл.
+        Assert.Equal(2 * IntegrationCellPatcher.MaxAttempts, hook.Reads);
+
+        Assert.Null(await CellAsync(stand, stand.ColumnDefIds[0]));
+        Assert.Null(await LastChangeAsync(stand, stand.ColumnDefIds[0]));
+
+        var coverage = Assert.Single(await CoverageAsync(stand));
+        Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
+        Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
+        Assert.Contains(IntegrationCellPatcher.RetriesExhaustedNote, coverage.Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,8 +270,77 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         Assert.Null(scope.Current);
     }
 
+    /// <summary>Усе, що заведено для одного прогону.</summary>
+    private sealed record Stand(
+        TestDocument Chain,
+        int EntityId,
+        int SvcId,
+        int RoleId,
+        string RowKey,
+        IReadOnlyList<int> ColumnDefIds,
+        IReadOnlyList<string> ColumnCodes);
+
+    /// <summary>
+    /// Ланцюг із відкритим періодом, сутність із мапінгами в рядок і грант
+    /// <c>Write</c> для <c>svc-integration</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Грант заводить ТЕСТ, і це свідомо: предмет тесту — АВТОР і шлях запису,
+    /// а не права. У сіді <c>svc-integration</c> без ролей і грантів, і шлях
+    /// доступу для нього (зона «Аудит»: <c>AccessDecisionService</c>) ще не
+    /// зроблено — без гранта задача за автором падає далі, на <c>ECR-DOC-0404</c>.
+    /// Грант знімається у <c>finally</c> кожного тесту: база спільна для всієї колекції.
+    /// </remarks>
+    private async Task<Stand> ArrangeAsync(TableRowMode rowMode, bool newRow, bool twoColumns = false)
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var chain = await builder.BuildAsync(rowMode: rowMode, ct: CancellationToken.None);
+
+        await using var db = builder.CreateContext();
+
+        var period = await db.Periods.SingleAsync(p => p.ProjectId == chain.ProjectId && p.PeriodKeyValue == chain.PeriodKey.Value);
+        period.TransitionTo(PeriodState.Open, Now);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var rowKey = newRow
+            ? $"PI_{Guid.NewGuid():N}"[..20]
+            : (await db.TableRows
+                .Where(r => r.PeriodKeyValue == chain.PeriodKey.Value && r.Id == chain.RowIds[0])
+                .Select(r => r.RowKey)
+                .SingleAsync()).Value;
+
+        int[] columnIds = twoColumns ? [chain.ColumnDefIds[1], chain.ColumnDefIds[2]] : [chain.ColumnDefIds[1]];
+        var codes = new List<string>();
+        foreach (var id in columnIds)
+        {
+            codes.Add(await db.ColumnDefs.Where(c => c.Id == id).Select(c => c.Code).SingleAsync());
+        }
+
+        var entityId = await ArrangeMappingAsync(db, rowKey, columnIds);
+        var svcId = await SvcIntegrationIdAsync();
+        var roleId = await GrantSvcWriteAsync(db, svcId, chain.ProjectId);
+
+        return new Stand(chain, entityId, svcId, roleId, rowKey, columnIds, codes);
+    }
+
+    /// <summary>Прогін задачі в scope, як його ставить <c>CollectionJob</c>.</summary>
+    private static async Task RunJobAsync(AsyncServiceScope scope, Stand stand)
+    {
+        var job = scope.ServiceProvider.GetRequiredService<IMaterializeCollectedDataJob>();
+
+        await job.ExecuteAsync(
+            new MaterializeTask(
+                stand.EntityId, stand.Chain.ProjectId, stand.Chain.DocumentId, stand.Chain.TableInstanceId,
+                stand.Chain.PeriodKey.Value,
+                new DateTime(2026, 1, 9, 0, 0, 0, DateTimeKind.Utc),
+                new DateTime(2026, 1, 16, 0, 0, 0, DateTimeKind.Utc)),
+            Substitute.For<IJobProgress>(),
+            CancellationToken.None);
+    }
+
     /// <summary>Контейнер як у проді: застосунок + інфраструктура + обгортка автора задачі.</summary>
-    private ServiceProvider BuildProvider()
+    /// <param name="hook">Перехоплювач читань версій рядків (без дії — прозорий).</param>
+    private ServiceProvider BuildProvider(RowStoreHook hook)
     {
         var configuration = Substitute.For<IConfiguration>();
         configuration[Arg.Any<string>()].Returns((string?)null);
@@ -167,16 +358,57 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         services.AddScoped<ICurrentUser>(sp => new JobAwareCurrentUser(
             new NoHttpRequestUser(), sp.GetRequiredService<JobActorScope>()));
 
+        // ⚠ Справжнє сховище рядків, обгорнуте перехоплювачем: і патчер, і
+        // обробник отримують ТОЙ САМИЙ `RowStore`, лише з дією після читання.
+        services.AddScoped<RowStore>();
+        services.AddScoped<IRowStore>(sp => new InterceptingRowStore(sp.GetRequiredService<RowStore>(), hook));
+
+        // ⚠ Черга перерахунку — підробка. Quartz тримає планувальник у
+        // ГЛОБАЛЬНОМУ (на процес) репозиторії за ім'ям: другий контейнер у тому
+        // самому процесі отримує вже звільнений планувальник першого, і запис
+        // падає `ObjectDisposedException` на постановці перерахунку — після
+        // коміту, тобто не про предмет цих тестів.
+        services.AddScoped(_ => Substitute.For<IBackgroundJobScheduler>());
+
         return services.BuildServiceProvider();
     }
 
-    /// <summary>
-    /// Сутність із матеріалізованим мапінгом у НОВИЙ рядок таблиці ланцюга і
-    /// дві точки посеред січня (3 + 4, згортка <c>Sum</c> = 7).
-    /// </summary>
-    private static async Task<int> ArrangeMappingAsync(TestDocumentBuilder builder, TestDocument chain, string rowKey)
+    /// <summary>Правка людини через той самий обробник, у власному scope.</summary>
+    private static async Task HumanEditAsync(ServiceProvider provider, Stand stand, int humanId, decimal value)
     {
-        await using var db = builder.CreateContext();
+        await using var scope = provider.CreateAsyncScope();
+        using var author = scope.ServiceProvider.GetRequiredService<JobActorScope>()
+            .Enter(new JobActor(humanId, "human", "en", [], Guid.NewGuid().ToString("N")));
+
+        var rows = await scope.ServiceProvider.GetRequiredService<IRowStore>()
+            .GetRowsAsync(stand.Chain.TableInstanceId, stand.Chain.PeriodKey, CancellationToken.None);
+        var version = rows.Single(r => r.RowKey == stand.RowKey).RowVersion;
+
+        await scope.ServiceProvider.GetRequiredService<PatchCellsHandler>().HandleAsync(
+            new PatchCellsRequest(
+                stand.Chain.TableInstanceId, stand.Chain.PeriodKey.Value, CellChangeOrigins.UserEdit,
+                [new PatchRow(stand.RowKey, version, [new PatchCell(stand.ColumnCodes[0], value)])]),
+            CancellationToken.None);
+    }
+
+    /// <summary>Чужий запис у рядок: будь-який <c>UPDATE</c> змінює <c>rowversion</c>.</summary>
+    private async Task BumpRowAsync(Stand stand)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"UPDATE doc.TableRow SET ModifiedAt = SYSUTCDATETIME() "
+            + $"WHERE PeriodKey = {stand.Chain.PeriodKey.Value} AND TableInstanceId = {stand.Chain.TableInstanceId} AND RowKey = N'{stand.RowKey}'";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Сутність із матеріалізованими мапінгами в рядок: на кожну колонку — своє
+    /// поле з двома точками посеред січня (3 + 4, згортка <c>Sum</c> = 7).
+    /// </summary>
+    private static async Task<int> ArrangeMappingAsync(EcrDbContext db, string rowKey, int[] columnDefIds)
+    {
         var tag = Guid.NewGuid().ToString("N")[..8];
 
         var dataSource = new DataSource(
@@ -191,33 +423,31 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         db.SourceEntities.Add(entity);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var field = $"F_{tag}";
-        var map = EntityFieldMap.ToColumn(entity.Id, field, chain.ColumnDefIds[1]);
-        map.SetMaterialization(rowKey, AggregationKind.Sum);
-        db.EntityFieldMaps.Add(map);
+        var points = new List<SourceDataPoint>();
+        for (var i = 0; i < columnDefIds.Length; i++)
+        {
+            var field = $"F{i}_{tag}";
+            var map = EntityFieldMap.ToColumn(entity.Id, field, columnDefIds[i]);
+            map.SetMaterialization(rowKey, AggregationKind.Sum);
+            db.EntityFieldMaps.Add(map);
+
+            points.Add(new SourceDataPoint(field, MidJanuary, 3m, null, null, "Good"));
+            points.Add(new SourceDataPoint(field, MidJanuary.AddHours(1), 4m, null, null, "Good"));
+        }
+
         await db.SaveChangesAsync(CancellationToken.None);
 
         var store = new CollectionStore(db, new TestClock(Now));
         var runId = await store.StartRunAsync(
             entity.Id, MidJanuary, MidJanuary.AddHours(2), isCatchUp: false, triggeredByUserId: null, CancellationToken.None);
-
-        await store.UpsertRawPointsAsync(
-            runId,
-            entity.Id,
-            [
-                new SourceDataPoint(field, MidJanuary, 3m, null, null, "Good"),
-                new SourceDataPoint(field, MidJanuary.AddHours(1), 4m, null, null, "Good"),
-            ],
-            CancellationToken.None);
+        await store.UpsertRawPointsAsync(runId, entity.Id, points, CancellationToken.None);
 
         return entity.Id;
     }
 
     /// <summary>Тестова роль із грантом <c>Write</c> на проєкт, призначена <c>svc-integration</c>.</summary>
-    private static async Task<int> GrantSvcWriteAsync(TestDocumentBuilder builder, int svcId, int projectId)
+    private static async Task<int> GrantSvcWriteAsync(EcrDbContext db, int svcId, int projectId)
     {
-        await using var db = builder.CreateContext();
-
         var role = new Role(
             EcrCode.Create($"P0SVC{Guid.NewGuid():N}"[..16]),
             new LocalizedText(new Dictionary<string, string> { ["en"] = "P0 integration writer (test)" }));
@@ -231,6 +461,22 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         return role.Id;
     }
 
+    /// <summary>Людина з тією самою тестовою роллю (знімається разом із нею).</summary>
+    private async Task<int> AddHumanAsync(int roleId)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+
+        var human = new User($"human_{Guid.NewGuid():N}"[..20], "Test human", AuthProvider.Local);
+        human.SetPassword("not-a-real-hash"); // CK_User_Provider: локальному — хеш.
+        db.Users.Add(human);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        db.RoleAssignments.Add(new RoleAssignment(roleId, human.Id, principalSid: null));
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        return human.Id;
+    }
+
     private async Task RevokeAsync(int roleId)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
@@ -241,6 +487,44 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
             + $"DELETE FROM sec.RoleAssignment WHERE RoleId = {roleId}; "
             + $"DELETE FROM sec.Role WHERE Id = {roleId};";
         await command.ExecuteNonQueryAsync();
+    }
+
+    private Task<object?> CellAsync(Stand stand, int columnDefId)
+        => ScalarAsync(
+            $"SELECT v.ValueNumeric FROM doc.CellValue v JOIN doc.TableRow r ON r.PeriodKey = v.PeriodKey AND r.Id = v.TableRowId "
+            + $"WHERE r.TableInstanceId = {stand.Chain.TableInstanceId} AND r.RowKey = N'{stand.RowKey}' AND v.ColumnDefId = {columnDefId}");
+
+    private Task<object?> LastChangeAsync(Stand stand, int columnDefId)
+        => ScalarAsync(
+            $"SELECT TOP 1 CONCAT(ChangedByUserId, N'|', Origin) FROM aud.CellChange "
+            + $"WHERE DocumentId = {stand.Chain.DocumentId} AND RowKey = N'{stand.RowKey}' AND ColumnDefId = {columnDefId} ORDER BY Id DESC");
+
+    private async Task<int> AuditCountAsync(Stand stand)
+        => Convert.ToInt32(
+            await ScalarAsync($"SELECT COUNT(*) FROM aud.CellChange WHERE DocumentId = {stand.Chain.DocumentId} AND RowKey = N'{stand.RowKey}'"),
+            System.Globalization.CultureInfo.InvariantCulture);
+
+    private async Task<string> RowVersionAsync(Stand stand)
+        => Convert.ToBase64String((byte[])(await ScalarAsync(
+            $"SELECT RowVersion FROM doc.TableRow WHERE PeriodKey = {stand.Chain.PeriodKey.Value} "
+            + $"AND TableInstanceId = {stand.Chain.TableInstanceId} AND RowKey = N'{stand.RowKey}'"))!);
+
+    private async Task<List<(string Status, string Details)>> CoverageAsync(Stand stand)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            $"SELECT Status, Details FROM itg.CollectionCoverage WHERE SourceEntityId = {stand.EntityId} AND Status IS NOT NULL";
+        await using var reader = await command.ExecuteReaderAsync();
+
+        var result = new List<(string, string)>();
+        while (await reader.ReadAsync())
+        {
+            result.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return result;
     }
 
     private async Task<int> SvcIntegrationIdAsync()
@@ -260,6 +544,98 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
 
     private static LocalizedText Name(string value)
         => new(new Dictionary<string, string> { ["en"] = value });
+
+    /// <summary>Дія після читання рядків і лічильник читань поза нею.</summary>
+    private sealed class RowStoreHook
+    {
+        /// <summary>Стеля читань: нескінченний повтор має впасти тут, а не зависнути.</summary>
+        private const int MaxReads = 20;
+
+        private bool _inside;
+
+        /// <summary>Дія після кожного читання версій; <c>null</c> — прозоро.</summary>
+        public Func<Task>? AfterRead { get; set; }
+
+        /// <summary>Скільки разів рядки читали поза самою дією.</summary>
+        public int Reads { get; private set; }
+
+        public async Task OnReadAsync()
+        {
+            if (_inside)
+            {
+                return;
+            }
+
+            Reads++;
+            if (Reads > MaxReads)
+            {
+                throw new InvalidOperationException($"Понад {MaxReads} читань рядків: повтор без стелі.");
+            }
+
+            if (AfterRead is { } action)
+            {
+                _inside = true;
+                try
+                {
+                    await action();
+                }
+                finally
+                {
+                    _inside = false;
+                }
+            }
+        }
+    }
+
+    /// <summary>Справжнє сховище рядків із дією ПІСЛЯ <see cref="IRowStore.GetRowsAsync"/>.</summary>
+    private sealed class InterceptingRowStore(IRowStore inner, RowStoreHook hook) : IRowStore
+    {
+        public async Task<IReadOnlyList<RowState>> GetRowsAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+        {
+            var rows = await inner.GetRowsAsync(tableInstanceId, periodKey, ct);
+            await hook.OnReadAsync();
+            return rows;
+        }
+
+        public Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct)
+            => inner.ResolveTableInstanceAsync(tableInstanceId, ct);
+
+        public Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetRowVersionsAsync(tableInstanceId, periodKey, ct);
+
+        public Task<IReadOnlyDictionary<string, long>> GetRowIdsAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetRowIdsAsync(tableInstanceId, periodKey, ct);
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>>> GetRowIdsBatchAsync(
+            IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetRowIdsBatchAsync(tableInstanceIds, periodKey, ct);
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, string>>> GetRowVersionsBatchAsync(
+            IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetRowVersionsBatchAsync(tableInstanceIds, periodKey, ct);
+
+        public Task<long> CreateRowAsync(long tableInstanceId, PeriodKey periodKey, RowKey rowKey, int ordinal, CancellationToken ct)
+            => inner.CreateRowAsync(tableInstanceId, periodKey, rowKey, ordinal, ct);
+
+        public Task<IReadOnlyList<long>> CreateRowsAsync(
+            long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct)
+            => inner.CreateRowsAsync(tableInstanceId, periodKey, rowKeys, ordinal, ct);
+
+        public Task TouchRowsAsync(IReadOnlyList<long> rowIds, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
+            => inner.TouchRowsAsync(rowIds, periodKey, utcNow, ct);
+
+        public Task<IReadOnlyDictionary<long, bool>> GetOrphanFlagsAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetOrphanFlagsAsync(tableInstanceId, periodKey, ct);
+
+        public Task<IReadOnlyList<TableInstanceRef>> GetTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetTableInstancesAsync(documentId, periodKey, ct);
+
+        public Task<int> EnsureTableInstancesAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+            => inner.EnsureTableInstancesAsync(documentId, periodKey, ct);
+
+        public Task<IReadOnlyList<long>> GetOrphanedRowIdsAsync(long documentId, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetOrphanedRowIdsAsync(documentId, periodKey, ct);
+    }
 
     /// <summary>
     /// <c>Ecr.Api.Auth.CurrentUser</c> поза HTTP-запитом: анонімний, а

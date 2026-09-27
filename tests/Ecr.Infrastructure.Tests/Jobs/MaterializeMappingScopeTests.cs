@@ -115,7 +115,9 @@ public sealed class MaterializeMappingScopeTests(SqlServerFixture sql)
         // Обробник запису — `null!` навмисно: єдина комірка своєї таблиці
         // правлена людиною, тож до запису справа дійти НЕ має; спроба запису
         // впала б тут `NullReferenceException`, а не пройшла б мовчки.
-        var job = new MaterializeCollectedDataJob(db, new IntegrationCellPatcher(db, null!), coverage, Actor(db));
+        var rows = new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), new TestClock(Now));
+        var job = new MaterializeCollectedDataJob(
+            db, new IntegrationCellPatcher(db, rows, new NormalizedCellStore(db), null!), coverage, Actor(db));
 
         await job.ExecuteAsync(MaterializeFor(stand.SourceEntityId, chain), Substitute.For<IJobProgress>(), CancellationToken.None);
 

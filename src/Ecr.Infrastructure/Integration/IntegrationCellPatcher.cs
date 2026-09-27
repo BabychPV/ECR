@@ -1,9 +1,12 @@
 // src/Ecr.Infrastructure/Integration/IntegrationCellPatcher.cs
 using Ecr.Application.Documents;
 using Ecr.Application.Documents.Dto;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -23,10 +26,45 @@ namespace Ecr.Infrastructure.Integration;
 /// ⚠ Комірки з правкою людини відсіюються ДО виклику, а не після: обробник не
 /// знає про походження попереднього значення, і питати його про це означало б
 /// навчити основний шлях правилам інтеграції.
+///
+/// ⛔ Наявний рядок адресується ЙОГО поточною версією, <c>null</c> — лише
+/// рядок, якого ще немає (R-B2: <c>null</c> = «створити»). Доти тут стояв
+/// <c>null</c> завжди, і запис у НАЯВНИЙ рядок — фіксовані рядки заводяться
+/// при відкритті періоду, а будь-який другий прогін пише туди ж — падав
+/// <c>ECR-ROW-0409</c> «рядки з такими ключами вже існують» на весь прогін.
+///
+/// ⚠ Рядок змінили між читанням версії і записом (<c>ECR-CELL-0409</c>) —
+/// обмежений повтор: перечитати стан і спробувати знову, не більше
+/// <see cref="MaxAttempts"/> разів. Після цього комірки повертаються в
+/// <see cref="IntegrationWriteResult.KeptManual"/> з позначкою
+/// <see cref="RetriesExhaustedNote"/> — і задача кладе їх у журнал покриття,
+/// а не валить прогін винятком (<c>D-118</c>: «зібрано, але не записано» — не
+/// мовчки, але й не аварія).
+///
+/// ⚠ Незмінні значення відсіюються тут, до обробника (ідемпотентність
+/// повторного прогону). Обробник сам не дає рядка аудиту на незмінне
+/// значення (`U-22`), але комірку однаково ПИШЕ: версія рядка, «дотик»
+/// документа і задача перерахунку — на кожен прогін, у якому нічого не
+/// змінилося.
 /// </remarks>
 public sealed class IntegrationCellPatcher(
-    EcrDbContext db, PatchCellsHandler patch) : ICellPatcher
+    EcrDbContext db, IRowStore rowStore, ICellStore cellStore, PatchCellsHandler patch) : ICellPatcher
 {
+    /// <summary>Скільки разів пробувати запис, якщо рядок змінили між читанням і записом.</summary>
+    public const int MaxAttempts = 3;
+
+    /// <summary>
+    /// Позначка комірки в <see cref="IntegrationWriteResult.KeptManual"/>, яку не
+    /// вдалося записати за <see cref="MaxAttempts"/> спроби через чужі зміни рядка.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремого статусу журналу покриття під це немає свідомо: статус тягне
+    /// бейдж, фільтр і ключ каталогу в клієнті, а сама подія — той самий
+    /// «конфлікт, лишено чинне значення», що й <c>ConflictKeptManual</c>.
+    /// Позначка в тексті відрізняє причину для адміністратора.
+    /// </remarks>
+    public const string RetriesExhaustedNote = " (рядок змінювали під час запису — 3 спроби поспіль)";
+
     /// <inheritdoc />
     public async Task<IntegrationWriteResult> ApplyIntegrationAsync(
         long documentId,
@@ -58,69 +96,185 @@ public sealed class IntegrationCellPatcher(
         var columns = await db.ColumnDefs
             .AsNoTracking()
             .Where(c => c.TableDefId == instance.TableDefId && !c.IsDeleted)
-            .Select(c => new { c.Id, c.Code })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var codeById = columns.ToDictionary(c => c.Id, c => c.Code);
+        var columnById = columns.ToDictionary(c => c.Id);
+
+        for (var attempt = 1; ; attempt++)
+        {
+            var plan = await PlanAsync(tableInstanceId, periodKey, cells, columnById, ct).ConfigureAwait(false);
+
+            if (plan.Rows.Count == 0)
+            {
+                return new IntegrationWriteResult(0, plan.Kept);
+            }
+
+            try
+            {
+                await patch
+                    .HandleAsync(
+                        new PatchCellsRequest(tableInstanceId, periodKey.Value, "Integration", plan.Rows),
+                        ct)
+                    .ConfigureAwait(false);
+
+                return new IntegrationWriteResult(plan.Applied, plan.Kept);
+            }
+            catch (EcrException ex) when (IsRowRace(ex))
+            {
+                // ⚠ Відкинутий батч міг лишити в трекері контексту зміни, яких
+                // у базі вже немає (транзакцію запису відкочено), — наступна
+                // спроба не має їх дописувати.
+                db.ChangeTracker.Clear();
+
+                if (attempt >= MaxAttempts)
+                {
+                    return new IntegrationWriteResult(
+                        0,
+                        [.. plan.Kept, .. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}{RetriesExhaustedNote}"))]);
+                }
+            }
+        }
+    }
+
+    /// <summary>Те, що піде в обробник за одну спробу, і те, що лишено.</summary>
+    private sealed record WritePlan(List<PatchRow> Rows, List<string> Kept, int Applied);
+
+    /// <summary>
+    /// Чи це гонка за рядок, яку знімає перечитування: версію змінили
+    /// (<c>ECR-CELL-0409</c>) або рядок, якого не було, щойно створили
+    /// (<c>ECR-ROW-0409</c> «ключі вже існують»).
+    /// </summary>
+    private static bool IsRowRace(EcrException ex)
+        => string.Equals(ex.ErrorCode, ErrorCodes.CellConflict, StringComparison.Ordinal)
+           || (string.Equals(ex.ErrorCode, ErrorCodes.RowDuplicate, StringComparison.Ordinal)
+               && ex.Details?.GetValueOrDefault("messageKey") is "err.ECR-ROW-0409.rowKeysExist");
+
+    /// <summary>Будує батч за ПОТОЧНИМ станом таблиці.</summary>
+    /// <remarks>
+    /// ⛔ Порядок читань — частина правила <c>D-118</c>, а не стиль. Спершу
+    /// ВЕРСІЇ рядків, потім правки людини, потім значення. Людина, що встигла
+    /// до читання версій, видна в журналі; людина, що встигла після, змінила
+    /// версію рядка, і обробник відхилить батч (<c>ECR-CELL-0409</c>) — а
+    /// повтор уже побачить її правку. Навпаки (журнал, потім версії) лишало б
+    /// вікно, у якому правку людини мовчки затирає інтеграція.
+    /// </remarks>
+    private async Task<WritePlan> PlanAsync(
+        long tableInstanceId,
+        PeriodKey periodKey,
+        IReadOnlyList<IntegrationCellValue> cells,
+        Dictionary<int, ColumnDef> columnById,
+        CancellationToken ct)
+    {
+        var existing = (await rowStore.GetRowsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false))
+            .ToDictionary(r => r.RowKey, StringComparer.Ordinal);
 
         // ⛔ Комірки, що їх правила людина, не чіпаємо (`D-118`). Ознака —
         // походження останньої зміни в журналі комірок: `UserEdit` означає
         // свідоме рішення, і інтеграція не має права його стерти.
         var manual = await ManualCellsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
 
-        var rows = new List<PatchRow>();
+        var candidates = new List<(IntegrationCellValue Cell, ColumnDef Column)>();
         var kept = new List<string>();
+
+        foreach (var cell in cells)
+        {
+            if (!columnById.TryGetValue(cell.ColumnDefId, out var column))
+            {
+                // Колонки немає серед живих колонок цієї таблиці. Мапінги
+                // чужих таблиць сюди вже не доходять (задача звужує їх до
+                // таблиці екземпляра, суміжне D16-03), тож лишається
+                // видалена колонка — помилка конфігурації, і мовчати про
+                // неї не можна, але й падати посеред перенесення теж.
+                kept.Add($"{cell.RowKey}:columnDef={cell.ColumnDefId}");
+                continue;
+            }
+
+            if (manual.Contains($"{cell.RowKey}:{column.Code}"))
+            {
+                kept.Add($"{cell.RowKey}:{column.Code}");
+                continue;
+            }
+
+            candidates.Add((cell, column));
+        }
+
+        var current = await CurrentValuesAsync(periodKey, candidates, existing, ct).ConfigureAwait(false);
+
+        var rows = new List<PatchRow>();
         var applied = 0;
 
-        foreach (var group in cells.GroupBy(c => c.RowKey, StringComparer.Ordinal))
+        foreach (var group in candidates.GroupBy(c => c.Cell.RowKey, StringComparer.Ordinal))
         {
-            var patchCells = new List<PatchCell>();
+            existing.TryGetValue(group.Key, out var row);
 
-            foreach (var cell in group)
+            var patchCells = group
+                .Where(c => row is null || !Unchanged(c.Cell, c.Column, row.Id, periodKey, current))
+                .Select(c => new PatchCell(c.Column.Code, c.Cell.Value))
+                .ToList();
+
+            if (patchCells.Count == 0)
             {
-                if (!codeById.TryGetValue(cell.ColumnDefId, out var code))
-                {
-                    // Колонки немає серед живих колонок цієї таблиці. Мапінги
-                    // чужих таблиць сюди вже не доходять (задача звужує їх до
-                    // таблиці екземпляра, суміжне D16-03), тож лишається
-                    // видалена колонка — помилка конфігурації, і мовчати про
-                    // неї не можна, але й падати посеред перенесення теж.
-                    kept.Add($"{group.Key}:columnDef={cell.ColumnDefId}");
-                    continue;
-                }
-
-                if (manual.Contains($"{group.Key}:{code}"))
-                {
-                    kept.Add($"{group.Key}:{code}");
-                    continue;
-                }
-
-                patchCells.Add(new PatchCell(code, cell.Value));
-                applied++;
+                continue;
             }
 
-            if (patchCells.Count > 0)
-            {
-                // ⚠ `baseVersion = null` означає «створити рядок, якщо його
-                // немає» (R-B2). Для інтеграції це правильно: рядок-адресат
-                // описаний у шаблоні, і його поява — не конфлікт.
-                rows.Add(new PatchRow(group.Key, BaseVersion: null, patchCells));
-            }
+            // ⚠ Наявний рядок — з його версією (оновлення), відсутній — `null`
+            // (створення, R-B2): рядок-адресат описаний у шаблоні, і його
+            // поява — не конфлікт.
+            rows.Add(new PatchRow(group.Key, BaseVersion: row?.RowVersion, patchCells));
+            applied += patchCells.Count;
         }
 
-        if (rows.Count == 0)
+        return new WritePlan(rows, kept, applied);
+    }
+
+    /// <summary>Чинні значення комірок-кандидатів у наявних рядках.</summary>
+    private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> CurrentValuesAsync(
+        PeriodKey periodKey,
+        List<(IntegrationCellValue Cell, ColumnDef Column)> candidates,
+        Dictionary<string, RowState> existing,
+        CancellationToken ct)
+    {
+        var addresses = candidates
+            .Where(c => existing.ContainsKey(c.Cell.RowKey))
+            .Select(c => new CellAddress(periodKey, existing[c.Cell.RowKey].Id, c.Column.Id))
+            .Distinct()
+            .ToList();
+
+        return addresses.Count == 0
+            ? new Dictionary<CellAddress, CellValueData>()
+            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Чи збіглося б записане значення з чинним.</summary>
+    /// <remarks>
+    /// ⚠ Порівняння — тим самим критерієм, яким обробник вирішує «зміни не
+    /// було» для журналу (`U-22`): значення, розібране за колонкою
+    /// (<see cref="CellValueReader.Read"/>), дорівнює збереженому як запис,
+    /// включно з <c>IsCalculated</c> і <c>IsEmpty</c>. Значення, яке колонка не
+    /// приймає, — «змінене»: відмову з причиною має дати обробник, а не
+    /// мовчазний пропуск тут.
+    /// </remarks>
+    private static bool Unchanged(
+        IntegrationCellValue cell,
+        ColumnDef column,
+        long rowId,
+        PeriodKey periodKey,
+        IReadOnlyDictionary<CellAddress, CellValueData> current)
+    {
+        if (!current.TryGetValue(new CellAddress(periodKey, rowId, column.Id), out var stored))
         {
-            return new IntegrationWriteResult(0, kept);
+            return false;
         }
 
-        await patch
-            .HandleAsync(
-                new PatchCellsRequest(tableInstanceId, periodKey.Value, "Integration", rows),
-                ct)
-            .ConfigureAwait(false);
-
-        return new IntegrationWriteResult(applied, kept);
+        try
+        {
+            return CellValueReader.Read(cell.Value, column) == stored;
+        }
+        catch (EcrException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Комірки, останню зміну яких зробила людина.</summary>
