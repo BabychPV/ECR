@@ -41,7 +41,6 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-1.6")]
     public void До_дати_відкриття_період_у_стані_Scheduled()
     {
         var state = Calculator.Calculate(January(), SiteMidnight(2025, 12, 20), Site);
@@ -97,7 +96,6 @@ public sealed class PeriodStateCalculatorTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-1.8")]
     public void Після_HardClose_стан_Closed()
     {
         var state = Calculator.Calculate(January(), SiteMidnight(2026, 3, 1), Site);

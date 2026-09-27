@@ -182,6 +182,7 @@ public sealed class CreateProjectTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-1.8")]
     public async Task Річний_грейс_береться_з_обраної_політики_а_не_з_45_T6_37()
     {
         // ⛔ T6/#37. До цього `Project.YearGraceOffsetDays` стояв літералом

@@ -19,7 +19,6 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-7.9")]
     public async Task Незастосована_міграція_у_режимі_Validate_зупиняє_старт()
     {
         // Прибираємо запис про міграцію — база стає «старішою» за збірку.
