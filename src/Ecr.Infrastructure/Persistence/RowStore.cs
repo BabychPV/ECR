@@ -116,6 +116,50 @@ public sealed class RowStore(
         return archived.ToDictionary(r => r.RowKey, r => r.Id, StringComparer.Ordinal);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Предикат — <see cref="RowsQuery"/>, той самий, що в
+    /// <see cref="GetRowVersionsAsync"/>/<see cref="GetRowIdsAsync"/>: сторож
+    /// <c>WR-05</c> (<c>PartitionKeyQueryTests</c>) перевіряє саме цю фабрику,
+    /// тож новий запит під ним автоматично, окремої реєстрації не потрібно.
+    ///
+    /// ⚠ Архівний фолбек (F-13) — ті самі три читання <c>arc.*</c>, що й у
+    /// сусідніх методах, лише на порожньому гарячому результаті. Гарячий шлях
+    /// платить одним запитом.
+    /// </remarks>
+    public async Task<IReadOnlyList<RowState>> GetRowsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
+        var rows = await RowsQuery(db, tableInstanceId, periodKey)
+            .Select(r => new { r.RowKeyValue, r.Id, r.RowVersion, r.IsOrphaned })
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        if (rows.Count > 0 || archive is null)
+        {
+            return rows.ConvertAll(r => new RowState(
+                r.RowKeyValue, r.Id, Convert.ToBase64String(r.RowVersion), r.IsOrphaned));
+        }
+
+        var ids = await archive.ReadArchivedRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        var versions = (await archive.ReadArchivedRowVersionsAsync(tableInstanceId, periodKey, ct)
+                .ConfigureAwait(false))
+            .ToDictionary(r => r.RowKey, r => r.RowVersion, StringComparer.Ordinal);
+        var orphans = (await archive.ReadArchivedOrphanFlagsAsync(tableInstanceId, periodKey, ct)
+                .ConfigureAwait(false))
+            .ToDictionary(r => r.Id, r => r.IsOrphaned);
+
+        return [.. ids.Select(r => new RowState(
+            r.RowKey,
+            r.Id,
+            versions.GetValueOrDefault(r.RowKey, string.Empty),
+            orphans.GetValueOrDefault(r.Id)))];
+    }
+
     /// <summary>Живі рядки одного екземпляра таблиці в його періоді.</summary>
     /// <param name="db">Контекст.</param>
     /// <param name="tableInstanceId">Екземпляр таблиці.</param>

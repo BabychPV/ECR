@@ -409,8 +409,13 @@ public sealed class PatchCellsHandler(
         var columns = columnDefs.ToDictionary(p => p.Key, p => p.Value.Id, StringComparer.Ordinal);
 
         // 2. Поточний стан рядків — ОДИН запит на батч, не на рядок.
-        var versions = await rowStore.GetRowVersionsAsync(request.TableInstanceId, periodKey, ct).ConfigureAwait(false);
-        var rowIds = await rowStore.GetRowIdsAsync(request.TableInstanceId, periodKey, ct).ConfigureAwait(false);
+        //
+        // ⚠ `WR-04` п. 3: версії й ідентифікатори — одним читанням. Доти це
+        // були два запити з однаковим предикатом (`GetRowVersionsAsync` +
+        // `GetRowIdsAsync`).
+        var rows = await rowStore.GetRowsAsync(request.TableInstanceId, periodKey, ct).ConfigureAwait(false);
+        var versions = rows.ToDictionary(r => r.RowKey, r => r.RowVersion, StringComparer.Ordinal);
+        var rowIds = rows.ToDictionary(r => r.RowKey, r => r.Id, StringComparer.Ordinal);
 
         // 3. Створення і оновлення розділяються за BaseVersion (R-B2):
         //    null означає намір СТВОРИТИ рядок, а не «мені байдуже до версії».

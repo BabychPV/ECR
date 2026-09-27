@@ -102,10 +102,12 @@ public sealed class PatchCellsTests
         // які не про методологію, лишається РІВНО такою, як до gate-у.
         _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
                        .Returns(Task.FromResult<IReadOnlyList<int>>([]));
+        // ⚠ `WR-04` п. 3: стан рядків до запису — одним `GetRowsAsync`;
+        // `GetRowVersionsAsync` лишається джерелом версій для відповіді.
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A")));
         _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
@@ -160,6 +162,10 @@ public sealed class PatchCellsTests
                    .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
     }
 
+    /// <summary>Стан рядків таблиці так, як його віддає <c>IRowStore.GetRowsAsync</c>.</summary>
+    private static IReadOnlyList<RowState> RowStates(params (string Key, long Id, string Version)[] rows)
+        => [.. rows.Select(r => new RowState(r.Key, r.Id, r.Version, IsOrphaned: false))];
+
     private static void SetId(ColumnDef column, int id)
         => typeof(Ecr.Domain.Abstractions.Entity<int>)
             .GetProperty("Id")!.SetValue(column, id);
@@ -202,10 +208,9 @@ public sealed class PatchCellsTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task Значення_записується_і_повертається_нова_версія_рядка()
     {
+        // Стан до запису — 0x0A (конструктор, `GetRowsAsync`); після — 0x0B.
         _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(
-                 new Dictionary<string, string> { ["7001001"] = "0x0A" },
-                 new Dictionary<string, string> { ["7001001"] = "0x0B" });
+             .Returns(new Dictionary<string, string> { ["7001001"] = "0x0B" });
 
         var response = await Handler().HandleAsync(
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
@@ -381,7 +386,7 @@ public sealed class PatchCellsTests
         WithTable(TableRowMode.Dynamic, maxDynamicRows: 1);
 
         // У таблиці вже є один рядок (7001001, з дефолтного фікстурного
-        // GetRowIdsAsync) — другий створюваний перевищив би межу в 1.
+        // GetRowsAsync) — другий створюваний перевищив би межу в 1.
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
             Request(new PatchRow("DYN-2", BaseVersion: null, [new PatchCell("Volume", 1m)])),
             CancellationToken.None));
@@ -501,10 +506,8 @@ public sealed class PatchCellsTests
     [Trait("Requirement", "ФВ-3.7")]
     public async Task Конфлікт_в_одному_рядку_відхиляє_весь_батч_із_переліком_конфліктів()
     {
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A", ["7001002"] = "0xFF" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L, ["7001002"] = 1002L });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(RowStates(("7001001", 1001L, "0x0A"), ("7001002", 1002L, "0xFF")));
 
         var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Handler().HandleAsync(
             Request(

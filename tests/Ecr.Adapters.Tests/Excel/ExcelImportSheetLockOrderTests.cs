@@ -88,8 +88,8 @@ public sealed class ExcelImportSheetLockOrderTests
         {
             _rows.ResolveTableInstanceAsync(table.Instance, Arg.Any<CancellationToken>())
                  .Returns(new TableInstanceRef(table.Instance, DocumentId, table.TableDefId, TemplateVersionId, Period));
-            _rows.GetRowIdsAsync(table.Instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-                 .Returns(new Dictionary<string, long> { ["R1"] = table.RowId });
+            _rows.GetRowsAsync(table.Instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+                 .Returns(new List<RowState> { new("R1", table.RowId, "0xAA", IsOrphaned: false) });
             _rows.GetRowVersionsAsync(table.Instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(new Dictionary<string, string> { ["R1"] = "0xAA" });
             _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), table.Instance, Arg.Any<CancellationToken>())

@@ -106,10 +106,8 @@ public sealed class PatchCellsLocalizedErrorTests
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(snapshot);
         _methodologies.GetMethodologyIdsBoundToTableAsync(3, Arg.Any<CancellationToken>())
                       .Returns(Task.FromResult<IReadOnlyList<int>>([]));
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string> { [RowKeyValue] = "0x0A" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { [RowKeyValue] = 1001L });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState> { new(RowKeyValue, 1001L, "0x0A", IsOrphaned: false) });
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());

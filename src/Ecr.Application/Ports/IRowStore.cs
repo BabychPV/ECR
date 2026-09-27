@@ -50,6 +50,19 @@ public interface IRowStore
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Живі рядки таблиці ОДНИМ запитом: ключ, <c>TableRow.Id</c>, версія
+    /// (Base64, як у <see cref="GetRowVersionsAsync"/>) і ознака осиротілості.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>WR-04</c> п. 3: той самий предикат, що в
+    /// <see cref="GetRowVersionsAsync"/> і <see cref="GetRowIdsAsync"/>, — тож
+    /// викликач, якому потрібні обидві мапи (запис комірок), платить одним
+    /// зверненням, а не двома.
+    /// </remarks>
+    public Task<IReadOnlyList<RowState>> GetRowsAsync(
+        long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
     /// Ідентифікатори рядків кількох таблиць ОДНИМ запитом; екземпляр без
     /// жодного рядка в результат не потрапляє.
     /// </summary>
@@ -191,3 +204,10 @@ public interface IRowStore
 /// <param name="PeriodKey">Період екземпляра; він же ключ партиції.</param>
 public sealed record TableInstanceRef(
     long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey);
+
+/// <summary>Стан одного живого рядка таблиці.</summary>
+/// <param name="RowKey">Ключ рядка.</param>
+/// <param name="Id"><c>TableRow.Id</c>.</param>
+/// <param name="RowVersion"><c>rowversion</c> у Base64 — те, що клієнт шле в <c>baseVersion</c>.</param>
+/// <param name="IsOrphaned">Збережена ознака осиротілості (<c>D-98</c>).</param>
+public sealed record RowState(string RowKey, long Id, string RowVersion, bool IsOrphaned);

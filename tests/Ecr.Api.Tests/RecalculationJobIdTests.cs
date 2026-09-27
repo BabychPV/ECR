@@ -115,8 +115,8 @@ public sealed class RecalculationJobIdTests
                       .Returns(Task.FromResult<IReadOnlyList<int>>([]));
         _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, string> { ["7001001"] = "0x0A" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState> { new("7001001", 1001L, "0x0A", IsOrphaned: false) });
 
         // ⛔ ОДИН профіль на обидва обробники, і в ньому НЕМАЄ
         // `System.ViewHealth`: саме це право й перевіряє `GetJobStatusHandler`

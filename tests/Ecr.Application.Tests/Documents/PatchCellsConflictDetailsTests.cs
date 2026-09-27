@@ -110,10 +110,8 @@ public sealed class PatchCellsConflictDetailsTests
         _metadata.GetAsync(2, Arg.Any<CancellationToken>()).Returns(snapshot);
 
         // Версія в базі не та, яку заявляє клієнт, — це і є конфлікт.
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string> { [RowKey] = "0xFF" });
-        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, long> { [RowKey] = TableRowId });
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState> { new(RowKey, TableRowId, "0xFF", IsOrphaned: false) });
     }
 
     private PatchCellsHandler Handler()
@@ -301,8 +299,8 @@ public sealed class PatchCellsConflictDetailsTests
     {
         // Рядок відсутній у версіях: клієнт заявив `baseVersion` на рядок, який
         // тим часом зник.
-        _rows.GetRowVersionsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-             .Returns(new Dictionary<string, string>());
+        _rows.GetRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new List<RowState>());
 
         var conflict = await Assert.ThrowsAsync<ConcurrencyConflictException>(
             () => Handler().HandleAsync(StaleRequest(new PatchCell("Volume", 9m)), CancellationToken.None));

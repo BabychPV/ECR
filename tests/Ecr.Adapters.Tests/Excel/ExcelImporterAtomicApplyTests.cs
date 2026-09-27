@@ -93,8 +93,8 @@ public sealed class ExcelImporterAtomicApplyTests
 
             _rows.ResolveTableInstanceAsync(instance, Arg.Any<CancellationToken>())
                  .Returns(new TableInstanceRef(instance, DocumentId, TableDefId, TemplateVersionId, Period));
-            _rows.GetRowIdsAsync(instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
-                 .Returns(new Dictionary<string, long> { ["R1"] = rowId });
+            _rows.GetRowsAsync(instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+                 .Returns(new List<RowState> { new("R1", rowId, "0xAA", IsOrphaned: false) });
             _rows.GetRowVersionsAsync(instance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(new Dictionary<string, string> { ["R1"] = "0xAA" });
             _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), instance, Arg.Any<CancellationToken>())
