@@ -288,7 +288,12 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
 
         // ⚠ Стан аркуша — так, як його читає `AccessDecisionService.BuildContextAsync`:
         // тим самим контекстом, `AsNoTracking`, окремим запитом поза транзакцією запису.
-        access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
+        //
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        access.CanEditCellsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
               .Returns(async _ =>
               {
                   var status = await db.ApprovalStates

@@ -97,6 +97,18 @@ public sealed class ExcelImportSheetLockOrderTests
                    {
                        [new CellAddress(PeriodKey.Parse(Period), table.RowId, table.ColumnId)] = EditDecision.Allow(),
                    });
+
+            // ⚠ WR-03: вкладений РЕАЛЬНИЙ `PatchCellsHandler` (той самий
+            // `_access`) тепер питає лише адреси батчу через `CanEditCellsAsync`,
+            // не весь зріз через `CanEditSliceAsync` (той лишається для
+            // власного попереднього перегляду `ExcelImporter`).
+            _access.CanEditCellsAsync(
+                       Arg.Any<AccessProfile>(), table.Instance, Arg.Any<PeriodKey>(),
+                       Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+                   .Returns(new Dictionary<CellAddress, EditDecision>
+                   {
+                       [new CellAddress(PeriodKey.Parse(Period), table.RowId, table.ColumnId)] = EditDecision.Allow(),
+                   });
         }
 
         // Підмінена транзакція виконує тіло; вкладена — теж (як справжня UnitOfWork).

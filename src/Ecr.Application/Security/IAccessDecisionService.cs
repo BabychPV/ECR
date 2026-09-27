@@ -67,6 +67,39 @@ public interface IAccessDecisionService
         AccessProfile profile, long tableInstanceId, CancellationToken ct);
 
     /// <summary>
+    /// Пакетна перевірка для запису: рішення лише для <paramref name="addresses"/>,
+    /// а не для всього зрізу.
+    /// </summary>
+    /// <param name="profile">Профіль прав користувача.</param>
+    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
+    /// <param name="periodKey">Період екземпляра — той самий, що й у кожній адресі батчу.</param>
+    /// <param name="addresses">Адреси комірок батчу.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Адреса → рішення. Адреса, чийого рядка чи колонки не існує (рядок
+    /// видалено чи створено паралельним запитом між читаннями), у словнику
+    /// відсутня — так само, як і в <see cref="CanEditSliceAsync"/>; викликач
+    /// трактує відсутність запису як відмову сам.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ <c>DIRECTIVE-14-ARCH.md</c>, <c>WR-03</c>. <see cref="CanEditSliceAsync"/>
+    /// читає ВСІ рядки екземпляра і будує словник <c>rows × columns</c>, а
+    /// <c>PatchCellsHandler</c> використовує з нього лише адреси батчу — на
+    /// таблиці 500×60 це до 30 000 зайвих рішень заради, наприклад, однієї
+    /// зміненої комірки. Цей метод фільтрує рядки одразу за
+    /// <paramref name="periodKey"/> і за ідентифікаторами рядків із
+    /// <paramref name="addresses"/>, і рахує рішення лише для запитаних
+    /// комірок — тим самим обчислювачем правил, що й <see cref="CanEditSliceAsync"/>.
+    ///
+    /// ⚠ Не заміна <see cref="CanEditSliceAsync"/>: той лишається для читання
+    /// (відкриття таблиці, де рішення потрібні на кожну комірку зрізу
+    /// одразу) і переробляється окремою задачею <c>RD-02</c>.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditCellsAsync(
+        AccessProfile profile, long tableInstanceId, PeriodKey periodKey,
+        IReadOnlyCollection<CellAddress> addresses, CancellationToken ct);
+
+    /// <summary>
     /// Рішення для рядків, яких у зрізі ще <b>немає</b> — тобто для створення.
     /// </summary>
     /// <param name="profile">Профіль прав користувача.</param>

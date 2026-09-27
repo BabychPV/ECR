@@ -341,10 +341,74 @@ public sealed class AccessDecisionService(
         return result;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ <c>DIRECTIVE-14-ARCH.md</c>, <c>WR-03</c>. На відміну від
+    /// <see cref="CanEditSliceAsync"/> рядки читаються ЛИШЕ ті, що входять у
+    /// <paramref name="addresses"/> (<c>SliceRowsQuery</c> з <c>rowIds</c>), і
+    /// <see cref="Decide"/> викликається лише на запитані адреси — не на
+    /// <c>rows × columns</c> усього екземпляра. Спільна підготовка зрізу
+    /// (<see cref="SliceContextAsync"/>) лишається тією самою: вона й так
+    /// коштує кілька запитів на весь зріз, а не на рядок.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditCellsAsync(
+        AccessProfile profile, long tableInstanceId, PeriodKey periodKey,
+        IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(addresses);
+
+        var result = new Dictionary<CellAddress, EditDecision>(addresses.Count);
+
+        if (addresses.Count == 0)
+        {
+            return result;
+        }
+
+        var slice = await SliceContextAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var columnsById = slice.Columns.ToDictionary(c => c.Id);
+
+        var rowIds = addresses.Select(a => a.TableRowId).Distinct().ToList();
+
+        // ⛔ WR-03: рядки батчу, не весь екземпляр — `Id IN (…)` поверх
+        // предиката партиції, той самий запит-фабрика, що й у CanEditSliceAsync.
+        var rows = await SliceRowsQuery(db, tableInstanceId, periodKey, rowIds)
+            .Select(r => new { r.Id, r.RowKey })
+            .ToDictionaryAsync(r => r.Id, ct)
+            .ConfigureAwait(false);
+
+        foreach (var address in addresses)
+        {
+            // ⚠ Немає рядка чи колонки в зрізі (рядок видалено, або
+            // ColumnDefId з іншої таблиці) — адреса просто відсутня в
+            // результаті, так само як і в CanEditSliceAsync. Викликач
+            // (`PatchCellsHandler.EnsureAccessAsync`) уже трактує відсутність
+            // рішення як відмову сам — тут нема потреби дублювати цю політику.
+            if (!rows.TryGetValue(address.TableRowId, out var row)
+                || !columnsById.TryGetValue(address.ColumnDefId, out var column))
+            {
+                continue;
+            }
+
+            var sourceValues = slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows)
+                ? windows
+                : EmptyWindows;
+
+            result[address] = Decide(profile, slice, row.RowKey, column, sourceValues);
+        }
+
+        return result;
+    }
+
     /// <summary>Рядки зрізу — запит, який іде і в бойовий шлях, і в сторожа <c>WR-05</c>.</summary>
     /// <param name="db">Контекст.</param>
     /// <param name="tableInstanceId">Екземпляр таблиці.</param>
     /// <param name="periodKey">Період екземпляра — він же ключ партиції.</param>
+    /// <param name="rowIds">
+    /// <c>null</c> — усі рядки зрізу (<see cref="CanEditSliceAsync"/>); інакше —
+    /// лише перелічені (<c>WR-03</c>, <see cref="CanEditCellsAsync"/>): <c>Id IN (…)</c>
+    /// поверх того самого предиката партиції, без зайвого читання решти рядків.
+    /// </param>
     /// <returns>Незавершений запит; проєкцію добирає викликач.</returns>
     /// <remarks>
     /// ⛔ <paramref name="periodKey"/> тут не «на всяк випадок». Кластерний ключ
@@ -365,15 +429,18 @@ public sealed class AccessDecisionService(
     /// бойовий шлях мусить ходити сюди ж.
     /// </remarks>
     public static IQueryable<TableRow> SliceRowsQuery(
-        EcrDbContext db, long tableInstanceId, PeriodKey periodKey)
+        EcrDbContext db, long tableInstanceId, PeriodKey periodKey,
+        IReadOnlyCollection<long>? rowIds = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        return db.TableRows
+        var query = db.TableRows
             .AsNoTracking()
             .Where(r => r.PeriodKeyValue == periodKey.Value
                         && r.TableInstanceId == tableInstanceId
                         && !r.IsDeleted);
+
+        return rowIds is null ? query : query.Where(r => rowIds.Contains(r.Id));
     }
 
     /// <inheritdoc />

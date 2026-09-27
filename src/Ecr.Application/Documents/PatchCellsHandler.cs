@@ -755,12 +755,17 @@ public sealed class PatchCellsHandler(
 
         if (addresses.Count > 0)
         {
-            var decisions = await access.CanEditSliceAsync(profile, request.TableInstanceId, ct)
-                                        .ConfigureAwait(false);
+            // ⛔ `DIRECTIVE-14-ARCH.md`, `WR-03`. `CanEditSliceAsync` рахує
+            // рішення на ВЕСЬ зріз (rows × columns), а тут потрібні лише
+            // адреси батчу — `CanEditCellsAsync` фільтрує рядки за
+            // `PeriodKey` і `Id IN (…)` і рахує рішення лише на них.
+            var decisions = await access
+                .CanEditCellsAsync(profile, request.TableInstanceId, context.PeriodKey, addresses, ct)
+                .ConfigureAwait(false);
 
             // Перевіряємо лише ті адреси, які справді змінюються: рішення
-            // приходять на весь зріз, але відхиляти батч через заборонену
-            // комірку, якої ніхто не чіпав, було б неправильно.
+            // приходять лише на них, але явний цикл (а не голе "усе allowed")
+            // лишається — щоб не загубити перевірку `IsAllowed` нижче.
             //
             // ⛔ Немає рішення — ВІДМОВА, так само як для створень нижче
             // (`DIRECTIVE-14-ARCH.md`, `DAT-04`; `S-15` частини 1). Тут стояло
@@ -769,10 +774,9 @@ public sealed class PatchCellsHandler(
             // одному методі жили дві протилежні політики замовчування, і
             // небезпечніша з них припадала на оновлення, тобто на гарячий шлях.
             //
-            // ⚠ Мовчазна відсутність рішення — не теоретична: `CanEditSliceAsync`
-            // будує словник із рядків, прочитаних ОКРЕМИМ запитом, і рядок,
-            // створений паралельним запитом між тими двома читаннями, у
-            // словник не потрапляє.
+            // ⚠ Мовчазна відсутність рішення — не теоретична: рядок,
+            // створений паралельним запитом між читаннями, у словник не
+            // потрапляє.
             foreach (var address in addresses)
             {
                 if (!decisions.TryGetValue(address, out var decision))

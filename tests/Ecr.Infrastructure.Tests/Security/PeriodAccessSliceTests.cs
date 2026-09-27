@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Ecr.Application.Common;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
@@ -221,6 +223,126 @@ public sealed class PeriodAccessSliceTests(SqlServerFixture sql) : IDisposable
             Profile(doc.ProjectId), doc.TableInstanceId, CancellationToken.None);
 
         return executed.Count;
+    }
+
+    /// <summary>
+    /// <c>DIRECTIVE-14-ARCH.md</c>, <c>WR-03</c>: <c>CanEditCellsAsync</c> дає ТІ
+    /// САМІ рішення, що й <c>CanEditSliceAsync</c>, для адрес, які справді
+    /// запитали — «звужений обчислювач» не сміє означати «інший обчислювач».
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Три колонки навмисно: <c>columnIndex 0</c> — та, на яку посилається
+    /// правило <c>SourceWindow</c> (сам вибір дозволу, без блокування);
+    /// <c>columnIndex 2</c> — місячна колонка, яку правило й обмежує. Один
+    /// індекс довів би лише збіг на одній гілці <c>Decide</c>.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-03")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task CanEditCellsAsync_дає_ті_самі_рішення_що_і_CanEditSliceAsync(int columnIndex)
+    {
+        var (doc, builder) = await ArrangeAsync();
+
+        await ArrangePermitAsync(
+            builder, doc,
+            validFrom: new DateOnly(2026, 1, 1),
+            validTo: new DateOnly(2026, 8, 31),
+            forRows: [doc.RowIds[0]]);
+
+        var wholeSlice = await DecideAsync(builder, doc);
+
+        var column = doc.ColumnDefIds[columnIndex];
+        var addresses = doc.RowIds
+            .Select(rowId => new CellAddress(new PeriodKey(PeriodKeyValue), rowId, column))
+            .ToList();
+
+        await using var db = builder.CreateContext();
+        var scoped = await Service(db).CanEditCellsAsync(
+            Profile(doc.ProjectId), doc.TableInstanceId, new PeriodKey(PeriodKeyValue), addresses,
+            CancellationToken.None);
+
+        // ⛔ Не більше й не менше запитаного: rows × columns усього зрізу
+        // (3 рядки × 3 колонки = 9) тут не годиться — лише адреси батчу.
+        Assert.Equal(addresses.Count, scoped.Count);
+
+        foreach (var address in addresses)
+        {
+            var expected = wholeSlice[address];
+            var actual = scoped[address];
+
+            Assert.Equal(expected.IsAllowed, actual.IsAllowed);
+            Assert.Equal(expected.Reason, actual.Reason);
+            Assert.Equal(expected.RequiresConfirmation, actual.RequiresConfirmation);
+            Assert.Equal(expected.Detail, actual.Detail);
+        }
+    }
+
+    /// <summary>
+    /// <c>WR-03</c>, доказ мутацією проти РЕАЛЬНОГО методу, а не проти
+    /// фабрики запиту окремо. Кількість рішень у результаті сама по собі не
+    /// доводить звуження: реалізація, яка рахує ввесь зріз
+    /// (<c>CanEditSliceAsync</c>) і фільтрує словник ПІСЛЯ, віддала б той
+    /// самий вихід і пройшла б тест еквівалентності вище так само зелено.
+    /// Тут перевіряється сам SQL, який <c>CanEditCellsAsync</c> НАСПРАВДІ
+    /// відправляє в СУБД (<c>LogTo</c>, той самий прийом, що й
+    /// <c>Правило_SourceWindow_не_додає_запитів_на_кожен_рядок</c> вище): він
+    /// мусить нести предикат на <c>Id</c> рядка, а не лише на
+    /// <c>TableInstanceId</c>/<c>PeriodKey</c>. Регрес — виклик
+    /// <c>SliceRowsQuery</c> БЕЗ <c>rowIds</c> — прибрав би цей предикат, і
+    /// запит знову читав би всі рядки екземпляра; цей тест зловив би це, а
+    /// тест еквівалентності — ні (фінальний словник лишився б тим самим).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "WR-03")]
+    public async Task CanEditCellsAsync_запит_рядків_несе_предикат_на_Id_адреси()
+    {
+        var (doc, builder) = await ArrangeAsync(rowCount: 5);
+
+        var targetRowId = doc.RowIds[2];
+        var address = new CellAddress(doc.PeriodKey, targetRowId, doc.ColumnDefIds[0]);
+
+        var executed = new List<string>();
+        await using var db = new EcrDbContext(new DbContextOptionsBuilder<EcrDbContext>()
+            .UseSqlServer(sql.ConnectionString)
+            .LogTo(executed.Add, [RelationalEventId.CommandExecuted])
+            // ⚠ Лише тестовий контекст: без цього значення параметрів у
+            // логу — «?», і предметну частину доказу (саме ЦЕЙ Id, не
+            // «якийсь IN») перевірити нічим.
+            .EnableSensitiveDataLogging()
+            .Options);
+
+        var result = await Service(db).CanEditCellsAsync(
+            Profile(doc.ProjectId), doc.TableInstanceId, doc.PeriodKey, [address], CancellationToken.None);
+
+        Assert.Single(result);
+        Assert.True(result[address].IsAllowed);
+
+        var rowsCommand = executed.SingleOrDefault(
+            text => Regex.IsMatch(text, @"FROM\s+\[doc\]\.\[TableRow\]", RegexOptions.IgnoreCase));
+
+        Assert.False(
+            string.IsNullOrEmpty(rowsCommand),
+            "Серед виконаних команд немає запиту до doc.TableRow. Виконано:"
+            + Environment.NewLine + string.Join(Environment.NewLine, executed));
+
+        // ⛔ Доказ звуження: предикат по Id рядка є, і несе саме той
+        // ідентифікатор, який запитала адреса, — не просто «якийсь IN».
+        //
+        // ⚠ Для одноелементного `IReadOnlyCollection<long>` EF Core 10
+        // спеціалізує `rowIds.Contains(r.Id)` у `[t].[Id] = @rowIds1`
+        // (рівність), а не в `IN (…)` — `IN` з'являється лише від двох
+        // адрес. Директивний приклад — саме PATCH ОДНІЄЇ комірки, тож тут
+        // очікується рівність; регекс приймає обидві форми, щоб не
+        // залежати від внутрішньої евристики провайдера.
+        Assert.Matches(@"\[Id\]\s*(=|IN\b)", rowsCommand!);
+        Assert.Contains(
+            targetRowId.ToString(CultureInfo.InvariantCulture), rowsCommand!, StringComparison.Ordinal);
     }
 
     /// <summary>Ланцюг «шаблон → період → документ» із відкритим періодом.</summary>

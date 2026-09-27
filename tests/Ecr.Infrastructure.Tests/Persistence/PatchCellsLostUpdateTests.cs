@@ -188,7 +188,11 @@ public sealed class PatchCellsLostUpdateTests(SqlServerFixture sql)
         // ПОРОЖНІЙ словник, і тест проходив лише тому, що обробник трактував
         // відсутність рішення як дозвіл (`DAT-04`). Предмет цього файлу — не
         // права, тож передумова тепер названа явно, а не отримана з дефекту.
-        access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        access.CanEditCellsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
               .Returns(doc.RowIds
                   .SelectMany(rowId => doc.ColumnDefIds
                       .Select(columnId => new CellAddress(doc.PeriodKey, rowId, columnId)))

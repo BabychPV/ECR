@@ -170,7 +170,11 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
         access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(profile);
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
-        access.CanEditSliceAsync(Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        access.CanEditCellsAsync(
+                  Arg.Any<AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
               .Returns(doc.RowIds
                   .SelectMany(rowId => doc.ColumnDefIds
                       .Select(columnId => new CellAddress(doc.PeriodKey, rowId, columnId)))

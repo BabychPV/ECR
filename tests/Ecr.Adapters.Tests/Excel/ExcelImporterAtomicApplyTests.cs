@@ -102,6 +102,18 @@ public sealed class ExcelImporterAtomicApplyTests
                    {
                        [new CellAddress(PeriodKey.Parse(Period), rowId, VolumeColumnId)] = EditDecision.Allow(),
                    });
+
+            // ⚠ WR-03: `ExcelImporter` тримає ВЛАСНИЙ попередній перегляд через
+            // `CanEditSliceAsync` (лишається як є), а вкладений РЕАЛЬНИЙ
+            // `PatchCellsHandler` (той самий `_access`) тепер питає лише адреси
+            // батчу через `CanEditCellsAsync`.
+            _access.CanEditCellsAsync(
+                       Arg.Any<AccessProfile>(), instance, Arg.Any<PeriodKey>(),
+                       Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+                   .Returns(new Dictionary<CellAddress, EditDecision>
+                   {
+                       [new CellAddress(PeriodKey.Parse(Period), rowId, VolumeColumnId)] = EditDecision.Allow(),
+                   });
         }
 
         // ⚠ Підмінена транзакція ВИКОНУЄ тіло і записує в журнал свої межі:

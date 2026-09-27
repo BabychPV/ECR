@@ -113,7 +113,11 @@ public sealed class PatchCellsLocalizedErrorTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
     }
 
@@ -221,7 +225,7 @@ public sealed class PatchCellsLocalizedErrorTests
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public async Task Заборонена_комірка_не_кладе_detail_у_подробиці_і_доїжджає_англійською()
     {
-        // `CanEditSliceAsync` повертає порожній словник — рішення на комірку
+        // `CanEditCellsAsync` повертає порожній словник — рішення на комірку
         // немає, отже відмова `NoGrant` з українським `Detail` рішення.
         var request = new PatchCellsRequest(
             TableInstance, Period, "UserEdit",

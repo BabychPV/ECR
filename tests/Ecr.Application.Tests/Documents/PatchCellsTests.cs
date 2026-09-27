@@ -118,7 +118,11 @@ public sealed class PatchCellsTests
         // ⚠ Тепер передумова названа явно: рішення на адреси, які тести
         // чіпають, ІСНУЮТЬ і дозволяють. Це не послаблення перевірки, а
         // повернення їй предмета — заборону підставляє той тест, що про неї.
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
+        // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>
                {
                    [new CellAddress(PeriodKey.Parse(Period), 1001L, VolumeColumnId)] = EditDecision.Allow(),
@@ -543,7 +547,9 @@ public sealed class PatchCellsTests
     {
         // Порожній словник рішень при НЕпорожньому батчі — рівно та ситуація,
         // що раніше означала «можна».
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
 
         var ex = await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
@@ -563,7 +569,9 @@ public sealed class PatchCellsTests
     public async Task Заборонена_комірка_відхиляє_батч_із_причиною()
     {
         var address = new CellAddress(new PeriodKey(Period), 1001L, VolumeColumnId);
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
+        _access.CanEditCellsAsync(
+                   Arg.Any<AccessProfile>(), TableInstance, Arg.Any<PeriodKey>(),
+                   Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>
                {
                    [address] = EditDecision.Deny(EditDenyReason.PeriodClosed, "Період закрито 05.02.2026")
