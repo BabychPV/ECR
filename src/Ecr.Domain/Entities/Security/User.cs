@@ -28,6 +28,35 @@ public sealed class User : Entity<int>
     }
 
     public string UserName { get; private set; } = null!;
+
+    /// <summary>Логін технічного запису інтеграції — той самий, що в <c>09-seed.sql</c>.</summary>
+    public const string IntegrationServiceUserName = "svc-integration";
+
+    /// <summary>Чи ім'я належить службовому запису, яким не входять.</summary>
+    /// <param name="userName">Ім'я входу.</param>
+    /// <remarks>
+    /// ⚠ Без урахування регістру: база порівнює логіни так само (колація), і
+    /// «SVC-Integration» у формі входу знайшов би той самий запис.
+    /// </remarks>
+    public static bool IsServiceAccountName(string? userName)
+        => string.Equals(userName?.Trim(), IntegrationServiceUserName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Службовий запис: автор фонових змін, яким НЕ можна увійти ні паролем, ні
+    /// Windows, ні наявною cookie.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Відсутності пароля недосить: адміністратор може скинути пароль будь-якому
+    /// запису (<c>ResetPassword</c>), і після цього «ніхто не знає пароля»
+    /// перестає бути правдою. Тому вхід відкидає сам запис, а не лише пароль.
+    ///
+    /// ⚠ Ознака за логіном, а не колонкою: логін незмінний (сетера немає), а
+    /// права запису інтеграції від цієї ознаки НЕ залежать — їх дає лише
+    /// контекст задачі (<c>JobActorScope.EnterIntegration</c>). Тут ім'я
+    /// тільки ЗАБОРОНЯЄ, і помилка в ньому нічого не відкриває.
+    /// </remarks>
+    public bool IsServiceAccount => IsServiceAccountName(UserName);
+
     public string DisplayName { get; private set; } = null!;
     public string? Email { get; private set; }
 

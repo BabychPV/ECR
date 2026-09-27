@@ -97,10 +97,16 @@ public sealed class SecurityStampValidator(EcrDbContext db, IMemoryCache cache, 
     public Task<string?> ReadCurrentAsync(int userId, CancellationToken ct) => ReadStampAsync(userId, ct);
 
     /// <summary>Читає чинний штамп активного користувача.</summary>
+    /// <remarks>
+    /// ⛔ Службовий запис (<c>svc-integration</c>) штампа для cookie не має:
+    /// навіть cookie, видана йому будь-яким шляхом (дефект входу, підроблений
+    /// ключ), відкидається на кожному запиті. Вхід його теж не пускає
+    /// (<c>LoginHandler</c>) — це другий рубіж, а не єдиний.
+    /// </remarks>
     private async Task<string?> ReadStampAsync(int userId, CancellationToken ct)
         => await db.Users
             .AsNoTracking()
-            .Where(u => u.Id == userId && u.IsActive)
+            .Where(u => u.Id == userId && u.IsActive && u.UserName != Domain.Entities.Security.User.IntegrationServiceUserName)
             .Select(u => u.SecurityStamp)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);

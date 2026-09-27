@@ -63,7 +63,11 @@ public sealed partial class LoginHandler(
         var now = clock.UtcNow;
         var user = await users.FindByUserNameAsync(userName, ct).ConfigureAwait(false);
 
-        if (user is null || user.Provider != AuthProvider.Local || !user.IsActive)
+        // ⛔ Службовий запис (`svc-integration`) не входить НІКОЛИ — навіть із
+        // правильним паролем, який міг з'явитися після скидання адміністратором.
+        // Відповідь і час — ті самі, що на невідоме ім'я: інакше форма входу
+        // підтверджувала б, що такий запис існує.
+        if (user is null || user.Provider != AuthProvider.Local || !user.IsActive || user.IsServiceAccount)
         {
             // Пароль однаково «перевіряється»: без цього відповідь на невідоме
             // ім'я приходила б помітно швидше.
@@ -131,6 +135,15 @@ public sealed partial class LoginHandler(
 
         var now = clock.UtcNow;
         var user = await users.FindByWindowsSidAsync(sid, ct).ConfigureAwait(false);
+
+        // ⛔ Службовий запис не входить і через Windows: ні SID, прив'язаним до
+        // нього, ні доменним обліковим записом із тим самим логіном (другий
+        // інакше пішов би в `CreateDomain` поруч зі службовим).
+        if (user?.IsServiceAccount == true || (user is null && User.IsServiceAccountName(userName)))
+        {
+            await FailAsync(userName, "ServiceAccount", ipAddress, now, ct).ConfigureAwait(false);
+            throw InvalidCredentials();
+        }
 
         if (user is null)
         {
