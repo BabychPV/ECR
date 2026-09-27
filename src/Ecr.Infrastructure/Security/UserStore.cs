@@ -484,7 +484,9 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // ⚠ Носії беруться і за прямим призначенням, і за призначенням на
         // групу AD: у другому випадку конкретних користувачів у таблиці немає,
         // і їхні сеанси доводиться лишати на звичайну перевірку штампа.
-        // Прокрутити можна лише тих, кого система знає поіменно.
+        // Прокрутити можна лише тих, кого система знає поіменно. Членів групи
+        // покриває ревізія грантів у відбитку груп ключа профілю
+        // (`AccessDecisionService.GroupsFingerprintAsync`), а не цей метод.
         var userIds = await db.RoleAssignments
             .AsNoTracking()
             .Where(a => a.RoleId == roleId && a.UserId != null)

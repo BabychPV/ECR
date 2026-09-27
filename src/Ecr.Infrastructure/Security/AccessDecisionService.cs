@@ -78,8 +78,16 @@ public sealed class AccessDecisionService(
     /// запис зі старими правами перестає адресуватися на НАСТУПНОМУ запиті —
     /// на кожному інстансі, без спільного лічильника в пам'яті.
     ///
-    /// ⚠ Ціна — один індексний запит (<c>UQ_RoleAssignment_Sid</c>) на запит
-    /// сесії з групами; сесія без груп не платить нічого.
+    /// ⛔ Те саме — для ГРАНТІВ ролей, отриманих через групу. Заміна грантів
+    /// ролі крутить штамп лише прямим носіям (<c>RotateStampsForRoleAsync</c>):
+    /// член групи зберігав би знятий грант до сплину профілю (30 хв). Тому в
+    /// ревізію входять ще кількість і найбільший Id рядків
+    /// <c>sec.ResourceGrant</c> цих ролей. <c>ReplaceGrantsAsync</c> видаляє й
+    /// вставляє, а Id — IDENTITY: вставка піднімає максимум, видалення без
+    /// вставки зменшує кількість — пара міняється за будь-якої зміни.
+    ///
+    /// ⚠ Ціна — ОДИН запит на запит сесії з групами (призначення й гранти
+    /// разом, підзапитом); сесія без груп не платить нічого.
     /// </remarks>
     private async Task<string> GroupsFingerprintAsync(IReadOnlyList<string> groupSids, CancellationToken ct)
     {
@@ -88,16 +96,33 @@ public sealed class AccessDecisionService(
             return string.Empty;
         }
 
-        var ids = await db.RoleAssignments
+        // Ті самі призначення й та сама стеля, що в `LoadAsync`: ревізія
+        // описує рівно ту вибірку, з якої профіль будується.
+        var assignments = db.RoleAssignments
             .AsNoTracking()
             .Where(a => a.PrincipalSid != null && groupSids.Contains(a.PrincipalSid))
             .OrderByDescending(a => a.Id)
-            .Select(a => a.Id)
-            .Take(MaxRoleAssignments)
-            .ToListAsync(ct)
+            .Take(MaxRoleAssignments);
+
+        var grants = db.ResourceGrants
+            .AsNoTracking()
+            .Where(g => assignments.Any(a => a.RoleId == g.RoleId));
+
+        var revision = await assignments
+            .GroupBy(_ => 1)
+            .Select(set => new
+            {
+                Assignments = set.Count(),
+                LastAssignment = set.Max(a => a.Id),
+                Grants = grants.Count(),
+                LastGrant = grants.Max(g => (int?)g.Id) ?? 0,
+            })
+            .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        return $"{Fingerprint(groupSids)}.{ids.Count}.{(ids.Count == 0 ? 0 : ids[0])}";
+        return revision is null
+            ? $"{Fingerprint(groupSids)}.0.0.0.0"
+            : $"{Fingerprint(groupSids)}.{revision.Assignments}.{revision.LastAssignment}.{revision.Grants}.{revision.LastGrant}";
     }
 
     /// <inheritdoc />

@@ -107,6 +107,12 @@ internal static class ProjectOwnershipGrant
                 ct).ConfigureAwait(false);
         }
 
+        // ⚠ Точкове скидання — лише ЦЬОГО інстансу. Носії ролі через групу AD
+        // (творець теж, якщо роль у нього групова) побачать грант на
+        // наступному запиті й на інших інстансах: заміна грантів рухає
+        // ревізію у відбитку груп ключа профілю (`GroupsFingerprintAsync`).
+        // Прямі носії на інших інстансах — після TTL; це розширення доступу,
+        // не залишковий знятий доступ.
         if (grantedAny)
         {
             await access.InvalidateProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
