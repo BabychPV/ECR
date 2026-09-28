@@ -26,8 +26,10 @@ public sealed class UpdateUnitTests
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Uom.EditCatalog").Build());
-        _units.FindUnitUsageAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        _units.FindUnitUsageForUpdateAsync(Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new UsageResponse(0, []));
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(call.Arg<CancellationToken>()));
     }
 
     [Fact]
@@ -35,7 +37,7 @@ public sealed class UpdateUnitTests
     public async Task Коефіцієнти_базової_одиниці_не_змінюються_навіть_без_посилань()
     {
         var kg = Make(isBase: true, factor: 1m);
-        _units.FindUnitByIdAsync(1, Arg.Any<CancellationToken>()).Returns(kg);
+        _units.LockUnitAsync(1, Arg.Any<CancellationToken>()).Returns(kg);
 
         var error = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => Handler().HandleAsync(
             1, Text("kg"), Text("Kilogram"), 1000m, 0m, UnitVersion.Of(kg), default));

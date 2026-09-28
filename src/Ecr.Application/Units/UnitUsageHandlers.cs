@@ -36,15 +36,21 @@ public sealed class UnitUsageHandler(
 
     /// <summary>Одиниця за ідентифікатором або <c>ECR-UOM-0404</c>.</summary>
     internal static async Task<Unit> FindAsync(IUnitStore units, int unitId, CancellationToken ct)
-        => await units.FindUnitByIdAsync(unitId, ct).ConfigureAwait(false)
-           ?? throw new NotFoundException(
-               ErrorCodes.UnitNotFound,
-               $"Одиниці з ідентифікатором {unitId} немає в довіднику.",
-               new Dictionary<string, object?>
-               {
-                   ["messageKey"] = "err.ECR-UOM-0404.unitId",
-                   ["id"] = unitId.ToString(CultureInfo.InvariantCulture),
-               });
+        => await units.FindUnitByIdAsync(unitId, ct).ConfigureAwait(false) ?? throw NotFound(unitId);
+
+    /// <summary>Одиниця під блокуванням рядка (див. <see cref="IUnitStore.LockUnitAsync"/>) або <c>ECR-UOM-0404</c>.</summary>
+    internal static async Task<Unit> LockAsync(IUnitStore units, int unitId, CancellationToken ct)
+        => await units.LockUnitAsync(unitId, ct).ConfigureAwait(false) ?? throw NotFound(unitId);
+
+    private static NotFoundException NotFound(int unitId)
+        => new(
+            ErrorCodes.UnitNotFound,
+            $"Одиниці з ідентифікатором {unitId} немає в довіднику.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-UOM-0404.unitId",
+                ["id"] = unitId.ToString(CultureInfo.InvariantCulture),
+            });
 }
 
 /// <summary>Видалення одиниці довідника <c>uom.Unit</c> (директива №15, BE-15).</summary>
@@ -53,6 +59,16 @@ public sealed class UnitUsageHandler(
 /// із переліком залежних у <c>details.references</c>. Зовнішні ключі відхилили
 /// б таке видалення й самі, але голим <c>500</c>: людина дізналася б, що «щось
 /// пішло не так», а не ЩО саме тримає одиницю.
+///
+/// ⛔ Аудит C6: перевірка й видалення — одна транзакція. Рядок одиниці читається під
+/// блокуванням, перелік посилань — під <c>SERIALIZABLE</c>
+/// (<see cref="IUnitStore.FindUnitUsageForUpdateAsync"/>). Раніше обидва читали знімок RCSI:
+/// посилання, що комітилося між перевіркою й записом, перевірка не бачила, і видалення падало
+/// на FK голим <c>500</c> замість <c>409</c> з переліком.
+///
+/// ⚠ Посилання, які не тримає зовнішній ключ (<c>cfg.ColumnDef.UnitId</c>,
+/// <c>dic.RegistryFieldDef.UnitId</c>), нова вставка після видалення однаково лишить висячими:
+/// їхні обробники існування одиниці не перевіряють. Закрити це може лише FK — міграція.
 /// </remarks>
 public sealed class DeleteUnitHandler(
     IUnitStore units,
@@ -71,27 +87,34 @@ public sealed class DeleteUnitHandler(
             .RequireAsync(access, currentUser, CreateUnitHandler.Permission, ct)
             .ConfigureAwait(false);
 
-        var unit = await UnitUsageHandler.FindAsync(units, unitId, ct).ConfigureAwait(false);
+        await uow.ExecuteInTransactionAsync(
+            async innerCt =>
+            {
+                var unit = await UnitUsageHandler.LockAsync(units, unitId, innerCt).ConfigureAwait(false);
 
-        var usage = await units.FindUnitUsageAsync(unitId, UsageResponse.PageSize, ct).ConfigureAwait(false);
-        if (usage.Total > 0)
-        {
-            // ⚠ Саме `ConcurrencyConflictException`: статус відповіді береться
-            // з ТИПУ винятку, а цифри коду кажуть 409 — той самий висновок, що
-            // в `TableRelationHandlers` і `PatchPresentationHandler`.
-            throw new ConcurrencyConflictException(
-                ErrorCodes.UnitInUse,
-                $"Одиниця «{unit.Code}» не видаляється: на неї посилаються — {usage.Total}.",
-                new Dictionary<string, object?>
+                var usage = await units
+                    .FindUnitUsageForUpdateAsync(unitId, UsageResponse.PageSize, innerCt)
+                    .ConfigureAwait(false);
+                if (usage.Total > 0)
                 {
-                    ["messageKey"] = "err.ECR-UOM-0409.unitInUse",
-                    ["code"] = unit.Code,
-                    ["total"] = usage.Total.ToString(CultureInfo.InvariantCulture),
-                    ["references"] = usage.Items,
-                });
-        }
+                    // ⚠ Саме `ConcurrencyConflictException`: статус відповіді береться
+                    // з ТИПУ винятку, а цифри коду кажуть 409 — той самий висновок, що
+                    // в `TableRelationHandlers` і `PatchPresentationHandler`.
+                    throw new ConcurrencyConflictException(
+                        ErrorCodes.UnitInUse,
+                        $"Одиниця «{unit.Code}» не видаляється: на неї посилаються — {usage.Total}.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-UOM-0409.unitInUse",
+                            ["code"] = unit.Code,
+                            ["total"] = usage.Total.ToString(CultureInfo.InvariantCulture),
+                            ["references"] = usage.Items,
+                        });
+                }
 
-        units.RemoveUnit(unit);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                units.RemoveUnit(unit);
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
     }
 }

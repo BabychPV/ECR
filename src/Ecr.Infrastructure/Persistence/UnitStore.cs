@@ -28,6 +28,70 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
     public void RemoveUnit(Unit unit) => db.Units.Remove(unit);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <c>UPDLOCK, HOLDLOCK</c> — той самий прийом, що в <c>MethodologyVersionDeletionStore</c>:
+    /// дві правки однієї одиниці серіалізуються на її рядку, а читання під RCSI без підказки
+    /// не блокувало б нічого.
+    ///
+    /// ⚠ Екземпляр, уже відстежуваний контекстом (повтор замикання стратегією після
+    /// дедлоку), відчіплюється: інакше EF повернув би його з ПОПЕРЕДНЬОЇ спроби — зі
+    /// зміненими в пам'яті значеннями, а не з тими, що зараз у базі.
+    /// </remarks>
+    public async Task<Unit?> LockUnitAsync(int unitId, CancellationToken ct)
+    {
+        RequireTransaction();
+
+        var stale = db.ChangeTracker.Entries<Unit>().FirstOrDefault(e => e.Entity.Id == unitId);
+        if (stale is not null)
+        {
+            stale.State = EntityState.Detached;
+        }
+
+        return await db.Units
+            .FromSql($"SELECT * FROM uom.Unit WITH (UPDLOCK, HOLDLOCK) WHERE Id = {unitId}")
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Чому <c>SERIALIZABLE</c>, а не підказки в кожному запиті. Під RCSI перевірка
+    /// читає знімок: незакомічене посилання для неї не існує, а нове після неї нічим не
+    /// зупинене. <c>SERIALIZABLE</c> робить читання блокувальним (чекає на незакомічене) і
+    /// тримає діапазони ключів до кінця транзакції (нове посилання чекає коміту). Підказки
+    /// довелося б дублювати в тринадцяти запитах переліку — і кожне нове джерело посилань
+    /// мовчки лишалося б без них.
+    ///
+    /// ⚠ Рівень ставиться окремим пакетом без параметрів (не <c>sp_executesql</c>, де він
+    /// скинувся б на виході) і повертається до <c>READ COMMITTED</c> одразу після
+    /// переліку. Блокування, узяті під <c>SERIALIZABLE</c>, лишаються до кінця транзакції й
+    /// після повернення рівня — так визначено для <c>SET TRANSACTION ISOLATION LEVEL</c>.
+    ///
+    /// ⚠ Ціна: запит до таблиці даних без індексу за одиницею тримає діапазон на всю
+    /// таблицю до коміту. Це адміністративна дія над довідником, і транзакція коротка.
+    /// </remarks>
+    public async Task<UsageResponse> FindUnitUsageForUpdateAsync(int unitId, int take, CancellationToken ct)
+    {
+        RequireTransaction();
+
+        await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;", ct).ConfigureAwait(false);
+        var usage = await FindUnitUsageAsync(unitId, take, ct).ConfigureAwait(false);
+        await db.Database.ExecuteSqlRawAsync("SET TRANSACTION ISOLATION LEVEL READ COMMITTED;", ct).ConfigureAwait(false);
+
+        return usage;
+    }
+
+    private void RequireTransaction()
+    {
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Блокування одиниці береться лише всередині транзакції: поза нею воно звільнилося б " +
+                "одразу і нічого не захистило б.");
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<UsageResponse> FindUnitUsageAsync(int unitId, int take, CancellationToken ct)
     {
         var total = 0;

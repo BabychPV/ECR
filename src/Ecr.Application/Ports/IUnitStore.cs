@@ -42,6 +42,30 @@ public interface IUnitStore
     /// </remarks>
     public Task<Common.UsageResponse> FindUnitUsageAsync(int unitId, int take, CancellationToken ct);
 
+    /// <summary>
+    /// Одиниця, прочитана під блокуванням рядка до кінця транзакції; <c>null</c> — немає
+    /// (аудит C6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише всередині <see cref="IUnitOfWork.ExecuteInTransactionAsync"/>: поза транзакцією
+    /// блокування звільнилося б одразу. Друга правка чи видалення тієї самої одиниці чекає,
+    /// доки перша закомітиться, і тоді читає ВЖЕ змінений рядок — версія з <c>If-Match</c>
+    /// більше не збігається, і замість мовчазного перезапису виходить <c>409</c>.
+    /// </remarks>
+    public Task<Unit?> LockUnitAsync(int unitId, CancellationToken ct);
+
+    /// <summary>
+    /// Те саме, що <see cref="FindUnitUsageAsync"/>, але читання тримає діапазони до кінця
+    /// транзакції (аудит C6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише всередині транзакції. Незакомічене посилання, що з'явилося до перевірки,
+    /// перевірка чекає й бачить; нове посилання після перевірки чекає кінця транзакції —
+    /// тобто «перевірили, що не використовується» і «видалили / змінили множник» стають
+    /// однією атомарною дією.
+    /// </remarks>
+    public Task<Common.UsageResponse> FindUnitUsageForUpdateAsync(int unitId, int take, CancellationToken ct);
+
     /// <summary>Ставить одиницю в чергу на видалення.</summary>
     public void RemoveUnit(Unit unit);
 }

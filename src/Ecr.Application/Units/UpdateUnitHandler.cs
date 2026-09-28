@@ -133,7 +133,37 @@ public sealed class UpdateUnitHandler(
             .RequireAsync(access, currentUser, CreateUnitHandler.Permission, ct)
             .ConfigureAwait(false);
 
-        var unit = await UnitUsageHandler.FindAsync(units, unitId, ct).ConfigureAwait(false);
+        UnitDetail? updated = null;
+
+        // ⛔ Аудит C6: версія, перевірка посилань, запис і аудит — ОДНА транзакція.
+        // Раніше рядок читався під RCSI без блокування, і дві правки з тією самою
+        // версією обидві її проходили: друга мовчки затирала першу. Тепер друга
+        // чекає на блокування рядка, а дочекавшись, бачить уже змінену одиницю —
+        // версія не збігається, 409. Колонки `rowversion` в `uom.Unit` немає, і вона
+        // не потрібна: блокування робить хеш вмісту (`UnitVersion`) достатнім токеном.
+        await uow.ExecuteInTransactionAsync(
+            async innerCt =>
+            {
+                updated = await ApplyAsync(
+                    unitId, symbol, name, factorToBase, offsetToBase, ifMatch, profile.UserId, innerCt)
+                    .ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+
+        return updated!;
+    }
+
+    private async Task<UnitDetail> ApplyAsync(
+        int unitId,
+        IReadOnlyDictionary<string, string>? symbol,
+        IReadOnlyDictionary<string, string>? name,
+        decimal factorToBase,
+        decimal offsetToBase,
+        string? ifMatch,
+        int userId,
+        CancellationToken ct)
+    {
+        var unit = await UnitUsageHandler.LockAsync(units, unitId, ct).ConfigureAwait(false);
         RequireCurrentVersion(unit, ifMatch);
 
         var symbolText = Normalize(symbol);
@@ -167,19 +197,15 @@ public sealed class UpdateUnitHandler(
         unit.Update(symbolText, nameText, factorToBase, offsetToBase);
 
         // ⛔ C4: зміна й подія — одним комітом. Раніше зміна комітилась ДО
-        // аудиту, і збій аудиту лишав новий множник без сліду в журналі.
-        await uow.ExecuteInTransactionAsync(
-            async token =>
-            {
-                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+        // аудиту, і збій аудиту лишав новий множник без сліду в журналі. Транзакція
+        // тут — та сама зовнішня з `HandleAsync` (C6), тож окремої не потрібно.
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-                await audit.WriteSecurityEventAsync(
-                    new SecurityEventRecord(
-                        clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
-                        JsonSerializer.Serialize(new { id = unit.Id, code = unit.Code, factorToBase, offsetToBase }),
-                        profile.UserId, currentUser.CorrelationId),
-                    token).ConfigureAwait(false);
-            },
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
+                JsonSerializer.Serialize(new { id = unit.Id, code = unit.Code, factorToBase, offsetToBase }),
+                userId, currentUser.CorrelationId),
             ct).ConfigureAwait(false);
 
         return UnitDetail.Of(unit);
@@ -210,7 +236,9 @@ public sealed class UpdateUnitHandler(
 
     private async Task RequireUnusedAsync(Unit unit, CancellationToken ct)
     {
-        var usage = await units.FindUnitUsageAsync(unit.Id, UsageResponse.PageSize, ct).ConfigureAwait(false);
+        // Під `SERIALIZABLE`: посилання, що комітиться під час перевірки, вона чекає й
+        // бачить, а нове після неї чекає коміту — множник не зміниться під ним.
+        var usage = await units.FindUnitUsageForUpdateAsync(unit.Id, UsageResponse.PageSize, ct).ConfigureAwait(false);
         if (usage.Total > 0 || unit.IsBase)
         {
             throw new ConcurrencyConflictException(
