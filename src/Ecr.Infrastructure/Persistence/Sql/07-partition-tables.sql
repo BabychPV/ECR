@@ -55,6 +55,9 @@ INSERT @map (SchemaName, TableName, SchemeName, PartColumn, CompressPk) VALUES
     (N'calc', N'CalculationResult', N'ps_ByPeriodKey', N'PeriodKey', 0),
     (N'calc', N'CalculationInput',  N'ps_ByPeriodKey', N'PeriodKey', 0),
     (N'calc', N'CalculationStep',   N'ps_ByPeriodKey', N'PeriodKey', 0),
+    -- HSE301 M2 (§4.4): провенанс підтягування за вікном рядка належить
+    -- періоду так само, як комірка, яку він пояснює.
+    (N'ext',  N'RowWindowValue',    N'ps_ByPeriodKey', N'PeriodKey', 0),
     -- Аудит партиціонується ОКРЕМО, по ChangedAt: місяць зміни і звітний
     -- період — різні осі (зміна за січень може статися в березні).
     (N'aud',  N'CellChange',        N'ps_AuditByMonth', N'ChangedAt', 1),
@@ -180,7 +183,8 @@ FROM sys.foreign_keys AS fk
 JOIN sys.tables AS t ON t.object_id = fk.parent_object_id
 WHERE fk.is_not_trusted = 1
   AND fk.is_disabled = 0
-  AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud');
+  AND (SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud')
+       OR (SCHEMA_NAME(t.schema_id) = N'ext' AND t.name = N'RowWindowValue'));
 
 IF LEN(@recheck) > 0 EXEC sp_executesql @recheck;
 GO
@@ -192,7 +196,8 @@ IF EXISTS
     FROM sys.foreign_keys AS fk
     JOIN sys.tables AS t ON t.object_id = fk.parent_object_id
     WHERE (fk.is_not_trusted = 1 OR fk.is_disabled = 1)
-      AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud')
+      AND (SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud')
+           OR (SCHEMA_NAME(t.schema_id) = N'ext' AND t.name = N'RowWindowValue'))
 )
     THROW 50032, N'Частина зовнішніх ключів недовірена або вимкнена.', 1;
 GO
@@ -207,10 +212,11 @@ IF EXISTS
     JOIN sys.tables  AS t  ON t.object_id = i.object_id
     JOIN sys.data_spaces AS ds ON ds.data_space_id = i.data_space_id
     WHERE i.type IN (1, 2)
-      AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud')
+      AND SCHEMA_NAME(t.schema_id) IN (N'doc', N'calc', N'aud', N'ext')
       AND t.name IN (N'TableInstance', N'TableRow', N'CellValue',
                      N'CalculationResult', N'CalculationInput', N'CalculationStep',
-                     N'CellChange', N'StructureChange', N'SecurityEvent', N'PublicationEvent')
+                     N'CellChange', N'StructureChange', N'SecurityEvent', N'PublicationEvent',
+                     N'RowWindowValue')
       AND ds.type_desc <> N'PARTITION_SCHEME'   -- type_desc, а не type: у type код 'PS'
 )
     THROW 50031, N'Частина індексів партиційованих таблиць лишилася поза схемою партиціонування.', 1;

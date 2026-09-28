@@ -2030,6 +2030,116 @@ CREATE TABLE ext.RawDataPoint
 );
 GO
 
+-- HSE301 M2 (FEATURE-HSE301-VIEW §4.4, D-171): прив'язка «атрибут → колонка,
+-- вікно = рядок». НЕ режим ext.EntityFieldMap: той має фіксованого адресата
+-- рядка й UQ(SourceEntityId, SourceField), а тут один атрибут обслуговує
+-- багато рядків, і вікно береться з самого рядка (колонки Start/End).
+CREATE TABLE ext.RowWindowMap
+(
+    Id                  int           IDENTITY(1,1) NOT NULL,
+    TableDefId          int           NOT NULL,
+    TargetColumnDefId   int           NOT NULL,   -- Decimal-колонка (Volume_Sm3)
+    StartColumnDefId    int           NOT NULL,   -- Date-колонка початку, час проєкту
+    EndColumnDefId      int           NOT NULL,   -- Date-колонка кінця (виключно)
+    SelectorColumnDefId int           NULL,       -- колонка, що обирає атрибут (PiSourceKey)
+    Summary             tinyint       NOT NULL,   -- 0 Total | 1 Average | 2 Minimum | 3 Maximum | 4 Count
+    IsStep              bit           NOT NULL CONSTRAINT DF_RWM_Step DEFAULT(0),
+    -- Розрив між точками (с), довший за який відрізок — прогалина (§4.1);
+    -- NULL — порога немає. Секунди, а не time: time не вміщає понад добу.
+    MaxGapSeconds       int           NULL,
+    TargetUnitId        int           NOT NULL,
+    MinPercentGood      decimal(5,2)  NOT NULL CONSTRAINT DF_RWM_MinGood DEFAULT(95),  -- нижче — Partial
+    RefetchWithinDays   int           NOT NULL CONSTRAINT DF_RWM_Refetch DEFAULT(7),   -- пізні дані PI
+    IsActive            bit           NOT NULL CONSTRAINT DF_RWM_Act DEFAULT(1),
+    RowVersion          rowversion    NOT NULL,
+    CONSTRAINT PK_RowWindowMap PRIMARY KEY (Id),
+    -- Одна прив'язка на колонку-ціль: дві писали б у ту саму комірку.
+    CONSTRAINT UQ_RowWindowMap_Target UNIQUE (TableDefId, TargetColumnDefId),
+    CONSTRAINT FK_RWM_Table FOREIGN KEY (TableDefId) REFERENCES cfg.TableDef (Id),
+    -- ⛔ Складені ключі на UQ_ColumnDef_ForFk (як FK_CellValue_Column): колонка
+    -- вікна чи селектор із чужої таблиці не пройде.
+    CONSTRAINT FK_RWM_Target   FOREIGN KEY (TableDefId, TargetColumnDefId)   REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_Start    FOREIGN KEY (TableDefId, StartColumnDefId)    REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_End      FOREIGN KEY (TableDefId, EndColumnDefId)      REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_Selector FOREIGN KEY (TableDefId, SelectorColumnDefId) REFERENCES cfg.ColumnDef (TableDefId, Id),
+    CONSTRAINT FK_RWM_Unit     FOREIGN KEY (TargetUnitId) REFERENCES uom.Unit (Id),
+    CONSTRAINT CK_RWM_Summary CHECK (Summary BETWEEN 0 AND 4),
+    CONSTRAINT CK_RWM_Window  CHECK (StartColumnDefId <> EndColumnDefId),
+    CONSTRAINT CK_RWM_Policy  CHECK (MinPercentGood BETWEEN 0 AND 100
+                                     AND RefetchWithinDays BETWEEN 0 AND 366
+                                     AND (MaxGapSeconds IS NULL OR MaxGapSeconds > 0))
+);
+GO
+
+-- Значення селектора → атрибут. SelectorValue = NULL — джерело для всіх рядків.
+CREATE TABLE ext.RowWindowSource
+(
+    Id             int           IDENTITY(1,1) NOT NULL,
+    RowWindowMapId int           NOT NULL,
+    SelectorValue  nvarchar(100) NULL,
+    SourceEntityId int           NOT NULL,
+    SourceField    nvarchar(200) NOT NULL,
+    SourceUnitId   int           NOT NULL,
+    CONSTRAINT PK_RowWindowSource PRIMARY KEY (Id),
+    -- ⛔ Без фільтра IS NOT NULL навмисно: унікальний індекс вважає NULL рівними,
+    -- тож джерело «для всіх рядків» у прив'язки теж рівно одне.
+    CONSTRAINT UQ_RowWindowSource UNIQUE (RowWindowMapId, SelectorValue),
+    CONSTRAINT FK_RWS_Map    FOREIGN KEY (RowWindowMapId) REFERENCES ext.RowWindowMap (Id),
+    CONSTRAINT FK_RWS_Entity FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id),
+    CONSTRAINT FK_RWS_Unit   FOREIGN KEY (SourceUnitId)   REFERENCES uom.Unit (Id)
+);
+GO
+
+-- Провенанс кожного підтягування (§4.4, §8.3); лише додається — нове
+-- підтягування тієї самої комірки знімає IsCurrent з попереднього.
+-- ⛔ FK на doc.TableInstance НЕМАЄ: arc.usp_ArchiveYear звільняє doc.* через
+-- TRUNCATE … WITH (PARTITIONS), а TRUNCATE таблиці, на яку посилається ключ,
+-- SQL Server відхиляє.
+CREATE TABLE ext.RowWindowValue
+(
+    PeriodKey        int            NOT NULL,
+    Id               bigint         IDENTITY(1,1) NOT NULL,
+    TableInstanceId  bigint         NOT NULL,
+    RowKey           nvarchar(100)  NOT NULL,
+    ColumnDefId      int            NOT NULL,
+    RowWindowMapId   int            NOT NULL,
+    SourceEntityId   int            NOT NULL,
+    SourceField      nvarchar(200)  NOT NULL,
+    FromUtc          datetime2(3)   NOT NULL,
+    ToUtc            datetime2(3)   NOT NULL,
+    Summary          tinyint        NOT NULL,
+    ComputedBy       tinyint        NOT NULL,   -- 0 Local | 1 Server
+    ValueSource      decimal(34,16) NULL,       -- в одиниці джерела
+    SourceUnitSymbol nvarchar(64)   NULL,
+    ValueTarget      decimal(34,16) NULL,       -- в одиниці колонки
+    TargetUnitId     int            NOT NULL,
+    ConversionFactor decimal(34,16) NULL,       -- множник межі (§4.2)
+    PointCount       int            NOT NULL,
+    PercentGood      decimal(5,2)   NULL,
+    Status           nvarchar(32)   NOT NULL,
+    ErrorCode        varchar(32)    NULL,
+    RetrievedAt      datetime2(3)   NOT NULL,
+    IsCurrent        bit            NOT NULL CONSTRAINT DF_RWV_Current DEFAULT(1),
+    CONSTRAINT PK_RowWindowValue PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
+    CONSTRAINT FK_RWV_Map    FOREIGN KEY (RowWindowMapId) REFERENCES ext.RowWindowMap (Id),
+    CONSTRAINT FK_RWV_Entity FOREIGN KEY (SourceEntityId) REFERENCES ext.SourceEntity (Id),
+    CONSTRAINT FK_RWV_Column FOREIGN KEY (ColumnDefId)    REFERENCES cfg.ColumnDef (Id),
+    CONSTRAINT FK_RWV_Unit   FOREIGN KEY (TargetUnitId)   REFERENCES uom.Unit (Id),
+    CONSTRAINT CK_RWV_Status CHECK (Status IN (N'Fetched', N'Partial', N'NoData', N'KeptManual',
+                                               N'SourceError', N'InvalidWindow', N'NotApplicable')),
+    CONSTRAINT CK_RWV_Kinds   CHECK (Summary BETWEEN 0 AND 4 AND ComputedBy BETWEEN 0 AND 1),
+    CONSTRAINT CK_RWV_Numbers CHECK (PointCount >= 0 AND (PercentGood IS NULL OR PercentGood BETWEEN 0 AND 100))
+) ON ps_ByPeriodKey(PeriodKey);
+GO
+
+-- Чинне значення комірки — рівно одне. UNIQUE і з PeriodKey першим: унікальний
+-- індекс партиційованої таблиці мусить містити ключ партиції (§4.4 мав тут
+-- неунікальний IX без PeriodKey — посилено при реалізації M2).
+CREATE UNIQUE INDEX UX_RowWindowValue_Current
+    ON ext.RowWindowValue (PeriodKey, TableInstanceId, RowKey, ColumnDefId)
+    WHERE IsCurrent = 1 ON ps_ByPeriodKey(PeriodKey);
+GO
+
 CREATE TABLE ext.ConsistencyRule
 (
     Id             int            IDENTITY(1,1) NOT NULL,

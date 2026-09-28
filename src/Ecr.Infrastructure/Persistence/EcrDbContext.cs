@@ -144,6 +144,11 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<LegacyRowMapping> LegacyRowMappings => Set<LegacyRowMapping>();
     public DbSet<LegacyColumnMapping> LegacyColumnMappings => Set<LegacyColumnMapping>();
 
+    /// <summary>Прив'язки «атрибут → колонка, вікно = рядок» і їхній провенанс (HSE301 §4.4).</summary>
+    public DbSet<RowWindowMap> RowWindowMaps => Set<RowWindowMap>();
+    public DbSet<RowWindowSource> RowWindowSources => Set<RowWindowSource>();
+    public DbSet<RowWindowValue> RowWindowValues => Set<RowWindowValue>();
+
     // itg
     public DbSet<CollectionRun> CollectionRuns => Set<CollectionRun>();
     public DbSet<CollectionCoverage> CollectionCoverages => Set<CollectionCoverage>();
