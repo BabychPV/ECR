@@ -336,6 +336,17 @@ public sealed class SubmitSheetHandler(
 
         var blocking = new List<Validation.ValidationMessage>();
 
+        // ⛔ Обов'язкова колонка (`ColumnDef.IsRequired`), якої НІКОЛИ не
+        // торкались редагуванням, не лишає запису в `doc.CellValue`
+        // (ФВ-3.8) — і тому не проходить через жодну перевірку на шляху
+        // запису: `PatchCellsHandler` перевіряє `IsRequired` лише в
+        // момент явного `PATCH` цієї самої клітинки. Рядок із порожнім
+        // обов'язковим полем, якого ніхто не торкався, спокійно проходив
+        // подання. Перевірка тут читає САМІ РЯДКИ екземпляра
+        // (`IRowStore.GetRowIdsBatchAsync`), а не клітинки, — інакше рядок без
+        // жодного запису в зрізі був би для неї «не існує взагалі».
+        var toValidate = new List<(TableInstanceRef Instance, Domain.Entities.Configuration.TableDef Table,
+            List<Domain.Entities.Configuration.ColumnDef> RequiredColumns)>();
         foreach (var instance in instances)
         {
             if (!tables.TryGetValue(instance.TableDefId, out var table))
@@ -343,23 +354,41 @@ public sealed class SubmitSheetHandler(
                 continue;
             }
 
-            // ⛔ Обов'язкова колонка (`ColumnDef.IsRequired`), якої НІКОЛИ не
-            // торкались редагуванням, не лишає запису в `doc.CellValue`
-            // (ФВ-3.8) — і тому не проходить через жодну перевірку на шляху
-            // запису: `PatchCellsHandler` перевіряє `IsRequired` лише в
-            // момент явного `PATCH` цієї самої клітинки. Рядок із порожнім
-            // обов'язковим полем, якого ніхто не торкався, спокійно проходив
-            // подання. Перевірка тут читає САМІ РЯДКИ екземпляра
-            // (`IRowStore.GetRowIdsAsync`), а не клітинки, — інакше рядок без
-            // жодного запису в зрізі був би для неї «не існує взагалі».
             var requiredColumns = table.Columns.Where(c => !c.IsDeleted && c.IsRequired).ToList();
             if (table.ValidationRules.Count == 0 && requiredColumns.Count == 0)
             {
                 continue;
             }
 
-            var cells = await cellStore.ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false);
-            var rowIds = await rowStore.GetRowIdsAsync(instance.TableInstanceId, key, ct).ConfigureAwait(false);
+            toValidate.Add((instance, table, requiredColumns));
+        }
+
+        // ⛔ P3 (перф-аудит): зріз і рядки — ДВОМА пакетними запитами на всі
+        // таблиці аркуша, а не парою запитів на КОЖНУ. Тут стояв цикл
+        // `ReadSliceAsync` + `GetRowIdsAsync` по екземплярах — і все це під
+        // винятковим блокуванням аркуша (`EnterSubmitAsync` вище), тобто
+        // правки цього аркуша чекали на кожен похід у базу. Той самий прийом,
+        // що вже закрив Q-165/Q-168 у `ValidateDocumentHandler`.
+        // Храповик — `SubmitSheetQueryCountTests`.
+        IReadOnlyDictionary<long, IReadOnlyList<CellRecord>> cellsByInstance =
+            new Dictionary<long, IReadOnlyList<CellRecord>>();
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> rowIdsByInstance =
+            new Dictionary<long, IReadOnlyDictionary<string, long>>();
+        if (toValidate.Count > 0)
+        {
+            var validateIds = toValidate.ConvertAll(v => v.Instance.TableInstanceId);
+            cellsByInstance = await cellStore.ReadSlicesAsync(validateIds, ct).ConfigureAwait(false);
+            rowIdsByInstance = await rowStore.GetRowIdsBatchAsync(validateIds, key, ct).ConfigureAwait(false);
+        }
+
+        foreach (var (instance, table, requiredColumns) in toValidate)
+        {
+            var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var slice)
+                ? slice
+                : [];
+            var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var ids)
+                ? ids
+                : new Dictionary<string, long>(StringComparer.Ordinal);
 
             if (table.ValidationRules.Count > 0)
             {
@@ -660,12 +689,26 @@ public sealed class SubmitSheetHandler(
         IReadOnlyDictionary<int, string> headerFieldCodes,
         CancellationToken ct)
     {
+        // ⛔ P3 (перф-аудит): ОДИН пакетний запит на всі екземпляри замість
+        // запиту на кожен — під винятковим блокуванням аркуша це ~90
+        // послідовних походів у базу на типовому документі. Порядок, у якому
+        // пакет повертає комірки, на payload не впливає: `SubmissionPayload.Write`
+        // сам сортує за (рядок, колонка), тож `ContentHash` для тих самих даних
+        // той самий байт-у-байт. Храповик — `SubmitSheetQueryCountTests`.
         var cells = new List<CellRecord>();
 
-        foreach (var instance in instances)
+        if (instances.Count > 0)
         {
-            cells.AddRange(await cellStore
-                .ReadSliceAsync(instance.TableInstanceId, ct).ConfigureAwait(false));
+            var slices = await cellStore
+                .ReadSlicesAsync([.. instances.Select(i => i.TableInstanceId)], ct)
+                .ConfigureAwait(false);
+            foreach (var instance in instances)
+            {
+                if (slices.TryGetValue(instance.TableInstanceId, out var slice))
+                {
+                    cells.AddRange(slice);
+                }
+            }
         }
 
         var headerRaw = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);

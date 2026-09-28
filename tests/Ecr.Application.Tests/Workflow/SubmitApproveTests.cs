@@ -128,6 +128,33 @@ public sealed class SubmitApproveTests
                   new(new CellAddress(new PeriodKey(Period), 1001, 11), 3,
                       new CellValueData { ValueNumeric = 12500m }),
               });
+
+        // ⚠ P3: подання читає зріз і рядки ПАКЕТНО (`ReadSlicesAsync`,
+        // `GetRowIdsBatchAsync`). Пакетні виклики делегують до поштучних
+        // підстановок вище — тести нижче й далі підставляють зріз поштучно.
+        _cells.ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>())
+              .Returns(call =>
+              {
+                  var result = new Dictionary<long, IReadOnlyList<CellRecord>>();
+                  foreach (var id in call.Arg<IReadOnlyList<long>>())
+                  {
+                      result[id] = _cells.ReadSliceAsync(id, CancellationToken.None).GetAwaiter().GetResult();
+                  }
+
+                  return (IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>)result;
+              });
+        _rows.GetRowIdsBatchAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(call =>
+             {
+                 var result = new Dictionary<long, IReadOnlyDictionary<string, long>>();
+                 foreach (var id in call.Arg<IReadOnlyList<long>>())
+                 {
+                     result[id] = _rows.GetRowIdsAsync(id, call.Arg<PeriodKey>(), CancellationToken.None)
+                                       .GetAwaiter().GetResult();
+                 }
+
+                 return (IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>>)result;
+             });
     }
 
     /// <summary>Версія шаблону, за якою живе документ цих тестів.</summary>
