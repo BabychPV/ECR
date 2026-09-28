@@ -1903,7 +1903,7 @@
             "type": "integer"
           },
           "periodKey": {
-            "description": "Період; `null` — не записано.",
+            "description": "Період; `null` — не записано або подія синку довідника (довідник не живе за періодами).",
             "format": "int32",
             "type": [
               "null",
@@ -1927,7 +1927,7 @@
             ]
           },
           "status": {
-            "description": "`SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`, `SkippedWriteConflict` або `SkippedNeedsConfirmation`.",
+            "description": "Один зі статусів `CollectionCoverage.KnownStatuses` (`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs`): події матеріалізації й синку довідника.",
             "type": "string"
           }
         },
@@ -13817,7 +13817,7 @@
             }
           },
           {
-            "description": "`SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`, `SkippedWriteConflict`, `SkippedNeedsConfirmation`; інше — `422`.",
+            "description": "Будь-який статус із `CollectionCoverage.KnownStatuses` (`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs`), без урахування регістру: події матеріалізації й синку довідника; інше — `422`.",
             "in": "query",
             "name": "status",
             "schema": {

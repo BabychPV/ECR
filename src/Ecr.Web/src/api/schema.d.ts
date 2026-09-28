@@ -497,7 +497,7 @@ export interface paths {
                     dataSource?: number;
                     /** @description Лише події цієї сутності збору. */
                     entity?: number;
-                    /** @description `SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`, `SkippedWriteConflict`, `SkippedNeedsConfirmation`; інше — `422`. */
+                    /** @description Будь-який статус із `CollectionCoverage.KnownStatuses` (`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs`), без урахування регістру: події матеріалізації й синку довідника; інше — `422`. */
                     status?: string;
                     /** @description Лише події цього періоду. */
                     periodKey?: number;
@@ -15261,7 +15261,7 @@ export interface components {
             id: number;
             /**
              * Format: int32
-             * @description Період; `null` — не записано.
+             * @description Період; `null` — не записано або подія синку довідника (довідник не живе за періодами).
              */
             periodKey: null | number;
             /** @description Код сутності. */
@@ -15273,7 +15273,7 @@ export interface components {
             sourceEntityId: number;
             /** @description Назва сутності; `null` — не задана. */
             sourceEntityName: null | string;
-            /** @description `SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`, `SkippedWriteConflict` або `SkippedNeedsConfirmation`. */
+            /** @description Один зі статусів `CollectionCoverage.KnownStatuses` (`src/Ecr.Domain/Entities/Integration/IntegrationLogs.cs`): події матеріалізації й синку довідника. */
             status: string;
         };
         /** @description Тіло створення розкладу. */
