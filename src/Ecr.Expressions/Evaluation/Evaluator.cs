@@ -633,16 +633,22 @@ public sealed class Evaluator(
         return ExpressionValue.Boolean(op == BinaryOperator.And ? a && b : a || b);
     }
 
-    private static bool AreEqual(ExpressionValue left, ExpressionValue right)
+    /// <remarks>
+    /// ⛔ Числа порівнює АРИФМЕТИКА режиму, а не <c>AsNumber()</c> (аудит A5):
+    /// звуження <c>double</c> до <c>decimal</c> округлювало до 15 знаків, і в
+    /// <c>Legacy</c> <c>0.1 + 0.2 = 0.3</c> давало TRUE, а NCalc 1.3.8 — FALSE.
+    /// У <c>Strict</c> і діалекті шаблонів це й далі <c>decimal</c>.
+    /// </remarks>
+    private bool AreEqual(ExpressionValue left, ExpressionValue right)
     {
         if (left.IsNull || right.IsNull)
         {
             return left.IsNull && right.IsNull;
         }
 
-        if (left.AsNumber() is { } a && right.AsNumber() is { } b)
+        if (arithmetic.CompareNumbers(left, right) is { } order)
         {
-            return a == b;
+            return order == 0;
         }
 
         if (left.Type != right.Type)

@@ -210,4 +210,28 @@ public sealed class StrictDecimalArithmetic : IEvaluationArithmetic
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ У <see cref="decimal"/>: <c>Strict</c> — наскрізний <c>decimal</c>
+    /// (<c>02b</c> §5), і порівняння не виняток (аудит A6).
+    ///
+    /// ⚠ <see cref="double"/>-значення в цьому режимі не породжує жодна операція;
+    /// якщо воно все ж потрапило сюди (<c>±∞</c> у <c>decimal</c> не подається),
+    /// порівняння йде в <c>double</c>, а не падає й не бреше звуженням.
+    /// </remarks>
+    public int? CompareNumbers(ExpressionValue left, ExpressionValue right)
+    {
+        if (left.Type != ExpressionValueType.Number || right.Type != ExpressionValueType.Number)
+        {
+            return null;
+        }
+
+        if (left.IsDouble || right.IsDouble)
+        {
+            return left.AsDouble()!.Value.CompareTo(right.AsDouble()!.Value);
+        }
+
+        return ((decimal)left.Value!).CompareTo((decimal)right.Value!);
+    }
 }
