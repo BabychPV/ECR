@@ -4104,6 +4104,8 @@ USING (VALUES
     (N'status.coverage.SkippedPointCeiling', N'en', N'Too many points', 1),
     (N'status.coverage.SkippedPeriodClosed', N'en', N'Period closed', 1),
     (N'status.coverage.ConflictKeptManual',  N'en', N'Manual value kept', 1),
+    (N'status.coverage.SkippedWriteConflict', N'en', N'Write conflict, will retry', 1),
+    (N'status.coverage.SkippedNeedsConfirmation', N'en', N'Needs confirmation', 1),
 
     -- `SnapshotStatus` (Enums.cs, D-65). Словник окремий від `status.sheet.*`:
     -- `Rejected` у зрізі немає, а `Submitted` — кінцевий іммутабельний стан.

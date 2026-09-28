@@ -497,7 +497,7 @@ export interface paths {
                     dataSource?: number;
                     /** @description Лише події цієї сутності збору. */
                     entity?: number;
-                    /** @description `SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`; інше — `422`. */
+                    /** @description `SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`, `SkippedWriteConflict`, `SkippedNeedsConfirmation`; інше — `422`. */
                     status?: string;
                     /** @description Лише події цього періоду. */
                     periodKey?: number;
@@ -15116,7 +15116,7 @@ export interface components {
             sourceEntityId: number;
             /** @description Назва сутності; `null` — не задана. */
             sourceEntityName: null | string;
-            /** @description `SkippedPeriodClosed`, `ConflictKeptManual` або `SkippedPointCeiling`. */
+            /** @description `SkippedPeriodClosed`, `ConflictKeptManual`, `SkippedPointCeiling`, `SkippedWriteConflict` або `SkippedNeedsConfirmation`. */
             status: string;
         };
         /** @description Тіло створення розкладу. */

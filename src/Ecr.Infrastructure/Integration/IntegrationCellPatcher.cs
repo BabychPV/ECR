@@ -38,10 +38,11 @@ namespace Ecr.Infrastructure.Integration;
 /// ⚠ Рядок змінили між читанням версії і записом (<c>ECR-CELL-0409</c>) —
 /// обмежений повтор: перечитати стан і спробувати знову, не більше
 /// <see cref="MaxAttempts"/> разів. Після цього комірки повертаються в
-/// <see cref="IntegrationWriteResult.KeptManual"/> з позначкою
-/// <see cref="RetriesExhaustedNote"/> — і задача кладе їх у журнал покриття,
-/// а не валить прогін винятком (<c>D-118</c>: «зібрано, але не записано» — не
-/// мовчки, але й не аварія).
+/// <see cref="IntegrationWriteResult.WriteConflicts"/> — і задача кладе їх у
+/// журнал покриття статусом <c>SkippedWriteConflict</c>, а не валить прогін
+/// винятком (<c>D-118</c>: «зібрано, але не записано» — не мовчки, але й не
+/// аварія). ⛔ Не в <see cref="IntegrationWriteResult.KeptManual"/>: людина
+/// комірку не правила, і журнал писав би «має правку людини» неправду.
 ///
 /// ⚠ Незмінні значення відсіюються тут, до обробника (ідемпотентність
 /// повторного прогону). Обробник сам не дає рядка аудиту на незмінне
@@ -59,18 +60,6 @@ public sealed class IntegrationCellPatcher(
 {
     /// <summary>Скільки разів пробувати запис, якщо рядок змінили між читанням і записом.</summary>
     public const int MaxAttempts = 3;
-
-    /// <summary>
-    /// Позначка комірки в <see cref="IntegrationWriteResult.KeptManual"/>, яку не
-    /// вдалося записати за <see cref="MaxAttempts"/> спроби через чужі зміни рядка.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Окремого статусу журналу покриття під це немає свідомо: статус тягне
-    /// бейдж, фільтр і ключ каталогу в клієнті, а сама подія — той самий
-    /// «конфлікт, лишено чинне значення», що й <c>ConflictKeptManual</c>.
-    /// Позначка в тексті відрізняє причину для адміністратора.
-    /// </remarks>
-    public const string RetriesExhaustedNote = " (рядок змінювали під час запису — 3 спроби поспіль)";
 
     /// <inheritdoc />
     public async Task<IntegrationWriteResult> ApplyIntegrationAsync(
@@ -138,8 +127,9 @@ public sealed class IntegrationCellPatcher(
                 {
                     return new IntegrationWriteResult(
                         0,
-                        [.. plan.Kept, .. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}{RetriesExhaustedNote}"))],
-                        plan.AwaitingConfirmation);
+                        plan.Kept,
+                        plan.AwaitingConfirmation,
+                        [.. plan.Rows.SelectMany(r => r.Cells.Select(c => $"{r.RowKey}:{c.ColumnCode}"))]);
                 }
             }
         }

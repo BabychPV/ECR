@@ -32,6 +32,8 @@ namespace Ecr.Infrastructure.Jobs;
 /// <item><term>період <c>Scheduled</c></term><description><b>не</b> писати і <b>не</b> журналювати: ще не відкритий, точки згорне перший прогін після відкриття</description></item>
 /// <item><term>період закритий</term><description><b>не</b> писати; рядок у журналі покриття зі статусом <c>SkippedPeriodClosed</c></description></item>
 /// <item><term>комірка правлена людиною</term><description><b>не</b> перезаписувати; <c>ConflictKeptManual</c></description></item>
+/// <item><term>рядок змінювали під час запису, повтори вичерпано</term><description><c>SkippedWriteConflict</c></description></item>
+/// <item><term>правило періоду вимагає підтвердження</term><description><b>не</b> писати; <c>SkippedNeedsConfirmation</c></description></item>
 /// <item><term>комірка порожня або від інтеграції</term><description>записати</description></item>
 /// </list>
 /// </remarks>
@@ -209,35 +211,36 @@ public sealed class MaterializeCollectedDataJob(
         // ⛔ Q-170 (аудит фази 2, продуктивність): ОДИН пакетний запис на всі
         // конфлікти замість `RecordAsync` (власний `SaveChangesAsync`) у
         // циклі на кожен.
-        if (written.KeptManual.Count > 0)
-        {
-            await coverage
-                .RecordManyAsync(
-                    [.. written.KeptManual.Select(kept => new CoverageEvent(
-                        task.SourceEntityId, periodKey, CollectionCoverage.ConflictKeptManual,
-                        $"Комірка {kept} має правку людини: значення збору не застосовано."))],
-                    ct)
-                .ConfigureAwait(false);
-        }
-
-        // ⛔ Комірки під правилом «дозволено з підтвердженням» (`ФВ-2.16`):
-        // підтвердження — дія людини, інтеграція його не дає і не пише. Не
-        // мовчки — рядок у журнал на кожну.
         //
-        // ⚠ Статус — той самий `ConflictKeptManual` («лишено чинне значення»):
-        // окремий статус тягне бейдж, фільтр, ключ каталогу й контракт клієнта,
-        // а подія для адміністратора та сама — значення збору не застосовано,
-        // рішення за людиною. Причину розрізняє текст.
-        if (written.AwaitingConfirmation is { Count: > 0 } awaiting)
+        // ⛔ Три причини «не записано» — три РІЗНІ статуси. Доти вичерпані
+        // повтори і комірки під підтвердженням теж ішли як `ConflictKeptManual`
+        // «має правку людини» — неправда в журналі, людина їх не правила; до
+        // того ж `ConflictKeptManual` свідомо поза зведенням сповіщень, тож
+        // незаписані дані губилися й там.
+        // • `ConflictKeptManual` — лише справжня правка людини; дії не треба.
+        // • `SkippedWriteConflict` — рядок змінювали під час запису, повтори
+        //   вичерпано; наступний прогін спробує знову.
+        // • `SkippedNeedsConfirmation` — правило періоду `AllowWithConfirmation`
+        //   (`ФВ-2.16`): підтвердження — дія людини, інтеграція його не дає.
+        var events = new List<CoverageEvent>();
+
+        events.AddRange(written.KeptManual.Select(kept => new CoverageEvent(
+            task.SourceEntityId, periodKey, CollectionCoverage.ConflictKeptManual,
+            $"Комірка {kept} має правку людини: значення збору не застосовано.")));
+
+        events.AddRange((written.WriteConflicts ?? []).Select(cell => new CoverageEvent(
+            task.SourceEntityId, periodKey, CollectionCoverage.SkippedWriteConflict,
+            $"Комірка {cell}: рядок змінювали під час запису, повтори вичерпано — "
+            + "значення збору не записано; наступний прогін спробує знову.")));
+
+        events.AddRange((written.AwaitingConfirmation ?? []).Select(cell => new CoverageEvent(
+            task.SourceEntityId, periodKey, CollectionCoverage.SkippedNeedsConfirmation,
+            $"Комірка {cell}: правило періоду вимагає підтвердження людини — "
+            + "інтеграція не підтверджує, значення збору не записано.")));
+
+        if (events.Count > 0)
         {
-            await coverage
-                .RecordManyAsync(
-                    [.. awaiting.Select(cell => new CoverageEvent(
-                        task.SourceEntityId, periodKey, CollectionCoverage.ConflictKeptManual,
-                        $"Комірка {cell}: правило періоду вимагає підтвердження людини — "
-                        + "інтеграція не підтверджує, значення збору не застосовано."))],
-                    ct)
-                .ConfigureAwait(false);
+            await coverage.RecordManyAsync(events, ct).ConfigureAwait(false);
         }
 
         await progress

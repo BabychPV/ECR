@@ -226,8 +226,12 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         Assert.Null(await CellAsync(stand, stand.ColumnDefIds[0]));
         Assert.Null(await LastChangeAsync(stand, stand.ColumnDefIds[0]));
 
+        // ⛔ Власний статус, а не `ConflictKeptManual` «має правку людини»:
+        // людина комірку не правила.
+        // МУТАЦІЙНИЙ ДОКАЗ: у `MaterializeCollectedDataJob` журналювати
+        // `AwaitingConfirmation` статусом `ConflictKeptManual` (як доти) → червоний.
         var coverage = Assert.Single(await CoverageAsync(stand));
-        Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
+        Assert.Equal(CollectionCoverage.SkippedNeedsConfirmation, coverage.Status);
         Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
         Assert.Contains("підтвердження", coverage.Details, StringComparison.Ordinal);
     }
@@ -335,10 +339,12 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         Assert.Equal(7m, Assert.IsType<decimal>(await CellAsync(stand, stand.ColumnDefIds[1])));
         Assert.Equal($"{stand.SvcId}|Integration", await LastChangeAsync(stand, stand.ColumnDefIds[1]));
 
+        // Контроль: справжня правка людини лишається `ConflictKeptManual`, а не
+        // `SkippedWriteConflict` — хоч і прийшла через той самий `ECR-CELL-0409`.
         var coverage = Assert.Single(await CoverageAsync(stand));
         Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
         Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
-        Assert.DoesNotContain(IntegrationCellPatcher.RetriesExhaustedNote, coverage.Details, StringComparison.Ordinal);
+        Assert.Contains("правку людини", coverage.Details, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -377,10 +383,14 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         Assert.Null(await CellAsync(stand, stand.ColumnDefIds[0]));
         Assert.Null(await LastChangeAsync(stand, stand.ColumnDefIds[0]));
 
+        // ⛔ `SkippedWriteConflict`, а НЕ `ConflictKeptManual` «має правку
+        // людини»: людина комірку не правила, рядок лише змінювали під час запису.
+        // МУТАЦІЙНИЙ ДОКАЗ: у `IntegrationCellPatcher` повернути вичерпані
+        // повтори в `KeptManual` (як доти) → статус `ConflictKeptManual`, червоний.
         var coverage = Assert.Single(await CoverageAsync(stand));
-        Assert.Equal(CollectionCoverage.ConflictKeptManual, coverage.Status);
+        Assert.Equal(CollectionCoverage.SkippedWriteConflict, coverage.Status);
         Assert.Contains($"{stand.RowKey}:{stand.ColumnCodes[0]}", coverage.Details, StringComparison.Ordinal);
-        Assert.Contains(IntegrationCellPatcher.RetriesExhaustedNote, coverage.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("правку людини", coverage.Details, StringComparison.Ordinal);
     }
 
     [Fact]

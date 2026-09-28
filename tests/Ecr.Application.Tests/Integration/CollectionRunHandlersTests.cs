@@ -4,6 +4,7 @@ using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Integration;
 using Ecr.TestKit;
 using NSubstitute;
 using Xunit;
@@ -120,6 +121,27 @@ public sealed class CollectionRunHandlersTests
         // Рядок статусу — дослівно той, що пише MaterializeCollectedDataJob.
         await _runs.Received(1).ListCoverageEventsAsync(
             Arg.Is<CoverageEventFilter>(f => f.Status == "SkippedPointCeiling" && f.SourceEntityId == 5 && f.PeriodKey == 202609),
+            Arg.Any<CursorRequest>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Нові статуси (<c>D-118</c>): фільтр їх приймає, а не відмовляє 422 —
+    /// інакше адміністратор не відфільтрував би саме ті події, що їх пише задача.
+    /// </summary>
+    [Theory]
+    [InlineData("skippedwriteconflict", CollectionCoverage.SkippedWriteConflict)]
+    [InlineData("SkippedNeedsConfirmation", CollectionCoverage.SkippedNeedsConfirmation)]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ІНТ-3.3")]
+    public async Task Фільтр_приймає_статуси_конфлікту_запису_і_підтвердження(string asked, string expected)
+    {
+        Allow("Integration.View");
+
+        await Events().HandleAsync(new CoverageEventFilter(null, null, asked, null), new CursorRequest(), default);
+
+        await _runs.Received(1).ListCoverageEventsAsync(
+            Arg.Is<CoverageEventFilter>(f => f.Status == expected),
             Arg.Any<CursorRequest>(),
             Arg.Any<CancellationToken>());
     }

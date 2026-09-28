@@ -39,7 +39,7 @@ public sealed record CoverageEventFilter(int? DataSourceId, int? SourceEntityId,
 /// <param name="SourceEntityName">Назва сутності; <c>null</c> — не задана.</param>
 /// <param name="DataSourceCode">Код з'єднання.</param>
 /// <param name="PeriodKey">Період; <c>null</c> — не записано.</param>
-/// <param name="Status"><c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c> або <c>SkippedPointCeiling</c>.</param>
+/// <param name="Status"><c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>, <c>SkippedPointCeiling</c>, <c>SkippedWriteConflict</c> або <c>SkippedNeedsConfirmation</c>.</param>
 /// <param name="Details">Пояснення сервера для людини; <c>null</c> — не записано.</param>
 /// <param name="At">Коли подію записано (UTC).</param>
 public sealed record CoverageEventView(

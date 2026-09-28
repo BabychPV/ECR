@@ -91,6 +91,23 @@ public sealed class CollectionCoverage : Entity<long>
     public const string SkippedPointCeiling = "SkippedPointCeiling";
 
     /// <summary>
+    /// Рядок змінювали під час запису — повтори вичерпано, значення збору не
+    /// записано; наступний прогін спробує знову.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="ConflictKeptManual"/>: людина комірку не правила, і
+    /// «має правку людини» тут було б неправдою в журналі.
+    /// </remarks>
+    public const string SkippedWriteConflict = "SkippedWriteConflict";
+
+    /// <summary>
+    /// Правило періоду дозволяє запис лише з підтвердженням людини
+    /// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>) — інтеграція не підтверджує,
+    /// значення збору не записано.
+    /// </summary>
+    public const string SkippedNeedsConfirmation = "SkippedNeedsConfirmation";
+
+    /// <summary>
     /// Усі статуси подій журналу покриття (<c>D-118</c>, ФВ-5.23).
     /// </summary>
     /// <remarks>
@@ -100,7 +117,7 @@ public sealed class CollectionCoverage : Entity<long>
     /// пропуском, від якого цей перелік і рятує.
     /// </remarks>
     public static readonly IReadOnlyList<string> KnownStatuses =
-        [SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling];
+        [SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling, SkippedWriteConflict, SkippedNeedsConfirmation];
 
     /// <summary>Записує покритий інтервал.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
@@ -130,7 +147,7 @@ public sealed class CollectionCoverage : Entity<long>
     /// </summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
     /// <param name="periodKey">Період, якого це стосується.</param>
-    /// <param name="status">Статус: <c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>.</param>
+    /// <param name="status">Статус із <see cref="KnownStatuses"/>.</param>
     /// <param name="details">Пояснення для людини; без стеків (ФВ-6.11).</param>
     /// <param name="utcNow">Момент запису.</param>
     /// <remarks>

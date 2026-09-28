@@ -122,6 +122,8 @@ public sealed class NotificationJob(
         // ⚠ `ConflictKeptManual` свідомо поза зведенням: ручне значення в
         // комірці перемогло зібране — це очікувана поведінка («людина має
         // рацію»), її видно в стрічці подій UI, а не в листі про збої.
+        // `SkippedWriteConflict` і `SkippedNeedsConfirmation` — навпаки, У
+        // зведенні: значення не записано, і людина правки не робила.
         //
         // ⚠ Групування (сутність, період, статус) — у базі: 5 000 пропусків
         // того самого періоду — ОДИН рядок із лічильником, а не сто рядків,
@@ -396,17 +398,28 @@ public sealed class NotificationJob(
     /// <param name="digestKind">Вид рядка.</param>
     /// <param name="status">Статус рядка.</param>
     /// <remarks>
-    /// ⚠ Лише <see cref="CollectionCoverage.SkippedPeriodClosed"/> — попередження:
-    /// значення за закритий період не лягли в комірки навмисно (період
-    /// закрито), і людина вирішує, чи відкривати його. Стеля точок
-    /// (<see cref="CollectionCoverage.SkippedPointCeiling"/>) — помилка: інтервал
-    /// не згорнуто, і в комірці немає числа, яке мало там бути. Решта рядків
-    /// зведення — збої, як і раніше.
+    /// ⚠ Попередження — події покриття, де значення не записано, але причина
+    /// відома й не є дефектом:
+    /// <list type="bullet">
+    /// <item><see cref="CollectionCoverage.SkippedPeriodClosed"/> — період закрито
+    /// навмисно, людина вирішує, чи відкривати його;</item>
+    /// <item><see cref="CollectionCoverage.SkippedWriteConflict"/> — рядок
+    /// змінювали під час запису; значення не втрачено, наступний прогін
+    /// спробує знову, і стан зазвичай минає сам;</item>
+    /// <item><see cref="CollectionCoverage.SkippedNeedsConfirmation"/> — правило
+    /// періоду вимагає підтвердження людини: потрібна дія, але це робота за
+    /// правилом, а не збій.</item>
+    /// </list>
+    /// Стеля точок (<see cref="CollectionCoverage.SkippedPointCeiling"/>) —
+    /// помилка: інтервал не згорнуто через конфігурацію, і сам він не мине.
+    /// Решта рядків зведення — збої, як і раніше.
     /// Серйозність групи — найвища серед її рядків.
     /// </remarks>
     public static NotificationSeverity SeverityOf(string digestKind, string status)
         => digestKind == CoverageKind
-           && string.Equals(status, CollectionCoverage.SkippedPeriodClosed, StringComparison.Ordinal)
+           && status is CollectionCoverage.SkippedPeriodClosed
+               or CollectionCoverage.SkippedWriteConflict
+               or CollectionCoverage.SkippedNeedsConfirmation
             ? NotificationSeverity.Warning
             : NotificationSeverity.Error;
 

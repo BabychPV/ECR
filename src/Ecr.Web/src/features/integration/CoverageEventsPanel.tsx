@@ -19,7 +19,8 @@ import { t } from '@/shared/i18n';
  * Події журналу покриття (ФВ-5.23, ІНТ-3.3, `D-118`) — секція `/admin/sources`.
  *
  * ⛔ Це те, що збір ЗІБРАВ, але в комірки НЕ поклав: період закрито, ручне
- * значення збережено, точок на поле забагато. Такі рядки не прив'язані до
+ * значення збережено, точок на поле забагато, рядок змінювали під час запису,
+ * правило періоду вимагає підтвердження людини. Такі рядки не прив'язані до
  * прогону (`CollectionRunId = null`, Q-186), тож шухляда прогону їх не
  * показує — і до цієї секції їх не бачив ніхто. Мовчазний пропуск тут
  * найдорожчий: звіт складається, а числа за пізній інтервал у ньому немає.
@@ -146,6 +147,10 @@ function statusFilterLabel(status: CoverageEventStatus): string {
       return t('status.coverage.SkippedPointCeiling');
     case 'SkippedPeriodClosed':
       return t('status.coverage.SkippedPeriodClosed');
+    case 'SkippedWriteConflict':
+      return t('status.coverage.SkippedWriteConflict');
+    case 'SkippedNeedsConfirmation':
+      return t('status.coverage.SkippedNeedsConfirmation');
     case 'ConflictKeptManual':
       return t('status.coverage.ConflictKeptManual');
     default:

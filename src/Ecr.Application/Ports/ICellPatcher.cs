@@ -46,14 +46,26 @@ public sealed record IntegrationCellValue(string RowKey, int ColumnDefId, decima
 
 /// <summary>Наслідок запису від інтеграції.</summary>
 /// <param name="Applied">Скільки комірок записано.</param>
-/// <param name="KeptManual">Комірки, лишені за людиною: <c>rowKey:columnCode</c>.</param>
+/// <param name="KeptManual">
+/// Комірки, лишені за людиною: <c>rowKey:columnCode</c>. ⛔ Лише справжні
+/// правки людини (і видалені колонки) — не повтори й не підтвердження: кожен
+/// елемент тут стає в журналі «має правку людини».
+/// </param>
 /// <param name="AwaitingConfirmation">
 /// Комірки, на які правило періоду вимагає підтвердження людини
 /// (<c>ФВ-2.16</c>, <c>AllowWithConfirmation</c>): інтеграція підтверджувати не
 /// може, тож їх не записано. <c>null</c> — таких немає.
 /// </param>
+/// <param name="WriteConflicts">
+/// Комірки, не записані через те, що рядок змінювали під час запису, і
+/// обмежені повтори вичерпано: <c>rowKey:columnCode</c>. <c>null</c> — таких
+/// немає. Людина їх не правила — окремо від <paramref name="KeptManual"/>.
+/// </param>
 public sealed record IntegrationWriteResult(
-    int Applied, IReadOnlyList<string> KeptManual, IReadOnlyList<string>? AwaitingConfirmation = null);
+    int Applied,
+    IReadOnlyList<string> KeptManual,
+    IReadOnlyList<string>? AwaitingConfirmation = null,
+    IReadOnlyList<string>? WriteConflicts = null);
 
 /// <summary>
 /// Журнал покриття збору (<c>itg.CollectionCoverage</c>).
@@ -68,7 +80,7 @@ public interface ICoverageJournal
     /// <summary>Записує подію покриття.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
     /// <param name="periodKey">Період.</param>
-    /// <param name="status">Статус: <c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>.</param>
+    /// <param name="status">Статус із <c>CollectionCoverage.KnownStatuses</c>.</param>
     /// <param name="details">Пояснення для людини; без стеків (ФВ-6.11).</param>
     /// <param name="ct">Токен скасування.</param>
     public Task RecordAsync(
@@ -86,6 +98,6 @@ public interface ICoverageJournal
 /// <summary>Одна подія покриття для пакетного запису.</summary>
 /// <param name="SourceEntityId">Сутність джерела.</param>
 /// <param name="PeriodKey">Період.</param>
-/// <param name="Status">Статус: <c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>.</param>
+/// <param name="Status">Статус із <c>CollectionCoverage.KnownStatuses</c>.</param>
 /// <param name="Details">Пояснення для людини; без стеків (ФВ-6.11).</param>
 public sealed record CoverageEvent(int SourceEntityId, PeriodKey PeriodKey, string Status, string Details);

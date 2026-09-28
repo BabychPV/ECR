@@ -109,7 +109,13 @@ export type CoverageEventView = components['schemas']['CoverageEventView'];
 export type CoverageEventPage = components['schemas']['PagedResultOfCoverageEventView'];
 
 /** Статуси подій — рівно перелік сервера (`CollectionCoverage.KnownStatuses`). */
-export const CoverageEventStatuses = ['SkippedPointCeiling', 'SkippedPeriodClosed', 'ConflictKeptManual'] as const;
+export const CoverageEventStatuses = [
+  'SkippedPointCeiling',
+  'SkippedPeriodClosed',
+  'SkippedWriteConflict',
+  'SkippedNeedsConfirmation',
+  'ConflictKeptManual',
+] as const;
 export type CoverageEventStatus = (typeof CoverageEventStatuses)[number];
 
 /** Ключ запиту подій — без курсора, з тієї самої причини, що {@link collectionRunsQueryKey}. */

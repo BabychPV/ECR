@@ -201,9 +201,60 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// Незаписане через конфлікт запису і через підтвердження — У зведенні
+    /// (на відміну від <c>ConflictKeptManual</c>), попередженням.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Доти обидва випадки журналювалися як <c>ConflictKeptManual</c>, а той
+    /// свідомо поза зведенням — незаписані дані мовчали в листі.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-118")]
+    public async Task Конфлікт_запису_і_підтвердження_йдуть_у_зведення_попередженням()
+    {
+        var now = new DateTime(2035, 6, 6, 6, 0, 0, DateTimeKind.Utc);
+        var world = await ArrangeAsync(now);
+
+        try
+        {
+            await using (var setup = CreateContext())
+            {
+                setup.CollectionCoverages.Add(CollectionCoverage.Skipped(
+                    world.EntityId, 203505, CollectionCoverage.SkippedWriteConflict,
+                    "R1:C1 write conflict", now.AddMinutes(-10)));
+                setup.CollectionCoverages.Add(CollectionCoverage.Skipped(
+                    world.EntityId, 203505, CollectionCoverage.SkippedNeedsConfirmation,
+                    "R1:C2 needs confirmation", now.AddMinutes(-9)));
+                await setup.SaveChangesAsync(CancellationToken.None);
+            }
+
+            // Серйозність (Warning) — `Серйозність_події_покриття_залежить_від_статусу`;
+            // тут — що рядки взагалі доходять до листа.
+            var (deliveries, messages) = await RunJobAsync(now, NotificationSeverity.Warning);
+
+            var delivery = Assert.Single(deliveries);
+            Assert.Equal(NotificationEventKind.CollectionFailed, delivery.EventKind);
+
+            var message = Assert.Single(messages);
+            Assert.Contains($"[coverage] {world.EntityCode}: {CollectionCoverage.SkippedWriteConflict}", message.Body, StringComparison.Ordinal);
+            Assert.Contains($"[coverage] {world.EntityCode}: {CollectionCoverage.SkippedNeedsConfirmation}", message.Body, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CleanupAsync(world.EntityId);
+        }
+    }
+
     [Theory]
     [InlineData(CollectionCoverage.SkippedPeriodClosed, NotificationSeverity.Warning)]
     [InlineData(CollectionCoverage.SkippedPointCeiling, NotificationSeverity.Error)]
+    // Значення не записано, але причина відома й не є дефектом: повтор
+    // наступним прогоном / потрібне підтвердження людини — попередження.
+    [InlineData(CollectionCoverage.SkippedWriteConflict, NotificationSeverity.Warning)]
+    [InlineData(CollectionCoverage.SkippedNeedsConfirmation, NotificationSeverity.Warning)]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "INT-3.3")]
     public void Серйозність_події_покриття_залежить_від_статусу(string status, NotificationSeverity expected)

@@ -228,10 +228,16 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
    * виправити це може лише людина. `SkippedPeriodClosed` — `warning`: період
    * закрито навмисно, але пізні дані все одно треба звірити. `ConflictKeptManual`
    * — `info`: ручне значення збережено за правилом, це не збій.
+   * `SkippedWriteConflict` — `warning`: значення не записано, хоч наступний
+   * прогін і спробує знову. `SkippedNeedsConfirmation` — `warning`, а не
+   * `info`: значення не записано, і без дії людини (підтвердження) воно не
+   * ляже; `info` тут означав би «нічого робити не треба», як у `ConflictKeptManual`.
    */
   coverage: {
     SkippedPointCeiling: 'danger',
     SkippedPeriodClosed: 'warning',
+    SkippedWriteConflict: 'warning',
+    SkippedNeedsConfirmation: 'warning',
     ConflictKeptManual: 'info',
   },
 

@@ -64,7 +64,7 @@ public sealed class CollectionRunsController(
     /// </remarks>
     /// <param name="dataSource">Лише події сутностей цього з'єднання.</param>
     /// <param name="entity">Лише події цієї сутності збору.</param>
-    /// <param name="status"><c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>, <c>SkippedPointCeiling</c>; інше — <c>422</c>.</param>
+    /// <param name="status"><c>SkippedPeriodClosed</c>, <c>ConflictKeptManual</c>, <c>SkippedPointCeiling</c>, <c>SkippedWriteConflict</c>, <c>SkippedNeedsConfirmation</c>; інше — <c>422</c>.</param>
     /// <param name="periodKey">Лише події цього періоду.</param>
     /// <param name="cursor">Курсор наступної сторінки.</param>
     /// <param name="limit">Розмір сторінки 1..200; <c>0</c> — типове 50.</param>

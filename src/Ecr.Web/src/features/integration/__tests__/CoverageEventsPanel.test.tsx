@@ -119,6 +119,47 @@ describe('CoverageEventsPanel', () => {
     expect(seen.every((params) => params.get('status') === 'SkippedPeriodClosed')).toBe(true);
   });
 
+  it('конфлікт запису і потреба підтвердження — власні бейджі `warning`, не «ручне значення»', async () => {
+    const WriteConflict = { ...Ceiling, id: 9002, sourceEntityCode: 'FLOW-03', sourceEntityName: null, status: 'SkippedWriteConflict' };
+    const NeedsConfirmation = { ...Ceiling, id: 9003, sourceEntityCode: 'FLOW-04', sourceEntityName: null, status: 'SkippedNeedsConfirmation' };
+    respond(() => ({ items: [WriteConflict, NeedsConfirmation], nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('FLOW-03');
+
+    for (const [id, status] of [
+      ['9002', 'SkippedWriteConflict'],
+      ['9003', 'SkippedNeedsConfirmation'],
+    ] as const) {
+      const badge = document.querySelector<HTMLElement>(`tr[data-row-key="${id}"] [data-status-kind="coverage"]`);
+      expect(badge?.dataset.statusState, `стан рядка ${id}`).toBe(status);
+      expect(badge?.dataset.statusTone, `тон рядка ${id}`).toBe('warning');
+      expect(badge?.textContent).toBe(`⟦status.coverage.${status}⟧`);
+    }
+  });
+
+  it('фільтр статусу пропонує обидва нові статуси з підписами каталогу', async () => {
+    respond(() => ({ items: [], nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('⟦coverageEvents.empty⟧');
+
+    fireEvent.click(await screen.findByRole('textbox', { name: '⟦coverageEvents.filterStatus⟧' }));
+
+    expect(await screen.findByRole('option', { name: '⟦status.coverage.SkippedWriteConflict⟧' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '⟦status.coverage.SkippedNeedsConfirmation⟧' })).toBeTruthy();
+  });
+
+  it('фільтр `coverageStatus=SkippedWriteConflict` іде в запит як `status`', async () => {
+    const seen = respond(() => ({ items: [], nextCursor: null, totalCount: null }));
+    show('/admin/sources?coverageStatus=SkippedWriteConflict');
+
+    await screen.findByText('⟦coverageEvents.empty⟧');
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((params) => params.get('status') === 'SkippedWriteConflict')).toBe(true);
+  });
+
   it('«Показати ще» дочитує за курсором і зникає, коли курсора немає', async () => {
     const seen = respond((cursor) =>
       cursor === null
