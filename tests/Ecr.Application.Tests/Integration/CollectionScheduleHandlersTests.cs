@@ -216,8 +216,8 @@ public sealed class CollectionScheduleHandlersTests
         _store.Entities[77] = ("STACK-77", null);
         _store.Entities[78] = ("FLOW-78", null);
 
-        await Create().HandleAsync(77, Hourly, isEnabled: true, CancellationToken.None);
-        await Create().HandleAsync(78, Nightly, isEnabled: true, CancellationToken.None);
+        await Create().HandleAsync(77, Hourly, isEnabled: true, lookbackDays: null, CancellationToken.None);
+        await Create().HandleAsync(78, Nightly, isEnabled: true, lookbackDays: null, CancellationToken.None);
 
         // МУТАЦІЙНИЙ ДОКАЗ: у `CollectionScheduleApplier.ApplyAsync` ставити
         // один сталий cron замість `schedule.CronExpression` (одна частота на
