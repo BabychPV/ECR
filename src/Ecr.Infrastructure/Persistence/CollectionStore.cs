@@ -19,9 +19,6 @@ namespace Ecr.Infrastructure.Persistence;
 /// </remarks>
 public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollectionStore
 {
-    /// <summary>Стеля вибірки інтервалів покриття.</summary>
-    private const int MaxIntervals = 100_000;
-
     /// <inheritdoc />
     public Task<SourceEntity?> FindSourceEntityAsync(int sourceEntityId, CancellationToken ct)
         => db.SourceEntities.FirstOrDefaultAsync(e => e.Id == sourceEntityId && e.IsActive, ct);
@@ -274,16 +271,81 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Повертає вже ЗЛИТІ інтервали (острови), а не сирі рядки журналу —
+    /// див. <see cref="ReadCoverageIslandsAsync"/>. Для <c>GapFinder</c> це те
+    /// саме: він сам зливає суміжні й перекриті інтервали, тож прогалини
+    /// однакові, а рядків — одиниці замість сотень тисяч.
+    /// </remarks>
     public async Task<IReadOnlyList<TimeInterval>> GetCoverageAsync(
         int sourceEntityId, DateTime notBefore, CancellationToken ct)
-        => await db.CollectionCoverages
-            .AsNoTracking()
-            .Where(c => c.SourceEntityId == sourceEntityId && c.CoveredTo >= notBefore)
-            .OrderBy(c => c.CoveredFrom)
-            .Take(MaxIntervals)
-            .Select(c => new TimeInterval(c.CoveredFrom, c.CoveredTo))
+        => (await ReadCoverageIslandsAsync([sourceEntityId], notBefore, ct).ConfigureAwait(false))
+            .ConvertAll(i => new TimeInterval(i.FromUtc, i.ToUtc));
+
+    /// <summary>
+    /// Покриття сутностей від <paramref name="notBefore"/>, злите в острови
+    /// самою базою (аудит P5).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Попередня форма — «усі рядки покриття, <c>OrderBy(CoveredFrom)</c>,
+    /// <c>Take(100 000)</c>» — з ростом журналу відрізала САМЕ СВІЖІ інтервали:
+    /// <c>WriteCoverageAsync</c> дописує рядок кожним прогоном і ніколи їх не
+    /// зливає, тож за кілька місяців стеля наставала, і екран джерел
+    /// (а з ним <c>SourcesHealthCheck</c> і наздоганяння) бачив «прогалину»
+    /// там, де дані є. Тепер стелі немає: у пам'ять їде лише результат
+    /// злиття, а його розмір обмежений вікном, а не історією.
+    /// <para>
+    /// ⛔ Лише інтервали ПРОГОНІВ (<c>Status IS NULL</c>). Рядки подій журналу
+    /// (<see cref="CollectionCoverage.Skipped"/>, <c>SkippedRegistry</c>) — у
+    /// тій самій таблиці, нульової довжини і про покриття нічого не кажуть.
+    /// </para>
+    /// <para>
+    /// Злиття — те саме правило, що в <c>GapFinder</c>: новий острів
+    /// починається, лише коли <c>CoveredFrom</c> СТРОГО пізніше за найпізніший
+    /// <c>CoveredTo</c> попередніх рядків; суміжні інтервали зливаються.
+    /// </para>
+    /// </remarks>
+    private async Task<List<CoverageIsland>> ReadCoverageIslandsAsync(
+        IReadOnlyCollection<int> sourceEntityIds, DateTime notBefore, CancellationToken ct)
+    {
+        var ids = JsonSerializer.Serialize(sourceEntityIds);
+
+        return await db.Database
+            .SqlQuery<CoverageIsland>($"""
+                WITH c AS (
+                    SELECT cc.SourceEntityId, cc.CoveredFrom, cc.CoveredTo
+                    FROM itg.CollectionCoverage cc
+                    WHERE cc.SourceEntityId IN (SELECT CAST(j.[value] AS int) FROM OPENJSON({ids}) j)
+                      AND cc.Status IS NULL
+                      AND cc.CoveredTo >= {notBefore}
+                ),
+                m AS (
+                    SELECT c.SourceEntityId, c.CoveredFrom, c.CoveredTo,
+                           MAX(c.CoveredTo) OVER (PARTITION BY c.SourceEntityId ORDER BY c.CoveredFrom, c.CoveredTo
+                                                  ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS PrevTo
+                    FROM c
+                ),
+                s AS (
+                    SELECT m.SourceEntityId, m.CoveredFrom, m.CoveredTo,
+                           SUM(CASE WHEN m.PrevTo IS NULL OR m.CoveredFrom > m.PrevTo THEN 1 ELSE 0 END)
+                               OVER (PARTITION BY m.SourceEntityId ORDER BY m.CoveredFrom, m.CoveredTo
+                                     ROWS UNBOUNDED PRECEDING) AS Island
+                    FROM m
+                )
+                SELECT s.SourceEntityId, MIN(s.CoveredFrom) AS FromUtc, MAX(s.CoveredTo) AS ToUtc
+                FROM s
+                GROUP BY s.SourceEntityId, s.Island
+                ORDER BY s.SourceEntityId, FromUtc
+                """)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Острів покриття: злиті суміжні й перекриті інтервали однієї сутності.</summary>
+    /// <param name="SourceEntityId">Сутність джерела.</param>
+    /// <param name="FromUtc">Початок острова.</param>
+    /// <param name="ToUtc">Кінець острова.</param>
+    private sealed record CoverageIsland(int SourceEntityId, DateTime FromUtc, DateTime ToUtc);
 
     /// <inheritdoc />
     /// <remarks>
@@ -471,14 +533,14 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        var coverage = await db.CollectionCoverages
-            .AsNoTracking()
-            .Where(c => ids.Contains(c.SourceEntityId))
-            .OrderBy(c => c.CoveredFrom)
-            .Take(MaxIntervals)
-            .Select(c => new { c.SourceEntityId, c.CoveredFrom, c.CoveredTo })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        var now = clock.UtcNow;
+        var gapWindowFrom = now.AddDays(-GapLookbackDays);
+
+        // ⛔ Лише вікно, в якому екран шукає прогалину, і вже злите базою
+        // (аудит P5): уся історія зі стелею «найстаріше першим» відрізала
+        // свіже й малювала прогалину там, де дані є.
+        var coverage = (await ReadCoverageIslandsAsync(ids, gapWindowFrom, ct).ConfigureAwait(false))
+            .ToLookup(c => c.SourceEntityId, c => new TimeInterval(c.FromUtc, c.ToUtc));
 
         var transportById = transports.ToDictionary(s => s.Id, s => s.Transport.ToString());
         var codeById = transports.ToDictionary(s => s.Id, s => s.Code);
@@ -489,21 +551,15 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 g => g.Key,
                 g => g.OrderByDescending(r => r.StartedAt).First());
 
-        var now = clock.UtcNow;
-
         return entities.ConvertAll(entity =>
         {
             var run = lastRun.GetValueOrDefault(entity.Id);
 
-            var intervals = coverage
-                .Where(c => c.SourceEntityId == entity.Id)
-                .Select(c => new TimeInterval(c.CoveredFrom, c.CoveredTo))
-                .ToList();
-
             // ⚠ Прогалина шукається ТИМ САМИМ кодом, що й наздоганяння:
             // друга реалізація «що таке дірка» показувала б на екрані одне,
-            // а збирала б інше.
-            var gaps = Ecr.Application.Integration.GapFinder.Find(intervals, now.AddDays(-GapLookbackDays), now);
+            // а збирала б інше. Злиття в SQL прогалин не змінює — GapFinder
+            // зливає так само.
+            var gaps = Ecr.Application.Integration.GapFinder.Find([.. coverage[entity.Id]], gapWindowFrom, now);
 
             return new SourceEntityStatus(
                 entity.Id,
