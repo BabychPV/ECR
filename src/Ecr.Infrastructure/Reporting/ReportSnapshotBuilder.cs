@@ -380,17 +380,49 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock) : IRepo
             c.Code, c.Kind, ReportColumnNames.Of(c.Code, c.NameL10n, language)))];
 
     /// <summary>Комірки зрізу, зведені в рядки: значення за кодом колонки в порядку опису.</summary>
-    private static List<SnapshotRow> WideRows(
+    /// <param name="cells">Комірки зрізу.</param>
+    /// <param name="columns">Колонки в порядку опису.</param>
+    /// <returns>Рядки за зростанням <c>RowNo</c>.</returns>
+    /// <remarks>
+    /// ⚠ P4 (перф-аудит): комірки групи складаються в словник за кодом ОДИН раз,
+    /// а не шукаються лінійно на кожну колонку — інакше O(R·C²) на зрізі в
+    /// 200 000 рядків. Код колонки, що трапився в групі двічі, дає ПЕРШУ комірку
+    /// (<c>TryAdd</c>) — рівно те, що давав <c>FirstOrDefault</c>. У базі такого
+    /// не буває (ключ <c>SnapshotId, RowNo, ColumnCode</c>), але семантика
+    /// тримається й без бази.
+    /// <para>
+    /// Публічний лише заради прямого тесту еквівалентності: дублікат коду
+    /// через базу не відтворити.
+    /// </para>
+    /// </remarks>
+    public static List<SnapshotRow> WideRows(
         IReadOnlyList<ReportRow> cells, IReadOnlyList<ReportColumnSpec> columns)
-        => [.. cells
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        return [.. cells
             .GroupBy(c => c.RowNo)
             .OrderBy(g => g.Key)
-            .Select(g => new SnapshotRow(
-                g.Key,
-                columns.ToDictionary(
-                    c => c.Code,
-                    c => ValueOf(g.FirstOrDefault(x => x.ColumnCode == c.Code), c.Kind),
-                    StringComparer.Ordinal)))];
+            .Select(g => new SnapshotRow(g.Key, RowCells(g, columns)))];
+    }
+
+    /// <summary>Значення одного рядка за кодом колонки; перша комірка коду виграє.</summary>
+    private static Dictionary<string, object?> RowCells(
+        IEnumerable<ReportRow> group, IReadOnlyList<ReportColumnSpec> columns)
+    {
+        var byCode = new Dictionary<string, ReportRow>(StringComparer.Ordinal);
+
+        foreach (var cell in group)
+        {
+            byCode.TryAdd(cell.ColumnCode, cell);
+        }
+
+        return columns.ToDictionary(
+            c => c.Code,
+            c => ValueOf(byCode.GetValueOrDefault(c.Code), c.Kind),
+            StringComparer.Ordinal);
+    }
 
     /// <summary>Стеля комірок одного рядка у сторінці рядків.</summary>
     private const int MaxColumnsPerRow = 64;
