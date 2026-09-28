@@ -94,6 +94,12 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
     /// Читається сирим SQL: <c>arc.*</c> немає в моделі EF навмисно (різниця
     /// фізична — columnstore і окрема файлова група), і заводити дзеркальні
     /// сутності означало б мати два описи однієї структури, які розійдуться.
+    /// <para>
+    /// ⛔ <c>ValueRegistryEntryId</c> у <c>arc.CellValue</c> — <c>int</c>, а в
+    /// <see cref="ArchivedCell"/> — <c>long?</c>; сирий SQL не розширює тип сам
+    /// (<c>InvalidCastException</c> на першій довідниковій комірці), тому
+    /// <c>CAST … AS bigint</c> (<c>ArchivedRegistryValueReadTests</c>).
+    /// </para>
     /// </remarks>
     private async Task<List<CellRecord>> ArchivedAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
@@ -103,7 +109,8 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
                 SELECT TOP ({MaxCells})
                        c.PeriodKey, c.TableRowId, c.ColumnDefId, c.TableDefId,
                        c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool,
-                       c.ValueRegistryEntryId, c.ValueUnitId, c.IsCalculated, c.IsEmpty
+                       CAST(c.ValueRegistryEntryId AS bigint) AS ValueRegistryEntryId,
+                       c.ValueUnitId, c.IsCalculated, c.IsEmpty
                 FROM arc.CellValue c
                 JOIN arc.TableRow r
                   ON r.PeriodKey = c.PeriodKey AND r.Id = c.TableRowId
