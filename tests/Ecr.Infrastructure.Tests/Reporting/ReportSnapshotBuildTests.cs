@@ -6,6 +6,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
@@ -65,7 +66,7 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
         db.ReportVersions.Add(version);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         // ⛔ Головна перевірка — те, що цей виклик узагалі ЗАВЕРШУЄТЬСЯ.
         // Доти він кидав «could not be translated», і жоден тест цього не
@@ -141,7 +142,7 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
         db.ReportVersions.Add(version);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         // ⛔ Головна перевірка — що виклик узагалі ЗАВЕРШУЄТЬСЯ. До виправлення
         // він кидав `DomainException(ECR-RPT-0409)` з наступного ж рядка після
@@ -201,7 +202,7 @@ public sealed class ReportSnapshotBuildTests(SqlServerFixture sql)
         db.ReportVersions.Add(version);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         var snapshotId = await builder.BuildAsync(
             version.Id, document.ProjectId, document.PeriodKey, """{"Threshold":12}""",

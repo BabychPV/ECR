@@ -10,6 +10,7 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
@@ -40,7 +41,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
             db,
             """[{"code":"Value","kind":"number"},{"code":"UnitCode","kind":"text"},{"code":"DocumentId","kind":"number"}]""");
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
         var snapshotId = await builder.BuildAsync(
             version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
 
@@ -70,7 +71,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var seeded = await SeedResultsAsync(chain, db);
         var version = await PublishedAsync(db, RuledColumnsJson);
 
-        var snapshotId = await new ReportSnapshotBuilder(db, new TestClock(Now)).BuildAsync(
+        var snapshotId = await new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions())).BuildAsync(
             version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
 
         await using var fresh = chain.CreateContext();
@@ -94,7 +95,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
             where def.Code == "IEC"
             select version.Id).SingleAsync();
 
-        var snapshotId = await new ReportSnapshotBuilder(db, new TestClock(Now)).BuildAsync(
+        var snapshotId = await new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions())).BuildAsync(
             iec, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
 
         var stored = await db.ReportSnapshots.AsNoTracking()
@@ -140,7 +141,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var version = await PublishedAsync(
             db, """[{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"}]""");
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
         var snapshotId = await builder.BuildAsync(
             version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None);
 
@@ -216,7 +217,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
             new("CalculationResults", Rules: [new("1 / ([Value] - 5) > 0", new(HideRow: true))]), RuledColumns));
 
         var error = await Assert.ThrowsAsync<Ecr.Application.Errors.BusinessRuleException>(
-            () => new ReportSnapshotBuilder(db, new TestClock(Now)).BuildAsync(
+            () => new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions())).BuildAsync(
                 version.Id, seeded.ProjectId, seeded.PeriodKey, null, CancellationToken.None));
 
         Assert.Equal("1", error.Details!["ruleNo"]);
@@ -288,7 +289,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var version = await PublishedAsync(
             db, """[{"code":"OutputCode","kind":"text"},{"code":"Value","kind":"number"}]""");
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
         var snapshotId = await builder.BuildAsync(
             version.Id, documentA.ProjectId, documentA.PeriodKey, null, CancellationToken.None);
 
@@ -337,7 +338,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var chain = new TestDocumentBuilder(sql.ConnectionString);
         await using var db = chain.CreateContext();
         var seeded = await SeedResultsAsync(chain, db);
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         var plain = await PublishedAsync(db, RuledColumnsJson);
         var grouped = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
@@ -379,7 +380,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var chain = new TestDocumentBuilder(sql.ConnectionString);
         await using var db = chain.CreateContext();
         var seeded = await SeedResultsAsync(chain, db);
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         // Групування за `Value` ставить рядок 2 (5) перед рядком 1 (12.5).
         var version = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(
@@ -420,7 +421,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var chain = new TestDocumentBuilder(sql.ConnectionString);
         await using var db = chain.CreateContext();
         var seeded = await SeedResultsAsync(chain, db);
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         var named = await PublishedAsync(db, ReportDefinitionSpec.ColumnsJson(NamedColumns));
         var plain = await PublishedAsync(
@@ -461,7 +462,7 @@ public sealed class ReportSnapshotLayoutTests(SqlServerFixture sql)
         var chain = new TestDocumentBuilder(sql.ConnectionString);
         var db = chain.CreateContext();
         var seeded = await SeedResultsAsync(chain, db);
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         var plain = await PublishedAsync(db, RuledColumnsJson);
         var ruled = await PublishedAsync(db, RuledColumnsJson, ReportDefinitionSpec.RulesJson(

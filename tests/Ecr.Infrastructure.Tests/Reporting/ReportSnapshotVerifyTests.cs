@@ -5,6 +5,7 @@ using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Reporting;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
 namespace Ecr.Infrastructure.Tests.Reporting;
@@ -34,7 +35,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
         var snapshotId = await SeedAsync(chain);
 
         await using var db = chain.CreateContext();
-        var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now))
+        var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()))
             .VerifyAsync(snapshotId, CancellationToken.None);
 
         Assert.NotNull(hashes);
@@ -58,7 +59,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
             $"UPDATE rpt.ReportRow SET ValueNumeric = 999 WHERE SnapshotId = {snapshotId} AND ColumnCode = 'Value'");
         Assert.Equal(1, touched);
 
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
         var hashes = await builder.VerifyAsync(snapshotId, CancellationToken.None);
 
         Assert.NotNull(hashes);
@@ -78,7 +79,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
         await chain.BuildAsync();
 
         await using var db = chain.CreateContext();
-        var builder = new ReportSnapshotBuilder(db, new TestClock(Now));
+        var builder = new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()));
 
         Assert.Null(await builder.VerifyAsync(long.MaxValue, CancellationToken.None));
         Assert.Null(await builder.FindProjectIdAsync(long.MaxValue, CancellationToken.None));
@@ -109,7 +110,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
             .SingleAsync();
         Assert.Equal("5.0000000000000000", value!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-        var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now))
+        var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()))
             .VerifyAsync(snapshotId, CancellationToken.None);
 
         Assert.NotNull(hashes);
@@ -146,7 +147,7 @@ public sealed class ReportSnapshotVerifyTests(SqlServerFixture sql)
             .SingleAsync();
         Assert.Equal(decimal.Parse(tampered, System.Globalization.CultureInfo.InvariantCulture), now);
 
-        var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now))
+        var hashes = await new ReportSnapshotBuilder(db, new TestClock(Now), new MemoryCache(new MemoryCacheOptions()))
             .VerifyAsync(snapshotId, CancellationToken.None);
 
         Assert.NotNull(hashes);
