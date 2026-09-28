@@ -503,21 +503,14 @@ public sealed class PatchCellsHandler(
         // ⛔ Та сама знахідка Q-148: `MaxDynamicRows` перевіряв лише
         // `CreateRowHandler`, і той самий стелю можна було обійти пакетним
         // записом через PATCH.
+        //
+        // ⚠ Тут — лише ШВИДКИЙ шлях (без транзакції, під RCSI). Гарантію дає
+        // повторна перевірка під винятковим блокуванням аркуша
+        // (<see cref="EnsureRowLimitUnderLockAsync"/>, `C3b`).
         if (creations.Count > 0 && table.AllowsDynamicRows && table.MaxDynamicRows is { } maxRows
             && context.RowIds.Count + creations.Count > maxRows)
         {
-            throw new BusinessRuleException(
-                "ECR-ROW-0409",
-                $"Створення {creations.Count} рядків перевищило б межу динамічних рядків таблиці "
-                + $"{table.Code}: {context.RowIds.Count} наявних + {creations.Count} нових > {maxRows}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ROW-0409.dynamicRowLimit",
-                    ["tableCode"] = table.Code,
-                    ["existing"] = context.RowIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["adding"] = creations.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["max"] = maxRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            throw DynamicRowLimitExceeded(table, context.RowIds.Count, creations.Count, maxRows);
         }
 
         var duplicates = creations.Where(r => context.Versions.ContainsKey(r.RowKey)).Select(r => r.RowKey).ToList();
@@ -533,6 +526,24 @@ public sealed class PatchCellsHandler(
                 });
         }
     }
+
+    /// <summary>
+    /// Відмова «батч перевищив би <c>MaxDynamicRows</c>» — одна форма для
+    /// швидкого шляху й для перевірки під блокуванням.
+    /// </summary>
+    private static BusinessRuleException DynamicRowLimitExceeded(TableDef table, int existing, int adding, int maxRows)
+        => new(
+            "ECR-ROW-0409",
+            $"Створення {adding} рядків перевищило б межу динамічних рядків таблиці "
+            + $"{table.Code}: {existing} наявних + {adding} нових > {maxRows}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-ROW-0409.dynamicRowLimit",
+                ["tableCode"] = table.Code,
+                ["existing"] = existing.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["adding"] = adding.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["max"] = maxRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
 
     /// <summary>Перевіряє версії рядків, що оновлюються, проти поточного стану.</summary>
     /// <remarks>
@@ -1930,6 +1941,7 @@ public sealed class PatchCellsHandler(
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             await EnsureSheetStillEditableAsync(context, planned, innerCt).ConfigureAwait(false);
+            await EnsureRowLimitUnderLockAsync(request, context, innerCt).ConfigureAwait(false);
 
             // ⛔ `DAT-04` п. 1: рядки — ПІСЛЯ блокування аркуша й усіх відмов,
             // у цій самій транзакції. Див. <see cref="MaterializeNewRowsAsync"/>.
@@ -1991,10 +2003,29 @@ public sealed class PatchCellsHandler(
     /// у <see cref="EnsureAccessAsync"/>. Проміжного варіанта більше немає.
     ///
     /// ⚠ Правки між собою НЕ серіалізуються — блокування спільне.
+    ///
+    /// ⛔ `C3b`: крім батчу, що СТВОРЮЄ рядки. Спільне блокування сумісне саме з
+    /// собою, тож два такі батчі тримали б його одночасно, обидва пройшли б
+    /// стелю <c>MaxDynamicRows</c> за прочитаним ДО транзакції числом рядків і
+    /// обидва вставили б — стелю перевищено (<c>PatchCellsRowLimitRaceTests</c>).
+    /// Тому батч із новими рядками в таблиці зі стелею
+    /// (<see cref="CreatesRowsUnderCeiling"/>) спершу бере ВИНЯТКОВЕ блокування — те саме,
+    /// що <c>CreateRowHandler</c> після `C3`, — і перераховує рядки вже під ним
+    /// (<see cref="EnsureRowLimitUnderLockAsync"/>). Спільне нижче тим самим
+    /// власником видається одразу й лише читає стан. Ціна: такий батч чекає на
+    /// правки й подання ЦЬОГО аркуша за ЦЕЙ період, а вони — на нього; звичайні
+    /// правки без нових рядків, як і раніше, між собою не чекають.
     /// </remarks>
     private async Task EnsureSheetStillEditableAsync(
         RequestContext context, CellChangeLists changes, CancellationToken ct)
     {
+        if (CreatesRowsUnderCeiling(context))
+        {
+            await sheetGate
+                .EnterSubmitAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
+                .ConfigureAwait(false);
+        }
+
         var status = await sheetGate
             .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
             .ConfigureAwait(false);
@@ -2027,6 +2058,50 @@ public sealed class PatchCellsHandler(
                 ["reason"] = reason.ToString(),
             });
     }
+
+    /// <summary>
+    /// `C3b`: стеля <c>MaxDynamicRows</c> — повторно, за числом рядків,
+    /// прочитаним ПІСЛЯ виняткового блокування аркуша.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кличеться лише після <see cref="EnsureSheetStillEditableAsync"/>: без
+    /// виняткового блокування це знову «порахував — вставив» із вікном між ними.
+    /// Під RCSI окремий запит бачить усе, що зафіксували попередні власники
+    /// блокування, поки ми на нього чекали.
+    /// </remarks>
+    private async Task EnsureRowLimitUnderLockAsync(
+        PatchCellsRequest request, RequestContext context, CancellationToken ct)
+    {
+        var table = context.Table;
+        if (!CreatesRowsUnderCeiling(context) || table.MaxDynamicRows is not { } maxRows)
+        {
+            return;
+        }
+
+        var existing = await rowStore
+            .GetRowIdsAsync(request.TableInstanceId, context.PeriodKey, ct)
+            .ConfigureAwait(false);
+
+        if (existing.Count + context.Creations.Count > maxRows)
+        {
+            throw DynamicRowLimitExceeded(table, existing.Count, context.Creations.Count, maxRows);
+        }
+    }
+
+    /// <summary>
+    /// Чи батч створює рядки в таблиці зі стелею <c>MaxDynamicRows</c> — лише
+    /// тоді потрібне виняткове блокування (`C3b`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Без стелі захищати нічого: дубль ключа ловить унікальний індекс
+    /// (<c>ECR-ROW-0409</c> зі сховища), а <c>Ordinal</c> нові рядки PATCH і так
+    /// отримують однаковий (<c>0</c>, <see cref="MaterializeNewRowsAsync"/>).
+    /// Такий батч лишається під спільним блокуванням і не чекає на сусідів.
+    /// </remarks>
+    private static bool CreatesRowsUnderCeiling(RequestContext context)
+        => context.Creations.Count > 0
+           && context.Table.AllowsDynamicRows
+           && context.Table.MaxDynamicRows is not null;
 
     /// <summary>Записує аудит батчу — усередині тієї ж транзакції, ДО коміту.</summary>
     private async Task WriteAuditAsync(

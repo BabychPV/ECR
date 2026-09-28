@@ -49,6 +49,9 @@ public sealed class PatchCellsTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
 
+    /// <summary>Блокування аркуша — `C3b` перевіряє, ЯКЕ з двох бере батч.</summary>
+    private readonly ISheetEditGate _gate = Substitute.For<ISheetEditGate>();
+
     public PatchCellsTests()
     {
         var column = new ColumnDef(
@@ -185,7 +188,7 @@ public sealed class PatchCellsTests
         => new(_cells, _rows, _documents, _periods, _metadata, _access,
                new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
                _methodologies, _registries, _headers, _audit, _auditReader, _jobs, _uow, _user, _clock,
-               Substitute.For<ISheetEditGate>(), Units());
+               _gate, Units());
 
     private static IDocumentHeaderStore CreateHeaderStore()
     {
@@ -459,6 +462,66 @@ public sealed class PatchCellsTests
         Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
         await _rows.DidNotReceive().CreateRowsAsync(
             Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task C3b_стеля_перевіряється_повторно_під_винятковим_блокуванням()
+    {
+        // Швидкий шлях бачить 1 рядок із 2 дозволених — пропускає. Під
+        // блокуванням рядків уже 2: хтось устиг додати, поки ми чекали.
+        WithTable(TableRowMode.Dynamic, maxDynamicRows: 2);
+        _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
+             .Returns(new Dictionary<string, long> { ["7001001"] = 1001L, ["DYN-X"] = 1002L });
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
+            Request(new PatchRow("DYN-2", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None));
+
+        Assert.Equal("ECR-ROW-0409", ex.ErrorCode);
+        Assert.Equal("err.ECR-ROW-0409.dynamicRowLimit", ex.Details?["messageKey"]?.ToString());
+        Received.InOrder(() =>
+        {
+            _gate.EnterSubmitAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+            _gate.EnterEditAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+            _rows.GetRowIdsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        });
+        await _rows.DidNotReceive().CreateRowsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task C3b_правка_без_нових_рядків_лишається_під_спільним_блокуванням()
+    {
+        WithTable(TableRowMode.Dynamic, maxDynamicRows: 5);
+        _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<long, string> { [1001L] = "0x0B" });
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        await _gate.Received(1).EnterEditAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _gate.DidNotReceive().EnterSubmitAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _rows.DidNotReceive().GetRowIdsAsync(
+            Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public async Task C3b_нові_рядки_без_стелі_лишаються_під_спільним_блокуванням()
+    {
+        // Без `MaxDynamicRows` захищати нічого — серіалізувати нема чого.
+        _rows.CreateRowsAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns([3001L]);
+
+        await Handler().HandleAsync(
+            Request(new PatchRow("DYN-2", BaseVersion: null, [new PatchCell("Volume", 1m)])),
+            CancellationToken.None);
+
+        await _gate.DidNotReceive().EnterSubmitAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+        await _rows.Received(1).CreateRowsAsync(
+            TableInstance, Arg.Any<PeriodKey>(), Arg.Any<IReadOnlyList<RowKey>>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     /// <summary>Підміняє знімок метаданих таблицею з обраним RowMode.</summary>
