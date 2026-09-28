@@ -136,6 +136,14 @@ builder.Services.ConfigureHttpJsonOptions(
 // Quartz стає придатним лише після ApplicationStarted. Без цієї реєстрації
 // вночі мовчазно не відбувалася б жодна перевірка.
 builder.Services.AddHostedService<Ecr.Api.Startup.RecurringScheduleService>();
+// ⛔ U8: стандартні 30 с зупинки хоста обривали перерахунок, імпорт чи збір
+// посеред роботи. Тепер задачі отримують скасування на зупинці
+// (`RecurringScheduleService.StopAsync`, до Quartz), а хост чекає, поки вони запишуть `Cancelled`
+// і Quartz (`WaitForJobsToComplete`) їх відпустить. 120 с — судження: з
+// запасом на пакет, що добігає до межі скасування.
+builder.Services.Configure<HostOptions>(options =>
+    options.ShutdownTimeout = TimeSpan.FromSeconds(
+        builder.Configuration.GetValue("Jobs:ShutdownTimeoutSeconds", defaultValue: 120)));
 // ⚠ Трансформер словників обов'язковий: без нього `RowDto.cells` описано як
 // об'єкт без дозволених властивостей, і згенерований клієнт не може покласти
 // в комірку жодного значення (див. DictionarySchemaTransformer).

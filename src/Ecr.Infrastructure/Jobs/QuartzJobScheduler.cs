@@ -412,10 +412,13 @@ public sealed class QuartzJobScheduler(
         // ⚠ Задачі, що вже виконується, надсилається СКАСУВАННЯ, а не
         // переривання потоку: убитий посеред пакета перерахунок лишив би
         // половину результатів записаними, і жоден статус про це не сказав би.
+        var executingHere = false;
+
         foreach (var executing in await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
         {
             if (string.Equals(executing.JobDetail.Key.Name, jobId, StringComparison.Ordinal))
             {
+                executingHere = true;
                 await instance.Interrupt(executing.JobDetail.Key, ct).ConfigureAwait(false);
             }
         }
@@ -426,12 +429,72 @@ public sealed class QuartzJobScheduler(
         // DeleteJob тут зняв би крон-тригер до рестарту. Зняття розкладу —
         // окремий метод (UnscheduleAsync).
         var jobKey = new JobKey(jobId);
-        if (IsRecurring(await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false)))
+        if (!IsRecurring(await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false)))
         {
-            return;
+            await instance.DeleteJob(jobKey, ct).ConfigureAwait(false);
         }
 
-        await instance.DeleteJob(jobKey, ct).ConfigureAwait(false);
+        // ⛔ U3: стан пишеться ТУТ, а не лише адаптером. Адаптер ставить
+        // `Cancelled` тільки задачі, що ВИКОНУЄТЬСЯ (гілка
+        // `OperationCanceledException`); задача в черзі чи в паузі ретраю
+        // (`Running` між спробами) просто зникала з планувальника, а рядок
+        // лишався `Queued`/`Running` НАЗАВЖДИ — і для перевірки узгодженості
+        // ще й блокував кнопку запуску (409, `RunConsistencyCheckHandler`).
+        //
+        // ⚠ Запис умовний (лише активний рядок):
+        // - задача в черзі чи в паузі ретраю цього інстанса — щойно знята, це
+        //   єдиний, хто запише її стан;
+        // - задача ІНШОГО інстанса (його черга в пам'яті, звідси недосяжна) —
+        //   цей рядок і є сигналом: її биття побачить неактивний рядок і
+        //   скасує задачу, а постановка з черги не стартує (`QuartzJobAdapter`);
+        // - розклад, чий тик іде деінде, — те саме; сам розклад лишається.
+        //
+        // ⚠ Задачу, що виконується ТУТ, не чіпаємо: вона ще добігає пакет, і
+        // `Cancelled` запише адаптер у мить, коли справді зупиниться. Ранній
+        // запис показав би «скасовано» роботі, яка ще пише результати.
+        if (!executingHere && progress is not null && clock is not null)
+        {
+            await progress.CancelActiveAsync(jobId, clock.UtcNow, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Надсилає скасування КОЖНІЙ задачі, що зараз виконується в цьому процесі (U8).
+    /// </summary>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки задач отримали сигнал.</returns>
+    /// <remarks>
+    /// ⛔ Для зупинки хоста. <c>WaitForJobsToComplete</c> лише ЧЕКАЄ задачі, а
+    /// сигналу їм не дає (<c>interruptJobsOnShutdown</c> у Quartz за
+    /// замовчуванням вимкнено): довгий перерахунок обривався разом із процесом
+    /// після <c>ShutdownTimeout</c>, і рядок лишався <c>Running</c>. Зі
+    /// скасуванням задача встигає вийти через свою гілку
+    /// <c>OperationCanceledException</c> і записати <c>Cancelled</c>.
+    /// </remarks>
+    public async Task<int> InterruptAllAsync(CancellationToken ct)
+    {
+        if (schedulerFactory is null)
+        {
+            return 0;
+        }
+
+        var instance = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
+        if (instance.IsShutdown)
+        {
+            return 0;
+        }
+
+        var interrupted = 0;
+
+        foreach (var executing in await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
+        {
+            if (await instance.Interrupt(executing.JobDetail.Key, ct).ConfigureAwait(false))
+            {
+                interrupted++;
+            }
+        }
+
+        return interrupted;
     }
 
     /// <inheritdoc />

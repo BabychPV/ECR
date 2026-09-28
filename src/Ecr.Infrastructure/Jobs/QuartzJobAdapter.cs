@@ -47,6 +47,9 @@ public sealed partial class QuartzJobAdapter(
     /// </summary>
     public static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(30);
 
+    /// <summary>Стан скасованої задачі в <c>itg.JobProgress</c>.</summary>
+    private const string CancelledState = "Cancelled";
+
     /// <inheritdoc />
     public async Task Execute(IJobExecutionContext context)
     {
@@ -116,10 +119,31 @@ public sealed partial class QuartzJobAdapter(
         using var logScope = logger.BeginScope(
             new Dictionary<string, object> { ["CorrelationId"] = correlationId });
 
+        // ⛔ Скасовану задачу з черги не запускаємо. Скасування з ІНШОГО
+        // інстанса не може зняти задачу з цієї черги (вона в пам'яті цього
+        // процесу) — воно лишає рядок `Cancelled` (`QuartzJobScheduler.CancelAsync`),
+        // і саме тут це стає відмовою від старту. Без перевірки `Begin`
+        // переписав би `Cancelled` на `Running`, і скасування мовчки не діяло б.
+        // Розклад не перевіряється: `Cancelled` його рядка — це про МИНУЛИЙ тик.
+        if (!isRecurring && progress is not null
+            && await progress.FindAsync(jobId, context.CancellationToken).ConfigureAwait(false)
+                is { State: CancelledState })
+        {
+            LogJobSkippedCancelled(logger, jobId, typeName ?? "—");
+            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
         await StartAsync(progress, jobId, typeName!, attemptNumber, correlationId, clock, context.CancellationToken)
             .ConfigureAwait(false);
 
-        // ⛔ Биття серця на весь час виконання. Прибирання на старті
+        // ⚠ Власний токен задачі — зв'язаний із токеном Quartz. Quartz скасовує
+        // свій на `Interrupt` (скасування на цьому інстансі, зупинка хоста), а
+        // цей додатково скасовує биття серця, коли рядок закрили ЗЗОВНІ —
+        // скасуванням з іншого інстанса.
+        using var jobCancel = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+
+        // ⛔ Биття серця на весь час виконання. Прибирання покинутих
         // (`IJobProgressStore.FailStaleAsync`) відрізняє покинуту задачу від
         // чужої живої саме за ним; без биття довга задача, яка не звітує
         // відсотків (імпорт великого файлу), через п'ять хвилин виглядала б
@@ -127,14 +151,14 @@ public sealed partial class QuartzJobAdapter(
         // як до виправлення. Насос живе в СВОЄМУ scope: `DbContext` scoped і
         // не потокобезпечний, а задача в цю мить користується своїм.
         using var heartbeatStop = new CancellationTokenSource();
-        var heartbeat = HeartbeatLoopAsync(jobId, heartbeatStop.Token);
+        var heartbeat = HeartbeatLoopAsync(jobId, jobCancel, heartbeatStop.Token);
 
         try
         {
             await job.ExecuteAsync(
                 payload,
                 new StoreJobProgress(progress, jobId, clock),
-                context.CancellationToken).ConfigureAwait(false);
+                jobCancel.Token).ConfigureAwait(false);
 
             await FinishAsync(progress, jobId, "Succeeded", null, clock, context.CancellationToken)
                 .ConfigureAwait(false);
@@ -158,7 +182,7 @@ public sealed partial class QuartzJobAdapter(
         {
             // Скасування — не провал: його попросили. Але й не успіх, і стан
             // мусить це розрізняти.
-            await FinishAsync(progress, jobId, "Cancelled", null, clock, CancellationToken.None)
+            await FinishAsync(progress, jobId, CancelledState, null, clock, CancellationToken.None)
                 .ConfigureAwait(false);
 
             // ⛔ Скасовано ПОТОЧНИЙ прогін, а не розклад — див. гілку успіху.
@@ -242,9 +266,13 @@ public sealed partial class QuartzJobAdapter(
     /// інтервал, тож збій БД мусить тривати п'ять хвилин поспіль, щоб
     /// вплинути хоч на щось. Помилка не ковтається мовчки: вона йде в лог.
     /// </remarks>
-    private async Task HeartbeatLoopAsync(string jobId, CancellationToken ct)
+    /// <param name="jobId">Задача.</param>
+    /// <param name="jobCancel">Токен задачі — скасовується, коли рядок закрили ззовні як <c>Cancelled</c>.</param>
+    /// <param name="ct">Зупинка самого насоса.</param>
+    private async Task HeartbeatLoopAsync(string jobId, CancellationTokenSource jobCancel, CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(IJobProgressStore.HeartbeatInterval);
+        using var timer = new PeriodicTimer(
+            services.GetService<JobHeartbeatSettings>()?.Interval ?? IJobProgressStore.HeartbeatInterval);
 
         // ⚠ Зупинка через Dispose, а не через токен у WaitForNextTickAsync:
         // токен змусив би метод кинути OperationCanceledException рівно в
@@ -264,11 +292,25 @@ public sealed partial class QuartzJobAdapter(
                     return;
                 }
 
-                await store.HeartbeatAsync(
+                var alive = await store.HeartbeatAsync(
                         jobId,
                         scope.ServiceProvider.GetRequiredService<IClock>().UtcNow,
                         CancellationToken.None)
                     .ConfigureAwait(false);
+
+                // ⚠ Рядок уже не активний — його закрили ЗЗОВНІ. Лише
+                // `Cancelled` означає «зупинись» (скасування з іншого інстанса,
+                // де цієї задачі в пам'яті немає). `Failed` від прибирання після
+                // довгого збою БД — не прохання: задача жива, доробить і
+                // запише справжній результат.
+                if (!alive
+                    && await store.FindAsync(jobId, CancellationToken.None).ConfigureAwait(false)
+                        is { State: CancelledState })
+                {
+                    LogJobCancelledElsewhere(logger, jobId);
+                    await jobCancel.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
             }
             catch (Exception ex)
             {
@@ -531,6 +573,16 @@ public sealed partial class QuartzJobAdapter(
     private static partial void LogJobSkippedElsewhere(ILogger logger, string jobId, string typeName);
 
     [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Задача {JobId} ({TypeName}) не запущена: її скасовано, поки вона стояла в черзі.")]
+    private static partial void LogJobSkippedCancelled(ILogger logger, string jobId, string typeName);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Задачу {JobId} скасовано з іншого інстанса; зупиняю її тут.")]
+    private static partial void LogJobCancelledElsewhere(ILogger logger, string jobId);
+
+    [LoggerMessage(
         Level = LogLevel.Warning,
         Message = "Не вдалося записати биття серця задачі {JobId}; наступна спроба за інтервал.")]
     private static partial void LogHeartbeatFailed(ILogger logger, string jobId, Exception exception);
@@ -540,6 +592,15 @@ public sealed partial class QuartzJobAdapter(
         Message = "Не вдалося записати прогрес задачі {JobId}; на результат самої задачі це не впливає.")]
     private static partial void LogProgressWriteFailed(ILogger logger, string jobId, Exception exception);
 }
+
+/// <summary>Перевизначення інтервалу биття серця задачі.</summary>
+/// <param name="Interval">Інтервал.</param>
+/// <remarks>
+/// ⚠ Лише для тестів: у застосунку не реєструється, і діє
+/// <see cref="IJobProgressStore.HeartbeatInterval"/>. Параметр через DI, а не
+/// статичне поле, щоб паралельні прогони не ділили один стан.
+/// </remarks>
+public sealed record JobHeartbeatSettings(TimeSpan Interval);
 
 /// <summary>Прогрес, що пишеться у сховище.</summary>
 /// <remarks>

@@ -172,7 +172,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     }
 
     /// <inheritdoc />
-    public Task HeartbeatAsync(string jobId, DateTime utcNow, CancellationToken ct)
+    public async Task<bool> HeartbeatAsync(string jobId, DateTime utcNow, CancellationToken ct)
         // ⚠ Точковий UPDATE, а не завантаження сутності: биття трапляється
         // кожні 30 секунд на КОЖНУ активну задачу, і читати заради нього цілий
         // рядок означало б платити двома запитами за один запис одного поля.
@@ -180,9 +180,112 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         // ⚠ Фільтр за станом обов'язковий: биття, яке спізнилося й прийшло
         // після `FinishAsync`, інакше воскресило б ознаку життя на вже
         // завершеній задачі.
-        => db.JobProgresses
+        => await db.JobProgresses
             .Where(p => p.JobId == jobId && (p.State == "Running" || p.State == "Queued"))
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.HeartbeatAt, utcNow), ct);
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.HeartbeatAt, utcNow), ct)
+            .ConfigureAwait(false) > 0;
+
+    /// <summary>Скільки ідентифікаторів в одному <c>IN (…)</c>.</summary>
+    /// <remarks>
+    /// ⚠ Порціями: черга інстанса зазвичай — одиниці задач, але <c>Contains</c>
+    /// без межі на тисячі значень дає план, який SQL Server не кешує, і
+    /// впирається в стелю параметрів (2100).
+    /// </remarks>
+    private const int KeepAliveChunk = 500;
+
+    /// <inheritdoc />
+    public async Task<int> KeepAliveAsync(
+        IReadOnlyCollection<string> jobIds, DateTime utcNow, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(jobIds);
+
+        var touched = 0;
+
+        foreach (var chunk in jobIds.Chunk(KeepAliveChunk))
+        {
+            // ⚠ Той самий фільтр стану, що в `HeartbeatAsync`: дурабельна
+            // деталь провалу теж лежить у локальному планувальнику, і воскресити
+            // їй биття означало б нічого — але шум у кожному прогоні.
+            touched += await db.JobProgresses
+                .Where(p => chunk.Contains(p.JobId) && (p.State == "Running" || p.State == "Queued"))
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.HeartbeatAt, utcNow), ct)
+                .ConfigureAwait(false);
+        }
+
+        return touched;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> CancelActiveAsync(string jobId, DateTime utcNow, CancellationToken ct)
+        // ⚠ Умовний UPDATE, а не завантаження й `Finish`: між читанням і записом
+        // задача могла завершитися сама, і беззастережний запис переписав би
+        // справжній результат на «скасовано». Поля — ті самі, що ставить
+        // `JobProgress.Finish(state, error: null)`: без помилки, відсоток 100.
+        => await db.JobProgresses
+            .Where(p => p.JobId == jobId && (p.State == "Running" || p.State == "Queued"))
+            .ExecuteUpdateAsync(
+                s => s
+                    .SetProperty(p => p.State, "Cancelled")
+                    .SetProperty(p => p.Error, (string?)null)
+                    .SetProperty(p => p.ErrorCode, (string?)null)
+                    .SetProperty(p => p.Percent, 100)
+                    .SetProperty(p => p.UpdatedAt, utcNow),
+                ct)
+            .ConfigureAwait(false) > 0;
+
+    /// <inheritdoc />
+    public async Task<StaleJobsSummary> SummarizeStaleAsync(DateTime utcNow, CancellationToken ct)
+    {
+        var threshold = utcNow - IJobProgressStore.StaleAfter;
+
+        // ⚠ Той самий предикат, що в `FailStaleAsync`, — інакше health показував
+        // би одне, а прибирання робило б інше. Індекс `IX_JobProgress_Stale`
+        // (State, HeartbeatAt) покриває його повністю.
+        var stale = db.JobProgresses
+            .AsNoTracking()
+            .Where(p => (p.State == "Running" || p.State == "Queued")
+                        && (p.HeartbeatAt == null || p.HeartbeatAt < threshold));
+
+        var count = await stale.CountAsync(ct).ConfigureAwait(false);
+        if (count == 0)
+        {
+            return new StaleJobsSummary(0, null);
+        }
+
+        var oldest = await stale.MinAsync(p => p.HeartbeatAt, ct).ConfigureAwait(false);
+
+        return new StaleJobsSummary(count, oldest);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> PurgeFinishedAsync(DateTime olderThan, int batch, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(batch, 1);
+
+        // ⚠ Предикат спирається на `IX_JobProgress_Stale` (State, HeartbeatAt):
+        // биття завершеної задачі не пізніше за її завершення, тож
+        // `HeartbeatAt < межа` — пошук за індексом, а не повний перегляд
+        // таблиці, яка саме через відсутність прибирання й виросла.
+        //
+        // ⛔ `UpdatedAt < межа` — друга умова, не надмірність. Прибирання
+        // покинутих закриває рядок із давнім биттям СЬОГОДНІ; без цієї умови
+        // щойно закритий провал зникав би раніше, ніж його хтось побачив.
+        //
+        // ⚠ Порцією (`TOP`): видалення сотень тисяч рядків одним запитом
+        // тримало б блокування на всій таблиці, яку в цю мить опитують екрани.
+        var victims = db.JobProgresses
+            .Where(p => (p.State == "Succeeded" || p.State == "Failed" || p.State == "Cancelled")
+                        && (p.HeartbeatAt == null || p.HeartbeatAt < olderThan)
+                        && p.UpdatedAt < olderThan)
+            .OrderBy(p => p.HeartbeatAt)
+            .Take(batch)
+            .Select(p => p.JobId);
+
+        return await db.JobProgresses
+            .Where(p => victims.Contains(p.JobId))
+            .ExecuteDeleteAsync(ct)
+            .ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public async Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct)

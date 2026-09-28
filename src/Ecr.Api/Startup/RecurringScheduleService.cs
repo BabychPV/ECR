@@ -41,6 +41,9 @@ public sealed partial class RecurringScheduleService(
     /// </remarks>
     public const int MaxCollectionSchedules = 1_000;
 
+    /// <summary>Скільки чекати, поки задачі отримають сигнал зупинки.</summary>
+    private static readonly TimeSpan InterruptWait = TimeSpan.FromSeconds(10);
+
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -52,7 +55,67 @@ public sealed partial class RecurringScheduleService(
     }
 
     /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    /// <remarks>
+    /// ⛔ U8: сигнал скасування задачам, що виконуються. Без нього задача про
+    /// зупинку не дізнавалася зовсім: її обривав кінець процесу по
+    /// <c>ShutdownTimeout</c>, а рядок лишався <c>Running</c>. Із сигналом вона
+    /// виходить через свою гілку скасування й пише <c>Cancelled</c>.
+    /// <para>
+    /// ⚠ Саме тут і саме ДО Quartz: hosted services зупиняються у ЗВОРОТНОМУ
+    /// порядку реєстрації, а Quartz реєструється раніше (<c>AddEcrInfrastructure</c>
+    /// у <c>Program.cs</c> іде перед цим сервісом). Тобто цей <c>StopAsync</c>
+    /// відпрацьовує раніше, ніж <c>QuartzHostedService</c> почне
+    /// <c>Shutdown(waitForJobsToComplete: true)</c>, і тому Quartz дочікується вже
+    /// задач, які зупиняються, а не тих, що рахують далі.
+    /// </para>
+    /// </remarks>
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            wait.CancelAfter(InterruptWait);
+
+            var interrupted = await InterruptRunningJobsAsync(services, wait.Token).ConfigureAwait(false);
+            if (interrupted > 0)
+            {
+                LogJobsInterrupted(logger, interrupted);
+            }
+        }
+        catch (Exception ex)
+        {
+            // ⚠ Зупинка не має зависнути чи впасти через планувальник, який уже
+            // недоступний: без сигналу задачі однаково дочекається Quartz.
+            LogInterruptFailed(logger, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Надсилає скасування всім задачам, що виконуються в цьому процесі (U8).
+    /// </summary>
+    /// <param name="provider">Кореневий провайдер застосунку.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки задач отримали сигнал.</returns>
+    public static async Task<int> InterruptRunningJobsAsync(IServiceProvider provider, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        await using var scope = provider.CreateAsyncScope();
+
+        return scope.ServiceProvider.GetService<IBackgroundJobScheduler>() is Infrastructure.Jobs.QuartzJobScheduler quartz
+            ? await quartz.InterruptAllAsync(ct).ConfigureAwait(false)
+            : 0;
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Зупинка: сигнал скасування надіслано задачам, що виконуються, — {Count}.")]
+    private static partial void LogJobsInterrupted(ILogger logger, int count);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Зупинка: не вдалося надіслати задачам сигнал скасування ({Reason}).")]
+    private static partial void LogInterruptFailed(ILogger logger, string reason);
 
     /// <summary>
     /// Ставить розклади і <b>зупиняє застосунок</b>, якщо не вдалося.
