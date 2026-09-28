@@ -142,7 +142,28 @@ describe('TestDataSourceModal', () => {
     expect(screen.getAllByRole('alert')).toEqual([banner]);
   });
 
-  it('ok: false без messageKey — сирий error джерела', async () => {
+  it('S3: нормалізована причина з каталогу; поле error людині сирим не показується', async () => {
+    // ⛔ Сервер віддає категорію (`timeout`) і ключ — не текст винятку. Навіть
+    // якщо в `error` щось сире (старий сервер), банер його не малює.
+    respond(() =>
+      json({
+        ok: false,
+        entities: 0,
+        error: 'timeout 10.0.0.7:443 raw',
+        messageKey: 'integration.test.failed.timeout',
+      }),
+    );
+    show();
+
+    runWith('перевірка');
+
+    const banner = await outcome();
+    expect(banner.getAttribute('data-test-outcome')).toBe('failed');
+    expect(banner.textContent).toContain('integration.test.failed.timeout');
+    expect(banner.textContent).not.toContain('10.0.0.7');
+  });
+
+  it('S3: ok: false без messageKey — загальна причина з каталогу, а не сирий error', async () => {
     respond(() => json({ ok: false, entities: 0, error: 'connection refused', messageKey: null }));
     show();
 
@@ -150,7 +171,8 @@ describe('TestDataSourceModal', () => {
 
     const banner = await outcome();
     expect(banner.getAttribute('data-test-outcome')).toBe('failed');
-    expect(banner.textContent).toContain('connection refused');
+    expect(banner.textContent).toContain('integration.test.failed.other');
+    expect(banner.textContent).not.toContain('connection refused');
   });
 
   it('409 — «проба вже йде», а не загальна помилка', async () => {

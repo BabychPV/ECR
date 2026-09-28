@@ -23,19 +23,25 @@ export type TestOutcome =
   | { readonly kind: 'failed'; readonly reason: string | null }
   | { readonly kind: 'running'; readonly detail: string | null };
 
+/** Причина, коли сервер не назвав ключа: та сама, що в категорії `other`. */
+const FallbackFailureKey = 'integration.test.failed.other';
+
 /**
  * Відповідь сервера → те, що показати.
  *
- * ⚠ Причина відмови — з каталогу за `messageKey`, коли сервер його назвав, і
- * сирим `error` — коли ні (той самий порядок, що в `ChannelsPanel`): власного
- * «не вдалося» тут бути не може, бо причину знає лише джерело.
+ * ⛔ Причина відмови — ЛИШЕ з каталогу за `messageKey`
+ * (`integration.test.failed.<категорія>`). Поле `error` несе категорію
+ * (`auth`, `unreachable`, `tls`, `timeout`, `other`), а не текст винятку (S3
+ * аудиту безпеки: сирий текст робив кнопку сканером мережі), і людині його
+ * сирим не показуємо. Ключа немає — загальна причина «other», а не `error`.
  */
 export function outcomeOf(result: DataSourceTestResult): TestOutcome {
   if (result.ok) return { kind: 'ok', entities: result.entities };
 
-  const key = result.messageKey ?? null;
+  const named = result.messageKey ?? '';
+  const key = named.length > 0 ? named : FallbackFailureKey;
 
-  return { kind: 'failed', reason: key !== null && key.length > 0 ? t(key) : result.error };
+  return { kind: 'failed', reason: t(key) };
 }
 
 /**
