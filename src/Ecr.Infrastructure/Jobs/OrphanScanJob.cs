@@ -25,7 +25,7 @@ namespace Ecr.Infrastructure.Jobs;
 /// нічний прохід скасовував би те, що зробив денний.
 /// </para>
 /// </remarks>
-public sealed partial class OrphanScanJob(IOrphanScanner scanner, ILogger<OrphanScanJob> logger) : IBackgroundJob
+public sealed partial class OrphanScanJob(IOrphanScanner scanner, ILogger<OrphanScanJob> logger) : IOrphanScanJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "orphan-scan";

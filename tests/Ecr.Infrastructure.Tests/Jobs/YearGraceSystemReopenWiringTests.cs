@@ -181,7 +181,7 @@ public sealed class YearGraceSystemReopenWiringTests(SqlServerFixture sql) : IDi
                 (await PeriodAsync(builder, periodId)).State == PeriodState.Grace,
                 $"Передумова: листопад 01.01 мав відкритися. Збій прогону: {error}");
 
-            await jobs.Received(1).EnqueueExclusiveAsync<OrphanScanJob>(
+            await jobs.Received(1).EnqueueExclusiveAsync<IOrphanScanJob>(
                 PeriodStateJob.OrphanScanAfterReopenTarget,
                 Arg.Any<object?>(),
                 Arg.Any<CancellationToken>(),

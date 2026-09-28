@@ -340,3 +340,14 @@ public interface ICollectionJob : IBackgroundJob;
 /// </para>
 /// </remarks>
 public interface IConsistencyCheckJob : IBackgroundJob;
+
+/// <summary>
+/// Маркер пошуку осиротілих рядків — щоб його можна було поставити РАЗОВО
+/// після ручного відкриття періоду (<c>ReopenPeriodHandler</c>).
+/// </summary>
+/// <remarks>
+/// ⚠ Реалізація (<c>OrphanScanJob</c>) живе в <c>Ecr.Infrastructure</c>, якого
+/// прикладний шар не бачить. Нічний розклад і системний Reopen у
+/// <c>PeriodStateJob</c> ставлять ТУ САМУ задачу за конкретним типом.
+/// </remarks>
+public interface IOrphanScanJob : IBackgroundJob;

@@ -241,7 +241,10 @@ public sealed partial class PeriodStateJob(
         try
         {
             await jobs
-                .EnqueueExclusiveAsync<OrphanScanJob>(OrphanScanAfterReopenTarget, payload: null, ct)
+                // ⚠ Маркер, а не клас: так само ставить ручний Reopen
+                // (`ReopenPeriodHandler`), і лише спільний префікс ключа дає
+                // витіснення між ними.
+                .EnqueueExclusiveAsync<IOrphanScanJob>(OrphanScanAfterReopenTarget, payload: null, ct)
                 .ConfigureAwait(false);
 
             LogOrphanScanEnqueued(_logger, _yearReopens);

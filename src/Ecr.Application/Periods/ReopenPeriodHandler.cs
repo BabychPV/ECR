@@ -7,6 +7,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Periods;
 
@@ -14,15 +15,25 @@ namespace Ecr.Application.Periods;
 /// Адміністративне відкриття закритого періоду (ФВ-1.10). Право
 /// <c>Period.Reopen</c> — небезпечне, у складені ролі не входить (ФВ-6.12).
 /// </summary>
-public sealed class ReopenPeriodHandler(
+public sealed partial class ReopenPeriodHandler(
     IPeriodStore periods,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    IMaterializationScheduler? materialization = null)
+    IMaterializationScheduler? materialization = null,
+    IBackgroundJobScheduler? jobs = null,
+    ILogger<ReopenPeriodHandler>? logger = null)
 {
+    /// <summary>Ціль витісняючої постановки пошуку осиротілих після ручного Reopen.</summary>
+    /// <remarks>
+    /// ⚠ Та сама, що в системного Reopen (<c>PeriodStateJob</c>), і той самий
+    /// маркер: сканер один на весь набір, тож кілька відкриттів поспіль дають
+    /// один прогін, а не чергу однакових.
+    /// </remarks>
+    public const string OrphanScanTarget = "period-reopen";
+
     // ⚠ `materialization` необов'язковий лише заради наявних прямих
     // конструювань обробника в тестах; у застосунку порт зареєстровано
     // (`Ecr.Infrastructure.DependencyInjection`), і контейнер його передає.
@@ -177,7 +188,49 @@ public sealed class ReopenPeriodHandler(
         {
             await materialization.EnqueueAfterTransitionAsync(projectId, [periodKey], ct).ConfigureAwait(false);
         }
+
+        await EnqueueOrphanScanAsync(periodId, ct).ConfigureAwait(false);
     }
+
+    /// <summary>Разовий пошук осиротілих рядків після відкриття — ПІСЛЯ коміту.</summary>
+    /// <remarks>
+    /// ⛔ Нічний <c>OrphanScanJob</c> обходить лише <c>Open</c>/<c>Grace</c>: поки
+    /// період був <c>Closed</c>, ознака <c>IsOrphaned</c> у ньому не оновлювалася,
+    /// і щойно відкритий період показує застарілі позначки до ночі (а за
+    /// бюджетом курсора — й довше).
+    /// <para>
+    /// ⚠ Після коміту: черга не транзакційна, і прогін, поставлений до коміту,
+    /// бачив би ще закритий період. Збій постановки НЕ валить відповідь —
+    /// відкриття вже закомічено й записано в аудит, і 500 на успішну дію
+    /// збрехав би людині; нічний прохід однаково дійде. Але й не мовчить — журнал.
+    /// </para>
+    /// </remarks>
+    private async Task EnqueueOrphanScanAsync(int periodId, CancellationToken ct)
+    {
+        if (jobs is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await jobs
+                .EnqueueExclusiveAsync<IOrphanScanJob>(OrphanScanTarget, payload: null, ct, currentUser.UserId)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (logger is not null)
+            {
+                LogOrphanScanNotEnqueued(logger, periodId, ex);
+            }
+        }
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Період {PeriodId} відкрито, але пошук осиротілих рядків НЕ поставлено; позначки оновить нічний прохід.")]
+    private static partial void LogOrphanScanNotEnqueued(ILogger logger, int periodId, Exception exception);
 
     /// <summary>Кінець поточної доби в поясі майданчика, у UTC (D-68).</summary>
     /// <remarks>

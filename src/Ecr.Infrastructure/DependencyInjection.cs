@@ -273,6 +273,7 @@ public static class DependencyInjection
         // у чергу і не виконувалася б — черга без виконавця ззовні виглядає
         // як «дуже довго рахує».
         services.AddScoped<Jobs.OrphanScanJob>();
+        services.AddScoped<IOrphanScanJob, Jobs.OrphanScanJob>();
         services.AddScoped<Jobs.PeriodStateJob>();
 
         // ⚠ Матеріалізація PI з місця переходу періоду в Open/Grace — її кличуть
