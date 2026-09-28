@@ -7083,16 +7083,9 @@
       "ProjectRecalculationRequest": {
         "description": "Запит на перерахунок усього проєкту (Q-151).",
         "properties": {
-          "approvalReason": {
-            "description": "Причина погодження; обов'язкова разом із `ApprovedByUserId`.",
-            "type": [
-              "null",
-              "string"
-            ]
-          },
-          "approvedByUserId": {
-            "description": "Хто погодив перерахунок закритого періоду (ФВ-9.7); `null` — без погодження.",
-            "format": "int32",
+          "approvalId": {
+            "description": "Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,\n`…/recalculation-approvals`); `null` — без погодження. Одноразове,\nлише для свого ініціатора, цього проєкту й періоду.",
+            "format": "int64",
             "type": [
               "null",
               "integer"
@@ -7109,8 +7102,7 @@
         },
         "required": [
           "periodKey",
-          "approvedByUserId",
-          "approvalReason"
+          "approvalId"
         ],
         "type": "object"
       },
@@ -7294,6 +7286,105 @@
           "jobId",
           "documentId",
           "periodKey"
+        ],
+        "type": "object"
+      },
+      "RecalculationApprovalDto": {
+        "description": "Погодження перерахунку закритого періоду — як його бачить клієнт.",
+        "properties": {
+          "confirmedAt": {
+            "description": "Коли підтверджено, UTC.",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "confirmedByName": {
+            "description": "Ім'я того, хто підтвердив.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "confirmedByUserId": {
+            "description": "Хто підтвердив; `null` — ще чекає.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "expiresAt": {
+            "description": "Після цього моменту погодження мертве, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор; його передає `POST …/recalculate` як `approvalId`.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "periodKey": {
+            "description": "Єдиний період, який погодження відкриває.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина.",
+            "type": "string"
+          },
+          "requestedAt": {
+            "description": "Коли створено, UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "requestedByName": {
+            "description": "Ім'я ініціатора.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "requestedByUserId": {
+            "description": "Ініціатор — єдиний, хто може ним скористатися.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "periodKey",
+          "reason",
+          "requestedByUserId",
+          "requestedByName",
+          "requestedAt",
+          "expiresAt",
+          "confirmedByUserId",
+          "confirmedByName",
+          "confirmedAt"
+        ],
+        "type": "object"
+      },
+      "RecalculationApprovalRequest": {
+        "description": "Запит на погодження перерахунку закритого періоду.",
+        "properties": {
+          "periodKey": {
+            "description": "Закритий період, який треба перерахувати.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Причина; обов'язкова, потрапляє в журнал.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "periodKey",
+          "reason"
         ],
         "type": "object"
       },
@@ -23553,6 +23644,229 @@
         ]
       }
     },
+    "/api/v1/projects/{projectId}/recalculation-approvals": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecalculationApprovalDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecalculationApprovalDto"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecalculationApprovalDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Живі погодження проєкту: не використані й не прострочені.",
+        "tags": [
+          "RecalculationApprovals"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculationApprovalRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculationApprovalRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecalculationApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Створює запит на погодження від імені поточного користувача.",
+        "tags": [
+          "RecalculationApprovals"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/recalculation-approvals/{id}/confirm": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "projectId",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecalculationApprovalDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "Підтверджує чужий запит під сесією поточного користувача.",
+        "tags": [
+          "RecalculationApprovals"
+        ]
+      }
+    },
     "/api/v1/public/bootstrap": {
       "get": {
         "description": "⚠ Дія не приймає ЖОДНОГО параметра — ні шляху, ні рядка запиту, ні тіла.\nЦе і є доказ того, що відповідь не може залежати від імені користувача:\nїй нізвідки його взяти.",
@@ -32268,6 +32582,9 @@
     },
     {
       "name": "Public"
+    },
+    {
+      "name": "RecalculationApprovals"
     },
     {
       "name": "Registries"

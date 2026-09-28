@@ -7808,6 +7808,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectId}/recalculation-approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Живі погодження проєкту: не використані й не прострочені. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecalculationApprovalDto"][];
+                        "text/json": components["schemas"]["RecalculationApprovalDto"][];
+                        "text/plain": components["schemas"]["RecalculationApprovalDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Створює запит на погодження від імені поточного користувача. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RecalculationApprovalRequest"];
+                    "application/json": components["schemas"]["RecalculationApprovalRequest"];
+                    "text/json": components["schemas"]["RecalculationApprovalRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecalculationApprovalDto"];
+                        "text/json": components["schemas"]["RecalculationApprovalDto"];
+                        "text/plain": components["schemas"]["RecalculationApprovalDto"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/recalculation-approvals/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Підтверджує чужий запит під сесією поточного користувача. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: number;
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecalculationApprovalDto"];
+                        "text/json": components["schemas"]["RecalculationApprovalDto"];
+                        "text/plain": components["schemas"]["RecalculationApprovalDto"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/bootstrap": {
         parameters: {
             query?: never;
@@ -17690,13 +17834,13 @@ export interface components {
         };
         /** @description Запит на перерахунок усього проєкту (Q-151). */
         ProjectRecalculationRequest: {
-            /** @description Причина погодження; обов'язкова разом із `ApprovedByUserId`. */
-            approvalReason: null | string;
             /**
-             * Format: int32
-             * @description Хто погодив перерахунок закритого періоду (ФВ-9.7); `null` — без погодження.
+             * Format: int64
+             * @description Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,
+             *     `…/recalculation-approvals`); `null` — без погодження. Одноразове,
+             *     лише для свого ініціатора, цього проєкту й періоду.
              */
-            approvedByUserId: null | number;
+            approvalId: null | number;
             /**
              * Format: int32
              * @description Період; `null` — повний рік, усі документи проєкту.
@@ -17800,6 +17944,60 @@ export interface components {
              * @description Період; перерахунок завжди адресує пару документ × період.
              */
             periodKey: number;
+        };
+        /** @description Погодження перерахунку закритого періоду — як його бачить клієнт. */
+        RecalculationApprovalDto: {
+            /**
+             * Format: date-time
+             * @description Коли підтверджено, UTC.
+             */
+            confirmedAt: null | string;
+            /** @description Ім'я того, хто підтвердив. */
+            confirmedByName: null | string;
+            /**
+             * Format: int32
+             * @description Хто підтвердив; `null` — ще чекає.
+             */
+            confirmedByUserId: null | number;
+            /**
+             * Format: date-time
+             * @description Після цього моменту погодження мертве, UTC.
+             */
+            expiresAt: string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор; його передає `POST …/recalculate` як `approvalId`.
+             */
+            id: number;
+            /**
+             * Format: int32
+             * @description Єдиний період, який погодження відкриває.
+             */
+            periodKey: number;
+            /** @description Причина. */
+            reason: string;
+            /**
+             * Format: date-time
+             * @description Коли створено, UTC.
+             */
+            requestedAt: string;
+            /** @description Ім'я ініціатора. */
+            requestedByName: null | string;
+            /**
+             * Format: int32
+             * @description Ініціатор — єдиний, хто може ним скористатися.
+             */
+            requestedByUserId: number;
+        };
+        /** @description Запит на погодження перерахунку закритого періоду. */
+        RecalculationApprovalRequest: {
+            /**
+             * Format: int32
+             * @description Закритий період, який треба перерахувати.
+             */
+            periodKey: number;
+            /** @description Причина; обов'язкова, потрапляє в журнал. */
+            reason: null | string;
         };
         /** @description Чи може поточний користувач відкликати аркуш (`BE-31`). */
         RecallAvailabilityDto: {
