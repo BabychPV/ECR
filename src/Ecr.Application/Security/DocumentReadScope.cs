@@ -107,6 +107,18 @@ public sealed class DocumentReadScope
         return readable;
     }
 
+    /// <summary>Таблиці структури, яких профіль НЕ бачить, — за зростанням.</summary>
+    /// <remarks>
+    /// Для шляхів, що рахують межі тут, а застосовують деінде: задача експорту
+    /// в черзі не знає користувача, тож межі їдуть у її завданні списком.
+    /// </remarks>
+    public IReadOnlyList<int> HiddenTableIds()
+        => [.. _sheetOfTable.Keys.Where(t => !CanReadTable(t)).Order()];
+
+    /// <summary>Колонки структури, яких профіль НЕ бачить, — за зростанням.</summary>
+    public IReadOnlyList<int> HiddenColumnIds()
+        => [.. _tableOfColumn.Keys.Where(c => !CanReadColumn(c)).Order()];
+
     /// <summary>Чи бачить профіль таблицю, якій належить колонка.</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>
     /// <remarks>

@@ -75,13 +75,27 @@ public sealed class ExportAccessTests
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
 
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(new Domain.Entities.Configuration.TemplateVersionSnapshot(
+                1, 0, [], new Dictionary<int, Domain.Entities.Configuration.ColumnDef>(),
+                new Dictionary<(int, string), Domain.Entities.Configuration.RowDef>())));
+
         _jobs.EnqueueAsync<IExcelExportJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns("job-1");
 
-        var jobId = await Handler().HandleAsync(DocumentId, Options(), CancellationToken.None);
+        // ⛔ S6: межі читання в завданні рахує СЕРВЕР — те, що передав викликач,
+        // перезаписується.
+        var jobId = await Handler().HandleAsync(
+            DocumentId, Options() with { HiddenTableDefIds = [999], HiddenColumnDefIds = [998] }, CancellationToken.None);
 
         Assert.Equal("job-1", jobId);
+        await _jobs.Received(1).EnqueueAsync<IExcelExportJob>(
+            Arg.Is<object?>(p => ServerScoped(p)),
+            Arg.Any<CancellationToken>(), Arg.Any<int?>());
     }
+
+    private static bool ServerScoped(object? payload)
+        => payload is ExcelExportTask { Options: { HiddenTableDefIds: { Count: 0 }, HiddenColumnDefIds: { Count: 0 } } };
 
     private ExportDocumentHandler Handler() => new(_jobs, _access, _user);
 

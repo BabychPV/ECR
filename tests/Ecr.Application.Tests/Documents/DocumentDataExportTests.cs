@@ -276,6 +276,9 @@ public sealed class DocumentDataExportTests
               .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.Export").Build());
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
               .Returns(allowed ? EditDecision.Allow() : EditDecision.Deny(EditDenyReason.NoGrant));
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+              .Returns(ReadScopes.Everything(new TemplateVersionSnapshot(
+                  1, 0, [], new Dictionary<int, ColumnDef>(), new Dictionary<(int, string), RowDef>())));
         return (new ExportDocumentHandler(jobs, access, user), jobs);
     }
 

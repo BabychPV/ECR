@@ -58,6 +58,17 @@ public sealed class ExportDocumentHandler(
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
         await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
+        // ⛔ S6 (ФВ-6.6): заборона на аркуш, таблицю й колонку діє й на
+        // вивантаження. Задача в черзі не знає користувача, тож межі читання
+        // рахуються ТУТ, з профілю, і їдуть у завданні. Перезаписуються завжди —
+        // що б не прийшло від викликача.
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        options = options with
+        {
+            HiddenTableDefIds = readable.HiddenTableIds(),
+            HiddenColumnDefIds = readable.HiddenColumnIds(),
+        };
+
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
         // сховища не може дорівнювати jobId: той повертає черга вже після
         // постановки, а задача має знати, куди класти результат, до запуску.

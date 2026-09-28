@@ -191,7 +191,107 @@ public sealed class DenyReadTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// Вивантаження xlsx, csv і json — справжня задача в черзі, справжній файл.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: у <c>ExportDocumentHandler</c> не класти межі в
+    /// завдання — червоніють рядки <c>reader</c> усіх трьох форматів.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    [InlineData("xlsx")]
+    [InlineData("csv")]
+    [InlineData("json")]
+    public async Task Експорт_не_містить_заборонених_таблиць_і_колонок(string format)
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        string[] secrets =
+        [
+            Digits(DeniedColumn), Digits(DeniedTable), Digits(DeniedSheet),
+            s.ColumnCodes[2], s.DeniedTable.TableCode, s.DeniedSheetTable.TableCode,
+        ];
+
+        using var app = new EcrApiFactory(sql);
+
+        using (var reader = await SignedInAsync(app, s.Reader).ConfigureAwait(true))
+        {
+            var text = await ExportTextAsync(app, reader, s, format).ConfigureAwait(true);
+
+            Assert.Contains(Digits(Visible), text, StringComparison.Ordinal);
+            Assert.Contains(s.ColumnCodes[1], text, StringComparison.Ordinal);
+            foreach (var secret in secrets)
+            {
+                Assert.DoesNotContain(secret, text, StringComparison.Ordinal);
+            }
+        }
+
+        // Регресія: без заборон у файлі все.
+        using (var plain = await SignedInAsync(app, s.Plain).ConfigureAwait(true))
+        {
+            var text = await ExportTextAsync(app, plain, s, format).ConfigureAwait(true);
+            foreach (var secret in secrets)
+            {
+                Assert.Contains(secret, text, StringComparison.Ordinal);
+            }
+        }
+    }
+
     // ────────────────────────────── збірка ────────────────────────────
+
+    /// <summary>
+    /// Вивантажує документ і повертає ВЕСЬ текст файлу: для zip (xlsx, csv) —
+    /// склеєний вміст кожного запису, тобто й прихованого аркуша карти книги.
+    /// </summary>
+    private static async Task<string> ExportTextAsync(EcrApiFactory app, HttpClient client, Scenario s, string format)
+    {
+        var start = await client.PostAsJsonAsync(
+            new Uri($"/api/v1/documents/{s.Doc.DocumentId}/export", UriKind.Relative),
+            new { includeFormulas = false, includeStyles = false, language = "en", periodKey = s.Doc.PeriodKey.Value, format })
+            .ConfigureAwait(false);
+        Assert.True(start.StatusCode == HttpStatusCode.Accepted, $"експорт: {start.StatusCode}: {app.ErrorsText}");
+        var jobId = (await start.Content.ReadFromJsonAsync<JsonElement>().ConfigureAwait(false))
+            .GetProperty("jobId").GetString()!;
+
+        JsonElement job = default;
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (DateTime.UtcNow < deadline)
+        {
+            job = await client.GetFromJsonAsync<JsonElement>(
+                new Uri($"/api/v1/jobs/{Uri.EscapeDataString(jobId)}", UriKind.Relative)).ConfigureAwait(false);
+            if (job.GetProperty("state").GetString() is not ("Queued" or "Running"))
+            {
+                break;
+            }
+
+            await Task.Delay(200).ConfigureAwait(false);
+        }
+
+        Assert.True(job.GetProperty("state").GetString() == "Succeeded", $"задача: {job.GetRawText()}\n{app.ErrorsText}");
+
+        var download = await client.GetAsync(new Uri(
+            $"/api/v1/documents/{s.Doc.DocumentId}/export/{job.GetProperty("message").GetString()}", UriKind.Relative))
+            .ConfigureAwait(false);
+        Assert.True(download.StatusCode == HttpStatusCode.OK, $"файл: {download.StatusCode}: {app.ErrorsText}");
+        var bytes = await download.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+
+        if (format == "json")
+        {
+            return System.Text.Encoding.UTF8.GetString(bytes);
+        }
+
+        using var zip = new System.IO.Compression.ZipArchive(new MemoryStream(bytes));
+        var all = new System.Text.StringBuilder();
+        foreach (var entry in zip.Entries)
+        {
+            using var stream = new StreamReader(entry.Open());
+            all.Append(entry.FullName).Append('\n').Append(await stream.ReadToEndAsync().ConfigureAwait(false));
+        }
+
+        return all.ToString();
+    }
 
     private static string Slice(Scenario s, long instance)
         => $"/api/v1/documents/{s.Doc.DocumentId}/tables/{instance}";
@@ -303,6 +403,7 @@ public sealed class DenyReadTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         db.RolePermissions.Add(new RolePermission(viewer.Id, "Document.View"));
+        db.RolePermissions.Add(new RolePermission(viewer.Id, "Document.Export"));
         db.ResourceGrants.Add(new ResourceGrant(viewer.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Read));
         db.RoleAssignments.Add(new RoleAssignment(viewer.Id, reader.Id, null));
         db.RoleAssignments.Add(new RoleAssignment(viewer.Id, plain.Id, null));

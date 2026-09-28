@@ -90,6 +90,14 @@ public sealed class ExcelExporter(
             : new Dictionary<int, StyleDef>();
 
         var lookups = await LookupsAsync(snapshot, ct).ConfigureAwait(false);
+
+        // ⛔ S6 (ФВ-6.6): таблиці під забороною для того, хто замовив експорт, у
+        // книгу не потрапляють зовсім — ні аркушем, ні блоком карти, ні
+        // значеннями. Вилучаються ДО читання, тож і пакетні запити нижче їх не
+        // беруть. `null` — завдання до S6, див. `ExcelExportOptions`.
+        var hiddenTables = options.HiddenTableDefIds?.ToHashSet() ?? [];
+        instances = [.. instances.Where(i => !hiddenTables.Contains(i.TableDefId))];
+
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
 
         // ⛔ Рядки й комірки ВСІХ таблиць читаються ДВОМА пакетними запитами
@@ -291,8 +299,12 @@ public sealed class ExcelExporter(
         IReadOnlyDictionary<string, long> rowIds,
         IReadOnlyList<CellRecord> cells)
     {
+        // ⛔ S6: колонка під забороною — як прихована: ні заголовка, ні значень.
+        // Формула, що посилається на неї, не транслюється (`#REF!` →
+        // `FormulaTranslator.IsBroken`) і лишається значенням.
         var columns = table.Columns
-            .Where(c => !c.IsDeleted && !c.IsHidden)
+            .Where(c => !c.IsDeleted && !c.IsHidden
+                        && options.HiddenColumnDefIds?.Contains(c.Id) != true)
             .OrderBy(c => c.Ordinal)
             .ToList();
 

@@ -27,6 +27,20 @@ public interface IExcelExporter
 /// таблиці, у якій неможливо сказати, який стовпчик за який місяць.
 /// Значення «поточний період» тут теж не годиться: звіт вивантажують у перші
 /// дні наступного, і мовчазний вибір давав би порожню книгу.
+///
+/// ⛔ S6 (ФВ-6.6): <paramref name="HiddenTableDefIds"/> і
+/// <paramref name="HiddenColumnDefIds"/> — таблиці й колонки під забороною
+/// для того, хто замовив експорт. Задача виконується в черзі без
+/// користувача, тож межі читання рахує <c>ExportDocumentHandler</c> з профілю
+/// і кладе СЮДИ; з тіла запиту вони не приходять (<c>ExportRequest</c> таких
+/// полів не має, а обробник перезаписує їх завжди).
+///
+/// ⚠ <c>null</c> — завдання, поставлене ДО S6 (у збереженому JSON полів
+/// немає): такий експорт іде без фільтра, як і було. Нові завдання несуть
+/// списки завжди, хай і порожні.
 /// </remarks>
+/// <param name="HiddenTableDefIds">Таблиці, яких немає в книзі.</param>
+/// <param name="HiddenColumnDefIds">Колонки, яких немає в книзі.</param>
 public sealed record ExcelExportOptions(
-    bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey);
+    bool IncludeFormulas, bool IncludeStyles, string Language, int PeriodKey,
+    IReadOnlyList<int>? HiddenTableDefIds = null, IReadOnlyList<int>? HiddenColumnDefIds = null);
