@@ -85,6 +85,51 @@ public interface IRegistryKeyStore
     /// <summary>Ставить новий рядок ключа на вставку разом із записом.</summary>
     /// <param name="key">Рядок ключа.</param>
     public void Add(RegistryEntryKey key);
+
+    /// <summary>
+    /// Пакетне читання для перерахунку ключів пакета (аудит P9): поточні значення й рядки ключів
+    /// УСІХ записів — сталим числом запитів замість двох на запис. Доки не викликано
+    /// <see cref="ForgetPreloaded"/>, <see cref="ListCurrentValuesAsync"/> і
+    /// <see cref="ListEntryKeysAsync"/> для цих записів віддають прочитане тут, без звернення до бази.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише оптимізація, не зміна змісту: результат поштучних методів той самий, що й без
+    /// попереднього читання. Тому типова реалізація — нічого не робити (підробка, що її не знає,
+    /// просто читає поштучно).
+    ///
+    /// ⛔ Прочитане живе до <see cref="ForgetPreloaded"/>: після збереження в базі з'являються
+    /// рядки ключів, яких цей знімок не бачив (<c>ReleaseAsync</c> мусить читати базу).
+    /// </remarks>
+    /// <param name="entries">Записи пакета; нові (без <c>Id</c>) дають лише додані значення.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task PreloadAsync(IReadOnlyCollection<RegistryEntry> entries, CancellationToken ct)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Бере <c>UPDLOCK, HOLDLOCK</c> на всі хеші ключа одним запитом на порцію (аудит P9) і
+    /// запам'ятовує їхніх живих тримачів: <see cref="FindLiveHoldersForUpdateAsync"/> для цих
+    /// хешів далі не ходить у базу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Те саме блокування діапазону, що й поштучний <see cref="FindLiveHoldersForUpdateAsync"/>
+    /// (кожне значення <c>IN (…)</c> — окремий seek по <c>(RegistryKeyDefId, KeyHash)</c>), тож
+    /// гонка RT-10b розводиться так само. Має сенс лише в транзакції.
+    ///
+    /// ⚠ Типова реалізація нічого не робить: тоді блокування бере поштучний метод.
+    /// </remarks>
+    /// <param name="registryKeyDefId">Ключ довідника.</param>
+    /// <param name="keyHashes">Хеші; порожній набір — без запиту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task LockLiveHoldersAsync(int registryKeyDefId, IReadOnlyCollection<byte[]> keyHashes, CancellationToken ct)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// Забуває прочитане <see cref="PreloadAsync"/> і <see cref="LockLiveHoldersAsync"/>: далі
+    /// поштучні методи знову читають базу.
+    /// </summary>
+    public void ForgetPreloaded()
+    {
+    }
 }
 
 /// <summary>Живий запис, що вже тримає значення ключа.</summary>

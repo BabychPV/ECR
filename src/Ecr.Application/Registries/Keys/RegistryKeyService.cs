@@ -72,8 +72,7 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(valuesByFieldId);
 
-        var computed = Compute(definition, key, definition.Fields.ToDictionary(f => f.Id), valuesByFieldId);
-        return computed.Canonical is null ? null : RegistryKeyNormalizer.Hash(computed.Canonical);
+        return Compute(definition, key, definition.Fields.ToDictionary(f => f.Id), valuesByFieldId).Hash;
     }
 
     /// <summary>
@@ -127,9 +126,38 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         }
 
         var batch = entries.Where(e => e.IsPersisted).Select(e => e.Id).ToHashSet();
-        foreach (var entry in entries)
+        var fields = definition.Fields.ToDictionary(f => f.Id);
+
+        // ⛔ Аудит P9: читання — пакетом на весь набір, не по 3 + K звернення на запис. Значення й
+        // рядки ключів — одним читанням, коди цілей — одним, блокування тримачів — одним запитом
+        // на ключ (порціями). Рішення по кожному запису — далі тим самим циклом і в тому самому
+        // порядку, що й до пакетного читання: перший конфлікт той самий.
+        await store.PreloadAsync(entries, ct).ConfigureAwait(false);
+        try
         {
-            await ApplyAsync(definition, entry, keys, batch, ct).ConfigureAwait(false);
+            var plans = new List<EntryPlan>(entries.Count);
+            foreach (var entry in entries)
+            {
+                var values = (await store.ListCurrentValuesAsync(entry, ct).ConfigureAwait(false))
+                    .ToDictionary(v => v.RegistryFieldDefId);
+                var rows = entry.IsPersisted
+                    ? (await store.ListEntryKeysAsync(entry.Id, ct).ConfigureAwait(false)).ToDictionary(k => k.RegistryKeyDefId)
+                    : [];
+
+                plans.Add(new EntryPlan(entry, rows, [.. keys.Select(key => Compute(definition, key, fields, values))]));
+            }
+
+            var names = await ReferenceNamesAsync([.. plans.SelectMany(p => p.Keys)], ct).ConfigureAwait(false);
+            await LockHoldersAsync(keys, plans, ct).ConfigureAwait(false);
+
+            foreach (var plan in plans)
+            {
+                await ApplyAsync(definition, plan, names, batch, ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            store.ForgetPreloaded();
         }
     }
 
@@ -203,34 +231,51 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         => !a.IsEmpty && !b.IsEmpty
         && a.OverlapsSegment(b.FromInclusive ?? DateOnly.MinValue, b.ToExclusive ?? DateOnly.MaxValue);
 
+    /// <summary>
+    /// Блокування тримачів — одним викликом на ключ для всіх хешів пакета, до перевірок записів.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише хеші живих записів: видалений запис ключ не тримає і не перевіряється (поштучний
+    /// <c>ApplyAsync</c> плану), тож і блокувати за ним нічого — як і до пакетного читання.
+    /// </remarks>
+    private async Task LockHoldersAsync(
+        IReadOnlyList<RegistryKeyDef> keys, IReadOnlyList<EntryPlan> plans, CancellationToken ct)
+    {
+        for (var i = 0; i < keys.Count; i++)
+        {
+            var hashes = plans
+                .Where(p => !p.Entry.IsDeleted)
+                .Select(p => p.Keys[i].Hash)
+                .OfType<byte[]>()
+                .DistinctBy(Convert.ToHexString)
+                .ToList();
+
+            if (hashes.Count > 0)
+            {
+                await store.LockLiveHoldersAsync(keys[i].Id, hashes, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
     private async Task ApplyAsync(
         RegistryDef definition,
-        RegistryEntry entry,
-        IReadOnlyList<RegistryKeyDef> keys,
+        EntryPlan plan,
+        ReferenceNames names,
         IReadOnlySet<long> batch,
         CancellationToken ct)
     {
-        var fields = definition.Fields.ToDictionary(f => f.Id);
-        var values = (await store.ListCurrentValuesAsync(entry, ct).ConfigureAwait(false))
-            .ToDictionary(v => v.RegistryFieldDefId);
-        var rows = entry.IsPersisted
-            ? (await store.ListEntryKeysAsync(entry.Id, ct).ConfigureAwait(false)).ToDictionary(k => k.RegistryKeyDefId)
-            : [];
-
-        var computed = keys.Select(key => Compute(definition, key, fields, values)).ToList();
-        var names = await ReferenceNamesAsync(computed, ct).ConfigureAwait(false);
+        var (entry, rows, computed) = plan;
 
         foreach (var key in computed)
         {
             rows.TryGetValue(key.Definition.Id, out var row);
 
-            if (key.Canonical is null)
+            if (key.Hash is not { } hash)
             {
                 row?.Retire();
                 continue;
             }
 
-            var hash = RegistryKeyNormalizer.Hash(key.Canonical);
             var keyText = string.Join(KeyTextSeparator, key.Parts.Select(p => Display(p, names)));
 
             // Видалений запис ключ не тримає (IsLive = 0) — і перевіряти його нема з ким.
@@ -313,7 +358,8 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
             })
             .ToList();
 
-        return new ComputedKey(key, RegistryKeyNormalizer.Canonical(parts, key.IgnoreCase), parts);
+        var canonical = RegistryKeyNormalizer.Canonical(parts, key.IgnoreCase);
+        return new ComputedKey(key, canonical, canonical is null ? null : RegistryKeyNormalizer.Hash(canonical), parts);
     }
 
     /// <summary>Збережене значення поля у формі, яку приймає <see cref="RegistryKeyNormalizer"/>.</summary>
@@ -381,7 +427,12 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         };
     }
 
-    private sealed record ComputedKey(RegistryKeyDef Definition, string? Canonical, IReadOnlyList<RegistryKeyPart> Parts);
+    private sealed record ComputedKey(
+        RegistryKeyDef Definition, string? Canonical, byte[]? Hash, IReadOnlyList<RegistryKeyPart> Parts);
+
+    /// <summary>Запис пакета з прочитаним: наявні рядки ключів і ключі, обчислені за значеннями.</summary>
+    private sealed record EntryPlan(
+        RegistryEntry Entry, Dictionary<int, RegistryEntryKey> Rows, IReadOnlyList<ComputedKey> Keys);
 
     private sealed record ReferenceNames(IReadOnlyDictionary<long, string> Entries, IReadOnlyDictionary<int, string> Units);
 }
