@@ -72,6 +72,8 @@ public sealed class ValidateDocumentBoolDateRulesTests
             .Returns(new AccessBuilder { UserId = 9 }.Permission("Document.View").Build());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), DocumentId, Arg.Any<CancellationToken>())
+            .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(TemplateVersionId, CancellationToken.None)));
 
         _rows.GetTableInstancesAsync(DocumentId, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new List<TableInstanceRef>

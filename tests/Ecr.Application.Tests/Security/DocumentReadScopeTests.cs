@@ -114,6 +114,26 @@ public sealed class DocumentReadScopeTests
         Assert.False(scope.CanReadColumn(Col1a));
     }
 
+    /// <summary>
+    /// Адреса повідомлення валідації (таблиця + код колонки): заборонена
+    /// колонка, заборонена таблиця й невідомий код — невидимі (S6).
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public void Адреса_повідомлення_шанує_заборони_колонки_й_таблиці()
+    {
+        var scope = Scope(Reader().Deny(ResourceKind.Column, Col1b).Deny(ResourceKind.Table, Table2));
+
+        Assert.True(scope.CanReadAt(Table1, null));
+        Assert.True(scope.CanReadAt(Table1, "C301"));
+        Assert.False(scope.CanReadAt(Table1, "C302"));
+        Assert.False(scope.CanReadAt(Table1, "C999"));
+        Assert.False(scope.CanReadAt(Table2, null));
+        Assert.Equal([Table2], scope.HiddenTableIds());
+        Assert.Equal([Col1b, Col2a], scope.HiddenColumnIds());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public void Невідома_знімку_колонка_чи_таблиця_невидима()

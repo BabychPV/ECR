@@ -112,7 +112,16 @@ public sealed class GetTableStatusHandler(
             .GetPeriodAccessRulesAsync(templateVersionId, ct)
             .ConfigureAwait(false);
 
-        var live = instances.Select(i => i.TableDefId).ToHashSet();
+        // ⛔ S6 (ФВ-6.6): таблиця під забороною (своєю чи аркуша) не з'являється
+        // в статусі — її ідентифікатор, код аркуша, заповненість і кількість
+        // зауважень теж факти про неї. «N з M» рахується по видимому.
+        //
+        // ⚠ Колонка під забороною у ВИДИМІЙ таблиці лишається в лічильниках:
+        // віддається лише кількість (скільки комірок заповнено, скільки
+        // зауважень), не значення й не адреса. Знаменник — властивість таблиці.
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+
+        var live = instances.Select(i => i.TableDefId).Where(readable.CanReadTable).ToHashSet();
 
         // ── Структура: що саме має заповнити людина ──────────────────────
         var shapes = new List<TableShape>(instances.Count);

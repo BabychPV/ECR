@@ -131,7 +131,13 @@ public sealed class ValidateDocumentHandler(
         await results.SaveAsync(summary, ct).ConfigureAwait(false);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        return messages;
+        // ⛔ S6 (ФВ-6.6): ЗБЕРІГАЄТЬСЯ підсумок цілком — подання питає його про
+        // помилки на весь документ, а не на те, що бачить запускач. ВІДДАЮТЬСЯ ж
+        // лише повідомлення про таблиці й колонки, які запускач бачить: адреса
+        // (`RowKey`, `ColumnCode`) і текст правила — теж зміст прихованого.
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+
+        return [.. messages.Where(m => readable.CanReadAt(m.TableDefId, m.ColumnCode))];
     }
 
 }

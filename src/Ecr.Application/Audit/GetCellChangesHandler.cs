@@ -185,6 +185,11 @@ public sealed class GetCellChangesHandler(
 
             // ⛔ ФВ-6.14: історія комірки за `Document.View` (а не за глобальним
             // `Security.ViewAudit`) — лише в проєкті, де це право є.
+            //
+            // ⚠ ПОРЯДОК: спершу право (немає — 403, журнал не читається
+            // взагалі), лише ПОТІМ межі читання S6. Навпаки — і запит без права
+            // на прихованій колонці отримав би «порожньо» замість 403, тобто
+            // відповідь залежала б від заборони, а не від права.
             if (!profile.Has(Permission)
                 && await access.DocumentProjectIdAsync(id, ct).ConfigureAwait(false) is { } projectId
                 && !profile.Has(CellHistoryPermission, projectId))
@@ -197,8 +202,33 @@ public sealed class GetCellChangesHandler(
                         ["permission"] = CellHistoryPermission,
                     });
             }
+
+            // ⛔ S6 (ФВ-6.6): історія комірки віддає СТАРІ й НОВІ значення —
+            // ті самі числа, що й зріз, тож і межа та сама. Колонка під
+            // забороною (своєю, таблиці чи аркуша) — порожня історія, як у
+            // комірки, яку ніхто не правив: 404 чи 403 тут сказали б, що
+            // колонка існує й щось приховано.
+            var readable = await access.ReadScopeAsync(profile, id, ct).ConfigureAwait(false);
+
+            if (filter.ColumnDefId is { } column && !readable.CanReadColumn(column))
+            {
+                return new PagedResult<CellChangeView>([], null, 0);
+            }
+
+            // ⚠ Журнал документа без колонки (лише `Security.ViewAudit`): рядки
+            // заборонених колонок відкидаються ПІСЛЯ читання сторінки, тож
+            // сторінка може бути коротшою за ліміт, а `TotalCount` — лічити й
+            // їх. Курсор лишається правильним: він іде за журналом, не за
+            // відфільтрованим переліком.
+            var result = await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
+            var visible = result.Items.Where(c => readable.CanReadColumn(c.ColumnDefId)).ToList();
+
+            return visible.Count == result.Items.Count ? result : result with { Items = visible };
         }
 
+        // ⚠ Без `documentId` — наскрізний журнал для `Security.ViewAudit` поза
+        // межами проєктів (рішення людини, Q-177); межі читання S6 тут не
+        // застосовуються так само, як не застосовується грант на проєкт.
         return await audit.ReadCellChangesAsync(filter, page, ct).ConfigureAwait(false);
     }
 }

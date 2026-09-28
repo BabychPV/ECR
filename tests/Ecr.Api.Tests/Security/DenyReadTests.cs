@@ -6,6 +6,7 @@ using System.Text.Json;
 using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Workflow;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
@@ -42,6 +43,151 @@ public sealed class DenyReadTests(SqlServerFixture sql)
     private const decimal DeniedColumn = 333333.5m;
     private const decimal DeniedTable = 777777.5m;
     private const decimal DeniedSheet = 888888.5m;
+
+    // Значення в журналі змін.
+    private const string AuditVisible = "444444.25";
+    private const string AuditDeniedColumn = "555555.25";
+    private const string AuditDeniedTable = "666666.25";
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Перелік_таблиць_і_статус_без_прихованих_таблиць()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var period = s.Doc.PeriodKey.Value;
+        var hidden = new[] { s.DeniedTable.TableDefId, s.DeniedSheetTable.TableDefId };
+
+        using var app = new EcrApiFactory(sql);
+
+        foreach (var (user, expectHidden) in new[] { (s.Reader, false), (s.Plain, true) })
+        {
+            using var client = await SignedInAsync(app, user).ConfigureAwait(true);
+
+            var (status, tablesBody) = await GetAsync(
+                client, $"/api/v1/documents/{s.Doc.DocumentId}/tables?periodKey={period}").ConfigureAwait(true);
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {tablesBody}\n{app.ErrorsText}");
+            var tables = JsonDocument.Parse(tablesBody).RootElement.EnumerateArray()
+                .Select(t => t.GetProperty("tableDefId").GetInt32()).ToList();
+
+            var (statusCode, statusBody) = await GetAsync(
+                client, $"/api/v1/documents/{s.Doc.DocumentId}/tables/status?periodKey={period}").ConfigureAwait(true);
+            Assert.True(statusCode == HttpStatusCode.OK, $"{statusCode}: {statusBody}\n{app.ErrorsText}");
+            var statuses = JsonDocument.Parse(statusBody).RootElement.EnumerateArray()
+                .Select(t => t.GetProperty("tableDefId").GetInt32()).ToList();
+
+            foreach (var list in new[] { tables, statuses })
+            {
+                Assert.Contains(s.Doc.TableDefId, list);
+                Assert.All(hidden, h => Assert.Equal(expectHidden, list.Contains(h)));
+            }
+
+            Assert.Equal(expectHidden, tablesBody.Contains(s.DeniedTable.TableCode, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Перевірка_і_збережений_підсумок_без_зауважень_про_приховане()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var period = s.Doc.PeriodKey.Value;
+
+        using var app = new EcrApiFactory(sql);
+
+        using (var reader = await SignedInAsync(app, s.Reader).ConfigureAwait(true))
+        {
+            var fresh = await reader.PostAsJsonAsync(
+                new Uri($"/api/v1/documents/{s.Doc.DocumentId}/validate", UriKind.Relative),
+                new { periodKey = period }).ConfigureAwait(true);
+            var freshBody = await fresh.Content.ReadAsStringAsync().ConfigureAwait(true);
+            Assert.True(fresh.IsSuccessStatusCode, $"{fresh.StatusCode}: {freshBody}\n{app.ErrorsText}");
+
+            var (status, storedBody) = await GetAsync(
+                reader, $"/api/v1/documents/{s.Doc.DocumentId}/validation?periodKey={period}").ConfigureAwait(true);
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {storedBody}\n{app.ErrorsText}");
+
+            foreach (var body in new[] { freshBody, storedBody })
+            {
+                var codes = RuleCodes(body);
+                Assert.Contains(s.Rules.VisibleTable, codes);
+                Assert.DoesNotContain(s.Rules.DeniedSheet, codes);
+                Assert.DoesNotContain(s.Rules.DeniedTable, codes);
+            }
+        }
+
+        // Регресія: без заборон видно всі три зауваження.
+        using (var plain = await SignedInAsync(app, s.Plain).ConfigureAwait(true))
+        {
+            var (status, storedBody) = await GetAsync(
+                plain, $"/api/v1/documents/{s.Doc.DocumentId}/validation?periodKey={period}").ConfigureAwait(true);
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {storedBody}\n{app.ErrorsText}");
+
+            var codes = RuleCodes(storedBody);
+            Assert.Contains(s.Rules.VisibleTable, codes);
+            Assert.Contains(s.Rules.DeniedSheet, codes);
+            Assert.Contains(s.Rules.DeniedTable, codes);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Історія_змін_не_віддає_значень_прихованих_колонок_і_таблиць()
+    {
+        var s = await ArrangeAsync().ConfigureAwait(true);
+        var from = DateTime.UtcNow.AddDays(-1).ToString("O", CultureInfo.InvariantCulture);
+        var to = DateTime.UtcNow.AddDays(1).ToString("O", CultureInfo.InvariantCulture);
+        var journal = $"/api/v1/audit/cells?from={Uri.EscapeDataString(from)}&to={Uri.EscapeDataString(to)}&documentId={s.Doc.DocumentId}";
+        string Cell(int column, string rowKey) => $"{journal}&rowKey={Uri.EscapeDataString(rowKey)}&columnDefId={column}";
+
+        using var app = new EcrApiFactory(sql);
+
+        using (var reader = await SignedInAsync(app, s.Reader).ConfigureAwait(true))
+        {
+            // Історія однієї комірки: заборонена колонка й колонка забороненої
+            // таблиці — порожньо, як у комірки, яку ніхто не правив.
+            foreach (var (url, secret) in new[]
+                     {
+                         (Cell(s.Doc.ColumnDefIds[2], s.RowKey), AuditDeniedColumn),
+                         (Cell(s.DeniedTable.ColumnDefIds[0], s.DeniedTable.RowKeys[0]), AuditDeniedTable),
+                     })
+            {
+                var (status, body) = await GetAsync(reader, url).ConfigureAwait(true);
+                Assert.True(status == HttpStatusCode.OK, $"{status}: {body}\n{app.ErrorsText}");
+                Assert.Empty(JsonDocument.Parse(body).RootElement.GetProperty("items").EnumerateArray());
+                Assert.DoesNotContain(secret, body, StringComparison.Ordinal);
+            }
+
+            var (okStatus, visible) = await GetAsync(reader, Cell(s.Doc.ColumnDefIds[1], s.RowKey)).ConfigureAwait(true);
+            Assert.True(okStatus == HttpStatusCode.OK, $"{okStatus}: {visible}\n{app.ErrorsText}");
+            Assert.Contains(AuditVisible, visible, StringComparison.Ordinal);
+
+            // Журнал документа цілком: лише видима колонка.
+            var (allStatus, all) = await GetAsync(reader, journal).ConfigureAwait(true);
+            Assert.True(allStatus == HttpStatusCode.OK, $"{allStatus}: {all}\n{app.ErrorsText}");
+            Assert.Contains(AuditVisible, all, StringComparison.Ordinal);
+            Assert.DoesNotContain(AuditDeniedColumn, all, StringComparison.Ordinal);
+            Assert.DoesNotContain(AuditDeniedTable, all, StringComparison.Ordinal);
+        }
+
+        // Регресія: без заборон журнал документа — усі три зміни.
+        using (var plain = await SignedInAsync(app, s.Plain).ConfigureAwait(true))
+        {
+            var (status, all) = await GetAsync(plain, journal).ConfigureAwait(true);
+            Assert.True(status == HttpStatusCode.OK, $"{status}: {all}\n{app.ErrorsText}");
+            Assert.Contains(AuditDeniedColumn, all, StringComparison.Ordinal);
+            Assert.Contains(AuditDeniedTable, all, StringComparison.Ordinal);
+        }
+    }
+
+    private static List<string> RuleCodes(string body)
+        => [.. JsonDocument.Parse(body).RootElement.GetProperty("messages").EnumerateArray()
+            .Select(m => m.GetProperty("ruleCode").GetString()!)];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -404,6 +550,25 @@ public sealed class DenyReadTests(SqlServerFixture sql)
 
         db.RolePermissions.Add(new RolePermission(viewer.Id, "Document.View"));
         db.RolePermissions.Add(new RolePermission(viewer.Id, "Document.Export"));
+        db.RolePermissions.Add(new RolePermission(viewer.Id, "Security.ViewAudit"));
+
+        // Правила рівня таблиці, порушені завжди (`FALSE`): на видиму основну
+        // таблицю, на заборонену таблицю й на таблицю забороненого аркуша.
+        // ⚠ Коміркових правил перевірка документа не виконує (їх виконує запис,
+        // `TableValidation`), тож фільтр за колонкою доводить `DocumentReadScopeTests`.
+        var tag = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+        var rules = new Rules($"VM_{tag}", $"VS_{tag}", $"VT_{tag}");
+        foreach (var (table, code) in new[]
+                 {
+                     (doc.TableDefId, rules.VisibleTable),
+                     (deniedSheetTable.TableDefId, rules.DeniedSheet),
+                     (deniedTable.TableDefId, rules.DeniedTable),
+                 })
+        {
+            db.ValidationRules.Add(new ValidationRule(
+                table, EcrCode.Create(code), ValidationSeverity.Error, 2, "FALSE",
+                new LocalizedText(new Dictionary<string, string> { ["en"] = code })));
+        }
         db.ResourceGrants.Add(new ResourceGrant(viewer.Id, ResourceKind.Project, doc.ProjectId, GrantLevel.Read));
         db.RoleAssignments.Add(new RoleAssignment(viewer.Id, reader.Id, null));
         db.RoleAssignments.Add(new RoleAssignment(viewer.Id, plain.Id, null));
@@ -421,7 +586,43 @@ public sealed class DenyReadTests(SqlServerFixture sql)
             .Select(c => c.Code)
             .ToListAsync().ConfigureAwait(false);
 
-        return new Scenario(doc, deniedTable, deniedSheetTable, codes, reader.UserName, reader.Id, plain.UserName);
+        var rowKey = await db.TableRows.AsNoTracking()
+            .Where(r => r.Id == doc.RowIds[0])
+            .Select(r => r.RowKeyValue)
+            .SingleAsync().ConfigureAwait(false);
+
+        // Журнал змін: видима C2, заборонена C3, колонка забороненої таблиці.
+        await AuditAsync(doc.DocumentId, rowKey, doc.ColumnDefIds[1], AuditVisible).ConfigureAwait(false);
+        await AuditAsync(doc.DocumentId, rowKey, doc.ColumnDefIds[2], AuditDeniedColumn).ConfigureAwait(false);
+        await AuditAsync(doc.DocumentId, deniedTable.RowKeys[0], deniedTable.ColumnDefIds[0], AuditDeniedTable).ConfigureAwait(false);
+
+        return new Scenario(
+            doc, deniedTable, deniedSheetTable, codes, reader.UserName, reader.Id, plain.UserName, rules, rowKey);
+    }
+
+    /// <summary>Рядок <c>aud.CellChange</c> — прямим ADO, бо <c>aud.*</c> поза моделлю EF.</summary>
+    private async Task AuditAsync(long documentId, string rowKey, int columnDefId, string newValue)
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO aud.CellChange
+                (ChangedAt, PeriodKey, DocumentId, TableRowId, RowKey, ColumnDefId,
+                 OldValue, NewValue, ChangedByUserId, Origin, IsLateEdit)
+            VALUES
+                (@changedAt, 202601, @documentId, 1, @rowKey, @columnDefId,
+                 N'1', @newValue, 1, N'UserEdit', 0);
+            """;
+
+        command.Parameters.AddWithValue("@changedAt", DateTime.UtcNow);
+        command.Parameters.AddWithValue("@documentId", documentId);
+        command.Parameters.AddWithValue("@rowKey", rowKey);
+        command.Parameters.AddWithValue("@columnDefId", columnDefId);
+        command.Parameters.AddWithValue("@newValue", newValue);
+
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     private static User NewUser(string prefix)
@@ -444,5 +645,10 @@ public sealed class DenyReadTests(SqlServerFixture sql)
         IReadOnlyList<string> ColumnCodes,
         string Reader,
         int ReaderId,
-        string Plain);
+        string Plain,
+        Rules Rules,
+        string RowKey);
+
+    /// <summary>Коди правил валідації сценарію.</summary>
+    private sealed record Rules(string VisibleTable, string DeniedSheet, string DeniedTable);
 }

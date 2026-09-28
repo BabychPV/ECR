@@ -81,12 +81,17 @@ public sealed class GetDocumentTablesHandler(
             .GetAsync(instances[0].TemplateVersionId, ct)
             .ConfigureAwait(false);
 
+        // ⛔ S6 (ФВ-6.6): таблиця під забороною (своєю чи аркуша) не з'являється
+        // в переліку — ні назвою, ні кодом, ні `tableInstanceId`. Зріз на неї
+        // однаково дав би 404, а назва в навігації сама розповідала б про неї.
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+
         var byTableDef = instances.ToDictionary(i => i.TableDefId);
         var result = new List<DocumentTableDto>(instances.Count);
 
         foreach (var sheet in snapshot.Sheets.Where(s => !s.IsDeleted).OrderBy(s => s.Ordinal))
         {
-            foreach (var table in sheet.Tables.Where(t => !t.IsDeleted).OrderBy(t => t.Ordinal))
+            foreach (var table in sheet.Tables.Where(t => !t.IsDeleted && readable.CanReadTable(t.Id)).OrderBy(t => t.Ordinal))
             {
                 if (!byTableDef.TryGetValue(table.Id, out var instance))
                 {

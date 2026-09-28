@@ -78,7 +78,17 @@ public sealed class GetValidationResultHandler(
         // РІЗНІ відповіді, і другу не можна показувати замість першої: зелений
         // напис «зауважень немає» під документом, який ніхто не перевіряв, —
         // це та сама неправда, що й порожній дашборд замість збою (`A7-04`).
-        var messages = JsonSerializer.Deserialize<List<ValidationMessage>>(summary.MessagesJson) ?? [];
+        var stored = JsonSerializer.Deserialize<List<ValidationMessage>>(summary.MessagesJson) ?? [];
+
+        // ⛔ S6 (ФВ-6.6): підсумок збережено цілком (його читає подання), а
+        // читачеві віддаються лише повідомлення про таблиці й колонки, які він
+        // бачить — той самий фільтр, що й у `ValidateDocumentHandler`.
+        var readable = stored.Count == 0
+            ? null
+            : await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        var messages = readable is null
+            ? stored
+            : [.. stored.Where(m => readable.CanReadAt(m.TableDefId, m.ColumnCode))];
 
         if (messages.Count == 0)
         {

@@ -32,6 +32,7 @@ public sealed class DocumentReadScope
     private readonly Dictionary<int, List<int>> _columnsOfTable = [];
     private readonly Dictionary<int, bool> _tables = [];
     private readonly Dictionary<int, bool> _columns = [];
+    private readonly Dictionary<(int TableDefId, string Code), int> _columnByCode = [];
 
     private DocumentReadScope(AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot)
     {
@@ -48,6 +49,7 @@ public sealed class DocumentReadScope
                 foreach (var column in table.Columns)
                 {
                     _tableOfColumn[column.Id] = table.Id;
+                    _columnByCode[(table.Id, column.Code)] = column.Id;
                     columns.Add(column.Id);
                 }
 
@@ -106,6 +108,18 @@ public sealed class DocumentReadScope
         _tables[tableDefId] = readable;
         return readable;
     }
+
+    /// <summary>
+    /// Чи бачить профіль місце, про яке говорить повідомлення: таблицю і, коли
+    /// названо, колонку за її кодом (так адресують повідомлення валідації).
+    /// </summary>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="columnCode">Код колонки; <c>null</c> — рівень рядка чи таблиці.</param>
+    /// <remarks>Невідомий у таблиці код — невидимий (закрито за замовчуванням).</remarks>
+    public bool CanReadAt(int tableDefId, string? columnCode)
+        => CanReadTable(tableDefId)
+           && (columnCode is null
+               || (_columnByCode.TryGetValue((tableDefId, columnCode), out var columnDefId) && CanReadColumn(columnDefId)));
 
     /// <summary>Таблиці структури, яких профіль НЕ бачить, — за зростанням.</summary>
     /// <remarks>
