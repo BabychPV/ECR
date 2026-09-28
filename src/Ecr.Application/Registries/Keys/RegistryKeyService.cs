@@ -237,11 +237,17 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
     /// <remarks>
     /// ⚠ Лише хеші живих записів: видалений запис ключ не тримає і не перевіряється (поштучний
     /// <c>ApplyAsync</c> плану), тож і блокувати за ним нічого — як і до пакетного читання.
+    ///
+    /// ⛔ Ключі — у порядку <c>RegistryKeyDefId</c>, а не в порядку переліку: це старша частина
+    /// індексу <c>IX_RegistryEntryKey_Hash</c>, і дві транзакції з перетином хешів на кількох ключах
+    /// мусять брати замки одним маршрутом (усередині ключа хеші впорядковує сховище). Порядок
+    /// переліку дає <c>ListActiveKeysAsync</c>, але спиратися на нього тут — означало б тримати
+    /// відсутність взаємоблокувань на сортуванні в чужому запиті.
     /// </remarks>
     private async Task LockHoldersAsync(
         IReadOnlyList<RegistryKeyDef> keys, IReadOnlyList<EntryPlan> plans, CancellationToken ct)
     {
-        for (var i = 0; i < keys.Count; i++)
+        foreach (var i in Enumerable.Range(0, keys.Count).OrderBy(i => keys[i].Id))
         {
             var hashes = plans
                 .Where(p => !p.Entry.IsDeleted)

@@ -166,20 +166,32 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
     /// Блокується діапазон кожного хеша, навіть вільного, — вставка того самого ключа паралельною
     /// транзакцією чекає кінця цієї
     /// (<c>RegistryKeyBatchQueryTests.Пакетне_блокування_тримає_вільний_ключ_до_кінця_транзакції</c>).
+    ///
+    /// ⛔ Хеші сортуються в порядку індексу (<see cref="BinaryIndexOrder"/>) ДО нарізки на порції:
+    /// інакше дві транзакції з перетином ключів, що подали їх у різному порядку, беруть першими
+    /// різні порції — і кожна чекає порцію, яку вже тримає інша (1205). У порядку індексу кожна
+    /// порція лежить цілком вище попередньої, тож обидві транзакції йдуть одним маршрутом, і друга
+    /// чекає першу на найменшому спільному хеші, нічого не тримаючи з того, що потрібне першій
+    /// (<c>RegistryKeyLockOrderTests</c>).
     /// </remarks>
     public async Task LockLiveHoldersAsync(
         int registryKeyDefId, IReadOnlyCollection<byte[]> keyHashes, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(keyHashes);
 
-        foreach (var chunk in keyHashes.Chunk(HashesPerQuery))
+        var ordered = keyHashes
+            .DistinctBy(Convert.ToHexString)
+            .Order(BinaryIndexOrder.Instance)
+            .ToList();
+
+        foreach (var chunk in ordered.Chunk(HashesPerQuery))
         {
             foreach (var hash in chunk)
             {
                 _lockedHolders.TryAdd((registryKeyDefId, Convert.ToHexString(hash)), []);
             }
 
-            foreach (var holder in await LiveHoldersAsync(registryKeyDefId, chunk, forUpdate: true, ct).ConfigureAwait(false))
+            foreach (var holder in await LockedHoldersAsync(registryKeyDefId, chunk, ct).ConfigureAwait(false))
             {
                 _lockedHolders[(registryKeyDefId, Convert.ToHexString(holder.KeyHash!))].Add(holder with { KeyHash = null });
             }
@@ -204,6 +216,11 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
     ///
     /// ⚠ Хеш — параметром <c>binary(32)</c>, а не виведеним <c>varbinary(max)</c>: з типом
     /// <c>max</c> порівняння з колонкою індексу пошуком не буде.
+    ///
+    /// ⛔ Той самий запит, що й пакетне <see cref="LockLiveHoldersAsync"/> (<c>FORCESEEK</c> по
+    /// <c>IX_RegistryEntryKey_Hash</c>, <c>ORDER BY</c>, <c>MAXDOP 1</c>): без підказки оптимізатор
+    /// обирав і тут то пошук по <c>UQ_RegistryEntryKey_Entry</c> (замки на всі рядки ключа), то скан
+    /// кластерного індексу — ті самі різні індекси під замком у двох транзакцій, що давали 1205.
     /// </remarks>
     public async Task<IReadOnlyList<RegistryKeyHolder>> FindLiveHoldersForUpdateAsync(
         int registryKeyDefId, byte[] keyHash, long exceptEntryId, CancellationToken ct)
@@ -217,27 +234,10 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
             return [.. holders.Where(h => h.EntryId != exceptEntryId)];
         }
 
-        var locked = db.RegistryEntryKeys.FromSqlRaw(
-            "SELECT * FROM dic.RegistryEntryKey WITH (UPDLOCK, HOLDLOCK) "
-            + "WHERE RegistryKeyDefId = @keyDefId AND KeyHash = @keyHash AND IsLive = 1",
-            new SqlParameter("@keyDefId", SqlDbType.Int) { Value = registryKeyDefId },
-            new SqlParameter("@keyHash", SqlDbType.Binary, RegistryEntryKey.KeyHashLength) { Value = keyHash });
-
-        var rows = await (
-                from k in locked.AsNoTracking()
-                join e in db.RegistryEntries.AsNoTracking() on k.RegistryEntryId equals e.Id
-                where k.RegistryEntryId != exceptEntryId
-                orderby k.RegistryEntryId
-                select new { e.Id, e.Code, k.KeyText, k.ValidFromKey, k.ValidTo })
-            .ToListAsync(ct).ConfigureAwait(false);
-
-        return rows
-            .Select(r => new RegistryKeyHolder(
-                r.Id,
-                r.Code,
-                r.KeyText,
-                new ValidityWindow(r.ValidFromKey == DateOnly.MinValue ? null : r.ValidFromKey, r.ValidTo)))
-            .ToList();
+        // Себе відкидаємо вже після запиту: замок однаково ставиться на весь діапазон хеша.
+        return [.. (await LockedHoldersAsync(registryKeyDefId, [keyHash], ct).ConfigureAwait(false))
+            .Where(h => h.EntryId != exceptEntryId)
+            .Select(h => h with { KeyHash = null })];
     }
 
     /// <inheritdoc />
@@ -255,7 +255,7 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
         var result = new List<RegistryKeyHolder>();
         foreach (var chunk in keyHashes.Chunk(HashesPerQuery))
         {
-            result.AddRange(await LiveHoldersAsync(registryKeyDefId, chunk, forUpdate: false, ct).ConfigureAwait(false));
+            result.AddRange(await LiveHoldersAsync(registryKeyDefId, chunk, ct).ConfigureAwait(false));
         }
 
         return result;
@@ -291,28 +291,18 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
     public void Add(RegistryEntryKey key) => db.RegistryEntryKeys.Add(key);
 
     /// <summary>
-    /// Живі тримачі порції хешів одним запитом; з <paramref name="forUpdate"/> — під
-    /// <c>UPDLOCK, HOLDLOCK</c>.
+    /// Живі тримачі порції хешів одним запитом під <c>UPDLOCK, HOLDLOCK</c> — у порядку індексу
+    /// <c>(RegistryKeyDefId, KeyHash)</c>.
     /// </summary>
     /// <remarks>
-    /// ⚠ Хеші — окремими параметрами <c>binary(32)</c>, а не <c>Contains</c> по колекції: переклад
-    /// колекції <c>byte[]</c> у параметр EF дає <c>varbinary(max)</c>, з яким порівняння з колонкою
-    /// індексу пошуком не буде (та сама причина, що в <see cref="FindLiveHoldersForUpdateAsync"/>).
+    /// ⚠ Окремий оператор через <c>SqlQueryRaw</c>, а не <c>FromSqlRaw</c> під LINQ: складений
+    /// запит EF загортає в підзапит, а в підзапиті SQL Server не дозволяє ні <c>ORDER BY</c> без
+    /// <c>TOP</c>, ні <c>OPTION</c>. Тут обидва мусять стояти на самому операторі.
     /// </remarks>
-    private async Task<List<RegistryKeyHolder>> LiveHoldersAsync(
-        int registryKeyDefId, byte[][] chunk, bool forUpdate, CancellationToken ct)
+    private async Task<List<RegistryKeyHolder>> LockedHoldersAsync(
+        int registryKeyDefId, byte[][] chunk, CancellationToken ct)
     {
-        var parameters = new List<object>(chunk.Length + 1)
-        {
-            new SqlParameter("@keyDefId", SqlDbType.Int) { Value = registryKeyDefId },
-        };
-        var names = new List<string>(chunk.Length);
-        for (var i = 0; i < chunk.Length; i++)
-        {
-            var name = "@h" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            names.Add(name);
-            parameters.Add(new SqlParameter(name, SqlDbType.Binary, RegistryEntryKey.KeyHashLength) { Value = chunk[i] });
-        }
+        var (names, parameters) = HashParameters(registryKeyDefId, chunk);
 
         // ⚠ Конкатенація в змінну (як `ConsistencyCheckJob`): підставляються лише ІМЕНА
         // параметрів `@h0`..`@hN` і сталий хінт, не значення — аналізатор EF1003 цього статично
@@ -326,9 +316,52 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
         // UQ_RegistryEntryKey_Entry, RegistryKeyRaceTests у повному прогоні після великих вставок).
         // Пошук по IX_RegistryEntryKey_Hash блокує рівно діапазон кожного хеша — той самий для
         // будь-якої транзакції, тож друга чекає першу, а не блокує її у відповідь.
+        //
+        // ⛔ Порядок, у якому пошук бере замки, — теж частина протоколу, а не деталь плану. Він
+        // тримається трьома речами разом, і жодна не зайва:
+        //  • хеші вже відсортовані побайтно (як `binary` в індексі), а порції йдуть по черзі
+        //    (LockLiveHoldersAsync), тож параметри `@h0 < @h1 < …` і кожна порція вища за попередню;
+        //  • `ORDER BY RegistryKeyDefId, KeyHash` — порядок самого індексу: план, що віддає рядки
+        //    пошуком по ньому, сортування не потребує, і оптимізатор не має підстав обирати інший
+        //    маршрут (сортування ВХОДУ перед пошуком чи хеш-з'єднання, що переставляє доступ);
+        //  • `MAXDOP 1` — паралельний план роздає діапазони потокам, і ті беруть замки впереміш,
+        //    хоч би який порядок стояв на виході.
+        // Так дві транзакції з перетином ключів проходять спільні хеші в ОДНОМУ порядку: друга
+        // чекає першу на найменшому спільному хеші, не тримаючи нічого, що потрібне першій.
+        var sql =
+            "SELECT CAST(e.Id AS bigint) AS EntryId, e.Code AS EntryCode, k.KeyText, k.KeyHash, k.ValidFromKey, k.ValidTo"
+            + " FROM dic.RegistryEntryKey AS k WITH (UPDLOCK, HOLDLOCK, FORCESEEK (IX_RegistryEntryKey_Hash (RegistryKeyDefId, KeyHash)))"
+            + " JOIN dic.RegistryEntry AS e ON e.Id = k.RegistryEntryId"
+            + " WHERE k.RegistryKeyDefId = @keyDefId AND k.IsLive = 1 AND k.KeyHash IN (" + string.Join(", ", names) + ")"
+            + " ORDER BY k.RegistryKeyDefId, k.KeyHash, k.RegistryEntryId"
+            + " OPTION (MAXDOP 1)";
+
+        var rows = await db.Database
+            .SqlQueryRaw<LockedHolderRow>(sql, [.. parameters])
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return rows.ConvertAll(r => new RegistryKeyHolder(
+            r.EntryId,
+            r.EntryCode,
+            r.KeyText,
+            new ValidityWindow(r.ValidFromKey == DateOnly.MinValue ? null : r.ValidFromKey, r.ValidTo),
+            r.KeyHash));
+    }
+
+    /// <summary>Живі тримачі порції хешів одним запитом, без замків.</summary>
+    /// <remarks>
+    /// ⚠ Хеші — окремими параметрами <c>binary(32)</c>, а не <c>Contains</c> по колекції: переклад
+    /// колекції <c>byte[]</c> у параметр EF дає <c>varbinary(max)</c>, з яким порівняння з колонкою
+    /// індексу пошуком не буде (та сама причина, що в <see cref="FindLiveHoldersForUpdateAsync"/>).
+    /// </remarks>
+    private async Task<List<RegistryKeyHolder>> LiveHoldersAsync(
+        int registryKeyDefId, byte[][] chunk, CancellationToken ct)
+    {
+        var (names, parameters) = HashParameters(registryKeyDefId, chunk);
+
+        // ⚠ Конкатенація в змінну: підставляються лише ІМЕНА параметрів `@h0`..`@hN`, не значення.
         var sql =
             "SELECT * FROM dic.RegistryEntryKey"
-            + (forUpdate ? " WITH (UPDLOCK, HOLDLOCK, FORCESEEK (IX_RegistryEntryKey_Hash (RegistryKeyDefId, KeyHash)))" : string.Empty)
             + " WHERE RegistryKeyDefId = @keyDefId AND IsLive = 1 AND KeyHash IN ("
             + string.Join(", ", names) + ")";
         var live = db.RegistryEntryKeys.FromSqlRaw(sql, [.. parameters]);
@@ -353,6 +386,24 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
             r.KeyHash))];
     }
 
+    /// <summary>Параметр ключа й по одному параметру <c>binary(32)</c> на хеш порції — у її порядку.</summary>
+    private static (List<string> Names, List<object> Parameters) HashParameters(int registryKeyDefId, byte[][] chunk)
+    {
+        var parameters = new List<object>(chunk.Length + 1)
+        {
+            new SqlParameter("@keyDefId", SqlDbType.Int) { Value = registryKeyDefId },
+        };
+        var names = new List<string>(chunk.Length);
+        for (var i = 0; i < chunk.Length; i++)
+        {
+            var name = "@h" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            names.Add(name);
+            parameters.Add(new SqlParameter(name, SqlDbType.Binary, RegistryEntryKey.KeyHashLength) { Value = chunk[i] });
+        }
+
+        return (names, parameters);
+    }
+
     private static List<T> Bucket<T>(Dictionary<long, List<T>> buckets, long id)
     {
         if (!buckets.TryGetValue(id, out var bucket))
@@ -361,5 +412,20 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
         }
 
         return bucket;
+    }
+
+    /// <summary>Рядок <see cref="LockedHoldersAsync"/>; імена колонок — імена властивостей.</summary>
+    internal sealed record LockedHolderRow(
+        long EntryId, string EntryCode, string KeyText, byte[] KeyHash, DateOnly ValidFromKey, DateOnly? ValidTo);
+
+    /// <summary>
+    /// Порядок хешів в індексі SQL Server: <c>binary</c> порівнюється побайтно, кожен байт — як
+    /// беззнакове число (<c>SequenceCompareTo</c> над <c>ReadOnlySpan&lt;byte&gt;</c>).
+    /// </summary>
+    private sealed class BinaryIndexOrder : IComparer<byte[]>
+    {
+        public static readonly BinaryIndexOrder Instance = new();
+
+        public int Compare(byte[]? x, byte[]? y) => x.AsSpan().SequenceCompareTo(y);
     }
 }
