@@ -47,7 +47,7 @@ public sealed class JobsHealthStaleTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Завислі_задачі_жовтять_і_червонять_jobs_а_прибирання_повертає_зелений()
+    public async Task Завислі_задачі_жовтять_jobs_а_прибирання_повертає_зелений()
     {
         await SweepAtAsync(T);
 
@@ -62,8 +62,13 @@ public sealed class JobsHealthStaleTests(SqlServerFixture sql)
         Assert.Equal(HealthStatus.Degraded, waiting.Status);
         Assert.Equal(1, waiting.Data["staleJobs"]);
 
-        // Шістнадцять — прибирання мало встигнути й не встигло: червоний.
-        Assert.Equal(HealthStatus.Unhealthy, (await CheckAtAsync(T.AddMinutes(10))).Status);
+        Assert.Equal(false, waiting.Data["cleanupStalled"]);
+
+        // Шістнадцять — прибирання мало встигнути й не встигло. Все одно жовтий
+        // (readiness не червоніє від тла), але з ознакою «прибирання стоїть».
+        var stalled = await CheckAtAsync(T.AddMinutes(10));
+        Assert.Equal(HealthStatus.Degraded, stalled.Status);
+        Assert.Equal(true, stalled.Data["cleanupStalled"]);
 
         var outcome = await SweepAtAsync(T.AddMinutes(10));
         Assert.True(outcome.Jobs >= 1);
@@ -72,6 +77,51 @@ public sealed class JobsHealthStaleTests(SqlServerFixture sql)
 
         await using var check = sql.CreateContext();
         Assert.Equal("Failed", (await new JobProgressStore(check).FindAsync(jobId, CancellationToken.None))?.State);
+    }
+
+    /// <remarks>
+    /// ⛔ Рішення координатора: зависле тло НЕ робить інстанс неготовим. 503 на
+    /// <c>/health/ready</c> вивів би з балансувальника здоровий API, а стан
+    /// спільної бази однаковий для всіх інстансів — зняло б усі разом.
+    /// Мутація: повернути <c>Unhealthy</c> для «прибирання стоїть» → 503, червоний (прогнано).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зависла_задача_не_робить_health_ready_503_а_jobs_показує_жовтий()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = app.CreateClient();
+
+        // Перший запит піднімає хост; прибирання на старті вже відбулося,
+        // періодичне — лише за хвилину.
+        await client.GetAsync(new Uri("/health/live", UriKind.Relative));
+
+        var now = app.Services.GetRequiredService<Domain.Abstractions.IClock>().UtcNow;
+        var jobId = $"hung-{Guid.NewGuid():N}";
+        await using (var db = sql.CreateContext())
+        {
+            // Година без биття — прибирання «стоїть» (найгірший випадок).
+            await new JobProgressStore(db).StartAsync(jobId, "Ecr.Test.HungJob", now.AddHours(-1), CancellationToken.None);
+        }
+
+        try
+        {
+            var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.True(response.StatusCode != System.Net.HttpStatusCode.ServiceUnavailable, body);
+
+            var jobs = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("checks")
+                .EnumerateArray()
+                .Single(c => string.Equals(c.GetProperty("name").GetString(), "jobs", StringComparison.Ordinal));
+            Assert.Equal("Degraded", jobs.GetProperty("status").GetString());
+        }
+        finally
+        {
+            await using var db = sql.CreateContext();
+            await new JobProgressStore(db).FinishAsync(jobId, "Failed", "test", now, CancellationToken.None);
+        }
     }
 
     private async Task<Infrastructure.Jobs.SweepOutcome> SweepAtAsync(DateTime at)

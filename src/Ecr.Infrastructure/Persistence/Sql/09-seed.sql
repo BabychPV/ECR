@@ -4046,8 +4046,8 @@ USING (VALUES
     (N'health.jobs.noSchedules',                N'en', N'The scheduler is alive, but no schedule is registered.', 1),
     (N'health.jobs.running',                    N'en', N'The scheduler is running.', 1),
     (N'health.jobs.unavailable',                N'en', N'The scheduler is unavailable.', 1),
-    -- U16: задачі без биття серця (покинуті процесом, що зник). Жовтий — чекають
-    -- найближчого проходу прибирання; червоний — прибирання їх не закриває.
+    -- U16: задачі без биття серця (покинуті процесом, що зник). Обидва — жовтий
+    -- (readiness не червоніє від тла): чекають прибирання / прибирання стоїть.
     (N'health.jobs.stale',                      N'en', N'Background jobs without a heartbeat, awaiting cleanup: {count}.', 1),
     (N'health.jobs.staleUnswept',               N'en', N'Background jobs hang without a heartbeat and the cleanup does not close them: {count}.', 1),
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),

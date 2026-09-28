@@ -29,14 +29,16 @@ public sealed class JobsHealthCheck(
 {
     /// <summary>
     /// Скільки задача може висіти без биття, поки прибирання мало б її закрити,
-    /// перш ніж перевірка стане червоною (U16).
+    /// перш ніж перевірка скаже «прибирання стоїть» (U16).
     /// </summary>
     /// <remarks>
     /// ⚠ Жовтий — одразу, щойно є задача без биття довше за
     /// <see cref="IJobProgressStore.StaleAfter"/>: це штатне вікно до наступного
-    /// проходу прибирання (раз на хвилину), і воно має бути видимим. Червоний —
-    /// коли така задача пережила ще й цей запас: прибирання, отже, не працює, і
-    /// «вічні Running» повернулися. Шість проходів — з запасом на збій БД.
+    /// проходу прибирання (раз на хвилину), і воно має бути видимим. Після
+    /// цього запасу — той самий жовтий, але з текстом <c>health.jobs.staleUnswept</c>
+    /// і <c>cleanupStalled = true</c>: прибирання не працює. Червоним (503 на
+    /// <c>/health/ready</c>) зависле тло не робиться свідомо — див. коментар у
+    /// перевірці. Шість проходів — з запасом на збій БД.
     /// </remarks>
     public static readonly TimeSpan UnsweptAfter = IJobProgressStore.StaleAfter + TimeSpan.FromMinutes(6);
 
@@ -102,6 +104,7 @@ public sealed class JobsHealthCheck(
                     data["staleJobs"] = stale.Count;
 
                     var unswept = stale.OldestHeartbeatAt is not { } oldest || now - oldest > UnsweptAfter;
+                    data["cleanupStalled"] = unswept;
                     var text = await Text(
                             unswept ? "health.jobs.staleUnswept" : "health.jobs.stale",
                             unswept
@@ -114,9 +117,13 @@ public sealed class JobsHealthCheck(
                             })
                         .ConfigureAwait(false);
 
-                    return unswept
-                        ? HealthCheckResult.Unhealthy(text, data: data)
-                        : HealthCheckResult.Degraded(text, data: data);
+                    // ⛔ Лише Degraded, навіть коли прибирання стоїть. Перевірка
+                    // має тег `ready`, а Unhealthy дає `/health/ready` 503:
+                    // балансувальник вивів би з ротації здоровий API через
+                    // зависле ТЛО — і однаковий стан спільної бази зняв би так
+                    // само всі інстанси разом (рішення координатора). Тяжкість
+                    // розрізняють текст і `cleanupStalled`, а не код відповіді.
+                    return HealthCheckResult.Degraded(text, data: data);
                 }
             }
 
