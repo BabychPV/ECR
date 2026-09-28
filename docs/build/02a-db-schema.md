@@ -2678,14 +2678,18 @@ CREATE TABLE itg.CollectionCoverage
     SourceEntityId int          NOT NULL,
     CoveredFrom    datetime2(3) NOT NULL,
     CoveredTo      datetime2(3) NOT NULL,
-    CollectionRunId bigint      NOT NULL,
+    -- NULL — рядок-подія (пропуск, конфлікт, синк довідника), не прив'язаний до прогону (Q-186).
+    CollectionRunId bigint      NULL,
     CONSTRAINT PK_CollectionCoverage PRIMARY KEY (Id),
     CONSTRAINT FK_CCov_Entity FOREIGN KEY (SourceEntityId)  REFERENCES ext.SourceEntity (Id),
     CONSTRAINT FK_CCov_Run    FOREIGN KEY (CollectionRunId) REFERENCES itg.CollectionRun (Id),
-    -- Період, якого стосується статус; NULL — звичайне покриття інтервалу.
+    -- Період, якого стосується статус; NULL — звичайне покриття інтервалу
+    -- або подія синку довідника (довідник не живе за періодами).
     PeriodKey       int            NULL,
-    -- ⛔ Чому інтервал НЕ перенесено в комірки (D-118):
-    -- SkippedPeriodClosed | ConflictKeptManual. NULL — нічого незвичайного.
+    -- ⛔ Чому інтервал НЕ перенесено в комірки (D-118) або що знайшов синк
+    -- довідника (FEATURE-REGISTRY-SYNC S5). Допустимі значення — рівно
+    -- CollectionCoverage.KnownStatuses (IntegrationLogs.cs, джерело правди).
+    -- NULL — нічого незвичайного.
     -- Мовчазний пропуск тут найдорожчий: збір відпрацював, звіт склався, а
     -- числа за пізній інтервал у ньому немає.
     Status          nvarchar(64)   NULL,
