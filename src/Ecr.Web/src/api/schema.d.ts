@@ -10155,7 +10155,85 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /**
+         * Заводить сутність збору з позиції каталогу джерела (`ФВ-13.11`).
+         *     Право `Integration.Manage`.
+         * @description ⚠ Код уже зайнятий у цьому з'єднанні — `409 ECR-INT-0409`
+         *     (`err.ECR-INT-0409.sourceEntityDuplicate`), а не другий рядок.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["CreateSourceEntityRequest"];
+                    "application/json": components["schemas"]["CreateSourceEntityRequest"];
+                    "text/json": components["schemas"]["CreateSourceEntityRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEntityDto"];
+                        "text/json": components["schemas"]["SourceEntityDto"];
+                        "text/plain": components["schemas"]["SourceEntityDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -10263,6 +10341,77 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sources/{id}/registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Прив'язує сутність збору до довідника або відв'язує її (`ФВ-8.11`).
+         *     Право `Integration.Manage`. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["BindSourceEntityRegistryRequest"];
+                    "application/json": components["schemas"]["BindSourceEntityRegistryRequest"];
+                    "text/json": components["schemas"]["BindSourceEntityRegistryRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEntityDto"];
+                        "text/json": components["schemas"]["SourceEntityDto"];
+                        "text/plain": components["schemas"]["SourceEntityDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -14358,6 +14507,14 @@ export interface components {
          * @enum {unknown}
          */
         AuthProvider: "Windows" | "Local";
+        /** @description Прив'язка сутності збору до довідника. */
+        BindSourceEntityRegistryRequest: {
+            /**
+             * Format: int32
+             * @description Довідник; `null` — відв'язати.
+             */
+            registryDefId: null | number;
+        };
         /** @description Запит на побудову зрізу. */
         BuildSnapshotRequest: {
             /** @description Значення параметрів звіту за іменем (`R6`, `02b` §8a): число,
@@ -15353,6 +15510,21 @@ export interface components {
              * @description Екземпляр таблиці.
              */
             tableInstanceId: number;
+        };
+        /** @description Нова сутність збору — позиція каталогу джерела. */
+        CreateSourceEntityRequest: {
+            /** @description Код у джерелі. */
+            code: null | string;
+            /**
+             * Format: int32
+             * @description З'єднання.
+             */
+            dataSourceId: number;
+            /** @description Підпис із каталогу. */
+            displayName: null | string;
+            /** @description Шлях в ієрархії джерела. */
+            entityPath: null | string;
+            sourceKind: null | components["schemas"]["RegistrySourceKind"];
         };
         /** @description Запит на створення шаблону. */
         CreateTemplateRequest: {
@@ -19170,6 +19342,34 @@ export interface components {
             items: components["schemas"]["SourceCatalogItem"][];
             nextCursor: null | string;
         };
+        /** @description Сутність збору у відповіді на заведення чи прив'язку. */
+        SourceEntityDto: {
+            /** @description Код у джерелі. */
+            code: string;
+            /**
+             * Format: int32
+             * @description З'єднання.
+             */
+            dataSourceId: number;
+            /** @description Підпис. */
+            displayName: null | string;
+            /** @description Шлях в ієрархії. */
+            entityPath: null | string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор `ext.SourceEntity`.
+             */
+            id: number;
+            /** @description Чи ввімкнено збір. */
+            isActive: boolean;
+            /**
+             * Format: int32
+             * @description Довідник; `null` — не прив'язана.
+             */
+            registryDefId: null | number;
+            /** @description Хто master. */
+            sourceKind: components["schemas"]["RegistrySourceKind"];
+        };
         /** @description Сутність збору разом зі станом останнього прогону. */
         SourceEntityStatus: {
             /** @description Код у джерелі. */
@@ -19198,6 +19398,11 @@ export interface components {
              * @description Початок найстарішої непокритої прогалини; `null` — покриття суцільне.
              */
             oldestGap: null | string;
+            /**
+             * Format: int32
+             * @description Довідник, до якого прив'язана сутність; `null` — не прив'язана.
+             */
+            registryDefId?: null | number;
             /** @description Транспорт джерела (ФВ-11.2). */
             transport: string;
         };

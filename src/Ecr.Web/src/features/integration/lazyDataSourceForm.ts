@@ -20,3 +20,11 @@ export const DataSourceFormModal = lazy(() =>
 export const DataSourceScheduleTab = lazy(() =>
   import('./DataSourceScheduleTab').then((module) => ({ default: module.DataSourceScheduleTab })),
 );
+
+/**
+ * Вкладка сутностей збору (`ФВ-13.11`) — за `import()` з тієї ж причини:
+ * форма з каталогу й вибір довідника потрібні лише тому, хто її відкрив.
+ */
+export const SourceEntitiesTab = lazy(() =>
+  import('./SourceEntitiesTab').then((module) => ({ default: module.SourceEntitiesTab })),
+);
