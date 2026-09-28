@@ -25,6 +25,8 @@
 name: Evidence
 
 on:
+  push:
+    branches: ['lane/**']
   pull_request:
     branches: [main]
   workflow_dispatch:

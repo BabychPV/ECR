@@ -30,7 +30,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'lane/**' ]
   pull_request:
 
   # ⚠ Розклад потрібен РІВНО одному завданню — `shuffle` (у кінці файла).
