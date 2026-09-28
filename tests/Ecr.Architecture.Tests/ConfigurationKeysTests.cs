@@ -82,18 +82,17 @@ public sealed partial class ConfigurationKeysTests
     /// ⛔ Перелік має бути ПОРОЖНІМ у здоровому стані. Кожен рядок — борг із
     /// причиною й датою, а не спосіб замовчати знахідку.
     ///
-    /// • <c>Telemetry:ServiceName</c>, <c>Telemetry:OtlpEndpoint</c> —
-    ///   2026-09-19, чекають на `D14-09`: експортера OTLP ще немає (`S-12`),
-    ///   а `deploy-ecr.ps1:37,150` уже наводить `OtlpEndpoint` як головний
-    ///   приклад для адміністратора. Видалити ключі означало б зламати
-    ///   інструкцію розгортання, підключити — завести пакет
+    /// • <c>Telemetry:ServiceName</c> — 2026-09-19, чекає на `D14-09`:
+    ///   експортера OTLP ще немає (`S-12`), підключити — завести пакет
     ///   `OpenTelemetry.Extensions.Hosting`, тобто foundation-PR через
     ///   `Directory.Packages.props`. Знімається разом із `D14-09`.
+    ///   ✎ 2026-09-28 (`U17`): <c>Telemetry:OtlpEndpoint</c> звідси знято — його
+    ///   читає перевірка старту (<c>EcrConfigurationValidation.Warnings</c>) і
+    ///   попереджає, що непорожнє значення нічого не вмикає.
     /// </remarks>
     private static readonly string[] KeysWithoutReaderByDesign =
     [
         "Telemetry:ServiceName",
-        "Telemetry:OtlpEndpoint",
     ];
 
     /// <summary>

@@ -16,6 +16,7 @@ Get-Service EcrApi
 Stop-Service EcrApi
 Start-Service EcrApi
 Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = процес живий
+Invoke-WebRequest http://localhost:5000/health/ready -UseBasicParsing  # 200 = готовий; 503 = див. п. 3.1
 ```
 
 Порт задає `ASPNETCORE_URLS` у середовищі служби (дефолт `-AppPort 5000`).
@@ -83,13 +84,19 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 | `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
-| `Telemetry:ServiceName` | `ecr-api` | ім'я служби в телеметрії |
-| `Telemetry:OtlpEndpoint` | порожньо | OTLP-колектор. Порожньо — не експортувати |
+| `Telemetry:ServiceName` | `ecr-api` | зарезервовано під експорт телеметрії; зараз не діє |
+| `Telemetry:OtlpEndpoint` | порожньо | ⚠ **Експорту OTLP у цій версії немає** (потрібен окремий пакет, `S-12`). Непорожнє значення нічого не вмикає — старт пише про це попередження. Метрики `Meter "Ecr"` — лише `dotnet-counters monitor --counters Ecr -n Ecr.Api` на сервері |
 | `Logging:LogLevel:*` | `Information`, `Microsoft.AspNetCore` = `Warning` | рівні логування |
 | `Logging:File:Directory` | `%ProgramData%\ECR\logs` | тека логів. Порожньо — без файлового логу |
 | `Logging:File:RetainedFiles` | 30 | скільки файлів зберігати |
 | `Logging:File:FileSizeLimitMb` | 100 | розмір файлу, після якого починається новий |
+| `Logging:File:Json` | `true` | поруч писати `ecr-yyyyMMdd.json` — рядок JSON на запис (п. 3.2) |
 | `AllowedHosts` | `*` | |
+
+Числові, булеві ключі й ключі з переліком значень (`Schema:StartupMode`,
+`Database:EditionMode`) перевіряються на старті: недійсне значення зупиняє
+службу з назвою ключа (п. 5), а не мовчки замінюється дефолтом. Порожнє
+значення — «не задано», тобто дефолт.
 
 ⚠ **потрібне рішення замовника:** SMTP, OTLP-колектор, сертифікат для Data
 Protection і HTTPS, адреси джерел PI. Дефолти коду — «вимкнено» або порожньо.
@@ -153,6 +160,13 @@ HTTP-код: `Healthy` і `Degraded` дають **200**, `Unhealthy` — **503**
   стартує. Перевіряйте права облікового запису служби.
 - Формат рядка:
   `2026-09-22 10:00:00.000 +03:00 [ERR] [<CorrelationId>] [uid:<UserId>] [<машина>] <джерело>: <повідомлення>`
+- Поруч — `ecr-yyyyMMdd.json` (вимикається `Logging:File:Json=false`): той самий
+  потік записів, рядок JSON на запис, для SIEM. Поля: `@t` (UTC), `@l` (рівень),
+  `@mt` (шаблон), `@m` (повідомлення), `@x` (виняток), далі властивості запису —
+  `CorrelationId`, `UserId`, `MachineName`, `SourceContext`, `Code` (код помилки
+  відмови, напр. `ECR-AUTH-…`). Ротація й строк зберігання — ті самі.
+- Журнал подій Windows: канал `Application`, джерело **`ECR`** (його реєструє MSI),
+  рівень `Warning` і вище. Сюди ж лягає недійсна конфігурація на старті.
 
 ### 3.3. Як знайти запит або задачу
 
@@ -200,7 +214,8 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | служба не стартує, у лозі незастосовані міграції | оновили код без схеми, а `StartupMode=Validate` | застосувати схему (п. 8) і запустити службу |
 | служба не стартує після зміни відбитка | немає сертифіката `Auth:DataProtection:CertificateThumbprint` у `LocalMachine\My` | встановити сертифікат із закритим ключем і дати права облікового запису служби |
 | `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` |
-| `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql` |
+| `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
+| служба не стартує: «Недійсна конфігурація — служба не стартує» | значення ключа не того типу чи поза межами (`"60s"` замість `60`, друкарська помилка в `Database:EditionMode`) | виправити названий ключ у `appsettings.Production.json` або в `ECR_…` змінній служби. Той самий текст — у журналі подій (джерело `ECR`) і в лозі |
 | `sources` Unhealthy | PI/SQL-джерело недоступне або змінився секрет | стан на `/admin/sources`, помилка в `GET /api/v1/jobs/{id}`, секрет `ECR_Secrets__<ім'я>` |
 | `jobs` Unhealthy | планувальник зупинився | лог за `Quartz`, перезапуск служби |
 | розгортання: `01-filegroups.sql`, `Msg 5149 … error 112` | немає місця на диску даних | звільнити місце. Файлові групи займають ~14 ГБ на повній редакції (п. 6.1) |
@@ -370,8 +385,13 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 
    Спершу запустіть із `-WhatIf`, потім без нього. Кроки скрипта: передумови,
    схема, MSI (`msiexec /qn`), змінні служби, конфіг (лише якщо ще заглушка),
-   перезапуск служби, перевірка `GET /health/live`.
-3. Перевірити `/health/ready` і `/health/db`.
+   перезапуск служби, перевірка `GET /health/live`, потім очікування
+   `GET /health/ready` до `Healthy`/`Degraded` (не довше `-ReadyTimeoutSeconds`,
+   дефолт 180 с). Перевірки, що не `Healthy`, скрипт друкує. `Unhealthy` лише
+   через `sources` — попередження (зовнішнє джерело, ручне введення працює);
+   будь-яка інша `Unhealthy` після тайм-ауту — розгортання провалене, «Готово»
+   не друкується.
+3. Перевірити `/health/db`.
 
 Графічний майстер `tools/Ecr.Setup` запускає той самий `deploy-ecr.ps1`.
 

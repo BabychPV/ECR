@@ -31,6 +31,7 @@ public sealed class FileLogTests(SqlServerFixture sql)
         try
         {
             string text;
+            string json;
             using (var app = new EcrApiFactory(sql))
             using (var host = WithFileLog(app, directory))
             {
@@ -45,7 +46,22 @@ public sealed class FileLogTests(SqlServerFixture sql)
                 using var facts = JsonDocument.Parse(await admin.GetStringAsync(Facts));
                 Assert.Equal(directory, facts.RootElement.GetProperty("logDirectory").GetString());
 
-                text = ReadLog(directory);            }
+                text = ReadLog(directory);
+                json = ReadLog(directory, "ecr-*.json");
+            }
+
+            // ⛔ U20: той самий запис — і в машиночитному журналі, де кореляція,
+            // користувач і код помилки — поля, а не шматок рядка.
+            var records = json.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => JsonSerializer.Deserialize<JsonElement>(l))
+                .ToList();
+            var denial = Assert.Single(records, r =>
+                r.TryGetProperty("CorrelationId", out var c) && c.GetString() == "filelog-test-7f3a"
+                && r.TryGetProperty("Code", out var code) && code.GetString()!.StartsWith("ECR-AUTH", StringComparison.Ordinal));
+            Assert.Matches(@"^\d+$", denial.GetProperty("UserId").GetString()!);
+            Assert.Equal(Environment.MachineName, denial.GetProperty("MachineName").GetString());
+            Assert.False(string.IsNullOrEmpty(denial.GetProperty("@t").GetString()));
+            Assert.DoesNotContain("Api-Health-Facts-2026!", json, StringComparison.Ordinal);
 
             var line = Assert.Single(
                 text.Split('\n'), l => l.Contains("ECR-AUTH", StringComparison.Ordinal)
@@ -148,9 +164,9 @@ public sealed class FileLogTests(SqlServerFixture sql)
             services.PostConfigure<FileLogOptions>(options => options.Directory = directory);
         }));
 
-    private static string ReadLog(string directory)
+    private static string ReadLog(string directory, string pattern = "ecr-*.log")
     {
-        var file = Assert.Single(Directory.GetFiles(directory, "ecr-*.log"));
+        var file = Assert.Single(Directory.GetFiles(directory, pattern));
         using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();

@@ -35,7 +35,7 @@
                              №13, Q-215, `BootstrapSecretFile.cs`).
       5. Конфігурація     — appsettings.Production.json у %ProgramData%\ECR\
                              config: НЕсекретні значення (наприклад,
-                             Telemetry:OtlpEndpoint), пише лише в ПОРОЖНІЙ
+                             Logging:File:Directory), пише лише в ПОРОЖНІЙ
                              заповнювач, ніколи не перезаписує заповнений
                              (`Folders.wxs`: NeverOverwrite; той самий
                              принцип тут — на рівні оркестратора, а не MSI).
@@ -46,7 +46,12 @@
                              записати секрети кроком 4 — свіжозаписане
                              оточення побачить лише новий запуск процесу,
                              не вже працюючий.
-      7. Здоров'я         — GET /health/live.
+      7. Здоров'я         — GET /health/live, потім GET /health/ready до
+                             `Healthy`/`Degraded` (не довше -ReadyTimeoutSeconds).
+                             Перевірки, що не Healthy, друкуються. Unhealthy
+                             лише через `sources` (зовнішнє джерело PI/SQL) —
+                             попередження, не провал; будь-яка інша Unhealthy
+                             після тайм-ауту — провал розгортання.
 
     Крок схеми виконується під `-SqlLogin`/інтегрованими обліковими даними
     ВИКОНАВЦЯ скрипта (DBA), НІКОЛИ під `-ServiceAccount`: сервісний
@@ -147,7 +152,8 @@
 
 .PARAMETER ConfigValues
     Шлях до JSON-файлу з НЕсекретними значеннями appsettings.Production.json
-    цього майданчика (наприклад, Telemetry:OtlpEndpoint) — НІКОЛИ рядок
+    цього майданчика (наприклад, Logging:File:Directory; ⚠ не
+    Telemetry:OtlpEndpoint — експорту OTLP у цій версії немає) — НІКОЛИ рядок
     підключення чи інший секрет, для нього -ConnectionString (D-11).
     Записується ЛИШЕ якщо цільовий файл ще заповнювач (порожній об'єкт) —
     інакше крок 5 попереджає і нічого не чіпає.
@@ -170,6 +176,10 @@
     Явний прапорець, а не автовизначення за станом бази: судження про
     "перше це чи ні" належить тому, хто розгортає, а не евристиці, яка
     вгадує за відсутністю таблиць.
+
+.PARAMETER ReadyTimeoutSeconds
+    Скільки секунд кроку 7 чекати, поки /health/ready стане Healthy або
+    Degraded (після того, як /health/live уже відповів). За замовчуванням 180.
 
 .EXAMPLE
     # Побачити повний план, нічого не роблячи в системі
@@ -214,7 +224,8 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+$')] [string] $Version,
     [switch] $SkipSchema,
     [switch] $FirstDeployment,
-    [switch] $CreateDatabaseIfMissing
+    [switch] $CreateDatabaseIfMissing,
+    [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180
 )
 
 $ErrorActionPreference = 'Stop'
@@ -413,6 +424,89 @@ if (-not $ConnectionString) {
 }
 
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
+
+# ⚠ Чиста функція (як Merge-ServiceEnvironmentEntry): без мережі, щоб рішення
+# кроку 7 перевірялося на готових відповідях (D-134), а не лише на живому стенді.
+# Вхід — код відповіді /health/ready і тіло (HealthReportDto: status, checks[]).
+# Вихід — Outcome: 'Ready' (Healthy/Degraded), 'Warning' (Unhealthy ЛИШЕ через
+# `sources`), 'Wait' (ще не готово — або відповіді немає, або Unhealthy інша);
+# Status — загальний статус; Details — рядки про перевірки, що не Healthy.
+#
+# ⚠ `sources` — не провал розгортання: це зовнішній PI/SQL, недоступний з
+# причин поза цим сервером, і ручне введення без нього працює (аудит, п. 7).
+function Get-ReadinessVerdict {
+    param(
+        [int] $StatusCode,
+        [string] $Body
+    )
+
+    $details = @()
+    if ($StatusCode -eq 0 -or [string]::IsNullOrWhiteSpace($Body)) {
+        return [pscustomobject]@{ Outcome = 'Wait'; Status = 'немає відповіді'; Details = $details }
+    }
+
+    try { $report = $Body | ConvertFrom-Json -ErrorAction Stop }
+    catch { return [pscustomobject]@{ Outcome = 'Wait'; Status = "HTTP $StatusCode, тіло не JSON"; Details = $details } }
+
+    # ⚠ Set-StrictMode Latest: звернення до відсутньої властивості — виняток.
+    $status = if ($report.PSObject.Properties['status']) { [string] $report.status } else { '' }
+    $checks = @()
+    if ($report.PSObject.Properties['checks'] -and $report.checks) { $checks = @($report.checks) }
+
+    foreach ($check in $checks) {
+        if ([string] $check.status -ne 'Healthy') {
+            $details += "$($check.name): $($check.status) — $($check.description)"
+        }
+    }
+
+    $outcome = switch ($status) {
+        'Healthy'  { 'Ready' }
+        'Degraded' { 'Ready' }
+        'Unhealthy' {
+            $failing = @($checks | Where-Object { [string] $_.status -eq 'Unhealthy' } | ForEach-Object { [string] $_.name })
+            if ($failing.Count -gt 0 -and @($failing | Where-Object { $_ -ne 'sources' }).Count -eq 0) { 'Warning' } else { 'Wait' }
+        }
+        default { 'Wait' }
+    }
+
+    return [pscustomobject]@{ Outcome = $outcome; Status = $status; Details = $details }
+}
+
+# Мережева половина кроку 7: код і тіло /health/ready, зокрема при 503 —
+# Invoke-WebRequest на 503 кидає виняток, а звіт перевірок лежить саме в тілі.
+function Invoke-ReadyProbe {
+    param([Parameter(Mandatory)] [string] $Url)
+
+    try {
+        $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 10
+        return [pscustomobject]@{ StatusCode = [int] $resp.StatusCode; Body = [string] $resp.Content }
+    }
+    catch {
+        $code = 0
+        $body = $null
+        $webResponse = $null
+        if ($_.Exception.PSObject.Properties['Response']) { $webResponse = $_.Exception.Response }
+        if ($webResponse) {
+            $code = [int] $webResponse.StatusCode
+            # ⚠ Windows PowerShell 5.1: ErrorDetails.Message на 503 порожній
+            # (перевірено живим HttpListener), тіло є лише в потоці відповіді —
+            # і читати його треба явно як UTF-8, бо описи перевірок кириличні.
+            if ($webResponse -is [System.Net.HttpWebResponse]) {
+                try {
+                    $stream = $webResponse.GetResponseStream()
+                    if ($stream.CanSeek) { $stream.Position = 0 }
+                    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+                    try { $body = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                }
+                catch { $body = $null }
+            }
+            if ([string]::IsNullOrWhiteSpace($body) -and $_.ErrorDetails -and $_.ErrorDetails.Message) {
+                $body = $_.ErrorDetails.Message                     # PowerShell 7
+            }
+        }
+        return [pscustomobject]@{ StatusCode = $code; Body = $body }
+    }
+}
 
 function Invoke-DeploySql {
     param(
@@ -661,6 +755,35 @@ if ($PSCmdlet.ShouldProcess($healthUrl, 'GET /health/live')) {
     }
     if (-not $ok) { throw "Служба не відповіла на $healthUrl за відведений час. Перевір Event Log (джерело ECR) і %ProgramData%\ECR\logs." }
     Write-Host "Служба відповідає на $healthUrl." -ForegroundColor Green
+}
+
+# ⛔ U21: `live` доводить лише, що процес відповідає. Стенд без RCSI, без
+# файлових груп чи з мертвим планувальником проходив би далі як «Готово» —
+# саме тому після `live` чекаємо `ready` і друкуємо перевірки, що не Healthy.
+$readyUrl = "http://localhost:$AppPort/health/ready"
+if ($PSCmdlet.ShouldProcess($readyUrl, 'GET /health/ready')) {
+    $deadline = (Get-Date).AddSeconds($ReadyTimeoutSeconds)
+    do {
+        $response = Invoke-ReadyProbe -Url $readyUrl
+        $verdict  = Get-ReadinessVerdict -StatusCode $response.StatusCode -Body $response.Body
+        if ($verdict.Outcome -ne 'Wait') { break }
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+
+    foreach ($line in $verdict.Details) { Write-Host "  $line" -ForegroundColor Yellow }
+
+    switch ($verdict.Outcome) {
+        'Ready'   { Write-Host "Служба готова (${readyUrl}: $($verdict.Status))." -ForegroundColor Green }
+        'Warning' {
+            Write-Warning ("Служба готова до роботи, але $readyUrl — $($verdict.Status) лише через зовнішні " +
+                "джерела даних (sources): ручне введення працює, збір — ні. Стан джерел — /admin/sources.")
+        }
+        default {
+            throw ("Служба не стала готовою за $ReadyTimeoutSeconds с (${readyUrl}: $($verdict.Status)). " +
+                "Перевірки вище; подробиці БД — /health/db після входу, причини — Event Log (джерело ECR) " +
+                "і %ProgramData%\ECR\logs. Типові збої — docs/admin/operations-runbook.md §5.")
+        }
+    }
 }
 
 Write-Host ""

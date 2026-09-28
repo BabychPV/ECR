@@ -2,6 +2,7 @@
 using Ecr.Api.Errors;
 using Ecr.Api.Middleware;
 using Ecr.Api.Observability;
+using Ecr.Api.Options;
 using Ecr.Api.Security;
 using Ecr.Api.Startup;
 using Ecr.Application;
@@ -24,6 +25,10 @@ var builder = WebApplication.CreateBuilder(args);
 // впливу на dev/тести/Linux CI немає): WindowsServiceHelpers.IsWindowsService()
 // вмикає цю поведінку лише тоді, коли процес і справді піднятий SCM.
 builder.Host.UseWindowsService();
+
+// ⛔ U15 (R-03): журнал подій — під джерелом, яке реєструє MSI (`ECR`), а не під
+// ім'ям застосунку. Пояснення — в `EventLogSource`.
+builder.Services.AddEcrEventLogSource();
 
 // Персистентна конфігурація майданчика (НЕсекретні значення — Q-213):
 // інсталятор кладе сюди копію appsettings.Production.json і більше НЕ
@@ -206,6 +211,12 @@ var app = builder.Build();
 // ⚠ ДО послідовності старту: якщо в теку журналу не вдається писати, про це
 // треба сказати раніше, ніж старт упаде з іншої причини й пояснення не лишиться.
 app.ReportFileLog();
+
+// ⛔ U19: недійсне значення конфігурації валить старт з ім'ям ключа — ДО бази,
+// а не тихо падає на дефолт. ⚠ Після `Build()`, а не на `builder.Configuration`:
+// лише тут видно всі джерела (зокрема ті, що додає хост тестів), і вже є логер,
+// тобто причина лягає в журнал подій і файл, а не лише у виняток процесу.
+app.ValidateEcrConfiguration();
 
 // ⚠ ПОСЛІДОВНІСТЬ СТАРТУ (B01 §6.3) — порядок значущий:
 // 1) retry-очікування БД  2) звірка міграцій  3) Validate/Migrate

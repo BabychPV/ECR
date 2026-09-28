@@ -61,9 +61,17 @@ public sealed class DatabaseHealthCheck(
 
             var partitionsAhead = await PartitionsAheadAsync(cancellationToken).ConfigureAwait(false);
             data["partitionsAhead"] = partitionsAhead;
-            data["limitations"] = await LimitationsAsync(cancellationToken).ConfigureAwait(false);
 
-            if (!capabilities.IsReadCommittedSnapshotOn)
+            // ⛔ U18: RCSI — ЖИВИМ запитом, а не з проби старту. Проба читає його
+            // раз на процес, тож після `06-rcsi.sql` (runbook §5) перевірка
+            // лишалася червоною до перезапуску служби, а RCSI, вимкнений на ходу,
+            // показувала зеленим. Запит — один рядок `sys.databases`, дешевший за
+            // `sys.filegroups` вище.
+            var rcsi = await ReadCommittedSnapshotOnAsync(cancellationToken).ConfigureAwait(false);
+            data["rcsi"] = rcsi;
+            data["limitations"] = await LimitationsAsync(rcsi, cancellationToken).ConfigureAwait(false);
+
+            if (!rcsi)
             {
                 // Не Degraded, а Unhealthy: без RCSI пік останнього дня періоду
                 // впирається в блокування (D-29), і це не «трохи гірше», а
@@ -126,6 +134,21 @@ public sealed class DatabaseHealthCheck(
         return result;
     }
 
+    /// <summary>Чи увімкнено RCSI для поточної бази — зараз, а не на старті процесу.</summary>
+    /// <remarks>
+    /// ⚠ З <c>sys.databases</c>, як і проба старту (<c>SqlCapabilitiesProbe</c>, <c>Q-052</c>):
+    /// <c>DATABASEPROPERTYEX(…, 'IsReadCommittedSnapshotOn')</c> такої властивості не має.
+    /// </remarks>
+    private async Task<bool> ReadCommittedSnapshotOnAsync(CancellationToken cancellationToken)
+    {
+        var flags = await db.Database
+            .SqlQueryRaw<int>(
+                "SELECT CAST(is_read_committed_snapshot_on AS int) AS Value FROM sys.databases WHERE name = DB_NAME()")
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+
+        return flags.Count > 0 && flags[0] == 1;
+    }
+
     /// <summary>Скільки меж партиціонування лежить попереду поточного періоду.</summary>
     private async Task<int> PartitionsAheadAsync(CancellationToken cancellationToken)
     {
@@ -162,7 +185,7 @@ public sealed class DatabaseHealthCheck(
     /// `IsReadCommittedSnapshotOn`, `ArchiveBatchSize`) — рантайм-перевірка
     /// типу (`is SqlCapabilitiesProbe`) взагалі не потрібна.
     /// </remarks>
-    private async Task<IReadOnlyList<string>> LimitationsAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<string>> LimitationsAsync(bool rcsi, CancellationToken ct)
     {
         var list = new List<string>();
 
@@ -182,7 +205,7 @@ public sealed class DatabaseHealthCheck(
                 null, ct).ConfigureAwait(false));
         }
 
-        if (!capabilities.IsReadCommittedSnapshotOn)
+        if (!rcsi)
         {
             list.Add(await Text(
                 "health.db.limitation.rcsi",
