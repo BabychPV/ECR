@@ -27,7 +27,7 @@ public interface ICalculationModule
     /// </summary>
     /// <remarks>
     /// ⛔ Окремий крок, а не ліниве поле всередині модуля. Склад версії
-    /// (формули, речовини, виходи) і межі періоду однакові для всієї
+    /// (формули, речовини, виходи, константи) і межі періоду однакові для всієї
     /// прив'язки «методологія × період», а <see cref="ExecuteAsync(
     /// CalculationBindingContext, CalculationInput, CancellationToken)"/>
     /// викликають на КОЖЕН рядок таблиці. Доти три читання сховища й один
@@ -98,6 +98,12 @@ public interface ICalculationModule
 /// <c>null</c> — колонка масштабу не оголошує, і береться
 /// <c>NumericPolicy.DefaultOutputScale</c>.
 /// </param>
+/// <param name="Constants">
+/// Код константи → УСІ її кандидати у версії (темпоральні, за речовиною, за
+/// категорією), прочитані одним запитом (аудит P1). Вибір серед них — у
+/// <c>ConstantResolver.Resolve</c>, у пам'яті, на кожну речовину. Коду немає
+/// в словнику — константи немає, формула читає <c>#REF</c>.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -106,7 +112,8 @@ public sealed record CalculationBindingContext(
     IReadOnlyList<MethodologySubstance> Substances,
     IReadOnlyList<MethodologyOutput> Outputs,
     Ecr.Expressions.PeriodContext Period,
-    IReadOnlyDictionary<string, byte?> OutputScales);
+    IReadOnlyDictionary<string, byte?> OutputScales,
+    IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.

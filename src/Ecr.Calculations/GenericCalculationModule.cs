@@ -58,6 +58,19 @@ public sealed class GenericCalculationModule(
         var outputs = await methodologies
             .GetOutputsAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
 
+        // ⛔ Константи версії — ОДНИМ запитом тут, а не запитом на рядок ×
+        // речовину × код у `ExecuteAsync` (аудит P1). Вибір кандидата лишається
+        // тим самим правилом `ConstantResolver`, лише в пам'яті. Регістр коду —
+        // без різниці, як і в запиті за кодом, що стояв тут раніше (колація БД).
+        var constants = await methodologies
+            .GetConstantsAsync(methodology.MethodologyVersionId, ct).ConfigureAwait(false);
+        var constantsByCode = constants
+            .GroupBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<MethodologyConstant>)g.OrderBy(c => c.Id).ToList(),
+                StringComparer.OrdinalIgnoreCase);
+
         // ⚠ Порядок беремо з EvaluationOrder — він топологічний із Publish
         // (ФВ-9.4). Сортувати граф тут заборонено: порядок мусить бути тим
         // самим, за яким версію перевірили тестами, а не тим, який вийде
@@ -77,7 +90,7 @@ public sealed class GenericCalculationModule(
 
         return new CalculationBindingContext(
             methodology, documentId, periodKey, ordered, substances, outputs, period,
-            scales ?? EmptyScales);
+            scales ?? EmptyScales, constantsByCode);
     }
 
     /// <summary>Порожній словник масштабів — усі виходи беруть замовчування.</summary>
@@ -154,8 +167,8 @@ public sealed class GenericCalculationModule(
 
         foreach (var substance in targets)
         {
-            var resolved = await ResolveConstantsAsync(
-                version, ordered, substance?.SubstanceEntryId, period, ct).ConfigureAwait(false);
+            var resolved = ResolveConstants(
+                version, ordered, substance?.SubstanceEntryId, period, binding.Constants);
 
             var units = await UnitsAsync(ct).ConfigureAwait(false);
             var context = new MethodologyEvaluationContext(period, arguments, resolved, units);
@@ -313,18 +326,23 @@ public sealed class GenericCalculationModule(
     }
 
     /// <summary>Резолвить усі константи, згадані у формулах, для однієї речовини.</summary>
-    private async Task<Dictionary<string, ExpressionValue>> ResolveConstantsAsync(
+    /// <remarks>
+    /// ⛔ Без походу в базу: кандидати прочитано в <see cref="PrepareAsync"/>
+    /// (аудит P1), тут — лише вибір у пам'яті.
+    /// </remarks>
+    private Dictionary<string, ExpressionValue> ResolveConstants(
         MethodologyDescriptor version,
         IReadOnlyList<MethodologyFormula> formulas,
         long? substanceEntryId,
         Expressions.PeriodContext period,
-        CancellationToken ct)
+        IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> candidatesByCode)
     {
         var resolved = new Dictionary<string, ExpressionValue>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var code in ConstantCodes(formulas))
         {
-            var constant = await constants.ResolveAsync(
+            var constant = constants.Resolve(
+                candidatesByCode.TryGetValue(code, out var candidates) ? candidates : [],
                 version.MethodologyVersionId,
                 code,
                 category: null,
@@ -333,8 +351,7 @@ public sealed class GenericCalculationModule(
                 // ⚠ Дата періоду, а не «сьогодні»: константа темпоральна, і
                 // перерахунок минулого року цього року має брати коефіцієнт,
                 // чинний тоді (ФВ-16.5).
-                period.End,
-                ct).ConfigureAwait(false);
+                period.End);
 
             // ⛔ Текстова константа підставляється ТЕКСТОМ, а не числом
             // (поправка 2-біс директиви ПК-1 №05). У корпусі ~90 констант

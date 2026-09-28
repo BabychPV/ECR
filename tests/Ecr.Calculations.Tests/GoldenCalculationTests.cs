@@ -42,6 +42,10 @@ public sealed class GoldenCalculationTests
         _store.GetSubstancesAsync(VersionId, Arg.Any<CancellationToken>()).Returns(Substances());
         _constants.GetCandidatesAsync(VersionId, "EF", Arg.Any<CancellationToken>())
                   .Returns(EmissionFactors());
+
+        // Прогін модуля читає константи версії одним запитом (аудит P1).
+        _store.GetConstantsAsync(VersionId, Arg.Any<CancellationToken>())
+              .Returns(EmissionFactors());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]

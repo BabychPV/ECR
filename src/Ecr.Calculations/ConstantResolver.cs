@@ -51,6 +51,38 @@ public sealed class ConstantResolver(IConstantStore constants)
             .GetCandidatesAsync(methodologyVersionId, code, ct)
             .ConfigureAwait(false);
 
+        return Resolve(candidates, methodologyVersionId, code, category, substanceEntryId, onDate);
+    }
+
+    /// <summary>
+    /// Те саме правило вибору над уже прочитаними кандидатами — без походу в
+    /// сховище.
+    /// </summary>
+    /// <param name="candidates">Усі константи версії з цим кодом (порядок — за <c>Id</c>).</param>
+    /// <param name="methodologyVersionId">Версія методології (для тексту помилки).</param>
+    /// <param name="code">Код константи.</param>
+    /// <param name="category">Категорія; <c>null</c> — без категорії.</param>
+    /// <param name="substanceEntryId">Речовина; <c>null</c> — спільна константа.</param>
+    /// <param name="onDate">Дата періоду для темпорального вибору.</param>
+    /// <returns>Значення константи; <c>null</c> — кандидата немає.</returns>
+    /// <remarks>
+    /// ⛔ Саме цим шляхом іде прогін (аудит P1). Константи версії читаються
+    /// ОДНИМ запитом у <c>GenericCalculationModule.PrepareAsync</c>, а тут
+    /// лише вибираються в пам'яті. Доти кожен рядок × речовина × код ходив у
+    /// базу окремим <c>SELECT</c>: 500 рядків × 20 речовин × 30 констант —
+    /// 300 тис. запитів на одну прив'язку по відповідь, яка в межах версії не
+    /// змінюється. Правило вибору одне для обох шляхів — копії немає.
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Performance",
+        "CA1822:Mark members as static",
+        Justification = "Модуль отримує резолвер залежністю; статичний метод лишив би її непрочитаною (CS9113).")]
+    public ResolvedConstant? Resolve(
+        IReadOnlyList<MethodologyConstant> candidates, int methodologyVersionId, string code,
+        string? category, long? substanceEntryId, DateOnly onDate)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+
         // 1. Темпоральний фільтр — ПЕРШИЙ. Константа, чинна не в цю дату,
         //    не є кандидатом узагалі; звужувати за нею після вибору за
         //    речовиною означало б інколи не знаходити нічого там, де

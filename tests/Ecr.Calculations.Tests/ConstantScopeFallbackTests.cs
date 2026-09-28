@@ -149,6 +149,7 @@ public sealed class ConstantScopeFallbackTests
              .Returns([new MethodologyOutput(VersionId, EcrCode.Create("Total"), unitId: 1)]);
         store.GetSubstancesAsync(VersionId, Arg.Any<CancellationToken>())
              .Returns([new MethodologySubstance(VersionId, SubstanceA), new MethodologySubstance(VersionId, SubstanceB)]);
+        store.GetConstantsAsync(VersionId, Arg.Any<CancellationToken>()).Returns(constants);
 
         var periods = Substitute.For<IPeriodStore>();
         periods.FindPeriodBoundsAsync(DocumentId, 202601, Arg.Any<CancellationToken>())
