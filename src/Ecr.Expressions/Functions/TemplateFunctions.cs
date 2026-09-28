@@ -30,13 +30,31 @@ public static class TemplateFunctions
         }
 
         var total = 0m;
-        foreach (var n in numbers)
+        try
         {
-            total += n;
+            foreach (var n in numbers)
+            {
+                total += n;
+            }
+        }
+        catch (OverflowException)
+        {
+            return Overflow;
         }
 
         return ExpressionValue.Number(total);
     }
+
+    /// <summary>
+    /// Переповнення <see cref="decimal"/> в агрегаті — <c>#VALUE</c>, а не виняток.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Аудит A2: виняток з однієї комірки валив перерахунок усієї таблиці
+    /// (`02b` §6.4). Код той самий, що вже дають <c>REGSUM</c>/<c>REGAVG</c>
+    /// (<c>RegistryForms.Accumulator</c>) і оператор <c>^</c> на переповненні:
+    /// одна відмова — один код, хоч би яким шляхом до неї дійшли.
+    /// </remarks>
+    private static ExpressionValue Overflow => ExpressionValue.Error(ExpressionErrors.BadValue);
 
     /// <summary>Середнє не-<c>null</c>; порожня множина → <c>null</c> (а не <c>0</c>).</summary>
     public static ExpressionValue Average(IReadOnlyList<ExpressionValue> args)
@@ -56,9 +74,16 @@ public static class TemplateFunctions
         }
 
         var total = 0m;
-        foreach (var n in numbers)
+        try
         {
-            total += n;
+            foreach (var n in numbers)
+            {
+                total += n;
+            }
+        }
+        catch (OverflowException)
+        {
+            return Overflow;
         }
 
         return ExpressionValue.Number(total / numbers.Count);
@@ -188,9 +213,16 @@ public static class TemplateFunctions
         // Порожня множина → 1, а не 0: одиниця — нейтральний елемент множення,
         // і нуль тут занулив би все, що на цей добуток помножать далі.
         var product = 1m;
-        foreach (var n in numbers)
+        try
         {
-            product *= n;
+            foreach (var n in numbers)
+            {
+                product *= n;
+            }
+        }
+        catch (OverflowException)
+        {
+            return Overflow;
         }
 
         return ExpressionValue.Number(product);
@@ -269,7 +301,14 @@ public static class TemplateFunctions
 
             if (value.AsNumber() is { } number)
             {
-                total += number;
+                try
+                {
+                    total += number;
+                }
+                catch (OverflowException)
+                {
+                    return Overflow;
+                }
             }
         }
 

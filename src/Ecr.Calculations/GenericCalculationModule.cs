@@ -198,7 +198,18 @@ public sealed class GenericCalculationModule(
 
                     // Вихід без числа не пишеться: нуль тут виглядав би як
                     // порахований результат. Причина вже в трейсі.
-                    trace.Failed(output.Code, null, value.ErrorCode ?? "#NULL");
+                    //
+                    // ⚠ Аудит A2: ЧИСЛО без `decimal`-подання — це `Legacy`
+                    // `double` за межею ≈7.9e28 (`Pow(10, 30)`). Колонка
+                    // результату його не вмістить, а «#NULL» збрехав би, що
+                    // значення не було; тому `#VALUE`, як у `Strict`.
+                    trace.Failed(
+                        output.Code,
+                        null,
+                        value.ErrorCode
+                            ?? (value.Type == Expressions.Ast.ExpressionValueType.Number
+                                ? Expressions.ExpressionErrors.BadValue
+                                : "#NULL"));
                     continue;
                 }
 

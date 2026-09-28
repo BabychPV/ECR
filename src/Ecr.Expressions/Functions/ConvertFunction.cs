@@ -54,6 +54,20 @@ public static class ConvertFunction
             return ExpressionValue.Error(ExpressionErrors.BadValue);
         }
 
-        return context.Convert(args[0], from, to);
+        // ⛔ Аудит A2: коефіцієнт множиться в `decimal` усередині контексту
+        // (`MethodologyEvaluationContext`, `SliceEvaluationContext`), і на
+        // величині порядку 1e26 кг → г множення переповнюється й КИДАЄ. Ловимо
+        // тут, а не в кожному контексті: це єдина точка, через яку конверсія
+        // приходить із виразу, і нова реалізація контексту не мусить
+        // пам'ятати про те саме. Код — той самий `#VALUE`, що й переповнення
+        // арифметики (`StrictDecimalArithmetic`).
+        try
+        {
+            return context.Convert(args[0], from, to);
+        }
+        catch (OverflowException)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadValue);
+        }
     }
 }
