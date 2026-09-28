@@ -32,7 +32,12 @@ public sealed class AbandonedWorkSweeperTests(SqlServerFixture sql)
     private static readonly DateTime Now = new(2031, 3, 1, 9, 0, 0, DateTimeKind.Utc);
 
     /// <summary>Задача-маркер для черги; не виконується (планувальник не запущено).</summary>
-    private sealed class QueuedJob : IBackgroundJob
+    /// <remarks>
+    /// ⚠ Ім'я коротке НАВМИСНО: <c>JobCode</c> — повне ім'я типу, а стовпець
+    /// <c>itg.JobProgress.JobCode</c> — <c>nvarchar(64)</c>; «…+QueuedJob» мав 67
+    /// символів і падав на постановці.
+    /// </remarks>
+    private sealed class Held : IBackgroundJob
     {
         public Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct) => Task.CompletedTask;
     }
@@ -69,7 +74,7 @@ public sealed class AbandonedWorkSweeperTests(SqlServerFixture sql)
         try
         {
             await using var db = sql.CreateContext();
-            var queued = await Jobs(factory, db, Now).EnqueueAsync<QueuedJob>(null, CancellationToken.None);
+            var queued = await Jobs(factory, db, Now).EnqueueAsync<Held>(null, CancellationToken.None);
 
             // Процес, що впав: рядок лишився, черги (in-memory) немає ніде.
             var orphan = $"orphan-{Guid.NewGuid():N}";
