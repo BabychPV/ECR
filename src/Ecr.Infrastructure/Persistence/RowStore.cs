@@ -42,31 +42,58 @@ public sealed class RowStore(
     /// як виправлені тут коштували скану на кожен зріз і на кожен <c>PATCH</c>.
     /// </remarks>
     public async Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct)
+        => (await ResolveTableInstancesAsync([tableInstanceId], ct).ConfigureAwait(false))[tableInstanceId];
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ P8: єдина реалізація і для одного екземпляра
+    /// (<see cref="ResolveTableInstanceAsync"/>), і для книги імпорту. Той самий
+    /// <c>WR-05</c>, що й у поштучного, — ключа партиції звідки взяти немає.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, TableInstanceRef>> ResolveTableInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        var ids = tableInstanceIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<long, TableInstanceRef>();
+        }
+
         // Один запит через увесь ланцюг: екземпляр → документ → проєкт.
         // TemplateVersionId живе на проєкті, і без нього use-case не знає,
         // яку структуру брати з кешу метаданих.
-        var found = await (
-            from instance in db.TableInstances.AsNoTracking()
-            where instance.Id == tableInstanceId
-            join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
-            join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
-            select new TableInstanceRef(
-                instance.Id, instance.DocumentId, instance.TableDefId,
-                project.TemplateVersionId, instance.PeriodKeyValue))
-            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        var found = (await (
+                from instance in db.TableInstances.AsNoTracking()
+                where ids.Contains(instance.Id)
+                join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
+                join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+                select new TableInstanceRef(
+                    instance.Id, instance.DocumentId, instance.TableDefId,
+                    project.TemplateVersionId, instance.PeriodKeyValue))
+            .ToListAsync(ct).ConfigureAwait(false))
+            .ToDictionary(r => r.TableInstanceId);
 
+        // ⛔ Відсутній — відмова, а не пропуск: словник без запису викликач
+        // міг би прочитати як «такого екземпляра не просили».
+        //
         // ⚠ Ідентифікатор їде в `Details` РЯДКОМ: `ResolveGenericMessageAsync`
         // підставляє лише поля типу `string`, тож `long` лишився б у тексті
         // незаміненим плейсхолдером (`Q-341`).
-        return found ?? throw new NotFoundException(
-            "ECR-DOC-0404",
-            $"Екземпляра таблиці {tableInstanceId} не знайдено.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
-                ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            });
+        foreach (var missing in ids.Where(id => !found.ContainsKey(id)))
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляра таблиці {missing} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                    ["tableInstanceId"] = missing.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return found;
     }
 
     /// <inheritdoc />
@@ -118,28 +145,69 @@ public sealed class RowStore(
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ Предикат — <see cref="RowsQuery"/>, той самий, що в
-    /// <see cref="GetRowVersionsAsync"/>/<see cref="GetRowIdsAsync"/>: сторож
-    /// <c>WR-05</c> (<c>PartitionKeyQueryTests</c>) перевіряє саме цю фабрику,
-    /// тож новий запит під ним автоматично, окремої реєстрації не потрібно.
+    /// ⚠ P8: поштучний метод — це <see cref="GetRowsBatchAsync"/> з одним
+    /// екземпляром. Предикат — <see cref="RowsBatchQuery"/> (<c>PeriodKey</c> +
+    /// <c>TableInstanceId IN (…)</c>), і сторож <c>WR-05</c>
+    /// (<c>PartitionKeyQueryTests</c>) бере його як будь-яку публічну фабрику.
     ///
-    /// ⚠ Архівний фолбек (F-13) — ті самі три читання <c>arc.*</c>, що й у
-    /// сусідніх методах, лише на порожньому гарячому результаті. Гарячий шлях
-    /// платить одним запитом.
+    /// ⚠ Архівний фолбек (F-13) — ті самі три читання <c>arc.*</c>, лише на
+    /// порожньому гарячому результаті. Гарячий шлях платить одним запитом.
     /// </remarks>
     public async Task<IReadOnlyList<RowState>> GetRowsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+        => (await GetRowsBatchAsync([tableInstanceId], periodKey, ct).ConfigureAwait(false))
+            .TryGetValue(tableInstanceId, out var rows)
+            ? rows
+            : [];
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Архівний фолбек — на порожньому гарячому результаті для ВСІХ
+    /// екземплярів, як у <see cref="GetRowIdsBatchAsync"/>: архівується
+    /// партиція періоду цілком, тож «частина таблиць у гарячій, частина в
+    /// архіві» для одного періоду не буває.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<RowState>>> GetRowsBatchAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
     {
-        var rows = await RowsQuery(db, tableInstanceId, periodKey)
-            .Select(r => new { r.RowKeyValue, r.Id, r.RowVersion, r.IsOrphaned })
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        if (tableInstanceIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<RowState>>();
+        }
+
+        var rows = await RowsBatchQuery(db, tableInstanceIds, periodKey)
+            .Select(r => new { r.TableInstanceId, r.RowKeyValue, r.Id, r.RowVersion, r.IsOrphaned })
             .ToListAsync(ct).ConfigureAwait(false);
 
         if (rows.Count > 0 || archive is null)
         {
-            return rows.ConvertAll(r => new RowState(
-                r.RowKeyValue, r.Id, Convert.ToBase64String(r.RowVersion), r.IsOrphaned));
+            return rows
+                .GroupBy(r => r.TableInstanceId)
+                .ToDictionary(
+                    g => g.Key,
+                    IReadOnlyList<RowState> (g) => [.. g.Select(r => new RowState(
+                        r.RowKeyValue, r.Id, Convert.ToBase64String(r.RowVersion), r.IsOrphaned))]);
         }
 
+        var result = new Dictionary<long, IReadOnlyList<RowState>>();
+        foreach (var tableInstanceId in tableInstanceIds.Distinct())
+        {
+            var archived = await ReadArchivedRowsAsync(archive, tableInstanceId, periodKey, ct).ConfigureAwait(false);
+            if (archived.Count > 0)
+            {
+                result[tableInstanceId] = archived;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Рядки заархівованого екземпляра — три читання <c>arc.*</c> (F-13).</summary>
+    private static async Task<IReadOnlyList<RowState>> ReadArchivedRowsAsync(
+        ArchiveAwareCellReader archive, long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
+    {
         var ids = await archive.ReadArchivedRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
         if (ids.Count == 0)
         {

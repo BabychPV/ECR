@@ -95,6 +95,18 @@ public sealed class SimulationAwareAccessDecisionService(
         => inner.CanCreateRowsAsync(profile, tableInstanceId, rowKeys, ct);
 
     /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsBatchAsync(
+        AccessProfile profile, IReadOnlyCollection<CellsAccessRequest> requests, CancellationToken ct)
+        => inner.CanEditCellsBatchAsync(profile, requests, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, NewRowAccess>>> CanCreateRowsBatchAsync(
+        AccessProfile profile,
+        IReadOnlyDictionary<long, IReadOnlyCollection<string>> rowKeysByInstance,
+        CancellationToken ct)
+        => inner.CanCreateRowsBatchAsync(profile, rowKeysByInstance, ct);
+
+    /// <inheritdoc />
     public Task<EditDecision> CanSubmitAsync(
         AccessProfile profile, long documentId, int sheetDefId, PeriodKey periodKey, CancellationToken ct)
         => inner.CanSubmitAsync(profile, documentId, sheetDefId, periodKey, ct);

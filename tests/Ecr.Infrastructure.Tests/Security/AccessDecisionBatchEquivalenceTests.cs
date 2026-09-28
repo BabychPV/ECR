@@ -41,7 +41,7 @@ namespace Ecr.Infrastructure.Tests.Security;
 /// звіті коміту.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class AccessDecisionBatchEquivalenceTests(SqlServerFixture sql) : IDisposable
+public sealed partial class AccessDecisionBatchEquivalenceTests(SqlServerFixture sql) : IDisposable
 {
     /// <summary>Період обох документів.</summary>
     /// <remarks>

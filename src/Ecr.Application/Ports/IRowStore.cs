@@ -34,6 +34,19 @@ public interface IRowStore
     public Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct);
 
     /// <summary>
+    /// Ідентичність КІЛЬКОХ екземплярів таблиць ОДНИМ запитом (P8, застосування
+    /// імпорту книги).
+    /// </summary>
+    /// <returns>Екземпляр → ідентичність; кожен запитаний присутній.</returns>
+    /// <remarks>
+    /// ⛔ Відсутній екземпляр — та сама відмова <c>ECR-DOC-0404</c>, що й у
+    /// <see cref="ResolveTableInstanceAsync"/>, а не мовчазний пропуск.
+    /// Поштучний метод і є цим методом з одним екземпляром.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, TableInstanceRef>> ResolveTableInstancesAsync(
+        IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct);
+
+    /// <summary>
     /// Поточні версії рядків таблиці: <c>RowKey</c> → hex <c>rowversion</c>.
     /// </summary>
     /// <remarks>
@@ -61,6 +74,19 @@ public interface IRowStore
     /// </remarks>
     public Task<IReadOnlyList<RowState>> GetRowsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct);
+
+    /// <summary>
+    /// Живі рядки КІЛЬКОХ таблиць одного періоду ОДНИМ запитом — те саме, що
+    /// <see cref="GetRowsAsync"/> на кожну; екземпляр без жодного рядка в
+    /// результат не потрапляє.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ P8 (застосування імпорту книги): <see cref="GetRowsAsync"/> у циклі по
+    /// ~91 таблиці книги — звернення на кожну. Поштучний метод і є цим методом
+    /// з одним екземпляром (тест еквівалентності — <c>RowStoreBatchEquivalenceTests</c>).
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyList<RowState>>> GetRowsBatchAsync(
+        IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
     /// Ідентифікатори рядків кількох таблиць ОДНИМ запитом; екземпляр без

@@ -503,8 +503,11 @@ public sealed class AccessDecisionService(
     /// <paramref name="addresses"/> (<c>SliceRowsQuery</c> з <c>rowIds</c>), і
     /// <see cref="Decide"/> викликається лише на запитані адреси — не на
     /// <c>rows × columns</c> усього екземпляра. Спільна підготовка зрізу
-    /// (<see cref="SliceContextAsync"/>) лишається тією самою: вона й так
+    /// (<see cref="SliceContextsAsync"/>) лишається тією самою: вона й так
     /// коштує кілька запитів на весь зріз, а не на рядок.
+    ///
+    /// ⚠ P8: поштучний метод — це <see cref="CanEditCellsBatchAsync"/> з одним
+    /// екземпляром; одна логіка на обидва шляхи.
     /// </remarks>
     public async Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditCellsAsync(
         AccessProfile profile, long tableInstanceId, PeriodKey periodKey,
@@ -513,43 +516,92 @@ public sealed class AccessDecisionService(
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(addresses);
 
-        var result = new Dictionary<CellAddress, EditDecision>(addresses.Count);
+        var all = await CanEditCellsBatchAsync(
+                profile, [new CellsAccessRequest(tableInstanceId, periodKey, addresses)], ct)
+            .ConfigureAwait(false);
 
-        if (addresses.Count == 0)
+        return all[tableInstanceId];
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ P8 (застосування імпорту книги). Спільне для документа й періоду —
+    /// ОДИН раз на групу (<see cref="SliceContextsAsync"/>), рядки — ОДНИМ
+    /// запитом на всі екземпляри одного запитаного періоду
+    /// (<see cref="SlicesRowsQuery"/> з <c>rowIds</c>), рішення — той самий
+    /// <see cref="Decide"/>.
+    ///
+    /// ⛔ Рядок шукається за парою «екземпляр × <c>TableRow.Id</c>», а не за
+    /// самим <c>Id</c>: запит спільний для всіх екземплярів, і адреса з рядком
+    /// СУСІДНЬОЇ таблиці інакше отримала б рішення під чужим зрізом — тоді як
+    /// поштучний шлях її просто не знаходить.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsBatchAsync(
+        AccessProfile profile, IReadOnlyCollection<CellsAccessRequest> requests, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(requests);
+
+        var result = new Dictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>(requests.Count);
+        foreach (var request in requests)
+        {
+            if (!result.TryAdd(request.TableInstanceId, new Dictionary<CellAddress, EditDecision>()))
+            {
+                throw new ArgumentException(
+                    $"Екземпляр {request.TableInstanceId} запитано двічі.", nameof(requests));
+            }
+        }
+
+        // ⚠ Екземпляр без адрес — порожнє рішення без жодного звернення до
+        // бази, як і в поштучного шляху (і без перевірки його існування).
+        var asked = requests.Where(r => r.Addresses.Count > 0).ToList();
+        if (asked.Count == 0)
         {
             return result;
         }
 
-        var slice = await SliceContextAsync(tableInstanceId, ct).ConfigureAwait(false);
-        var columnsById = slice.Columns.ToDictionary(c => c.Id);
+        var slices = await SliceContextsAsync([.. asked.Select(r => r.TableInstanceId)], ct).ConfigureAwait(false);
 
-        var rowIds = addresses.Select(a => a.TableRowId).Distinct().ToList();
-
-        // ⛔ WR-03: рядки батчу, не весь екземпляр — `Id IN (…)` поверх
-        // предиката партиції, той самий запит-фабрика, що й у CanEditSliceAsync.
-        var rows = await SliceRowsQuery(db, tableInstanceId, periodKey, rowIds)
-            .Select(r => new { r.Id, r.RowKey })
-            .ToDictionaryAsync(r => r.Id, ct)
-            .ConfigureAwait(false);
-
-        foreach (var address in addresses)
+        foreach (var byPeriod in asked.GroupBy(r => r.PeriodKey))
         {
-            // ⚠ Немає рядка чи колонки в зрізі (рядок видалено, або
-            // ColumnDefId з іншої таблиці) — адреса просто відсутня в
-            // результаті, так само як і в CanEditSliceAsync. Викликач
-            // (`PatchCellsHandler.EnsureAccessAsync`) уже трактує відсутність
-            // рішення як відмову сам — тут нема потреби дублювати цю політику.
-            if (!rows.TryGetValue(address.TableRowId, out var row)
-                || !columnsById.TryGetValue(address.ColumnDefId, out var column))
+            var rowIds = byPeriod.SelectMany(r => r.Addresses.Select(a => a.TableRowId)).Distinct().ToList();
+
+            // ⛔ WR-03: рядки батчу, не всі рядки екземплярів — `Id IN (…)`
+            // поверх предиката партиції.
+            var rows = (await SlicesRowsQuery(db, [.. byPeriod.Select(r => r.TableInstanceId)], byPeriod.Key, rowIds)
+                    .Select(r => new { r.TableInstanceId, r.Id, r.RowKey })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false))
+                .ToDictionary(r => (r.TableInstanceId, r.Id));
+
+            foreach (var request in byPeriod)
             {
-                continue;
+                var slice = slices[request.TableInstanceId];
+                var columnsById = slice.Columns.ToDictionary(c => c.Id);
+                var decisions = new Dictionary<CellAddress, EditDecision>(request.Addresses.Count);
+
+                foreach (var address in request.Addresses)
+                {
+                    // ⚠ Немає рядка чи колонки в зрізі (рядок видалено, належить
+                    // іншому екземпляру, або ColumnDefId з іншої таблиці) —
+                    // адреса просто відсутня в результаті, так само як і в
+                    // CanEditSliceAsync. Викликач (`PatchCellsHandler.EnsureAccessAsync`)
+                    // уже трактує відсутність рішення як відмову сам.
+                    if (!rows.TryGetValue((request.TableInstanceId, address.TableRowId), out var row)
+                        || !columnsById.TryGetValue(address.ColumnDefId, out var column))
+                    {
+                        continue;
+                    }
+
+                    var sourceValues = slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows)
+                        ? windows
+                        : EmptyWindows;
+
+                    decisions[address] = Decide(profile, slice, row.RowKey, column, sourceValues);
+                }
+
+                result[request.TableInstanceId] = decisions;
             }
-
-            var sourceValues = slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows)
-                ? windows
-                : EmptyWindows;
-
-            result[address] = Decide(profile, slice, row.RowKey, column, sourceValues);
         }
 
         return result;
@@ -605,6 +657,10 @@ public sealed class AccessDecisionService(
     /// <param name="db">Контекст.</param>
     /// <param name="tableInstanceIds">Екземпляри таблиць, усі — за <paramref name="periodKey"/>.</param>
     /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <param name="rowIds">
+    /// <c>null</c> — усі рядки зрізів (<see cref="CanEditSlicesAsync"/>); інакше —
+    /// лише перелічені (<c>WR-03</c>, <see cref="CanEditCellsBatchAsync"/>).
+    /// </param>
     /// <returns>Незавершений запит; проєкцію добирає викликач.</returns>
     /// <remarks>
     /// ⛔ Предикат партиції — той самий, що й у <see cref="SliceRowsQuery"/>
@@ -613,33 +669,79 @@ public sealed class AccessDecisionService(
     /// взяти <c>ToQueryString()</c> саме бойового запиту.
     /// </remarks>
     public static IQueryable<TableRow> SlicesRowsQuery(
-        EcrDbContext db, IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey)
+        EcrDbContext db, IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey,
+        IReadOnlyCollection<long>? rowIds = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(tableInstanceIds);
 
-        return db.TableRows
+        var query = db.TableRows
             .AsNoTracking()
             .Where(r => r.PeriodKeyValue == periodKey.Value
                         && tableInstanceIds.Contains(r.TableInstanceId)
                         && !r.IsDeleted);
+
+        return rowIds is null ? query : query.Where(r => rowIds.Contains(r.Id));
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ P8: поштучний метод — це <see cref="CanCreateRowsBatchAsync"/> з одним екземпляром.
+    /// </remarks>
     public async Task<IReadOnlyDictionary<string, NewRowAccess>> CanCreateRowsAsync(
         AccessProfile profile, long tableInstanceId, IReadOnlyCollection<string> rowKeys, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(rowKeys);
 
-        var result = new Dictionary<string, NewRowAccess>(rowKeys.Count, StringComparer.Ordinal);
+        var all = await CanCreateRowsBatchAsync(
+                profile, new Dictionary<long, IReadOnlyCollection<string>> { [tableInstanceId] = rowKeys }, ct)
+            .ConfigureAwait(false);
 
-        if (rowKeys.Count == 0)
+        return all[tableInstanceId];
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ P8: спільне для зрізів — ОДИН раз на групу «документ × період»
+    /// (<see cref="SliceContextsAsync"/>); рядків ще немає, тож рядки й не
+    /// читаються. Екземпляр без ключів — порожньо, без звернення до бази.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, NewRowAccess>>> CanCreateRowsBatchAsync(
+        AccessProfile profile,
+        IReadOnlyDictionary<long, IReadOnlyCollection<string>> rowKeysByInstance,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(rowKeysByInstance);
+
+        var result = new Dictionary<long, IReadOnlyDictionary<string, NewRowAccess>>(rowKeysByInstance.Count);
+        foreach (var tableInstanceId in rowKeysByInstance.Keys)
+        {
+            result[tableInstanceId] = new Dictionary<string, NewRowAccess>(StringComparer.Ordinal);
+        }
+
+        var asked = rowKeysByInstance.Where(p => p.Value.Count > 0).Select(p => p.Key).ToList();
+        if (asked.Count == 0)
         {
             return result;
         }
 
-        var slice = await SliceContextAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var slices = await SliceContextsAsync(asked, ct).ConfigureAwait(false);
+
+        foreach (var tableInstanceId in asked)
+        {
+            result[tableInstanceId] = NewRowDecisions(profile, slices[tableInstanceId],rowKeysByInstance[tableInstanceId]);
+        }
+
+        return result;
+    }
+
+    /// <summary>Рішення на рядки, яких ще немає, в одному зрізі.</summary>
+    private static Dictionary<string, NewRowAccess> NewRowDecisions(
+        AccessProfile profile, SliceContext slice, IReadOnlyCollection<string> rowKeys)
+    {
+        var result = new Dictionary<string, NewRowAccess>(rowKeys.Count, StringComparer.Ordinal);
 
         foreach (var rowKey in rowKeys)
         {
@@ -770,19 +872,6 @@ public sealed class AccessDecisionService(
         TemplateVersionSnapshot Snapshot,
         PeriodRuleContext Rules);
 
-    /// <summary>Збирає все, що спільне для зрізу, ОДИН раз.</summary>
-    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
-    /// <param name="ct">Токен скасування.</param>
-    /// <remarks>
-    /// ⚠ Винесено з <see cref="CanEditSliceAsync"/> заради
-    /// <see cref="CanCreateRowsAsync"/>: обидва питання — про той самий зріз, і
-    /// друга копія цієї підготовки розійшлася б із першою мовчки. Саме так і
-    /// стався дефект, який <see cref="CanCreateRowsAsync"/> закриває: створення
-    /// пішло іншим шляхом, на якому перевірки просто не було.
-    /// </remarks>
-    private async Task<SliceContext> SliceContextAsync(long tableInstanceId, CancellationToken ct)
-        => (await SliceContextsAsync([tableInstanceId], ct).ConfigureAwait(false))[tableInstanceId];
-
     /// <summary>
     /// Збирає все, що спільне для зрізів, ОДИН раз на групу «документ × період».
     /// </summary>
@@ -790,8 +879,14 @@ public sealed class AccessDecisionService(
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Екземпляр → умови його зрізу; кожен запитаний екземпляр присутній.</returns>
     /// <remarks>
-    /// ⛔ P8: єдина реалізація і для одного зрізу (<see cref="SliceContextAsync"/>),
-    /// і для книги імпорту. Кількість звернень — на ГРУПУ, а не на таблицю:
+    /// ⚠ Спільне для <see cref="CanEditSlicesAsync"/>, <see cref="CanEditCellsBatchAsync"/>
+    /// і <see cref="CanCreateRowsBatchAsync"/> (а через них — для поштучних):
+    /// усі три питання — про той самий зріз, і друга копія цієї підготовки
+    /// розійшлася б із першою мовчки. Саме так колись і стався дефект, який
+    /// закрив <see cref="CanCreateRowsAsync"/>: створення пішло іншим шляхом, на
+    /// якому перевірки просто не було.
+    ///
+    /// ⛔ P8: єдина реалізація і для одного зрізу, і для книги імпорту. Кількість звернень — на ГРУПУ, а не на таблицю:
     /// екземпляри (1), знімок (1), умови доступу (1), стан решти аркушів
     /// групи (1, лише коли аркушів більше одного), правила періоду (1–3).
     /// </remarks>

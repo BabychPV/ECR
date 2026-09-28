@@ -30,6 +30,13 @@ public sealed record ApprovalStepView(
 public sealed record NewRowAccess(
     EditDecision Row, IReadOnlyDictionary<int, EditDecision> Columns);
 
+/// <summary>Адреси одного екземпляра для пакетного рішення про запис.</summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="PeriodKey">Період, за яким шукаються рядки, — як у <c>CanEditCellsAsync</c>.</param>
+/// <param name="Addresses">Адреси комірок батчу цього екземпляра.</param>
+public sealed record CellsAccessRequest(
+    long TableInstanceId, PeriodKey PeriodKey, IReadOnlyCollection<CellAddress> Addresses);
+
 public interface IAccessDecisionService
 {
     /// <summary>Будує профіль прав користувача. Викликається раз на сесію.</summary>
@@ -149,6 +156,42 @@ public interface IAccessDecisionService
     /// </remarks>
     public Task<IReadOnlyDictionary<string, NewRowAccess>> CanCreateRowsAsync(
         AccessProfile profile, long tableInstanceId, IReadOnlyCollection<string> rowKeys, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="CanEditCellsAsync"/> для КІЛЬКОХ екземплярів одним викликом —
+    /// за сталу кількість звернень до бази, а не за кількість таблиць (P8,
+    /// застосування імпорту книги).
+    /// </summary>
+    /// <param name="profile">Профіль прав користувача.</param>
+    /// <param name="requests">Екземпляр, його період і адреси; екземпляри не повторюються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Екземпляр → рішення на його адреси, рівно як у <see cref="CanEditCellsAsync"/>:
+    /// кожен запитаний екземпляр присутній; адреса без рядка цього екземпляра
+    /// в запитаному періоді чи без колонки його таблиці — відсутня.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Поштучний <see cref="CanEditCellsAsync"/> і є цим методом з одним
+    /// екземпляром (тест еквівалентності — <c>AccessDecisionBatchEquivalenceTests</c>).
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditCellsBatchAsync(
+        AccessProfile profile, IReadOnlyCollection<CellsAccessRequest> requests, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="CanCreateRowsAsync"/> для КІЛЬКОХ екземплярів одним викликом
+    /// (P8, застосування імпорту книги).
+    /// </summary>
+    /// <param name="profile">Профіль прав користувача.</param>
+    /// <param name="rowKeysByInstance">Екземпляр → ключі рядків, які збираються створити.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Екземпляр → те, що дав би <see cref="CanCreateRowsAsync"/>; кожен запитаний присутній.</returns>
+    /// <remarks>
+    /// ⛔ Поштучний <see cref="CanCreateRowsAsync"/> і є цим методом з одним екземпляром.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<string, NewRowAccess>>> CanCreateRowsBatchAsync(
+        AccessProfile profile,
+        IReadOnlyDictionary<long, IReadOnlyCollection<string>> rowKeysByInstance,
+        CancellationToken ct);
 
     /// <summary>Чи може користувач подати аркуш за період на затвердження.</summary>
     public Task<EditDecision> CanSubmitAsync(

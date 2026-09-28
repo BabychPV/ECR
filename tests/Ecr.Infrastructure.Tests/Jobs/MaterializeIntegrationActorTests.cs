@@ -757,6 +757,14 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
         public Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct)
             => inner.ResolveTableInstanceAsync(tableInstanceId, ct);
 
+        public Task<IReadOnlyDictionary<long, TableInstanceRef>> ResolveTableInstancesAsync(
+            IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
+            => inner.ResolveTableInstancesAsync(tableInstanceIds, ct);
+
+        public Task<IReadOnlyDictionary<long, IReadOnlyList<RowState>>> GetRowsBatchAsync(
+            IReadOnlyList<long> tableInstanceIds, PeriodKey periodKey, CancellationToken ct)
+            => inner.GetRowsBatchAsync(tableInstanceIds, periodKey, ct);
+
         public Task<IReadOnlyDictionary<string, string>> GetRowVersionsAsync(long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
             => inner.GetRowVersionsAsync(tableInstanceId, periodKey, ct);
 
