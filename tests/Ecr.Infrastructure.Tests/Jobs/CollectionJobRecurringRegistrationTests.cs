@@ -56,6 +56,9 @@ public sealed class CollectionJobRecurringRegistrationTests(SqlServerFixture sql
         services.AddSingleton(Substitute.For<INotificationSender>());
         services.AddScoped<OutboxDispatcher>();
 
+        // Синк довідника (S5) — залежність диспетчера; тут його не виконують.
+        services.AddSingleton(Substitute.For<IRegistrySyncJob>());
+
         // ⚠ ТОЧНО рядок із `Ecr.Infrastructure.DependencyInjection`
         // (`services.AddScoped<ICollectionJob, Jobs.CollectionJob>();`):
         // задача зареєстрована ЛИШЕ під портом, не сама собою.
