@@ -2930,6 +2930,10 @@ CREATE TABLE arc.TableRow
     RowDefId        int           NULL,
     Ordinal         int           NOT NULL,
     IsDeleted       bit           NOT NULL,
+    -- D4 аудиту: копія doc.TableRow.IsOrphaned. У розгортанні додається
+    -- ідемпотентним ALTER у 12-archive-tables.sql; роки, заархівовані до
+    -- цього, мають тут 0 (див. operations-runbook.md, п. 7).
+    IsOrphaned      bit           NOT NULL CONSTRAINT DF_arc_TableRow_Orph DEFAULT(0),
     ModifiedAt      datetime2(3)  NOT NULL,
     INDEX CCI_arc_TableRow CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
@@ -3168,8 +3172,8 @@ BEGIN
         FROM doc.CellValue WHERE PeriodKey = @k;
 
         INSERT INTO arc.TableRow WITH (TABLOCK)
-            (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, ModifiedAt)
-        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, ModifiedAt
+            (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt
         FROM doc.TableRow WHERE PeriodKey = @k;
 
         INSERT INTO arc.TableInstance WITH (TABLOCK)
