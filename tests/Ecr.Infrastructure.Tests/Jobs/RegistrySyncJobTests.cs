@@ -12,6 +12,7 @@ using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Xunit;
 
@@ -21,7 +22,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// Синк довідника в режимі ЛИШЕ ЗВІРКИ (FEATURE-REGISTRY-SYNC S5, <c>ФВ-8.10</c>,
 /// <c>ФВ-8.11</c>): сутність із <c>RegistryDefId</c> іде в <see cref="RegistrySyncJob"/>
 /// замість збору, задача читає джерело й довідник, пише події в журнал покриття
-/// і НЕ пише нічого в <c>dic.*</c>.
+/// і для <c>Local</c> НЕ пише нічого в <c>dic.*</c>. Запис для <c>External</c>/<c>Hybrid</c>
+/// (S7) — <c>RegistrySyncApplyTests</c>; S5-тест «External лише журналює» знято разом із
+/// поведінкою, яку він тримав.
 /// </summary>
 /// <remarks>
 /// ⚠ На справжньому SQL Server: «нічого не записано» перевіряється відбитком
@@ -97,41 +100,6 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
                                          && e.Details!.Contains(stand.MissingGuid, StringComparison.Ordinal));
             Assert.Contains(events, e => e.Status == CollectionCoverage.RegistryElementUnlinked
                                          && e.Details!.Contains(stand.UnlinkedGuid, StringComparison.Ordinal));
-        }
-        finally
-        {
-            await DeactivateAsync(stand);
-        }
-    }
-
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    [Trait(TestCategories.Category, TestCategories.Integration)]
-    [Trait("Requirement", "ФВ-8.11")]
-    public async Task External_довідник_оновлення_не_застосовується_а_журналюється()
-    {
-        var stand = await ArrangeAsync(RegistrySourceKind.External);
-
-        try
-        {
-            var before = await FingerprintAsync(stand);
-
-            await using (var db = Context())
-            {
-                await Job(db, new FakeSource(stand.Values), stand, new JobActorScope())
-                    .ExecuteAsync(stand.EntityId, CancellationToken.None);
-            }
-
-            Assert.Equal(before, await FingerprintAsync(stand));
-
-            var events = await EventsAsync(stand.EntityId);
-
-            // External з активним мапінгом і автором svc-integration — синк МАВ БИ
-            // записати 12.5; у S5 це лише подія, розбіжності (Diverged) немає.
-            Assert.Contains(events, e => e.Status == CollectionCoverage.RegistryPendingUpdate
-                                         && e.Details!.Contains("field=CAP", StringComparison.Ordinal)
-                                         && e.Details.Contains("source=12.5", StringComparison.Ordinal));
-            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistryDiverged);
         }
         finally
         {
@@ -390,8 +358,15 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
         await db.SaveChangesAsync();
     }
 
+    /// <remarks>
+    /// ⚠ Фабрика scope — підробка: тести цього файлу ганяють лише <c>Local</c>, а він не пише
+    /// через writer. Покликав би — підробка повернула б порожній scope і тест упав би.
+    /// Запис (<c>External</c>/<c>Hybrid</c>) — <c>RegistrySyncApplyTests</c>, зі справжнім контейнером.
+    /// </remarks>
     private RegistrySyncJob Job(EcrDbContext db, FakeSource source, Stand stand, JobActorScope scope)
-        => new(db, [source], new FakeCatalog(stand.Children), new IntegrationActor(db, scope), new TestClock(Now));
+        => new(
+            db, [source], new FakeCatalog(stand.Children), new IntegrationActor(db, scope), new TestClock(Now),
+            Substitute.For<IServiceScopeFactory>());
 
     private async Task<List<CollectionCoverage>> EventsAsync(int entityId)
     {

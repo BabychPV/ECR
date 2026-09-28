@@ -142,12 +142,13 @@ public sealed class CollectionCoverage : Entity<long>
     public const string RegistryValueRejected = "RegistryValueRejected";
 
     /// <summary>
-    /// Синк довідника в режимі лише звірки (S5): оновлення, яке синк ЗАПИСАВ
-    /// би, якби писав (поле або шлях елемента). Нічого не записано.
+    /// Синк довідника в режимі лише звірки: оновлення, яке синк ЗАПИСАВ би, якби
+    /// писав (поле або шлях елемента). Нічого не записано.
     /// </summary>
     /// <remarks>
-    /// ⚠ Зникне з журналу, щойно синк почне писати через <c>RegistryEntryWriter</c>
-    /// (S7): тоді оновлення — вже не подія, а запис.
+    /// ⚠ З S7 для <c>External</c>/<c>Hybrid</c> оновлення пишуться через
+    /// <c>RegistryEntryWriter</c> і цієї події не дають; лишилась для <c>Local</c>
+    /// (зміна шляху елемента, <c>D-49</c>).
     /// </remarks>
     public const string RegistryPendingUpdate = "RegistryPendingUpdate";
 
