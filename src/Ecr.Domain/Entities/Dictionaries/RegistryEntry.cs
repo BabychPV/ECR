@@ -85,6 +85,23 @@ public sealed class RegistryEntry : Entity<long>
     public DateTime? DeletedAt { get; private set; }
     public int? DeletedByUserId { get; private set; }
 
+    /// <summary>
+    /// Автор ОСТАННЬОЇ зміни рядка; <c>null</c> — невідомий (фонова задача без
+    /// автора, фікстура, рядок, записаний до міграції <c>RK03</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ставить <c>UnitOfWork</c> під час збереження, а не use-case: автор
+    /// потрібен на КОЖНОМУ шляху запису, і поле, яке треба не забути
+    /// заповнити в кожному обробнику, рано чи пізно лишається порожнім.
+    /// Разом із системною історією (<c>D-158</c>) саме воно дає «хто змінив»
+    /// кожної версії рядка в <c>dic.RegistryEntryHistory</c>.
+    /// </remarks>
+    public int? ChangedByUserId { get; private set; }
+
+    /// <summary>Фіксує автора зміни рядка (див. <see cref="ChangedByUserId"/>).</summary>
+    /// <param name="userId">Автор; <c>null</c> — невідомий.</param>
+    public void MarkChangedBy(int? userId) => ChangedByUserId = userId;
+
     /// <summary>Чинний на дату: напівінтервал <c>[ValidFrom, ValidTo)</c>.</summary>
     /// <param name="date">Дата в календарі майданчика.</param>
     /// <returns><c>true</c> — запис можна обрати в цю дату (<c>ФВ-8.5</c>).</returns>

@@ -20,7 +20,8 @@ namespace Ecr.Infrastructure.Persistence;
 /// інакше воркер починає читати рядки, яких ще не видно, і отримує або старі
 /// значення, або блокування на піку останнього дня періоду.
 /// </remarks>
-public sealed class UnitOfWork(EcrDbContext db, IClock? clock = null) : IUnitOfWork
+public sealed class UnitOfWork(
+    EcrDbContext db, IClock? clock = null, Application.Common.ICurrentUser? currentUser = null) : IUnitOfWork
 {
     // ⚠ Годинник необов'язковий лише для тестів, що будують одиницю роботи
     // руками (`new UnitOfWork(db)`, їх десятки); контейнер завжди підставляє
@@ -31,6 +32,7 @@ public sealed class UnitOfWork(EcrDbContext db, IClock? clock = null) : IUnitOfW
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
         StampRegistryDataChanges();
+        StampRegistryAuthors();
 
         try
         {
@@ -119,6 +121,46 @@ public sealed class UnitOfWork(EcrDbContext db, IClock? clock = null) : IUnitOfW
             {
                 now ??= _clock.UtcNow;
                 entry.Entity.MarkDataChanged(now.Value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ставить <c>ChangedByUserId</c> кожному доданому чи зміненому запису й
+    /// значенню довідника (<c>D-158</c>, FEATURE-REGISTRY-TABLES §3.3).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Автор ставиться й тоді, коли він НЕВІДОМИЙ (<c>null</c>): інакше
+    /// рядок, змінений фоновою задачею без автора, успадкував би автора
+    /// попередньої версії, і історія (<c>dic.*History</c>) приписала б зміну
+    /// людині, яка її не робила.
+    ///
+    /// ⚠ Контейнер <c>Ecr.Api</c> (єдиний хост) підставляє <c>ICurrentUser</c>
+    /// завжди, без змін у <c>DependencyInjection</c> (у фоновій задачі —
+    /// її автора через <c>JobAwareCurrentUser</c>); <c>null</c> тут лише в
+    /// тестах, що будують одиницю роботи руками.
+    ///
+    /// ⚠ Видалення рядка (<c>DELETE</c>) автора не отримує: історичний рядок
+    /// несе автора ОСТАННЬОЇ зміни перед видаленням. Для записів це не
+    /// обмеження — вони видаляються логічно (<c>SoftDelete</c>, тобто UPDATE).
+    /// </remarks>
+    private void StampRegistryAuthors()
+    {
+        var userId = currentUser?.UserId;
+
+        foreach (var entry in db.ChangeTracker.Entries<Domain.Entities.Dictionaries.RegistryEntry>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.MarkChangedBy(userId);
+            }
+        }
+
+        foreach (var entry in db.ChangeTracker.Entries<Domain.Entities.Dictionaries.RegistryValue>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.MarkChangedBy(userId);
             }
         }
     }

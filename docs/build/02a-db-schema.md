@@ -41,6 +41,11 @@
 
 > Виконується **окремими скриптами під SQL Agent**, не міграціями EF: у
 > застосунку немає DDL-прав у прод (`D-66`).
+>
+> ⛔ Скрипт міграцій EF, що йде між цими скриптами, генерується **лише з
+> `--idempotent`** (`deploy-ecr.ps1`, `build-installer.ps1`, `setup-dev-db.ps1`):
+> `RK02RegistryComposition` додає колонку й `CHECK` на неї в одному пакеті, і без
+> `--idempotent` (там EF не обгортає `CHECK` в `EXEC`) скрипт падає з `Msg 207`.
 
 ### 1.0 Зіставлення бази — вимога до `CREATE DATABASE`
 
@@ -1002,6 +1007,18 @@ CREATE TABLE dic.RegistryEntry
     DeletedByUserId int           NULL,
     CreatedAt       datetime2(3)  NOT NULL,
     CreatedByUserId int           NOT NULL,
+    -- RK03 (D-158): автор ОСТАННЬОЇ зміни рядка; ставить UnitOfWork з ICurrentUser.
+    -- NULL — невідомий (задача без автора, рядок до RK03).
+    ChangedByUserId int           NULL,
+    -- RK03 (D-158): системна історія — dic.RegistryEntryHistory нижче.
+    -- datetime2(3), а не типовий 7 (D-68); HIDDEN — `SELECT *` їх не бачить.
+    -- DEFAULT SYSUTCDATETIME(): рядки, що були до RK03, отримують момент міграції,
+    -- тож «станом на» раніше за неї — порожньо (FEATURE-REGISTRY-TABLES §3.5).
+    PeriodStart     datetime2(3)  GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
+        CONSTRAINT DF_RegEntry_PS DEFAULT SYSUTCDATETIME(),
+    PeriodEnd       datetime2(3)  GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL
+        CONSTRAINT DF_RegEntry_PE DEFAULT CONVERT(datetime2(3), '9999-12-31 23:59:59.999'),
+    PERIOD FOR SYSTEM_TIME (PeriodStart, PeriodEnd),
     CONSTRAINT PK_RegistryEntry PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryEntry UNIQUE (RegistryDefId, Code),
     CONSTRAINT FK_RegEntry_Def    FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id),
@@ -1035,6 +1052,12 @@ CREATE TABLE dic.RegistryValue
     ValueBool           bit            NULL,
     ValueRefEntryId     int            NULL,
     ValueUnitId         int            NULL,
+    ChangedByUserId     int            NULL,        -- RK03: як у dic.RegistryEntry
+    PeriodStart         datetime2(3)   GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
+        CONSTRAINT DF_RegValue_PS DEFAULT SYSUTCDATETIME(),
+    PeriodEnd           datetime2(3)   GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL
+        CONSTRAINT DF_RegValue_PE DEFAULT CONVERT(datetime2(3), '9999-12-31 23:59:59.999'),
+    PERIOD FOR SYSTEM_TIME (PeriodStart, PeriodEnd),
     CONSTRAINT PK_RegistryValue PRIMARY KEY (Id),
     CONSTRAINT UQ_RegistryValue UNIQUE (RegistryEntryId, RegistryFieldDefId),
     CONSTRAINT FK_RegValue_Entry FOREIGN KEY (RegistryEntryId)    REFERENCES dic.RegistryEntry (Id),
@@ -1042,6 +1065,58 @@ CREATE TABLE dic.RegistryValue
     CONSTRAINT FK_RegValue_Ref   FOREIGN KEY (ValueRefEntryId)    REFERENCES dic.RegistryEntry (Id),
     CONSTRAINT FK_RegValue_Unit  FOREIGN KEY (ValueUnitId)        REFERENCES uom.Unit (Id)
 );
+GO
+
+-- RK03RegistryTemporalHistory (D-158, FEATURE-REGISTRY-TABLES §3.2, §3.6): системна
+-- історія. Відтворення прогону читає довідники FOR SYSTEM_TIME AS OF
+-- CalculationRun.RegistryAsOfUtc; історію пише база на КОЖНОМУ шляху запису.
+-- ⚠ Історичні таблиці міграція не створює явно — їх створює сам SQL Server на
+-- SET SYSTEM_VERSIONING = ON, у файловій групі за замовчуванням ([PRIMARY]).
+-- DBA може створити їх заздалегідь у своїй групі (Sql/*.sql) саме такої форми.
+-- ⛔ Над таблицями з історією не працюють TRUNCATE, DROP і ALTER колонок без
+-- SYSTEM_VERSIONING = OFF; DELETE працює (рядок іде в історію). Відкат RK03
+-- історичні таблиці не видаляє, а перейменовує (…_RK03Down_<мітка>, D-25).
+CREATE TABLE dic.RegistryEntryHistory
+(
+    Id              int           NOT NULL,
+    RegistryDefId   int           NOT NULL,
+    Code            nvarchar(100) NOT NULL,
+    DisplayL10n     nvarchar(max) NOT NULL,
+    ParentEntryId   int           NULL,
+    ValidFrom       date          NULL,
+    ValidTo         date          NULL,
+    Ordinal         int           NOT NULL,
+    IsActive        bit           NOT NULL,
+    IsDeleted       bit           NOT NULL,
+    DeletedAt       datetime2(3)  NULL,
+    DeletedByUserId int           NULL,
+    CreatedAt       datetime2(3)  NOT NULL,
+    CreatedByUserId int           NOT NULL,
+    ChangedByUserId int           NULL,
+    PeriodStart     datetime2(3)  NOT NULL,
+    PeriodEnd       datetime2(3)  NOT NULL
+);
+CREATE CLUSTERED INDEX ix_RegistryEntryHistory ON dic.RegistryEntryHistory (PeriodEnd, PeriodStart);
+ALTER TABLE dic.RegistryEntry SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dic.RegistryEntryHistory));
+GO
+
+CREATE TABLE dic.RegistryValueHistory
+(
+    Id                  bigint         NOT NULL,
+    RegistryEntryId     int            NOT NULL,
+    RegistryFieldDefId  int            NOT NULL,
+    ValueString         nvarchar(1000) NULL,
+    ValueNumeric        decimal(34,16) NULL,
+    ValueDate           datetime2(3)   NULL,
+    ValueBool           bit            NULL,
+    ValueRefEntryId     int            NULL,
+    ValueUnitId         int            NULL,
+    ChangedByUserId     int            NULL,
+    PeriodStart         datetime2(3)   NOT NULL,
+    PeriodEnd           datetime2(3)   NOT NULL
+);
+CREATE CLUSTERED INDEX ix_RegistryValueHistory ON dic.RegistryValueHistory (PeriodEnd, PeriodStart);
+ALTER TABLE dic.RegistryValue SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dic.RegistryValueHistory));
 GO
 
 -- Зв'язки M:N між записами реєстрів (напр. дозвіл ↔ забруднюючі речовини)

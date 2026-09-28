@@ -33,9 +33,20 @@ public sealed class RegistryEntryConfiguration : IEntityTypeConfiguration<Regist
         // крок I.10). `ValidFrom = ValidTo` — це вікно з нуля днів, тобто
         // запис, якого ніколи не видно в списку; ловити його треба базою, а не
         // на екрані, бо масова вставка імпортера повз домен не проходить.
-        builder.ToTable("RegistryEntry", "dic", t => t.HasCheckConstraint(
-            "CK_RegEntry_Period",
-            "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo"));
+        builder.ToTable("RegistryEntry", "dic", t =>
+        {
+            t.HasCheckConstraint(
+                "CK_RegEntry_Period",
+                "ValidFrom IS NULL OR ValidTo IS NULL OR ValidFrom < ValidTo");
+
+            // RK03 (D-158, FEATURE-REGISTRY-TABLES §3.6): системна історія. Вона
+            // пишеться базою на КОЖНОМУ шляху запису — ручному, CSV, імпорті,
+            // синку, прямому SQL, — тому відтворити прогін «станом на» можна
+            // незалежно від того, хто й як змінив довідник.
+            t.IsTemporal(Temporal<RegistryEntry>("RegistryEntryHistory"));
+        });
+        TemporalPeriod(builder);
+        builder.Property(x => x.ChangedByUserId);
 
         builder.HasKey(x => x.Id).HasName("PK_RegistryEntry");
         builder.Property(x => x.Id).HasConversion<int>().ValueGeneratedOnAdd();
@@ -81,6 +92,42 @@ public sealed class RegistryEntryConfiguration : IEntityTypeConfiguration<Regist
         codeSequence.StartValue = 1;
         codeSequence.IncrementBy = 1;
     }
+
+    /// <summary>
+    /// Налаштування системної історії таблиці <c>dic.*</c>: історична таблиця в тій
+    /// самій схемі, колонки періоду <c>PeriodStart</c>/<c>PeriodEnd</c>.
+    /// </summary>
+    /// <param name="historyTable">Ім'я історичної таблиці в схемі <c>dic</c>.</param>
+    /// <returns>Дія для <c>IsTemporal</c>.</returns>
+    internal static Action<TemporalTableBuilder<TEntity>> Temporal<TEntity>(string historyTable)
+        where TEntity : class
+        => tt =>
+        {
+            tt.UseHistoryTable(historyTable, "dic");
+            tt.HasPeriodStart(PeriodStart).HasColumnName(PeriodStart);
+            tt.HasPeriodEnd(PeriodEnd).HasColumnName(PeriodEnd);
+        };
+
+    /// <summary>Точність колонок періоду — <c>datetime2(3)</c>.</summary>
+    /// <param name="builder">Будівник сутності з системною історією.</param>
+    /// <remarks>
+    /// ⛔ <c>datetime2(3)</c>, а не типові для EF <c>datetime2(7)</c>: так вимагає
+    /// <c>D-68</c> для всіх міток часу (FEATURE-REGISTRY-TABLES §3.2). Дві зміни
+    /// рядка в межах однієї мілісекунди дають історичний рядок нульової
+    /// тривалості — його не видно на жоден момент «станом на», і це допустимо.
+    /// </remarks>
+    internal static void TemporalPeriod<TEntity>(EntityTypeBuilder<TEntity> builder)
+        where TEntity : class
+    {
+        builder.Property<DateTime>(PeriodStart).HasPrecision(3);
+        builder.Property<DateTime>(PeriodEnd).HasPrecision(3);
+    }
+
+    /// <summary>Колонка початку системного періоду.</summary>
+    internal const string PeriodStart = "PeriodStart";
+
+    /// <summary>Колонка кінця системного періоду.</summary>
+    internal const string PeriodEnd = "PeriodEnd";
 }
 
 /// <summary>Конфігурація <see cref="RegistryValue"/> — значень полів запису.</summary>
@@ -97,7 +144,12 @@ public sealed class RegistryValueConfiguration : IEntityTypeConfiguration<Regist
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ToTable("RegistryValue", "dic");
+        // RK03 (D-158): системна історія значень — див. RegistryEntryConfiguration.
+        builder.ToTable("RegistryValue", "dic", t =>
+            t.IsTemporal(RegistryEntryConfiguration.Temporal<RegistryValue>("RegistryValueHistory")));
+        RegistryEntryConfiguration.TemporalPeriod(builder);
+        builder.Property(x => x.ChangedByUserId);
+
         builder.HasKey(x => x.Id).HasName("PK_RegistryValue");
 
         builder.Property(x => x.RegistryEntryId).HasConversion<int>();
