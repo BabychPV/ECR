@@ -10,6 +10,7 @@ using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 using Ecr.TestKit;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 
@@ -39,6 +40,7 @@ public sealed class DataSourceHandlersTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
 
     private readonly List<SecurityEventRecord> _events = [];
+    private readonly CapturingLogger _log = new();
 
     public DataSourceHandlersTests()
     {
@@ -63,7 +65,7 @@ public sealed class DataSourceHandlersTests
         Allow("Integration.View");
 
         await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Save().CreateAsync("NEW", Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, default));
+            () => Save().CreateAsync("NEW", Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, null, default));
         await Assert.ThrowsAsync<AccessDeniedException>(
             () => Delete().HandleAsync(source.Id, Version(source), default));
         await Assert.ThrowsAsync<AccessDeniedException>(
@@ -118,7 +120,7 @@ public sealed class DataSourceHandlersTests
         foreach (var address in carriers)
         {
             var refused = await Assert.ThrowsAsync<BusinessRuleException>(
-                () => Save().CreateAsync("FLERT", Named(), ExternalTransport.Sql, address, null, null, null, default));
+                () => Save().CreateAsync("FLERT", Named(), ExternalTransport.Sql, address, null, null, null, null, default));
 
             Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
             Assert.Equal("err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", refused.Details!["messageKey"]);
@@ -135,7 +137,7 @@ public sealed class DataSourceHandlersTests
         var spare = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().UpdateAsync(
                 existing.Id, Named(), ExternalTransport.PiWebApi, Endpoint,
-                "https://svc:hunter2@pi2.corp.example", null, null, true, Version(existing), default));
+                "https://svc:hunter2@pi2.corp.example", null, null, true, Version(existing), null, default));
 
         // Відмова називає поле, у якому облікові дані, — не вміст.
         Assert.Equal("secondaryEndpoint", spare.Details!["field"]);
@@ -144,7 +146,7 @@ public sealed class DataSourceHandlersTests
         var both = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Save().CreateAsync(
                 "BOTH", Named(), ExternalTransport.Sql, "Server=a;Password=x", "Server=b;Password=y",
-                null, null, default));
+                null, null, null, default));
         Assert.Equal("endpoint", both.Details!["field"]);
 
         Assert.Empty(_store.Added);
@@ -267,7 +269,7 @@ public sealed class DataSourceHandlersTests
 
         // Оборотна дія на її місці: збір спиняє `isActive = false`.
         var disabled = await Save().UpdateAsync(
-            source.Id, Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, false, Version(source), default);
+            source.Id, Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, false, Version(source), null, default);
 
         Assert.False(disabled.IsActive);
         Assert.Equal(12, disabled.SourceEntities);
@@ -277,6 +279,201 @@ public sealed class DataSourceHandlersTests
         await Delete().HandleAsync(source.Id, Version(source), default);
 
         Assert.Same(source, Assert.Single(_store.Removed));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task S3_нова_адреса_джерела_з_секретом_без_повторного_введення_дає_422_і_нічого_не_змінює()
+    {
+        // ⛔ S3 аудиту безпеки: секрет середовища прив'язаний до ІМЕНІ джерела, і
+        // адаптер чіпляє його до будь-якої адреси з рядка. Без перевірки право
+        // `Integration.Manage` = «надішли службовий секрет на мій хост».
+        var source = Add("PI_MAIN");
+        _secrets.Values["DataSource.PI_MAIN"] = SecretValue;
+
+        // Кожен вид «нової адреси», який правило називає зміною.
+        (ExternalTransport Transport, string Endpoint, string? Spare)[] moves =
+        [
+            (ExternalTransport.PiWebApi, "https://attacker.example/piwebapi", null),
+            (ExternalTransport.PiWebApi, "https://pi.corp.example:8443/piwebapi", null),
+            (ExternalTransport.PiWebApi, "http://pi.corp.example/piwebapi", null),
+            (ExternalTransport.PiWebApi, "https://pi.corp.example/other", null),
+            (ExternalTransport.PiWebApi, Endpoint, "https://attacker.example/piwebapi"),
+            (ExternalTransport.Sql, Endpoint, null),
+        ];
+
+        foreach (var (transport, endpoint, spare) in moves)
+        {
+            foreach (var confirmation in new string?[] { null, string.Empty, "wrong-guess" })
+            {
+                var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+                    () => Save().UpdateAsync(
+                        source.Id, Named(), transport, endpoint, spare, null, null, true, Version(source),
+                        confirmation, default));
+
+                Assert.Equal("ECR-REQ-0422", refused.ErrorCode);
+                Assert.Equal(SaveDataSourceHandler.SecretReentryRequiredKey, refused.Details!["messageKey"]);
+                Assert.Equal("secretConfirmation", refused.Details!["field"]);
+                Assert.DoesNotContain(SecretValue, refused.Message, StringComparison.Ordinal);
+            }
+        }
+
+        // Рядок з'єднання: доданий `Failover Partner` веде секрет на інший сервер.
+        var flert = Add("FLERT", ExternalTransport.Sql, "Server=flert;Database=Vol");
+        _secrets.Values["DataSource.FLERT"] = SecretValue;
+
+        await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().UpdateAsync(
+                flert.Id, Named(), ExternalTransport.Sql, "Server=flert;Database=Vol;Failover Partner=evil",
+                null, null, null, true, Version(flert), null, default));
+
+        // Нічого не записано й не зажурнальовано: адреса та сама, що була.
+        Assert.Equal(Endpoint, source.Endpoint);
+        Assert.Equal(ExternalTransport.PiWebApi, source.Transport);
+        Assert.Null(source.SecondaryEndpoint);
+        Assert.Equal("Server=flert;Database=Vol", flert.Endpoint);
+        Assert.Empty(_events);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task S3_створення_джерела_під_уже_заданий_секрет_вимагає_його_ввести()
+    {
+        // ⛔ Секрет, що лишився в середовищі після видаленого джерела, інакше
+        // поїхав би на адресу нового джерела з тим самим кодом.
+        _secrets.Values["DataSource.PI_NEW"] = SecretValue;
+
+        var refused = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Save().CreateAsync(
+                "PI_NEW", Named(), ExternalTransport.PiWebApi, "https://attacker.example", null, null, null,
+                null, default));
+
+        Assert.Equal(SaveDataSourceHandler.SecretReentryRequiredKey, refused.Details!["messageKey"]);
+        Assert.Empty(_store.Added);
+
+        var created = await Save().CreateAsync(
+            "PI_NEW", Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, SecretValue, default);
+
+        Assert.True(created.HasSecret);
+
+        // Контроль: без секрету в середовищі підтвердження не потрібне взагалі.
+        var plain = await Save().CreateAsync(
+            "PI_PLAIN", Named(), ExternalTransport.PiWebApi, Endpoint, null, null, null, null, default);
+
+        Assert.False(plain.HasSecret);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task S3_та_сама_адреса_в_іншому_записі_не_вимагає_секрету_і_секрет_лишається()
+    {
+        var source = Add("PI_MAIN");
+        _secrets.Values["DataSource.PI_MAIN"] = SecretValue;
+
+        // Регістр схеми й хоста, явний типовий порт, кінцева `/` — та сама ціль.
+        var saved = await Save().UpdateAsync(
+            source.Id, Named(), ExternalTransport.PiWebApi, "HTTPS://PI.CORP.EXAMPLE:443/piwebapi/", null,
+            "OtherDb", 8, true, Version(source), null, default);
+
+        Assert.True(saved.HasSecret);
+        Assert.Equal("OtherDb", saved.Catalog);
+
+        // Рядок з'єднання: інший порядок ключів, пробіли й регістр назв — та сама ціль.
+        var flert = Add("FLERT", ExternalTransport.Sql, "Server=flert;Database=Vol");
+        _secrets.Values["DataSource.FLERT"] = SecretValue;
+
+        var same = await Save().UpdateAsync(
+            flert.Id, Named(), ExternalTransport.Sql, " database = Vol ; SERVER = flert ", null, null, null, true,
+            Version(flert), null, default);
+
+        Assert.True(same.HasSecret);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task S3_нова_адреса_з_правильним_секретом_зберігається_а_журнал_має_стару_й_нову_без_секрету()
+    {
+        var source = Add("PI_MAIN");
+        _secrets.Values["DataSource.PI_MAIN"] = SecretValue;
+        const string moved = "https://pi2.corp.example/piwebapi";
+
+        await Save().UpdateAsync(
+            source.Id, Named(), ExternalTransport.PiWebApi, moved, null, null, null, true, Version(source),
+            SecretValue, default);
+
+        Assert.Equal(moved, source.Endpoint);
+
+        var recorded = Assert.Single(_events);
+        Assert.Equal(SaveDataSourceHandler.EventType, recorded.EventType);
+
+        var details = JsonDocument.Parse(recorded.DetailsJson ?? "{}").RootElement;
+        Assert.Equal(Endpoint, details.GetProperty("oldEndpoint").GetString());
+        Assert.Equal(moved, details.GetProperty("newEndpoint").GetString());
+        Assert.True(details.GetProperty("addressChanged").GetBoolean());
+
+        // ⛔ Ні значення секрету, ні його імені в журналі.
+        Assert.DoesNotContain(SecretValue, recorded.DetailsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("DataSource.PI_MAIN", recorded.DetailsJson, StringComparison.Ordinal);
+
+        // Без секрету в середовищі адреса змінюється вільно — поведінка Q15-06
+        // (Windows-автентифікація) не ламається, а журнал так само каже «звідки й куди».
+        var plain = Add("PI_PLAIN");
+        await Save().UpdateAsync(
+            plain.Id, Named(), ExternalTransport.PiWebApi, moved, null, null, null, true, Version(plain),
+            null, default);
+
+        var second = JsonDocument.Parse(_events[^1].DetailsJson ?? "{}").RootElement;
+        Assert.Equal(Endpoint, second.GetProperty("oldEndpoint").GetString());
+        Assert.Equal(moved, second.GetProperty("newEndpoint").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "BE-21")]
+    public async Task S3_проба_віддає_категорію_а_не_текст_винятку_і_текст_лише_в_серверному_журналі()
+    {
+        var source = Add("PI_MAIN");
+        const string raw = "RAW-10.20.30.40:5432-banner";
+
+        // ⛔ Кожен тип — окрема відповідь сканера: «refused», «timeout», «TLS»,
+        // «сервер відповів». Тіло відповіді мусить бути однаковим усередині категорії.
+        (Exception Error, string Category)[] cases =
+        [
+            (new SourceAuthenticationException("ECR-INT-0502", $"401 {raw}"), "auth"),
+            (new HttpRequestException(raw, new System.Security.Authentication.AuthenticationException(raw)), "tls"),
+            (new HttpRequestException(HttpRequestError.SecureConnectionError, raw), "tls"),
+            (new TaskCanceledException(raw, new TimeoutException(raw)), "timeout"),
+            (new BusinessRuleException(
+                "ECR-INT-0503", raw, new Dictionary<string, object?> { ["reason"] = "timeout" }), "timeout"),
+            (new HttpRequestException(raw, new System.Net.Sockets.SocketException(10061)), "unreachable"),
+            (new BusinessRuleException("ECR-INT-0503", $"SQL-джерело не з'єднується: {raw}"), "unreachable"),
+            (new InvalidOperationException(raw), "other"),
+        ];
+
+        foreach (var (error, category) in cases)
+        {
+            _adapter.Throw = error;
+
+            var result = await Test().HandleAsync(source.Id, Reason, default);
+
+            Assert.False(result.Ok);
+            Assert.Equal(category, result.Error);
+            Assert.Equal($"integration.test.failed.{category}", result.MessageKey);
+            Assert.Contains(category, TestDataSourceConnectionHandler.FailureCategories);
+            Assert.DoesNotContain(raw, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+        }
+
+        // Журнал безпеки тексту теж не має — лише факт і підсумок.
+        Assert.Equal(cases.Length, _events.Count);
+        Assert.All(_events, e => Assert.DoesNotContain(raw, e.DetailsJson, StringComparison.Ordinal));
+
+        // …а серверний журнал має: без нього відмову не було б чим лагодити.
+        Assert.Equal(cases.Length, _log.Entries.Count(e => e.Contains(raw, StringComparison.Ordinal)));
     }
 
     private void Allow(params string[] permissions)
@@ -300,16 +497,16 @@ public sealed class DataSourceHandlersTests
     private DeleteDataSourceHandler Delete() => new(_store, _access, _uow, _audit, _user, Clock());
 
     private TestDataSourceConnectionHandler Test()
-        => new(_store, [_adapter], _gate, _access, _audit, _user, Clock());
+        => new(_store, [_adapter], _gate, _access, _audit, _user, Clock(), _log);
 
     private static TestClock Clock() => new(new DateTime(2026, 9, 21, 10, 0, 0, DateTimeKind.Utc));
 
     /// <summary>Джерело з присвоєним ключем — базу тут заміняє список.</summary>
-    private DataSource Add(string code)
+    private DataSource Add(string code, ExternalTransport transport = ExternalTransport.PiWebApi, string endpoint = Endpoint)
     {
         var source = new DataSource(
             EcrCode.Create(code), new LocalizedText(Named()),
-            ExternalTransport.PiWebApi, Endpoint, SaveDataSourceHandler.SecretNamePrefix + code);
+            transport, endpoint, SaveDataSourceHandler.SecretNamePrefix + code);
 
         typeof(Entity<int>).GetProperty("Id")!.SetValue(source, _store.Sources.Count + 1);
         typeof(DataSource).GetProperty(nameof(DataSource.RowVersion))!
@@ -363,6 +560,21 @@ public sealed class DataSourceHandlersTests
             => Usage.TryGetValue(id, out var usage) ? usage : new DataSourceUsage(0, 0);
     }
 
+    /// <summary>Серверний журнал: повідомлення разом із текстом винятку.</summary>
+    private sealed class CapturingLogger : ILogger<TestDataSourceConnectionHandler>
+    {
+        public List<string> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Entries.Add($"{formatter(state, exception)} {exception?.Message}");
+    }
+
     /// <summary>Середовище, яке може дати секрет під ім'я.</summary>
     private sealed class FakeSecrets : ISecretProvider
     {
@@ -385,11 +597,20 @@ public sealed class DataSourceHandlersTests
 
         public TaskCompletionSource Release { get; } = new();
 
+        /// <summary>Відмова, якою відповідає «джерело»; <c>null</c> — відповідає каталогом.</summary>
+        public Exception? Throw { get; set; }
+
         public ExternalTransport Transport => ExternalTransport.PiWebApi;
 
         public async Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct)
         {
             Entered.TrySetResult();
+
+            if (Throw is { } error)
+            {
+                throw error;
+            }
+
             await Release.Task.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
 
             return [new SourceEntityDescriptor("Unit-01", "Probe element", @"\Srv\Db\Unit-01", null, "Element")];

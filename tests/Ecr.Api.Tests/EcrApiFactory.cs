@@ -86,6 +86,20 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
     /// </remarks>
     public ConcurrentQueue<Uri> SourceCalls { get; } = new();
 
+    /// <summary>
+    /// Ті самі спроби, що в <see cref="SourceCalls"/>, разом із заголовком
+    /// <c>Authorization</c>, який на них поїхав (S3: куди йде секрет джерела).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Хост <c>refused.test</c> відповідає відмовою з'єднання (з текстом
+    /// <see cref="RefusedMarker"/> у винятку), <c>denied.test</c> — <c>401</c>:
+    /// так тест бачить, що проба віддає категорію, а не текст винятку.
+    /// </remarks>
+    public ConcurrentQueue<(Uri Uri, string? Authorization)> SourceRequests { get; } = new();
+
+    /// <summary>Текст винятку «відмова з'єднання» на хості <c>refused.test</c>.</summary>
+    public const string RefusedMarker = "RAW-refused-10.0.0.7:443-banner";
+
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -167,7 +181,7 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             // не заводить другий.
             services
                 .AddHttpClient<PiWebApiDataSource>()
-                .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls));
+                .ConfigurePrimaryHttpMessageHandler(() => new OfflineSourceHandler(SourceCalls, SourceRequests));
 
             // ⚠ Решта строків — з конфігурації, як у проді; підмінюється лише
             // вікно ревізії. Пізніша реєстрація виграє в `GetRequiredService`.
@@ -184,7 +198,9 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
 
     /// <summary>Каталог джерела з однієї позиції; у мережу не ходить.</summary>
     /// <param name="calls">Куди записати адресу спроби.</param>
-    private sealed class OfflineSourceHandler(ConcurrentQueue<Uri> calls) : HttpMessageHandler
+    /// <param name="requests">Куди записати адресу разом із заголовком автентифікації.</param>
+    private sealed class OfflineSourceHandler(
+        ConcurrentQueue<Uri> calls, ConcurrentQueue<(Uri Uri, string? Authorization)> requests) : HttpMessageHandler
     {
         /// <summary>Відповідь у формі PI Web API: <c>Items</c> з одним елементом.</summary>
         private const string Catalog =
@@ -198,6 +214,19 @@ public sealed class EcrApiFactory(SqlServerFixture sql, int stampCacheSeconds = 
             if (request.RequestUri is { } uri)
             {
                 calls.Enqueue(uri);
+                requests.Enqueue((uri, request.Headers.Authorization?.ToString()));
+
+                if (string.Equals(uri.Host, "refused.test", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new HttpRequestException(
+                        HttpRequestError.ConnectionError, RefusedMarker,
+                        new System.Net.Sockets.SocketException(10061));
+                }
+
+                if (string.Equals(uri.Host, "denied.test", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+                }
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

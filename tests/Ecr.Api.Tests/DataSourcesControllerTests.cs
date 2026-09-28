@@ -108,7 +108,10 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
 
             var seen = new StringBuilder();
 
-            var created = await client.PostAsJsonAsync(Sources, Body(code)).ConfigureAwait(true);
+            // ⚠ Секрет у середовищі вже заданий, тож створення — прив'язка його
+            // до адреси — вимагає ввести його повторно (S3).
+            var created = await client.PostAsJsonAsync(Sources, Body(code, secretConfirmation: Marker))
+                .ConfigureAwait(true);
             Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
 
             var body = await BodyAsync(created, seen).ConfigureAwait(true);
@@ -450,6 +453,169 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
             (await viewer.PostAsJsonAsync(At($"{id}/probe"), new { path = "Unit-01" }).ConfigureAwait(true)).StatusCode);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21")]
+    public async Task S3_нова_адреса_без_секрету_дає_422_і_секрет_на_неї_не_їде()
+    {
+        var code = $"S3{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+        const string attacker = "https://attacker.test/piwebapi";
+        const string moved = "https://pi2.corp.example/piwebapi";
+
+        Environment.SetEnvironmentVariable($"ECR_Secrets__DataSource.{code}", Marker);
+        int? id = null;
+
+        try
+        {
+            using var app = new EcrApiFactory(sql);
+            using var client = await SignedInAsync(app, "Integration.Manage", "Integration.View").ConfigureAwait(true);
+            var seen = new StringBuilder();
+
+            var created = await client.PostAsJsonAsync(Sources, Body(code, secretConfirmation: Marker))
+                .ConfigureAwait(true);
+            Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+            id = (await BodyAsync(created, seen).ConfigureAwait(true)).GetProperty("id").GetInt32();
+
+            // ⛔ Атака S3: адреса на чужий хост без секрету — і з вгаданим.
+            foreach (var guess in new string?[] { null, "guess" })
+            {
+                var version = await VersionAsync(client, id.Value).ConfigureAwait(true);
+                var refused = await SendAsync(
+                    client, HttpMethod.Put, id.Value, version,
+                    Body(code, endpoint: attacker, secretConfirmation: guess)).ConfigureAwait(true);
+
+                Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+                var problem = await BodyAsync(refused, seen).ConfigureAwait(true);
+                Assert.Equal("ECR-REQ-0422", problem.GetProperty("errorCode").GetString());
+                Assert.Equal(
+                    "err.ECR-REQ-0422.dataSourceSecretReentryRequired", problem.GetProperty("messageKey").GetString());
+                Assert.Equal("secretConfirmation", problem.GetProperty("field").GetString());
+            }
+
+            await using (var db = NewDb())
+            {
+                var stored = await db.DataSources.AsNoTracking().SingleAsync(s => s.Id == id).ConfigureAwait(true);
+                Assert.Equal(Endpoint, stored.Endpoint);
+            }
+
+            // Наступне звернення йде на СТАРУ адресу, і на чужий хост не їде нічого —
+            // ні запиту, ні заголовка з секретом. Секрет на старій адресі на місці:
+            // інакше «не поїхав на чужий хост» означало б лише «не поїхав нікуди».
+            var probe = await BodyAsync(
+                await client.PostAsJsonAsync(At($"{id}/test"), new { reason = Reason }).ConfigureAwait(true), seen)
+                .ConfigureAwait(true);
+            Assert.True(probe.GetProperty("ok").GetBoolean(), $"{probe}\n{app.ErrorsText}");
+
+            Assert.DoesNotContain(app.SourceRequests, r => r.Uri.Host == "attacker.test");
+            Assert.Contains(
+                app.SourceRequests,
+                r => r.Uri.AbsoluteUri.StartsWith(Endpoint, StringComparison.Ordinal)
+                     && r.Authorization == $"Bearer {Marker}");
+
+            // Та сама адреса в іншому записі — без секрету, і секрет лишається.
+            var same = await SendAsync(
+                client, HttpMethod.Put, id.Value, await VersionAsync(client, id.Value).ConfigureAwait(true),
+                Body(code, endpoint: "HTTPS://PI.CORP.EXAMPLE:443/piwebapi/")).ConfigureAwait(true);
+            Assert.True(same.StatusCode == HttpStatusCode.OK, $"{same.StatusCode}: {app.ErrorsText}");
+            Assert.True((await BodyAsync(same, seen).ConfigureAwait(true)).GetProperty("hasSecret").GetBoolean());
+
+            // Хто секрет знає — переносить джерело одним запитом.
+            var legit = await SendAsync(
+                client, HttpMethod.Put, id.Value, await VersionAsync(client, id.Value).ConfigureAwait(true),
+                Body(code, endpoint: moved, secretConfirmation: Marker)).ConfigureAwait(true);
+            Assert.True(legit.StatusCode == HttpStatusCode.OK, $"{legit.StatusCode}: {app.ErrorsText}");
+            _ = await BodyAsync(legit, seen).ConfigureAwait(true);
+
+            // ⛔ Журнал безпеки: стара й нова адреса, і жодного сліду секрету.
+            await using (var db = NewDb())
+            {
+                var events = await db.Database
+                    .SqlQuery<string>(
+                        $"SELECT ISNULL(DetailsJson, N'') AS Value FROM aud.SecurityEvent WHERE EventType = N'DataSourceSaved' AND DetailsJson LIKE N'%' + {code} + N'%'")
+                    .ToListAsync().ConfigureAwait(true);
+
+                Assert.DoesNotContain(events, e => e.Contains(Marker, StringComparison.Ordinal));
+
+                // Переїзд записано парою «звідки → куди»; «звідки» — адреса в тому
+                // написанні, яке стояло перед переїздом (друга правка її переписала).
+                Assert.Contains(events, e =>
+                {
+                    var details = JsonDocument.Parse(e).RootElement;
+                    return details.TryGetProperty("oldEndpoint", out var old)
+                           && old.GetString() == "HTTPS://PI.CORP.EXAMPLE:443/piwebapi/"
+                           && details.GetProperty("newEndpoint").GetString() == moved
+                           && details.GetProperty("addressChanged").GetBoolean();
+                });
+            }
+
+            Assert.DoesNotContain(Marker, seen.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(app.ServerLog, line => line.Contains(Marker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable($"ECR_Secrets__DataSource.{code}", null);
+
+            if (id is { } created)
+            {
+                await SetActiveAsync(created, false).ConfigureAwait(true);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "BE-21")]
+    public async Task S3_проба_віддає_категорію_відмови_а_текст_винятку_лише_в_серверний_журнал()
+    {
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, "Integration.Manage", "Integration.View").ConfigureAwait(true);
+
+        // ⛔ Хост `refused.test` стенд відхиляє винятком із RefusedMarker у тексті,
+        // `denied.test` відповідає 401 (EcrApiFactory.OfflineSourceHandler).
+        (string Host, string Category)[] cases = [("refused.test", "unreachable"), ("denied.test", "auth")];
+        var ids = new List<int>();
+
+        try
+        {
+            foreach (var (host, category) in cases)
+            {
+                var code = $"PB{Guid.NewGuid():N}"[..12].ToUpperInvariant();
+                var created = await client.PostAsJsonAsync(Sources, Body(code, endpoint: $"https://{host}/piwebapi"))
+                    .ConfigureAwait(true);
+                Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {app.ErrorsText}");
+                var id = (await BodyAsync(created, null).ConfigureAwait(true)).GetProperty("id").GetInt32();
+                ids.Add(id);
+
+                var response = await client.PostAsJsonAsync(At($"{id}/test"), new { reason = Reason }).ConfigureAwait(true);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+                var text = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
+                var probe = JsonDocument.Parse(text).RootElement;
+
+                Assert.False(probe.GetProperty("ok").GetBoolean());
+                Assert.Equal(category, probe.GetProperty("error").GetString());
+                Assert.Equal($"integration.test.failed.{category}", probe.GetProperty("messageKey").GetString());
+
+                // Тіло — лише категорія: ні тексту винятку, ні статусу, ні шляху.
+                Assert.DoesNotContain(EcrApiFactory.RefusedMarker, text, StringComparison.Ordinal);
+                Assert.DoesNotContain("401", text, StringComparison.Ordinal);
+                Assert.DoesNotContain(host, text, StringComparison.Ordinal);
+            }
+
+            // …а серверний журнал текст має: без нього відмову не було б чим лагодити.
+            Assert.Contains(app.ServerLog, line => line.Contains(EcrApiFactory.RefusedMarker, StringComparison.Ordinal));
+        }
+        finally
+        {
+            foreach (var id in ids)
+            {
+                await SetActiveAsync(id, false).ConfigureAwait(true);
+            }
+        }
+    }
+
     private async Task SetActiveAsync(int id, bool active)
     {
         await using var db = NewDb();
@@ -506,15 +672,18 @@ public sealed class DataSourcesControllerTests(SqlServerFixture sql)
         return await client.SendAsync(request).ConfigureAwait(false);
     }
 
-    private static object Body(string code, bool isActive = true, string catalog = "EcrDb") => new
+    private static object Body(
+        string code, bool isActive = true, string catalog = "EcrDb", string endpoint = Endpoint,
+        string? secretConfirmation = null) => new
     {
         code,
         nameL10n = new Dictionary<string, string> { ["en"] = "PI AF primary" },
         transport = "PiWebApi",
-        endpoint = Endpoint,
+        endpoint,
         catalog,
         maxParallel = 4,
         isActive,
+        secretConfirmation,
     };
 
     private static Uri At(string tail) => new($"{Sources}/{tail}", UriKind.Relative);

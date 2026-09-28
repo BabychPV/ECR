@@ -2625,6 +2625,18 @@ USING (VALUES
     -- Проба віддає `ok: false` із цим ключем, а не 500: конфігурація, у якій
     -- обрано транспорт без адаптера, — стан системи, а не аварія запиту.
     (N'integration.test.adapterNotRegistered', N'en', N'No adapter is registered for this source transport: collection from it never runs.', 1),
+    -- COLL:security — S3 аудиту безпеки. Проба з'єднання віддає КАТЕГОРІЮ
+    -- відмови, а не текст винятку (інакше кнопка — сканер внутрішньої мережі);
+    -- сирий текст лише в серверному журналі. Нова адреса джерела, під яке
+    -- середовище дає секрет, вимагає ввести секрет повторно.
+    (N'integration.test.failed.auth',        N'en', N'The source refused the credentials of the service account.', 1),
+    (N'integration.test.failed.unreachable', N'en', N'The source could not be reached, or it answered with an error.', 1),
+    (N'integration.test.failed.tls',         N'en', N'A secure (TLS) connection to the source could not be established.', 1),
+    (N'integration.test.failed.timeout',     N'en', N'The source did not answer in time.', 1),
+    (N'integration.test.failed.other',       N'en', N'The connection test failed. The server log has the details.', 1),
+    (N'err.ECR-REQ-0422.dataSourceSecretReentryRequired', N'en', N'The address of data source "{code}" is new, so its secret must be entered again: the service secret goes only to an address confirmed by someone who knows it.', 1),
+    (N'sources.secretConfirmation',          N'en', N'Secret', 1),
+    (N'sources.secretConfirmationHint',      N'en', N'The address changed. Enter the secret of this connection again: it is sent only to an address confirmed by someone who knows it. It is not stored.', 1),
     (N'health.copyPartitionScript',      N'en', N'Copy command for DBA', 1),
     (N'health.partitionScriptCopied',    N'en', N'Partition command copied to the clipboard.', 1),
     (N'profile.theme',                   N'en', N'Theme', 1),

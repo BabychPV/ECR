@@ -1236,6 +1236,12 @@ export interface paths {
          * @description ⚠ Код не змінюється: на нього спираються сутності збору, і
          *     перейменування ключа виглядало б як правка підпису, а було б переїздом
          *     усієї конфігурації збору.
+         *
+         *     ⛔ Нова адреса (транспорт, основна чи запасна адреса — правило в
+         *     `DataSourceAddress`) джерела, під яке середовище дає секрет, без
+         *     правильного `secretConfirmation` — `422
+         *     err.ECR-REQ-0422.dataSourceSecretReentryRequired` ДО запису (S3). У
+         *     журнал безпеки йдуть стара й нова адреса; секрет — ніколи.
          */
         put: {
             parameters: {
@@ -1605,8 +1611,13 @@ export interface paths {
          *     і тому віддає `jobId`.
          *
          *     ⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це
-         *     `{ ok: false, error }`, а не помилка запиту. Проба цього ж джерела,
-         *     яка вже виконується, — `409 ECR-JOB-0409`.
+         *     `{ ok: false, error, messageKey }`, а не помилка запиту. Проба цього ж
+         *     джерела, яка вже виконується, — `409 ECR-JOB-0409`.
+         *
+         *     ⛔ `error` — лише категорія (`auth`, `unreachable`,
+         *     `tls`, `timeout`, `other`, `adapterNotRegistered`),
+         *     `messageKey` — `integration.test.failed.{категорія}`. Сирий
+         *     текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
          */
         post: {
             parameters: {
@@ -15633,10 +15644,16 @@ export interface components {
         };
         /** @description Наслідок перевірки з'єднання; `Entities` — розмір каталогу джерела. */
         DataSourceTestResult: {
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Розмір кореневого каталогу джерела.
+             */
             entities: number;
+            /** @description Категорія відмови; `null` — успіх. */
             error: null | string;
+            /** @description Ключ каталогу з причиною відмови. */
             messageKey?: null | string;
+            /** @description Чи джерело відповіло. */
             ok: boolean;
         };
         /** @description Джерело даних — рядок екрана конфігуратора (`BE-21`, ФВ-14.3). */
@@ -18718,6 +18735,11 @@ export interface components {
             };
             /** @description Запасна адреса; `null` — немає. */
             secondaryEndpoint?: null | string;
+            /** @description Повторно введений секрет джерела. Обов'язковий, лише коли в середовищі
+             *     заданий секрет під це джерело і адреса нова (створення або зміна
+             *     транспорту, основної чи запасної адреси); інакше ігнорується. Не
+             *     зберігається й не повертається. */
+            secretConfirmation?: null | string;
             /** @description Транспорт: `PiWebApi`, `PiSqlClient`, `Sql`. */
             transport: components["schemas"]["ExternalTransport"];
         };

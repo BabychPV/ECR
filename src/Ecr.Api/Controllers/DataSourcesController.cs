@@ -109,7 +109,7 @@ public sealed class DataSourcesController(
         var created = await save
             .CreateAsync(
                 request.Code ?? string.Empty, request.NameL10n, request.Transport, request.Endpoint,
-                request.SecondaryEndpoint, request.Catalog, request.MaxParallel, ct)
+                request.SecondaryEndpoint, request.Catalog, request.MaxParallel, request.SecretConfirmation, ct)
             .ConfigureAwait(false);
 
         return Created(new Uri("/api/v1/data-sources", UriKind.Relative), created);
@@ -120,6 +120,12 @@ public sealed class DataSourcesController(
     /// ⚠ Код не змінюється: на нього спираються сутності збору, і
     /// перейменування ключа виглядало б як правка підпису, а було б переїздом
     /// усієї конфігурації збору.
+    ///
+    /// ⛔ Нова адреса (транспорт, основна чи запасна адреса — правило в
+    /// <c>DataSourceAddress</c>) джерела, під яке середовище дає секрет, без
+    /// правильного <c>secretConfirmation</c> — <c>422
+    /// err.ECR-REQ-0422.dataSourceSecretReentryRequired</c> ДО запису (S3). У
+    /// журнал безпеки йдуть стара й нова адреса; секрет — ніколи.
     /// </remarks>
     [HttpPut("{id:int}")]
     [ProducesResponseType<DataSourceView>(StatusCodes.Status200OK)]
@@ -140,7 +146,7 @@ public sealed class DataSourcesController(
         return Ok(await save
             .UpdateAsync(
                 id, request.NameL10n, request.Transport, request.Endpoint, request.SecondaryEndpoint,
-                request.Catalog, request.MaxParallel, request.IsActive, ifMatch, ct)
+                request.Catalog, request.MaxParallel, request.IsActive, ifMatch, request.SecretConfirmation, ct)
             .ConfigureAwait(false));
     }
 
@@ -178,8 +184,13 @@ public sealed class DataSourcesController(
     /// і тому віддає <c>jobId</c>.
     ///
     /// ⚠ Причина обов'язкова і йде в журнал безпеки; відмова джерела — це
-    /// <c>{ ok: false, error }</c>, а не помилка запиту. Проба цього ж джерела,
-    /// яка вже виконується, — <c>409 ECR-JOB-0409</c>.
+    /// <c>{ ok: false, error, messageKey }</c>, а не помилка запиту. Проба цього ж
+    /// джерела, яка вже виконується, — <c>409 ECR-JOB-0409</c>.
+    ///
+    /// ⛔ <c>error</c> — лише категорія (<c>auth</c>, <c>unreachable</c>,
+    /// <c>tls</c>, <c>timeout</c>, <c>other</c>, <c>adapterNotRegistered</c>),
+    /// <c>messageKey</c> — <c>integration.test.failed.{категорія}</c>. Сирий
+    /// текст винятку — лише в серверному журналі (S3: інакше кнопка — сканер мережі).
     /// </remarks>
     [HttpPost("{id:int}/test")]
     [ProducesResponseType<DataSourceTestResult>(StatusCodes.Status200OK)]
@@ -197,7 +208,11 @@ public sealed class DataSourcesController(
 }
 
 /// <summary>Тіло створення і зміни джерела.</summary>
-/// <remarks>⛔ Поля секрету тут немає навмисно (<c>Q15-06</c>).</remarks>
+/// <remarks>
+/// ⛔ Поля «задати секрет» тут немає навмисно (<c>Q15-06</c>).
+/// <c>SecretConfirmation</c> — інше: доказ знання секрету, заданого в
+/// середовищі, коли той мав би поїхати на нову адресу (S3). Лише звіряється.
+/// </remarks>
 /// <param name="Code">Код джерела; при зміні ігнорується.</param>
 /// <param name="NameL10n">Назва мовами каталогу; хоча б одна мова.</param>
 /// <param name="Transport">Транспорт: <c>PiWebApi</c>, <c>PiSqlClient</c>, <c>Sql</c>.</param>
@@ -206,6 +221,12 @@ public sealed class DataSourcesController(
 /// <param name="Catalog">Каталог або база джерела.</param>
 /// <param name="MaxParallel">Стеля паралельних звернень; <c>null</c> — типова.</param>
 /// <param name="IsActive">Чи збирати з джерела; при створенні ігнорується.</param>
+/// <param name="SecretConfirmation">
+/// Повторно введений секрет джерела. Обов'язковий, лише коли в середовищі
+/// заданий секрет під це джерело і адреса нова (створення або зміна
+/// транспорту, основної чи запасної адреси); інакше ігнорується. Не
+/// зберігається й не повертається.
+/// </param>
 public sealed record SaveDataSourceRequest(
     string? Code,
     IReadOnlyDictionary<string, string>? NameL10n,
@@ -214,7 +235,8 @@ public sealed record SaveDataSourceRequest(
     string? SecondaryEndpoint = null,
     string? Catalog = null,
     int? MaxParallel = null,
-    bool IsActive = true);
+    bool IsActive = true,
+    string? SecretConfirmation = null);
 
 /// <summary>Тіло перевірки з'єднання.</summary>
 /// <param name="Reason">Причина; обов'язкова, потрапляє в журнал безпеки.</param>

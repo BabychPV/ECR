@@ -479,7 +479,10 @@ public sealed partial class EndpointCoverageTests
             "Помилка cron-виразу (cronProblem)."),
 
         new("features/integration/DataSourceFormModal.tsx", "key", 1, "features/integration/DataSourceFormModal.tsx",
-            ["err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceCodeTaken"],
+            [
+                "err.ECR-REQ-0422.dataSourceEndpointCarriesSecret", "err.ECR-REQ-0422.dataSourceCodeTaken",
+                "err.ECR-REQ-0422.dataSourceSecretReentryRequired",
+            ],
             "messageKey сервера, але лише з FieldOfKey — інші сюди не доходять."),
 
         new("features/notifications/ChannelsPanel.tsx", "`notifications.kind.${channel.kind}`", 1,
