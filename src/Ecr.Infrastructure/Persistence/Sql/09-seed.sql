@@ -2557,6 +2557,9 @@ USING (VALUES
     (N'err.ECR-REQ-0422.entityFieldMapRegistryFieldMaterialization', N'en', N'A mapping to a registry field takes neither a target row nor an aggregation: they address rows of a document table, and a registry field has none.', 1),
     (N'err.ECR-REQ-0422.entityFieldMapRegistryNotBound',        N'en', N'Source entity {sourceEntityId} is not bound to a registry: bind it first, then map its fields to that registry.', 1),
     (N'err.ECR-REQ-0422.entityFieldMapRegistryFieldForeign',    N'en', N'Registry field {registryFieldDefId} belongs to a different registry than the one source entity {sourceEntityId} is bound to.', 1),
+    -- COLL:registry-sync ── Дубль ключа між записами одного пакета `RegistryEntryWriter` (синк довідника, S7-3; FEATURE-REGISTRY-TABLES §4.3 крок 3) ──
+    (N'err.ECR-REG-4092.keyDuplicateInBatch',                   N'en', N'Another entry written in the same batch would get the same key.', 1),
+    -- COLL:registry-sync ── кінець секції ──
     (N'jobs.pick',                       N'en', N'Enter a job id', 1),
     (N'jobs.pickHint',                   N'en', N'Long operations return a job id; paste it here to follow the progress.', 1),
     (N'jobs.restart',                    N'en', N'Restart', 1),

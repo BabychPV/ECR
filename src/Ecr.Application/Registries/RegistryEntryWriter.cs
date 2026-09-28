@@ -123,6 +123,12 @@ public sealed class RegistryEntryWriter(
     /// </remarks>
     public const string ValueChangedEventType = "RegistryValueChanged";
 
+    /// <summary>
+    /// Ключ помилки рядка: той самий ключ отримує інший запис цього ж пакета (для темпорального
+    /// довідника — у вікні, що перетинається; FEATURE-REGISTRY-TABLES §4.3 крок 3).
+    /// </summary>
+    public const string KeyDuplicateInBatchKey = "err.ECR-REG-4092.keyDuplicateInBatch";
+
     /// <summary>Служба ключів, з якою працює writer; <c>null</c> — лише в тестах без ключів.</summary>
     internal RegistryKeyService? Keys => keys;
 
@@ -133,9 +139,10 @@ public sealed class RegistryEntryWriter(
     /// <remarks>
     /// ⚠ Помилка значення (тип, обов'язковість, невідоме поле, <c>Lookup</c> на чужий чи
     /// неіснуючий запис, невалідний код) — помилка рядка в результаті, а не виняток; є хоч одна —
-    /// нічого не зберігається. Ключ, який уже тримає запис поза пакетом, — виняток
-    /// <c>ECR-REG-4092</c> на весь пакет, як в імпорті CSV: це перевірка під блокуванням у
-    /// транзакції запису.
+    /// нічого не зберігається. Два записи пакета з тим самим ключем (темпоральний довідник — у
+    /// вікнах, що перетинаються) — помилка обох рядків <see cref="KeyDuplicateInBatchKey"/>. Ключ,
+    /// який уже тримає запис поза пакетом, — виняток <c>ECR-REG-4092</c> на весь пакет, як в
+    /// імпорті CSV: це перевірка під блокуванням у транзакції запису.
     ///
     /// ⚠ Пакет без жодної фактичної зміни нічого не зберігає і ревізію не рухає
     /// (<c>Applied = false</c>): мітка <c>DataChangedAt</c> оголосила б застарілими результати
@@ -268,8 +275,25 @@ public sealed class RegistryEntryWriter(
 
         var errors = new List<RegistryEntryImportError>();
         var staged = new List<RegistryEntry>();
+        var keyed = new List<KeyedTarget>();
         var valueChanges = new List<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)>();
         var (added, updated, unchanged) = (0, 0, 0);
+
+        void Count(RowOutcome outcome, int delta)
+        {
+            switch (outcome)
+            {
+                case RowOutcome.Added:
+                    added += delta;
+                    break;
+                case RowOutcome.Updated:
+                    updated += delta;
+                    break;
+                default:
+                    unchanged += delta;
+                    break;
+            }
+        }
 
         foreach (var target in targets)
         {
@@ -325,18 +349,39 @@ public sealed class RegistryEntryWriter(
                 valueChanges.Add((entry, changes));
             }
 
-            if (isNew)
+            var outcome = isNew ? RowOutcome.Added : changes.Count > 0 ? RowOutcome.Updated : RowOutcome.Unchanged;
+            Count(outcome, +1);
+
+            if (keyDefs.Count > 0)
             {
-                added++;
+                // Значення ПІСЛЯ застосування рядка: рядок, що змінює ключ, звіряється з новим ключем.
+                var stored = isNew ? [] : valuesByEntry.GetValueOrDefault(entry.Id) ?? [];
+                keyed.Add(new KeyedTarget(
+                    new RegistryBatchKeyRow(row, entry, RegistryBatchKeys.EffectiveValues(definition, stored, values)),
+                    code,
+                    outcome));
             }
-            else if (changes.Count > 0)
-            {
-                updated++;
-            }
-            else
-            {
-                unchanged++;
-            }
+        }
+
+        // ⛔ RT-10b (§4.3 крок 3): служба ключів записи пакета між собою НЕ звіряє — тримачі з
+        // пакета вона виключає з перевірки проти бази. Без цього кроку нетемпоральний дубль
+        // доходив до UX_RegistryEntryKey_Live (keyTakenConcurrently на весь пакет), а темпоральний
+        // з різним ValidFrom і вікнами, що перетинаються, записувався. Дубль — помилка ОБОХ рядків;
+        // вікна, що не перетинаються, — законні (та сама умова, що в служби й імпорту CSV).
+        var keyedByNumber = keyed.ToDictionary(k => k.Row.Number);
+        foreach (var (duplicate, fields) in RegistryBatchKeys.DuplicateKeyRows(
+                     definition, keyDefs, [.. keyed.Select(k => k.Row)]))
+        {
+            var target = keyedByNumber[duplicate.Number];
+            errors.Add(new RegistryEntryImportError(target.Row.Number, target.Code, fields, KeyDuplicateInBatchKey));
+            Count(target.Outcome, -1);
+        }
+
+        if (errors.Count > 0)
+        {
+            var ordered = errors.OrderBy(e => e.Row).ToList();
+            errors.Clear();
+            errors.AddRange(ordered);
         }
 
         if (errors.Count > 0 || added + updated == 0)
@@ -737,4 +782,17 @@ public sealed class RegistryEntryWriter(
     /// <param name="Values">Значення за кодами полів.</param>
     private sealed record WriteTarget(
         int Row, string Code, RegistryEntry? Existing, bool MayCreate, IReadOnlyDictionary<string, object?> Values);
+
+    /// <summary>Рядок, що пройшов перевірку значень, — для звірки ключів у межах пакета.</summary>
+    /// <param name="Row">Рядок для <see cref="RegistryBatchKeys.DuplicateKeyRows"/>.</param>
+    /// <param name="Code">Код запису для помилки рядка.</param>
+    /// <param name="Outcome">Як рядок пораховано в результаті.</param>
+    private sealed record KeyedTarget(RegistryBatchKeyRow Row, string Code, RowOutcome Outcome);
+
+    private enum RowOutcome
+    {
+        Added,
+        Updated,
+        Unchanged,
+    }
 }

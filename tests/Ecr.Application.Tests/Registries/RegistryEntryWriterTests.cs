@@ -212,6 +212,84 @@ public sealed class RegistryEntryWriterTests
         await _uow.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// S7-3 (FEATURE-REGISTRY-TABLES §4.3 крок 3): два записи пакета отримують той самий ключ —
+    /// помилка ОБОХ рядків, нічого не зберігається. Служба ключів тримачів із пакета не
+    /// перевіряє, тож без цього кроку дубль доходив до індексу бази.
+    /// </summary>
+    [Fact]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task UpdateAsync_дубль_ключа_в_пакеті_це_помилка_обох_рядків_без_збереження()
+    {
+        var e1 = new RegistryEntry(RegistryId, EcrCode.Create("E1"), Text("E1"), 1, Now);
+        SetId(e1, 77L);
+        var e2 = new RegistryEntry(RegistryId, EcrCode.Create("E2"), Text("E2"), 1, Now);
+        SetId(e2, 78L);
+        _registries.FindEntryAsync(77L, Arg.Any<CancellationToken>()).Returns(e1);
+        _registries.FindEntryAsync(78L, Arg.Any<CancellationToken>()).Returns(e2);
+        _registries
+            .ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new[]
+            {
+                Stored(77L, StreamId, "1D-2"), Stored(77L, CaseId, "Winter"),
+                Stored(78L, StreamId, "1D-2"), Stored(78L, CaseId, "Summer"),
+            });
+        var revision = _definition.DataRevision;
+
+        // Обидва — на «Autumn» (ключ без урахування регістру): кожен окремо вільний, разом — дубль.
+        var result = await Writer().UpdateAsync(
+            new RegistryEntryUpdateBatch(
+                RegistryId,
+                [
+                    new RegistryEntryUpdate(77L, new Dictionary<string, object?> { ["CASE_NAME"] = "Autumn" }),
+                    new RegistryEntryUpdate(78L, new Dictionary<string, object?> { ["CASE_NAME"] = "AUTUMN" }),
+                ]),
+            CancellationToken.None);
+
+        Assert.False(result.Applied);
+        Assert.Equal(
+            new[]
+            {
+                new RegistryEntryImportError(1, "E1", "STREAM, CASE_NAME", RegistryEntryWriter.KeyDuplicateInBatchKey),
+                new RegistryEntryImportError(2, "E2", "STREAM, CASE_NAME", RegistryEntryWriter.KeyDuplicateInBatchKey),
+            },
+            result.Errors);
+        Assert.Equal((0, 0, 0), (result.Added, result.Updated, result.Unchanged));
+
+        await _uow.DidNotReceive().ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        _keyStore.DidNotReceive().Add(Arg.Any<RegistryEntryKey>());
+        await _audit.DidNotReceive().WriteSecurityEventsAsync(Arg.Any<IReadOnlyList<SecurityEventRecord>>(), Arg.Any<CancellationToken>());
+        Assert.Equal(revision, _definition.DataRevision);
+    }
+
+    /// <summary>
+    /// S7-3: те саме для <see cref="RegistryEntryWriter.WriteAsync"/> — прогалина S6 (пакет нових
+    /// записів із тим самим ключем писався, бо служба ключів звіряє лише з базою).
+    /// </summary>
+    [Fact]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task WriteAsync_дубль_ключа_в_пакеті_це_помилка_обох_рядків_без_збереження()
+    {
+        var result = await Writer().WriteAsync(
+            Batch(Row("E1", "1D-2", "Winter"), Row("E2", "1d-2", "winter"), Row("E3", "1D-2", "Summer")),
+            CancellationToken.None);
+
+        Assert.False(result.Applied);
+        Assert.Equal(
+            new[]
+            {
+                new RegistryEntryImportError(1, "E1", "STREAM, CASE_NAME", RegistryEntryWriter.KeyDuplicateInBatchKey),
+                new RegistryEntryImportError(2, "E2", "STREAM, CASE_NAME", RegistryEntryWriter.KeyDuplicateInBatchKey),
+            },
+            result.Errors);
+
+        // E3 з іншим ключем пройшов би — його й лічить результат.
+        Assert.Equal((1, 0, 0), (result.Added, result.Updated, result.Unchanged));
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        _keyStore.DidNotReceive().Add(Arg.Any<RegistryEntryKey>());
+    }
+
     [Fact]
     public async Task Повторений_у_пакеті_код_це_помилка_виклику_а_не_даних()
     {

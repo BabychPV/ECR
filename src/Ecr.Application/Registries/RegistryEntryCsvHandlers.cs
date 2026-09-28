@@ -347,22 +347,26 @@ public sealed class ImportRegistryEntriesHandler(
             if (keyDefs.Count > 0)
             {
                 keyed.Add(new KeyedRow(
-                    rowNumber, code, entry, EffectiveValues(definition, existingValues ?? [], values), outcome));
+                    rowNumber, code, entry, RegistryBatchKeys.EffectiveValues(definition, existingValues ?? [], values), outcome));
             }
         }
 
         // ⛔ RT-10b (§4.6): дубль ключа у файлі — помилка ОБОХ рядків, щоб звіт показав і той,
         // що «переміг би» за порядком. Порівнюються значення ПІСЛЯ застосування рядка, тож
         // рядок, що змінює ключ наявного запису, звіряється з новим ключем, а не зі старим.
-        foreach (var row in DuplicateKeyRows(definition, keyDefs, keyed))
+        // Та сама звірка, що в RegistryEntryWriter (RegistryBatchKeys) — друга копія розійшлася б.
+        var keyedByNumber = keyed.ToDictionary(r => r.Number);
+        foreach (var (duplicate, fields) in RegistryBatchKeys.DuplicateKeyRows(
+                     definition, keyDefs, [.. keyed.Select(r => new RegistryBatchKeyRow(r.Number, r.Entry, r.Values))]))
         {
-            if (!flaggedRows.Add(row.Row.Number))
+            var row = keyedByNumber[duplicate.Number];
+            if (!flaggedRows.Add(row.Number))
             {
                 continue;
             }
 
-            errors.Add(new RegistryEntryImportError(row.Row.Number, row.Row.Code, row.Fields, KeyDuplicateInFileKey));
-            switch (row.Row.Outcome)
+            errors.Add(new RegistryEntryImportError(row.Number, row.Code, fields, KeyDuplicateInFileKey));
+            switch (row.Outcome)
             {
                 case RowOutcome.Added:
                     added--;
@@ -635,7 +639,7 @@ public sealed class ImportRegistryEntriesHandler(
                 continue;
             }
 
-            if (RegistryKeyService.HashOf(definition, primary, EffectiveValues(definition, [], values)) is { } hash)
+            if (RegistryKeyService.HashOf(definition, primary, RegistryBatchKeys.EffectiveValues(definition, [], values)) is { } hash)
             {
                 rowHashes[i] = hash;
             }
@@ -688,79 +692,6 @@ public sealed class ImportRegistryEntriesHandler(
                 .GroupBy(v => v.RegistryEntryId)
                 .ToDictionary(g => g.Key, g => (IReadOnlyList<RegistryValue>)[.. g]),
             primaryFields);
-    }
-
-    /// <summary>
-    /// Значення полів запису такими, якими їх залишить рядок: наявні, поверх них — передані у
-    /// файлі. Для обчислення ключа в пам'яті, без звернення до бази.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Значення з файлу — пробні об'єкти, як у <see cref="ResolveRowAsync"/>: у контекст вони не
-    /// додаються. Порожня клітинка поля не змінює — як і в
-    /// <see cref="RegistryEntryWriter.ApplyValuesAsync"/>, куди вона не потрапляє.
-    /// </remarks>
-    private static Dictionary<int, RegistryValue> EffectiveValues(
-        RegistryDef definition, IReadOnlyList<RegistryValue> existing, IReadOnlyDictionary<string, object?> values)
-    {
-        var result = existing.ToDictionary(v => v.RegistryFieldDefId);
-        var fields = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
-
-        foreach (var (code, raw) in values)
-        {
-            if (fields.TryGetValue(code, out var field))
-            {
-                var probe = new RegistryValue(0L, field.Id);
-                probe.Set(field.DataType, raw, field.UnitId);
-                result[field.Id] = probe;
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Рядки, чий ключ має ще хоч один рядок файлу (для темпорального довідника — у вікні, що
-    /// перетинається, та сама умова, що <see cref="RegistryKeyService.Overlaps"/>).
-    /// </summary>
-    /// <returns>Кожен такий рядок — з полями першого ключа, що збігся.</returns>
-    private static List<(KeyedRow Row, string Fields)> DuplicateKeyRows(
-        RegistryDef definition, IReadOnlyList<RegistryKeyDef> keyDefs, IReadOnlyList<KeyedRow> rows)
-    {
-        var fieldCodes = definition.Fields.ToDictionary(f => f.Id, f => f.Code);
-        var found = new SortedDictionary<int, (KeyedRow Row, string Fields)>();
-
-        foreach (var key in keyDefs)
-        {
-            var fields = string.Join(
-                ", ", key.Fields.OrderBy(f => f.Ordinal).Select(f => fieldCodes[f.RegistryFieldDefId]));
-
-            var groups = rows
-                .Select(r => (Row: r, Hash: RegistryKeyService.HashOf(definition, key, r.Values)))
-                .Where(x => x.Hash is not null)
-                .GroupBy(x => Convert.ToHexString(x.Hash!), StringComparer.Ordinal)
-                .Where(g => g.Skip(1).Any());
-
-            foreach (var group in groups)
-            {
-                var members = group.Select(x => x.Row).ToList();
-                for (var a = 0; a < members.Count; a++)
-                {
-                    for (var b = a + 1; b < members.Count; b++)
-                    {
-                        if (definition.IsTemporal
-                            && !RegistryKeyService.Overlaps(members[a].Entry.Window, members[b].Entry.Window))
-                        {
-                            continue;
-                        }
-
-                        found.TryAdd(members[a].Number, (members[a], fields));
-                        found.TryAdd(members[b].Number, (members[b], fields));
-                    }
-                }
-            }
-        }
-
-        return [.. found.Values];
     }
 
     private static void RequireSize(long length, int maxBytes)
