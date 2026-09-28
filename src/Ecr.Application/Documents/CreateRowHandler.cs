@@ -110,115 +110,59 @@ public sealed class CreateRowHandler(
                 });
         }
 
-        // ⛔ C3. Решта — стан аркуша, стеля рядків, ключ, права, `ordinal` і сама
+        // 2. Ключ: заданий користувачем або GUID у форматі "N" (ФВ-2.5). Потрібен
+        //    уже тут — від нього залежить рішення про права (`RowIsReadOnly`).
+        var key = requestedKey ?? RowKey.NewDynamic();
+
+        // 3. Права — ДО транзакції й ВИНЯТКОВОГО блокування аркуша (P3).
+        await RequireCreateAllowedAsync(profile, tableInstanceId, key, ct).ConfigureAwait(false);
+
+        // ⛔ C3. Решта — стан аркуша, стеля рядків, дубль ключа, `ordinal` і сама
         // вставка — ОДНІЄЮ транзакцією під блокуванням аркуша × періоду. Доти
         // все читалося поза транзакцією: поки подання тримало аркуш, POST row
         // бачив під RCSI `Draft` і вставляв рядок, якого немає в зрізі подання;
         // а два одночасні POST обидва бачили `existing.Count < max` і обидва
         // брали `ordinal = Count + 1` — стелю перевищено, порядковий номер
         // задвоєно (`CreateRowRaceTests`).
-        RowKey key = default!;
         await uow.ExecuteInTransactionAsync(
-            async innerCt => key = await CreateUnderLockAsync(
-                instance, table, tableInstanceId, requestedKey, profile, innerCt).ConfigureAwait(false),
+            innerCt => CreateUnderLockAsync(instance, table, tableInstanceId, key, profile, innerCt),
             ct).ConfigureAwait(false);
 
         return key;
     }
 
-    /// <summary>
-    /// Перевірки й вставка рядка під блокуванням аркуша; кличеться лише
-    /// всередині транзакції <see cref="HandleAsync"/>.
-    /// </summary>
+    /// <summary>Рішення служби доступу на створення рядка з цим ключем.</summary>
     /// <remarks>
-    /// ⚠ Блокування ВИНЯТКОВЕ (<c>EnterSubmitAsync</c>), а не спільне, як у
-    /// правки комірок: спільне сумісне саме з собою, тож два POST row його
-    /// тримали б одночасно, і «порахував — вставив» лишилося б гонкою. Виняткове
-    /// серіалізує створення рядків між собою, із правками й поданням ЦЬОГО
-    /// аркуша за ЦЕЙ період; сусідні аркуші й періоди не чекають. Стан аркуша
-    /// читає <c>EnterEditAsync</c> — той самий власник транзакції вже тримає
-    /// виняткове, тож спільне видається одразу й лише читає стан після блокування.
+    /// <para>
+    /// ⛔ До цього місця обробник колись не звертався до
+    /// <c>IAccessDecisionService</c> ЖОДНОГО разу: залежність була вприснута й
+    /// не читана (<c>CS9113</c>). Наслідок вимірювався живим прогоном: рядок
+    /// додавався в ЗАКРИТИЙ період. Питається ДО вставки, з уже відомим ключем.
+    /// </para>
+    /// <para>
+    /// ⚠ Питається рішення на РЯДОК, не на комірки: колонок у цей момент ніхто
+    /// не назвав, і вимагати дозволу на кожну означало б відмовляти там, де одна
+    /// колонка обчислювана. Комірки перевіряє той, хто їх пише, —
+    /// <c>PatchCellsHandler</c>.
+    /// </para>
+    /// <para>
+    /// ✎ P3: винесено З-ПІД виняткового блокування аркуша. Рішення — кілька
+    /// читань (екземпляр, знімок, документ + проєкт + період + стан аркуша,
+    /// правила періоду), і під замком вони тримали правки, подання й інші
+    /// створення рядків цього аркуша. Чому це не відкриває TOCTOU: з усього,
+    /// що рішення читає, блокування аркуша × періоду серіалізує ЛИШЕ стан
+    /// аркуша (його змінює подання, яке теж бере це блокування), — і стан під
+    /// замком перевіряється окремо (<c>EnterEditAsync</c> у
+    /// <see cref="CreateUnderLockAsync"/>). Стан проєкту й періоду (закриття,
+    /// архівація, перевідкриття), гранти й правила доступу до періоду цього
+    /// блокування не беруть узагалі, тож і під замком рішення бачило їх лише
+    /// як знімок під RCSI — захисту, який тут знято, у них не було. Опис рядка
+    /// в шаблоні (<c>RowIsReadOnly</c>) — з незмінної версії шаблону.
+    /// </para>
     /// </remarks>
-    private async Task<RowKey> CreateUnderLockAsync(
-        Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey? requestedKey,
-        AccessProfile profile, CancellationToken ct)
+    private async Task RequireCreateAllowedAsync(
+        AccessProfile profile, long tableInstanceId, RowKey key, CancellationToken ct)
     {
-        await sheetGate
-            .EnterSubmitAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
-            .ConfigureAwait(false);
-        var status = await sheetGate
-            .EnterEditAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
-            .ConfigureAwait(false);
-
-        var stateReason = status switch
-        {
-            DocumentStatus.Submitted => (EditDenyReason?)EditDenyReason.DocumentSubmitted,
-            DocumentStatus.Approved => EditDenyReason.DocumentApproved,
-            _ => null,
-        };
-
-        if (stateReason is { } denied)
-        {
-            // ⚠ Той самий код, ключ і форма, що й відмова служби доступу нижче:
-            // для людини це та сама відмова, на якому б кроці її не спіймали.
-            throw new Errors.AccessDeniedException(
-                "ECR-ACCS-0403",
-                $"Рядок у цю таблицю додати не можна: {denied}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
-                    ["reason"] = denied.ToString(),
-                });
-        }
-
-        var existing = await rowStore.GetRowIdsAsync(tableInstanceId, PeriodKeyOf(instance), ct).ConfigureAwait(false);
-
-        // 2. Стеля кількості рядків — захист від того, щоб таблиця на 5000
-        //    рядків не з'явилася випадково і не зруйнувала бюджет читання зрізу.
-        if (table.MaxDynamicRows is { } max && existing.Count >= max)
-        {
-            throw new Errors.BusinessRuleException(
-                "ECR-ROW-0409",
-                $"Досягнуто межу динамічних рядків таблиці {table.Code}: {max}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ROW-0409.rowLimitReached",
-                    ["tableCode"] = table.Code,
-                    ["max"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
-
-        // 3. Ключ: заданий користувачем або GUID у форматі "N" (ФВ-2.5).
-        var key = requestedKey ?? RowKey.NewDynamic();
-
-        if (existing.ContainsKey(key.Value))
-        {
-            throw new Errors.BusinessRuleException(
-                "ECR-ROW-0409", $"Рядок із ключем {key.Value} у цій таблиці вже існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-ROW-0409.rowKeyExists",
-                    ["rowKey"] = key.Value,
-                });
-        }
-
-        // 4. Права. Питаються ДО вставки і з уже відомим ключем.
-        //
-        // ⛔ До цього місця обробник не звертався до `IAccessDecisionService`
-        // ЖОДНОГО разу: залежність була вприснута й не читана, і компілятор
-        // казав це прямо і безкоштовно (`CS9113`). Наслідок вимірювався живим
-        // прогоном: рядок додавався в ЗАКРИТИЙ період. `EditRules` про ту саму
-        // перевірку каже: «Закритий період блокує ВСІХ, включно з `Manage`. Це
-        // головна перевірка моделі доступу: якщо вона пропускає, зламана вся
-        // модель, і жоден інший тест цього не покаже».
-        //
-        // ⚠ Питається рішення на РЯДОК, не на комірки: колонок у цей момент
-        // ніхто не назвав, і вимагати дозволу на кожну означало б відмовляти
-        // там, де одна колонка обчислювана. Комірки перевіряє той, хто їх
-        // пише, — `PatchCellsHandler`.
-        //
-        // ⚠ Ключ уже відомий: від нього залежить `RowIsReadOnly` — опис рядка
-        // в шаблоні шукається саме за ключем.
         var decisions = await access
             .CanCreateRowsAsync(profile, tableInstanceId, [key.Value], ct)
             .ConfigureAwait(false);
@@ -242,8 +186,85 @@ public sealed class CreateRowHandler(
                     ["reason"] = decision.Reason.ToString(),
                 });
         }
+    }
 
-        // 5. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
+    /// <summary>
+    /// Перевірки й вставка рядка під блокуванням аркуша; кличеться лише
+    /// всередині транзакції <see cref="HandleAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Блокування ВИНЯТКОВЕ (<c>EnterSubmitAsync</c>), а не спільне, як у
+    /// правки комірок: спільне сумісне саме з собою, тож два POST row його
+    /// тримали б одночасно, і «порахував — вставив» лишилося б гонкою. Виняткове
+    /// серіалізує створення рядків між собою, із правками й поданням ЦЬОГО
+    /// аркуша за ЦЕЙ період; сусідні аркуші й періоди не чекають. Стан аркуша
+    /// читає <c>EnterEditAsync</c> — той самий власник транзакції вже тримає
+    /// виняткове, тож спільне видається одразу й лише читає стан після блокування.
+    /// </remarks>
+    private async Task CreateUnderLockAsync(
+        Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey key,
+        AccessProfile profile, CancellationToken ct)
+    {
+        await sheetGate
+            .EnterSubmitAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .ConfigureAwait(false);
+        var status = await sheetGate
+            .EnterEditAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .ConfigureAwait(false);
+
+        var stateReason = status switch
+        {
+            DocumentStatus.Submitted => (EditDenyReason?)EditDenyReason.DocumentSubmitted,
+            DocumentStatus.Approved => EditDenyReason.DocumentApproved,
+            _ => null,
+        };
+
+        if (stateReason is { } denied)
+        {
+            // ⚠ Той самий код, ключ і форма, що й відмова служби доступу
+            // (`RequireCreateAllowedAsync`, до блокування):
+            // для людини це та сама відмова, на якому б кроці її не спіймали.
+            throw new Errors.AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Рядок у цю таблицю додати не можна: {denied}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                    ["reason"] = denied.ToString(),
+                });
+        }
+
+        var existing = await rowStore.GetRowIdsAsync(tableInstanceId, PeriodKeyOf(instance), ct).ConfigureAwait(false);
+
+        // 4. Стеля кількості рядків — захист від того, щоб таблиця на 5000
+        //    рядків не з'явилася випадково і не зруйнувала бюджет читання зрізу.
+        if (table.MaxDynamicRows is { } max && existing.Count >= max)
+        {
+            throw new Errors.BusinessRuleException(
+                "ECR-ROW-0409",
+                $"Досягнуто межу динамічних рядків таблиці {table.Code}: {max}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.rowLimitReached",
+                    ["tableCode"] = table.Code,
+                    ["max"] = max.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        // 5. Дубль ключа — під блокуванням: два одночасні POST з тим самим
+        //    ключем серіалізуються тут.
+        if (existing.ContainsKey(key.Value))
+        {
+            throw new Errors.BusinessRuleException(
+                "ECR-ROW-0409", $"Рядок із ключем {key.Value} у цій таблиці вже існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ROW-0409.rowKeyExists",
+                    ["rowKey"] = key.Value,
+                });
+        }
+
+        // 6. Id береться з SEQUENCE ДО вставки — саме це дозволяє вантажити
         //    рядок і його комірки одним проходом SqlBulkCopy.
         await rowStore.CreateRowAsync(tableInstanceId, PeriodKeyOf(instance), key,
                                       ordinal: existing.Count + 1, ct).ConfigureAwait(false);
@@ -261,7 +282,6 @@ public sealed class CreateRowHandler(
             .ConfigureAwait(false);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        return key;
     }
 
     // Період екземпляра таблиці зберігається разом із ним; на Етапі 1 його

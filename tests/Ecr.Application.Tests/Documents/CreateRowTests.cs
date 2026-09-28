@@ -24,6 +24,7 @@ public sealed class CreateRowTests
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IUnitOfWork _uow = Substitute.For<IUnitOfWork>();
     private readonly IClock _clock = Substitute.For<IClock>();
+    private readonly ISheetEditGate _gate = Substitute.For<ISheetEditGate>();
 
     private static AccessProfile Profile() => new()
     {
@@ -96,8 +97,48 @@ public sealed class CreateRowTests
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
 
-        return new(_rows, Substitute.For<IDocumentStore>(), _metadata, _access, _uow, _clock,
-                   Substitute.For<ISheetEditGate>());
+        return new(_rows, Substitute.For<IDocumentStore>(), _metadata, _access, _uow, _clock, _gate);
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "P3")]
+    public async Task Права_на_рядок_питають_ДО_транзакції_й_виняткового_блокування_аркуша()
+    {
+        // ⛔ `CanCreateRowsAsync` — кілька читань (екземпляр, знімок, документ +
+        // проєкт + період + стан аркуша, правила періоду). Під ВИНЯТКОВИМ
+        // `EnterSubmitAsync` вони тримали правки, подання й інші створення
+        // рядків ЦЬОГО аркуша, хоча від блокування нічого не отримували: з
+        // того, що рішення читає, блокування аркуша серіалізує лише стан аркуша,
+        // а його під замком перевіряє `EnterEditAsync` окремо.
+        Arrange(TableRowMode.Dynamic, maxRows: null);
+
+        await Handler().HandleAsync(700, TableInstance, RowKey.Create("k1"), Profile(), CancellationToken.None);
+
+        Received.InOrder(() =>
+        {
+            _ = _access.CanCreateRowsAsync(
+                Arg.Any<AccessProfile>(), TableInstance,
+                Arg.Is<IReadOnlyCollection<string>>(k => k.Single() == "k1"), Arg.Any<CancellationToken>());
+            _ = _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
+            _ = _gate.EnterSubmitAsync(700, 1, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
+            _ = _rows.CreateRowAsync(TableInstance, Arg.Any<PeriodKey>(), Arg.Any<RowKey>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait("Requirement", "P3")]
+    public async Task Відмова_в_правах_не_відкриває_транзакції_й_не_бере_блокування()
+    {
+        Arrange(TableRowMode.Dynamic, maxRows: null);
+        Deny(EditDenyReason.PeriodClosed);
+
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Handler().HandleAsync(
+            700, TableInstance, requestedKey: null, Profile(), CancellationToken.None));
+
+        await _uow.DidNotReceive().ExecuteInTransactionAsync(
+            Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
+        await _gate.DidNotReceive().EnterSubmitAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
