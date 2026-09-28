@@ -59,7 +59,7 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
     /// читає знімок: незакомічене посилання для неї не існує, а нове після неї нічим не
     /// зупинене. <c>SERIALIZABLE</c> робить читання блокувальним (чекає на незакомічене) і
     /// тримає діапазони ключів до кінця транзакції (нове посилання чекає коміту). Підказки
-    /// довелося б дублювати в тринадцяти запитах переліку — і кожне нове джерело посилань
+    /// довелося б дублювати в кожному запиті переліку — і кожне нове джерело посилань
     /// мовчки лишалося б без них.
     ///
     /// ⚠ Рівень ставиться окремим пакетом без параметрів (не <c>sp_executesql</c>, де він
@@ -198,13 +198,34 @@ public sealed class UnitStore(EcrDbContext db) : IUnitStore
                 .Select(d => new Hit(d.Id, d.Code, null)))
             .ConfigureAwait(false);
 
+        // HSE301 U2: прив'язка PI тримає одиницю і цільовою колонкою (FK_RWM_Unit), і
+        // кожним джерелом (FK_RWS_Unit). Джерело без своєї прив'язки не існує, тож рядок —
+        // один на прив'язку, хоч би скільки її джерел були в цій одиниці. Раніше цього
+        // виду не було, і видалення такої одиниці падало на FK голим 500.
+        await AddAsync(
+            UsageKinds.RowWindowMap,
+            from m in db.RowWindowMaps
+            where m.TargetUnitId == unitId || m.Sources.Any(s => s.SourceUnitId == unitId)
+            join c in db.ColumnDefs on m.TargetColumnDefId equals c.Id
+            join t in db.TableDefs on m.TableDefId equals t.Id
+            join s in db.SheetDefs on t.SheetDefId equals s.Id
+            join v in db.TemplateVersions on s.TemplateVersionId equals v.Id
+            orderby m.Id
+            select new Hit(
+                m.Id, t.Code + "." + c.Code, "/admin/templates/" + v.TemplateId + "/versions/" + v.Id))
+            .ConfigureAwait(false);
+
         // Таблиці даних: один рядок на таблицю, без підрахунку (див. порт).
+        // ⚠ Кожен зовнішній ключ на uom.Unit мусить мати тут або вище свій запит — інакше
+        // видалення падає на FK голим 500 замість 409. Стереже UnitUsageForeignKeyTests.
         foreach (var (table, any) in new (string, Func<Task<bool>>)[]
         {
             ("doc.CellValue", () => db.CellValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
+            ("doc.DocumentHeaderValue", () => db.DocumentHeaderValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
             ("dic.RegistryValue", () => db.RegistryValues.AnyAsync(x => x.ValueUnitId == unitId, ct)),
             ("calc.CalculationResult", () => db.CalculationResults.AnyAsync(x => x.UnitId == unitId, ct)),
             ("ext.RawData", () => db.RawDataPoints.AnyAsync(x => x.UnitId == unitId, ct)),
+            ("ext.RowWindowValue", () => db.RowWindowValues.AnyAsync(x => x.TargetUnitId == unitId, ct)),
         })
         {
             if (!await any().ConfigureAwait(false))

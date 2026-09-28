@@ -51,6 +51,8 @@ export function UsageKindLabel({ kind }: { kind: string }): JSX.Element {
       return <>{t('usageKind.methodologyRule')}</>;
     case 'methodologyRequiredInput':
       return <>{t('usageKind.methodologyRequiredInput')}</>;
+    case 'rowWindowMap':
+      return <>{t('usageKind.rowWindowMap')}</>;
     default:
       return <Code>{kind}</Code>;
   }

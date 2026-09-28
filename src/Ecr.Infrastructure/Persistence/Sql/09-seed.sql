@@ -4598,6 +4598,11 @@ USING (VALUES
     (N'err.ECR-INT-0422.timestampUnreadable', N'en', N'The value query of source "{dataSource}" returned Ts of type {valueType} for "{sourcePath}". Only datetimeoffset or a date/time type without offset (read as UTC) can be used, so this interval is not recorded as collected.', 1),
     (N'err.ECR-INT-0422.timestampsOutOfOrder', N'en', N'The value query of source "{dataSource}" returns rows for "{sourcePath}" out of time order ({current} after {previous}). Add ORDER BY on the timestamp to the query: without it the unread tail of a batch cannot be determined.', 1),
     -- HSE301:A7 ── кінець секції
+
+    -- HSE301:U2 ── «де використовується одиниця» бачить прив'язки PI за вікном рядка
+    -- (ext.RowWindowMap / ext.RowWindowSource): без виду видалення падало на FK голим 500.
+    (N'usageKind.rowWindowMap', N'en', N'PI row-window binding', 1),
+    -- HSE301:U2 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
