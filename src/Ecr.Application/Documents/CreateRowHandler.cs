@@ -1,6 +1,7 @@
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
@@ -13,7 +14,8 @@ public sealed class CreateRowHandler(
     IMetadataCache metadata,
     IAccessDecisionService access,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+    ISheetEditGate sheetGate)
 {
     /// <summary>Створює рядок і повертає його ключ.</summary>
     /// <exception cref="Errors.BusinessRuleException">
@@ -105,6 +107,67 @@ public sealed class CreateRowHandler(
                     ["messageKey"] = "err.ECR-ROW-0409.rowsFromTemplate",
                     ["tableCode"] = table.Code,
                     ["rowMode"] = table.RowMode.ToString(),
+                });
+        }
+
+        // ⛔ C3. Решта — стан аркуша, стеля рядків, ключ, права, `ordinal` і сама
+        // вставка — ОДНІЄЮ транзакцією під блокуванням аркуша × періоду. Доти
+        // все читалося поза транзакцією: поки подання тримало аркуш, POST row
+        // бачив під RCSI `Draft` і вставляв рядок, якого немає в зрізі подання;
+        // а два одночасні POST обидва бачили `existing.Count < max` і обидва
+        // брали `ordinal = Count + 1` — стелю перевищено, порядковий номер
+        // задвоєно (`CreateRowRaceTests`).
+        RowKey key = default!;
+        await uow.ExecuteInTransactionAsync(
+            async innerCt => key = await CreateUnderLockAsync(
+                instance, table, tableInstanceId, requestedKey, profile, innerCt).ConfigureAwait(false),
+            ct).ConfigureAwait(false);
+
+        return key;
+    }
+
+    /// <summary>
+    /// Перевірки й вставка рядка під блокуванням аркуша; кличеться лише
+    /// всередині транзакції <see cref="HandleAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Блокування ВИНЯТКОВЕ (<c>EnterSubmitAsync</c>), а не спільне, як у
+    /// правки комірок: спільне сумісне саме з собою, тож два POST row його
+    /// тримали б одночасно, і «порахував — вставив» лишилося б гонкою. Виняткове
+    /// серіалізує створення рядків між собою, із правками й поданням ЦЬОГО
+    /// аркуша за ЦЕЙ період; сусідні аркуші й періоди не чекають. Стан аркуша
+    /// читає <c>EnterEditAsync</c> — той самий власник транзакції вже тримає
+    /// виняткове, тож спільне видається одразу й лише читає стан після блокування.
+    /// </remarks>
+    private async Task<RowKey> CreateUnderLockAsync(
+        Ports.TableInstanceRef instance, TableDef table, long tableInstanceId, RowKey? requestedKey,
+        AccessProfile profile, CancellationToken ct)
+    {
+        await sheetGate
+            .EnterSubmitAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .ConfigureAwait(false);
+        var status = await sheetGate
+            .EnterEditAsync(instance.DocumentId, table.SheetDefId, PeriodKeyOf(instance), ct)
+            .ConfigureAwait(false);
+
+        var stateReason = status switch
+        {
+            DocumentStatus.Submitted => (EditDenyReason?)EditDenyReason.DocumentSubmitted,
+            DocumentStatus.Approved => EditDenyReason.DocumentApproved,
+            _ => null,
+        };
+
+        if (stateReason is { } denied)
+        {
+            // ⚠ Той самий код, ключ і форма, що й відмова служби доступу нижче:
+            // для людини це та сама відмова, на якому б кроці її не спіймали.
+            throw new Errors.AccessDeniedException(
+                "ECR-ACCS-0403",
+                $"Рядок у цю таблицю додати не можна: {denied}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-ACCS-0403.addRowDenied",
+                    ["reason"] = denied.ToString(),
                 });
         }
 

@@ -89,7 +89,16 @@ public sealed class CreateRowTests
     private static void SetId(TableDef t, int id) => typeof(Entity<int>).GetProperty("Id")!.SetValue(t, id);
 
     private CreateRowHandler Handler()
-        => new(_rows, Substitute.For<IDocumentStore>(), _metadata, _access, _uow, _clock);
+    {
+        // ⚠ C3: обробник пише в транзакції під блокуванням аркуша. Тут —
+        // прохідна транзакція й блокування зі станом `Draft`; саму гонку
+        // тримає `CreateRowRaceTests` (Infrastructure.Tests) на справжній базі.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
+        return new(_rows, Substitute.For<IDocumentStore>(), _metadata, _access, _uow, _clock,
+                   Substitute.For<ISheetEditGate>());
+    }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage1)]
     public async Task BaseVersion_null_трактується_як_створення()
