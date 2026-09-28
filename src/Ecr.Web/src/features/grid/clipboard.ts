@@ -251,6 +251,12 @@ export type CellGuard = (rowKey: string, columnCode: string) => string | null;
  * обидва прочитання і вставляє однозначний запис.
  */
 function ambiguityOf(value: string, locale: string): string | null {
+  // ⚠ Без коми неоднозначності не буває (крапка неоднозначна лише там, де вона
+  // розряди, — тому перевіряються обидві). Швидкий вихід тримає ФВ-14.4
+  // (500×60 за < 200 мс): у повному наборі під навантаженням повний розбір
+  // кожної комірки дав 492 мс.
+  if (!value.includes(',') && !value.includes('.')) return null;
+
   const reading = readNumber(value, locale);
   if (reading.kind !== 'ambiguous') return null;
 
