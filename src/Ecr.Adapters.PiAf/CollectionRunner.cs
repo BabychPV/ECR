@@ -29,7 +29,8 @@ public sealed partial class CollectionRunner(
     CatchUpPlanner catchUp,
     ICollectionStore store,
     TimeSpan? maxRunDuration = null,
-    ILogger<CollectionRunner>? logger = null) : ICollectionRunner
+    ILogger<CollectionRunner>? logger = null,
+    int? maxPagesPerRead = null) : ICollectionRunner
 {
     /// <summary>Лог збоїв прогону; без реєстрації (тести) — порожній.</summary>
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
@@ -68,6 +69,19 @@ public sealed partial class CollectionRunner(
     /// контейнера, не обхідний прийом.
     /// </remarks>
     private readonly TimeSpan runDuration = maxRunDuration ?? DefaultMaxRunDuration;
+
+    /// <summary>Стеля сторінок на одну пару інтервал/атрибут за прогін (аудит B3).</summary>
+    /// <remarks>
+    /// ⚠ Судження, не вимога: 200 сторінок по <see cref="MaxPointsPerRequest"/>
+    /// — мільйон точок, тобто майже два роки хвилинного тега. Це запобіжник від
+    /// джерела, що віддає нескінченно (тоді годинник прогону спрацював би
+    /// значно пізніше), а не робочий режим: прочитане покривається, решту
+    /// бере наздоганяння з місця зупинки.
+    /// </remarks>
+    public const int DefaultMaxPagesPerRead = 200;
+
+    /// <summary>Стеля сторінок цього прогону: параметр конструктора (тести) або дефолт.</summary>
+    private readonly int maxPages = maxPagesPerRead is > 0 ? maxPagesPerRead.Value : DefaultMaxPagesPerRead;
 
     /// <summary>
     /// Наскільки глибоко кожен прогін заглядає назад по прогалини.
@@ -145,6 +159,19 @@ public sealed partial class CollectionRunner(
         // Атрибути, чиї мапінги цей прогін поставив на паузу (ФВ-16.9).
         var pausedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        // ⚠ Інтервал, що читається зараз, і межа, до якої він прочитаний
+        // ДОСТОВІРНО (усіма атрибутами). Потрібні, коли прогін обривається
+        // посеред сторінкування (watchdog, скасування, збій): покриття
+        // пишеться за фактично прочитане, і наздоганяння продовжує звідси, а
+        // не з початку інтервалу (аудит B3).
+        TimeInterval? inFlight = null;
+        var inFlightReached = DateTime.MinValue;
+
+        List<TimeInterval> CoveredWithInFlight()
+            => inFlight is { } open && inFlightReached > open.FromUtc
+                ? [.. covered, new TimeInterval(open.FromUtc, inFlightReached)]
+                : covered;
+
         // ⚠ Годинник прогону (Q-250): рахує ЛИШЕ звідси, а не з початку
         // методу — підготовка вище (пошук сутності, мапінгів, планування)
         // у джерело не ходить і в цей ліміт не входить. Пов'язаний із
@@ -159,52 +186,79 @@ public sealed partial class CollectionRunner(
         {
             foreach (var interval in work)
             {
-                var complete = true;
+                inFlight = interval;
+                inFlightReached = interval.FromUtc;
 
-                foreach (var path in paths)
+                // Межа, до якої інтервал прочитали ВСІ вже пройдені атрибути.
+                var reachedAll = interval.ToUtc;
+
+                for (var index = 0; index < paths.Count; index++)
                 {
+                    var path = paths[index];
+                    var lastPath = index == paths.Count - 1;
+
                     // Мапінг, поставлений на паузу через зміну одиниці, у
                     // цьому прогоні більше не читається; інтервал лишається
                     // непокритим — після рішення людини його забере наздоганяння.
                     if (pausedPaths.Contains(path))
                     {
-                        complete = false;
+                        reachedAll = interval.FromUtc;
                         continue;
                     }
 
-                    var outcome = await ReadAsync(
-                        adapter, dataSource.Id, sourceEntityId, path, interval, runToken).ConfigureAwait(false);
+                    // ⛔ Аудит B3: інтервал читається СТОРІНКАМИ до кінця, а не
+                    // одним запитом зі стелею. Раніше хвіст понад
+                    // MaxPointsPerRequest лише знімав покриття, і кожен прогін
+                    // перечитував ті самі перші 5000 точок — решта не
+                    // збиралася НІКОЛИ, а прогін ставав «Degraded» з
+                    // неправдивим «джерело недоступне».
+                    var cursor = interval.FromUtc;
+                    var carried = new Dictionary<DateTime, int>();
+                    var pages = 0;
 
-                    if (outcome.Unauthorized)
+                    while (true)
                     {
-                        // ⚠ Єдиний виняток із заборони повторювати: квиток міг
-                        // просто протухнути посеред довгого прогону. Запит
-                        // адаптера перескладається з нуля — секрет читається на
-                        // кожне звернення, — тож це справді ПЕРЕЗДОБУТТЯ, а не
-                        // той самий заголовок удруге.
-                        if (accepted && !reacquired)
-                        {
-                            reacquired = true;
+                        var page = new TimeInterval(cursor, interval.ToUtc);
 
-                            outcome = await ReadAsync(
-                                adapter, dataSource.Id, sourceEntityId, path, interval, runToken)
-                                .ConfigureAwait(false);
-                        }
+                        var outcome = await ReadAsync(
+                            adapter, dataSource.Id, sourceEntityId, path, page, runToken).ConfigureAwait(false);
 
                         if (outcome.Unauthorized)
                         {
-                            // ⛔ Прогін обривається ТУТ. Решта інтервалів і
-                            // атрибутів не читається: ті самі облікові дані
-                            // дадуть ту саму відмову, а прогін від цього стане
-                            // лише довшим (`H-20`).
-                            throw await FailAuthenticationAsync(
-                                runId, sourceEntityId, entity.Code, covered, retrieved, outcome.Message)
-                                .ConfigureAwait(false);
-                        }
-                    }
+                            // ⚠ Єдиний виняток із заборони повторювати: квиток міг
+                            // просто протухнути посеред довгого прогону. Запит
+                            // адаптера перескладається з нуля — секрет читається на
+                            // кожне звернення, — тож це справді ПЕРЕЗДОБУТТЯ, а не
+                            // той самий заголовок удруге.
+                            if (accepted && !reacquired)
+                            {
+                                reacquired = true;
 
-                    if (outcome.Collected is { } result)
-                    {
+                                outcome = await ReadAsync(
+                                    adapter, dataSource.Id, sourceEntityId, path, page, runToken)
+                                    .ConfigureAwait(false);
+                            }
+
+                            if (outcome.Unauthorized)
+                            {
+                                // ⛔ Прогін обривається ТУТ. Решта інтервалів і
+                                // атрибутів не читається: ті самі облікові дані
+                                // дадуть ту саму відмову, а прогін від цього стане
+                                // лише довшим (`H-20`).
+                                throw await FailAuthenticationAsync(
+                                    runId, sourceEntityId, entity.Code, CoveredWithInFlight(), retrieved,
+                                    outcome.Message)
+                                    .ConfigureAwait(false);
+                            }
+                        }
+
+                        if (outcome.Collected is not { } result)
+                        {
+                            failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
+                            failureMessage ??= outcome.Message;
+                            break;
+                        }
+
                         accepted = true;
 
                         // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
@@ -212,32 +266,87 @@ public sealed partial class CollectionRunner(
                         // діапазону не дався, означало б читати його вдруге —
                         // і так до наступної відмови.
                         var saved = await SaveAsync(
-                            runId, sourceEntityId, result.Points, maps, units, pausedPaths, ct).ConfigureAwait(false);
+                                runId, sourceEntityId, Fresh(result.Points, carried), maps, units, pausedPaths, ct)
+                            .ConfigureAwait(false);
                         retrieved += saved.Written;
+                        pages++;
 
                         if (saved.UnitChange is { } change)
                         {
                             failureCode ??= SourceUnitConverter.UnitChangedCode;
                             failureMessage ??= change;
+                            break;
                         }
-                        else if (result.ErrorCode is null && result.FailedIntervals.Count == 0)
+
+                        if (result.ErrorCode is not null)
                         {
-                            continue;
+                            failureCode ??= result.ErrorCode;
+                            break;
+                        }
+
+                        if (result.FailedIntervals.Count == 0)
+                        {
+                            cursor = interval.ToUtc;
+                            break;
+                        }
+
+                        // Батч обрізано стелею: наступна сторінка — з першого
+                        // непрочитаного моменту. Адаптери віддають хвіст як
+                        // [мітка ОСТАННЬОЇ точки, кінець) — тобто межу ВКЛЮЧНО
+                        // (≥): точки з тією самою міткою, що не влізли в батч,
+                        // інакше загубилися б. Уже прочитані з цією міткою
+                        // наступна сторінка поверне вдруге — їх відкидає Fresh.
+                        var next = result.FailedIntervals.Min(i => i.FromUtc);
+
+                        if (next <= cursor)
+                        {
+                            // Уся сторінка — одна мітка: ≥ не просуває курсора,
+                            // а > загубив би точки. Далі цей атрибут у цьому
+                            // інтервалі прочитати неможливо — так і пишемо.
+                            failureCode ??= SourceUnavailable;
+                            failureMessage ??=
+                                $"Атрибут «{path}»: понад {MaxPointsPerRequest} точок мають однакову мітку "
+                                + $"{cursor:O}; сторінкування за часом далі не просувається, "
+                                + $"[{cursor:O}, {interval.ToUtc:O}) не дочитано.";
+                            break;
+                        }
+
+                        carried = Carried(result.Points, next);
+                        cursor = next;
+
+                        if (lastPath)
+                        {
+                            inFlightReached = Min(reachedAll, cursor);
+                        }
+
+                        if (pages >= maxPages)
+                        {
+                            failureCode ??= SourceUnavailable;
+                            failureMessage ??=
+                                $"Атрибут «{path}»: прочитано {pages} сторінок по {MaxPointsPerRequest} точок "
+                                + $"до {cursor:O} — ліміт сторінок на прогін. Покриття записано за прочитане; "
+                                + $"[{cursor:O}, {interval.ToUtc:O}) дочитає наздоганяння з цього місця.";
+                            break;
                         }
                     }
 
-                    complete = false;
-                    failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
-                    failureMessage ??= outcome.Message;
+                    reachedAll = Min(reachedAll, cursor);
+
+                    if (lastPath)
+                    {
+                        inFlightReached = reachedAll;
+                    }
                 }
 
-                // ⛔ Покриття пишеться ЛИШЕ за повністю прочитаний інтервал.
-                // Записане наперед покриття — це дірка, яку більше ніхто не
-                // знайде: наздоганяння шукає прогалини саме тут.
-                if (complete)
+                // ⛔ Покриття пишеться ЛИШЕ за фактично прочитане ВСІМА
+                // атрибутами. Записане наперед покриття — це дірка, яку більше
+                // ніхто не знайде: наздоганяння шукає прогалини саме тут.
+                if (reachedAll > interval.FromUtc)
                 {
-                    covered.Add(interval);
+                    covered.Add(new TimeInterval(interval.FromUtc, reachedAll));
                 }
+
+                inFlight = null;
 
                 step++;
                 await progress
@@ -255,7 +364,7 @@ public sealed partial class CollectionRunner(
             // одиниці сюди більше не доходить — вона ставить на паузу лише
             // свій мапінг, див. SaveAsync.)
             await store
-                .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
+                .WriteCoverageAsync(runId, sourceEntityId, CoveredWithInFlight(), CancellationToken.None)
                 .ConfigureAwait(false);
 
             await store
@@ -276,6 +385,12 @@ public sealed partial class CollectionRunner(
             // це затримка (ФВ-11.3), а не збій: непрочитане нижче піде в
             // ту саму гілку `Degraded`, що й звичайна відмова джерела, і
             // наздоганяння забере його наступного разу без втрати даних.
+            // Прочитані до обриву сторінки інтервалу — теж покриття: інакше
+            // наступний прогін почав би цей інтервал спочатку і знову вперся б
+            // у той самий ліміт (аудит B3).
+            covered = CoveredWithInFlight();
+            inFlight = null;
+
             failureCode ??= SourceUnavailable;
             failureMessage ??=
                 $"Прогін перевищив ліміт часу {runDuration.TotalMinutes:0} хв: джерело відповідає, "
@@ -292,7 +407,7 @@ public sealed partial class CollectionRunner(
             // зміна контракту й екрана, не цього виправлення. Виняток іде
             // далі: задача мусить побачити, що її скасували.
             await CloseAfterFailureAsync(
-                    runId, sourceEntityId, covered, "Degraded", retrieved,
+                    runId, sourceEntityId, CoveredWithInFlight(), "Degraded", retrieved,
                     $"{SourceUnavailable}: прогін скасовано ззовні (зупинка задачі). "
                     + "Непрочитане піде в наздоганяння наступного разу.",
                     ex)
@@ -311,7 +426,7 @@ public sealed partial class CollectionRunner(
             // Відмова в автентифікації сюди не йде: її прогін уже закрито
             // (`FailAuthenticationAsync`).
             await CloseAfterFailureAsync(
-                    runId, sourceEntityId, covered, CollectionFailure.FailedStatus, retrieved,
+                    runId, sourceEntityId, CoveredWithInFlight(), CollectionFailure.FailedStatus, retrieved,
                     Compose("Збій прогону збору.", Describe(ex)),
                     ex)
                 .ConfigureAwait(false);
@@ -634,6 +749,63 @@ public sealed partial class CollectionRunner(
 
         return new SaveOutcome(written, unitChange);
     }
+
+    /// <summary>
+    /// Точки сторінки без тих, що попередня сторінка вже віддала (межа ≥).
+    /// </summary>
+    /// <param name="points">Сторінка в порядку джерела.</param>
+    /// <param name="carried">Скільки точок з кожною міткою ≥ курсора вже прочитано.</param>
+    /// <remarks>
+    /// ⚠ Відкидається рівно стільки перших точок із міткою, скільки їх уже
+    /// прочитано, — не «всі з цією міткою»: точки з однаковою міткою, що не
+    /// влізли в попередній батч, ідуть після прочитаних і мають лишитися.
+    /// </remarks>
+    private static IReadOnlyList<SourceDataPoint> Fresh(
+        IReadOnlyList<SourceDataPoint> points, Dictionary<DateTime, int> carried)
+    {
+        if (carried.Count == 0)
+        {
+            return points;
+        }
+
+        var left = new Dictionary<DateTime, int>(carried);
+        var fresh = new List<SourceDataPoint>(points.Count);
+
+        foreach (var point in points)
+        {
+            if (left.TryGetValue(point.Timestamp, out var skip) && skip > 0)
+            {
+                left[point.Timestamp] = skip - 1;
+                continue;
+            }
+
+            fresh.Add(point);
+        }
+
+        return fresh;
+    }
+
+    /// <summary>Скільки точок із кожною міткою ≥ <paramref name="cursor"/> є на сторінці.</summary>
+    /// <remarks>
+    /// Рахується за СИРОЮ сторінкою, разом із відкинутими дублями: вони теж
+    /// лежать у ≥ курсора і наступна сторінка поверне їх знову.
+    /// </remarks>
+    private static Dictionary<DateTime, int> Carried(IReadOnlyList<SourceDataPoint> points, DateTime cursor)
+    {
+        var carried = new Dictionary<DateTime, int>();
+
+        foreach (var point in points)
+        {
+            if (point.Timestamp >= cursor)
+            {
+                carried[point.Timestamp] = carried.GetValueOrDefault(point.Timestamp) + 1;
+            }
+        }
+
+        return carried;
+    }
+
+    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
 
     /// <summary>Підсумок збереження батча.</summary>
     /// <param name="Written">Скільки точок записано.</param>
