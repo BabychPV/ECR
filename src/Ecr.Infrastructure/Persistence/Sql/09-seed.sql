@@ -4456,6 +4456,15 @@ USING (VALUES
     -- RT: data
 
     -- RT: expressions
+    -- RT-21 (FEATURE-REGISTRY-TABLES §5.5, `02b` §12, перевірки 15–19 і попередження 21а): статичні перевірки функцій довідників.
+    (N'expr.registryUnknown',                  N'en', N'Registry "{registry}" does not exist.', 1),
+    (N'expr.registryCodeMustBeLiteral',        N'en', N'The registry code of {function} must be a string literal such as ''STREAM_CASE'': it is resolved when the formula is published.', 1),
+    (N'expr.registryFieldUnknown',             N'en', N'Registry "{registry}" has no field "{field}".', 1),
+    (N'expr.registryFieldNotLookup',           N'en', N'Field "{field}" of registry "{registry}" is not a Lookup field: a field path can continue only through Lookup fields.', 1),
+    (N'expr.registryKeyArity',                 N'en', N'REGFIND on registry "{registry}" needs {expected} key part(s) ({key}), but {actual} were given.', 1),
+    (N'expr.registryKeyPartType',              N'en', N'Key part {index} of REGFIND on registry "{registry}" (field "{field}") must be {expected}, but it is {actual}.', 1),
+    (N'expr.entryRefMisuse',                   N'en', N'A reference to an entry of registry "{registry}" cannot take part in arithmetic or be compared with a number; compare it only with an entry of the same registry.', 1),
+    (N'expr.registryScanUnindexed',            N'en', N'The filter of {function} on registry "{registry}" has no indexed condition (ROW.<Lookup field> = ...), so every row of the registry is scanned.', 1),
 
     -- RT: ui-registries
 

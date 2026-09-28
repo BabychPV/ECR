@@ -1,5 +1,6 @@
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Expressions.Ast;
+using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Parsing;
 
 namespace Ecr.Expressions.Binding;
@@ -24,6 +25,11 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
     /// Cell-залежності від самої Lookup-комірки (ту додає загальний обхід
     /// аргументів функції, як для будь-якого іншого посилання-аргументу).
     /// </summary>
+    /// <remarks>
+    /// ✎ RT-21: також ребро «довідник/шлях поля» функцій довідників
+    /// (<c>REGFIND</c>, <c>REGONE</c>, агрегати, <c>ROW.a.b</c>) — без таблиці,
+    /// див. <c>AddRegistryUse</c>.
+    /// </remarks>
     public const byte KindRegistry = 2;
 
     /// <summary>Обходить AST і збирає всі залежності.</summary>
@@ -44,10 +50,12 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
         ArgumentNullException.ThrowIfNull(root);
 
         var found = new List<ExtractedDependency>();
-        Visit(root, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
+        Visit(root, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId, rowRegistry: null);
         return found;
     }
 
+    // `rowRegistry` — код довідника області `ROW` (перший аргумент найближчого
+    // агрегата чи REGONE); `null` — області немає або код не літерал.
     private void Visit(
         AstNode node,
         List<ExtractedDependency> found,
@@ -55,7 +63,8 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
         string? currentRowKey,
         IReadOnlyDictionary<int, TableDef>? tables,
         List<ExpressionDiagnostic>? diagnostics,
-        int? currentColumnDefId)
+        int? currentColumnDefId,
+        string? rowRegistry)
     {
         switch (node)
         {
@@ -98,18 +107,30 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
                 return;
 
             case UnaryNode unary:
-                Visit(unary.Operand, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
+                Visit(unary.Operand, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId, rowRegistry);
                 return;
 
             case BinaryNode binary:
-                Visit(binary.Left, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
-                Visit(binary.Right, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
+                Visit(binary.Left, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId, rowRegistry);
+                Visit(binary.Right, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId, rowRegistry);
                 return;
 
             case ConditionalNode conditional:
-                Visit(conditional.Condition, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
-                Visit(conditional.WhenTrue, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
-                Visit(conditional.WhenFalse, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
+                Visit(conditional.Condition, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId, rowRegistry);
+                Visit(conditional.WhenTrue, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId, rowRegistry);
+                Visit(conditional.WhenFalse, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId, rowRegistry);
+                return;
+
+            // `ROW.a.b` — поле рядка області агрегата: ребро «довідник області /
+            // шлях». Поза відомою областю (код не літерал, правило довідника,
+            // якого видобувач не знає) ребра немає — про невідомий код уже
+            // сказав TypeChecker.
+            case RowFieldNode rowField:
+                if (rowRegistry is not null)
+                {
+                    AddRegistryUse(found, rowRegistry, string.Join('.', rowField.Path));
+                }
+
                 return;
 
             case FunctionNode function:
@@ -124,11 +145,24 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
                     && string.Equals(function.Name, "REGFIELD", StringComparison.OrdinalIgnoreCase))
                 {
                     AddRegistryDependency(function, found, currentTableDefId, currentRowKey, currentColumnDefId);
+                    AddRegistryFieldUse(function, found, rowRegistry);
                 }
 
-                foreach (var argument in function.Arguments)
+                // RT-21 (§5.8): функції довідників дають ребро «довідник» на
+                // сам код, а агрегати й REGONE відкривають область `ROW` для
+                // аргументів з другого — внутрішній рядок затіняє зовнішній.
+                var registryCode = RegistryCodeOf(function);
+                if (registryCode is not null)
                 {
-                    Visit(argument, found, currentTableDefId, currentRowKey, tables, diagnostics, currentColumnDefId);
+                    AddRegistryUse(found, registryCode, null);
+                }
+
+                var opensRow = RegistryForms.RowScopeNames.Contains(function.Name);
+
+                for (var i = 0; i < function.Arguments.Count; i++)
+                {
+                    Visit(function.Arguments[i], found, currentTableDefId, currentRowKey, tables, diagnostics,
+                        currentColumnDefId, opensRow && i > 0 ? registryCode : rowRegistry);
                 }
 
                 return;
@@ -263,6 +297,80 @@ public sealed class DependencyExtractor(ReferenceResolver resolver, RangeExpande
         found.Add(new ExtractedDependency(
             KindRegistry, resolved.TableDefId, resolved.RowKey, resolved.ColumnDefId,
             fieldCode, null, found.Count));
+    }
+
+    /// <summary>
+    /// Код довідника функції довідника — рядковий літерал першого аргументу
+    /// <c>REGFIND</c>/<c>REGONE</c>/агрегата; <c>null</c> — інша функція або код
+    /// обчислюється (перевірка 15 звітує про це в <c>TypeChecker</c>).
+    /// </summary>
+    private static string? RegistryCodeOf(FunctionNode function)
+        => function.Arguments.Count > 0
+           && (RegistryForms.RowScopeNames.Contains(function.Name)
+               || string.Equals(function.Name, RegistryForms.Find, StringComparison.OrdinalIgnoreCase))
+            ? ReferenceResolver.RegistryCodeLiteral(function.Arguments[0])
+            : null;
+
+    /// <summary>
+    /// Ребро «довідник/шлях поля» від <c>REGFIELD(entry, 'p')</c>, коли довідник
+    /// запису статичний: <c>REGFIND</c>/<c>REGONE</c> із літералом або
+    /// <c>ROW.a</c> відомої області (тоді шлях — <c>a.p</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Запис із <c>Lookup</c>-комірки шаблону тут не розбирається: його довідник
+    /// знає лише колонка, і ребро для нього вже дає <see cref="AddRegistryDependency"/>
+    /// (адреса комірки + код поля). Запис з <c>!Formula</c>, <c>@Arg</c> чи
+    /// <c>THIS</c> видобувач без форм довідників не бачить — його називає
+    /// публікація за типом <c>EntryRef</c> (RT-23b).
+    /// </remarks>
+    private static void AddRegistryFieldUse(FunctionNode function, List<ExtractedDependency> found, string? rowRegistry)
+    {
+        if (function.Arguments[1] is not LiteralNode { Type: ExpressionValueType.Text, Value: string path })
+        {
+            return;
+        }
+
+        switch (function.Arguments[0])
+        {
+            case FunctionNode entry when RegistryCodeOf(entry) is { } code
+                                         && (entry.Name.Equals(RegistryForms.Find, StringComparison.OrdinalIgnoreCase)
+                                             || entry.Name.Equals(RegistryForms.One, StringComparison.OrdinalIgnoreCase)):
+                AddRegistryUse(found, code, path);
+                return;
+
+            case RowFieldNode row when rowRegistry is not null:
+                AddRegistryUse(found, rowRegistry, string.Join('.', row.Path) + "." + path);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// Ребро <see cref="KindRegistry"/> «довідник/шлях поля» функцій довідників
+    /// (§5.8) — один раз на пару в межах виразу.
+    /// </summary>
+    /// <param name="found">Зібрані залежності.</param>
+    /// <param name="registryCode">Код довідника, як його написано у виразі.</param>
+    /// <param name="fieldPath">Шлях поля через крапку (<c>COMPONENT.MW</c>); <c>null</c> — сам довідник.</param>
+    /// <remarks>
+    /// ⛔ Форма ребра відрізняється від шаблонного <c>REGFIELD</c> і розрізняється
+    /// за <c>TableDefId</c>: тут його НЕМАЄ (<c>null</c>), бо довідник названо
+    /// кодом, а не комірка несе id запису. Тоді <c>RowKey</c> — код довідника,
+    /// <c>FilterJson</c> — шлях поля. Та сама конвенція, що вже діє для
+    /// <c>!Formula</c> (Cell без таблиці, <c>RowKey</c> — код формули). Наявні
+    /// читачі <see cref="KindRegistry"/> (<c>RecalculationService</c>,
+    /// <c>ValidationEngine</c>) вимагають <c>TableDefId</c> і такі ребра
+    /// пропускають; у <c>cfg.RegistryUse</c> їх переписує публікація (RT-23b, RT-24).
+    /// </remarks>
+    private static void AddRegistryUse(List<ExtractedDependency> found, string registryCode, string? fieldPath)
+    {
+        var duplicate = found.Any(d => d.DependsOnKind == KindRegistry
+                                       && d.TableDefId is null
+                                       && string.Equals(d.RowKey, registryCode, StringComparison.OrdinalIgnoreCase)
+                                       && string.Equals(d.FilterJson, fieldPath, StringComparison.OrdinalIgnoreCase));
+        if (!duplicate)
+        {
+            found.Add(new ExtractedDependency(KindRegistry, null, registryCode, null, fieldPath, null, found.Count));
+        }
     }
 }
 

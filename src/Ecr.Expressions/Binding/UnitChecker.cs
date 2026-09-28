@@ -1,4 +1,5 @@
 using Ecr.Expressions.Ast;
+using Ecr.Expressions.Evaluation;
 using Ecr.Expressions.Parsing;
 
 namespace Ecr.Expressions.Binding;
@@ -15,12 +16,32 @@ public sealed class UnitChecker
     /// <param name="context">Джерело одиниць.</param>
     /// <param name="diagnostics">Куди складати зауваження публікації.</param>
     /// <returns>Ідентифікатор одиниці результату або <c>null</c>, якщо вираз безрозмірний.</returns>
+    /// <remarks>
+    /// ✎ RT-21 (перевірка 20, FEATURE-REGISTRY-TABLES §5.5): одиниці полів
+    /// довідника беруть участь у перевірках 9–10. <c>ROW.a.b</c> і
+    /// <c>REGFIELD</c> мають одиницю останнього поля шляху, агрегати
+    /// <c>REGSUM</c>/<c>REGAVG</c>/<c>REGMIN</c>/<c>REGMAX</c> — одиницю виразу
+    /// <c>e</c>, <c>REGCOUNT</c> і пошук запису — безрозмірні. Без форм
+    /// довідників (<see cref="IRegistryBindingContext.Registries"/>) поля
+    /// безрозмірні, як і було до RT-21. Помилок шляху тут НЕ звітується —
+    /// це робить <see cref="TypeChecker"/>, і друге зауваження на ту саму
+    /// описку редактор показав би двічі.
+    /// </remarks>
     public int? Check(AstNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(diagnostics);
 
+        var ruleScope = context.RuleRegistryCode is { } rule && context.Registries is { } registries
+            ? registries.FindRegistry(rule)
+            : null;
+
+        return Check(node, context, diagnostics, ruleScope);
+    }
+
+    private int? Check(AstNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics, RegistryShape? row)
+    {
         switch (node)
         {
             case LiteralNode:
@@ -38,31 +59,37 @@ public sealed class UnitChecker
             case SymbolReferenceNode:
                 return null;
 
+            case RowFieldNode rowField:
+                return row is not null && context.Registries is { } registries
+                    ? FieldOf(registries, row, rowField.Path)?.UnitId
+                    : null;
+
             case UnaryNode unary:
-                return Check(unary.Operand, context, diagnostics);
+                return Check(unary.Operand, context, diagnostics, row);
 
             case ConditionalNode conditional:
                 return Same(
-                    Check(conditional.WhenTrue, context, diagnostics),
-                    Check(conditional.WhenFalse, context, diagnostics),
+                    Check(conditional.WhenTrue, context, diagnostics, row),
+                    Check(conditional.WhenFalse, context, diagnostics, row),
                     node, context, diagnostics,
                     "expr.unit.branchesDiffer", "The branches of a condition must be in the same unit.");
 
             case BinaryNode binary:
-                return CheckBinary(binary, context, diagnostics);
+                return CheckBinary(binary, context, diagnostics, row);
 
             case FunctionNode function:
-                return CheckFunction(function, context, diagnostics);
+                return CheckFunction(function, context, diagnostics, row);
 
             default:
                 return null;
         }
     }
 
-    private int? CheckBinary(BinaryNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics)
+    private int? CheckBinary(
+        BinaryNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics, RegistryShape? row)
     {
-        var left = Check(node.Left, context, diagnostics);
-        var right = Check(node.Right, context, diagnostics);
+        var left = Check(node.Left, context, diagnostics, row);
+        var right = Check(node.Right, context, diagnostics, row);
 
         switch (node.Operator)
         {
@@ -127,12 +154,26 @@ public sealed class UnitChecker
         }
     }
 
-    private int? CheckFunction(FunctionNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics)
+    private int? CheckFunction(
+        FunctionNode node, IUnitContext context, List<ExpressionDiagnostic> diagnostics, RegistryShape? row)
     {
-        var units = node.Arguments.Select(a => Check(a, context, diagnostics)).ToList();
+        var upper = node.Name.ToUpperInvariant();
 
-        switch (node.Name.ToUpperInvariant())
+        if (RegistryForms.RowScopeNames.Contains(upper))
         {
+            return CheckRegistryScan(node, upper, context, diagnostics, row);
+        }
+
+        var units = node.Arguments.Select(a => Check(a, context, diagnostics, row)).ToList();
+
+        switch (upper)
+        {
+            case RegistryForms.Field:
+                return RegistryFieldUnit(node, context, row);
+
+            case RegistryForms.Find:
+                return null;
+
             case "SUM" or "AVERAGE" or "MIN" or "MAX" or "PRODUCT" or "SUMIF":
             {
                 // ⛔ Колонка з одиницею НА РЯДОК (ФВ-16.8, D-87): підсумувати її
@@ -174,6 +215,109 @@ public sealed class UnitChecker
                 return null;
         }
     }
+
+    /// <summary>
+    /// <c>REGONE</c> і агрегати: <c>f</c> і <c>e</c> — в області рядка довідника
+    /// з першого аргументу; внутрішній <c>ROW</c> затіняє зовнішній (§5.2).
+    /// </summary>
+    private int? CheckRegistryScan(
+        FunctionNode node, string upper, IUnitContext context, List<ExpressionDiagnostic> diagnostics, RegistryShape? row)
+    {
+        var arguments = node.Arguments;
+        if (arguments.Count == 0)
+        {
+            return null;
+        }
+
+        Check(arguments[0], context, diagnostics, row);
+
+        var inner = ReferenceResolver.RegistryCodeLiteral(arguments[0]) is { } code && context.Registries is { } registries
+            ? registries.FindRegistry(code)
+            : null;
+
+        int? value = null;
+        for (var i = 1; i < arguments.Count; i++)
+        {
+            var unit = Check(arguments[i], context, diagnostics, inner);
+            if (i == 2)
+            {
+                value = unit;
+            }
+        }
+
+        // Сума, середнє, мінімум і максимум мають одиницю того, що
+        // агрегують; кількість рядків і знайдений запис — безрозмірні.
+        return upper is RegistryForms.Sum or RegistryForms.Average or RegistryForms.Minimum or RegistryForms.Maximum
+            ? value
+            : null;
+    }
+
+    /// <summary>Одиниця <c>REGFIELD(entry, 'p')</c> — останнього поля шляху.</summary>
+    private static int? RegistryFieldUnit(FunctionNode node, IUnitContext context, RegistryShape? row)
+    {
+        if (node.Arguments.Count != 2
+            || context.Registries is not { } registries
+            || node.Arguments[1] is not LiteralNode { Value: string path }
+            || EntryRegistry(node.Arguments[0], context, registries, row) is not { } code
+            || registries.FindRegistry(code) is not { } shape)
+        {
+            return null;
+        }
+
+        return FieldOf(registries, shape, path.Split('.'))?.UnitId;
+    }
+
+    /// <summary>
+    /// Довідник запису, який статично дає вузол; <c>null</c> — вузол не є
+    /// <c>EntryRef</c> або його довідник невідомий.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Та сама відповідь, що дає <see cref="TypeChecker"/> типом <c>EntryRef</c>,
+    /// лише без діагностик: одиниці про помилку шляху не звітують.
+    /// </remarks>
+    private static string? EntryRegistry(
+        AstNode node, IUnitContext context, IRegistryShapeSource registries, RegistryShape? row)
+    {
+        switch (node)
+        {
+            case FunctionNode function when function.Arguments.Count > 0
+                                            && (function.Name.Equals(RegistryForms.Find, StringComparison.OrdinalIgnoreCase)
+                                                || function.Name.Equals(RegistryForms.One, StringComparison.OrdinalIgnoreCase)):
+                return ReferenceResolver.RegistryCodeLiteral(function.Arguments[0]);
+
+            case FunctionNode function when function.Arguments.Count == 2
+                                            && function.Name.Equals(RegistryForms.Field, StringComparison.OrdinalIgnoreCase)
+                                            && function.Arguments[1] is LiteralNode { Value: string path }
+                                            && EntryRegistry(function.Arguments[0], context, registries, row) is { } code
+                                            && registries.FindRegistry(code) is { } shape:
+                return LookupTarget(FieldOf(registries, shape, path.Split('.')));
+
+            case RowFieldNode rowField when row is not null:
+                return LookupTarget(FieldOf(registries, row, rowField.Path));
+
+            case ThisNode:
+                return context.RuleRegistryCode;
+
+            case CellReferenceNode reference:
+                return context.GetReferenceRegistry(reference);
+
+            case SymbolReferenceNode { Kind: SymbolKind.Argument } argument:
+                return context.GetArgumentRegistry(argument.Name);
+
+            case SymbolReferenceNode { Kind: SymbolKind.Formula } formula:
+                return context.GetFormulaRegistry(formula.Name);
+
+            default:
+                return null;
+        }
+    }
+
+    private static string? LookupTarget(RegistryFieldShape? field)
+        => field is { DataType: Domain.Enums.CellDataType.Lookup } ? field.LookupRegistryCode : null;
+
+    /// <summary>Поле в кінці шляху; <c>null</c> — шлях не проходить (зауваження — справа <see cref="TypeChecker"/>).</summary>
+    private static RegistryFieldShape? FieldOf(IRegistryShapeSource registries, RegistryShape registry, IReadOnlyList<string> path)
+        => ReferenceResolver.ResolveRegistryPath(registries, registry, path, _ => (0, 0), diagnostics: null);
 
     /// <summary>Одиниця результату <c>CONVERT(значення, 'з', 'у')</c>.</summary>
     /// <remarks>
@@ -329,7 +473,11 @@ public sealed class UnitChecker
 }
 
 /// <summary>Джерело одиниць.</summary>
-public interface IUnitContext
+/// <remarks>
+/// ✎ RT-21: успадковує <see cref="IRegistryBindingContext"/> — одиниці полів
+/// довідника (перевірка 20) приходять із тих самих форм, що й типи.
+/// </remarks>
+public interface IUnitContext : IRegistryBindingContext
 {
     /// <summary>Одиниця посилання з дерева виразу; <c>null</c> — безрозмірне.</summary>
     public int? GetReferenceUnit(CellReferenceNode reference);
