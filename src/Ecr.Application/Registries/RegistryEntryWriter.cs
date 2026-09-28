@@ -51,7 +51,28 @@ public sealed record RegistryEntryWrite(string Code, IReadOnlyDictionary<string,
 /// <summary>Пакет записів ОДНОГО довідника для <see cref="RegistryEntryWriter.WriteAsync"/>.</summary>
 /// <param name="RegistryDefId">Довідник.</param>
 /// <param name="Entries">Записи; код не повторюється (без урахування регістру).</param>
-public sealed record RegistryEntryWriteBatch(int RegistryDefId, IReadOnlyList<RegistryEntryWrite> Entries);
+public sealed record RegistryEntryWriteBatch(int RegistryDefId, IReadOnlyList<RegistryEntryWrite> Entries)
+{
+    /// <summary>
+    /// Лише оновлювати (S7, синк довідника): запису з таким кодом немає — помилка рядка
+    /// <c>err.ECR-REG-0404.registryEntry</c>, а не створення. За замовчуванням <c>false</c> —
+    /// поведінка S6 (немає — створюється).
+    /// </summary>
+    public bool UpdateOnly { get; init; }
+}
+
+/// <summary>
+/// Одне оновлення наявного запису, адресоване за <c>RegistryEntryId</c>
+/// (<see cref="RegistryEntryWriter.UpdateAsync"/>).
+/// </summary>
+/// <param name="RegistryEntryId">Запис; мусить належати довіднику пакета й не бути видаленим логічно.</param>
+/// <param name="Values">Значення за кодами полів — як у <see cref="RegistryEntryWrite.Values"/>.</param>
+public sealed record RegistryEntryUpdate(long RegistryEntryId, IReadOnlyDictionary<string, object?> Values);
+
+/// <summary>Пакет оновлень ОДНОГО довідника для <see cref="RegistryEntryWriter.UpdateAsync"/>.</summary>
+/// <param name="RegistryDefId">Довідник.</param>
+/// <param name="Entries">Оновлення; <c>RegistryEntryId</c> не повторюється.</param>
+public sealed record RegistryEntryUpdateBatch(int RegistryDefId, IReadOnlyList<RegistryEntryUpdate> Entries);
 
 /// <summary>Результат <see cref="RegistryEntryWriter.WriteAsync"/>.</summary>
 /// <param name="Added">Створених записів.</param>
@@ -147,30 +168,98 @@ public sealed class RegistryEntryWriter(
             }
         }
 
-        var userId = currentUser.UserId
-            ?? throw new AccessDeniedException(
-                "ECR-AUTH-0401",
-                "Анонімний запит не змінює довідники.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
-
-        var definition = await registries.FindDefinitionByIdAsync(batch.RegistryDefId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                "ECR-REG-0404",
-                $"Довідника {batch.RegistryDefId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0404.registryId",
-                    ["registryDefId"] = batch.RegistryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+        var userId = RequireUserId();
+        var definition = await RequireDefinitionAsync(batch.RegistryDefId, ct).ConfigureAwait(false);
 
         // Наявні записи й їхні значення — пакетом (B-10), з відстеженням (як в імпорті).
         var existing = codes.Count == 0
             ? new Dictionary<string, RegistryEntry>(StringComparer.OrdinalIgnoreCase)
             : (await registries.FindEntriesByCodesAsync(definition.Id, codes, ct).ConfigureAwait(false))
                 .ToDictionary(e => e.Code, StringComparer.OrdinalIgnoreCase);
-        var valuesByEntry = existing.Count == 0
+
+        var targets = batch.Entries
+            .Select((item, i) => new WriteTarget(
+                i + 1,
+                item.Code.Trim(),
+                existing.GetValueOrDefault(item.Code.Trim()),
+                MayCreate: !batch.UpdateOnly,
+                item.Values ?? new Dictionary<string, object?>()))
+            .ToList();
+
+        return await WriteTargetsAsync(definition, targets, userId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Оновлює наявні записи одного довідника, адресовані за <c>RegistryEntryId</c> — лише
+    /// оновлення, без створення (S7, синк довідника із зовнішнім джерелом).
+    /// </summary>
+    /// <remarks>
+    /// Правила ті самі, що в <see cref="WriteAsync"/>: все або нічого, <c>Applied = false</c> без
+    /// фактичних змін, ревізія й аудит — лише при записі; ⛔ після <c>Applied = false</c> область
+    /// виклику закривається без <c>SaveChangesAsync</c>.
+    /// <para>
+    /// Запису немає, він видалений логічно або належить іншому довіднику — помилка рядка
+    /// <c>err.ECR-REG-0404.registryEntry</c> з <c>Key</c> = Id запису.
+    /// </para>
+    /// <para>
+    /// ⚠ Записи читаються поштучно (<see cref="IRegistryStore.FindEntryAsync"/>): пакетного читання
+    /// за Id у порту немає, а порт — поза межами кроку S7. Значення — пакетом, як у
+    /// <see cref="WriteAsync"/>.
+    /// </para>
+    /// </remarks>
+    /// <param name="batch">Пакет.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="ArgumentException">Id запису повторюється в пакеті.</exception>
+    /// <exception cref="AccessDeniedException"><c>ECR-AUTH-0401</c>: немає автора.</exception>
+    /// <exception cref="NotFoundException"><c>ECR-REG-0404</c>: довідника немає.</exception>
+    /// <exception cref="BusinessRuleException"><c>ECR-REG-4092</c>: ключ зайнятий записом поза пакетом.</exception>
+    public async Task<RegistryEntryWriteResult> UpdateAsync(RegistryEntryUpdateBatch batch, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(batch.Entries);
+
+        var ids = new HashSet<long>();
+        foreach (var item in batch.Entries)
+        {
+            if (item is null || !ids.Add(item.RegistryEntryId))
+            {
+                throw new ArgumentException(
+                    $"Запис {item?.RegistryEntryId} порожній або повторюється в пакеті.", nameof(batch));
+            }
+        }
+
+        var userId = RequireUserId();
+        var definition = await RequireDefinitionAsync(batch.RegistryDefId, ct).ConfigureAwait(false);
+
+        var targets = new List<WriteTarget>(batch.Entries.Count);
+        for (var i = 0; i < batch.Entries.Count; i++)
+        {
+            var item = batch.Entries[i];
+            var entry = await registries.FindEntryAsync(item.RegistryEntryId, ct).ConfigureAwait(false);
+            if (entry is null || entry.IsDeleted || entry.RegistryDefId != definition.Id)
+            {
+                entry = null;
+            }
+
+            targets.Add(new WriteTarget(
+                i + 1,
+                entry?.Code ?? item.RegistryEntryId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                entry,
+                MayCreate: false,
+                item.Values ?? new Dictionary<string, object?>()));
+        }
+
+        return await WriteTargetsAsync(definition, targets, userId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Спільне ядро <see cref="WriteAsync"/> і <see cref="UpdateAsync"/>.</summary>
+    private async Task<RegistryEntryWriteResult> WriteTargetsAsync(
+        RegistryDef definition, IReadOnlyList<WriteTarget> targets, int userId, CancellationToken ct)
+    {
+        var existingIds = targets.Where(t => t.Existing is not null).Select(t => t.Existing!.Id).Distinct().ToList();
+        var valuesByEntry = existingIds.Count == 0
             ? new Dictionary<long, IReadOnlyList<RegistryValue>>()
-            : (await registries.ListValuesForEntriesAsync([.. existing.Values.Select(e => e.Id)], ct).ConfigureAwait(false))
+            : (await registries.ListValuesForEntriesAsync(existingIds, ct).ConfigureAwait(false))
                 .GroupBy(v => v.RegistryEntryId)
                 .ToDictionary(g => g.Key, g => (IReadOnlyList<RegistryValue>)[.. g]);
         IReadOnlyList<RegistryKeyDef> keyDefs = keys is null
@@ -182,11 +271,18 @@ public sealed class RegistryEntryWriter(
         var valueChanges = new List<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)>();
         var (added, updated, unchanged) = (0, 0, 0);
 
-        for (var i = 0; i < batch.Entries.Count; i++)
+        foreach (var target in targets)
         {
-            var row = i + 1;
-            var code = batch.Entries[i].Code.Trim();
-            var values = batch.Entries[i].Values ?? new Dictionary<string, object?>();
+            var row = target.Row;
+            var code = target.Code;
+            var values = target.Values;
+
+            // Режим «лише оновлювати»: запису немає — помилка рядка, не створення.
+            if (!target.MayCreate && target.Existing is null)
+            {
+                errors.Add(new RegistryEntryImportError(row, code, null, "err.ECR-REG-0404.registryEntry"));
+                continue;
+            }
 
             if (!EcrCode.TryCreate(code, out var ecrCode))
             {
@@ -202,7 +298,7 @@ public sealed class RegistryEntryWriter(
                 continue;
             }
 
-            var entry = existing.GetValueOrDefault(code);
+            var entry = target.Existing;
             var isNew = entry is null;
             entry ??= AddEntry(
                 definition.Id,
@@ -253,6 +349,24 @@ public sealed class RegistryEntryWriter(
 
         return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: true);
     }
+
+    private int RequireUserId()
+        => currentUser.UserId
+           ?? throw new AccessDeniedException(
+               "ECR-AUTH-0401",
+               "Анонімний запит не змінює довідники.",
+               new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
+
+    private async Task<RegistryDef> RequireDefinitionAsync(int registryDefId, CancellationToken ct)
+        => await registries.FindDefinitionByIdAsync(registryDefId, ct).ConfigureAwait(false)
+           ?? throw new NotFoundException(
+               "ECR-REG-0404",
+               $"Довідника {registryDefId} не існує.",
+               new Dictionary<string, object?>
+               {
+                   ["messageKey"] = "err.ECR-REG-0404.registryId",
+                   ["registryDefId"] = registryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+               });
 
     /// <summary>Новий запис довідника, уже доданий у сховище.</summary>
     /// <remarks>
@@ -614,4 +728,13 @@ public sealed class RegistryEntryWriter(
         // виконання сюди дійде.
         _ => null,
     };
+
+    /// <summary>Рядок пакета, уже зіставлений із наявним записом (або без нього).</summary>
+    /// <param name="Row">Номер у пакеті, з 1.</param>
+    /// <param name="Code">Код запису (для помилки рядка й створення).</param>
+    /// <param name="Existing">Наявний запис; <c>null</c> — немає.</param>
+    /// <param name="MayCreate">Чи створювати запис, якого немає.</param>
+    /// <param name="Values">Значення за кодами полів.</param>
+    private sealed record WriteTarget(
+        int Row, string Code, RegistryEntry? Existing, bool MayCreate, IReadOnlyDictionary<string, object?> Values);
 }
