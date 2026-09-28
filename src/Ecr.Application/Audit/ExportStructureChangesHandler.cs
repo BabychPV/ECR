@@ -77,7 +77,9 @@ public sealed class ExportStructureChangesHandler(
         }
 
         // Подія — ДО потоку: обірване завантаження однаково означає, що дані пішли.
-        await writer.WriteSecurityEventAsync(
+        // ⛔ C4: це подія-СПРОБА (доступ до журналу), а не результат зміни, —
+        // незалежна від долі будь-якої транзакції навколо.
+        await writer.WriteIndependentSecurityEventAsync(
             new SecurityEventRecord(
                 clock.UtcNow,
                 ExportedEventType,

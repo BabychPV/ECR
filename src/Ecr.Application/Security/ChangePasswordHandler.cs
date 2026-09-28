@@ -81,21 +81,28 @@ public sealed class ChangePasswordHandler(
         user.SetPassword(hasher.Hash(newPassword));
 
         var now = clock.UtcNow;
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                now,
-                "PasswordChanged",
-                TargetUserId: user.Id,
-                TargetRoleId: null,
 
-                // ⛔ В аудит іде ФАКТ зміни без значень: ні старого пароля, ні
-                // нового, ні хеша (ФВ-6.11). Аудит читають ширше коло людей,
-                // ніж базу.
-                DetailsJson: null,
-                ChangedByUserId: user.Id,
-                CorrelationId: currentUser.CorrelationId),
+        // ⛔ C4: подія й новий хеш — одним комітом.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        now,
+                        "PasswordChanged",
+                        TargetUserId: user.Id,
+                        TargetRoleId: null,
+
+                        // ⛔ В аудит іде ФАКТ зміни без значень: ні старого пароля, ні
+                        // нового, ні хеша (ФВ-6.11). Аудит читають ширше коло людей,
+                        // ніж базу.
+                        DetailsJson: null,
+                        ChangedByUserId: user.Id,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
             ct).ConfigureAwait(false);
-
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

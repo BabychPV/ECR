@@ -290,6 +290,50 @@ public sealed class AuditWriter(EcrDbContext db) : IAuditWriter
         ArgumentNullException.ThrowIfNull(evt);
 
         await using var command = CreateCommand();
+        FillSecurityEvent(command, evt);
+
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ C4. Без відкритої транзакції — той самий шлях, що й
+    /// <see cref="WriteSecurityEventAsync"/>: <c>INSERT</c> на з'єднанні
+    /// контексту автокомітиться, тобто вже незалежний. З відкритою — ОКРЕМЕ
+    /// з'єднання за тим самим рядком підключення: команда на з'єднанні
+    /// контексту мусить узяти його транзакцію (SqlClient інакше відмовляє), і
+    /// відкат забрав би подію-спробу з собою.
+    ///
+    /// ⚠ Окреме з'єднання — це окрема сесія СУБД: вона не бачить незакоміченого
+    /// транзакції навколо і не чекає на нього, бо лише вставляє в
+    /// <c>aud.SecurityEvent</c>, де ключі двох вставок не перетинаються.
+    /// </remarks>
+    public async Task WriteIndependentSecurityEventAsync(SecurityEventRecord evt, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(evt);
+
+        if (db.Database.CurrentTransaction is null)
+        {
+            await WriteSecurityEventAsync(evt, ct).ConfigureAwait(false);
+            return;
+        }
+
+        var connectionString = db.Database.GetConnectionString()
+            ?? throw new InvalidOperationException(
+                "Незалежний запис аудиту потребує рядка підключення: контекст зібрано без нього.");
+
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        FillSecurityEvent(command, evt);
+
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Текст і параметри одиночного <c>INSERT</c> події безпеки.</summary>
+    private static void FillSecurityEvent(SqlCommand command, SecurityEventRecord evt)
+    {
         command.CommandText = """
             INSERT INTO aud.SecurityEvent
                 (ChangedAt, EventType, TargetUserId, TargetRoleId, DetailsJson, ChangedByUserId, CorrelationId)
@@ -302,8 +346,6 @@ public sealed class AuditWriter(EcrDbContext db) : IAuditWriter
         AddText(command, "@d", evt.DetailsJson, UnboundedLength);
         AddInt32(command, "@u", evt.ChangedByUserId);
         AddText(command, "@x", evt.CorrelationId, CorrelationIdLength);
-
-        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>

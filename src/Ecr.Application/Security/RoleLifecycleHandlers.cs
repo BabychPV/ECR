@@ -112,18 +112,26 @@ public sealed class RenameRoleHandler(
 
         await users.RenameRoleAsync(roleId, newCode, name, ct).ConfigureAwait(false);
 
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow,
-                "RoleRenamed",
-                TargetUserId: null,
-                TargetRoleId: roleId,
-                DetailsJson: JsonSerializer.Serialize(new { from = role.Code, to = newCode }),
-                ChangedByUserId: profile.UserId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія й перейменування — одним комітом. Інакше друге з двох
+        // паралельних перейменувань в один код падало на `UQ_Role`, а
+        // `RoleRenamed` уже лежав у журналі.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow,
+                        "RoleRenamed",
+                        TargetUserId: null,
+                        TargetRoleId: roleId,
+                        DetailsJson: JsonSerializer.Serialize(new { from = role.Code, to = newCode }),
+                        ChangedByUserId: profile.UserId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
     }
 }
 
@@ -174,18 +182,24 @@ public sealed class DeleteRoleHandler(
 
         await users.RemoveRoleAsync(roleId, ct).ConfigureAwait(false);
 
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow,
-                "RoleDeleted",
-                TargetUserId: null,
-                TargetRoleId: roleId,
-                DetailsJson: JsonSerializer.Serialize(new { code = role.Code, permissions = role.Permissions }),
-                ChangedByUserId: profile.UserId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія й видалення — одним комітом.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow,
+                        "RoleDeleted",
+                        TargetUserId: null,
+                        TargetRoleId: roleId,
+                        DetailsJson: JsonSerializer.Serialize(new { code = role.Code, permissions = role.Permissions }),
+                        ChangedByUserId: profile.UserId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
     }
 }
 

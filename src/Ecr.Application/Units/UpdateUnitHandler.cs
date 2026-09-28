@@ -165,13 +165,21 @@ public sealed class UpdateUnitHandler(
         }
 
         unit.Update(symbolText, nameText, factorToBase, offsetToBase);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
-                JsonSerializer.Serialize(new { id = unit.Id, code = unit.Code, factorToBase, offsetToBase }),
-                profile.UserId, currentUser.CorrelationId),
+        // ⛔ C4: зміна й подія — одним комітом. Раніше зміна комітилась ДО
+        // аудиту, і збій аудиту лишав новий множник без сліду в журналі.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow, EventType, TargetUserId: null, TargetRoleId: null,
+                        JsonSerializer.Serialize(new { id = unit.Id, code = unit.Code, factorToBase, offsetToBase }),
+                        profile.UserId, currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
+            },
             ct).ConfigureAwait(false);
 
         return UnitDetail.Of(unit);

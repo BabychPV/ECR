@@ -210,17 +210,23 @@ public sealed class ReplaceResourceGrantsHandler(
         // ⚠ Зміна доступу пишеться в журнал безпеки ЗАВЖДИ і повним набором:
         // «хто тепер це бачить» відновлюється лише так. Різницю не рахуємо —
         // попередній стан уже є в попередньому записі журналу.
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow,
-                "ResourceGrantsReplaced",
-                TargetUserId: null,
-                TargetRoleId: roleId,
-                DetailsJson: JsonSerializer.Serialize(new { role = role.Code, grants }),
-                ChangedByUserId: actorId,
-                CorrelationId: null),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія, гранти й штампи — одним комітом.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow,
+                        "ResourceGrantsReplaced",
+                        TargetUserId: null,
+                        TargetRoleId: roleId,
+                        DetailsJson: JsonSerializer.Serialize(new { role = role.Code, grants }),
+                        ChangedByUserId: actorId,
+                        CorrelationId: null),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
     }
 }

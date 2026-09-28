@@ -162,15 +162,22 @@ public sealed class PublishTemplateVersionHandler(
         // виняток виходить назовні до SaveChanges, тому часткових змін немає.
         version.Publish(userId, clock.UtcNow);
 
-        await audit.WritePublicationEventAsync(
-            new PublicationEventRecord(
-                clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
-                ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
-            ct).ConfigureAwait(false);
-
         // Аудит і зміна стану — в одній транзакції: подія публікації без
         // публікації (і навпаки) зробила б журнал недостовірним.
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ C4: коментар тут стояв і раніше, а транзакції не було — `INSERT`
+        // аудиту автокомітився до `SaveChangesAsync`.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WritePublicationEventAsync(
+                    new PublicationEventRecord(
+                        clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
+                        ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
+                    token).ConfigureAwait(false);
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
     }
@@ -205,13 +212,19 @@ public sealed class PublishTemplateVersionHandler(
 
         version.Deprecate(userId, clock.UtcNow);
 
-        await audit.WritePublicationEventAsync(
-            new PublicationEventRecord(
-                clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
-                ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія й зміна стану — одним комітом.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WritePublicationEventAsync(
+                    new PublicationEventRecord(
+                        clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
+                        ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         // Ключ кешу не змінився — змінився СТАН версії, а структура ні. Але
         // знімок несе і статус, і саме за ним конфігуратор вирішує, чи
