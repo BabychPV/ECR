@@ -92,14 +92,13 @@ public sealed partial class QuartzJobAdapter(
         // один тик. Лок — негайна спроба, без очікування: якщо інший
         // інстанс уже виконує цю саму job, цей тик просто пропускається, а
         // не чекає й не дублює роботу пізніше.
-        var isRecurring = context.JobDetail.JobDataMap.ContainsKey(QuartzJobScheduler.RecurringKey)
-            && context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.RecurringKey) == "1";
+        var isRecurring = QuartzJobScheduler.IsRecurring(context.JobDetail);
 
         await using var distributedLock = isRecurring
             ? await SqlDistributedLock.TryAcquireAsync(
                     provider.GetRequiredService<EcrDbContext>().Database.GetConnectionString()
                         ?? throw new InvalidOperationException("У контексту немає рядка підключення."),
-                    $"Ecr.Job.{jobId}", context.CancellationToken)
+                    QuartzJobScheduler.LockNameOf(jobId), context.CancellationToken)
                 .ConfigureAwait(false)
             : null;
 
@@ -144,8 +143,16 @@ public sealed partial class QuartzJobAdapter(
             // ЛИШЕ заради ручного перезапуску провалу — успіх її не потребує,
             // і держати деталь задачі в пам'яті планувальника навічно означало
             // б повільну витік пам'яті на кожен успішний прогін.
-            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
-                .ConfigureAwait(false);
+            //
+            // ⛔ Лише РАЗОВА. У розкладу ключ той самий, що в крон-тригера, а
+            // DeleteJob знімає задачу разом із тригерами: сховище в пам'яті,
+            // розклади ставляться тільки на старті — тож задача за розкладом
+            // відпрацьовувала б рівно один раз до наступного рестарту.
+            if (!isRecurring)
+            {
+                await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -153,8 +160,14 @@ public sealed partial class QuartzJobAdapter(
             // мусить це розрізняти.
             await FinishAsync(progress, jobId, "Cancelled", null, clock, CancellationToken.None)
                 .ConfigureAwait(false);
-            await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
-                .ConfigureAwait(false);
+
+            // ⛔ Скасовано ПОТОЧНИЙ прогін, а не розклад — див. гілку успіху.
+            if (!isRecurring)
+            {
+                await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
             throw;
         }
         catch (Exception ex)

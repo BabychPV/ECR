@@ -132,7 +132,7 @@ public sealed partial class RecurringScheduleService(
         //
         // ⚠ Те саме стосується будь-якого перезапуску посеред доби: пропущену
         // межу періоду ніхто не наздоганяє, бо cron не має пам'яті.
-        await RunPeriodStateOnceAsync(scope.ServiceProvider).ConfigureAwait(false);
+        await RunPeriodStateOnceAsync(scope.ServiceProvider, logger).ConfigureAwait(false);
 
         await scheduler
             .ScheduleAsync<Infrastructure.Jobs.NotificationJob>(HourlyCron, null, CancellationToken.None)
@@ -383,6 +383,7 @@ public sealed partial class RecurringScheduleService(
     /// Виконує вирівнювання станів періодів негайно, у цьому ж процесі.
     /// </summary>
     /// <param name="provider">Область служб старту.</param>
+    /// <param name="logger">Журнал старту.</param>
     /// <remarks>
     /// ⚠ Не через планувальник, а прямим викликом: постановка «виконати зараз»
     /// у Quartz — це ще один тригер, який треба чистити, і він виконався б уже
@@ -401,15 +402,24 @@ public sealed partial class RecurringScheduleService(
     /// <see cref="Infrastructure.Jobs.QuartzJobScheduler.ScheduleAsync{TJob}"/>
     /// для цієї ж задачі.
     /// </remarks>
-    private async Task RunPeriodStateOnceAsync(IServiceProvider provider)
+    public static async Task RunPeriodStateOnceAsync(IServiceProvider provider, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(logger);
+
         try
         {
             var connectionString = provider.GetRequiredService<EcrDbContext>().Database.GetConnectionString()
                 ?? throw new InvalidOperationException("У контексту немає рядка підключення.");
 
             await using var distributedLock = await Infrastructure.Jobs.SqlDistributedLock
-                .TryAcquireAsync(connectionString, "Ecr.Job.PeriodStateJob:startup", CancellationToken.None)
+                .TryAcquireAsync(
+                    connectionString,
+                    // ⛔ Та сама назва, що бере адаптер на погодинний тик (payload
+                    // `null` — як у постановці розкладу вище). Окрема назва
+                    // (`…:startup`) не конкурувала з тиком, і обидва бігли паралельно.
+                    Infrastructure.Jobs.QuartzJobScheduler.RecurringLockName<Infrastructure.Jobs.PeriodStateJob>(null),
+                    CancellationToken.None)
                 .ConfigureAwait(false);
 
             if (distributedLock is null)

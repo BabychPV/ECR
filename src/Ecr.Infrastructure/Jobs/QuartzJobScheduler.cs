@@ -80,6 +80,34 @@ public sealed class QuartzJobScheduler(
     /// </remarks>
     public const string RecurringKey = "ecr.recurring";
 
+    /// <summary>Чи поставлена задача через <see cref="ScheduleAsync{TJob}"/> (крон).</summary>
+    /// <param name="detail">Деталь задачі; <c>null</c> — задачі немає.</param>
+    /// <remarks>
+    /// ⚠ Одне визначення на адаптер і на скасування: розбіжність означала б,
+    /// що одне місце вважає задачу розкладом, а інше — разовою і видаляє її.
+    /// </remarks>
+    public static bool IsRecurring(IJobDetail? detail)
+        => detail is not null
+           && detail.JobDataMap.ContainsKey(RecurringKey)
+           && detail.JobDataMap.GetString(RecurringKey) == "1";
+
+    /// <summary>Ім'я міжінстансового локу задачі (Q-223).</summary>
+    /// <param name="jobId">Ідентифікатор (ім'я ключа) задачі.</param>
+    public static string LockNameOf(string jobId) => $"Ecr.Job.{jobId}";
+
+    /// <summary>
+    /// Ім'я локу, який бере <see cref="QuartzJobAdapter"/> на тик розкладу
+    /// <typeparamref name="TJob"/> з цим payload.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Для викликів ПОЗА планувальником (стартове вирівнювання станів
+    /// періодів): лок з іншою назвою не конкурував би з погодинним прогоном
+    /// тієї самої задачі, і обидва бігли б паралельно.
+    /// </remarks>
+    public static string RecurringLockName<TJob>(object? payload)
+        where TJob : IBackgroundJob
+        => LockNameOf(RecurringJob<TJob>(payload).Key.Name);
+
     /// <summary>
     /// Ключ кореляції (BE-08): у даних задачі — від постановки, у даних
     /// триґера — від ручного перезапуску чи ретраю; триґер важить більше.
@@ -392,7 +420,18 @@ public sealed class QuartzJobScheduler(
             }
         }
 
-        await instance.DeleteJob(new JobKey(jobId), ct).ConfigureAwait(false);
+        // ⛔ Розклад НЕ знімається: скасування через API — прохання зупинити
+        // поточний прогін, а прогрес розкладу пишеться під його ключем, тож
+        // погодинну задачу в стані Running видно в `/jobs` і її можна скасувати.
+        // DeleteJob тут зняв би крон-тригер до рестарту. Зняття розкладу —
+        // окремий метод (UnscheduleAsync).
+        var jobKey = new JobKey(jobId);
+        if (IsRecurring(await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false)))
+        {
+            return;
+        }
+
+        await instance.DeleteJob(jobKey, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
