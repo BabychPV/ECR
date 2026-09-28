@@ -54,6 +54,24 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <see cref="Local_нічого_не_пише_за_два_прогони"/> червоний (відбиток <c>dic.*</c> змінився:
 /// шлях ключа).</item>
 /// </list>
+/// <para>
+/// S7-3 (2026-09-29, кожна мутація окремо, відкат і контрольний прогін <c>RegistrySync*</c> 14/14):
+/// </para>
+/// <list type="bullet">
+/// <item>Без звірки ключів пакета в <c>RegistryEntryWriter.WriteTargetsAsync</c> →
+/// <see cref="Дубль_ключа_в_пакеті_синку_відхиляє_обидва_записи_а_не_валить_прогін"/> (E1 записано
+/// 12.5 поштучним повтором) і <see cref="Темпоральний_дубль_ключа_у_вікнах_що_перетинаються_не_записується"/>
+/// (дубль у <c>dic.RegistryEntryKey</c>: 1 замість 0) червоні.</item>
+/// <item>Звірка без урахування вікон (<c>RegistryBatchKeys.DuplicateKeyRows</c>) →
+/// <see cref="Темпоральний_той_самий_ключ_у_вікнах_що_не_перетинаються_записується"/> червоний.</item>
+/// <item>Без <c>ConcurrencyConflictException</c> у <c>catch</c> <c>TryWriteAsync</c> →
+/// <see cref="Обмін_ключами_між_записами_пакета_не_валить_прогін"/> червоний (виняток
+/// <c>keyTakenConcurrently</c> із прогону). Тест дубля після фіксу writer'а до цього <c>catch</c> не
+/// доходить і лишається зеленим.</item>
+/// <item>Без <c>entry.RegistryDefId == registryDefId</c> у <c>LinksAsync</c> →
+/// <see cref="Синк_довідника_A_не_торкається_запису_довідника_B_з_ключем_того_самого_джерела"/>
+/// червоний (шлях зовнішнього ключа XB переписано).</item>
+/// </list>
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
