@@ -64,7 +64,7 @@ public sealed class PiSqlClientDataSource(
     /// <c>Type</c> (`Q-197`).
     /// </remarks>
     public const string DefaultCatalogQuery = """
-        SELECT e.Name AS ElementName, a.Name AS AttributeName, a.UnitOfMeasure AS Uom, a.ValueType AS DataType
+        SELECT e.Name AS ElementName, a.Name AS AttributeName, a.UnitOfMeasure AS Uom, a.ValueType AS DataType, e.ID AS ElementId
         FROM [Master].[Element].[Attribute] a
         INNER JOIN [Master].[Element].[Element] e ON e.ID = a.ElementID
         ORDER BY e.Name, a.Name
@@ -124,10 +124,20 @@ public sealed class PiSqlClientDataSource(
             .ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct)
             .ConfigureAwait(false);
 
+        // ⚠ `ElementId` (GUID елемента, S1) — необов'язкова: запит каталогу
+        // перевизначається налаштуванням, і текст без неї мусить працювати як досі.
+        var hasElementId = Enumerable.Range(0, reader.FieldCount)
+            .Any(i => string.Equals(reader.GetName(i), "ElementId", StringComparison.OrdinalIgnoreCase));
+
         while (result.Count < MaxCatalogRows && await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var element = reader["ElementName"] as string ?? string.Empty;
             var attribute = reader["AttributeName"] as string ?? string.Empty;
+
+            // Порядок звернень — порядок колонок: під SequentialAccess назад не можна.
+            var uom = reader["Uom"] as string;
+            var dataType = reader["DataType"] as string;
+            var elementId = hasElementId ? reader["ElementId"] : null;
 
             result.Add(new SourceEntityDescriptor(
                 $"{element}|{attribute}",
@@ -136,8 +146,9 @@ public sealed class PiSqlClientDataSource(
 
                 // ⚠ Одиниця йде в каталог обов'язково: побачити її треба вже
                 // при налаштуванні, а не через місяць на звірці (ФВ-16.9).
-                reader["Uom"] as string,
-                reader["DataType"] as string));
+                uom,
+                dataType,
+                elementId is null or DBNull ? null : Convert.ToString(elementId, CultureInfo.InvariantCulture)));
         }
 
         return result;
@@ -153,7 +164,7 @@ public sealed class PiSqlClientDataSource(
         var queryText = request.Kind switch
         {
             SourceQueryKind.Raw => null,
-            SourceQueryKind.Interpolated => ConfiguredOrRefuse(InterpolatedQueryKey, request.Kind),
+            SourceQueryKind.Interpolated => ConfiguredOrRefuse(InterpolatedQueryKey, request.Kind.ToString()),
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Невідомий тип запиту."),
         };
 
@@ -319,7 +330,7 @@ public sealed class PiSqlClientDataSource(
     private const string QueryNotConfigured = "ECR-INT-0422";
 
     /// <summary>Текст запиту з налаштування або відмова <c>ECR-INT-0422</c>.</summary>
-    private string ConfiguredOrRefuse(string key, SourceQueryKind kind)
+    private string ConfiguredOrRefuse(string key, string kind)
     {
         var configured = settings?.Find(key);
         if (!string.IsNullOrWhiteSpace(configured))
@@ -333,9 +344,79 @@ public sealed class PiSqlClientDataSource(
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-INT-0422.queryKindNotConfigured",
-                ["queryKind"] = kind.ToString(),
+                ["queryKind"] = kind,
                 ["configKey"] = key,
             });
+    }
+
+    /// <summary>Ключ запиту поточного значення атрибута (S1, FEATURE-REGISTRY-SYNC). Типового тексту немає.</summary>
+    /// <remarks>
+    /// ⛔ Типового тексту немає з тієї ж причини, що в <see cref="InterpolatedQueryKey"/>
+    /// (V-3): таблична функція RTQP для «snapshot» атрибута в репозиторії не
+    /// підтверджена, а вигаданий дефолт виглядав би робочим налаштуванням.
+    /// <para>
+    /// Контракт тексту: заповнювачі <c>{template}</c>, <c>{attribute}</c> —
+    /// літералами; один параметр <c>?</c> — ім'я елемента. Перший рядок
+    /// результату: <c>Ts</c>, <c>Val</c>, необов'язкові <c>Uom</c>, <c>Quality</c>
+    /// (як у <see cref="ReadPointsAsync"/>). Порожній результат — відмова шляху
+    /// <c>ECR-INT-0503</c> <c>.currentValueUnreadable</c>, не «нуль».
+    /// </para>
+    /// </remarks>
+    public const string CurrentValueQueryKey = "PiSqlClient:CurrentValueQuery";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Без <see cref="CurrentValueQueryKey"/> — відмова <c>ECR-INT-0422</c>
+    /// <c>.queryKindNotConfigured</c> ДО з'єднання (як інтерпольований запит, F4).
+    /// Елемента немає — відмова шляху <c>ECR-INT-0404</c>, решта читається далі.
+    /// </remarks>
+    public async Task<CurrentValuesResult> ReadCurrentAsync(
+        int dataSourceId, IReadOnlyCollection<string> paths, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+
+        var queryText = ConfiguredOrRefuse(CurrentValueQueryKey, "CurrentValue");
+
+        var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
+
+        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+
+        var values = new List<SourceDataPoint>();
+        var failures = new List<CurrentValueFailure>();
+
+        foreach (var path in paths.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal))
+        {
+            var (element, attribute) = Split(path);
+
+            var template = await TemplateAsync(connection, element, ct).ConfigureAwait(false);
+            if (template is null)
+            {
+                failures.Add(new CurrentValueFailure(path, "ECR-INT-0404", "err.ECR-INT-0404.sourcePathNotFound"));
+                continue;
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = Fill(queryText, template, attribute);
+            command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
+
+            using var reader = await RetryAsync(
+                () => command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct),
+                IsTransientOdbcFailure,
+                ct).ConfigureAwait(false);
+
+            var point = (await ReadPointsAsync(reader, path, 1, ct).ConfigureAwait(false)).FirstOrDefault();
+            if (point is null)
+            {
+                failures.Add(new CurrentValueFailure(path, SourceUnavailable, "err.ECR-INT-0503.currentValueUnreadable"));
+            }
+            else
+            {
+                values.Add(point);
+            }
+        }
+
+        return new CurrentValuesResult(values, failures);
     }
 
     /// <summary>Текст summary-запиту з підставленими літералами.</summary>

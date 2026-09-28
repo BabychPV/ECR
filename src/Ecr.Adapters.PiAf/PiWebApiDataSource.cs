@@ -74,7 +74,11 @@ public sealed class PiWebApiDataSource(
                 Text(item, "Description"),
                 Text(item, "Path"),
                 SourceUnitSymbol: null,
-                DataType: "Element"),
+                DataType: "Element",
+
+                // GUID елемента, а не WebId: WebId кодує ще й сервер і формат
+                // (WebID 2.0), тож змінюється разом із ними; GUID — ні (S1).
+                ExternalId: Text(item, "Id")),
             ct).ConfigureAwait(false);
     }
 
@@ -90,7 +94,7 @@ public sealed class PiWebApiDataSource(
         ArgumentException.ThrowIfNullOrWhiteSpace(elementPath);
 
         var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
-        var webId = await ElementWebIdAsync(source, elementPath, ct).ConfigureAwait(false);
+        var (webId, elementId) = await ElementAsync(source, elementPath, ct).ConfigureAwait(false);
         return await ItemsAsync(
             source,
             $"elements/{Uri.EscapeDataString(webId)}/attributes?searchFullHierarchy=false",
@@ -102,19 +106,30 @@ public sealed class PiWebApiDataSource(
                     Text(item, "Description"),
                     Text(item, "Path"),
                     string.IsNullOrWhiteSpace(units) ? null : units,
-                    Text(item, "Type"));
+                    Text(item, "Type"),
+
+                    // Атрибут належить елементу: зовнішній ключ запису довідника —
+                    // GUID саме елемента (FEATURE-REGISTRY-SYNC §2.1).
+                    elementId);
             },
             ct).ConfigureAwait(false);
     }
 
     private async Task<string> ElementWebIdAsync(
         Domain.Entities.External.DataSource source, string path, CancellationToken ct)
+        => (await ElementAsync(source, path, ct).ConfigureAwait(false)).WebId;
+
+    /// <summary>WebId і GUID елемента за шляхом.</summary>
+    private async Task<(string WebId, string? Id)> ElementAsync(
+        Domain.Entities.External.DataSource source, string path, CancellationToken ct)
     {
         using var element = await GetAsync(
             source.Endpoint, $"elements?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
             .ConfigureAwait(false);
 
-        return Text(element.RootElement, "WebId")
+        var id = Text(element.RootElement, "Id");
+
+        return (Text(element.RootElement, "WebId")
                ?? throw new BusinessRuleException(
                    SourceUnavailable,
                    $"PI Web API не знайшов елемент {path}.",
@@ -123,7 +138,7 @@ public sealed class PiWebApiDataSource(
                        ["messageKey"] = "err.ECR-INT-0503.catalogUnavailable",
                        ["code"] = source.Code.ToString(),
                        ["path"] = path,
-                   });
+                   }), id);
     }
 
     /// <summary><c>Items</c> колекції з переходом за <c>Links.Next</c> до стелі.</summary>
@@ -178,6 +193,15 @@ public sealed class PiWebApiDataSource(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ⛔ Лише сирі точки (HSE301 F4, D-172). Інтерпольований запит тут не
+        // реалізовано — і він не підміняється `recorded`: сирі точки під
+        // іменем інтерпольованих дали б правдоподібні, але інші числа.
+        // Перевірка ДО джерела: відмова конфігурації не чіпає PI.
+        if (request.Kind != SourceQueryKind.Raw)
+        {
+            throw IExternalDataSource.QueryKindNotSupported(request.Kind, Transport);
+        }
+
         var source = await SourceAsync(request.DataSourceId, ct).ConfigureAwait(false);
 
         JsonDocument? attribute = null;
@@ -231,6 +255,105 @@ public sealed class PiWebApiDataSource(
             attribute?.Dispose();
             recorded?.Dispose();
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// На кожен шлях — WebId атрибута (<c>attributes?path=</c>, як у
+    /// <see cref="ReadAsync"/>), далі <c>streams/{webId}/value</c>. Для
+    /// статичного атрибута (без PI Point) PI Web API віддає його значення тим
+    /// самим викликом.
+    /// <para>
+    /// ⚠ Запит на шлях, а не пакетний <c>streamsets/value</c>: синк довідника
+    /// читає десятки атрибутів раз на прогін, а пакет потребував би окремої
+    /// обробки часткових відмов у відповіді. Судження S1; переглянути, якщо
+    /// кількість атрибутів виросте на порядки.
+    /// </para>
+    /// <para>
+    /// ⛔ Атрибута немає (<c>404</c> або відповідь без <c>WebId</c>) — відмова
+    /// цього шляху <c>ECR-INT-0404</c>, решта читається далі. Будь-яка інша
+    /// відмова (5xx, автентифікація) летить винятком: знімок неповний.
+    /// </para>
+    /// </remarks>
+    public async Task<CurrentValuesResult> ReadCurrentAsync(
+        int dataSourceId, IReadOnlyCollection<string> paths, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+
+        var source = await SourceAsync(dataSourceId, ct).ConfigureAwait(false);
+        var values = new List<SourceDataPoint>();
+        var failures = new List<CurrentValueFailure>();
+
+        foreach (var path in paths.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal))
+        {
+            string? webId;
+            string? defaultUnits;
+
+            try
+            {
+                using var attribute = await GetAsync(
+                    source.Endpoint, $"attributes?path={Uri.EscapeDataString(path)}", source.SecretName, ct)
+                    .ConfigureAwait(false);
+                webId = Text(attribute.RootElement, "WebId");
+                defaultUnits = Text(attribute.RootElement, "DefaultUnitsName");
+            }
+            catch (BusinessRuleException ex) when (IsNotFound(ex))
+            {
+                webId = null;
+                defaultUnits = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(webId))
+            {
+                failures.Add(new CurrentValueFailure(path, PathNotFound, "err.ECR-INT-0404.sourcePathNotFound"));
+                continue;
+            }
+
+            using var value = await GetAsync(
+                source.Endpoint, $"streams/{Uri.EscapeDataString(webId)}/value", source.SecretName, ct)
+                .ConfigureAwait(false);
+
+            if (CurrentPoint(value.RootElement, path, defaultUnits) is { } point)
+            {
+                values.Add(point);
+            }
+            else
+            {
+                failures.Add(new CurrentValueFailure(
+                    path, SourceUnavailable, "err.ECR-INT-0503.currentValueUnreadable"));
+            }
+        }
+
+        return new CurrentValuesResult(values, failures);
+    }
+
+    /// <summary>Атрибута чи елемента немає.</summary>
+    private const string PathNotFound = "ECR-INT-0404";
+
+    /// <summary>Чи відмова <see cref="GetAsync(string, string, string, CancellationToken)"/> — це «такого шляху немає».</summary>
+    private static bool IsNotFound(BusinessRuleException error)
+        => error.Details is { } details
+           && details.TryGetValue("status", out var status)
+           && status is "404";
+
+    /// <summary>Одне значення відповіді <c>streams/{webId}/value</c>; без мітки часу — <c>null</c>.</summary>
+    private static SourceDataPoint? CurrentPoint(JsonElement item, string sourcePath, string? defaultUnits)
+    {
+        if (!item.TryGetProperty("Timestamp", out var stamp) || !stamp.TryGetDateTime(out var timestamp))
+        {
+            return null;
+        }
+
+        var (numeric, text) = Value(item);
+        var units = Text(item, "UnitsAbbreviation");
+
+        return new SourceDataPoint(
+            sourcePath,
+            timestamp.ToUniversalTime(),
+            numeric,
+            text,
+            string.IsNullOrWhiteSpace(units) ? defaultUnits : units,
+            Quality(item));
     }
 
     /// <summary>Джерело за ідентифікатором; запам'ятовується на час прогону.</summary>

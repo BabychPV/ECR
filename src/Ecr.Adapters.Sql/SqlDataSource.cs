@@ -29,6 +29,13 @@ namespace Ecr.Adapters.Sql;
 /// порожнечу. Натомість <b>наш</b> бік контракту заданий жорстко: імена
 /// колонок результату і набір параметрів (див. <see cref="ValueQueryKey"/>).
 /// </para>
+/// <para>
+/// ⛔ <see cref="IExternalDataSource.ReadCurrentAsync"/> навмисно НЕ
+/// перевизначено: типова реалізація відмовляє <c>ECR-INT-0422</c>
+/// (<c>.currentValueNotSupported</c>). Довідники з SQL-джерела не
+/// синхронізуються — master там ECR (D-50, D-199), а FLERT дає часові ряди, не
+/// атрибути елементів.
+/// </para>
 /// </remarks>
 /// <param name="store">Читання конфігурації джерела.</param>
 /// <param name="secrets">Значення секрету за іменем (ФВ-6.11).</param>
@@ -137,6 +144,14 @@ public sealed class SqlDataSource(
     public async Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // ⛔ Лише сирі точки (HSE301 F4, D-172): контракт запиту значень
+        // (`ValueQueryKey`) кроку не має, і інтерпольований запит мовчки
+        // отримав би сирі рядки. Відмова — ДО джерела й до пошуку запиту.
+        if (request.Kind != SourceQueryKind.Raw)
+        {
+            throw IExternalDataSource.QueryKindNotSupported(request.Kind, Transport);
+        }
 
         var source = await store.FindDataSourceAsync(request.DataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(request.DataSourceId);

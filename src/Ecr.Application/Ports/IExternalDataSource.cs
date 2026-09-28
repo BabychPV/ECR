@@ -1,5 +1,6 @@
 // src/Ecr.Application/Ports/IExternalDataSource.cs
 
+using Ecr.Application.Errors;
 using Ecr.Application.Sources;
 using Ecr.Domain.Enums;
 
@@ -37,7 +38,86 @@ public interface IExternalDataSource
     /// <param name="ct">Скасування.</param>
     public Task<WindowResult> ReadWindowAsync(WindowRequest request, CancellationToken ct)
         => WindowFold.FromRawAsync(this, request, ct);
+
+    /// <summary>
+    /// Поточні значення атрибутів (синхронізація довідників, S1,
+    /// FEATURE-REGISTRY-SYNC §4, ФВ-8.11): значення, якість і мітка часу на
+    /// кожен шлях.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Атрибута, якого немає в джерелі, немає і в
+    /// <see cref="CurrentValuesResult.Values"/>: він іде в
+    /// <see cref="CurrentValuesResult.Failures"/> зі своїм шляхом. «Нуль» чи
+    /// <c>null</c> замість відмови синк прочитав би як «джерело очистило поле».
+    /// Відмова всього джерела (недоступність, автентифікація) — виняток, як у
+    /// <see cref="ReadAsync"/>: неповний знімок не видається за повний (D-187).
+    /// <para>
+    /// ⚠ Типова реалізація — <b>відмова</b> <c>ECR-INT-0422</c>
+    /// (<c>.currentValueNotSupported</c>): транспорт, який не вміє поточних
+    /// значень, мусить сказати це, а не повернути порожній знімок. Чинні
+    /// реалізації від цього не змінюються.
+    /// </para>
+    /// </remarks>
+    /// <param name="dataSourceId">Джерело.</param>
+    /// <param name="paths">Шляхи атрибутів; повтори читаються один раз.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<CurrentValuesResult> ReadCurrentAsync(
+        int dataSourceId, IReadOnlyCollection<string> paths, CancellationToken ct)
+        => Task.FromException<CurrentValuesResult>(new BusinessRuleException(
+            QueryRefusedCode,
+            $"Транспорт {Transport} не читає поточних значень атрибутів.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.currentValueNotSupported",
+                ["transport"] = Transport.ToString(),
+            }));
+
+    /// <summary>Код відмови «тип читання не налаштовано або транспорт його не виконує».</summary>
+    public const string QueryRefusedCode = "ECR-INT-0422";
+
+    /// <summary>
+    /// Відмова адаптера, який тип запиту <paramref name="kind"/> не виконує взагалі
+    /// (HSE301 F4, прохання до PI Web API і SQL).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Код той самий, що в PI SQL Client без налаштованого тексту
+    /// (<c>.queryKindNotConfigured</c>), а ключ — власний <c>.queryKindNotSupported</c>:
+    /// шаблон <c>.queryKindNotConfigured</c> радить «задати {configKey}», а
+    /// налаштування, яке ввімкнуло б цей тип для PI Web API чи SQL, не існує.
+    /// Вигаданий ключ конфігурації послав би людину шукати його (і
+    /// <c>MessageKeyRatchetTests</c> порожнього плейсхолдера не пропускає).
+    /// </remarks>
+    /// <param name="kind">Тип запиту.</param>
+    /// <param name="transport">Транспорт адаптера.</param>
+    public static BusinessRuleException QueryKindNotSupported(SourceQueryKind kind, ExternalTransport transport)
+        => new(
+            QueryRefusedCode,
+            $"Запит типу {kind} транспорт {transport} не виконує.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.queryKindNotSupported",
+                ["queryKind"] = kind.ToString(),
+                ["transport"] = transport.ToString(),
+            });
 }
+
+/// <summary>Поточні значення атрибутів — результат <see cref="IExternalDataSource.ReadCurrentAsync"/>.</summary>
+/// <param name="Values">
+/// Прочитані значення в <b>одиниці джерела</b> (ФВ-16.9): <see cref="SourceDataPoint.Timestamp"/> —
+/// мітка часу значення в джерелі, <see cref="SourceDataPoint.Quality"/> — якість у його термінах.
+/// </param>
+/// <param name="Failures">Шляхи, які прочитати не вдалося, — кожен зі своєю причиною.</param>
+public sealed record CurrentValuesResult(
+    IReadOnlyList<SourceDataPoint> Values,
+    IReadOnlyList<CurrentValueFailure> Failures);
+
+/// <summary>Шлях, поточне значення якого не прочитано.</summary>
+/// <param name="SourcePath">Шлях атрибута.</param>
+/// <param name="ErrorCode">
+/// <c>ECR-INT-0404</c> — атрибута чи елемента немає; <c>ECR-INT-0503</c> — джерело відповіло без значення.
+/// </param>
+/// <param name="MessageKey">Ключ каталогу повідомлень.</param>
+public sealed record CurrentValueFailure(string SourcePath, string ErrorCode, string MessageKey);
 
 /// <summary>Що саме читає <see cref="IExternalDataSource.ReadAsync"/>.</summary>
 public enum SourceQueryKind : byte
@@ -148,12 +228,19 @@ public sealed record WindowResult(
 /// <param name="EntityPath">Шлях в ієрархії AF.</param>
 /// <param name="SourceUnitSymbol">UOM атрибута в термінах джерела; <c>null</c> — безрозмірний.</param>
 /// <param name="DataType">Тип значення в термінах джерела.</param>
+/// <param name="ExternalId">
+/// Незмінний ідентифікатор <b>елемента</b> AF (GUID <c>Id</c>) — те, що лягає в
+/// <c>dic.RegistryExternalKey.ExternalId</c> (FEATURE-REGISTRY-SYNC §2.1, S1).
+/// Для атрибута — GUID елемента, якому він належить. <c>null</c> — джерело його не дає
+/// (SQL-джерело, перевизначений запит каталогу без колонки <c>ElementId</c>).
+/// </param>
 public sealed record SourceEntityDescriptor(
     string Code,
     string? DisplayName,
     string? EntityPath,
     string? SourceUnitSymbol,
-    string? DataType);
+    string? DataType,
+    string? ExternalId = null);
 
 /// <summary>Запит на читання діапазону з джерела.</summary>
 /// <remarks>

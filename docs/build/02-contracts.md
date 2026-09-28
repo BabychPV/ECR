@@ -1316,7 +1316,27 @@ public interface IExternalDataSource
     /// </summary>
     public Task<WindowResult> ReadWindowAsync(WindowRequest request, CancellationToken ct)
         => WindowFold.FromRawAsync(this, request, ct);
+
+    /// <summary>
+    /// Поточні значення атрибутів (FEATURE-REGISTRY-SYNC S1, ФВ-8.11): значення,
+    /// якість, мітка часу на шлях. Атрибута немає — запис у Failures зі шляхом
+    /// (ECR-INT-0404 .sourcePathNotFound), не «нуль»; відмова джерела — виняток.
+    /// Типова реалізація — відмова ECR-INT-0422 (.currentValueNotSupported).
+    /// PiWebApi: attributes?path= → streams/{webId}/value. PiSqlClient: лише з
+    /// ключем PiSqlClient:CurrentValueQuery (типового тексту немає), без нього —
+    /// ECR-INT-0422 (.queryKindNotConfigured). Sql: типова відмова (master — ECR).
+    /// </summary>
+    public Task<CurrentValuesResult> ReadCurrentAsync(
+        int dataSourceId, IReadOnlyCollection<string> paths, CancellationToken ct);
 }
+
+// S1 (адитивно): CurrentValuesResult(Values: SourceDataPoint[], Failures:
+// CurrentValueFailure(SourcePath, ErrorCode, MessageKey)[]);
+// SourceEntityDescriptor(..., DataType, ExternalId? = null) — GUID елемента AF
+// (PiWebApi: Id; PiSqlClient: e.ID AS ElementId), для dic.RegistryExternalKey.
+// PiWebApi і Sql: CollectionRequest.Kind = Interpolated → ECR-INT-0422
+// (.queryKindNotSupported {transport, queryKind}: налаштування, яке ввімкнуло б
+// тип, немає — тому не .queryKindNotConfigured з {configKey}) до звернення до джерела.
 
 // HSE301 F4 (адитивно): SourceQueryKind { Raw, Interpolated }, SourceSummaryKind
 // { Total, Average, Minimum, Maximum, Count }, WindowComputedBy { Local, Server },
@@ -3231,7 +3251,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CALC-4221` | 422 | перерахунок закритого періоду без окремого погодження (ФВ-9.7) |
 | `ECR-IMP-0422` | 422 | імпорт xlsx: структура файлу не відповідає шаблону |
 | `ECR-INT-0503` | 503 | зовнішнє джерело недоступне; збір перейде в catch-up |
-| `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9); також тип запиту джерела не налаштовано (`.queryKindNotConfigured`, HSE301 §4.3) |
+| `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9); також тип запиту джерела не налаштовано (`.queryKindNotConfigured`, HSE301 §4.3) чи транспорт його не виконує (`.queryKindNotSupported`); транспорт не читає поточних значень (`.currentValueNotSupported`, FEATURE-REGISTRY-SYNC S1) |
 | `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена; **або** немає самого мапінгу поля (`messageKey` розрізняє: `sourceEntity` / `fieldMap`) |
 | `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
 | `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`); **або** сутність збору з таким кодом у з'єднанні вже є (`POST /sources`, `messageKey` `sourceEntityDuplicate`) |
