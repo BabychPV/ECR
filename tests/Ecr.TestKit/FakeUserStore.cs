@@ -523,6 +523,26 @@ public sealed class FakeUserStore : IUserStore
     /// <inheritdoc />
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct) => Task.FromResult(Policy);
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Фікстура рахує ДОМЕННИМ методом (<c>User.RegisterFailedAttempt</c>):
+    /// у пам'яті гонки немає, а правило має бути рівно те, що й у домені.
+    /// Рівність SQL бойового сховища з доменом тримає
+    /// <c>FailedAttemptAtomicTests</c> (Infrastructure).
+    /// </remarks>
+    public Task<FailedAttemptOutcome> RegisterFailedAttemptAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null)
+        {
+            return Task.FromResult(default(FailedAttemptOutcome));
+        }
+
+        var locked = user.RegisterFailedAttempt(maxFailedAttempts, lockoutMinutes, utcNow);
+        return Task.FromResult(new FailedAttemptOutcome(user.FailedAttempts, user.LockedUntil, locked));
+    }
+
     /// <summary>Активний доменний користувач для сценаріїв входу.</summary>
     /// <param name="userName">Ім'я входу.</param>
     /// <param name="sid">SID у каталозі.</param>

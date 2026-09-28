@@ -8,6 +8,7 @@ using Ecr.Domain.Errors;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Ecr.Infrastructure.Security;
 
@@ -672,5 +673,91 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // ⛔ Відсутня політика — це НЕ «без обмежень». Порожнє поле не має бути
         // тихим способом вимкнути перевірку довжини пароля.
         return policy ?? new PasswordPolicy(DefaultPolicyCode, minLength: 12, maxFailedAttempts: 5);
+    }
+
+    /// <summary>Типова тривалість блокування, коли політика її не задає.</summary>
+    /// <remarks>Те саме число, що й у <c>User.RegisterFailedAttempt</c>.</remarks>
+    private const int DefaultLockoutMinutes = 15;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Один <c>UPDATE</c>: SQL Server тримає на рядку блокування оновлення,
+    /// тож паралельні спроби серіалізуються на ньому і кожна бачить лічильник
+    /// попередньої. Маркер паралельності (<c>rowversion</c>) дав би те саме
+    /// лише разом із міграцією й повтором на конфлікті.
+    ///
+    /// ⚠ Праві частини <c>SET</c> читають значення ДО оновлення — тому «новий
+    /// лічильник» записано двічі, а не посиланням на щойно присвоєний.
+    ///
+    /// ⚠ <c>OUTPUT … INTO</c> табличну змінну, а не голий <c>OUTPUT</c>: другий
+    /// SQL Server відхиляє на таблиці з тригером, і поява тригера аудиту на
+    /// <c>sec.User</c> тихо зламала б вхід.
+    /// </remarks>
+    public async Task<FailedAttemptOutcome> RegisterFailedAttemptAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct)
+    {
+        var lockUntil = utcNow.AddMinutes(lockoutMinutes <= 0 ? DefaultLockoutMinutes : lockoutMinutes);
+
+        await db.Database.OpenConnectionAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var command = db.Database.GetDbConnection().CreateCommand();
+            command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = """
+                DECLARE @out TABLE (FailedAttempts int NOT NULL, LockedUntil datetime2(3) NULL, LockedNow bit NOT NULL);
+
+                UPDATE sec.[User]
+                SET FailedAttempts =
+                        CASE WHEN LockedUntil IS NOT NULL AND LockedUntil <= @now THEN 1
+                             ELSE FailedAttempts + 1 END,
+                    LockedUntil =
+                        CASE WHEN LockedUntil IS NOT NULL AND LockedUntil > @now THEN LockedUntil
+                             WHEN @max > 0
+                                  AND CASE WHEN LockedUntil IS NOT NULL AND LockedUntil <= @now THEN 1
+                                           ELSE FailedAttempts + 1 END >= @max
+                                  THEN @until
+                             ELSE NULL END
+                OUTPUT inserted.FailedAttempts,
+                       inserted.LockedUntil,
+                       CASE WHEN inserted.LockedUntil IS NOT NULL AND inserted.LockedUntil > @now
+                                 AND (deleted.LockedUntil IS NULL OR deleted.LockedUntil <= @now)
+                            THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END
+                INTO @out
+                WHERE Id = @id;
+
+                SELECT FailedAttempts, LockedUntil, LockedNow FROM @out;
+                """;
+
+            Add(command, "@id", System.Data.DbType.Int32, userId);
+            Add(command, "@max", System.Data.DbType.Int32, maxFailedAttempts);
+            Add(command, "@now", System.Data.DbType.DateTime2, utcNow);
+            Add(command, "@until", System.Data.DbType.DateTime2, lockUntil);
+
+            await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                // Запису немає (видалили між читанням і спробою) — рахувати нема чого.
+                return default;
+            }
+
+            return new FailedAttemptOutcome(
+                reader.GetInt32(0),
+                reader.IsDBNull(1) ? null : DateTime.SpecifyKind(reader.GetDateTime(1), DateTimeKind.Utc),
+                reader.GetBoolean(2));
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Типізований параметр команди.</summary>
+    private static void Add(System.Data.Common.DbCommand command, string name, System.Data.DbType type, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.DbType = type;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 }

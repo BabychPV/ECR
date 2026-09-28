@@ -260,4 +260,37 @@ public interface IUserStore
     /// це був би тихий спосіб вимкнути перевірку довжини одним порожнім полем.
     /// </remarks>
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct);
+
+    /// <summary>
+    /// Рахує невдалу спробу АТОМАРНО — одним оновленням рядка в сховищі
+    /// (S8(в), ФВ-6.4a).
+    /// </summary>
+    /// <param name="userId">Обліковий запис.</param>
+    /// <param name="maxFailedAttempts">Поріг блокування; ≤ 0 — не блокувати.</param>
+    /// <param name="lockoutMinutes">На скільки блокувати; ≤ 0 — 15 хв.</param>
+    /// <param name="utcNow">Поточний момент.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Стан лічильника ПІСЛЯ цієї спроби.</returns>
+    /// <remarks>
+    /// ⛔ Не «прочитати → <c>User.RegisterFailedAttempt</c> → зберегти»:
+    /// <c>sec.User</c> не має маркера паралельності, і дві одночасні хибні
+    /// спроби читали той самий лічильник та обидві писали N+1 — підбір у
+    /// кілька потоків не доходив до порогу ніколи.
+    ///
+    /// ⚠ Правило — те саме, що в <c>User.RegisterFailedAttempt</c>: минуле
+    /// блокування скидає лічильник, чинне не скорочується. Сховище зберігає
+    /// рядок само; сутність у пам'яті викликача цим методом НЕ змінюється.
+    /// </remarks>
+    public Task<FailedAttemptOutcome> RegisterFailedAttemptAsync(
+        int userId, int maxFailedAttempts, int lockoutMinutes, DateTime utcNow, CancellationToken ct);
 }
+
+/// <summary>Стан лічильника невдалих спроб після атомарного оновлення.</summary>
+/// <param name="FailedAttempts">Лічильник після спроби.</param>
+/// <param name="LockedUntil">Межа блокування після спроби; <c>null</c> — не заблоковано.</param>
+/// <param name="LockedNow">Саме ця спроба заблокувала запис.</param>
+/// <remarks>
+/// ⚠ Структура, а не клас: підставне сховище без налаштування віддає
+/// <c>default</c> — «не заблоковано», а не <c>null</c>, на якому впав би обробник.
+/// </remarks>
+public readonly record struct FailedAttemptOutcome(int FailedAttempts, DateTime? LockedUntil, bool LockedNow);

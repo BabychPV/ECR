@@ -253,6 +253,11 @@ public sealed class User : Entity<int>
     /// ⚠ ЧИННЕ блокування спроба не скорочує і не подовжує: інакше хибний
     /// пароль перетворював би адміністративне «доки не розблокують» (BE-12) на
     /// 15 хвилин.
+    ///
+    /// ⚠ Обробник входу рахує спробу не цим методом, а одним <c>UPDATE</c>
+    /// сховища (<c>IUserStore.RegisterFailedAttemptAsync</c>, S8(в) —
+    /// атомарність під паралельними спробами). Правило там те саме; їхню
+    /// рівність тримає <c>FailedAttemptAtomicTests</c>.
     /// </remarks>
     public bool RegisterFailedAttempt(int maxFailedAttempts, int lockoutMinutes, DateTime utcNow)
     {

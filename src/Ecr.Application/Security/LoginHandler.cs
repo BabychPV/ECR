@@ -107,9 +107,14 @@ public sealed partial class LoginHandler(
         if (!verified)
         {
             var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
-            var locked = user.RegisterFailedAttempt(policy.MaxFailedAttempts, policy.LockoutMinutes, now);
 
-            await FailAsync(userName, locked ? "LockedOut" : "BadPassword", ipAddress, now, ct)
+            // ⛔ S8(в): лічильник рахує СХОВИЩЕ одним оновленням рядка, а не
+            // сутність у пам'яті з наступним збереженням — інакше паралельні
+            // хибні спроби губили інкременти (lost update) і поріг не наставав.
+            var outcome = await users.RegisterFailedAttemptAsync(
+                user.Id, policy.MaxFailedAttempts, policy.LockoutMinutes, now, ct).ConfigureAwait(false);
+
+            await FailAsync(userName, outcome.LockedNow ? "LockedOut" : "BadPassword", ipAddress, now, ct)
                 .ConfigureAwait(false);
 
             throw InvalidCredentials();
