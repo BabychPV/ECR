@@ -424,7 +424,10 @@ public sealed class AccessDecisionTests
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage3)]
     public void Грант_на_колонку_перекриває_грант_на_таблицю()
     {
+        // ⚠ Грант на проєкт (Read) — передумова дрібніших грантів (S2): без
+        // нього таблиця й колонка не діють зовсім (SubProjectGrantScopeRulesTests).
         var profile = new AccessBuilder()
+            .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
             .Grant(ResourceKind.Table, AccessBuilder.TableId, GrantLevel.Manage)
             .Grant(ResourceKind.Column, AccessBuilder.ColumnId, GrantLevel.Read)
             .Build();

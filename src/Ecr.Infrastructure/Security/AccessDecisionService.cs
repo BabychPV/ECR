@@ -349,6 +349,21 @@ public sealed class AccessDecisionService(
 
         var projectId = await ProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
+        return ReadDecision(profile, projectId);
+    }
+
+    /// <summary>Чи бачить профіль документи проєкту — без походу в базу.</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <remarks>
+    /// ⛔ Одне формулювання на два шляхи: <see cref="CanReadDocumentAsync"/> і
+    /// дії робочого процесу (<see cref="CanSubmitAsync"/>,
+    /// <see cref="CanApproveAsync"/>, <see cref="CanReopenAsync"/>), які
+    /// проєкт уже мають із <see cref="BuildContextAsync"/> і другого запиту не
+    /// платять.
+    /// </remarks>
+    private static EditDecision ReadDecision(AccessProfile profile, int projectId)
+    {
         // Читання не залежить ні від стану періоду, ні від статусу аркуша:
         // закритий період і подана форма лишаються видимими — інакше звіт
         // неможливо було б навіть переглянути після подання.
@@ -361,6 +376,31 @@ public sealed class AccessDecisionService(
         return integrationReads || profile.LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read
             ? EditDecision.Allow()
             : EditDecision.Deny(EditDenyReason.NoGrant);
+    }
+
+    /// <summary>
+    /// Дія робочого процесу над документом, якого користувач не бачить, —
+    /// відмова ДО будь-якої іншої причини (S2).
+    /// </summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="context">Умови аркуша, уже зібрані.</param>
+    /// <returns>Відмова <see cref="EditDenyReason.NoGrant"/> або <c>null</c> — видимість є.</returns>
+    /// <remarks>
+    /// ⛔ S2 (enterprise-аудит безпеки, 2026-09-28). Подання, затвердження й
+    /// повернення в роботу не питали права ЧИТАТИ документ: вистачало гранта
+    /// на аркуш, а той не прив'язаний до проєкту (див.
+    /// <see cref="EditRules.Effective"/>). Невидимий документ змінював стан
+    /// (порушення B-08).
+    ///
+    /// ⚠ Саме ПЕРШОЮ, а не лише через <see cref="EditRules.Effective"/>: там
+    /// рівень рахується ОСТАННІМ, і відмова на невидимому документі казала б
+    /// «аркуш у стані Draft» чи «період закритий» — тобто розповідала б про
+    /// стан документа, якого для цієї людини не існує.
+    /// </remarks>
+    private static EditDecision? DenyIfInvisible(AccessProfile profile, CellAccessContext context)
+    {
+        var read = ReadDecision(profile, context.ProjectId);
+        return read.IsAllowed ? null : read;
     }
 
     /// <inheritdoc />
@@ -873,6 +913,11 @@ public sealed class AccessDecisionService(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
 
+        if (DenyIfInvisible(profile, context) is { } invisible)
+        {
+            return invisible;
+        }
+
         // ⚠ При поданні блокує БУДЬ-ЯКА помилка валідації будь-якого рівня
         // (ФВ-5.19), на відміну від запису, де блокує лише коміркова (D-90):
         // подана форма йде назовні цілком, і рядкова помилка в ній — це
@@ -898,6 +943,11 @@ public sealed class AccessDecisionService(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
 
+        if (DenyIfInvisible(profile, context) is { } invisible)
+        {
+            return invisible;
+        }
+
         // ⚠ Маршрут читається ЛИШЕ при затвердженні, а не в кожному рішенні
         // про доступ: затверджують рідко, а комірки читають тисячами.
         var step = await CurrentApprovalStepAsync(documentId, sheetDefId, periodKey, ct)
@@ -916,7 +966,7 @@ public sealed class AccessDecisionService(
                 documentId, periodKey, sheetDefId, columnDefId: 0, evaluateAccessWindow: true, ct)
             .ConfigureAwait(false);
 
-        return EditRules.CanReopen(profile, context);
+        return DenyIfInvisible(profile, context) ?? EditRules.CanReopen(profile, context);
     }
 
     /// <inheritdoc />
