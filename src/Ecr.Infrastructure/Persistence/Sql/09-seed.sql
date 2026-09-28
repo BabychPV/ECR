@@ -73,6 +73,10 @@ USING (VALUES
   -- починається на `Report.`, означало б змінити повноваження людей правкою
   -- одного рядка каталогу. Адміністратор видає його свідомо, і в журналі
   -- безпеки видно, хто це зробив (`DangerousPermissionsGranted`).
+  -- ✎ 2026-09-28: рішення людини на Q-153 — Approver отримує право явно
+  -- (окремий MERGE після ролі первинного налаштування, `D-203`); для решти
+  -- ролей воно й далі видається свідомо. Позначку (1) НЕ знімати: саме вона
+  -- тримає право поза шаблонами `Report.%` і `%` інших ролей.
   (N'Report.EditDefinition',    N'Report',      1),
   -- ⚠ НЕБЕЗПЕЧНЕ (1) з тієї самої причини, що й рядок вище, і це — механізм,
   -- яким виконано рішення людини на `Q15-07`: «окреме право, ВИДАЄТЬСЯ ЯВНО».
@@ -304,6 +308,9 @@ GO
 -- перелік редагують руками і рано чи пізно допишуть у нього ще один рядок,
 -- а фільтр не забудеш (ФВ-6.12, D-40). Такі права адміністратор додає
 -- окремою свідомою дією, і в аудиті видно, хто це зробив.
+-- ✎ 2026-09-28: поіменні винятки живуть ОКРЕМИМИ MERGE нижче (роль
+-- первинного налаштування; `Approver` × `Report.EditDefinition`, Q-153 /
+-- D-203) — фільтр цього блоку вони не послаблюють.
 --
 -- ⚠ Без цього блоку жоден користувач не має ЖОДНОГО функціонального права —
 -- включно з тим, кого щойно зробили SystemAdministrator. Ролі без прав
@@ -393,6 +400,29 @@ USING (
     JOIN sec.Permission AS p ON p.Code = m.Code
     CROSS JOIN sec.Role AS r
     WHERE r.Code = N'BootstrapAdministrator'
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+
+-- ── Погоджувач: авторство описів державних звітів (Q-153, D-203) ────────
+-- ✎ 2026-09-28, рішення людини: «Чи може погоджувач (Approver) редагувати
+-- описи державних звітів (Report.EditDefinition) — ТАК».
+--
+-- ⛔ Окремим MERGE і поіменно, а НЕ зняттям `IsDangerous` з права і НЕ
+-- рядком у переліку вище: фільтр `IsDangerous = 0` там лишається цілим, тож
+-- шаблони `Report.%` і `%` інших ролей небезпечного права як не роздавали,
+-- так і не роздають. Видано рівно одній ролі рівно одне право.
+--
+-- ⚠ MERGE … WHEN NOT MATCHED додає відсутню пару і на ВЖЕ розгорнутій базі:
+-- `SeedRunner` виконує seed на кожному старті, тож наявний погоджувач
+-- отримає право після оновлення без окремого скрипта.
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM sec.Role AS r
+    JOIN sec.Permission AS p ON p.Code = N'Report.EditDefinition'
+    WHERE r.Code = N'Approver'
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);

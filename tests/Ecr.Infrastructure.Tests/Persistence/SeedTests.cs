@@ -226,6 +226,11 @@ public sealed class SeedTests(SqlServerFixture sql)
         // симуляцію або відкриття періоду, видане розгортанням, не має автора
         // в аудиті — а саме автор й потрібен, коли потім з'ясовують, звідки
         // взялася можливість.
+        //
+        // ✎ 2026-09-28: другий поіменний виняток — `Approver` ×
+        // `Report.EditDefinition` (рішення людини на Q-153, `D-203`). Він
+        // виданий окремим MERGE, а не послабленням фільтра, і тест тримає
+        // саме це: крім цієї пари небезпечного в складених ролях НЕМАЄ.
         Assert.Equal(0, await ScalarAsync($"""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
@@ -233,6 +238,7 @@ public sealed class SeedTests(SqlServerFixture sql)
             JOIN sec.Permission AS p ON p.Code = rp.PermissionCode
             WHERE p.IsDangerous = 1
               AND r.Code <> N'{BootstrapAdmin.RoleCode}'
+              AND NOT (r.Code = N'Approver' AND p.Code = N'Report.EditDefinition')
             """));
 
         // ⚠ Виняток рівно один і названий. Він не послаблення правила, а його
@@ -272,6 +278,83 @@ public sealed class SeedTests(SqlServerFixture sql)
         // первинного налаштування.
         Assert.Equal(0, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.RolePermission WHERE PermissionCode = N'Security.Simulate'"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    [Trait("Requirement", "ФВ-10.4")]
+    public async Task Погоджувач_отримує_Report_EditDefinition_явно_а_шаблони_його_не_роздають()
+    {
+        // ✎ Q-153, рішення людини 2026-09-28 (`D-203`): «Чи може погоджувач
+        // (Approver) редагувати описи державних звітів — ТАК».
+        Assert.Equal(1, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Approver' AND rp.PermissionCode = N'Report.EditDefinition'
+            """));
+
+        // ⛔ Право лишається НЕБЕЗПЕЧНИМ. Зняти позначку — найкоротший шлях
+        // «видати погоджувачу», але тоді шаблон `%` SystemAdministrator і будь-
+        // який майбутній `Report.%` роздали б авторство державної форми мовчки.
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.EditDefinition' AND IsDangerous = 1"));
+
+        // ⛔ Жодна інша вбудована роль його не має — зокрема SystemAdministrator
+        // (шаблон `%`), DataEntry і Viewer.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE rp.PermissionCode = N'Report.EditDefinition' AND r.Code <> N'Approver'
+            """));
+
+        // ⚠ Шаблон `Report.%` погоджувача й далі НЕ бере небезпечного: сусіднє
+        // `Report.ViewCampaign` (`Q15-07`) до нього не приїхало.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role       AS r ON r.Id   = rp.RoleId
+            JOIN sec.Permission AS p ON p.Code = rp.PermissionCode
+            WHERE r.Code = N'Approver' AND p.IsDangerous = 1
+              AND p.Code <> N'Report.EditDefinition'
+            """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Розгорнута_база_без_права_погоджувача_отримує_його_повторним_seed()
+    {
+        // ⚠ Стара база: розгорнута до рішення Q-153, пари немає. MERGE роздач
+        // лише додає, і саме це тут і перевіряється — наявна роль отримує
+        // відсутнє призначення на наступному старті (`SeedRunner`), без
+        // окремого скрипта оновлення.
+        await ExecuteAsync("""
+            DELETE rp
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Approver' AND rp.PermissionCode = N'Report.EditDefinition';
+            """);
+
+        Assert.Equal(0, await ApproverEditDefinitionAsync());
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(1, await ApproverEditDefinitionAsync());
+
+        Task<int> ApproverEditDefinitionAsync() => ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Approver' AND rp.PermissionCode = N'Report.EditDefinition'
+            """);
     }
 
     [Fact]
