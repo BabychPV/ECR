@@ -32,6 +32,10 @@ import { markSlicesStale } from '@/features/grid/sliceCache';
 import { ApprovalRouteEditor } from '@/features/projects/ApprovalRouteEditor';
 import { CreateProjectModal, timeZones } from '@/features/projects/CreateProjectModal';
 import { PeriodPolicyManager } from '@/features/projects/PeriodPolicyManager';
+import {
+  RecalculationApprovalsPanel,
+  RequestRecalculationButton,
+} from '@/features/projects/RecalculationApprovals';
 import { hasProjectGrant } from '@/features/documents/BusinessKeyChangeAction';
 import { pollInterval, outcomeOf } from '@/features/workflow/jobFollow';
 import { humanizeJobId } from '@/features/workflow/jobLabel';
@@ -970,6 +974,10 @@ export function PeriodsPage(): JSX.Element {
                 </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">
+                    {period.state === 'Closed' && recalculates && projectId !== null && (
+                      <RequestRecalculationButton projectId={projectId} periodKey={period.periodKey} />
+                    )}
+
                     {period.state === 'Closed' && reopens && (
                       <Button
                         size="compact-xs"
@@ -999,6 +1007,9 @@ export function PeriodsPage(): JSX.Element {
         </>
         )}
       </AsyncBoundary>
+
+      {/* ФВ-9.7, аудит S1: погодження перерахунку закритих періодів. */}
+      {recalculates && projectId !== null && <RecalculationApprovalsPanel projectId={projectId} />}
 
       {/* ⛔ Форма створення живе ОКРЕМИМ компонентом (`A7-56`). Вона
           надсилала запит без версії шаблону і без політики періодів, а сервер

@@ -4648,7 +4648,23 @@ USING (VALUES
     (N'err.ECR-REQ-0422.headerBaseVersion', N'en', N'The header change must say which version of the header it started from (baseVersion).', 1),
     -- D16: S1 — погодження перерахунку закритого періоду окремою сутністю (ФВ-9.7).
     (N'err.ECR-CALC-0409.approvalNotPending', N'en', N'This recalculation approval is not waiting for confirmation: it does not exist, is already confirmed or used, or has expired.', 1),
-    (N'err.ECR-CALC-4221.approvalNotUsable', N'en', N'This approval cannot be used for this recalculation. It must be confirmed by another person, unused and unexpired, and issued to you for this project and period.', 1)
+    (N'err.ECR-CALC-4221.approvalNotUsable', N'en', N'This approval cannot be used for this recalculation. It must be confirmed by another person, unused and unexpired, and issued to you for this project and period.', 1),
+    -- D16: S1 — екран погоджень перерахунку закритого періоду (PeriodsPage).
+    (N'recalcApprovals.title', N'en', N'Recalculation approvals for closed periods', 1),
+    (N'recalcApprovals.empty', N'en', N'No open recalculation approvals.', 1),
+    (N'recalcApprovals.request', N'en', N'Request recalculation', 1),
+    (N'recalcApprovals.requestTitle', N'en', N'Request recalculation of closed period {period}', 1),
+    (N'recalcApprovals.requestHint', N'en', N'Another person with Manage access to the project must confirm the request. The approval is valid for 24 hours, can be used once, and only by you.', 1),
+    (N'recalcApprovals.requested', N'en', N'Recalculation request sent for confirmation.', 1),
+    (N'recalcApprovals.reason', N'en', N'Reason', 1),
+    (N'recalcApprovals.period', N'en', N'Period', 1),
+    (N'recalcApprovals.requestedBy', N'en', N'Requested by', 1),
+    (N'recalcApprovals.state', N'en', N'State', 1),
+    (N'recalcApprovals.statePending', N'en', N'Waiting for confirmation', 1),
+    (N'recalcApprovals.stateConfirmed', N'en', N'Confirmed by {name}', 1),
+    (N'recalcApprovals.expires', N'en', N'Valid until', 1),
+    (N'recalcApprovals.confirm', N'en', N'Confirm', 1),
+    (N'recalcApprovals.confirmedDone', N'en', N'Recalculation approval confirmed.', 1)
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
