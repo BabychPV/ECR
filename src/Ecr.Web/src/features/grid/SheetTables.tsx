@@ -253,6 +253,7 @@ export function SheetTables({
               <DocumentGrid
                 documentId={documentId}
                 tableInstanceId={id}
+                tableDefId={table.tableDefId}
                 periodKey={periodKey}
                 readOnly={readOnly}
                 allowsDynamicRows={table.allowsDynamicRows}

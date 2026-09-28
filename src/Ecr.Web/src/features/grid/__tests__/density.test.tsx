@@ -115,6 +115,7 @@ async function showGrid(): Promise<Element> {
         <DocumentGrid
           documentId={1}
           tableInstanceId={1}
+          tableDefId={1}
           periodKey={202601}
           readOnly={false}
           allowsDynamicRows={false}

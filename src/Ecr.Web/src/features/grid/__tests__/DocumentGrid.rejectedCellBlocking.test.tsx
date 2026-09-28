@@ -197,6 +197,7 @@ function DocumentHost(): JSX.Element {
     <DocumentGrid
       documentId={DocumentId}
       tableInstanceId={Table}
+      tableDefId={1}
       periodKey={Period}
       readOnly={false}
       allowsDynamicRows={false}

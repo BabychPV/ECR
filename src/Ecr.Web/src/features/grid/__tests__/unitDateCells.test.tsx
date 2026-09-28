@@ -233,6 +233,7 @@ describe('R-01: вставка з Excel — код одиниці стає ід�
           <DocumentGrid
             documentId={1}
             tableInstanceId={1}
+            tableDefId={1}
             periodKey={202609}
             readOnly={false}
             allowsDynamicRows={false}

@@ -5,58 +5,18 @@
  * колонки: назву ширшою, службові вужчими. Ширини, які не переживають
  * перезавантаження, — це та сама робота двісті разів на рік.
  *
- * ⛔ У `localStorage`, а не на сервері, і це свідомо: це налаштування ОДНОГО
- * робочого місця, а не профілю. Той самий оператор на іншому моніторі хоче
- * інші ширини, і синхронізувати їх між машинами означало б псувати обидві.
+ * ⛔ `D-201`: ширини — на КОРИСТУВАЧА і ВИЗНАЧЕННЯ таблиці (`tableDefId`), на
+ * сервері (`BE-20`, ключ `grid.columnWidths.{tableDefId}`); `localStorage` —
+ * лише кеш першого рендера. Ключ — визначення, а не екземпляр: екземпляр
+ * новий на кожен період, і ширини губилися б щомісяця. Компроміс названо в
+ * `D-201`: ширини однакові на всіх робочих місцях користувача.
+ *
+ * Збереження — `features/preferences/columnWidthsSync.ts` (`useColumnWidths`);
+ * тут лишилися типова ширина і розбір події RevoGrid.
  */
 
 /** Ширина за замовчуванням, якщо збереженої немає. */
 export const DefaultColumnWidth = 140;
-
-/** Ключ сховища: таблиця плюс період не потрібен — розмітка та сама. */
-function storageKey(tableInstanceId: number): string {
-  return `ecr.columnWidths:${tableInstanceId}`;
-}
-
-/**
- * Читає збережені ширини: код колонки → пікселі.
- *
- * ⚠ Ніколи не падає і ніколи не повертає сміття: пошкоджений або чужий вміст
- * трактується як «збереженого немає». Налаштування вигляду не має права
- * ламати таблицю, заради якої існує система.
- */
-export function readWidths(tableInstanceId: number): Record<string, number> {
-  try {
-    const raw = globalThis.localStorage?.getItem(storageKey(tableInstanceId));
-    if (raw === null || raw === undefined) return {};
-
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return {};
-
-    const widths: Record<string, number> = {};
-    for (const [code, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-        widths[code] = value;
-      }
-    }
-
-    return widths;
-  } catch {
-    return {};
-  }
-}
-
-/** Дописує ширини, не стираючи решти. */
-export function saveWidths(tableInstanceId: number, changed: Record<string, number>): void {
-  try {
-    const merged = { ...readWidths(tableInstanceId), ...changed };
-
-    globalThis.localStorage?.setItem(storageKey(tableInstanceId), JSON.stringify(merged));
-  } catch {
-    // Приватне вікно і заблоковані дані сайту: ширини не збережуться, і це
-    // все, що станеться.
-  }
-}
 
 /**
  * Розбирає подію зміни ширини RevoGrid.

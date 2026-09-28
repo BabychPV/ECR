@@ -14,6 +14,7 @@ import type {
   TableSliceDto,
   UnitRef,
 } from '@/api/types';
+import { useColumnWidths } from '@/features/preferences/columnWidthsSync';
 import { cellAppearanceClassOf, cellAppearanceOf } from './cellAppearance';
 import { cellDisplay, cellText, editorValueOf, isNumericColumn, sameCellValue } from './cellValue';
 import { parseClipboard, planPaste, toClipboard, type PasteRejection } from './clipboard';
@@ -22,7 +23,7 @@ import { captureRange, isRangeEdit, type RangeEditDetail } from './rangeEdit';
 import { ConflictPanel, hasCurrentVersion, type OpenConflict } from './ConflictPanel';
 import { cellStateClass, cellStateOf, type LocalCellFlags } from './cellState';
 import { isMissingColumns, isSliceEmpty } from './emptiness';
-import { DefaultColumnWidth, readWidths, saveWidths, widthsFromEvent } from './columnWidths';
+import { DefaultColumnWidth, widthsFromEvent } from './columnWidths';
 import { createLookupCellEditor, lookupCellDisplay, lookupIdOfText } from './LookupCellEditor';
 import { boolCellDisplay, createBoolCellEditor } from './BoolCellEditor';
 import { createUnitCellEditor, unitCellDisplay, unitIdOfCode } from './UnitCellEditor';
@@ -117,6 +118,8 @@ export interface DocumentGridProps {
   documentId: number;
   /** Екземпляр таблиці. */
   tableInstanceId: number;
+  /** Визначення таблиці — ключ ширин колонок (`D-201`). */
+  tableDefId: number;
   /** Ключ періоду. */
   periodKey: number;
   /** Чи доступне редагування на рівні всієї таблиці. */
@@ -241,8 +244,15 @@ const RowLabelColumnWidth = 260;
  * рівні API (B04 §2.3), і UI не має його імітувати.
  */
 export function DocumentGrid(props: DocumentGridProps): JSX.Element {
-  const { documentId, tableInstanceId, periodKey, readOnly, allowsDynamicRows, maxDynamicRows } =
-    props;
+  const {
+    documentId,
+    tableInstanceId,
+    tableDefId,
+    periodKey,
+    readOnly,
+    allowsDynamicRows,
+    maxDynamicRows,
+  } = props;
 
   const slice = useQuery({
     // ⚠ Період лишається в КЛЮЧІ КЕШУ, але не в адресі. Екземпляр таблиці
@@ -631,12 +641,10 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   // ⚠ Лічильник змін історії. Стек живе в `ref` — інакше кожна правка
   // перестворювала б його і губила глибину; але тоді React не знає, що
   // «можна скасувати» змінилося, і кнопки лишалися б назавжди сірими.
-  // ⚠ Ширини читаються ОДИН раз на таблицю і далі живуть у стані: читати
-  // `localStorage` на кожному рендері таблиці 500×60 означало б розбирати JSON
-  // при кожному натисканні клавіші.
-  const [widths, setWidths] = useState<Record<string, number>>(() =>
-    readWidths(tableInstanceId),
-  );
+  // ⚠ Ширини — на користувача і ВИЗНАЧЕННЯ таблиці (`ФВ-14.29`, `D-201`):
+  // ключ `tableDefId`, а не `tableInstanceId`, інакше ширини губилися б на
+  // кожному новому періоді. Хук сам скидає стан при зміні таблиці.
+  const { widths, onResize: saveColumnWidths } = useColumnWidths(tableDefId);
 
   const [historyRevision, setHistoryRevision] = useState(0);
   const touchHistory = useCallback(() => setHistoryRevision((value) => value + 1), []);
@@ -663,7 +671,6 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     // вираз колонки з тим самим номером, але з іншої таблиці.
     publishFocus(tableInstanceId, periodKey, null);
 
-    setWidths(readWidths(tableInstanceId));
     touchHistory();
 
     // ⚠ І дебаунс тут більше не скасовується. Раніше це було обов'язкове
@@ -676,18 +683,18 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
   /**
    * Зміна ширини колонки.
    *
-   * ⚠ Зберігається одразу, а не «при виході»: користувач закриє вкладку, і
-   * подія виходу не спрацює. Обсяг запису — кілька десятків байтів.
+   * ⚠ Кеш (`localStorage`) пишеться одразу, сервер (`BE-20`,
+   * `grid.columnWidths.{tableDefId}`) — з дебаунсом і при розмонтуванні:
+   * серію подій перетягування межі хук зводить до одного запиту.
    */
   const onColumnResize = useCallback(
     (event: { detail: unknown }) => {
       const changed = widthsFromEvent(event.detail);
       if (Object.keys(changed).length === 0) return;
 
-      saveWidths(tableInstanceId, changed);
-      setWidths((current) => ({ ...current, ...changed }));
+      saveColumnWidths(changed);
     },
-    [tableInstanceId],
+    [saveColumnWidths],
   );
 
   const data = slice.data;
@@ -2117,7 +2124,7 @@ export function gridColumns(
         (column.unitSymbol === null ? column.header : `${column.header}, ${column.unitSymbol}`) +
         (isRequired ? ' *' : ''),
 
-      // Збережена ширина цієї колонки для цього робочого місця (ФВ-14.29).
+      // Збережена ширина цієї колонки для цього користувача (ФВ-14.29, D-201).
       size: widths[column.code] ?? DefaultColumnWidth,
 
       // ⚠ Зірочка в заголовку — це ЗНАК, а не пояснення: читалка екрана й
