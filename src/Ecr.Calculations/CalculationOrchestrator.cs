@@ -32,6 +32,18 @@ public sealed class CalculationOrchestrator(
     /// </remarks>
     private const int MaxParallelism = 4;
 
+    /// <summary>
+    /// Кеш знімків довідників за прогоном (RT-23a, FEATURE-REGISTRY-TABLES §5.7).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ За прогоном, а не за викликом: задача перерахунку кличе <see cref="RunAsync(long,
+    /// long, PeriodKey, IReadOnlyList{CalculationBindingRef}, IJobProgress, CancellationToken)"/>
+    /// на КОЖЕН документ × період того самого прогону, і склад потоку, спільний для
+    /// всіх документів, читався б стільки разів, скільки їх. Ключ знімка всередині —
+    /// (довідники, бізнес-дата, момент), тож різні періоди не змішуються.
+    /// </remarks>
+    private readonly ConcurrentDictionary<long, RegistrySnapshotCache> _registries = new();
+
     /// <inheritdoc />
     /// <param name="calculationRunId">Прогін, створений use-case.</param>
     /// <param name="documentId">Документ.</param>
@@ -40,12 +52,45 @@ public sealed class CalculationOrchestrator(
     /// <param name="progress">Канал прогресу для UI.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Профіль по модулях — заповнюється завжди (J-1).</returns>
+    /// <remarks>
+    /// ⚠ Порт <see cref="ICalculationRunner"/> моменту знімка прогону ще не несе, тож
+    /// довідники тут читаються на поточний момент (<c>null</c>). Щойно задача
+    /// перерахунку передаватиме <c>CalculationRun.RegistryAsOfUtc</c>, вона кличе
+    /// перевантаження з моментом.
+    /// </remarks>
+    public Task<ModuleProfile> RunAsync(
+        long calculationRunId,
+        long documentId,
+        PeriodKey periodKey,
+        IReadOnlyList<CalculationBindingRef> bindings,
+        IJobProgress progress,
+        CancellationToken ct)
+        => RunAsync(calculationRunId, documentId, periodKey, bindings, progress, registryAsOfUtc: null, ct);
+
+    /// <summary>Виконує прогін із заданим моментом знімка довідників.</summary>
+    /// <param name="calculationRunId">Прогін, створений use-case.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="bindings">Прив'язки методологій до таблиць документа.</param>
+    /// <param name="progress">Канал прогресу для UI.</param>
+    /// <param name="registryAsOfUtc">
+    /// <c>CalculationRun.RegistryAsOfUtc</c>: усі довідники прогону читаються
+    /// <c>FOR SYSTEM_TIME AS OF</c> цього моменту (<c>D-158</c>, AC-7); <c>null</c> —
+    /// поточні дані.
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Профіль по модулях — заповнюється завжди (J-1).</returns>
+    /// <exception cref="ArgumentException">
+    /// Той самий прогін уже йшов з іншим моментом: два моменти в одному прогоні дали б
+    /// змішаний стан, який не відтворює жоден повтор.
+    /// </exception>
     public async Task<ModuleProfile> RunAsync(
         long calculationRunId,
         long documentId,
         PeriodKey periodKey,
         IReadOnlyList<CalculationBindingRef> bindings,
         IJobProgress progress,
+        DateTime? registryAsOfUtc,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(bindings);
@@ -55,6 +100,15 @@ public sealed class CalculationOrchestrator(
         if (bindings.Count == 0)
         {
             return profile;
+        }
+
+        var registries = _registries.GetOrAdd(calculationRunId, _ => new RegistrySnapshotCache(registryAsOfUtc));
+        if (registries.RegistryAsOfUtc != registryAsOfUtc)
+        {
+            throw new ArgumentException(
+                $"Прогін {calculationRunId} уже читає довідники станом на "
+                + $"{registries.RegistryAsOfUtc:O}, а не на {registryAsOfUtc:O}.",
+                nameof(registryAsOfUtc));
         }
 
         var onDate = await PeriodDateAsync(documentId, periodKey, ct).ConfigureAwait(false);
@@ -123,7 +177,7 @@ public sealed class CalculationOrchestrator(
                     {
                         var stat = await ExecuteAsync(
                             scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
-                            calculationRunId, documentId, periodKey, binding, token).ConfigureAwait(false);
+                            calculationRunId, documentId, periodKey, binding, registries, token).ConfigureAwait(false);
 
                         measured.Add(stat);
                     }
@@ -170,6 +224,7 @@ public sealed class CalculationOrchestrator(
         long documentId,
         PeriodKey periodKey,
         ResolvedBinding binding,
+        RegistrySnapshotCache registries,
         CancellationToken ct)
     {
         var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
@@ -214,8 +269,11 @@ public sealed class CalculationOrchestrator(
         //    жодного походу в базу — рівно так поводився й цикл до зміни.
         if (inputs.Count > 0)
         {
+            // ⚠ RT-23a: знімок довідників — з кешу ПРОГОНУ (§5.7), спільного для
+            // всіх прив'язок і паралельних гілок: завантажується один раз на
+            // (довідники, бізнес-дата, момент), а не на прив'язку.
             var prepared = await module
-                .PrepareAsync(binding.Descriptor, documentId, periodKey, ct)
+                .PrepareAsync(binding.Descriptor, documentId, periodKey, registries, ct)
                 .ConfigureAwait(false);
 
             foreach (var input in inputs)

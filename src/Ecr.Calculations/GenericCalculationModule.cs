@@ -17,6 +17,19 @@ namespace Ecr.Calculations;
 /// для 5 — проблема не в методологіях, а в граматиці рівня 1: дешевше
 /// розширити граматику, ніж плодити скрипти.
 /// </remarks>
+/// <param name="formulaEngine">Рушій виразів.</param>
+/// <param name="methodologies">Склад версій методологій.</param>
+/// <param name="constants">Вибір константи серед кандидатів.</param>
+/// <param name="calendar">Календарний контекст періоду.</param>
+/// <param name="unitCatalog">Довідник одиниць.</param>
+/// <param name="periods">Межі періодів.</param>
+/// <param name="bindingStore">Масштаби колонок-приймачів.</param>
+/// <param name="registryStore">
+/// Коди довідників → ідентифікатори (RT-23a). ⚠ Необов'язковий, як і
+/// <paramref name="registryLoader"/>: методологія без функцій довідників їх не потребує,
+/// і стенди, що збирають модуль вручну, не мусять їх знати.
+/// </param>
+/// <param name="registryLoader">Завантажувач знімка довідників (RT-22).</param>
 public sealed class GenericCalculationModule(
     IFormulaEngine formulaEngine,
     IMethodologyStore methodologies,
@@ -24,7 +37,9 @@ public sealed class GenericCalculationModule(
     CalendarContext calendar,
     IUnitCatalog unitCatalog,
     IPeriodStore periods,
-    ICalculationBindingStore bindingStore) : ICalculationModule
+    ICalculationBindingStore bindingStore,
+    IRegistryStore? registryStore = null,
+    IRegistrySnapshotLoader? registryLoader = null) : ICalculationModule
 {
     private UnitTable? _units;
     /// <inheritdoc />
@@ -46,8 +61,22 @@ public sealed class GenericCalculationModule(
     }
 
     /// <inheritdoc />
-    public async Task<CalculationBindingContext> PrepareAsync(
+    /// <remarks>
+    /// ⚠ Без кешу прогону (одиночний виклик — публікація, симуляція) знімок довідників
+    /// читається на ПОТОЧНИЙ момент: прогону, чий <c>RegistryAsOfUtc</c> треба
+    /// відтворити, тут немає.
+    /// </remarks>
+    public Task<CalculationBindingContext> PrepareAsync(
         MethodologyDescriptor methodology, long documentId, PeriodKey periodKey, CancellationToken ct)
+        => PrepareAsync(methodology, documentId, periodKey, registries: null, ct);
+
+    /// <inheritdoc />
+    public async Task<CalculationBindingContext> PrepareAsync(
+        MethodologyDescriptor methodology,
+        long documentId,
+        PeriodKey periodKey,
+        RegistrySnapshotCache? registries,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(methodology);
 
@@ -88,9 +117,113 @@ public sealed class GenericCalculationModule(
             .ListOutputScalesAsync(methodology.MethodologyId, ct)
             .ConfigureAwait(false);
 
+        // ⛔ RT-23a (`D-162`): знімок довідників — ТУТ, раз на прив'язку, і довідник
+        // одиниць теж. Після підготовки обчислення рядків не звертається до сховищ
+        // жодного разу: ні `REGSUM` на 34 рядках складу, ні `CONVERT`.
+        var snapshot = await RegistriesAsync(ordered, period, registries, ct).ConfigureAwait(false);
+        await UnitsAsync(ct).ConfigureAwait(false);
+
         return new CalculationBindingContext(
             methodology, documentId, periodKey, ordered, substances, outputs, period,
-            scales ?? EmptyScales, constantsByCode);
+            scales ?? EmptyScales, constantsByCode, snapshot);
+    }
+
+    /// <summary>
+    /// Знімок довідників, які читають формули версії, на кінець періоду.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перелік довідників — з тексту формул (перший літерал <c>REGFIND</c>/<c>REGONE</c>/
+    /// агрегатів), цілі <c>Lookup</c>-полів (<c>ROW.COMPONENT.MW</c>) дочитує сам
+    /// завантажувач. <c>cfg.RegistryUse</c> пише публікація лише з кроку RT-23b; коли він
+    /// є, перелік варто брати звідти — відповідь та сама, але без розбору.
+    ///
+    /// ⚠ Формули без функцій довідників — жодного звернення до сховищ і <c>null</c>: так
+    /// поводився модуль до кроку, і саме так лишаються побітно незмінними версії
+    /// <c>Legacy</c>, де ці функції не публікуються взагалі (<c>ECR-CALC-0433</c>).
+    ///
+    /// ⚠ Невідомий код довідника (опис видалили після публікації) просто не
+    /// потрапляє в перелік: формула отримає <c>#REF</c> на рядку, а не виняток на
+    /// всю прив'язку.
+    /// </remarks>
+    private async Task<IRegistrySnapshot?> RegistriesAsync(
+        IReadOnlyList<MethodologyFormula> formulas,
+        Expressions.PeriodContext period,
+        RegistrySnapshotCache? cache,
+        CancellationToken ct)
+    {
+        var codes = RegistryCodes(formulas);
+        if (codes.Count == 0 || registryStore is null || registryLoader is null)
+        {
+            return null;
+        }
+
+        var definitions = await registryStore.FindDefinitionsAsync(codes, ct).ConfigureAwait(false);
+        var ids = definitions.Select(d => d.Id).Distinct().Order().ToList();
+
+        // ⛔ Бізнес-дата — останній день ПЕРІОДУ, а не «сьогодні»: перерахунок
+        // минулого року бачить склад, чинний тоді (§5.7, та сама вісь, що в констант).
+        return await (cache ?? new RegistrySnapshotCache(registryAsOfUtc: null))
+            .GetOrLoadAsync(ids, period.End, registryLoader, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Коди довідників, які формули версії називають літералом.</summary>
+    private HashSet<string> RegistryCodes(IReadOnlyList<MethodologyFormula> formulas)
+    {
+        var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var formula in formulas)
+        {
+            var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
+            if (!parsed.IsSuccess || parsed.Expression is null)
+            {
+                continue;
+            }
+
+            var pending = new Stack<Expressions.Ast.AstNode>();
+            pending.Push(parsed.Expression.Root);
+            while (pending.TryPop(out var node))
+            {
+                switch (node)
+                {
+                    case Expressions.Ast.FunctionNode function:
+                        if (function.Arguments.Count > 0
+                            && (RegistryForms.RowScopeNames.Contains(function.Name)
+                                || string.Equals(function.Name, RegistryForms.Find, StringComparison.OrdinalIgnoreCase))
+                            && Expressions.Binding.ReferenceResolver.RegistryCodeLiteral(function.Arguments[0]) is { } code)
+                        {
+                            codes.Add(code);
+                        }
+
+                        foreach (var argument in function.Arguments)
+                        {
+                            pending.Push(argument);
+                        }
+
+                        break;
+
+                    case Expressions.Ast.BinaryNode binary:
+                        pending.Push(binary.Left);
+                        pending.Push(binary.Right);
+                        break;
+
+                    case Expressions.Ast.UnaryNode unary:
+                        pending.Push(unary.Operand);
+                        break;
+
+                    case Expressions.Ast.ConditionalNode conditional:
+                        pending.Push(conditional.Condition);
+                        pending.Push(conditional.WhenTrue);
+                        pending.Push(conditional.WhenFalse);
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+        }
+
+        return codes;
     }
 
     /// <summary>Порожній словник масштабів — усі виходи беруть замовчування.</summary>
@@ -171,7 +304,7 @@ public sealed class GenericCalculationModule(
                 version, ordered, substance?.SubstanceEntryId, period, binding.Constants);
 
             var units = await UnitsAsync(ct).ConfigureAwait(false);
-            var context = new MethodologyEvaluationContext(period, arguments, resolved, units);
+            var context = new MethodologyEvaluationContext(period, arguments, resolved, units, binding.Registries);
 
             foreach (var formula in ordered)
             {
@@ -338,7 +471,7 @@ public sealed class GenericCalculationModule(
 
     /// <summary>Резолвить усі константи, згадані у формулах, для однієї речовини.</summary>
     /// <remarks>
-    /// ⛔ Без походу в базу: кандидати прочитано в <see cref="PrepareAsync"/>
+    /// ⛔ Без походу в базу: кандидати прочитано в <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, RegistrySnapshotCache, CancellationToken)"/>
     /// (аудит P1), тут — лише вибір у пам'яті.
     /// </remarks>
     private Dictionary<string, ExpressionValue> ResolveConstants(
@@ -493,10 +626,18 @@ public sealed class GenericCalculationModule(
     }
 
     /// <summary>Аргумент розрахунку як значення виразу.</summary>
+    /// <remarks>
+    /// ✎ RT-23a: <c>EntryRef</c> (<see cref="CalculationArgument.EntryId"/>) у рантаймі —
+    /// число, id запису (§5.3), той самий вибір, що вже діє для <c>Lookup</c>-комірок у
+    /// шаблонах. Його заповнює лише <see cref="CalculationInputBuilder"/> і лише для
+    /// <c>Strict</c> (<c>D-161</c>), тож для <c>Legacy</c> гілка недосяжна.
+    /// </remarks>
     private static ExpressionValue ToValue(CalculationArgument argument)
-        => argument.Value is { } number
-            ? ExpressionValue.Number(number)
-            : argument.ValueString is { } text
-                ? ExpressionValue.Text(text)
-                : ExpressionValue.Null;
+        => argument.EntryId is { } entryId
+            ? ExpressionValue.Number(entryId)
+            : argument.Value is { } number
+                ? ExpressionValue.Number(number)
+                : argument.ValueString is { } text
+                    ? ExpressionValue.Text(text)
+                    : ExpressionValue.Null;
 }

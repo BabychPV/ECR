@@ -23,13 +23,24 @@ internal sealed class MethodologyEvaluationContext(
     PeriodContext period,
     IReadOnlyDictionary<string, ExpressionValue> arguments,
     IReadOnlyDictionary<string, ExpressionValue> constants,
-    UnitTable units) : IEvaluationContext
+    UnitTable units,
+    IRegistrySnapshot? registries = null) : IEvaluationContext
 {
     private readonly Dictionary<string, ExpressionValue> _formulaResults =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public PeriodContext Period { get; } = period;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ✎ RT-23a: знімок довідників прив'язки (<c>CalculationBindingContext.Registries</c>),
+    /// завантажений у <c>GenericCalculationModule.PrepareAsync</c> ДО обчислення
+    /// (<c>D-162</c>). Це не порушує переносності методології (02b §3.4): довідник — дані
+    /// системи, спільні для всіх проєктів, а не комірки конкретного шаблону. <c>null</c> —
+    /// формули версії довідників не читають, і <c>REG*</c> дають <c>#REF</c>.
+    /// </remarks>
+    public IRegistrySnapshot? Registries { get; } = registries;
 
     /// <summary>Записує результат формули, доступний далі як <c>!Code</c>.</summary>
     /// <param name="code">Код формули.</param>
@@ -117,17 +128,20 @@ internal sealed class MethodologyEvaluationContext(
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⛔ Поля довідника методологія теж не бачить — З ТІЄЇ САМОЇ причини, що
-    /// й комірки та шапку: <c>REGFIELD</c> бере id запису з Lookup-КОМІРКИ
-    /// документа, а методологія комірок не читає за побудовою (02b §3.4).
-    /// Парсер відхиляє посилання ще при розборі (<c>expr.
-    /// cellReferencesForbiddenInMethodology</c>), тож REGFIELD у діалекті
-    /// методологій сюди дійти не може взагалі — цей метод лишається реальним,
-    /// а не мертвим кодом, тому що <c>IEvaluationContext</c> — один контракт
-    /// на всі діалекти, і його симетрія важливіша за один недосяжний рядок.
+    /// ✎ RT-23a: поле запису — за ЗНІМКОМ (<see cref="Registries"/>), а не з бази. Id
+    /// запису приходить не з комірки (методологія комірок не читає, 02b §3.4), а як
+    /// <c>EntryRef</c>: аргумент <c>Lookup</c>-колонки у версії <c>Strict</c> (<c>D-161</c>)
+    /// або результат <c>REGFIND</c>/<c>REGONE</c>. <c>REGFIELD</c> методологій іде через
+    /// <c>RegistryForms</c> і читає знімок сам; цей метод — та сама відповідь для всіх,
+    /// хто питає через контракт контексту.
+    ///
+    /// ⚠ Без знімка — <c>#REF</c>, як і до кроку: запис невидимий так само, як поле, якого
+    /// немає.
     /// </remarks>
     public ExpressionValue GetRegistryField(long registryEntryId, string fieldCode)
-        => ExpressionValue.Error(ExpressionErrors.BadReference);
+        => Registries is { } snapshot
+            ? snapshot.GetField(registryEntryId, fieldCode)
+            : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
     public ExpressionValue Convert(ExpressionValue value, string fromUnitCode, string toUnitCode)

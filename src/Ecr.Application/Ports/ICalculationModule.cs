@@ -48,10 +48,37 @@ public interface ICalculationModule
         MethodologyDescriptor methodology, long documentId, PeriodKey periodKey, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, що <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, CancellationToken)"/>,
+    /// але знімок довідників береться з кешу ПРОГОНУ (RT-23a, FEATURE-REGISTRY-TABLES §5.7).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Кеш — окремий параметр, а не поле модуля: модуль живе рівно стільки, скільки
+    /// гілка пакета (<c>Q-249</c>), а знімок спільний для ВСІХ прив'язок прогону. Той самий
+    /// аргумент, що вже стоїть вище про склад версії.
+    ///
+    /// ⚠ Типова реалізація відкидає кеш: модуль, що довідників не читає, нічого не
+    /// перевизначає, і поведінка лишається тією, що була до кроку.
+    /// </remarks>
+    /// <param name="methodology">Версія методології, яку виконують.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="registries">Кеш знімків прогону; <c>null</c> — модуль вантажить сам.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<CalculationBindingContext> PrepareAsync(
+        MethodologyDescriptor methodology,
+        long documentId,
+        PeriodKey periodKey,
+        RegistrySnapshotCache? registries,
+        CancellationToken ct)
+        => PrepareAsync(methodology, documentId, periodKey, ct);
+
+    /// <summary>
     /// Виконує розрахунок одного рядка в уже готовому контексті прив'язки.
     /// Не пише в БД — повертає результат.
     /// </summary>
-    /// <param name="binding">Контекст із <see cref="PrepareAsync"/>.</param>
+    /// <param name="binding">
+    /// Контекст із <see cref="PrepareAsync(MethodologyDescriptor, long, PeriodKey, CancellationToken)"/>.
+    /// </param>
     /// <param name="input">Рядок документа з аргументами.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<CalculationOutput> ExecuteAsync(
@@ -104,6 +131,12 @@ public interface ICalculationModule
 /// <c>ConstantResolver.Resolve</c>, у пам'яті, на кожну речовину. Коду немає
 /// в словнику — константи немає, формула читає <c>#REF</c>.
 /// </param>
+/// <param name="Registries">
+/// Знімок довідників, які читають формули версії (RT-23a, <c>D-162</c>); <c>null</c> —
+/// формули довідників не читають, і функції <c>REG*</c> дали б <c>#REF</c>.
+/// ⛔ Завантажується тут, у підготовці, а не на рядку: під час обчислення звернень до
+/// БД немає жодного.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -113,7 +146,81 @@ public sealed record CalculationBindingContext(
     IReadOnlyList<MethodologyOutput> Outputs,
     Ecr.Expressions.PeriodContext Period,
     IReadOnlyDictionary<string, byte?> OutputScales,
-    IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants);
+    IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants,
+    Ecr.Expressions.Evaluation.IRegistrySnapshot? Registries = null);
+
+/// <summary>
+/// Кеш знімків довідників ОДНОГО прогону: ключ — (довідники, бізнес-дата, момент
+/// <c>AS OF</c>) (RT-23a, FEATURE-REGISTRY-TABLES §5.7).
+/// </summary>
+/// <remarks>
+/// ⛔ Один момент на прогін (<c>CalculationRun.RegistryAsOfUtc</c>, <c>D-158</c>): усі
+/// прив'язки бачать довідник у тому самому стані, тож повтор прогону відтворює числа
+/// побітно (AC-7). Момент задає той, хто створює кеш, — модуль його не вибирає.
+///
+/// ⚠ Потокобезпечний: прив'язки одного пакета йдуть паралельно
+/// (<c>CalculationOrchestrator</c>, <c>MaxParallelism</c>), і дві гілки з тим самим
+/// ключем чекають ОДНОГО завантаження, а не роблять два. Завантажує гілка, яка прийшла
+/// першою, своїм власним завантажувачем (власний scope, <c>Q-249</c>); знімок
+/// незмінний, тож ділити його між гілками безпечно (<c>IRegistrySnapshot</c>).
+///
+/// ⚠ Невдале завантаження з кешу прибирається: наступна прив'язка спробує знову, а не
+/// отримає чужий виняток.
+/// </remarks>
+/// <param name="registryAsOfUtc">
+/// Системний момент знімка; <c>null</c> — поточні дані (прогін без моменту, §3.5).
+/// </param>
+public sealed class RegistrySnapshotCache(DateTime? registryAsOfUtc)
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>>> _snapshots =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Системний момент знімків цього прогону.</summary>
+    public DateTime? RegistryAsOfUtc { get; } = registryAsOfUtc;
+
+    /// <summary>Скільки різних знімків завантажено (для перевірки спільності кешу).</summary>
+    public int Count => _snapshots.Count;
+
+    /// <summary>Знімок із кешу або завантажений заданим завантажувачем.</summary>
+    /// <param name="registryDefIds">Довідники, які читають формули.</param>
+    /// <param name="businessDate">Бізнес-дата — останній день періоду.</param>
+    /// <param name="loader">Завантажувач гілки, яка питає.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<Ecr.Expressions.Evaluation.IRegistrySnapshot> GetOrLoadAsync(
+        IReadOnlyCollection<int> registryDefIds,
+        DateOnly businessDate,
+        IRegistrySnapshotLoader loader,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryDefIds);
+        ArgumentNullException.ThrowIfNull(loader);
+
+        var ids = registryDefIds.Distinct().Order().ToList();
+        var key = string.Join(',', ids) + "|" + businessDate.ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                  + "|" + (RegistryAsOfUtc?.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-");
+
+        var entry = _snapshots.GetOrAdd(
+            key,
+            _ => new Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>>(
+                () => loader.LoadAsync(ids, businessDate, RegistryAsOfUtc, ct)));
+
+        return AwaitAsync(key, entry);
+    }
+
+    private async Task<Ecr.Expressions.Evaluation.IRegistrySnapshot> AwaitAsync(
+        string key, Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>> entry)
+    {
+        try
+        {
+            return await entry.Value.ConfigureAwait(false);
+        }
+        catch
+        {
+            _snapshots.TryRemove(new KeyValuePair<string, Lazy<Task<Ecr.Expressions.Evaluation.IRegistrySnapshot>>>(key, entry));
+            throw;
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.
@@ -194,11 +301,18 @@ public sealed record CalculationInput(
 /// <param name="Value">Числове значення; <c>null</c> — порожньо.</param>
 /// <param name="ValueString">Текстове значення для нечислових аргументів.</param>
 /// <param name="UnitId">Одиниця значення; <c>null</c> — безрозмірне.</param>
+/// <param name="EntryId">
+/// Запис довідника з <c>Lookup</c>-комірки — <c>EntryRef</c> аргументу (RT-23a, §5.3).
+/// ⛔ Заповнюється ЛИШЕ для версій <c>Strict</c> (<c>D-161</c>): у <c>Legacy</c> аргумент
+/// лишається побітно таким, як до кроку, бо чинна система id запису в формулу не
+/// передавала, і <c>Legacy</c> мусить відтворювати саме її числа.
+/// </param>
 public sealed record CalculationArgument(
     string ArgumentCode,
     decimal? Value,
     string? ValueString,
-    int? UnitId);
+    int? UnitId,
+    long? EntryId = null);
 
 /// <summary>
 /// Результат розрахунку одного рядка: <b>усі</b> виходи методології плюс трейс.
