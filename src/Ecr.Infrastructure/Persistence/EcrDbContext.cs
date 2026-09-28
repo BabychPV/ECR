@@ -49,6 +49,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     /// <summary>Складені ключі довідників і їхні частини (FEATURE-REGISTRY-TABLES, RT-01).</summary>
     public DbSet<RegistryKeyDef> RegistryKeyDefs => Set<RegistryKeyDef>();
     public DbSet<RegistryKeyField> RegistryKeyFields => Set<RegistryKeyField>();
+
+    /// <summary>Хто використовує довідник: формули й правила (FEATURE-REGISTRY-TABLES, RT-05).</summary>
+    public DbSet<RegistryUse> RegistryUses => Set<RegistryUse>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom

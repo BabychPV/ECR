@@ -859,6 +859,32 @@ CREATE TABLE cfg.RegistryKeyField
 );
 GO
 
+-- Хто використовує довідник (FEATURE-REGISTRY-TABLES §3.2, міграція
+-- RK04RegistryUseAndRunAsOf): формула шаблону, формула версії методології або
+-- правило довідника читає довідник цілком чи одне його поле. Похідні дані —
+-- публікація джерела переписує його ребра повністю. SourceId поліморфний, як
+-- cfg.FormulaDependency.SourceKind, тому FK на джерело немає.
+CREATE TABLE cfg.RegistryUse
+(
+    Id            bigint        IDENTITY(1,1) NOT NULL,
+    SourceKind    tinyint       NOT NULL,   -- 0 TemplateFormula (FormulaDefId), 1 MethodologyVersion, 2 RegistryRule
+    SourceId      int           NOT NULL,
+    FormulaCode   nvarchar(64)  NULL,       -- код формули в межах версії методології (SourceKind = 1)
+    RegistryDefId int           NOT NULL,
+    FieldPath     nvarchar(400) NULL,       -- 'COMPONENT.MW'; NULL — довідник цілком (REGFIND/агрегат)
+    CONSTRAINT PK_RegistryUse PRIMARY KEY (Id),
+    -- Вид закритий: ребро невідомого виду не прочитав би жоден споживач
+    -- («Де використано», завантажувач знімка), і довідник виглядав би невикористаним.
+    CONSTRAINT CK_RegUse_Kind CHECK (SourceKind BETWEEN 0 AND 2),
+    CONSTRAINT FK_RegUse_Def FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
+CREATE INDEX IX_RegistryUse_Registry ON cfg.RegistryUse (RegistryDefId)
+    INCLUDE (SourceKind, SourceId, FormulaCode, FieldPath);
+CREATE INDEX IX_RegistryUse_Source ON cfg.RegistryUse (SourceKind, SourceId);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding
@@ -1648,6 +1674,10 @@ CREATE TABLE calc.CalculationRun
     Status            nvarchar(32)  NOT NULL,
     ModulesProfileJson nvarchar(max) NULL,       -- профіль по модулях (питання J-1)
     ErrorMessage      nvarchar(2000) NULL,
+    -- RK04 (D-158): системний момент знімка довідників — ставиться на старті
+    -- прогону, усі довідники прогону читаються FOR SYSTEM_TIME AS OF нього.
+    -- NULL — прогін до RK04: відтворюється на поточних даних із попередженням.
+    RegistryAsOfUtc   datetime2(3)  NULL,
     CONSTRAINT PK_CalculationRun PRIMARY KEY (Id),
     CONSTRAINT FK_CR_Project FOREIGN KEY (ProjectId) REFERENCES doc.Project (Id)
 );

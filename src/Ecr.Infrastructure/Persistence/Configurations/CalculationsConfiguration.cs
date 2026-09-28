@@ -446,6 +446,9 @@ public sealed class CalculationRunConfiguration : IEntityTypeConfiguration<Calcu
         builder.Property(x => x.FinishedAt).HasColumnType("datetime2(3)");
         builder.Property(x => x.ErrorMessage).HasMaxLength(2000);
 
+        // RK04 (D-158): момент знімка довідників; NULL — прогін до міграції.
+        builder.Property(x => x.RegistryAsOfUtc).HasColumnType("datetime2(3)");
+
         // ⛔ Унікальний ФІЛЬТРОВАНИЙ індекс — той самий прийом, що вже тримає
         // «поточний зріз» у `UX_ReportSnapshot_Current`. Доти інваріант
         // «актуальний прогін на область — щонайбільше один» не тримало НІЩО:
