@@ -48,6 +48,11 @@ public sealed class ReopenDocumentHandler(
         var key = PeriodKey.Parse(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
+        // ⛔ S2 / B-08: видимість — ПЕРШОЮ, ще до функціонального права: відмова
+        // «немає Document.Reopen» на невидимому документі теж підтверджувала б,
+        // що він існує. Невидимий документ — `404`, як на кожному маршруті.
+        await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
         // Право небезпечне і тому перевіряється окремо від грантів: воно дає
         // змогу змінити вже подані числа (ФВ-6.12).
         if (!profile.Has(Permission))

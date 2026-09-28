@@ -60,6 +60,12 @@ public sealed class RecallSheetHandler(
         // на невірному періоді, а сама дія відкликання — ні.
         var key = PeriodKey.Parse(periodKey);
 
+        // ⛔ S2 / B-08: видимість документа — ПЕРШОЮ, до перевірки складу, як у
+        // `SubmitSheetHandler`: невидимий документ — `404 document`, а не
+        // `404 sheetNotInDocument` чи `403 recallDenied`.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
         // ⛔ Та сама перевірка складу, що й у поданні: `GetOrCreateAsync` створює
         // рядок стану для БУДЬ-ЯКОГО ідентифікатора аркуша (`S-17`).
         if (!await documents.HasSheetAsync(documentId, sheetDefId, ct).ConfigureAwait(false))
@@ -75,7 +81,6 @@ public sealed class RecallSheetHandler(
                 });
         }
 
-        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
         var projectId = await documents.FindProjectIdAsync(documentId, ct).ConfigureAwait(false);
 
         if (!HasSubmitGrant(profile, projectId, sheetDefId))

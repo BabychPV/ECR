@@ -96,6 +96,12 @@ public sealed class SubmitSheetHandler(
         // `GetWorkflowHistoryHandler`.
         var key = PeriodKey.Parse(periodKey);
 
+        // ⛔ S2 / B-08: видимість документа — ПЕРШОЮ, до перевірки складу. Інакше
+        // невидимий документ відповідав би `403` (рішення про подання) або
+        // `404 sheetNotInDocument` — і те, і те каже, що документ існує.
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
         // ⛔ Аркуш мусить входити в СКЛАД документа. Без цієї перевірки
         // `POST …/submit` на довільний `sheetDefId` — навіть той, якого в
         // документі ніколи не було, — проходив кодом `204`:
@@ -131,7 +137,7 @@ public sealed class SubmitSheetHandler(
             async innerCt =>
             {
                 await sheetGate.EnterSubmitAsync(documentId, sheetDefId, key, innerCt).ConfigureAwait(false);
-                await SubmitUnderLockAsync(documentId, sheetDefId, periodKey, key, userId, innerCt)
+                await SubmitUnderLockAsync(documentId, sheetDefId, periodKey, key, userId, profile, innerCt)
                     .ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -142,10 +148,9 @@ public sealed class SubmitSheetHandler(
     /// <see cref="HandleAsync"/>.
     /// </summary>
     private async Task SubmitUnderLockAsync(
-        long documentId, int sheetDefId, int periodKey, PeriodKey key, int userId, CancellationToken ct)
+        long documentId, int sheetDefId, int periodKey, PeriodKey key, int userId, AccessProfile profile,
+        CancellationToken ct)
     {
-        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-
         var decision = await access.CanSubmitAsync(profile, documentId, sheetDefId, key, ct)
                                    .ConfigureAwait(false);
         if (!decision.IsAllowed)

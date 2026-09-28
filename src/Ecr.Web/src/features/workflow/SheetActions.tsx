@@ -105,6 +105,18 @@ export function effectiveGrant(
   // Заборона перемагає на будь-якому рівні (ФВ-6.6).
   if (scopes.some((scope) => denies.includes(scope))) return 'None';
 
+  /*
+   * ⛔ S2 — та сама передумова, що в `EditRules.Effective`: грант на аркуш
+   * діє лише в проєкті, який користувач бачить (грант на проєкт ≥ `Read`).
+   * Id аркуша належить ВЕРСІЇ ШАБЛОНУ, спільній для всіх проєктів шаблону;
+   * без цієї умови `Sheet:S = Approve` «з проєкту A» показав би кнопку в B.
+   * `None` і невідома назва рівня передумовою не є.
+   */
+  const projectLevel = grants[`Project:${projectId}`];
+  if (projectLevel === undefined || (GrantOrder as readonly string[]).indexOf(projectLevel) < GrantOrder.indexOf('Read')) {
+    return 'None';
+  }
+
   // Дозвіл — з найдрібнішого ОГОЛОШЕНОГО рівня: грант на аркуш перекриває
   // грант на проєкт, і саме так права звужують точково.
   for (let i = scopes.length - 1; i >= 0; i--) {

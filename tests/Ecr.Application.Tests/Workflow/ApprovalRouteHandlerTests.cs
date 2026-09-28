@@ -183,6 +183,10 @@ public sealed class ApprovalRouteHandlerTests
 
         access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }.Build());
+
+        // S2 / B-08: `ApproveSheetHandler` першою питає видимість документа.
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), 1, Arg.Any<CancellationToken>())
+            .Returns(EditDecision.Allow());
         access.CanApproveAsync(
                 Arg.Any<AccessProfile>(), 1, 2, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());

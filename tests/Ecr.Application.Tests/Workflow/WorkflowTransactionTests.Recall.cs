@@ -150,6 +150,11 @@ public sealed partial class WorkflowTransactionTests
               .Returns(new AccessBuilder { UserId = userId }
                   .Grant(ResourceKind.Project, world.ProjectId, level).Build());
 
+        // S2 / B-08: видимість документа питається першою; тут він видимий
+        // (грант на проєкт є), предмет тесту — рівень Submit і авторство.
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+              .Returns(EditDecision.Allow());
+
         var user = Substitute.For<ICurrentUser>();
         user.UserId.Returns(userId);
 

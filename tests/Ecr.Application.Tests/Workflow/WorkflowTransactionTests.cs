@@ -281,6 +281,11 @@ public sealed partial class WorkflowTransactionTests(SqlServerFixture sql)
         // жорстко зашитого `UserId`.
         access.BuildProfileAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
               .Returns(call => new AccessBuilder { UserId = call.Arg<int>() }.Build());
+
+        // S2 / B-08: обробники робочого процесу першою питають видимість
+        // документа; тут документ видимий — предмет тесту транзакції, а не прав.
+        access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+              .Returns(EditDecision.Allow());
         access.CanSubmitAsync(
                   Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<int>(), Arg.Any<PeriodKey>(),
                   Arg.Any<CancellationToken>())

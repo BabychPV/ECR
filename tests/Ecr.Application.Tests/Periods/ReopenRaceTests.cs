@@ -232,6 +232,11 @@ public sealed class ReopenRaceTests(SqlServerFixture sql)
             .Returns(new AccessBuilder { UserId = 9 }
                 .Permission(Ecr.Application.Workflow.ReopenDocumentHandler.Permission)
                 .Build());
+
+        // S2 / B-08: `ReopenDocumentHandler` першою питає видимість документа.
+        access.CanReadDocumentAsync(
+                Arg.Any<Ecr.Application.Security.AccessProfile>(), documentId, Arg.Any<CancellationToken>())
+            .Returns(Ecr.Application.Security.EditDecision.Allow());
         access.CanReopenAsync(
                 Arg.Any<Ecr.Application.Security.AccessProfile>(), documentId, Arg.Any<int>(),
                 Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())

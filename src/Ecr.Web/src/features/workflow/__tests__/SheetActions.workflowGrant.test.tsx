@@ -154,6 +154,21 @@ describe('effectiveGrant: дзеркало EditRules.Effective для аркуш
     expect(grant).toBe('Read');
   });
 
+  it('S2: грант на аркуш без гранта на проєкт документа — None', () => {
+    // ⛔ Мутаційний доказ: прибери передумову проєкту в `effectiveGrant` — тут
+    // буде 'Approve' («аркуш S із проєкту A» показав би кнопку в проєкті B).
+    expect(effectiveGrant(me({ 'Project:8': 'Read', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('None');
+  });
+
+  it('S2: грант на проєкт рівня None чи невідомого — не передумова', () => {
+    expect(effectiveGrant(me({ 'Project:7': 'None', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('None');
+    expect(effectiveGrant(me({ 'Project:7': 'Superuser', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('None');
+  });
+
+  it('S2: під видимим проєктом грант на аркуш ПІДНІМАЄ рівень', () => {
+    expect(effectiveGrant(me({ 'Project:7': 'Read', 'Sheet:42': 'Approve' }), ProjectId, SheetDefId)).toBe('Approve');
+  });
+
   it('явна заборона перемагає будь-який дозвіл (ФВ-6.6)', () => {
     const grant = effectiveGrant(me({ 'Project:7': 'Manage' }, ['Project:7']), ProjectId, SheetDefId);
 

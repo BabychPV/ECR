@@ -39,6 +39,11 @@ public sealed class ApproveSheetHandler(
         var key = PeriodKey.Parse(periodKey);
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
+        // ⛔ S2 / B-08: невидимий документ — `404`, як на кожному маршруті
+        // документа, а не `403` з рішення про затвердження (той сам по собі каже,
+        // що документ існує).
+        await Documents.DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
         var decision = await access.CanApproveAsync(profile, documentId, sheetDefId, key, ct)
                                    .ConfigureAwait(false);
         if (!decision.IsAllowed)

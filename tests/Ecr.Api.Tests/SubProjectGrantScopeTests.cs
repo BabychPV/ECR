@@ -27,6 +27,10 @@ namespace Ecr.Api.Tests;
 /// Write</c>) — тобто «аркуш S у проєкті A». Гранта на проєкт B немає зовсім.
 /// До фіксу <c>POST /documents/{docB}/approve|submit|reopen</c> давав
 /// <c>204</c> і змінював стан документа, якого ця людина навіть не бачить.
+/// Тепер — <c>404 ECR-DOC-0404</c>, як на будь-якому маршруті невидимого
+/// документа (B-08). Причину відмови самої служби (<c>NoGrant</c>, а не стан
+/// аркуша) тримає <c>Ecr.Infrastructure.Tests…WorkflowInvisibleDocumentDecisionTests</c>:
+/// тут її перекриває обробник.
 ///
 /// ⚠ Контрольний тест (грант на B є) — щоб фікс не «закрив» законний доступ.
 /// </remarks>
@@ -38,8 +42,9 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
     private static readonly DateTime Now = new(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc);
 
     /// <remarks>
-    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати <c>DenyIfInvisible</c> у
-    /// <c>AccessDecisionService.CanApproveAsync</c> І передумову проєкту в
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати ВСІ три шари — видимість в
+    /// <c>ApproveSheetHandler</c>, <c>DenyIfInvisible</c> у
+    /// <c>AccessDecisionService.CanApproveAsync</c> і передумову проєкту в
     /// <c>EditRules.Effective</c> → <c>204</c>, аркуш у B затверджено.
     /// </remarks>
     [Fact]
@@ -112,27 +117,40 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
         Assert.Equal(DocumentStatus.Submitted, await StatusAsync(scenario.B).ConfigureAwait(true));
     }
 
-    /// <summary>Невидимий документ не розповідає про свій стан (B-08).</summary>
+    /// <summary>
+    /// Невидимий документ на маршрутах робочого процесу виглядає як
+    /// неіснуючий — <c>404 ECR-DOC-0404</c> (B-08).
+    /// </summary>
     /// <param name="action">Дія робочого процесу.</param>
+    /// <param name="noSheetInDocument">
+    /// Аркуша немає в складі документа — перевірка складу стоїть у submit і
+    /// recall ДО прав і давала б <c>404 sheetNotInDocument</c>, тобто інше тіло.
+    /// </param>
     /// <remarks>
-    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ для перевірки ЧИТАННЯ окремо від передумови в
-    /// <c>EditRules.Effective</c>, по одному на кожен із трьох методів. Стан
-    /// аркуша підібрано так, щоб без <c>DenyIfInvisible</c> відмова все одно
-    /// була, але з причиною про СТАН: approve і reopen на <c>Draft</c> →
-    /// <c>BusinessRule</c> «аркуш у стані Draft», submit на <c>Submitted</c> →
-    /// <c>DocumentSubmitted</c>. Тобто стан чужого документа видно. З
-    /// перевіркою — <c>NoGrant</c>, як на будь-який невидимий.
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ, по одному на кожен обробник: прибрати
+    /// <c>DocumentVisibility.RequireVisibleAsync</c> — approve/reopen/recall
+    /// дають <c>403 ECR-ACCS-0403</c>, submit — <c>403</c> (або <c>404</c> з
+    /// іншим <c>messageKey</c>, коли аркуша немає в складі). Стан аркуша
+    /// підібрано так, щоб без видимості відмова все одно була: тест ловить
+    /// саме ВИД відмови, а не її наявність.
     /// </remarks>
     [Theory]
-    [InlineData("approve")]
-    [InlineData("submit")]
-    [InlineData("reopen")]
+    [InlineData("approve", false)]
+    [InlineData("submit", false)]
+    [InlineData("submit", true)]
+    [InlineData("reopen", false)]
+    [InlineData("recall", false)]
+    [InlineData("recall", true)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Finding", "S2")]
-    public async Task Дія_над_невидимим_документом_відмовляє_NoGrant_а_не_станом_аркуша(string action)
+    [Trait("Requirement", "B-08")]
+    public async Task Дія_над_невидимим_документом_дає_404_як_неіснуючий(string action, bool noSheetInDocument)
     {
-        var scenario = await ArrangeAsync(action == "submit" ? DocumentStatus.Submitted : null).ConfigureAwait(true);
+        var scenario = await ArrangeAsync(
+                action is "submit" or "recall" ? DocumentStatus.Submitted : null,
+                includeSheet: !noSheetInDocument)
+            .ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
         using var client = await SignedInAsync(
@@ -144,7 +162,7 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
         object body = action switch
         {
             "approve" => new { sheetDefId = scenario.B.SheetDefId, periodKey = scenario.B.PeriodKey.Value, approved = true, reason = (string?)null },
-            "reopen" => new { sheetDefId = scenario.B.SheetDefId, periodKey = scenario.B.PeriodKey.Value, reason = "S2 oracle" },
+            "reopen" or "recall" => new { sheetDefId = scenario.B.SheetDefId, periodKey = scenario.B.PeriodKey.Value, reason = "S2 oracle" },
             _ => new { sheetDefId = scenario.B.SheetDefId, periodKey = scenario.B.PeriodKey.Value },
         };
 
@@ -152,10 +170,7 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
             new Uri($"/api/v1/documents/{scenario.B.DocumentId}/{action}", UriKind.Relative), body)
             .ConfigureAwait(true);
 
-        var problem = await AssertDeniedAsync(response, app).ConfigureAwait(true);
-        Assert.True(
-            Reason(problem) == nameof(EditDenyReason.NoGrant),
-            $"{action}: очікували причину NoGrant\n{problem}");
+        await AssertDeniedAsync(response, app).ConfigureAwait(true);
     }
 
     /// <summary>Запис у колонку документа B за грантом «колонка C у проєкті A».</summary>
@@ -200,9 +215,7 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
                 },
             }).ConfigureAwait(true);
 
-        Assert.True(
-            response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden,
-            $"PATCH у B: {(int)response.StatusCode}\n{await response.Content.ReadAsStringAsync().ConfigureAwait(true)}\n{app.ErrorsText}");
+        await AssertDeniedAsync(response, app).ConfigureAwait(true);
 
         await using var db = Context();
         Assert.False(await db.CellValues.AnyAsync(
@@ -239,45 +252,27 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
         Assert.Equal(DocumentStatus.Approved, await StatusAsync(scenario.B).ConfigureAwait(true));
     }
 
-    private static async Task<string> AssertDeniedAsync(HttpResponseMessage response, EcrApiFactory app)
+    /// <summary>
+    /// Невидимий документ: <c>404 ECR-DOC-0404</c> з тим самим
+    /// <c>messageKey</c>, що й на відсутній документ (B-08).
+    /// </summary>
+    private static async Task AssertDeniedAsync(HttpResponseMessage response, EcrApiFactory app)
     {
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
 
         Assert.True(
-            response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound,
-            $"очікували відмову, отримали {(int)response.StatusCode}\n{body}\n{app.ErrorsText}");
+            response.StatusCode == HttpStatusCode.NotFound,
+            $"очікували 404, отримали {(int)response.StatusCode}\n{body}\n{app.ErrorsText}");
 
-        return body;
-    }
-
-    /// <summary>Причина відмови з тіла проблеми; <c>null</c> — поля немає.</summary>
-    private static string? Reason(string body)
-    {
         var root = JsonDocument.Parse(body).RootElement;
-        foreach (var name in new[] { "reason", "params" })
-        {
-            if (!root.TryGetProperty(name, out var value))
-            {
-                continue;
-            }
-
-            if (value.ValueKind == JsonValueKind.String)
-            {
-                return value.GetString();
-            }
-
-            if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("reason", out var inner))
-            {
-                return inner.GetString();
-            }
-        }
-
-        return null;
+        Assert.Equal("ECR-DOC-0404", root.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-DOC-0404.document", root.GetProperty("messageKey").GetString());
     }
 
     /// <summary>Два проєкти одного шаблону; документ — у B.</summary>
     /// <param name="state">Стан аркуша в B; <c>null</c> — рядка стану немає (Draft).</param>
-    private async Task<(TestDocument B, int ProjectA)> ArrangeAsync(DocumentStatus? state)
+    /// <param name="includeSheet">Чи внести аркуш у склад документа B.</param>
+    private async Task<(TestDocument B, int ProjectA)> ArrangeAsync(DocumentStatus? state, bool includeSheet = true)
     {
         var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(false);
 
@@ -296,7 +291,11 @@ public sealed class SubProjectGrantScopeTests(SqlServerFixture sql)
 
         // Аркуш у складі документа B: без цього подання відмовляє раніше за
         // права (`HasSheetAsync`, 404), і тест не доводив би нічого про S2.
-        db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));
+        if (includeSheet)
+        {
+            db.DocumentSheets.Add(new DocumentSheet(b.DocumentId, b.SheetDefId));
+        }
+
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         if (state is { } target)
