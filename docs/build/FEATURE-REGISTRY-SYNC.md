@@ -1,0 +1,165 @@
+# FEATURE-REGISTRY-SYNC — синхронізація довідників із PI AF
+
+| | |
+|---|---|
+| Дата | 2026-09-28 |
+| Статус | **Проєкт до виконання; S3 зроблено, S4 — у цій гілці.** Дизайн погоджено координатором сесій 2026-09-28. Рішення «зовнішній ключ чи поле» — `D-202` у `docs/tz/10-decisions.md` |
+| Вимоги | `ФВ-8.9` (хто master), `ФВ-8.10` (зовнішні ідентифікатори), `ФВ-8.11` (синхронізація — конфігурація, не код) |
+| Спирається на | `D-44` (запису в AF немає), `D-49` (подвійна звірка), `D-118` (ручна правка не перетирається), `D-173` (одиниці на межі), `D-187` (`Missing` лише після повного читання), `D-198` (`LEGACY_ID` — поле й альтернативний ключ) |
+| Суміжне | [FEATURE-REGISTRY-TABLES](FEATURE-REGISTRY-TABLES.md) (ключі, `RegistryEntryWriter`); [FEATURE-HSE301-VIEW](FEATURE-HSE301-VIEW.md) §4.7.4 (`SourceEventSyncJob` — та сама політика для подій) |
+
+Позначки: ⛔ — межа або заборона; ⚠ — застереження; `S-n` — крок плану (§5); `RSQ-n` — питання
+замовнику (§7).
+
+---
+
+## 1. Коротко
+
+Довідник, у якого master — PI AF (`SourceKind = External` або `Hybrid`), наповнюється окремою
+фоновою задачею **`RegistrySyncJob`**. Задача читає елементи AF, зіставляє їх із записами довідника
+через **`dic.RegistryExternalKey`**, будує план чистою функцією **`RegistrySyncPlanner`** і пише
+лише через спільний **`RegistryEntryWriter`** від імені службового користувача **`svc-integration`**.
+Нічого не видаляється й нічого не створюється автоматично: зниклий і новий елементи — події.
+
+⛔ Запису в AF немає (`D-44`): синхронізація однонапрямна.
+
+## 2. Модель
+
+### 2.1 Зв'язок «елемент AF → запис довідника»
+
+`dic.RegistryExternalKey` (`src/Ecr.Domain/Entities/Dictionaries/RegistryExternalKey.cs`):
+`RegistryEntryId`, `DataSourceId`, `ExternalId` (WebId/GUID), `ExternalPath` (шлях AF — змінюється
+незалежно від GUID), `LastSyncedAt`; `MarkSynced(path, utcNow)` фіксує прогін. Унікальність —
+`(DataSourceId, ExternalId)`.
+
+### 2.2 Зовнішній ключ чи поле — `D-202`
+
+| Що це | Куди | Приклад |
+|---|---|---|
+| **Технічний дескриптор** зовнішньої системи, прив'язаний до `DataSource`: WebId, GUID, шлях AF | `dic.RegistryExternalKey` | GUID елемента факела в AF |
+| **Бізнес-ідентифікатор**, який бачать формули, імпорт, люди | поле довідника + альтернативний ключ | `STREAM.LEGACY_ID` (`D-198`) |
+
+Причина: дескриптор належить парі «запис × джерело» і змінюється разом із джерелом (перенесли
+елемент, замінили сервер AF), а формулам його знати не треба; бізнес-ідентифікатор — властивість
+самого запису, і `REGFIND` мусить знаходити запис за ним без знання про джерело.
+
+### 2.3 Мапінг
+
+`ext.EntityFieldMap` з ціллю «поле довідника» (`FieldTargetKind.RegistryField`,
+`IRegistryStore.ListFieldMappingsAsync` → `RegistryFieldMapping`, `IsActive`). Мапінг — конфігурація,
+не код (`ФВ-8.11`).
+
+## 3. Політика
+
+| `SourceKind` | Що пише синк | Розбіжність без права запису |
+|---|---|---|
+| `External` | усі поля з **активним** мапінгом | поле з **вимкненим** мапінгом → `RegistryDiverged` |
+| `Hybrid` | лише поля з **активним** мапінгом | решта полів — локальні, синк про них мовчить |
+| `Local` | нічого | кожне змаплене поле, що відрізняється → `RegistryDiverged` (звірка, `D-49`) |
+
+⚠ **Судження S4 (у межах погодженого):** координатор сформулював «External — синк володіє
+змапленими полями, Hybrid — лише полями з активним мапінгом». Писати в `External` через мапінг, який
+адміністратор свідомо вимкнув, означало б перетерти його рішення, тому таке поле не пишеться, але
+розбіжність показується подією. Саме це і відрізняє `External` від `Hybrid` у планувальнику.
+
+Події:
+
+| Подія | Коли | Що з записом |
+|---|---|---|
+| `RegistryDiverged` | див. таблицю вище | нічого |
+| `RegistryConflictKeptManual` | джерело змінило поле, яке останньою правила людина (`D-118`) | лишається людське |
+| `RegistrySourceMissing` | прив'язаного елемента немає в **повному** знімку (`D-187`) | не видаляється |
+| `RegistryElementUnlinked` | елемент AF без `RegistryExternalKey` | не створюється (прив'язує людина, `S10`) |
+| `RegistryValueRejected` | значення не приводиться до типу поля (`ECR-REG-0422`) або не проходить ключ/правило у writer | нічого |
+
+Ідемпотентність: те саме типізоване значення (`12.5` = `"12.50"` після приведення) — нічого не
+пишеться, подій немає, план порожній. Атрибута немає у знімку — поле не чіпається (збій читання не
+видається за «порожньо»); атрибут є зі значенням `null` — поле очищається.
+
+⚠ Одиниці приводить задача на межі (`BoundaryUnitConversion`, `D-173`; станом на 2026-09-28 у коді
+ще немає) **до** планувальника.
+
+## 4. Компоненти
+
+| Компонент | Шар | Відповідальність |
+|---|---|---|
+| `IExternalDataSource.ReadCurrentAsync` (S1) | порт (`src/Ecr.Application/Ports/IExternalDataSource.cs`) | поточні значення атрибутів елементів шаблону/гілки AF |
+| `RegistrySyncPlanner` (S4) | `Ecr.Application/Integration/RegistrySync` | чиста функція: вхід → план |
+| `RegistrySyncJob` (S5, S7) | `Ecr.Application` + планувальник `D-09` | читає, планує, пише через writer, фіксує `MarkSynced` |
+| `RegistryEntryWriter` (S6) | `Ecr.Application/Registries` | єдина точка запису `dic.RegistryEntry`/`RegistryValue`: типи, ключі, правила, ревізія, аудит |
+| Панель зовнішніх ідентифікаторів (S10) | `Ecr.Web` | зв'язки, події, ручна прив'язка |
+
+### 4.1 API планувальника (S4)
+
+```csharp
+RegistrySyncPlan RegistrySyncPlanner.Plan(RegistrySyncInput input);
+
+RegistrySyncInput(RegistryDefId, SourceKind, IsCompleteSnapshot,
+    Elements: RegistrySyncSourceElement(ExternalId, ExternalPath, Attributes[атрибут → значення]),
+    Links:    RegistrySyncLink(ExternalId, RegistryEntryId, ExternalPath),
+    Entries:  RegistrySyncEntryState(RegistryEntryId, Values[FieldDefId → (Value, LastWriterIsHuman)]),
+    Mappings: RegistrySyncFieldMapping(RegistryFieldDefId, FieldCode, DataType, UnitId, SourceAttribute, IsActive))
+
+RegistrySyncPlan(Updates: (EntryId, FieldDefId, FieldCode, Old, New),
+                 PathChanges: (ExternalId, EntryId, OldPath, NewPath),
+                 Events: (Kind, ExternalId, EntryId, FieldCode, Current, Source, ErrorCode, MessageKey))
+```
+
+Приведення типу — тим самим механізмом, що ручний запис і імпорт: `CellValueReader.Normalize` +
+`RegistryValue.Set`. ⚠ Проєкція типізованого значення (6 рядків) повторює приватний
+`UpsertRegistryEntryHandler.RawValue`; винести її в `RegistryValue` — разом із S6/S7 (файл — зона
+HSE301).
+
+## 5. Кроки
+
+| Крок | Що | Залежить від | Стан |
+|---|---|---|---|
+| **S0** | цей документ + `D-202` | — | ✓ 2026-09-28 |
+| **S1** | порт `ReadCurrentAsync` (поточні значення атрибутів елементів AF) | вікно HSE301 `F4` (той самий файл порту) | ☐ після `F4` |
+| **S2** | API зовнішніх ключів: перелік/прив'язка/відв'язка `dic.RegistryExternalKey` | — | ☐ |
+| **S3** | створення `SourceEntity` з вебу | — | ✓ `lane/analiz/sources-create` `56cb4066` |
+| **S4** | `RegistrySyncPlanner` — чиста логіка + тести | S0 | ✓ у гілці `lane/analiz/registry-sync-s0-s4` |
+| **S5** | `RegistrySyncJob` — **лише звірка**: читає, планує, пише події, нічого в довідник | S1, S4, планувальник `D-09` | ☐ |
+| **S6** | `RegistryEntryWriter` — спільна точка запису | — | ◐ HSE301 `lane/hse301/s6-entry-writer` `c1320e94`, ще не в `dev/integration` |
+| **S7** | синк пише через writer від `svc-integration`; у writer — режим «лише оновлювати» й адресація за `RegistryEntryId` (адитивно, з попередженням HSE301) | S5, S6 | ☐ |
+| **S8** | блок ручних правок змаплених полів у `External`/`Hybrid` (явна дія «Виправити вручну», як `D-191`) | S7 | ☐ |
+| **S9** | зіставлення неприв'язаних елементів за бізнес-ключем (альтернативний ключ довідника) — пропозиція людині, не автоприв'язка | S2, S5 | ☐ |
+| **S10** | панель зовнішніх ідентифікаторів: зв'язки, події, ручна прив'язка | S2, S5 | ☐ |
+| **S11** | (опц.) міграція наявних GUID із `Configuration!J3` та подібних у `RegistryExternalKey` | S2 | ☐ опційно |
+
+## 6. Журнал покриття
+
+| Вимога | Що покриває | Стан |
+|---|---|---|
+| `ФВ-8.10` | `RegistryExternalKey` (сутність і тести `RegistryExternalKeyTests`); планувальник: зниклий/неприв'язаний/перенесений елемент (`RegistrySyncPlannerTests`, S4) | покрито частково: API й панель — S2, S10 |
+| `ФВ-8.11` | мапінг `ext.EntityFieldMap` на поле довідника (`CreateEntityFieldMapTests`); політика `SourceKind`, ідемпотентність, ручна правка, відмова типу (`RegistrySyncPlannerTests`, S4) | покрито частково: задача — S5/S7 |
+| `ФВ-8.9` | політика `SourceKind` у планувальнику | логіка є; перемикання й подвійна звірка в UI — поза цим планом |
+
+## 7. Питання замовнику
+
+Поставлені людині координатором 2026-09-28 (10 питань). Формулювання тут — з боку дизайну; до
+відповіді діють дефолти праворуч, кожен замінюється без переробки.
+
+| # | Питання | Дефолт до відповіді |
+|---|---|---|
+| RSQ-1 | Які довідники мають master у AF (`External`/`Hybrid`)? | жоден не перемикається автоматично; `Local` + звірка |
+| RSQ-2 | Шаблони/гілки AF, з яких беруться елементи кожного довідника | задаються на `SourceEntity` (S3) |
+| RSQ-3 | Ідентифікатор елемента: WebId чи GUID; стабільний при перенесенні? | зберігаємо обидва — `ExternalId` + `ExternalPath` |
+| RSQ-4 | Частота синхронізації | розклад `ext.CollectionSchedule`, раз на добу |
+| RSQ-5 | Ручна правка змапленого поля: дозволена? | людина лишається (`D-118`), подія `RegistryConflictKeptManual` |
+| RSQ-6 | Зниклий в AF елемент: що з записом? | лише подія `RegistrySourceMissing`, запис чинний |
+| RSQ-7 | Новий елемент в AF: створювати запис автоматично? | ні — подія `RegistryElementUnlinked`, прив'язує людина |
+| RSQ-8 | Бізнес-ключ для первинного зіставлення (тег, код, `LEGACY_ID`?) | альтернативний ключ довідника, пропозиція — не автоприв'язка (S9) |
+| RSQ-9 | Хто отримує сповіщення про події синку | ті, хто має `Integration.Manage` (як `J-4`) |
+| RSQ-10 | Чи переносити наявні GUID із `Configuration!J3` (S11) | ні, доки не підтверджено |
+
+## 8. Ризики
+
+- ⚠ **Тиша замість помилки.** Неповний знімок без позначки `IsCompleteSnapshot = false` дав би
+  хибні `RegistrySourceMissing` на весь довідник. Позначку ставить читач (S1/S5) — лише після
+  повного прочитання всіх сторінок.
+- ⚠ **Ознака «останній автор — людина»** — це `RegistryValue` + автор ревізії (RT-04). Якщо writer
+  S7 не проставить `svc-integration` послідовно, перший же ручний запис «приклеїть» поле назавжди.
+  Тест S7 має довести обидва напрямки.
+- ⚠ **Hybrid ↔ External.** Перемикання `SourceKind` у відкритому періоді заборонене (`ECR-REG-0422`,
+  `ФВ-8.9`) — планувальник цього не перевіряє, він лише читає поточне значення.
