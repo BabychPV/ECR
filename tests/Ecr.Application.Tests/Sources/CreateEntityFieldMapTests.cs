@@ -51,6 +51,10 @@ public sealed class CreateEntityFieldMapTests
             .Returns(new SourceEntity(1, "AF01", RegistrySourceKind.External));
 
         _sources.ColumnDefExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+
+        // Типово колонку не використовує жоден проєкт — мапінг нікого не зачіпає (S3).
+        _sources.FindProjectIdsUsingColumnAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<int>());
         _sources.FindRegistryFieldOwnerAsync(OwnFieldId, Arg.Any<CancellationToken>()).Returns(BoundRegistryId);
         _sources.FindRegistryFieldOwnerAsync(ForeignFieldId, Arg.Any<CancellationToken>()).Returns(BoundRegistryId + 1);
         _sources.UnitExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
@@ -105,6 +109,50 @@ public sealed class CreateEntityFieldMapTests
                 && m.SourceField == "Flare_01_CO"
                 && m.TargetColumnDefId == 100),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.11")]
+    public async Task S3_мапінг_на_колонку_проєкту_без_гранта_Manage_дає_403_і_нічого_не_пише()
+    {
+        // ⛔ Колонку використовують два проєкти; на 41 грант є, на 42 — лише Write.
+        // Integration.Manage без Manage-гранта на КОЖЕН проєкт не дає права
+        // писати збором у його документи.
+        _sources.FindProjectIdsUsingColumnAsync(100, Arg.Any<CancellationToken>()).Returns(new[] { 42, 41 });
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Integration.Manage")
+                .Grant(ResourceKind.Project, 41, GrantLevel.Manage)
+                .Grant(ResourceKind.Project, 42, GrantLevel.Write)
+                .Build());
+
+        var denied = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
+        Assert.Equal("err.ECR-AUTH-0403.noProjectManageGrant", denied.Details!["messageKey"]);
+        Assert.Equal("42", denied.Details!["projectId"]);
+        await _sources.DidNotReceive().AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-13.11")]
+    public async Task S3_мапінг_на_колонку_з_грантом_Manage_на_всі_проєкти_заводиться()
+    {
+        _sources.FindProjectIdsUsingColumnAsync(100, Arg.Any<CancellationToken>()).Returns(new[] { 41, 42 });
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Integration.Manage")
+                .Grant(ResourceKind.Project, 41, GrantLevel.Manage)
+                .Grant(ResourceKind.Project, 42, GrantLevel.Manage)
+                .Build());
+
+        var dto = await Handler().HandleAsync(SourceEntityId, ColumnCommand(), CancellationToken.None);
+
+        Assert.Equal(100, dto.TargetColumnDefId);
+        await _sources.Received(1).AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

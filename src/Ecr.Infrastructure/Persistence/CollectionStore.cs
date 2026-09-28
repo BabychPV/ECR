@@ -393,6 +393,29 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> FindProjectIdsUsingColumnAsync(int columnDefId, CancellationToken ct)
+    {
+        // ⚠ Той самий шлях «колонка → таблиця → екземпляр → документ», що в
+        // `MaterializationTargets`: саме ним мапінг і пише.
+        var byInstances =
+            from c in db.ColumnDefs.AsNoTracking()
+            where c.Id == columnDefId
+            join t in db.TableInstances.AsNoTracking() on c.TableDefId equals t.TableDefId
+            join d in db.Documents.AsNoTracking() on t.DocumentId equals d.Id
+            select d.ProjectId;
+
+        var byTemplate =
+            from c in db.ColumnDefs.AsNoTracking()
+            where c.Id == columnDefId
+            join td in db.TableDefs.AsNoTracking() on c.TableDefId equals td.Id
+            join s in db.SheetDefs.AsNoTracking() on td.SheetDefId equals s.Id
+            join p in db.Projects.AsNoTracking() on s.TemplateVersionId equals p.TemplateVersionId
+            select p.Id;
+
+        return await byInstances.Union(byTemplate).OrderBy(id => id).ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task<bool> UnitExistsAsync(int unitId, CancellationToken ct)
         => db.Units.AsNoTracking().AnyAsync(u => u.Id == unitId, ct);
 

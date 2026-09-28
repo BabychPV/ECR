@@ -140,6 +140,21 @@ public interface ICollectionStore
     /// <summary>Колонка-ціль існує і не м'яко видалена.</summary>
     public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct);
 
+    /// <summary>
+    /// Проєкти, у які може писати мапінг на цю колонку (S3 аудиту безпеки).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Обидва шляхи в ОДНОМУ запиті: проєкти з екземплярами таблиці колонки
+    /// (наявні документи, зокрема на старих версіях шаблону) і проєкти, чия
+    /// поточна версія шаблону цю колонку містить (документи, яких ще немає).
+    /// Колонки — ідентифікатори версії шаблону, а версію ділять проєкти, тож
+    /// один мапінг пише в кожен із них.
+    /// </remarks>
+    /// <param name="columnDefId">Колонка-ціль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатори проєктів без повторів; порожньо — колонку ніхто не використовує.</returns>
+    public Task<IReadOnlyList<int>> FindProjectIdsUsingColumnAsync(int columnDefId, CancellationToken ct);
+
     /// <summary>Одиниця межі інтеграції (ФВ-16.9) існує.</summary>
     public Task<bool> UnitExistsAsync(int unitId, CancellationToken ct);
 
