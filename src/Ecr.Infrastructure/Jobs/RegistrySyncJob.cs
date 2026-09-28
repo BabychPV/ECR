@@ -53,8 +53,10 @@ public interface IRegistrySyncJob
 /// <para>
 /// ⚠ «Все або нічого» writer'а (рішення S7): відмова рядків → ці записи йдуть подією
 /// <see cref="CollectionCoverage.RegistryValueRejected"/>, решта пакета — ОДНИМ повтором;
-/// відмова на весь пакет (<c>ECR-REG-4092</c>) або невдалий повтор → решта поштучно, кожен у
-/// власному scope. Один поганий запис не блокує довідник, а кількість спроб обмежена.
+/// відмова на весь пакет (<c>ECR-REG-4092</c>, зокрема <c>keyTakenConcurrently</c> від індексу) або
+/// невдалий повтор → решта поштучно, кожен у власному scope. Один поганий запис не блокує
+/// довідник, а кількість спроб обмежена. Два записи пакета з тим самим ключем — помилки обох
+/// рядків (<c>keyDuplicateInBatch</c>) від writer'а, а не падіння прогону.
 /// </para>
 /// <para>
 /// ⚠ Дедуп подій: у <c>Details</c> — ключ <c>key=&lt;предмет&gt;:&lt;значення&gt;</c>. Предмет —
@@ -285,7 +287,13 @@ public sealed class RegistrySyncJob(
 
             return new WriteOutcome(result.Errors, Failure: null);
         }
-        catch (Exception ex) when (ex is BusinessRuleException or DomainException)
+        // ⛔ ConcurrencyConflictException — теж відмова пакета, не падіння прогону: індекс
+        // UX_RegistryEntryKey_Live (keyTakenConcurrently) спрацьовує, коли записи пакета
+        // обмінюються ключами (A: k1→k2, B: k2→k1 — SQL Server перевіряє індекс на кожну
+        // інструкцію) або коли паралельний запис випередив блокування. Поштучний повтор
+        // розводить такі записи. Інші EcrException (немає автора, немає довідника) — збій
+        // прогону, а не дані: їх не ковтаємо.
+        catch (Exception ex) when (ex is BusinessRuleException or DomainException or ConcurrencyConflictException)
         {
             return new WriteOutcome([], ex);
         }
