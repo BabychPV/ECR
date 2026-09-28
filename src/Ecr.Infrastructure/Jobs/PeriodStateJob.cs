@@ -36,8 +36,19 @@ public sealed partial class PeriodStateJob(
     IClock clock,
     IMaterializationScheduler materialization,
     ILogger<PeriodStateJob>? logger = null,
-    IAuditWriter? audit = null) : IBackgroundJob
+    IAuditWriter? audit = null,
+    IBackgroundJobScheduler? jobs = null) : IBackgroundJob
 {
+    /// <summary>Ціль витісняючої постановки пошуку осиротілих після системного Reopen.</summary>
+    /// <remarks>
+    /// ⚠ Витісняюча, а не звичайна: прогін бере весь набір за курсором, тож
+    /// друга постановка поспіль нічого не додала б — лише подвоїла б роботу.
+    /// </remarks>
+    public const string OrphanScanAfterReopenTarget = "period-reopen";
+
+    /// <summary>Скільки періодів системно відкрито за цей прогін.</summary>
+    private int _yearReopens;
+
     /// <summary>
     /// Автор системного Reopen «вікно року» в <c>aud.StructureChange</c>: не
     /// людина. Та сама умовність, що й у перерахунку (<c>RecalculationService.SystemUserId</c>).
@@ -132,6 +143,7 @@ public sealed partial class PeriodStateJob(
             .ConfigureAwait(false);
 
         var utcNow = clock.UtcNow;
+        _yearReopens = 0;
         var skipped = new List<SkippedEntry>();
         var failures = new List<FailedEntry>();
 
@@ -177,6 +189,8 @@ public sealed partial class PeriodStateJob(
 
         await RecordFindingsAsync(skipped, failures, utcNow, ct).ConfigureAwait(false);
 
+        await EnqueueOrphanScanAfterReopenAsync(ct).ConfigureAwait(false);
+
         switch (failures.Count)
         {
             case 0:
@@ -195,6 +209,46 @@ public sealed partial class PeriodStateJob(
                         CultureInfo.InvariantCulture,
                         $"PeriodStateJob: не оброблено проєктів — {failures.Count}: {string.Join(", ", failures.Select(f => f.ProjectCode))}."),
                     failures.Select(f => f.Error));
+        }
+    }
+
+    /// <summary>
+    /// Ставить разовий пошук осиротілих рядків, якщо прогін системно відкрив
+    /// хоч один період (D-204, «вікно року»).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Нічний <c>OrphanScanJob</c> обходить лише <c>Open</c>/<c>Grace</c>: поки
+    /// рік був закритим, ознака <c>IsOrphaned</c> у ньому не оновлювалася, і
+    /// щойно відкритий рік показує застарілі позначки — аж до ночі, а за
+    /// бюджетом курсора й довше. Постановка скорочує це до хвилин.
+    /// <para>
+    /// ⚠ Сканер глобальний (курсор на весь набір), окремого проходу «лише цей
+    /// період» порт <see cref="IOrphanScanner"/> не має — тож це прогін
+    /// набору, що вже включає відкриті періоди.
+    /// </para>
+    /// <para>
+    /// ⚠ Збій постановки прогону НЕ валить: стани періодів уже закомічено, а
+    /// нічний прохід однаково дійде до цих рядків. Але й не мовчить — журнал.
+    /// </para>
+    /// </remarks>
+    private async Task EnqueueOrphanScanAfterReopenAsync(CancellationToken ct)
+    {
+        if (_yearReopens == 0 || jobs is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await jobs
+                .EnqueueExclusiveAsync<OrphanScanJob>(OrphanScanAfterReopenTarget, payload: null, ct)
+                .ConfigureAwait(false);
+
+            LogOrphanScanEnqueued(_logger, _yearReopens);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogOrphanScanNotEnqueued(_logger, _yearReopens, ex);
         }
     }
 
@@ -230,6 +284,7 @@ public sealed partial class PeriodStateJob(
         // проєкті, трималося б до кінця прогону по всіх.
         var toMaterialize = new List<int>();
         var skipped = new List<SkippedPeriodTransition>();
+        var reopened = 0;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
@@ -237,6 +292,7 @@ public sealed partial class PeriodStateJob(
             // збираються заново, а не дописуються.
             toMaterialize.Clear();
             skipped.Clear();
+            reopened = 0;
 
             // ⚠ UPDLOCK: Reopen бере той самий рядок так само (ФВ-1.10a).
             // Тепер блокування справді тримається до кінця транзакції.
@@ -288,6 +344,7 @@ public sealed partial class PeriodStateJob(
                 var period = reopen.Period;
                 var before = period.State;
                 period.Reopen(reopen.Until, reopen.Reason, utcNow);
+                reopened++;
 
                 await _audit.WriteStructureChangeAsync(
                     new StructureChangeRecord(
@@ -323,6 +380,9 @@ public sealed partial class PeriodStateJob(
 
             await db.SaveChangesAsync(innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+
+        // Лише закомічені: відкочена транзакція нічого не відкривала.
+        _yearReopens += reopened;
 
         // ⛔ Матеріалізація з переходу — ПІСЛЯ коміту, не в
         // транзакції: черга не транзакційна, і задача, поставлена до коміту,
@@ -490,4 +550,15 @@ public sealed partial class PeriodStateJob(
         Level = LogLevel.Error,
         Message = "PeriodStateJob: не вдалося записати знахідки прогону в itg.MaintenanceRun (пропусків {Skipped}, збоїв {Failed}).")]
     private static partial void LogFindingsNotRecorded(ILogger logger, int skipped, int failed, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "PeriodStateJob: системно відкрито періодів — {Count}; поставлено разовий пошук осиротілих рядків.")]
+    private static partial void LogOrphanScanEnqueued(ILogger logger, int count);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PeriodStateJob: системно відкрито періодів — {Count}, але пошук осиротілих рядків НЕ поставлено; "
+            + "позначки оновить нічний прохід.")]
+    private static partial void LogOrphanScanNotEnqueued(ILogger logger, int count, Exception exception);
 }

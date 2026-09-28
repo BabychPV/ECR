@@ -24,8 +24,11 @@ public sealed partial class RecurringScheduleService(
     IServiceProvider services,
     IHostApplicationLifetime lifetime,
     ILogger<RecurringScheduleService> logger,
-    IConfiguration configuration) : IHostedService
+    IConfiguration configuration) : IHostedService, IDisposable
 {
+    /// <inheritdoc />
+    public void Dispose() => sweepStop.Dispose();
+
     /// <summary>Cron нічних перевірок: 02:15, поза вікном роботи людей.</summary>
     public const string NightlyCron = "0 15 2 * * ?";
 
@@ -41,15 +44,38 @@ public sealed partial class RecurringScheduleService(
     /// </remarks>
     public const int MaxCollectionSchedules = 1_000;
 
+    /// <summary>Як часто прибирати покинуту роботу (U4, U11).</summary>
+    /// <remarks>
+    /// ⚠ Удесятеро частіше за межу застарілості
+    /// (<see cref="IJobProgressStore.StaleAfter"/>, 5 хв): підтвердження
+    /// локальної черги мусить устигати задовго до того, як сусідній інстанс
+    /// визнає її рядки покинутими. Хвилина — це «покинута задача зникає за
+    /// ~6 хв після зупинки процесу» замість «до наступного довгого перезапуску».
+    /// </remarks>
+    public static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
+
+    /// <summary>Як часто виконувати ретенцію завершених записів прогресу (аудит P2).</summary>
+    public static readonly TimeSpan PurgeInterval = TimeSpan.FromHours(1);
+
     /// <summary>Скільки чекати, поки задачі отримають сигнал зупинки.</summary>
     private static readonly TimeSpan InterruptWait = TimeSpan.FromSeconds(10);
+
+    /// <summary>Зупинка циклу прибирання.</summary>
+    private readonly CancellationTokenSource sweepStop = new();
+
+    /// <summary>Цикл прибирання; <c>null</c> — ще не запущено.</summary>
+    private Task? sweepLoop;
 
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
         // Постановка відкладається до ApplicationStarted: до цього моменту
         // планувальник ще не піднято, а решта hosted-сервісів ще стартує.
-        lifetime.ApplicationStarted.Register(() => _ = ScheduleSafelyAsync());
+        lifetime.ApplicationStarted.Register(() =>
+        {
+            _ = ScheduleSafelyAsync();
+            sweepLoop = SweepLoopAsync(sweepStop.Token);
+        });
 
         return Task.CompletedTask;
     }
@@ -71,6 +97,8 @@ public sealed partial class RecurringScheduleService(
     /// </remarks>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
+        await sweepStop.CancelAsync().ConfigureAwait(false);
+
         try
         {
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -87,6 +115,11 @@ public sealed partial class RecurringScheduleService(
             // ⚠ Зупинка не має зависнути чи впасти через планувальник, який уже
             // недоступний: без сигналу задачі однаково дочекається Quartz.
             LogInterruptFailed(logger, ex.Message);
+        }
+
+        if (sweepLoop is not null)
+        {
+            await sweepLoop.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -106,6 +139,99 @@ public sealed partial class RecurringScheduleService(
             ? await quartz.InterruptAllAsync(ct).ConfigureAwait(false)
             : 0;
     }
+
+    /// <summary>Періодичне прибирання, поки застосунок живий.</summary>
+    private async Task SweepLoopAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(SweepInterval);
+        DateTime? lastPurge = null;
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                try
+                {
+                    await using var scope = services.CreateAsyncScope();
+                    var now = scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>().UtcNow;
+                    var purge = lastPurge is null || now - lastPurge >= PurgeInterval;
+
+                    var outcome = await SweepOnceAsync(scope.ServiceProvider, purge, ct).ConfigureAwait(false);
+
+                    if (purge)
+                    {
+                        lastPurge = now;
+                    }
+
+                    if (outcome.Any)
+                    {
+                        LogSwept(logger, outcome.Jobs, outcome.CollectionRuns, outcome.MaintenanceRuns, outcome.Purged);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // ⚠ Прохід, що впав, не зупиняє цикл: наступний за хвилину
+                    // спробує знову, а мовчки загублений цикл — це рівно та
+                    // сама «вічна Running», яку він прибирає.
+                    LogSweepFailed(logger, ex.Message);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Зупинка застосунку — штатний вихід із циклу.
+        }
+    }
+
+    /// <summary>
+    /// Один прохід: підтвердити локальну чергу, потім прибрати покинуте.
+    /// </summary>
+    /// <param name="provider">Провайдер області проходу.</param>
+    /// <param name="purge">Чи виконувати ретенцію завершених записів прогресу.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⛔ Порядок значущий: спершу підтвердження СВОЄЇ черги, потім прибирання.
+    /// У зворотному порядку задача, що просто довго стоїть у черзі цього ж
+    /// інстанса, була б визнана покинутою його ж проходом.
+    /// </remarks>
+    public static async Task<Infrastructure.Jobs.SweepOutcome> SweepOnceAsync(
+        IServiceProvider provider, bool purge, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        if (provider.GetService<IBackgroundJobScheduler>() is Infrastructure.Jobs.QuartzJobScheduler quartz)
+        {
+            await quartz.KeepAliveLocalJobsAsync(ct).ConfigureAwait(false);
+        }
+
+        if (provider.GetService<IJobProgressStore>() is not { } progress)
+        {
+            return new Infrastructure.Jobs.SweepOutcome(0, 0, 0, 0);
+        }
+
+        var sweeper = new Infrastructure.Jobs.AbandonedWorkSweeper(
+            provider.GetRequiredService<EcrDbContext>(), progress);
+
+        return await sweeper
+            .SweepAsync(
+                Infrastructure.Jobs.AbandonedWorkSweeper.AbandonedJobReason,
+                provider.GetRequiredService<Domain.Abstractions.IClock>().UtcNow,
+                purge,
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Прибирання: задач позначено Failed — {Jobs}; прогонів збору закрито — {CollectionRuns}; "
+            + "прогонів обслуговування закрито — {MaintenanceRuns}; завершених записів прогресу видалено — {Purged}.")]
+    private static partial void LogSwept(
+        ILogger logger, int jobs, int collectionRuns, int maintenanceRuns, int purged);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Прибирання покинутих задач не вдалося ({Reason}); наступна спроба за інтервал.")]
+    private static partial void LogSweepFailed(ILogger logger, string reason);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

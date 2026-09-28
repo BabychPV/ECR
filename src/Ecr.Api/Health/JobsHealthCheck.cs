@@ -21,8 +21,25 @@ namespace Ecr.Api.Health;
 /// роками, навчають ігнорувати, і справжню деградацію ніхто не помітить.
 /// </remarks>
 public sealed class JobsHealthCheck(
-    ISchedulerFactory? factory, IUiStringCatalog catalog, ICurrentUser currentUser) : IHealthCheck
+    ISchedulerFactory? factory,
+    IUiStringCatalog catalog,
+    ICurrentUser currentUser,
+    IJobProgressStore? progress = null,
+    Domain.Abstractions.IClock? clock = null) : IHealthCheck
 {
+    /// <summary>
+    /// Скільки задача може висіти без биття, поки прибирання мало б її закрити,
+    /// перш ніж перевірка стане червоною (U16).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Жовтий — одразу, щойно є задача без биття довше за
+    /// <see cref="IJobProgressStore.StaleAfter"/>: це штатне вікно до наступного
+    /// проходу прибирання (раз на хвилину), і воно має бути видимим. Червоний —
+    /// коли така задача пережила ще й цей запас: прибирання, отже, не працює, і
+    /// «вічні Running» повернулися. Шість проходів — з запасом на збій БД.
+    /// </remarks>
+    public static readonly TimeSpan UnsweptAfter = IJobProgressStore.StaleAfter + TimeSpan.FromMinutes(6);
+
     /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -71,6 +88,38 @@ public sealed class JobsHealthCheck(
                 return HealthCheckResult.Degraded(noSchedules, data: Data(jobs.Count, 0));
             }
 
+            // ⛔ U16: «планувальник живий» ще не означає «задачі не висять».
+            // Раніше перевірка була зеленою, поки в `/jobs` місяцями «виконувалися»
+            // задачі, покинуті процесом, що зник.
+            if (progress is not null && clock is not null)
+            {
+                var now = clock.UtcNow;
+                var stale = await progress.SummarizeStaleAsync(now, cancellationToken).ConfigureAwait(false);
+
+                if (stale.Count > 0)
+                {
+                    var data = Data(jobs.Count, triggers.Count);
+                    data["staleJobs"] = stale.Count;
+
+                    var unswept = stale.OldestHeartbeatAt is not { } oldest || now - oldest > UnsweptAfter;
+                    var text = await Text(
+                            unswept ? "health.jobs.staleUnswept" : "health.jobs.stale",
+                            unswept
+                                ? "Background jobs hang without a heartbeat and the cleanup does not close them: {count}."
+                                : "Background jobs without a heartbeat, awaiting cleanup: {count}.",
+                            cancellationToken,
+                            new Dictionary<string, string>(StringComparer.Ordinal)
+                            {
+                                ["count"] = stale.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            })
+                        .ConfigureAwait(false);
+
+                    return unswept
+                        ? HealthCheckResult.Unhealthy(text, data: data)
+                        : HealthCheckResult.Degraded(text, data: data);
+                }
+            }
+
             var running = await Text("health.jobs.running", "The scheduler is running.", cancellationToken)
                 .ConfigureAwait(false);
             return HealthCheckResult.Healthy(running, data: Data(jobs.Count, triggers.Count));
@@ -86,8 +135,9 @@ public sealed class JobsHealthCheck(
         }
     }
 
-    private Task<string> Text(string key, string fallback, CancellationToken ct)
-        => HealthCatalogText.ResolveAsync(catalog, currentUser, key, fallback, null, ct);
+    private Task<string> Text(
+        string key, string fallback, CancellationToken ct, IReadOnlyDictionary<string, string>? parameters = null)
+        => HealthCatalogText.ResolveAsync(catalog, currentUser, key, fallback, parameters, ct);
 
     private static Dictionary<string, object> Data(int jobs, int triggers)
         => new(StringComparer.Ordinal) { ["jobs"] = jobs, ["triggers"] = triggers };

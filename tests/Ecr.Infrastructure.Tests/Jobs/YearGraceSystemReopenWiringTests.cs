@@ -148,6 +148,55 @@ public sealed class YearGraceSystemReopenWiringTests(SqlServerFixture sql) : IDi
     }
 
     /// <remarks>
+    /// Після системного Reopen ставиться разовий пошук осиротілих рядків: нічний
+    /// прохід обходить лише <c>Open</c>/<c>Grace</c>, і позначки <c>IsOrphaned</c>
+    /// щойно відкритого року застаріли, поки він був закритим. Мутація: не
+    /// рахувати відкриті періоди (<c>reopened++</c>) у <c>PeriodStateJob</c> →
+    /// постановки немає, червоний (прогнано).
+    /// <para>
+    /// ⚠ Негативного боку («без Reopen — без постановки») тут немає свідомо:
+    /// задача обходить УСІ активні проєкти спільної бази, і чужий проєкт у
+    /// своєму вікні року дав би постановку, якої цей тест не спричиняв.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-1.8")]
+    public async Task Системний_Reopen_ставить_разовий_пошук_осиротілих_рядків()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(November, rowCount: 1);
+        var baseline = await ScalarAsync("SELECT ISNULL(MAX(Id), 0) FROM itg.MaintenanceRun");
+
+        try
+        {
+            var periodId = await ArmClosedNovemberAsync(builder, doc);
+            var jobs = Substitute.For<IBackgroundJobScheduler>();
+
+            var error = await RunStateJobAsync(
+                builder, SiteTime(2027, 1, 1, 10), Substitute.For<IMaterializationScheduler>(), jobs);
+
+            Assert.True(
+                (await PeriodAsync(builder, periodId)).State == PeriodState.Grace,
+                $"Передумова: листопад 01.01 мав відкритися. Збій прогону: {error}");
+
+            await jobs.Received(1).EnqueueExclusiveAsync<OrphanScanJob>(
+                PeriodStateJob.OrphanScanAfterReopenTarget,
+                Arg.Any<object?>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<int?>());
+        }
+        finally
+        {
+            await RetireAsync(doc.ProjectId);
+            await ExecuteAsync(
+                "DELETE FROM itg.MaintenanceRun WHERE Id > @id AND JobCode = @code",
+                ("@id", baseline), ("@code", PeriodStateJob.Code));
+        }
+    }
+
+    /// <remarks>
     /// Правка й перерахунок у перевідкритому вікном листопаді: запис
     /// позначено <c>IsLateEdit = 1</c>, перерахунок поставлено в чергу і сам
     /// перерахунок (справжній <c>RecalculationService</c> зі справжнім
@@ -474,7 +523,8 @@ public sealed class YearGraceSystemReopenWiringTests(SqlServerFixture sql) : IDi
 
     /// <summary>Справжній прогін задачі станів (зі справжнім аудитом); збій чужого проєкту — текстом.</summary>
     private static async Task<string?> RunStateJobAsync(
-        TestDocumentBuilder builder, DateTime at, IMaterializationScheduler materialization)
+        TestDocumentBuilder builder, DateTime at, IMaterializationScheduler materialization,
+        IBackgroundJobScheduler? jobs = null)
     {
         await using var db = builder.CreateContext();
 
@@ -482,7 +532,7 @@ public sealed class YearGraceSystemReopenWiringTests(SqlServerFixture sql) : IDi
         {
             await new PeriodStateJob(
                     db, new PeriodStateCalculator(), new UnitOfWork(db), new TestClock(at),
-                    materialization, logger: null, audit: new AuditWriter(db))
+                    materialization, logger: null, audit: new AuditWriter(db), jobs: jobs)
                 .ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
             return null;
         }

@@ -128,18 +128,29 @@ public static partial class StartupSequence
         //     A. Інстанс у розгортанні не один (ціль — 100 одночасних
         //     користувачів), тож це був не крайній випадок, а щоденний
         //     наслідок будь-якого розгортання.
+        //
+        // ⚠ U4/U11: той самий прохід, що й періодичне прибирання
+        //     (`RecurringScheduleService.SweepOnceAsync`), — разом із журналами
+        //     прогонів збору й обслуговування, які раніше не прибирав ніхто.
+        //     Рядки ПОПЕРЕДНЬОГО процесу цього ж інстанса зі свіжим биттям тут не
+        //     відрізнити від живих рядків сусіда: ідентифікатора інстансу в
+        //     `itg.JobProgress` немає (потрібна міграція). Їх закриє періодичний
+        //     прохід — щойно биття застаріє, тобто за ~6 хв, а не «ніколи».
         var progress = scope.ServiceProvider.GetService<IJobProgressStore>();
         if (progress is not null)
         {
             var clock = scope.ServiceProvider.GetRequiredService<Domain.Abstractions.IClock>();
-            var failed = await progress
-                .FailStaleAsync("Застосунок перезапущено: задача не завершилася до зупинки процесу.",
-                    clock.UtcNow, CancellationToken.None)
+            var swept = await new Infrastructure.Jobs.AbandonedWorkSweeper(db, progress)
+                .SweepAsync(
+                    "Застосунок перезапущено: задача не завершилася до зупинки процесу.",
+                    clock.UtcNow,
+                    purge: false,
+                    CancellationToken.None)
                 .ConfigureAwait(false);
 
-            if (failed > 0)
+            if (swept.Any)
             {
-                LogStaleJobsFailed(logger, failed);
+                LogStaleJobsFailed(logger, swept.Jobs, swept.CollectionRuns, swept.MaintenanceRuns);
             }
         }
 
@@ -237,8 +248,11 @@ public static partial class StartupSequence
     [LoggerMessage(Level = LogLevel.Information, Message = "Старт: seed виконано.")]
     private static partial void LogSeedDone(ILogger logger);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: {Count} застарілих задач позначено Failed.")]
-    private static partial void LogStaleJobsFailed(ILogger logger, int count);
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Старт: застарілих задач позначено Failed — {Count}; прогонів збору закрито — {CollectionRuns}; "
+            + "прогонів обслуговування закрито — {MaintenanceRuns}.")]
+    private static partial void LogStaleJobsFailed(ILogger logger, int count, int collectionRuns, int maintenanceRuns);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Старт: {Warning}")]
     private static partial void LogBootstrapWarning(ILogger logger, string warning);

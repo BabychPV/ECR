@@ -459,6 +459,45 @@ public sealed class QuartzJobScheduler(
     }
 
     /// <summary>
+    /// Підтверджує в <c>itg.JobProgress</c>, що задачі з локальної черги
+    /// цього процесу ще живі (U4).
+    /// </summary>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки активних рядків підтверджено.</returns>
+    /// <remarks>
+    /// ⛔ Без цього періодичне прибирання позначало б <c>Failed</c> задачі, які
+    /// просто довго чекають вільного потоку чи ретраю: у черзі биття не б'є
+    /// ніхто. Розклади сюди не входять — їхній рядок б'є лише прогін, що йде.
+    /// </remarks>
+    public async Task<int> KeepAliveLocalJobsAsync(CancellationToken ct)
+    {
+        if (schedulerFactory is null || progress is null || clock is null)
+        {
+            return 0;
+        }
+
+        var instance = await schedulerFactory.GetScheduler(ct).ConfigureAwait(false);
+        if (instance.IsShutdown)
+        {
+            return 0;
+        }
+
+        var held = new List<string>();
+
+        foreach (var key in await instance.GetJobKeys(GroupMatcher<JobKey>.AnyGroup(), ct).ConfigureAwait(false))
+        {
+            if (!IsRecurring(await instance.GetJobDetail(key, ct).ConfigureAwait(false)))
+            {
+                held.Add(key.Name);
+            }
+        }
+
+        return held.Count == 0
+            ? 0
+            : await progress.KeepAliveAsync(held, clock.UtcNow, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Надсилає скасування КОЖНІЙ задачі, що зараз виконується в цьому процесі (U8).
     /// </summary>
     /// <param name="ct">Скасування.</param>
