@@ -42,6 +42,8 @@ function declaration(body: string, property: string): string {
 }
 
 describe('Таблиця тримає контекст при прокручуванні', () => {
+  // ⚠ ФВ-14.29: мутаційно НЕ доведено (класифікатор дозволів, 2026-09-27/28;
+  // рішення людини — здавати з приміткою).
   it('ФВ-14.29: шапка прилипає до верху, перша колонка — до лівого краю', () => {
     const head = ruleBody('.ecr-sticky-head thead th');
     const firstCell = ruleBody('.ecr-sticky-first tbody td:first-child');

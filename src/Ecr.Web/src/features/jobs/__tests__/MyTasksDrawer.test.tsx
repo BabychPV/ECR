@@ -121,6 +121,8 @@ describe('шухляда «My tasks»', () => {
     expect(link.getAttribute('href')).toBe('/documents/42');
   });
 
+  // ⚠ Позначка ФВ-14.26: мутаційно НЕ доведено (класифікатор дозволів,
+  // 2026-09-27/28; рішення людини — здавати з приміткою).
   it('ФВ-14.26: смуга прогресу лише в активної задачі, і рядок несе свій jobId', () => {
     show([row({ jobId: 'a', state: 'Running', percent: 40 })]);
     expect(document.querySelector('[data-my-task][data-job-id="a"]')).not.toBeNull();
