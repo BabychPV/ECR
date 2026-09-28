@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MantineProvider } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ImportPreview } from '@/api/types';
 import { ImportPanel } from '../ImportPanel';
@@ -323,5 +324,84 @@ describe('ImportPanel: четвертий раунд (F-01, F-06)', () => {
     // ⛔ Мутація: прибрати гілку `isQueued` — тут буде `⟦import.applied⟧`.
     await vi.waitFor(() => expect(vi.mocked(showDone)).toHaveBeenCalledWith('⟦import.queued⟧'));
     expect(vi.mocked(showDone)).not.toHaveBeenCalledWith('⟦import.applied⟧');
+  });
+});
+
+describe('ImportPanel: застосування впирається в блокування аркуша (ECR-DOC-4091)', () => {
+  /*
+   * ⚠ Застосування імпорту бере блокування аркуша (`SheetEditGate`); поки
+   * аркуш подають (або зберігають/перераховують), сервер після очікування
+   * відповідає `409 ECR-DOC-4091` з `messageKey` і `detail`, УЖЕ зібраним із
+   * каталогу мовою користувача (`ExceptionHandlingMiddleware`,
+   * `SheetEditGateTimeoutTests`). Людина має побачити саме цей текст —
+   * «аркуш зараз подають, спробуйте за мить», — а не голе «Conflict».
+   *
+   * ⛔ Мутація: `onError: showApiError` застосування замінити загальною
+   * помилкою (`() => showApiError(new Error('x'))`) — тут буде
+   * `⟦state.errorTitle⟧` замість тексту каталогу.
+   */
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    [
+      'err.ECR-DOC-4091.sheetBeingSubmitted',
+      'This sheet is being submitted right now. Your changes were not saved; try again in a moment.',
+    ],
+    [
+      'err.ECR-DOC-4091.sheetBeingEdited',
+      'This sheet is being saved or recalculated right now. The sheet was not submitted; try again in a moment.',
+    ],
+  ])('409 з %s — у тості текст каталогу, не загальна помилка', async (messageKey, catalogText) => {
+    const show = vi.spyOn(notifications, 'show');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.includes('/import/preview')) {
+          return new Response(
+            JSON.stringify({
+              previewToken: 'tok',
+              changes: [{ rowKey: 'R1', columnCode: 'A', oldValue: null, newValue: 1, tableCode: 'T1' }],
+              rejected: [],
+              conflicts: [],
+            } satisfies ImportPreview),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+
+        if (url.includes('/import/apply')) {
+          return new Response(
+            JSON.stringify({
+              type: 'https://ecr/errors/ECR-DOC-4091',
+              title: 'Conflict',
+              status: 409,
+              detail: catalogText,
+              errorCode: 'ECR-DOC-4091',
+              correlationId: 'corr-1',
+              messageKey,
+            }),
+            { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+          );
+        }
+
+        throw new Error(`неочікуваний запит у тесті: ${url}`);
+      }),
+    );
+
+    await openPreview();
+    await userEvent.click(screen.getByRole('button', { name: '⟦import.apply⟧' }));
+
+    await vi.waitFor(() =>
+      expect(show).toHaveBeenCalledWith(expect.objectContaining({ color: 'statusError', message: catalogText })),
+    );
+    expect(show).not.toHaveBeenCalledWith(expect.objectContaining({ message: '⟦state.errorTitle⟧' }));
+    expect(vi.mocked(showDone)).not.toHaveBeenCalledWith('⟦import.applied⟧');
+
+    // Перегляд лишається відкритим — людина може повторити застосування.
+    expect(screen.getByRole('dialog')).toBeTruthy();
   });
 });
