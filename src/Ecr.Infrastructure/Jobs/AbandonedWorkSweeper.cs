@@ -106,6 +106,8 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
         // ⚠ Задачі — ПЕРШИМИ: живість прогонів нижче визначається саме за
         // активними задачами, і покинута задача, ще не закрита, тримала б
         // «живим» і свій покинутий прогін.
+        // ⚠ Друга служба (чи перекритий рецикл) на ту саму базу з цієї ж машини
+        // закриє тут задачі ЖИВОГО першого процесу — див. operations-runbook.md, п. 1.1.
         var previous = startingInstance is { } me
             ? await progress
                 .FailPreviousInstanceAsync(me.MachineName, me.InstanceId, jobReason, utcNow, ct)
