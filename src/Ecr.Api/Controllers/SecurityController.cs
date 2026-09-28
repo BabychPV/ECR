@@ -477,6 +477,10 @@ public sealed class SecurityController(
     [HttpPost("auth/change-password")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    // S9: запис заблоковано невдалими спробами (спільний із входом лічильник) —
+    // `ECR-AUTH-0423`; межа частоти на користувача — `ECR-REQ-0429`.
+    [ProducesResponseType(StatusCodes.Status423Locked)]
+    [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> ChangePassword(
         [FromBody] ChangePasswordRequest request, CancellationToken ct)
     {

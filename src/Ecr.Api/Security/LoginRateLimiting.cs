@@ -126,11 +126,11 @@ public static class LoginRateLimiting
     /// Ключ каталогу для подробиці відмови зміни пароля.
     /// </summary>
     /// <remarks>
-    /// ⚠ Заголовок коду, а не окрема подробиця: окремого рядка сіду для цього
-    /// випадку немає, а подробиця входу («з цієї адреси») тут була б неправдою —
-    /// межа тут на користувача. Власний рядок — питання до власника сіду.
+    /// ⚠ Власний рядок, а не подробиця входу: та каже «з цієї адреси», а межа
+    /// тут на КОРИСТУВАЧА. Записаний повним літералом — сторож
+    /// <c>ErrorTitleCatalogTests</c> шукає саме літерал (див. <see cref="RejectionDetailKey"/>).
     /// </remarks>
-    private const string ChangePasswordRejectionDetailKey = "err.ECR-REQ-0429";
+    private const string ChangePasswordRejectionDetailKey = "err.ECR-REQ-0429.tooManyPasswordChanges";
 
     /// <summary>Запасна подробиця відмови зміни пароля — коли каталог недоступний.</summary>
     private const string ChangePasswordRejectionDetail =
@@ -405,6 +405,11 @@ public static class LoginRateLimiting
 
         problem.Extensions["errorCode"] = code;
         problem.Extensions["correlationId"] = correlationId;
+
+        // ⚠ Клієнт (`ErrorAlert`, рішення 2026-09-20) показує подробицю лише
+        // тоді, коли сервер позначив її ключем каталогу; без ключа користувач
+        // бачив би самий заголовок «Too many requests» (S9).
+        problem.Extensions["messageKey"] = detailKey;
 
         context.Response.ContentType = ProblemJson;
 

@@ -4642,6 +4642,8 @@ USING (VALUES
     (N'err.ECR-CELL-4223.deletedEntry',        N'en', N'The chosen registry entry has been deleted: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.inactiveEntry',       N'en', N'The chosen registry entry is switched off: {cellCount} cell(s).', 1),
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'en', N'The chosen registry entry is not valid on {asOf}, the last day of the period: {cellCount} cell(s).', 1),
+    -- S9: межа частоти зміни пароля — на КОРИСТУВАЧА, не на адресу (`LoginRateLimiting`).
+    (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'en', N'Too many password change attempts. Try again in a minute.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).

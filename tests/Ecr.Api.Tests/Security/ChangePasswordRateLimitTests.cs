@@ -73,6 +73,15 @@ public sealed class ChangePasswordRateLimitTests(SqlServerFixture sql)
         Assert.Equal(ExpectedRejection, json.GetProperty("errorCode").GetString());
         Assert.NotNull(rejected[0].Headers.RetryAfter);
 
+        // ⛔ Подробиця — з КАТАЛОГУ (рядок сіду) і позначена ключем: без
+        // `messageKey` клієнт (`problemText`) її не показує взагалі. Запасне
+        // речення в коді навмисно інше («Try again later»), тож рівність нижче
+        // доводить, що текст приїхав із сіду.
+        Assert.Equal("err.ECR-REQ-0429.tooManyPasswordChanges", json.GetProperty("messageKey").GetString());
+        Assert.Equal(
+            "Too many password change attempts. Try again in a minute.",
+            json.GetProperty("detail").GetString());
+
         // ⛔ Межа — на КОРИСТУВАЧА, не на адресу: у тестовому хості адреса одна
         // на всіх, тож межа за адресою відрізала б і сусіда.
         using var neighbourResponse = await neighbour.PostAsJsonAsync(
