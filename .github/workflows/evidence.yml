@@ -102,8 +102,10 @@ jobs:
           fetch-depth: 0
       # ⛔ На push (lane/**) у події немає pull_request.*, і сторож отримував
       # порожні BASE/HEAD: `git diff "..."` давав порожній diff, а скрипт
-      # виходив нулем — зелений гейт, що нічого не перевірив. Тому на push
-      # база — merge-base з dev/integration (історія є: fetch-depth: 0), а
+      # виходив нулем — зелений гейт, що нічого не перевірив. Тому на push і
+      # workflow_dispatch база — merge-base з dev/integration (історія є:
+      # fetch-depth: 0; на самій dev/integration база = вершина, і порожній
+      # diff там чесний), а
       # порожня чи неіснуюча база — падіння, а не «змін у .cs немає».
       - name: honesty
         env:
@@ -113,7 +115,7 @@ jobs:
           PUSH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "push" ]; then
+          if [ "$EVENT_NAME" = "push" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             HEAD_SHA="$PUSH_SHA"
             BASE_SHA="$(git merge-base origin/dev/integration "$HEAD_SHA" || true)"
           fi
