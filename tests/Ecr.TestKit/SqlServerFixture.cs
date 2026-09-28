@@ -113,7 +113,31 @@ public sealed class SqlServerFixture : IAsyncLifetime
             ? DatabaseNamePrefix
             : $"{DatabaseNamePrefix}_{suffix}";
 
-        return $"{name}_{WorkspaceTag()}";
+        return $"{name}_{WorkspaceTag()}{ShardSuffix()}";
+    }
+
+    /// <summary>
+    /// Суфікс <c>_s&lt;N&gt;</c> для паралельного шарда з <c>ECR_TEST_SHARD</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Той самий клас дефекту, що <c>Q-055</c> і <see cref="WorkspaceTag"/>,
+    /// ще на рівень нижче: <c>tools/verify-all.ps1 -ApiParallel K</c> запускає
+    /// K процесів <c>dotnet test</c> на ОДНУ й ту саму DLL з одного каталогу
+    /// збірки. Мітка каталогу в них однакова, тож без суфікса кожен процес
+    /// скидав би базу з-під сусіда.
+    ///
+    /// ⚠ Шардуються саме процеси, а не колекції в одному процесі:
+    /// <c>EcrApiFactory</c> передає рядок з'єднання через змінну оточення
+    /// (глобально на процес), а Quartz тримає статичні реєстри.
+    ///
+    /// ⚠ Без змінної ім'я не змінюється ні на символ — прогони без шардів
+    /// працюють із тією самою базою, що й раніше. <c>ECR_TEST_DB</c>, як і
+    /// раніше, перекриває ім'я цілком — разом із суфіксом.
+    /// </remarks>
+    private static string ShardSuffix()
+    {
+        var shard = Environment.GetEnvironmentVariable("ECR_TEST_SHARD");
+        return string.IsNullOrWhiteSpace(shard) ? string.Empty : $"_s{shard.Trim()}";
     }
 
     /// <summary>
