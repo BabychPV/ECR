@@ -1,6 +1,7 @@
 // tests/Ecr.Api.Tests/CollectionScheduleStateSaveTests.cs
 using Ecr.Api.Startup;
 using Ecr.Application.Integration;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -68,16 +69,74 @@ public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
         Assert.Contains("LastError", error.Message, StringComparison.Ordinal);
     }
 
+    /// <remarks>
+    /// Мутаційний доказ: (1) прибрати пропуск у <c>ApplyCollectionSchedulesAsync</c>
+    /// → червоний (поставлено 2, <c>LastError</c> власної форми порожній);
+    /// (2) <c>LocalSourceEntityIdsAsync</c> фільтрує <c>External</c> замість
+    /// <c>Local</c> → червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-12.8")]
+    public async Task ФВ_12_8_розклад_власної_форми_заведений_до_правила_на_старті_пропущено_з_LastError_у_базі()
+    {
+        var localId = await AddScheduleAsync(RecurringScheduleService.HourlyCron, RegistrySourceKind.Local);
+        var externalId = await AddScheduleAsync(RecurringScheduleService.HourlyCron, RegistrySourceKind.External);
+        var logger = new RecordingLogger<RecurringScheduleService>();
+
+        // ⚠ Заглушка, а не Quartz: у спільному прогоні Api статичний LogProvider
+        // Quartz уже прив'язаний до LoggerFactory закритого тестового хоста, і
+        // справжня постановка падає ObjectDisposedException. Тут стережеться
+        // запит і запис стану, а не сам Quartz (його — CollectionScheduleStartupTests).
+        var scheduler = new RecordingScheduler();
+        int applied;
+        int externalEntityId;
+        await using (var db = Context())
+        {
+            var schedules = await db.CollectionSchedules
+                .Where(s => s.Id == localId || s.Id == externalId)
+                .OrderBy(s => s.Id)
+                .ToListAsync();
+            externalEntityId = schedules.Single(s => s.Id == externalId).SourceEntityId;
+
+            // Той самий запит, що й на старті: база спільна, тож у множині можуть
+            // бути й чужі Local-сутності — важливо лише, що наша в ній є, а External — ні.
+            var local = await RecurringScheduleService.LocalSourceEntityIdsAsync(db, CancellationToken.None);
+
+            applied = await RecurringScheduleService.ApplyCollectionSchedulesAsync(
+                schedules, local, scheduler, new CollectionScheduleApplier(scheduler), logger, Now,
+                CancellationToken.None);
+            await RecurringScheduleService.SaveCollectionScheduleStateAsync(db, logger, CancellationToken.None);
+        }
+
+        Assert.Equal(1, applied);
+        Assert.Equal(CollectionScheduleApplier.PayloadOf(externalEntityId), Assert.Single(scheduler.Scheduled));
+
+        await using var read = Context();
+        var savedLocal = await read.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == localId);
+        var savedExternal = await read.CollectionSchedules.AsNoTracking().SingleAsync(s => s.Id == externalId);
+
+        Assert.Equal(RecurringScheduleService.LocalEntityScheduleSkipped, savedLocal.LastError);
+        Assert.Equal(Now, savedLocal.LastErrorAt);
+        Assert.True(savedLocal.IsEnabled);
+
+        Assert.Null(savedExternal.LastError);
+        Assert.Single(logger.OfLevel(LogLevel.Warning));
+    }
+
     private static async Task StartAsync(
         EcrDbContext db, int id, RecordingLogger<RecurringScheduleService> logger)
     {
         var schedules = await db.CollectionSchedules.Where(s => s.Id == id).ToListAsync();
-        await ApplyAsync(schedules, logger);
+        await ApplyAsync(schedules, logger, new HashSet<int>());
         await RecurringScheduleService.SaveCollectionScheduleStateAsync(db, logger, CancellationToken.None);
     }
 
     private static Task<int> ApplyAsync(
-        List<CollectionSchedule> schedules, RecordingLogger<RecurringScheduleService> logger)
+        List<CollectionSchedule> schedules,
+        RecordingLogger<RecurringScheduleService> logger,
+        IReadOnlySet<int> localSourceEntityIds)
     {
         var jobs = new QuartzJobScheduler(new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
         {
@@ -86,10 +145,11 @@ public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
         }));
 
         return RecurringScheduleService.ApplyCollectionSchedulesAsync(
-            schedules, jobs, new CollectionScheduleApplier(jobs), logger, Now, CancellationToken.None);
+            schedules, localSourceEntityIds, jobs, new CollectionScheduleApplier(jobs), logger, Now,
+            CancellationToken.None);
     }
 
-    private async Task<int> AddScheduleAsync(string cron)
+    private async Task<int> AddScheduleAsync(string cron, RegistrySourceKind kind = RegistrySourceKind.External)
     {
         var tag = Guid.NewGuid().ToString("N")[..10];
         await using var db = Context();
@@ -103,7 +163,7 @@ public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
         db.DataSources.Add(dataSource);
         await db.SaveChangesAsync();
 
-        var entity = new SourceEntity(dataSource.Id, $"Ent{tag}", RegistrySourceKind.External);
+        var entity = new SourceEntity(dataSource.Id, $"Ent{tag}", kind);
 
         // ⛔ Неактивне НАВМИСНО, і це не дрібниця оформлення. База тестів спільна
         // на весь прогін: активне джерело, яке жодного разу не збиралося, для
@@ -125,4 +185,45 @@ public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
 
     private EcrDbContext Context()
         => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
+
+    /// <summary>Планувальник, що лише запам'ятовує постановки; решта порту тут не потрібна.</summary>
+    private sealed class RecordingScheduler : IBackgroundJobScheduler
+    {
+        public List<object?> Scheduled { get; } = [];
+
+        public bool IsValidCron(string expression, out string? error)
+        {
+            error = null;
+            return true;
+        }
+
+        public Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct)
+            where TJob : IBackgroundJob
+        {
+            Scheduled.Add(payload);
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> UnscheduleAsync<TJob>(object? payload, CancellationToken ct)
+            where TJob : IBackgroundJob => throw new NotSupportedException();
+
+        public Task<string> EnqueueAsync<TJob>(object? payload, CancellationToken ct, int? createdByUserId = null)
+            where TJob : IBackgroundJob => throw new NotSupportedException();
+
+        public Task<string> EnqueueExclusiveAsync<TJob>(
+            string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+            where TJob : IBackgroundJob => throw new NotSupportedException();
+
+        public Task CancelAsync(string jobId, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<bool> RestartAsync(string jobId, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<int?> GetCreatedByUserIdAsync(string jobId, CancellationToken ct)
+            => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<JobSummary>> ListRecentAsync(
+            JobListFilter filter, int limit, CancellationToken ct) => throw new NotSupportedException();
+    }
 }

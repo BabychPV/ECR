@@ -163,8 +163,11 @@ public sealed partial class RecurringScheduleService(
             .ToListAsync()
             .ConfigureAwait(false);
 
+        var localSourceEntityIds = await LocalSourceEntityIdsAsync(db, CancellationToken.None).ConfigureAwait(false);
+
         var applied = await ApplyCollectionSchedulesAsync(
                 schedules,
+                localSourceEntityIds,
                 scheduler,
                 scope.ServiceProvider.GetRequiredService<Application.Integration.CollectionScheduleApplier>(),
                 logger,
@@ -206,6 +209,43 @@ public sealed partial class RecurringScheduleService(
     private static partial void LogCollectionStateNotSaved(ILogger logger, string reason);
 
     /// <summary>
+    /// Текст <c>LastError</c> пропущеного розкладу власної форми (ФВ-12.8).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Сирий текст, а не ключ каталогу — як і решта <c>LastError</c>: вкладка
+    /// розкладу показує його в <c>Code</c> під заголовком «не поставлено».
+    /// </remarks>
+    public const string LocalEntityScheduleSkipped =
+        "Сутність — власна форма ECR (SourceKind = Local): розклад збору для неї заборонено (ФВ-12.8), "
+        + "у планувальник не поставлено. Вимкніть або видаліть розклад.";
+
+    /// <summary>
+    /// Сутності джерела-власні форми ECR (<see cref="Domain.Enums.RegistrySourceKind.Local"/>),
+    /// які мають увімкнений розклад збору.
+    /// </summary>
+    /// <param name="db">Контекст бази.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Окремим запитом, а не приєднанням до переліку розкладів: внутрішнє
+    /// приєднання мовчки викинуло б розклад без рядка сутності, і той перестав
+    /// би бути видимим навіть як пропущений.
+    /// </remarks>
+    public static async Task<IReadOnlySet<int>> LocalSourceEntityIdsAsync(EcrDbContext db, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var ids = await db.SourceEntities
+            .AsNoTracking()
+            .Where(e => e.SourceKind == Domain.Enums.RegistrySourceKind.Local
+                        && db.CollectionSchedules.Any(s => s.IsEnabled && s.SourceEntityId == e.Id))
+            .Select(e => e.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return ids.ToHashSet();
+    }
+
+    /// <summary>
     /// Ставить розклади збору; повертає, скільки поставлено.
     /// </summary>
     /// <remarks>
@@ -218,9 +258,16 @@ public sealed partial class RecurringScheduleService(
     /// ⚠ Метод лишає стан НА СУТНОСТЯХ (пропущений — <c>MarkInvalid</c>,
     /// поставлений — <c>ClearError</c>); зберігає його той, хто викликав.
     /// </para>
+    /// <para>
+    /// ⛔ ФВ-12.8: розклад власної форми (<paramref name="localSourceEntityIds"/>),
+    /// заведений ДО заборони, у планувальник НЕ ставиться — але й не вимикається
+    /// та не видаляється: це рішення людини. Пропуск не мовчазний — причина в
+    /// <c>LastError</c> (її бачить вкладка розкладу) і <c>Warning</c> у журналі.
+    /// </para>
     /// </remarks>
     public static async Task<int> ApplyCollectionSchedulesAsync(
         IReadOnlyList<Domain.Entities.External.CollectionSchedule> schedules,
+        IReadOnlySet<int> localSourceEntityIds,
         IBackgroundJobScheduler scheduler,
         Application.Integration.CollectionScheduleApplier applier,
         ILogger logger,
@@ -228,6 +275,7 @@ public sealed partial class RecurringScheduleService(
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(schedules);
+        ArgumentNullException.ThrowIfNull(localSourceEntityIds);
         ArgumentNullException.ThrowIfNull(scheduler);
         ArgumentNullException.ThrowIfNull(applier);
 
@@ -241,6 +289,13 @@ public sealed partial class RecurringScheduleService(
 
         foreach (var schedule in schedules)
         {
+            if (schedule.IsEnabled && localSourceEntityIds.Contains(schedule.SourceEntityId))
+            {
+                LogCollectionLocalEntitySkipped(logger, schedule.Id, schedule.SourceEntityId);
+                schedule.MarkInvalid(LocalEntityScheduleSkipped, utcNow);
+                continue;
+            }
+
             if (!scheduler.IsValidCron(schedule.CronExpression, out var cronError))
             {
                 LogCollectionCronInvalid(
@@ -284,6 +339,14 @@ public sealed partial class RecurringScheduleService(
             + "«{CronExpression}»: {CronError}. Збір за ним не відбувається, доки cron не виправлять.")]
     private static partial void LogCollectionCronInvalid(
         ILogger logger, int sourceEntityId, string cronExpression, string cronError);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Старт: розклад збору {CollectionScheduleId} сутності {SourceEntityId} ПРОПУЩЕНО — "
+            + "сутність є власною формою ECR (SourceKind = Local), розклад для неї заборонено (ФВ-12.8). "
+            + "Розклад не вимкнено й не видалено: це рішення людини.")]
+    private static partial void LogCollectionLocalEntitySkipped(
+        ILogger logger, int collectionScheduleId, int sourceEntityId);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

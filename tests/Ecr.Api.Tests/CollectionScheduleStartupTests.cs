@@ -26,6 +26,8 @@ public sealed class CollectionScheduleStartupTests
 
     private static readonly DateTime Now = new(2026, 9, 20, 8, 0, 0, DateTimeKind.Utc);
 
+    private static readonly IReadOnlySet<int> NoLocal = new HashSet<int>();
+
     private static async Task<(QuartzJobScheduler Jobs, IScheduler Quartz)> SchedulerAsync()
     {
         var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
@@ -52,7 +54,7 @@ public sealed class CollectionScheduleStartupTests
         repaired.MarkInvalid("stale error from the previous start", Now.AddDays(-1));
 
         var applied = await RecurringScheduleService.ApplyCollectionSchedulesAsync(
-            [broken, repaired], jobs, new CollectionScheduleApplier(jobs), logger, Now, CancellationToken.None);
+            [broken, repaired], NoLocal, jobs, new CollectionScheduleApplier(jobs), logger, Now, CancellationToken.None);
 
         Assert.Equal(1, applied);
 
@@ -85,11 +87,48 @@ public sealed class CollectionScheduleStartupTests
         var schedules = Enumerable.Range(1, count).Select(i => new CollectionSchedule(i, Hourly)).ToList();
 
         var applied = await RecurringScheduleService.ApplyCollectionSchedulesAsync(
-            schedules, jobs, new CollectionScheduleApplier(jobs), logger, Now, CancellationToken.None);
+            schedules, NoLocal, jobs, new CollectionScheduleApplier(jobs), logger, Now, CancellationToken.None);
 
         Assert.Equal(count, applied);
         Assert.Equal(count, await JobCountAsync(quartz));
         Assert.Equal(warnings, logger.OfLevel(LogLevel.Warning).Count);
+    }
+
+    /// <remarks>
+    /// Мутаційний доказ: прибрати пропуск у <c>ApplyCollectionSchedulesAsync</c>
+    /// (гілку <c>localSourceEntityIds.Contains</c>) → тест червоний (2 задачі в
+    /// планувальнику, <c>LastError</c> порожній, жодного Warning).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-12.8")]
+    public async Task ФВ_12_8_увімкнений_розклад_власної_форми_на_старті_не_ставиться_і_несе_причину()
+    {
+        var (jobs, quartz) = await SchedulerAsync();
+        var logger = new RecordingLogger<RecurringScheduleService>();
+
+        var local = new CollectionSchedule(7, Hourly);
+        var external = new CollectionSchedule(8, Hourly);
+
+        var applied = await RecurringScheduleService.ApplyCollectionSchedulesAsync(
+            [local, external], new HashSet<int> { 7 }, jobs, new CollectionScheduleApplier(jobs), logger, Now,
+            CancellationToken.None);
+
+        // Контроль: External ставиться; власна форма — ні.
+        Assert.Equal(1, applied);
+        Assert.Equal(1, await JobCountAsync(quartz));
+        Assert.Null(external.LastError);
+
+        // Причина видима на вкладці розкладу, а розклад не вимкнено автоматично.
+        Assert.Equal(RecurringScheduleService.LocalEntityScheduleSkipped, local.LastError);
+        Assert.Contains("ФВ-12.8", local.LastError, StringComparison.Ordinal);
+        Assert.Equal(Now, local.LastErrorAt);
+        Assert.True(local.IsEnabled);
+
+        // Оператор бачить, яку сутність пропущено.
+        var warning = Assert.Single(logger.OfLevel(LogLevel.Warning));
+        Assert.Contains("7", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("ФВ-12.8", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact]
