@@ -1573,6 +1573,7 @@ public sealed class PatchCellsHandler(
         var bounds = await periods
             .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
             .ConfigureAwait(false);
+        // Дата чинності — останній день періоду: D-158 (10-decisions.md), як пікер сітки, OrphanScanner і знімок розрахунку.
         var asOf = bounds?.PeriodEnd;
 
         LookupRejection? Reject((CellAddress Address, long? EntryId) cell)
