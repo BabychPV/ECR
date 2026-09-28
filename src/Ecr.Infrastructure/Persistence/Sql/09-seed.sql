@@ -4448,6 +4448,10 @@ USING (VALUES
     (N'err.ECR-REG-4092', N'en', N'Key already in use', 1),
     (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}.', 1),
     (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period.', 1),
+    -- RT-10b: гонка за ключем (UX_RegistryEntryKey_Live), дубль ключа у файлі CSV, ключ і код рядка — різні записи.
+    (N'err.ECR-REG-4092.keyTakenConcurrently', N'en', N'Another entry took the key {keyText} a moment ago. Refresh the list and try again.', 1),
+    (N'err.ECR-REG-4092.keyDuplicateInFile', N'en', N'Another row of this file has the same key.', 1),
+    (N'err.ECR-REG-4092.keyCodeMismatch', N'en', N'The key of this row belongs to a different entry than its code.', 1),
 
     -- RT: data
 

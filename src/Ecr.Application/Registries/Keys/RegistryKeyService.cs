@@ -29,13 +29,134 @@ namespace Ecr.Application.Registries.Keys;
 /// частиною в перевірку не входить (як <c>UNIQUE</c> з різними <c>NULL</c>), і наявний рядок
 /// такого ключа виводиться з унікальності (<see cref="RegistryEntryKey.Retire"/>).
 ///
-/// ⚠ Гонку, яку не закрило блокування (перетин двох транзакцій до першого читання), ловить
-/// <c>UX_RegistryEntryKey_Live</c>; її мапінг у 409 — крок RT-10b.
+/// ⚠ Гонку, яку не закрило блокування, ловить <c>UX_RegistryEntryKey_Live</c>, а
+/// <c>UnitOfWork.TryMapDuplicateKey</c> перетворює її на 409 <c>keyTakenConcurrently</c> (RT-10b).
+///
+/// Точки виклику (RT-10b): upsert — <see cref="SaveAsync"/>; зміна вікна чинності —
+/// <see cref="ApplyAsync(RegistryDef, RegistryEntry, CancellationToken)"/>; імпорт CSV — пакетний
+/// <see cref="ApplyAsync(RegistryDef, IReadOnlyList{RegistryKeyDef}, IReadOnlyCollection{RegistryEntry}, CancellationToken)"/>;
+/// видалення — <see cref="ReleaseAsync"/>.
 /// </remarks>
 public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
 {
     /// <summary>Роздільник частин у людському вигляді ключа (<c>KeyText</c>).</summary>
     public const string KeyTextSeparator = " · ";
+
+    /// <summary>Активні ключі довідника з полями.</summary>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryKeyDef>> ListActiveKeysAsync(int registryDefId, CancellationToken ct)
+        => store.ListActiveKeysAsync(registryDefId, ct);
+
+    /// <summary>Живі тримачі будь-якого з хешів ключа — пакетом, без блокування (пошук, не перевірка).</summary>
+    /// <param name="registryKeyDefId">Ключ довідника.</param>
+    /// <param name="keyHashes">Хеші.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task<IReadOnlyList<RegistryKeyHolder>> FindHoldersAsync(
+        int registryKeyDefId, IReadOnlyCollection<byte[]> keyHashes, CancellationToken ct)
+        => keyHashes.Count == 0
+            ? []
+            : await store.FindLiveHoldersAsync(registryKeyDefId, keyHashes, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Хеш ключа за значеннями полів; <c>null</c>, якщо хоч одна частина порожня (така частина
+    /// в унікальність не входить, <c>D-153</c>).
+    /// </summary>
+    /// <param name="definition">Опис довідника (з полями).</param>
+    /// <param name="key">Ключ.</param>
+    /// <param name="valuesByFieldId">Значення за <c>RegistryFieldDefId</c>.</param>
+    public static byte[]? HashOf(
+        RegistryDef definition, RegistryKeyDef key, IReadOnlyDictionary<int, RegistryValue> valuesByFieldId)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(valuesByFieldId);
+
+        var computed = Compute(definition, key, definition.Fields.ToDictionary(f => f.Id), valuesByFieldId);
+        return computed.Canonical is null ? null : RegistryKeyNormalizer.Hash(computed.Canonical);
+    }
+
+    /// <summary>
+    /// Перераховує й перевіряє ключі одного запису БЕЗ збереження — всередині вже відкритої
+    /// транзакції виклику (зміна вікна чинності, §4.4: нове вікно може перетнутися з дублем).
+    /// </summary>
+    /// <param name="definition">Опис довідника (з полями).</param>
+    /// <param name="entry">Запис.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-REG-4092</c>, як у <see cref="SaveAsync"/>.</exception>
+    public async Task ApplyAsync(RegistryDef definition, RegistryEntry entry, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var keys = await store.ListActiveKeysAsync(definition.Id, ct).ConfigureAwait(false);
+        if (keys.Count > 0)
+        {
+            await ApplyAsync(definition, keys, [entry], ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Перераховує й перевіряє ключі пакета записів БЕЗ збереження — всередині вже відкритої
+    /// транзакції виклику (імпорт CSV).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Записи пакета один з одним тут не звіряються — це робить виклик ДО транзакції (дубль
+    /// у файлі, §4.6), бо відповідь на нього — помилка рядка, а не 409. Тому й тримачі, що
+    /// самі входять у пакет, у перевірку проти бази не йдуть (§4.3, крок 4: <c>NOT IN (@пакет)</c>):
+    /// їхні ключі цей самий виклик щойно переписує.
+    /// </remarks>
+    /// <param name="definition">Опис довідника (з полями).</param>
+    /// <param name="keys">Активні ключі довідника (<see cref="ListActiveKeysAsync"/>).</param>
+    /// <param name="entries">Записи, значення яких уже застосовано.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-REG-4092</c>, як у <see cref="SaveAsync"/>.</exception>
+    public async Task ApplyAsync(
+        RegistryDef definition,
+        IReadOnlyList<RegistryKeyDef> keys,
+        IReadOnlyCollection<RegistryEntry> entries,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(keys);
+        ArgumentNullException.ThrowIfNull(entries);
+
+        if (keys.Count == 0)
+        {
+            return;
+        }
+
+        var batch = entries.Where(e => e.IsPersisted).Select(e => e.Id).ToHashSet();
+        foreach (var entry in entries)
+        {
+            await ApplyAsync(definition, entry, keys, batch, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Виводить усі рядки ключів видаленого запису з унікальності (<c>IsLive = 0</c>): видалений
+    /// запис ключ не тримає (§3.2, <c>WHERE IsLive = 1</c>). Без збереження.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Усі рядки, а не лише активних ключів: вимкнений ключ теж лишив би живий рядок, і
+    /// повторне ввімкнення ключа побачило б видалений запис тримачем.
+    /// </remarks>
+    /// <param name="entry">Запис, щойно видалений логічно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public async Task ReleaseAsync(RegistryEntry entry, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        if (!entry.IsPersisted)
+        {
+            return;
+        }
+
+        foreach (var row in await store.ListEntryKeysAsync(entry.Id, ct).ConfigureAwait(false))
+        {
+            row.Retire();
+        }
+    }
 
     /// <summary>
     /// Перераховує ключі запису, перевіряє їх і зберігає одиницю роботи — в одній транзакції,
@@ -65,7 +186,7 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         await uow.ExecuteInTransactionAsync(
             async token =>
             {
-                await ApplyAsync(definition, entry, keys, token).ConfigureAwait(false);
+                await ApplyAsync(definition, keys, [entry], token).ConfigureAwait(false);
                 await uow.SaveChangesAsync(token).ConfigureAwait(false);
             },
             ct).ConfigureAwait(false);
@@ -83,7 +204,11 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         && a.OverlapsSegment(b.FromInclusive ?? DateOnly.MinValue, b.ToExclusive ?? DateOnly.MaxValue);
 
     private async Task ApplyAsync(
-        RegistryDef definition, RegistryEntry entry, IReadOnlyList<RegistryKeyDef> keys, CancellationToken ct)
+        RegistryDef definition,
+        RegistryEntry entry,
+        IReadOnlyList<RegistryKeyDef> keys,
+        IReadOnlySet<long> batch,
+        CancellationToken ct)
     {
         var fields = definition.Fields.ToDictionary(f => f.Id);
         var values = (await store.ListCurrentValuesAsync(entry, ct).ConfigureAwait(false))
@@ -111,7 +236,7 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
             // Видалений запис ключ не тримає (IsLive = 0) — і перевіряти його нема з ким.
             if (!entry.IsDeleted)
             {
-                await RequireFreeAsync(definition, entry, key.Definition, hash, ct).ConfigureAwait(false);
+                await RequireFreeAsync(definition, entry, key.Definition, hash, batch, ct).ConfigureAwait(false);
             }
 
             if (row is null)
@@ -126,14 +251,22 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
     }
 
     private async Task RequireFreeAsync(
-        RegistryDef definition, RegistryEntry entry, RegistryKeyDef key, byte[] hash, CancellationToken ct)
+        RegistryDef definition,
+        RegistryEntry entry,
+        RegistryKeyDef key,
+        byte[] hash,
+        IReadOnlySet<long> batch,
+        CancellationToken ct)
     {
         var holders = await store
             .FindLiveHoldersForUpdateAsync(key.Id, hash, entry.Id, ct).ConfigureAwait(false);
 
         // Нетемпоральний довідник: ключ унікальний цілком. Темпоральний — у кожен момент
-        // бізнес-часу: дубль у вікні, що не перетинається, законний (§4.4).
-        var conflict = holders.FirstOrDefault(h => !definition.IsTemporal || Overlaps(h.Window, entry.Window));
+        // бізнес-часу: дубль у вікні, що не перетинається, законний (§4.4). Тримач із того самого
+        // пакета не конфліктує: його ключ переписує цей самий виклик.
+        var conflict = holders
+            .Where(h => !batch.Contains(h.EntryId))
+            .FirstOrDefault(h => !definition.IsTemporal || Overlaps(h.Window, entry.Window));
         if (conflict is null)
         {
             return;
@@ -164,7 +297,7 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
         RegistryDef definition,
         RegistryKeyDef key,
         Dictionary<int, RegistryFieldDef> fields,
-        Dictionary<int, RegistryValue> values)
+        IReadOnlyDictionary<int, RegistryValue> values)
     {
         var parts = key.Fields
             .OrderBy(f => f.Ordinal)

@@ -240,7 +240,39 @@ public sealed class UnitOfWork(
                             ["messageKey"] = "err.ECR-PRJ-0409.projectCodeTaken", ["code"] = project.Code,
                         });
 
-                case Domain.Entities.Dictionaries.RegistryEntry registryEntry:
+                case Domain.Entities.Dictionaries.RegistryEntryKey registryKey:
+                    // ⛔ RT-10b (Д-3): гонку за складеним ключем, яку не закрило блокування
+                    // `RegistryKeyStore.FindLiveHoldersForUpdateAsync`, ловить
+                    // `UX_RegistryEntryKey_Live`. Без цієї гілки — голий 500.
+                    //
+                    // ⚠ Це не теоретичний випадок: дві одночасні перевірки того самого ВІЛЬНОГО
+                    // ключа одна одну не зупиняють (блокування тримає діапазон проти вставки, а
+                    // не проти другої такої самої перевірки), обидві проходять, і розводить їх
+                    // лише індекс — виміряно `RegistryKeyRaceTests.Одночасні_записи_…`.
+                    //
+                    // ⚠ `ConcurrencyConflictException`, а не `BusinessRuleException` (як
+                    // `keyTaken`): дані правильні, хтось випередив — 409 без переліку полів.
+                    // Відомий лише ПЕРЕМОЖЕНИЙ запис і його ключ; хто переміг, база не каже, а
+                    // запит по нього тут, де вона щойно відмовила, — зайвий обмін (та сама
+                    // причина, що в `.entryCodeTakenConcurrently` нижче).
+                    return new ConcurrencyConflictException(
+                        ErrorCodes.RegistryKeyConflict,
+                        $"Ключ {registryKey.KeyText} щойно зайняв інший запис довідника.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REG-4092.keyTakenConcurrently",
+                            ["keyText"] = registryKey.KeyText,
+                            ["code"] = registryKey.Entry?.Code,
+                        });
+
+                // ⚠ Лише доданий запис: код запису не змінюється (`RegistryEntry` не має сетера),
+                // тож змінений запис на `UQ_RegistryEntry` не впаде ніколи. Умова захисна: у
+                // пакеті команд поруч із рядком ключа змінений запис буває (правка значень міняє
+                // ключ), і якби EF поклав його в `ex.Entries` першим, гонку за ключем
+                // перехопила б гілка гонки за кодом. На поточній версії EF такий порядок не
+                // відтворився (`RegistryKeyRaceTests.Гонка_при_зміні_ключа_…` зелений і без
+                // умови) — тобто тест тримає результат, а не саму умову.
+                case Domain.Entities.Dictionaries.RegistryEntry registryEntry when entry.State == EntityState.Added:
                     // ⚠ Той самий код, що й перевірка «до запису» в
                     // `UpsertRegistryEntryHandler.CreateAsync` (`ECR-REG-0409`):
                     // клієнт бачить ОДНУ причину незалежно від того, який із

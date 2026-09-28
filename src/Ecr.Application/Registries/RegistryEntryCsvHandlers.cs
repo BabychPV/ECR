@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Localization;
 using Ecr.Application.Ports;
+using Ecr.Application.Registries.Keys;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
@@ -59,8 +60,20 @@ public sealed class ImportRegistryEntriesHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Keys.RegistryKeyService? keys = null)
 {
+    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
+    // `UpsertRegistryEntryHandler`; храповик запитів B-10 так і міряє довідник без ключів);
+    // контейнер підставляє `RegistryKeyService` завжди. Справжній шлях тримає
+    // `RegistryKeyLifecycleHttpTests`.
+
+    /// <summary>Ключ помилки рядка: той самий ключ має інший рядок файлу (§4.6).</summary>
+    public const string KeyDuplicateInFileKey = "err.ECR-REG-4092.keyDuplicateInFile";
+
+    /// <summary>Ключ помилки рядка: первинний ключ рядка і його код указують на різні записи.</summary>
+    public const string KeyCodeMismatchKey = "err.ECR-REG-4092.keyCodeMismatch";
+
     /// <summary>Стеля розміру файлу, коли конфіг не задає іншої.</summary>
     public const int DefaultMaxBytes = 1024 * 1024;
 
@@ -170,6 +183,19 @@ public sealed class ImportRegistryEntriesHandler(
         var prefetched = await PrefetchAsync(definition.Id, records, codeColumn, columns, ct).ConfigureAwait(false);
         var lookupCache = prefetched.LookupCache;
 
+        // ⛔ RT-10b (§4.6): складений ключ довідника. Первинний ключ знаходить наявний запис
+        // рядка раніше за код; дубль ключа у файлі — помилка обох рядків; вільність ключа
+        // проти бази — у транзакції запису, тим самим сервісом, що й ручний upsert.
+        IReadOnlyList<RegistryKeyDef> keyDefs = keys is null
+            ? []
+            : await keys.ListActiveKeysAsync(definition.Id, ct).ConfigureAwait(false);
+        var keyMatch = await MatchPrimaryKeyAsync(definition, keyDefs, records, codeColumn, columns, prefetched, ct)
+            .ConfigureAwait(false);
+        var keyed = new List<KeyedRow>();
+        var seenEntries = new Dictionary<RegistryEntry, (int Row, string Code, bool ByKey, RowOutcome Outcome)>(
+            ReferenceEqualityComparer.Instance);
+        var flaggedRows = new HashSet<int>();
+
         var errors = new List<RegistryEntryImportError>();
         var seenCodes = new HashSet<string>(StringComparer.Ordinal);
         var (added, updated, unchanged) = (0, 0, 0);
@@ -213,8 +239,37 @@ public sealed class ImportRegistryEntriesHandler(
                 continue;
             }
 
-            var entry = prefetched.EntriesByCode.GetValueOrDefault(code);
+            var byCode = prefetched.EntriesByCode.GetValueOrDefault(code);
+            var byKey = keyMatch.EntriesByRow.GetValueOrDefault(i);
+
+            // ⚠ Код називає один наявний запис, первинний ключ — інший: «оновити за ключем» тихо
+            // змінило б не той запис, про який думала людина, а «за кодом» — дало б йому ключ,
+            // який уже тримає сусід. Обидва гірші за помилку рядка.
+            if (byKey is not null && byCode is not null && !ReferenceEquals(byKey, byCode))
+            {
+                errors.Add(new RegistryEntryImportError(rowNumber, code, keyMatch.PrimaryFields, KeyCodeMismatchKey));
+                continue;
+            }
+
+            var entry = byKey ?? byCode;
             var isNew = entry is null;
+
+            // Два рядки файлу дійшли до одного запису (один за ключем, інший за кодом): застосувати
+            // обидва — означало б мовчки лишити переможцем останній.
+            if (entry is not null && seenEntries.TryGetValue(entry, out var first) && (first.ByKey || byKey is not null))
+            {
+                if (flaggedRows.Add(first.Row))
+                {
+                    errors.Add(new RegistryEntryImportError(first.Row, first.Code, keyMatch.PrimaryFields, KeyDuplicateInFileKey));
+                    (updated, unchanged) = first.Outcome == RowOutcome.Unchanged
+                        ? (updated, unchanged - 1)
+                        : (updated - 1, unchanged);
+                }
+
+                flaggedRows.Add(rowNumber);
+                errors.Add(new RegistryEntryImportError(rowNumber, code, keyMatch.PrimaryFields, KeyDuplicateInFileKey));
+                continue;
+            }
 
             var (values, refField, refErrorKey) = await ResolveRowAsync(record, columns, lookupCache, ct)
                 .ConfigureAwait(false);
@@ -243,14 +298,21 @@ public sealed class ImportRegistryEntriesHandler(
                 registries.Add(entry);
             }
 
+            // ⚠ Запис, знайдений за ключем, міг не потрапити в пакет «за кодами» — його значення
+            // прочитав пошук за ключем. Порожній список тут означав би «полів немає», і кожне
+            // значення вставилося б удруге.
+            var existingValues = isNew
+                ? null
+                : prefetched.ValuesByEntry.GetValueOrDefault(entry.Id)
+                  ?? keyMatch.ValuesByEntry.GetValueOrDefault(entry.Id)
+                  ?? [];
+
             IReadOnlyList<RegistryValueFieldChange> changes;
             try
             {
                 // Реюз: та сама перевірка типу, обов'язковості й складу полів,
                 // що при ручному редагуванні запису — жодного дубля правила.
-                var prefetch = new RegistryValuesPrefetch(
-                    isNew ? null : prefetched.ValuesByEntry.GetValueOrDefault(entry.Id) ?? [],
-                    prefetched.LookupTargets);
+                var prefetch = new RegistryValuesPrefetch(existingValues, prefetched.LookupTargets);
 
                 changes = await UpsertRegistryEntryHandler
                     .ApplyValuesAsync(registries, definition, entry, values, prefetch, ct)
@@ -267,21 +329,67 @@ public sealed class ImportRegistryEntriesHandler(
                 valueChanges.Add((entry, changes));
             }
 
-            if (isNew)
+            var outcome = isNew ? RowOutcome.Added : values.Count == 0 ? RowOutcome.Unchanged : RowOutcome.Updated;
+            switch (outcome)
             {
-                added++;
-            }
-            else if (values.Count == 0)
-            {
+                case RowOutcome.Added:
+                    added++;
+                    break;
+
                 // Рядок назвав лише код — жодного поля не передано: наявний
                 // запис ніхто не торкнувся.
-                unchanged++;
+                case RowOutcome.Unchanged:
+                    unchanged++;
+                    break;
+
+                default:
+                    updated++;
+                    break;
             }
-            else
+
+            // Лише рядок, що пройшов: відхилений рядок запису не торкнувся і сусіда не блокує.
+            if (!isNew)
             {
-                updated++;
+                seenEntries.TryAdd(entry, (rowNumber, code, byKey is not null, outcome));
+            }
+
+            if (keyDefs.Count > 0)
+            {
+                keyed.Add(new KeyedRow(
+                    rowNumber, code, entry, EffectiveValues(definition, existingValues ?? [], values), outcome));
             }
         }
+
+        // ⛔ RT-10b (§4.6): дубль ключа у файлі — помилка ОБОХ рядків, щоб звіт показав і той,
+        // що «переміг би» за порядком. Порівнюються значення ПІСЛЯ застосування рядка, тож
+        // рядок, що змінює ключ наявного запису, звіряється з новим ключем, а не зі старим.
+        foreach (var row in DuplicateKeyRows(definition, keyDefs, keyed))
+        {
+            if (!flaggedRows.Add(row.Row.Number))
+            {
+                continue;
+            }
+
+            errors.Add(new RegistryEntryImportError(row.Row.Number, row.Row.Code, row.Fields, KeyDuplicateInFileKey));
+            switch (row.Row.Outcome)
+            {
+                case RowOutcome.Added:
+                    added--;
+                    break;
+                case RowOutcome.Unchanged:
+                    unchanged--;
+                    break;
+                default:
+                    updated--;
+                    break;
+            }
+        }
+
+        // Помилки ключа додано після циклу — звіт лишається впорядкованим за рядками (OrderBy
+        // стабільний: помилки одного рядка зберігають порядок).
+        var ordered = errors.OrderBy(e => e.Row).ToList();
+        errors.Clear();
+        errors.AddRange(ordered);
 
         if (dryRun || errors.Count > 0 || added + updated == 0)
         {
@@ -295,6 +403,15 @@ public sealed class ImportRegistryEntriesHandler(
         // журналом і SaveChangesAsync лишив би їх у різних станах.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ RT-10b: ключі — тим самим сервісом, що й ручний upsert, у тій самій транзакції,
+            // що й записи. Ключ, який тримає запис поза файлом, — 409 на весь файл (не помилка
+            // рядка): це перевірка під блокуванням, і в dryRun її немає.
+            if (keys is not null && keyed.Count > 0)
+            {
+                await keys.ApplyAsync(definition, keyDefs, [.. keyed.Select(r => r.Entry)], innerCt)
+                    .ConfigureAwait(false);
+            }
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     ChangedAt: clock.UtcNow,
@@ -510,6 +627,184 @@ public sealed class ImportRegistryEntriesHandler(
         return (values, null, null);
     }
 
+    /// <summary>
+    /// Наявний запис рядка за ПЕРВИННИМ ключем (§4.6): хеш значень полів ключа з рядка → живий
+    /// тримач цього хешу. Пакетом — один запит на тримачів і, для тих, кого не прочитав пакет
+    /// «за кодами», ще один на записи й один на їхні значення.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Ключ не шукається, якщо у файлі немає стовпця хоч одного поля первинного ключа: такий
+    /// рядок не змінює ключа, і наявний запис знаходить код, як досі.
+    ///
+    /// ⚠ Темпоральний довідник може мати кілька живих тримачів того самого ключа (вікна не
+    /// перетинаються). Тоді береться той, чий код збігається з кодом рядка; немає такого і
+    /// тримачів більше одного — рядок лишається пошуку за кодом: вгадувати вікно нема з чого.
+    /// </remarks>
+    private async Task<KeyMatch> MatchPrimaryKeyAsync(
+        RegistryDef definition,
+        IReadOnlyList<RegistryKeyDef> keyDefs,
+        IReadOnlyList<IReadOnlyList<string>> records,
+        int codeColumn,
+        List<(int Index, RegistryFieldDef Field)> columns,
+        ImportPrefetch prefetched,
+        CancellationToken ct)
+    {
+        var primary = keyDefs.FirstOrDefault(k => k.IsPrimary);
+        var present = columns.Select(c => c.Field.Id).ToHashSet();
+        if (keys is null || primary is null || !primary.Fields.All(f => present.Contains(f.RegistryFieldDefId)))
+        {
+            return KeyMatch.None;
+        }
+
+        var fieldCodes = definition.Fields.ToDictionary(f => f.Id, f => f.Code);
+        var primaryFields = string.Join(
+            ", ", primary.Fields.OrderBy(f => f.Ordinal).Select(f => fieldCodes[f.RegistryFieldDefId]));
+
+        var rowHashes = new Dictionary<int, byte[]>();
+        for (var i = 1; i < records.Count; i++)
+        {
+            var record = records[i];
+            if (record.All(string.IsNullOrWhiteSpace))
+            {
+                continue;
+            }
+
+            // Рядок із помилкою значення тут пропускається: основний цикл і так його відхилить.
+            var (values, _, errorKey) = await ResolveRowAsync(record, columns, prefetched.LookupCache, ct)
+                .ConfigureAwait(false);
+            if (errorKey is not null)
+            {
+                continue;
+            }
+
+            if (RegistryKeyService.HashOf(definition, primary, EffectiveValues(definition, [], values)) is { } hash)
+            {
+                rowHashes[i] = hash;
+            }
+        }
+
+        var holders = (await keys
+                .FindHoldersAsync(primary.Id, [.. rowHashes.Values.DistinctBy(Convert.ToHexString)], ct)
+                .ConfigureAwait(false))
+            .GroupBy(h => Convert.ToHexString(h.KeyHash!), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+
+        var codeByRow = new Dictionary<int, string>();
+        foreach (var (row, hash) in rowHashes)
+        {
+            if (!holders.TryGetValue(Convert.ToHexString(hash), out var candidates))
+            {
+                continue;
+            }
+
+            var code = Cell(records[row], codeColumn).Trim();
+            var holder = candidates.FirstOrDefault(h => string.Equals(h.EntryCode, code, StringComparison.OrdinalIgnoreCase))
+                ?? (candidates.Count == 1 ? candidates[0] : null);
+            if (holder is not null)
+            {
+                codeByRow[row] = holder.EntryCode;
+            }
+        }
+
+        var missing = codeByRow.Values
+            .Where(c => !prefetched.EntriesByCode.ContainsKey(c))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<RegistryEntry> extra = missing.Count == 0
+            ? []
+            : await registries.FindEntriesByCodesAsync(definition.Id, missing, ct).ConfigureAwait(false);
+        IReadOnlyList<RegistryValue> extraValues = extra.Count == 0
+            ? []
+            : await registries.ListValuesForEntriesAsync([.. extra.Select(e => e.Id)], ct).ConfigureAwait(false);
+
+        var entriesByCode = new Dictionary<string, RegistryEntry>(prefetched.EntriesByCode, StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in extra)
+        {
+            entriesByCode[entry.Code] = entry;
+        }
+
+        return new KeyMatch(
+            codeByRow
+                .Where(c => entriesByCode.ContainsKey(c.Value))
+                .ToDictionary(c => c.Key, c => entriesByCode[c.Value]),
+            extraValues
+                .GroupBy(v => v.RegistryEntryId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<RegistryValue>)[.. g]),
+            primaryFields);
+    }
+
+    /// <summary>
+    /// Значення полів запису такими, якими їх залишить рядок: наявні, поверх них — передані у
+    /// файлі. Для обчислення ключа в пам'яті, без звернення до бази.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Значення з файлу — пробні об'єкти, як у <see cref="ResolveRowAsync"/>: у контекст вони не
+    /// додаються. Порожня клітинка поля не змінює — як і в
+    /// <see cref="UpsertRegistryEntryHandler.ApplyValuesAsync"/>, куди вона не потрапляє.
+    /// </remarks>
+    private static Dictionary<int, RegistryValue> EffectiveValues(
+        RegistryDef definition, IReadOnlyList<RegistryValue> existing, IReadOnlyDictionary<string, object?> values)
+    {
+        var result = existing.ToDictionary(v => v.RegistryFieldDefId);
+        var fields = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
+
+        foreach (var (code, raw) in values)
+        {
+            if (fields.TryGetValue(code, out var field))
+            {
+                var probe = new RegistryValue(0L, field.Id);
+                probe.Set(field.DataType, raw, field.UnitId);
+                result[field.Id] = probe;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Рядки, чий ключ має ще хоч один рядок файлу (для темпорального довідника — у вікні, що
+    /// перетинається, та сама умова, що <see cref="RegistryKeyService.Overlaps"/>).
+    /// </summary>
+    /// <returns>Кожен такий рядок — з полями першого ключа, що збігся.</returns>
+    private static List<(KeyedRow Row, string Fields)> DuplicateKeyRows(
+        RegistryDef definition, IReadOnlyList<RegistryKeyDef> keyDefs, IReadOnlyList<KeyedRow> rows)
+    {
+        var fieldCodes = definition.Fields.ToDictionary(f => f.Id, f => f.Code);
+        var found = new SortedDictionary<int, (KeyedRow Row, string Fields)>();
+
+        foreach (var key in keyDefs)
+        {
+            var fields = string.Join(
+                ", ", key.Fields.OrderBy(f => f.Ordinal).Select(f => fieldCodes[f.RegistryFieldDefId]));
+
+            var groups = rows
+                .Select(r => (Row: r, Hash: RegistryKeyService.HashOf(definition, key, r.Values)))
+                .Where(x => x.Hash is not null)
+                .GroupBy(x => Convert.ToHexString(x.Hash!), StringComparer.Ordinal)
+                .Where(g => g.Skip(1).Any());
+
+            foreach (var group in groups)
+            {
+                var members = group.Select(x => x.Row).ToList();
+                for (var a = 0; a < members.Count; a++)
+                {
+                    for (var b = a + 1; b < members.Count; b++)
+                    {
+                        if (definition.IsTemporal
+                            && !RegistryKeyService.Overlaps(members[a].Entry.Window, members[b].Entry.Window))
+                        {
+                            continue;
+                        }
+
+                        found.TryAdd(members[a].Number, (members[a], fields));
+                        found.TryAdd(members[b].Number, (members[b], fields));
+                    }
+                }
+            }
+        }
+
+        return [.. found.Values];
+    }
+
     private static void RequireSize(long length, int maxBytes)
     {
         if (length > maxBytes)
@@ -581,6 +876,35 @@ public sealed class ImportRegistryEntriesHandler(
         IReadOnlyDictionary<long, IReadOnlyList<RegistryValue>> ValuesByEntry,
         Dictionary<(int RefRegistryDefId, string Code), long?> LookupCache,
         IReadOnlyDictionary<long, RegistryEntry> LookupTargets);
+
+    /// <summary>Наявні записи, знайдені за первинним ключем (RT-10b).</summary>
+    /// <param name="EntriesByRow">Індекс рядка у файлі → запис.</param>
+    /// <param name="ValuesByEntry">Значення тих із них, кого не прочитав пакет «за кодами».</param>
+    /// <param name="PrimaryFields">Поля первинного ключа — для поля <c>field</c> помилки рядка.</param>
+    private sealed record KeyMatch(
+        IReadOnlyDictionary<int, RegistryEntry> EntriesByRow,
+        IReadOnlyDictionary<long, IReadOnlyList<RegistryValue>> ValuesByEntry,
+        string? PrimaryFields)
+    {
+        public static KeyMatch None { get; } = new(
+            new Dictionary<int, RegistryEntry>(), new Dictionary<long, IReadOnlyList<RegistryValue>>(), null);
+    }
+
+    /// <summary>Рядок, що пройшов, — для звірки ключів у межах файлу.</summary>
+    /// <param name="Number">Номер рядка у файлі.</param>
+    /// <param name="Code">Код, як його записано у файлі.</param>
+    /// <param name="Entry">Запис рядка.</param>
+    /// <param name="Values">Значення полів після застосування рядка.</param>
+    /// <param name="Outcome">Як рядок пораховано у звіті.</param>
+    private sealed record KeyedRow(
+        int Number, string Code, RegistryEntry Entry, IReadOnlyDictionary<int, RegistryValue> Values, RowOutcome Outcome);
+
+    private enum RowOutcome
+    {
+        Added,
+        Updated,
+        Unchanged,
+    }
 }
 
 /// <summary>

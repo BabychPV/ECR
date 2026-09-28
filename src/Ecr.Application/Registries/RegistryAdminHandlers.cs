@@ -305,8 +305,13 @@ public sealed class DeleteRegistryEntryHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Keys.RegistryKeyService? keys = null)
 {
+    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
+    // `UpsertRegistryEntryHandler`); контейнер підставляє `RegistryKeyService` завжди. Що
+    // видалення звільняє ключ на справжньому шляху, тримає `RegistryKeyLifecycleHttpTests`.
+
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
 
@@ -423,6 +428,14 @@ public sealed class DeleteRegistryEntryHandler(
         // ними лишає журнал і довідник у різних станах.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ RT-10b: видалений запис ключ не тримає (`IsLive = 0`). Без цього рядок ключа
+            // лишався живим, і новий запис із тим самим ключем отримував 409 від запису,
+            // якого вже немає.
+            if (keys is not null)
+            {
+                await keys.ReleaseAsync(entry, innerCt).ConfigureAwait(false);
+            }
+
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             await audit.WriteStructureChangeAsync(

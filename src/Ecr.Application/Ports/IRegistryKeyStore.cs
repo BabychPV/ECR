@@ -41,13 +41,35 @@ public interface IRegistryKeyStore
     /// <c>UPDLOCK, HOLDLOCK</c>: паралельний запис того самого ключа чекає кінця транзакції,
     /// навіть коли ключ ще вільний (блокується діапазон, а не лише знайдені рядки).
     /// </summary>
-    /// <remarks>⛔ Має сенс лише всередині <see cref="IUnitOfWork.ExecuteInTransactionAsync"/>.</remarks>
+    /// <remarks>
+    /// ⛔ Має сенс лише всередині <see cref="IUnitOfWork.ExecuteInTransactionAsync"/>.
+    ///
+    /// ⚠ Блокування зупиняє ВСТАВКУ того самого ключа, але не другу таку саму перевірку: дві
+    /// одночасні транзакції обидві бачать вільний ключ, і розводить їх лише
+    /// <c>UX_RegistryEntryKey_Live</c> → 409 <c>keyTakenConcurrently</c> (RT-10b,
+    /// <c>RegistryKeyRaceTests</c>).
+    /// </remarks>
     /// <param name="registryKeyDefId">Ключ довідника.</param>
     /// <param name="keyHash">SHA-256 канонічного рядка.</param>
     /// <param name="exceptEntryId">Запис, що зберігається (0 — новий): сам із собою не конфліктує.</param>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<RegistryKeyHolder>> FindLiveHoldersForUpdateAsync(
         int registryKeyDefId, byte[] keyHash, long exceptEntryId, CancellationToken ct);
+
+    /// <summary>
+    /// Живі записи, що тримають будь-який із хешів ключа, — пакетом і БЕЗ блокування (RT-10b):
+    /// імпорт CSV знаходить за первинним ключем наявний запис рядка (§4.6).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Лише для пошуку, не для перевірки: вільність ключа перед записом і далі стверджує
+    /// <see cref="FindLiveHoldersForUpdateAsync"/> у транзакції.
+    /// </remarks>
+    /// <param name="registryKeyDefId">Ключ довідника.</param>
+    /// <param name="keyHashes">Хеші; порожній набір — порожній результат без запиту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Тримачі з заповненим <see cref="RegistryKeyHolder.KeyHash"/>.</returns>
+    public Task<IReadOnlyList<RegistryKeyHolder>> FindLiveHoldersAsync(
+        int registryKeyDefId, IReadOnlyCollection<byte[]> keyHashes, CancellationToken ct);
 
     /// <summary>Коди записів за ідентифікаторами — для людського вигляду частини <c>Lookup</c>.</summary>
     /// <param name="registryEntryIds">Ідентифікатори; відсутні в результат не потрапляють.</param>
@@ -70,4 +92,9 @@ public interface IRegistryKeyStore
 /// <param name="EntryCode">Код запису — для повідомлення про конфлікт.</param>
 /// <param name="KeyText">Людський вигляд ключа, як його записано для цього запису.</param>
 /// <param name="Window">Вікно чинності, яке тримає рядок ключа.</param>
-public sealed record RegistryKeyHolder(long EntryId, string EntryCode, string KeyText, ValidityWindow Window);
+/// <param name="KeyHash">
+/// Хеш ключа; заповнює лише пакетний <see cref="IRegistryKeyStore.FindLiveHoldersAsync"/>, де
+/// тримачі різних хешів ідуть одним списком.
+/// </param>
+public sealed record RegistryKeyHolder(
+    long EntryId, string EntryCode, string KeyText, ValidityWindow Window, byte[]? KeyHash = null);

@@ -11,6 +11,9 @@ namespace Ecr.Infrastructure.Persistence;
 /// <summary>Реалізація <see cref="IRegistryKeyStore"/> над <see cref="EcrDbContext"/> (RT-10a).</summary>
 public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
 {
+    /// <summary>Хешів в одному запиті <see cref="FindLiveHoldersAsync"/>.</summary>
+    public const int HashesPerQuery = 500;
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<RegistryKeyDef>> ListActiveKeysAsync(int registryDefId, CancellationToken ct)
         => await db.RegistryKeyDefs.AsNoTracking()
@@ -91,6 +94,63 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
                 r.KeyText,
                 new ValidityWindow(r.ValidFromKey == DateOnly.MinValue ? null : r.ValidFromKey, r.ValidTo)))
             .ToList();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Хеші — окремими параметрами <c>binary(32)</c> порціями по <see cref="HashesPerQuery"/>
+    /// (стеля SQL Server — 2100 параметрів на запит), а не <c>Contains</c> по колекції: переклад
+    /// колекції <c>byte[]</c> у параметр EF дає <c>varbinary(max)</c>, з яким порівняння з колонкою
+    /// індексу пошуком не буде (та сама причина, що в <see cref="FindLiveHoldersForUpdateAsync"/>).
+    /// </remarks>
+    public async Task<IReadOnlyList<RegistryKeyHolder>> FindLiveHoldersAsync(
+        int registryKeyDefId, IReadOnlyCollection<byte[]> keyHashes, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(keyHashes);
+
+        var result = new List<RegistryKeyHolder>();
+        foreach (var chunk in keyHashes.Chunk(HashesPerQuery))
+        {
+            var parameters = new List<object>(chunk.Length + 1)
+            {
+                new SqlParameter("@keyDefId", SqlDbType.Int) { Value = registryKeyDefId },
+            };
+            var names = new List<string>(chunk.Length);
+            for (var i = 0; i < chunk.Length; i++)
+            {
+                var name = "@h" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                names.Add(name);
+                parameters.Add(new SqlParameter(name, SqlDbType.Binary, RegistryEntryKey.KeyHashLength) { Value = chunk[i] });
+            }
+
+            // ⚠ Конкатенація в змінну (як `ConsistencyCheckJob`): підставляються лише ІМЕНА
+            // параметрів `@h0`..`@hN`, не значення — аналізатор EF1003 цього статично не доводить.
+            var sql =
+                "SELECT * FROM dic.RegistryEntryKey WHERE RegistryKeyDefId = @keyDefId AND IsLive = 1 AND KeyHash IN ("
+                + string.Join(", ", names) + ")";
+            var live = db.RegistryEntryKeys.FromSqlRaw(sql, [.. parameters]);
+
+            var rows = await (
+                    from k in live.AsNoTracking()
+                    join e in db.RegistryEntries.AsNoTracking() on k.RegistryEntryId equals e.Id
+
+                    // ⚠ Дублює умову сирого SQL навмисно: межа вибірки видна в самому запиті
+                    // (сторож `LayerRulesTests.Правило_6…` не читає рядок SQL), а не лише в
+                    // рядку, зібраному вище.
+                    where k.RegistryKeyDefId == registryKeyDefId && k.IsLive
+                    orderby k.RegistryEntryId
+                    select new { e.Id, e.Code, k.KeyText, k.KeyHash, k.ValidFromKey, k.ValidTo })
+                .ToListAsync(ct).ConfigureAwait(false);
+
+            result.AddRange(rows.Select(r => new RegistryKeyHolder(
+                r.Id,
+                r.Code,
+                r.KeyText,
+                new ValidityWindow(r.ValidFromKey == DateOnly.MinValue ? null : r.ValidFromKey, r.ValidTo),
+                r.KeyHash)));
+        }
+
+        return result;
     }
 
     /// <inheritdoc />

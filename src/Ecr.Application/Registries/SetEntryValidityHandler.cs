@@ -23,8 +23,13 @@ public sealed class SetEntryValidityHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Keys.RegistryKeyService? keys = null)
 {
+    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
+    // `UpsertRegistryEntryHandler`); контейнер підставляє `RegistryKeyService` завжди. Що
+    // на справжньому шляху вікно перевіряється, тримає `RegistryKeyLifecycleHttpTests`.
+
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
 
@@ -105,6 +110,15 @@ public sealed class SetEntryValidityHandler(
         // базу коректно.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ RT-10b (§4.4): рядки ключів ДЗЕРКАЛЯТЬ вікно запису, тож перераховуються тут,
+            // у тій самій транзакції, — інакше в `dic.RegistryEntryKey` лишилося б старе вікно.
+            // І перевіряються: нове вікно може перетнутися з дублем ключа, якого старе не
+            // зачіпало, — тоді 409 `keyWindowOverlap`, і вікно не змінюється.
+            if (keys is not null && definition is not null)
+            {
+                await keys.ApplyAsync(definition, entry, innerCt).ConfigureAwait(false);
+            }
+
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
 
             affected = await scanner.RescanForEntryAsync(registryEntryId, innerCt).ConfigureAwait(false);
