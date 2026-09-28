@@ -72,15 +72,39 @@ public sealed class ConstantResolver(IConstantStore constants)
         // 2. ⚠ Точний збіг за речовиною виграє над загальним. Інакше
         //    коефіцієнт емісії ХСК застосувався б і до завислих речовин:
         //    число вийшло б правдоподібне і невірне втричі.
+        //
+        // ⛔ Третього кроку «тоді будь-яка» НЕМАЄ (аудит A1). Тут стояло
+        //    `?? valid`: коли для речовини B не було ні власної, ні загальної
+        //    константи, повертався весь набір — тобто константи ЧУЖИХ речовин,
+        //    і за рівно одного такого кандидата перевірка неоднозначності
+        //    нижче мовчала. Прогін для B множив на коефіцієнт A без жодної
+        //    помилки. Тепер — «кандидатів немає» → `null` → формула читає
+        //    `#REF` (`MethodologyEvaluationContext.GetConstant`).
+        //    Прогін без речовини (`substanceEntryId = null`) бере лише загальні
+        //    константи: з кількох речовинних вибрати «свою» нема за чим, а
+        //    єдину речовинну підставити означало б ту саму ваду.
         var bySubstance = Narrow(valid, c => c.SubstanceEntryId == substanceEntryId)
-                          ?? Narrow(valid, c => c.SubstanceEntryId is null)
-                          ?? valid;
+                          ?? Narrow(valid, c => c.SubstanceEntryId is null);
 
+        if (bySubstance is null)
+        {
+            return null;
+        }
+
+        // ⚠ Без категорії (`category = null`) звуження немає, як і було: так
+        //    кличе рушій (`GenericCalculationModule`), і константи корпусу
+        //    несуть категорію-мітку («default») навіть там, де вона одна.
+        //    Задана категорія — так само без «тоді будь-яка»: константа
+        //    категорії «K1» до «K2» не застосовується (аудит A1).
         var byCategory = category is null
             ? bySubstance
             : Narrow(bySubstance, c => string.Equals(c.Category, category, StringComparison.Ordinal))
-              ?? Narrow(bySubstance, c => c.Category is null)
-              ?? bySubstance;
+              ?? Narrow(bySubstance, c => c.Category is null);
+
+        if (byCategory is null)
+        {
+            return null;
+        }
 
         // ⛔ Кілька кандидатів на одну дату — помилка конфігурації, а не привід
         //    узяти перший. «Перший ліпший» тут означає, що число звіту залежить
