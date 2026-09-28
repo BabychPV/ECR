@@ -94,6 +94,34 @@ Invoke-WebRequest http://localhost:5000/health/live -UseBasicParsing   # 200 = �
 ⚠ **потрібне рішення замовника:** SMTP, OTLP-колектор, сертифікат для Data
 Protection і HTTPS, адреси джерел PI. Дефолти коду — «вимкнено» або порожньо.
 
+### 2.2. SQL-джерело: місцевий час у колонці `Ts` без поясу
+
+У налаштуваннях SQL-джерела немає поля часового поясу (`ext.DataSource`), і
+текст запиту значень (`Sql:ValueQuery`) адаптер бере як є. Колонку `Ts` він
+читає так: `datetimeoffset` **конвертується** в UTC; `datetime`, `datetime2`,
+`smalldatetime`, `date` (значення без поясу) **вважаються** UTC без жодної
+конвертації. Якщо джерело фактично пише місцевий час (наприклад, Атирау,
+UTC+5), увесь ряд буде зсунутий на зсув поясу — дані самі по собі виглядають
+правильними, але зміщеними в часі.
+
+Лагодиться це в тексті запиту `Sql:ValueQuery`: переведіть колонку `Ts` через
+`AT TIME ZONE` у `datetimeoffset` — тоді адаптер конвертує її в UTC коректно.
+Ім'я поясу Windows перевіряйте по `sys.time_zone_info`; для Атирау (UTC+5) це
+`West Asia Standard Time`:
+
+```sql
+SELECT
+    [Ts] AT TIME ZONE 'West Asia Standard Time' AS [Ts],
+    [Val], [Uom], [Quality]
+FROM dbo.Readings
+WHERE [EntityPath] = @path AND [Ts] >= @from AND [Ts] < @to
+ORDER BY [Ts];
+```
+
+⛔ `ORDER BY [Ts]` у тексті запиту обов'язковий незалежно від поясу: мітки
+мають іти неспадно, інакше адаптер відмовляє помилкою `ECR-INT-0422`
+(`timestampsOutOfOrder`) замість мовчазного сортування в пам'яті.
+
 ## 3. Моніторинг і логи
 
 ### 3.1. Health-ендпоінти
