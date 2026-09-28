@@ -324,6 +324,8 @@ public sealed class SubmitEditRaceTests(SqlServerFixture sql)
         var methodologies = Substitute.For<IMethodologyStore>();
         methodologies.GetMethodologyIdsBoundToTableAsync(doc.TableDefId, Arg.Any<CancellationToken>())
                      .Returns(Task.FromResult<IReadOnlyList<int>>([]));
+        methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                     .Returns(Task.FromResult<IReadOnlyList<int>>([]));
 
         var registries = Substitute.For<IRegistryStore>();
         registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())

@@ -361,6 +361,29 @@ public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethod
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTablesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableDefIds);
+        if (tableDefIds.Count == 0)
+        {
+            return [];
+        }
+
+        var ids = tableDefIds.Distinct().ToList();
+
+        return await db.CalculationBindings
+            .AsNoTracking()
+            .Where(b => b.IsActive && ids.Contains(b.TableDefId))
+            .Select(b => b.MethodologyId)
+            .Distinct()
+            .OrderBy(methodologyId => methodologyId)
+            .Take(MaxChildren)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Два запити на весь набір таблиць, не по запиту на таблицю: зріз —
     /// найгарячіше читання системи. Версії — УСІХ статусів: виведена з обігу

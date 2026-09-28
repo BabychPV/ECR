@@ -41,10 +41,12 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// саме подання, а не сусідні тести процесу.
 /// </para>
 /// <para>
-/// ⚠ Обсяг храповика — клітинки й рядки. <c>IMethodologyStore</c> тут
-/// підставний: перевірка прив'язок методологій (<c>GetMethodologyIdsBoundToTableAsync</c>
-/// у циклі по таблицях аркуша) має власний N+1, і пакетного методу в порту
-/// для нього немає — окрема задача.
+/// ⚠ Обсяг храповика — клітинки, рядки й перевірка прив'язок методологій.
+/// <c>IMethodologyStore</c> тут справжній: доти прив'язки питались
+/// <c>GetMethodologyIdsBoundToTableAsync</c> у циклі по таблицях аркуша (N
+/// звернень, коли жодна таблиця не прив'язана або прив'язана остання); тепер —
+/// одним <c>GetMethodologyIdsBoundToTablesAsync</c>. Обидва випадки —
+/// «не прив'язано» і «прив'язана остання таблиця» — під лічильником.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
@@ -62,25 +64,38 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
     /// таблицях. До P3 (виміряно тим самим тестом): 3 таблиці — 20, 12 таблиць —
     /// 47, тобто 11 + 3N (зріз і рядки на таблицю у валідації, зріз на таблицю
     /// в знімку).
+    /// <para>
+    /// ✎ Сховище методологій стало справжнім (доти — підставне, 0 звернень):
+    /// стеля 14 + 1 (прив'язки аркуша одним запитом) = 15 для аркуша без
+    /// прив'язки, + 1 (свіжість результатів методологій) = 16 для аркуша з
+    /// прив'язкою. До пакетного методу на тому самому обсязі: без прив'язки
+    /// 17 на 3 і 26 на 12 таблицях, з прив'язкою останньої — 18 і 27.
+    /// </para>
     /// </remarks>
-    private const int MaxCommands = 14;
+    private const int MaxCommandsUnbound = 15;
+
+    private const int MaxCommandsBound = 16;
 
     private static readonly AsyncLocal<StrongBox<bool>?> Measuring = new();
 
     private static int _counter;
 
-    [Fact]
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "P3")]
-    public async Task Подання_аркуша_робить_стільки_ж_звернень_до_БД_на_3_і_на_12_таблицях()
+    public async Task Подання_аркуша_робить_стільки_ж_звернень_до_БД_на_3_і_на_12_таблицях(bool bindLastTable)
     {
         // Розігрів: перше подання в процесі платить за модель EF і кеш планів.
-        var warm = await ArrangeAsync(tableCount: 1);
+        var warm = await ArrangeAsync(tableCount: 1, bindLastTable);
         await SubmitMeasuredAsync(warm);
 
-        var small = await ArrangeAsync(tableCount: 3);
-        var large = await ArrangeAsync(tableCount: 12);
+        // ⚠ Прив'язана саме ОСТАННЯ таблиця аркуша: поштучний цикл, що
+        // виходить на першій прив'язаній, пройшов би тоді всі N таблиць.
+        var small = await ArrangeAsync(tableCount: 3, bindLastTable);
+        var large = await ArrangeAsync(tableCount: 12, bindLastTable);
 
         var (smallCount, smallDetail) = await SubmitMeasuredAsync(small);
         var (largeCount, largeDetail) = await SubmitMeasuredAsync(large);
@@ -95,9 +110,10 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
             + "Кількість звернень росте з кількістю таблиць (N+1 під винятковим блокуванням аркуша).\n"
             + $"— 3 таблиці —\n{smallDetail}\n— 12 таблиць —\n{largeDetail}");
 
+        var ceiling = bindLastTable ? MaxCommandsBound : MaxCommandsUnbound;
         Assert.True(
-            largeCount <= MaxCommands,
-            $"Подання: {largeCount} звернень до БД, стеля {MaxCommands}.\n{largeDetail}");
+            largeCount <= ceiling,
+            $"Подання: {largeCount} звернень до БД, стеля {ceiling}.\n{largeDetail}");
     }
 
     [Fact]
@@ -135,6 +151,32 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
         Assert.Equal(5 * RowsPerTable * ColumnsPerTable, cellsRead.Count);
         Assert.Equal(expected, payload);
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(expected))), hash);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "P3")]
+    public async Task Пакетні_прив_язки_таблиць_дорівнюють_об_єднанню_поштучних()
+    {
+        var doc = await ArrangeAsync(tableCount: 4, bindLastTable: true);
+        var tableIds = doc.Tables.Select(t => t.TableDefId).ToList();
+
+        await using var db = CreateContext();
+        var store = new MethodologyStore(db);
+
+        var expected = new SortedSet<int>();
+        foreach (var id in tableIds)
+        {
+            expected.UnionWith(await store.GetMethodologyIdsBoundToTableAsync(id, CancellationToken.None));
+        }
+
+        Assert.Single(expected);
+        Assert.Equal([.. expected], await store.GetMethodologyIdsBoundToTablesAsync(tableIds, CancellationToken.None));
+
+        // Без прив'язаної (останньої) таблиці — порожньо: чужі прив'язки не просочуються.
+        Assert.Empty(await store.GetMethodologyIdsBoundToTablesAsync(tableIds[..^1], CancellationToken.None));
+        Assert.Empty(await store.GetMethodologyIdsBoundToTablesAsync([], CancellationToken.None));
     }
 
     /// <summary>Одне подання під лічильником; повертає число звернень і їх розклад.</summary>
@@ -208,7 +250,7 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
     /// перша колонка обов'язкова (щоб валідація читала кожну таблицю), усі
     /// клітинки заповнені (щоб подання пройшло).
     /// </summary>
-    private async Task<Scenario> ArrangeAsync(int tableCount)
+    private async Task<Scenario> ArrangeAsync(int tableCount, bool bindLastTable = false)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(columnCount: ColumnsPerTable, rowCount: RowsPerTable);
@@ -255,6 +297,16 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
 
                 await db.SaveChangesAsync();
                 tables.Add((table.Id, [.. columns.Select(c => c.Id)], rowIds));
+            }
+
+            if (bindLastTable)
+            {
+                // `MethodologyId` навмисно без FK (Q-222) — самої методології не треба.
+                var (lastTableId, lastColumns, _) = tables[^1];
+                db.CalculationBindings.Add(new CalculationBinding(
+                    lastTableId, lastColumns[^1], methodologyId: 900_000 + Interlocked.Increment(ref _counter),
+                    "tons", "{}"));
+                await db.SaveChangesAsync();
             }
         }
 
@@ -318,9 +370,9 @@ public sealed class SubmitSheetQueryCountTests(SqlServerFixture sql)
         headers.GetValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
                .Returns(new Dictionary<int, DocumentHeaderValueData>());
 
-        var methodologies = Substitute.For<IMethodologyStore>();
-        methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
-                     .Returns(new List<int>());
+        // ⛔ Справжнє сховище методологій: перевірка прив'язок аркуша (та
+        // сама, що визначає, чи питати про застарілість) — у храповику.
+        var methodologies = new MethodologyStore(db);
 
         var metadata = Metadata(doc);
 

@@ -54,7 +54,7 @@ public sealed class SubmitSheetHandler(
     // прив'язок (`calc.CalculationResult`, `cfg.CalculationBinding`) він не
     // чіпає (`D-69`).
     //
-    // ✎ Той самий порт тепер дає й `GetMethodologyIdsBoundToTableAsync` —
+    // ✎ Той самий порт тепер дає й `GetMethodologyIdsBoundToTablesAsync` —
     // звуження перевірки `IsStale` до аркушів, що мають хоч одну методологічну
     // прив'язку (див. коментар над перевіркою нижче).
     IMethodologyStore methodologies,
@@ -215,8 +215,8 @@ public sealed class SubmitSheetHandler(
         // ✎ ЗВУЖЕННЯ (мінімальне, наступний крок над початковим фіксом):
         // перевірку `IsStale` пропускаємо ЦІЛКОМ, якщо в АРКУШІ, що подають,
         // немає ЖОДНОЇ таблиці з методологічною прив'язкою
-        // (`IMethodologyStore.GetMethodologyIdsBoundToTableAsync` по кожній
-        // таблиці аркуша — таблиць в аркуші мало, це не масовий скан).
+        // (`IMethodologyStore.GetMethodologyIdsBoundToTablesAsync` на всі
+        // таблиці аркуша разом).
         // Аркуш, до жодної методології не причетний, більше не блокується
         // застарілістю ЧУЖОГО прив'язаного результату в сусідньому аркуші
         // того самого документа+періоду.
@@ -238,17 +238,19 @@ public sealed class SubmitSheetHandler(
         // назавжди (посилання живе, а не копія) — і це вирішальний аргумент
         // за блокуванням, а не попередженням: попередження на екрані «Подати»
         // ніхто не побачить УДРУГЕ на екрані «Погоджено».
+        //
+        // ✎ P3: прив'язки — ОДНИМ зверненням на всі таблиці аркуша
+        // (`GetMethodologyIdsBoundToTablesAsync`), не циклом по таблицях: цикл
+        // робив N походів у базу під винятковим блокуванням подання
+        // (`SubmitSheetQueryCountTests`). Семантика та сама — «бодай одна
+        // таблиця аркуша прив'язана».
         var sheetHasMethodologyBinding = false;
-        foreach (var tableDefId in tables.Keys)
+        if (tables.Count > 0)
         {
             var boundMethodologyIds = await methodologies
-                .GetMethodologyIdsBoundToTableAsync(tableDefId, ct)
+                .GetMethodologyIdsBoundToTablesAsync(tables.Keys, ct)
                 .ConfigureAwait(false);
-            if (boundMethodologyIds is { Count: > 0 })
-            {
-                sheetHasMethodologyBinding = true;
-                break;
-            }
+            sheetHasMethodologyBinding = boundMethodologyIds is { Count: > 0 };
         }
 
         if (sheetHasMethodologyBinding)

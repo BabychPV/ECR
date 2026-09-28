@@ -113,6 +113,25 @@ public interface IMethodologyStore
         int tableDefId, CancellationToken ct);
 
     /// <summary>
+    /// Методології, активно прив'язані бодай однією колонкою до БУДЬ-ЯКОЇ з
+    /// названих таблиць (<c>cfg.CalculationBinding</c>) — одним зверненням.
+    /// </summary>
+    /// <param name="tableDefIds">Таблиці (наприклад, усі таблиці аркуша).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Різні ідентифікатори за зростанням — об'єднання того, що дав би
+    /// <see cref="GetMethodologyIdsBoundToTableAsync"/> по кожній таблиці;
+    /// порожньо — жодна з таблиць не прив'язана.
+    /// </returns>
+    /// <remarks>
+    /// ⚠ Потрібно поданню аркуша (<c>SubmitSheetHandler</c>): прив'язки питались
+    /// поштучно по таблицях аркуша під винятковим блокуванням подання — N
+    /// звернень на аркуш із N таблиць (<c>SubmitSheetQueryCountTests</c>).
+    /// </remarks>
+    public Task<IReadOnlyList<int>> GetMethodologyIdsBoundToTablesAsync(
+        IReadOnlyCollection<int> tableDefIds, CancellationToken ct);
+
+    /// <summary>
     /// Активні прив'язки виходів методологій до колонок названих таблиць —
     /// разом з усіма версіями кожної методології (F-02).
     /// </summary>

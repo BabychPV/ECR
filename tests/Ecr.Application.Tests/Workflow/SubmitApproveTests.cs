@@ -107,6 +107,8 @@ public sealed class SubmitApproveTests
         // аркуш БЕЗ прив'язки підставляє порожній список сам.
         _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
              .Returns(new List<int> { 1 });
+        _methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int> { 1 });
 
         // ⚠ Екземпляри таблиць і знімок структури: подання кличе валідацію
         // (`ФВ-5.4`, `W8`), а вона питає обидва. Порожній набір правил тут
@@ -806,6 +808,8 @@ public sealed class SubmitApproveTests
         // методології взагалі не причетний — застарілість чужого не повинна
         // його блокувати.
         _methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+             .Returns(new List<int>());
+        _methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
              .Returns(new List<int>());
         _methodologies.GetCalculationFreshnessAsync(Document, Period, Arg.Any<IReadOnlyCollection<int>?>(), Arg.Any<CancellationToken>())
              .Returns(new CalculationFreshness(Now.AddHours(-2), Now.AddHours(-1))); // IsStale = true

@@ -231,6 +231,8 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
         var methodologies = Substitute.For<IMethodologyStore>();
         methodologies.GetMethodologyIdsBoundToTableAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
                      .Returns(new List<int>());
+        methodologies.GetMethodologyIdsBoundToTablesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                     .Returns(new List<int>());
 
         var metadata = Metadata(doc);
 
