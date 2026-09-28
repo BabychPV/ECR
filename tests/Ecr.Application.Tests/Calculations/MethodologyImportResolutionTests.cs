@@ -133,26 +133,12 @@ public sealed class MethodologyImportResolutionTests
                  });
     }
 
-    [Fact]
-    [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "ФВ-9.4")]
-    public async Task Посилання_у_бібліотеку_резолвиться_і_дає_ребро_між_методологіями()
-    {
-        // ⛔ Упаде, якщо `!` знову шукатиме лише у власній версії: 265 посилань
-        // корпусу стануть нерезолвленими. І впаде вдруге, якщо резолвінг є, а
-        // ребра немає, — тоді `HSE400` порахується раніше за `Common`.
-        Formulas([Formula(ReferencingId, "Total", $"!{Shared} * 2")]);
-        Imports([Library(CommonId, "Common", 910, [Shared])]);
-
-        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
-
-        Assert.Equal([CommonId], _edges);
-
-        // ⚠ Формула бібліотеки НЕ входить у топологічний порядок цієї версії:
-        // її рахує своя методологія, і чуже ребро тут стало б посиланням на
-        // ідентифікатор із іншої нумерації.
-        Assert.Empty(_nodes.Single(n => n.FormulaDefId == ReferencingId).DependsOnFormulaDefIds);
-    }
+    // ⚠ Тест «посилання у бібліотеку резолвиться і дає ребро між методологіями»
+    // стояв тут і вимагав, щоб публікація такого посилання ПРОХОДИЛА. Саме це й
+    // був дефект A3: рантайм імпортованих формул не обчислює, і кожен прогін
+    // давав `#REF`. Тепер така публікація відхиляється — див.
+    // `ImportedFormulaReferencePublishTests`; резолвінг у бібліотеку там
+    // перевіряється через назву методології в проблемі.
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]

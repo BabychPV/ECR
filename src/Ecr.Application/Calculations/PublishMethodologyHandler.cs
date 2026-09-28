@@ -692,8 +692,20 @@ public sealed class PublishMethodologyHandler(
                 // порядок цієї версії — вони рахуються своєю. Без цього ребра
                 // порядок перерахунку неповний, і `HSE400` читає торішній
                 // результат `Common` без жодної помилки в журналі.
+                //
+                // ⛔ A3 (аудит 2026-09-28): і водночас — відмова публікації.
+                // Резолвінг тут є, а в рантаймі немає: контекст обчислення
+                // (`MethodologyEvaluationContext.GetFormulaResult`) бачить лише
+                // формули СВОЄЇ версії, і модуль бібліотечних не підкладає. Тож
+                // таке посилання публікувалося, а кожен прогін давав `#REF` і
+                // мовчки не писав вихід. Жодна опублікована чи сідова методологія
+                // його не вживає (розвідка A3), тому заборона нічого не ламає; її
+                // знімають разом із резолвінгом у модулі, а не окремо. Ребро
+                // лишається, щоб зняття заборони було одним рядком.
                 case MethodologyReferenceOutcome.Imported:
                     dependencies.Add(reference.MethodologyId!.Value);
+                    problems.Add(ImportedFormulaNotEvaluated(
+                        formula.Code, code, parsed.Expression.Root, imports, reference.MethodologyId.Value));
                     break;
 
                 // ⛔ Неоднозначність між двома бібліотеками — відмова, а не
@@ -717,6 +729,65 @@ public sealed class PublishMethodologyHandler(
         }
 
         return new FormulaResolution(edges, parsed.Expression.Root);
+    }
+
+    /// <summary>
+    /// Проблема «посилання на формулу імпортованої методології рантайм не
+    /// обчислює» — з позицією посилання у виразі (аудит A3).
+    /// </summary>
+    /// <param name="formulaCode">Формула, що посилається.</param>
+    /// <param name="name">Ім'я після <c>!</c>, як його віддав обхід залежностей.</param>
+    /// <param name="root">Корінь розібраного виразу — звідти береться позиція.</param>
+    /// <param name="imports">Імпорти на дату чинності.</param>
+    /// <param name="methodologyId">Методологія, у яку резолвилося посилання.</param>
+    /// <remarks>
+    /// ⚠ Позиція — перше входження <c>!name</c> у виразі (позиція знака
+    /// <c>!</c>, як у діагностиках парсера). Кілька входжень того самого імені —
+    /// одна проблема: виправлення в усіх однакове.
+    /// </remarks>
+    private static PublishProblem ImportedFormulaNotEvaluated(
+        string formulaCode,
+        string name,
+        Ecr.Expressions.Ast.AstNode root,
+        IReadOnlyList<MethodologyLibrary> imports,
+        int methodologyId)
+    {
+        var library = imports.First(l => l.MethodologyId == methodologyId).MethodologyCode;
+        var position = FormulaReferences(root)
+            .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+            ?.Position ?? 0;
+        var at = position.ToString(CultureInfo.InvariantCulture);
+
+        return PublishProblem.Of(
+            "publish.problem.importedFormulaNotEvaluated",
+            $"Формула «{formulaCode}»: посилання «!{name}» (позиція {at}) веде у формулу імпортованої "
+            + $"методології «{library}», а розрахунок імпортованих формул не обчислює — щоразу був би #REF. "
+            + "Перенесіть формулу в цю версію.",
+            ("formula", formulaCode),
+            ("name", name),
+            ("position", at),
+            ("library", library));
+    }
+
+    /// <summary>Усі посилання <c>!Name</c> у дереві, у порядку обходу.</summary>
+    private static IEnumerable<Ecr.Expressions.Ast.SymbolReferenceNode> FormulaReferences(
+        Ecr.Expressions.Ast.AstNode node)
+    {
+        if (node is Ecr.Expressions.Ast.SymbolReferenceNode
+            {
+                Kind: Ecr.Expressions.Ast.SymbolKind.Formula,
+            } symbol)
+        {
+            yield return symbol;
+        }
+
+        foreach (var child in Children(node))
+        {
+            foreach (var found in FormulaReferences(child))
+            {
+                yield return found;
+            }
+        }
     }
 
     /// <summary>Що дав один прохід над виразом формули.</summary>

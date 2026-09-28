@@ -84,6 +84,12 @@ internal sealed class MethodologyEvaluationContext(
             : ExpressionValue.Error(ExpressionErrors.BadReference);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Лише формули СВОЄЇ версії. Посилання в імпортовану методологію сюди
+    /// не доходить: його відхиляє публікація (<c>publish.problem.
+    /// importedFormulaNotEvaluated</c>, аудит A3). <c>#REF</c> на промах —
+    /// друга лінія, а не спосіб «обчислити» чуже посилання.
+    /// </remarks>
     public ExpressionValue GetFormulaResult(string name)
         => _formulaResults.TryGetValue(name, out var value)
             ? value

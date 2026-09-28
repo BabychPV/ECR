@@ -4581,6 +4581,11 @@ USING (VALUES
     -- прогін читає всі константи версії одним запитом, і відкинутий хвіст дав би тихий #REF.
     (N'err.ECR-CALC-0422.constantsOverCap', N'en', N'Methodology version {methodologyVersionId} has more than {cap} constants: they cannot all be read, and a constant left out would silently evaluate to #REF.', 1),
     -- HSE301:A1P1 ── кінець секції
+
+    -- HSE301:A3 ── посилання !Code у формулу імпортованої методології (аудит A3):
+    -- рантайм обчислює лише формули своєї версії, тому публікація таке посилання відхиляє.
+    (N'publish.problem.importedFormulaNotEvaluated', N'en', N'Formula {formula}: reference !{name} at position {position} points to a formula of imported methodology {library}, but calculations do not evaluate imported formulas, so it would always give #REF. Copy the formula into this version.', 1),
+    -- HSE301:A3 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
