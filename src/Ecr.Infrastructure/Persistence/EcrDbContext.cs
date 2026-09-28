@@ -106,6 +106,7 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<MethodologyVersion> MethodologyVersions => Set<MethodologyVersion>();
     public DbSet<MethodologyFormula> MethodologyFormulas => Set<MethodologyFormula>();
     public DbSet<MethodologyConstant> MethodologyConstants => Set<MethodologyConstant>();
+    public DbSet<RecalculationApproval> RecalculationApprovals => Set<RecalculationApproval>();
 
     /// <summary>Тести методології: вхід, очікуваний вихід, допуск (ФВ-13.7).</summary>
     public DbSet<MethodologyTestCaseEntity> MethodologyTestCases => Set<MethodologyTestCaseEntity>();
