@@ -35,6 +35,14 @@ public sealed partial class EventLogSourceTests(SqlServerFixture sql)
 
         var runbook = File.ReadAllText(Path.Combine(root, "docs", "admin", "operations-runbook.md"));
         Assert.Contains($"джерело **`{EventLogSource.Name}`**", runbook, StringComparison.Ordinal);
+
+        // ⚠ Інструкція з установки (§7) — туди адміністратор іде першим, коли
+        // служба не стартує. Історичні записи про `Ecr.Api` там лишаються
+        // перекресленими, тож звіряється чинний рядок таблиці й підказка про
+        // файловий журнал, а не відсутність слова `Ecr.Api` у файлі.
+        var guide = File.ReadAllText(Path.Combine(root, "docs", "build", "11-install-guide.md"));
+        Assert.Contains($"| Системний Event Log | джерело **`{EventLogSource.Name}`**", guide, StringComparison.Ordinal);
+        Assert.Contains($"Event Log (джерело `{EventLogSource.Name}`)", guide, StringComparison.Ordinal);
     }
 
     [Fact]
