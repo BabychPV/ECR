@@ -259,8 +259,8 @@ BEGIN
         FROM doc.CellValue WHERE PeriodKey = @k;
 
         INSERT INTO arc.TableRow WITH (TABLOCK)
-            (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, ModifiedAt)
-        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, ModifiedAt
+            (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt)
+        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, IsOrphaned, ModifiedAt
         FROM doc.TableRow WHERE PeriodKey = @k;
 
         INSERT INTO arc.TableInstance WITH (TABLOCK)
@@ -546,12 +546,13 @@ BEGIN
               AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS d
                                WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id);
 
-            -- ⚠ `IsOrphaned = 0`: `arc.TableRow` цієї колонки не має (D4 аудиту,
-            -- окреме рішення про схему архіву). Нічний перерахунок ставить її знову.
+            -- D4 аудиту: `IsOrphaned` — з архіву, а не жорсткий 0. Інакше осиротілий
+            -- рядок після архівування+відновлення переставав блокувати подання
+            -- (ECR-SUB-4221) до наступного нічного перерахунку.
             INSERT INTO doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal,
                                       IsDeleted, IsOrphaned, ModifiedAt)
             SELECT a.PeriodKey, a.Id, a.TableInstanceId, a.RowKey, a.RowDefId, a.Ordinal,
-                   a.IsDeleted, 0, a.ModifiedAt
+                   a.IsDeleted, a.IsOrphaned, a.ModifiedAt
             FROM arc.TableRow AS a
             WHERE a.PeriodKey = @k
               AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS d

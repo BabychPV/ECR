@@ -19,9 +19,9 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// ⚠ Знайдено цим сторожем у кроці F6: `calc.CalculationStep.MaskedZero`
 /// (<c>H-24d-1</c>) дзеркала не мав.
 ///
-/// ⚠ Лише `calc`-пари. `doc.TableRow.IsOrphaned` у `arc.TableRow` свідомо немає
-/// (розархівація ставить 0, `03-archive-proc.sql`), тож загальне правило «архів ⊇
-/// джерело» для `doc.*` не діє.
+/// ⚠ Лише `calc`-пари. Для `doc.*` загальне правило «архів ⊇ джерело» не діє
+/// (архів свідомо без `rowversion` тощо). `doc.TableRow.IsOrphaned` з D4 аудиту
+/// дзеркало вже має — його перевіряє `RestoreYearTests` наскрізним сценарієм.
 ///
 /// Мутаційний доказ (F6): прибрати `ALTER TABLE arc.CalculationResult ADD Kind` зі
 /// скрипту — червоніє рядок <c>calc.CalculationResult</c>; прибрати

@@ -218,11 +218,10 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
 
     /// <summary>Ключі й ідентифікатори рядків з архіву одного екземпляра таблиці.</summary>
     /// <remarks>
-    /// ⚠ Спільна точка для <see cref="ReadArchivedRowVersionsAsync"/> і
-    /// <see cref="ReadArchivedOrphanFlagsAsync"/> нижче: обидва — той самий
-    /// перелік рядків із дефолтним значенням замість поля, якого немає в
-    /// <c>arc.TableRow</c>. Дублювати запит під кожен із них означало б три
-    /// копії того самого <c>WHERE</c>.
+    /// ⚠ Спільна точка для <see cref="ReadArchivedRowVersionsAsync"/> нижче:
+    /// той самий перелік рядків із дефолтним значенням замість поля, якого немає
+    /// в <c>arc.TableRow</c>. <see cref="ReadArchivedOrphanFlagsAsync"/> читає
+    /// власну колонку і тому має свій запит (D4 аудиту).
     /// </remarks>
     public async Task<IReadOnlyList<(string RowKey, long Id)>> ReadArchivedRowIdsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
@@ -259,20 +258,28 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
         return [.. rows.Select(r => (r.RowKey, string.Empty))];
     }
 
-    /// <summary>Ознаки «осиротілості» рядків з архіву — завжди <c>false</c>.</summary>
+    /// <summary>Ознаки «осиротілості» рядків з архіву — ті, що були в момент архівації.</summary>
     /// <remarks>
-    /// ⚠ <c>arc.TableRow</c> НЕ МАЄ колонки <c>IsOrphaned</c>
-    /// (<c>12-archive-tables.sql</c>): нічний <c>OrphanScanJob</c> архіву не
-    /// торкається (архівні проєкти не редагуються), тож ставити прапорець
-    /// там нема кому і споживати його нема кому — перегляд архівного
-    /// документа не пропонує дію «видалити осиротілий рядок» узагалі.
-    /// <c>false</c> — свідомий дефолт, а не обчислення.
+    /// D4 аудиту: <c>arc.TableRow.IsOrphaned</c> — копія <c>doc.TableRow.IsOrphaned</c>
+    /// (<c>usp_ArchiveYear</c>), і розархівація повертає її назад. Раніше колонки не
+    /// було і тут стояв жорсткий <c>false</c> — архівний перегляд ховав позначку,
+    /// яку гарячий показав би. Нічний <c>OrphanScanJob</c> архіву не торкається,
+    /// тож значення «заморожене» на момент архівації.
     /// </remarks>
     public async Task<IReadOnlyList<(long Id, bool IsOrphaned)>> ReadArchivedOrphanFlagsAsync(
         long tableInstanceId, PeriodKey periodKey, CancellationToken ct)
     {
-        var rows = await ReadArchivedRowIdsAsync(tableInstanceId, periodKey, ct).ConfigureAwait(false);
-        return [.. rows.Select(r => (r.Id, false))];
+        var rows = await db.Database
+            .SqlQuery<ArchivedRowOrphanFlag>($"""
+                SELECT r.Id, r.IsOrphaned
+                FROM arc.TableRow r
+                WHERE r.TableInstanceId = {tableInstanceId} AND r.PeriodKey = {periodKey.Value}
+                ORDER BY r.Id
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return [.. rows.Select(r => (r.Id, r.IsOrphaned))];
     }
 
     /// <summary>Приводить рядок будь-якої зі схем до контрактного вигляду.</summary>
@@ -314,4 +321,7 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
 
     /// <summary>Ключ і ідентифікатор рядка — форма проєкції архівного <c>arc.TableRow</c>.</summary>
     private sealed record ArchivedRowIdentity(string RowKey, long Id);
+
+    /// <summary>Ідентифікатор рядка й позначка осиротілості — проєкція <c>arc.TableRow</c>.</summary>
+    private sealed record ArchivedRowOrphanFlag(long Id, bool IsOrphaned);
 }

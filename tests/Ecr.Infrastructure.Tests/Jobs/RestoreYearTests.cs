@@ -11,7 +11,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// проєкти спільної партиції, повтор.
 /// </summary>
 /// <remarks>
-/// ⚠ Кожен тест бере СВІЙ період (202705, 202709, 202710), якого не
+/// ⚠ Кожен тест бере СВІЙ період (202705, 202709, 202710, 202711), якого не
 /// торкається жоден інший тест збірки: база спільна для колекції, а
 /// процедура працює з партицією цілком — чужий документ у тому самому
 /// періоді зробив би асерти на кількостях залежними від порядку тестів.
@@ -167,6 +167,49 @@ public sealed class RestoreYearTests(SqlServerFixture sql)
         var run = await LastRunAsync(doc.ProjectId);
         Assert.Equal(("FromArchive", "Completed"), (run.Direction, run.Status));
     }
+
+    /// <summary>D4 аудиту: позначка осиротілого рядка переживає архів і повернення.</summary>
+    /// <remarks>
+    /// Раніше `arc.TableRow` не мав `IsOrphaned`, розархівація писала 0, і
+    /// осиротілий рядок переставав блокувати подання (ECR-SUB-4221).
+    /// Мутаційний доказ: прибрати `IsOrphaned` з вставки `usp_ArchiveYear` —
+    /// червоніє читання з архіву; повернути `0` замість `a.IsOrphaned` у
+    /// `usp_RestoreYear` — червоніє перевірка після відновлення.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Архівація_і_розархівація_зберігають_IsOrphaned_рядка()
+    {
+        const int period = 202711;
+        var doc = await DocumentAsync(period);
+        await CellAsync(doc, 0, 1, 1m);
+
+        await ExecuteAsync(
+            $"UPDATE doc.TableRow SET IsOrphaned = CASE WHEN Id = {doc.RowIds[0]} THEN 1 ELSE 0 END "
+            + $"WHERE PeriodKey = {period} AND TableInstanceId = {doc.TableInstanceId}");
+
+        await ArchiveAsync(doc.ProjectId, period, period);
+
+        // Читання з архіву показує позначку, а не жорсткий `false`.
+        await using (var db = sql.CreateContext())
+        {
+            var flags = await new ArchiveAwareCellReader(db)
+                .ReadArchivedOrphanFlagsAsync(doc.TableInstanceId, doc.PeriodKey, default);
+            Assert.True(flags.Single(f => f.Id == doc.RowIds[0]).IsOrphaned);
+            Assert.False(flags.Single(f => f.Id == doc.RowIds[1]).IsOrphaned);
+        }
+
+        await RestoreAsync(doc.ProjectId, period, period);
+
+        Assert.True(await OrphanAsync(period, doc.RowIds[0]));
+        Assert.False(await OrphanAsync(period, doc.RowIds[1]));
+    }
+
+    private async Task<bool> OrphanAsync(int period, long rowId)
+        => await ScalarAsync<int>(
+            $"SELECT CAST(IsOrphaned AS int) FROM doc.TableRow WHERE PeriodKey = {period} AND Id = {rowId}")
+            .ConfigureAwait(false) == 1;
 
     private async Task<TestDocument> DocumentAsync(int periodKey)
     {

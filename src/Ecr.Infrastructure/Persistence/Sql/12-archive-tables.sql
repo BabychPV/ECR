@@ -172,3 +172,11 @@ GO
 IF COL_LENGTH(N'arc.CalculationStep', N'SubstanceEntryId') IS NULL
     ALTER TABLE arc.CalculationStep ADD SubstanceEntryId int NULL;
 GO
+
+-- D4 аудиту: позначка осиротілого рядка (`doc.TableRow.IsOrphaned`). Без неї
+-- архівування+відновлення скидало прапорець у 0, і осиротілі рядки переставали
+-- блокувати подання (ECR-SUB-4221). Копіюють `usp_ArchiveYear`/`usp_RestoreYear`.
+IF COL_LENGTH(N'arc.TableRow', N'IsOrphaned') IS NULL
+    ALTER TABLE arc.TableRow
+        ADD IsOrphaned bit NOT NULL CONSTRAINT DF_arc_TableRow_Orph DEFAULT (0);
+GO
