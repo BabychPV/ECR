@@ -240,3 +240,46 @@ describe('createListCellEditor — як його бачить RevoGrid', () => {
     expect(save).toHaveBeenCalledWith('', false);
   });
 });
+
+describe('mountListEditor — перф пошуку', () => {
+  /**
+   * Варіанти, що рахують кожне читання `label`. Запит нижче не збігається ні з
+   * чим, тож рядки списку не малюються, і читає `label` лише побудова
+   * haystack — одне читання на варіант за побудову.
+   */
+  function countedOptions(size: number): { options: readonly ListOption[]; reads: () => number } {
+    let reads = 0;
+    const options: ListOption[] = [{ value: null, label: '(clear)' }];
+    for (let index = 0; index < size; index += 1) {
+      options.push({
+        value: String(index),
+        get label(): string {
+          reads += 1;
+          return `Entry ${String(index)}`;
+        },
+      });
+    }
+
+    return { options, reads: () => reads };
+  }
+
+  it('два натискання поспіль з тими самими варіантами — haystack будується один раз', () => {
+    const { options, reads } = countedOptions(100);
+    const { input } = mountListEditor(host(), {
+      options, selected: null, initialQuery: '', ariaLabel: 'Source', onCommit: vi.fn(),
+    });
+
+    // Порожній пошук малює перші варіанти — це не пошук, лічимо від нуля.
+    const baseline = reads();
+
+    type(input, 'z');
+    const afterFirst = reads() - baseline;
+    type(input, 'zz');
+    const afterSecond = reads() - baseline;
+
+    expect(afterFirst).toBe(100);
+    // ⛔ Мутаційний доказ: поверни `props.options.filter((o) => o.value !== null)`
+    // на кожне натискання — масив новий, `WeakMap` не влучає, стане 200.
+    expect(afterSecond).toBe(100);
+  });
+});

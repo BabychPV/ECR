@@ -189,7 +189,7 @@ export function mountListEditor(host: HTMLElement, props: MountListEditorProps):
     const matched =
       input.value.trim().length === 0
         ? props.options
-        : filterOptions(props.options.filter((option) => option.value !== null), input.value);
+        : filterOptions(withoutClear(props.options), input.value);
     shown = matched.slice(0, MaxShownOptions);
 
     const items: HTMLLIElement[] = shown.map((option, index) => {
@@ -338,6 +338,25 @@ export function filterOptions(options: readonly ListOption[], query: string): re
 }
 
 const haystackCache = new WeakMap<readonly ListOption[], readonly string[]>();
+
+const withoutClearCache = new WeakMap<readonly ListOption[], readonly ListOption[]>();
+
+/**
+ * Варіанти без «Очистити» (`value: null`) — той самий масив на ті самі
+ * варіанти.
+ *
+ * ⚠ Перф: новий масив на кожне натискання робив `haystackCache` (ключ — масив)
+ * марним — нижній регістр 50 000 записів рахувався наново на кожен символ.
+ */
+function withoutClear(options: readonly ListOption[]): readonly ListOption[] {
+  const known = withoutClearCache.get(options);
+  if (known !== undefined) return known;
+
+  const filtered = options.filter((option) => option.value !== null);
+  withoutClearCache.set(options, filtered);
+
+  return filtered;
+}
 
 function haystacksOf(options: readonly ListOption[]): readonly string[] {
   const known = haystackCache.get(options);
