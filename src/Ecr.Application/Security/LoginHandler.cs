@@ -320,7 +320,11 @@ public sealed partial class LoginHandler(
     }
 
     /// <summary>Відмова заблокованому запису: причина — лічильник спроб чи адміністратор.</summary>
-    private static BusinessRuleException Locked(User user)
+    /// <remarks>
+    /// ⚠ <c>internal</c>: ту саму відмову дає і зміна пароля (S9) — блокування
+    /// одне, і форма відмови про нього теж має бути одна.
+    /// </remarks>
+    internal static BusinessRuleException Locked(User user)
         => user.IsLockedByAdministrator
             ? new BusinessRuleException(
                 "ECR-AUTH-0423", "Обліковий запис заблоковано адміністратором.",

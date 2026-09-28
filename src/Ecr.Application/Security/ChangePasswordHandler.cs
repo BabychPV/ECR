@@ -19,6 +19,9 @@ public sealed class ChangePasswordHandler(
     ICurrentUser currentUser,
     IClock clock)
 {
+    /// <summary>Тип події аудиту: хибний чинний пароль при зміні пароля (S9).</summary>
+    public const string PasswordChangeFailedEvent = "PasswordChangeFailed";
+
     /// <summary>Змінює пароль поточного користувача.</summary>
     /// <param name="currentPassword">Чинний пароль.</param>
     /// <param name="newPassword">Новий пароль.</param>
@@ -44,17 +47,48 @@ public sealed class ChangePasswordHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0403.domainPassword" });
         }
 
+        var now = clock.UtcNow;
+
+        // ⛔ S9: заблокований запис не перевіряє пароль і тут — блокування одне
+        // на вхід і на зміну пароля. Інакше сеанс, що лишився відкритим,
+        // продовжував би підбір чинного пароля повз блокування (ФВ-6.4a).
+        if (user.IsLockedOut(now))
+        {
+            throw LoginHandler.Locked(user);
+        }
+
+        var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
+
         // ⚠ Чинний пароль перевіряється НАВІТЬ при MustChangePassword. Інакше
         // будь-хто, хто дістався до сесії з разовим паролем, змінив би його на
         // свій — і законний власник залишився б без доступу.
         if (user.PasswordHash is null || !hasher.Verify(currentPassword, user.PasswordHash))
         {
+            // ⛔ S9: хибний чинний пароль — це невдала спроба, як і на вході,
+            // і рахується ТИМ САМИМ атомарним лічильником. Без цього відкритий
+            // сеанс (залишений браузер, викрадена cookie) давав необмежений
+            // підбір пароля, якого блокування входу не бачило.
+            var outcome = await users.RegisterFailedAttemptAsync(
+                user.Id, policy.MaxFailedAttempts, policy.LockoutMinutes, now, ct).ConfigureAwait(false);
+
+            // ⛔ Подія-СПРОБА (C4): лишається в журналі незалежно від того,
+            // чим скінчиться запит. У деталях — лише категорія, без пароля
+            // (ФВ-6.11).
+            await audit.WriteIndependentSecurityEventAsync(
+                new SecurityEventRecord(
+                    now,
+                    PasswordChangeFailedEvent,
+                    TargetUserId: user.Id,
+                    TargetRoleId: null,
+                    DetailsJson: outcome.LockedNow ? """{"reason":"LockedOut"}""" : """{"reason":"BadPassword"}""",
+                    ChangedByUserId: user.Id,
+                    CorrelationId: currentUser.CorrelationId),
+                ct).ConfigureAwait(false);
+
             throw new AccessDeniedException(
                 "ECR-AUTH-0401", "Чинний пароль не підходить.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.currentPasswordWrong" });
         }
-
-        var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
         if (newPassword is null || newPassword.Length < policy.MinLength)
         {
             // ⚠ Код ОКРЕМИЙ від «пароль треба змінити» (`P-01`). Спільний
@@ -79,8 +113,6 @@ public sealed class ChangePasswordHandler(
         // SetPassword знімає прапорець і крутить SecurityStamp, тому всі інші
         // сесії стають недійсними негайно.
         user.SetPassword(hasher.Hash(newPassword));
-
-        var now = clock.UtcNow;
 
         // ⛔ C4: подія й новий хеш — одним комітом.
         await uow.ExecuteInTransactionAsync(
