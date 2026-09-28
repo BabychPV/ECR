@@ -282,7 +282,7 @@ public sealed class ImportDiffBuilder
                 // (його порушення лишається відмовою). Округлене значення
                 // видно в прев'ю як «нове», і воно ж — те, що буде записано й
                 // потрапить у журнал.
-                return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
+                return ReadNumber(cell, text) is { } number
                     ? decimal.Round(number, CellValueReader.StorageScale, MidpointRounding.AwayFromZero)
                     : text;
 
@@ -336,6 +336,43 @@ public sealed class ImportDiffBuilder
             default:
                 return text;
         }
+    }
+
+    /// <summary>Число з комірки дробової колонки; <c>null</c> — не число.</summary>
+    /// <remarks>
+    /// ⛔ Аудит `C1`. Числова комірка береться ЧИСЛОМ, не через
+    /// <c>cell.GetString()</c>: той форматує <c>double</c> ПОТОЧНОЮ культурою, і
+    /// на сервері з uk-UA 12.5 ставало «12,5», а розбір під Invariant з
+    /// <c>AllowThousands</c> читав кому як роздільник тисяч — у базу йшло 125.
+    ///
+    /// ⚠ Не <c>(decimal)double</c>: той округлює до 15 значущих цифр, а Excel
+    /// зберігає 17. Круговий <c>"R"</c> під Invariant дає найкоротший рядок, що
+    /// повертає рівно той самий <c>double</c>, — тобто те саме, що доти давав
+    /// текстовий шлях на сервері з крапкою, лише без залежності від культури.
+    /// Для нього потрібен <c>AllowExponent</c>: 0.00001 — це «1E-05».
+    ///
+    /// ⚠ Текстова комірка лишається на розборі тексту, і до
+    /// <c>NumberStyles.Number</c> додано <c>AllowExponent</c>: «1E-05», набране
+    /// текстом, — однозначне число, а відмова на ньому — хибна.
+    /// </remarks>
+    private static decimal? ReadNumber(IXLCell cell, string text)
+    {
+        if (cell.DataType == XLDataType.Number)
+        {
+            var raw = cell.GetDouble();
+
+            return double.IsFinite(raw)
+                   && decimal.TryParse(
+                       raw.ToString("R", CultureInfo.InvariantCulture),
+                       NumberStyles.Float, CultureInfo.InvariantCulture, out var exact)
+                ? exact
+                : null;
+        }
+
+        return decimal.TryParse(
+            text, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
     }
 
     /// <summary>Чи рахує комірки цієї колонки система — за ЖИВИМ визначенням.</summary>
