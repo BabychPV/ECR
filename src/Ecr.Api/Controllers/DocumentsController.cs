@@ -191,7 +191,9 @@ public sealed class DocumentsController(
     /// </summary>
     [HttpPatch("{id:long}/header")]
     [ProducesResponseType<DocumentHeaderDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<DocumentHeaderDto>> PatchHeader(
         long id, [FromBody] PatchDocumentHeaderRequest request, CancellationToken ct)

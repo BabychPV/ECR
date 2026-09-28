@@ -69,10 +69,15 @@ public sealed class HeaderScenarios(SqlServerFixture sql)
             .First(f => f.GetProperty("code").GetString() == "Area");
         Assert.Equal(JsonValueKind.Null, beforeField.GetProperty("value").ValueKind);
 
-        // 3. PATCH .../header записує значення шапки документа.
+        // 3. PATCH .../header записує значення шапки документа — з версією,
+        //    яку щойно віддав GET (C2: без неї правка відхиляється).
         var patchHeader = await admin.Client.PatchAsJsonAsync(
             new Uri($"/api/v1/documents/{doc.DocumentId}/header", UriKind.Relative),
-            new { fields = new[] { new { code = "Area", value = (object?)"Kashagan", isEmpty = false } } });
+            new
+            {
+                fields = new[] { new { code = "Area", value = (object?)"Kashagan", isEmpty = false } },
+                baseVersion = beforeBody.GetProperty("version").GetString(),
+            });
         Assert.True(
             patchHeader.StatusCode == HttpStatusCode.OK,
             $"{patchHeader.StatusCode}: {await patchHeader.Content.ReadAsStringAsync()}; {app.ErrorsText}");
@@ -123,7 +128,11 @@ public sealed class HeaderScenarios(SqlServerFixture sql)
 
         var patch = await admin.Client.PatchAsJsonAsync(
             new Uri($"/api/v1/documents/{doc.DocumentId}/header", UriKind.Relative),
-            new { fields = new[] { new { code = "NoSuchField", value = (object?)"x", isEmpty = false } } });
+            new
+            {
+                fields = new[] { new { code = "NoSuchField", value = (object?)"x", isEmpty = false } },
+                baseVersion = "any",
+            });
 
         Assert.Equal(HttpStatusCode.NotFound, patch.StatusCode);
         var body = await patch.Content.ReadFromJsonAsync<JsonElement>();

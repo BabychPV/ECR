@@ -4637,7 +4637,9 @@ USING (VALUES
     (N'grid.batchConfirmBody', N'en', N'{count} cell(s) in this change are outside the allowed editing window and need your confirmation. Apply the whole change?', 1),
     (N'err.ECR-ACCS-0403.confirmationRequired', N'en', N'{confirmationCount} cell(s) in this batch need confirmation before they can be changed. Repeat the change and confirm it.', 1),
     -- D16:C2 — шапка документа: стан, конкурентність (`PatchDocumentHeaderHandler`).
-    (N'err.ECR-ACCS-0403.headerLocked', N'en', N'The document header cannot be changed now. Reason: {reason}.', 1)
+    (N'err.ECR-ACCS-0403.headerLocked', N'en', N'The document header cannot be changed now. Reason: {reason}.', 1),
+    (N'err.ECR-DOC-0409.headerStale', N'en', N'Someone else changed the document header after you opened it. Reload the header and repeat your change.', 1),
+    (N'err.ECR-REQ-0422.headerBaseVersion', N'en', N'The header change must say which version of the header it started from (baseVersion).', 1)
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang

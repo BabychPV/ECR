@@ -21,6 +21,12 @@ vi.mock('@/shared/ui/notify', async (importOriginal) => ({
 
 const DocumentId = 11;
 
+/** Версія шапки з `GET` — її панель зобов'язана повернути в `baseVersion` (C2). */
+const HeaderVersion = 'HDR-V1';
+
+/** Версія після успішного `PATCH`. */
+const SavedVersion = 'HDR-V2';
+
 interface HeaderField {
   code: string;
   dataType: string;
@@ -105,6 +111,9 @@ interface EntriesRequest {
 
 const entriesRequests: EntriesRequest[] = [];
 
+/** Скільки разів панель читала шапку (`GET …/header`). */
+const headerGets = { count: 0 };
+
 function mockServer(
   fields: HeaderField[],
   patchResponse?: { status: number; body?: unknown },
@@ -112,6 +121,7 @@ function mockServer(
 ): void {
   sent.length = 0;
   entriesRequests.length = 0;
+  headerGets.count = 0;
 
   vi.stubGlobal(
     'fetch',
@@ -120,7 +130,8 @@ function mockServer(
       const method = String(init?.method ?? 'GET');
 
       if (url.endsWith(`/api/v1/documents/${String(DocumentId)}/header`) && method === 'GET') {
-        return new Response(JSON.stringify({ fields }), {
+        headerGets.count += 1;
+        return new Response(JSON.stringify({ fields, version: HeaderVersion }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -133,7 +144,7 @@ function mockServer(
           body: init?.body === undefined ? undefined : (JSON.parse(String(init.body)) as unknown),
         });
 
-        const response = patchResponse ?? { status: 200, body: { fields } };
+        const response = patchResponse ?? { status: 200, body: { fields, version: SavedVersion } };
 
         return response.body === undefined
           ? new Response(null, { status: response.status })
@@ -342,9 +353,40 @@ describe('DocumentHeaderPanel: збереження', () => {
     // рядок почервоніє, бо `B` з'явиться в тілі запиту.
     expect(sent[0]?.body).toEqual({
       fields: [{ code: 'A', isEmpty: false, value: 'нова' }],
+      baseVersion: HeaderVersion,
     });
 
     expect(showDone).toHaveBeenCalled();
+  });
+
+  it('409 ECR-DOC-0409: показує причину і перечитує шапку — чернетка стає значенням сервера', async () => {
+    show({
+      fields: [field({ code: 'A', dataType: 'String', value: 'стара' })],
+      patchResponse: {
+        status: 409,
+        body: {
+          title: 'Conflict',
+          status: 409,
+          errorCode: 'ECR-DOC-0409',
+          correlationId: 'cid-hdr-409',
+          detail: 'Someone else changed the document header after you opened it.',
+          messageKey: 'err.ECR-DOC-0409.headerStale',
+        },
+      },
+    });
+
+    const input = await screen.findByLabelText('Label');
+    fireEvent.change(input, { target: { value: 'моя' } });
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Someone else changed the document header');
+
+    // ⛔ Мутаційний доказ: без перечитування після конфлікту панель лишила б
+    // стару версію, і повторне «Зберегти» знову впало б у 409 — або, гірше,
+    // людина не побачила б чужого значення, яке збирається перезаписати.
+    await waitFor(() => expect(headerGets.count).toBe(2));
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe('стара'));
   });
 
   it('непорушене поле без значення НЕ вважається зміненим (порожній текст ≡ null)', async () => {
@@ -385,6 +427,7 @@ describe('DocumentHeaderPanel: збереження', () => {
     await waitFor(() => expect(sent.length).toBe(1));
     expect(sent[0]?.body).toEqual({
       fields: [{ code: 'AMOUNT', isEmpty: false, value: '6' }],
+      baseVersion: HeaderVersion,
     });
   });
 
@@ -479,6 +522,7 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     // цей рядок почервоніє.
     expect(sent[0]?.body).toEqual({
       fields: [{ code: 'UNIT', isEmpty: false, value: 43 }],
+      baseVersion: HeaderVersion,
     });
   });
 
@@ -621,6 +665,9 @@ describe('DocumentHeaderPanel: поле Unit (R-01)', () => {
     fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
 
     await waitFor(() => expect(sent.length).toBe(1));
-    expect(sent[0]?.body).toEqual({ fields: [{ code: 'HUNIT', isEmpty: false, value: 22 }] });
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'HUNIT', isEmpty: false, value: 22 }],
+      baseVersion: HeaderVersion,
+    });
   });
 });

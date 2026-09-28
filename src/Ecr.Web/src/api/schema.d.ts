@@ -2538,8 +2538,30 @@ export interface paths {
                         "text/plain": components["schemas"]["DocumentHeaderDto"];
                     };
                 };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
                 /** @description Not Found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -15733,6 +15755,11 @@ export interface components {
         DocumentHeaderDto: {
             /** @description Поля в порядку `Ordinal`. */
             fields: components["schemas"]["DocumentHeaderFieldDto"][];
+            /** @description Версія значень шапки — її клієнт повертає в `baseVersion` наступного
+             *     `PATCH`. Виводиться зі ЗНАЧЕНЬ (хеш), а не з колонки: у
+             *     `doc.DocumentHeaderValue` немає власного `rowversion`, а
+             *     `doc.Document.RowVersion` змінюється й від правки будь-якої комірки. */
+            version: string;
         };
         /** @description Одне поле шапки документа разом із поточним значенням. */
         DocumentHeaderFieldDto: {
@@ -17382,6 +17409,10 @@ export interface components {
         };
         /** @description Пакетна зміна шапки документа. */
         PatchDocumentHeaderRequest: {
+            /** @description Версія шапки (`version` з `GET …/header`), з якої почалася правка. Обов'язкова:
+             *     розбіжність із чинною — `409 ECR-DOC-0409`, а не мовчазне затирання
+             *     чужої правки (enterprise-аудит, `C2`). */
+            baseVersion: string;
             /** @description Зміни полів; поле, якого немає в списку, не чіпається. */
             fields: components["schemas"]["PatchHeaderField"][];
         };

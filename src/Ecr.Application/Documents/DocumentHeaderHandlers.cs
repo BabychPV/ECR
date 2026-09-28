@@ -42,10 +42,10 @@ public sealed class GetDocumentHeaderHandler(
     }
 }
 
-/// <summary>Збирання відповіді шапки й текст значення для журналу — спільні для <c>GET</c> і <c>PATCH</c>.</summary>
+/// <summary>Версія значень шапки і збирання відповіді — спільні для <c>GET</c> і <c>PATCH</c>.</summary>
 internal static class HeaderVersion
 {
-    /// <summary>Відповідь: усі поля версії шаблону зі значеннями.</summary>
+    /// <summary>Відповідь: усі поля версії шаблону, значення і версія.</summary>
     public static DocumentHeaderDto ToDto(
         TemplateVersionSnapshot snapshot, IReadOnlyDictionary<int, Domain.ValueObjects.DocumentHeaderValueData> values)
     {
@@ -57,7 +57,41 @@ internal static class HeaderVersion
                 f.LookupRegistryDefId))
             .ToList();
 
-        return new DocumentHeaderDto(fields);
+        return new DocumentHeaderDto(fields, Of(values));
+    }
+
+    /// <summary>Версія — хеш збережених значень шапки документа.</summary>
+    /// <remarks>
+    /// ⚠ Хеш ЗНАЧЕНЬ, а не лічильник: окремої колонки версії в
+    /// <c>doc.DocumentHeaderValue</c> немає (міграція поза цією задачею), а
+    /// <c>doc.Document.RowVersion</c> змінюється від кожної правки комірки —
+    /// шапка тоді «конфліктувала б» із сусідом, який її не торкався. Наслідок
+    /// хешу чесний і безпечний: правка, що повернула рівно те саме значення
+    /// (A → B → A), конфліктом не вважається — затирати тут нічого.
+    ///
+    /// ⚠ Рядок кодується з довжиною (<c>7:Kashagan</c>), а число —
+    /// нормалізованим: «12.5» і «12.5000000000000000» — одне значення.
+    /// </remarks>
+    public static string Of(IReadOnlyDictionary<int, Domain.ValueObjects.DocumentHeaderValueData> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        var text = new System.Text.StringBuilder();
+        foreach (var (fieldId, value) in values.OrderBy(pair => pair.Key))
+        {
+            text.Append(fieldId.ToString(CultureInfo.InvariantCulture))
+                .Append('|').Append(value.IsEmpty ? '1' : '0')
+                .Append('|').Append(value.ValueString is { } s ? $"{s.Length.ToString(CultureInfo.InvariantCulture)}:{s}" : "-")
+                .Append('|').Append(value.ValueNumeric is { } n ? Number(n) : "-")
+                .Append('|').Append(value.ValueDate is { } d ? d.ToString("O", CultureInfo.InvariantCulture) : "-")
+                .Append('|').Append(value.ValueBool is { } b ? (b ? "1" : "0") : "-")
+                .Append('|').Append(value.ValueRegistryEntryId?.ToString(CultureInfo.InvariantCulture) ?? "-")
+                .Append('|').Append(value.ValueUnitId?.ToString(CultureInfo.InvariantCulture) ?? "-")
+                .Append('\n');
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString()));
+        return Convert.ToHexString(hash.AsSpan(0, 16));
     }
 
     /// <summary>Значення поля текстом для журналу; <c>null</c> — рядка немає або явна порожнеча.</summary>
@@ -97,8 +131,7 @@ internal static class HeaderVersion
 /// ⛔ C2 (enterprise-аудит коректності). Доти грант був ЄДИНОЮ перевіркою:
 /// шапку поданого чи затвердженого документа правили з <c>200</c>, у
 /// журналі не лишалося нічого, формули з <c>HDR.*</c> не перераховувалися, а
-/// дві правки з однієї версії мовчки затирали одна одну (останнє — окремим
-/// кроком, бо потребує зміни контракту). Тепер:
+/// дві правки з однієї версії мовчки затирали одна одну. Тепер:
 /// <list type="number">
 /// <item><b>Стан</b> — <see cref="EditRules.CanEdit"/>, те саме правило, що
 /// для комірки. Шапка не має ні аркуша, ні періоду й належить документу
@@ -115,6 +148,10 @@ internal static class HeaderVersion
 /// на кожен період, куди перерахунок має право писати: <c>HDR.*</c> читають і
 /// формули шаблону (<c>RecalculationService</c>), і методології, а насіння
 /// «змінена комірка» в шапки немає.</item>
+/// <item><b>Конкурентність</b> — обов'язкова <c>baseVersion</c> проти
+/// <see cref="HeaderVersion.Of"/>, звірена ПІД <c>UPDLOCK</c> на рядку
+/// документа: дві одночасні правки з однієї версії — одна <c>200</c>, друга
+/// <c>409</c>.</item>
 /// </list>
 /// </remarks>
 public sealed class PatchDocumentHeaderHandler(
@@ -140,7 +177,12 @@ public sealed class PatchDocumentHeaderHandler(
     /// Анонімний запит; немає гранта на запис у проєкт документа; або стан документа
     /// правку не допускає — <c>ECR-ACCS-0403</c> з <c>reason</c> від <see cref="EditRules"/>.
     /// </exception>
-    /// <exception cref="BusinessRuleException">Значення не відповідає типу чи обов'язковості поля.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Значення не відповідає типу чи обов'язковості поля; або немає <c>baseVersion</c>.
+    /// </exception>
+    /// <exception cref="ConcurrencyConflictException">
+    /// <c>baseVersion</c> застаріла — <c>ECR-DOC-0409</c>.
+    /// </exception>
     public async Task<DocumentHeaderDto> HandleAsync(
         long documentId, PatchDocumentHeaderRequest request, CancellationToken ct)
     {
@@ -174,6 +216,14 @@ public sealed class PatchDocumentHeaderHandler(
                     ["messageKey"] = "err.ECR-AUTH-0403.noProjectWriteGrant",
                     ["projectId"] = document.ProjectId.ToString(CultureInfo.InvariantCulture),
                 });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.BaseVersion))
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.RequestInvalid,
+                "Запит на зміну шапки має нести baseVersion — версію, з якої почалася правка.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422.headerBaseVersion" });
         }
 
         var project = await periods.FindProjectAsync(document.ProjectId, ct).ConfigureAwait(false)
@@ -235,7 +285,7 @@ public sealed class PatchDocumentHeaderHandler(
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
             changed = await PersistAsync(
-                documentId, project, profile, toSave, codeById, userId, innerCt)
+                documentId, project, profile, request.BaseVersion, toSave, codeById, userId, innerCt)
                 .ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
@@ -258,17 +308,24 @@ public sealed class PatchDocumentHeaderHandler(
     /// ⛔ Порядок блокувань — той самий, що в <see cref="ChangeDocumentKeyHandler"/>:
     /// спершу рядок документа (<c>UPDLOCK</c>), потім стани аркушів
     /// (<c>UPDLOCK, HOLDLOCK</c> по <c>DocumentId</c>). Перше серіалізує дві
-    /// правки шапки між собою; друге не дає
+    /// правки шапки між собою (звірка версії й запис — атомарні); друге не дає
     /// паралельному поданню вставити чи змінити стан аркуша, доки правка не
     /// зафіксована, — тобто подання або бачить уже нову шапку, або правка бачить
     /// уже поданий аркуш і відмовляє. Правкам комірок ні те, ні те не заважає:
     /// вони не пишуть <c>wf.ApprovalState</c>, а рядок документа «торкають»
     /// коротко.
+    ///
+    /// ⚠ Дві правки шапки серіалізує й друге блокування саме (діапазон
+    /// <c>HOLDLOCK</c> по <c>DocumentId</c>): мутація «без <c>UPDLOCK</c> на
+    /// документі» лишила одночасний тест зеленим, «без обох» — червоним.
+    /// Перше лишається свідомо: воно не залежить від того, чи є в документа
+    /// рядки стану й індекс під діапазон, і тримає той самий порядок, що й зміна ключа.
     /// </remarks>
     private async Task<int> PersistAsync(
         long documentId,
         Domain.Entities.Documents.Project project,
         AccessProfile profile,
+        string baseVersion,
         Dictionary<int, Domain.ValueObjects.DocumentHeaderValueData> requested,
         Dictionary<int, string> codeById,
         int userId,
@@ -281,8 +338,20 @@ public sealed class PatchDocumentHeaderHandler(
 
         // ⚠ Читання ПІСЛЯ блокування: під RCSI знімок береться на початку
         // оператора, тож цей оператор бачить правку, яка зафіксувалася, поки
-        // ми чекали на UPDLOCK, — і «старе значення» в журналі правдиве.
+        // ми чекали на UPDLOCK.
         var current = await headers.GetValuesAsync(documentId, ct).ConfigureAwait(false);
+        var actual = HeaderVersion.Of(current);
+        if (!string.Equals(actual, baseVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConcurrencyConflictException(
+                ErrorCodes.DocumentSubmitted,
+                $"Шапку документа {documentId} змінили після того, як її прочитали.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0409.headerStale",
+                    ["version"] = actual,
+                });
+        }
 
         // ⚠ Лише справді змінені поля: запис «того самого» не лишає ні рядка
         // в журналі, ні перерахунку, ні нової дати зміни документа.

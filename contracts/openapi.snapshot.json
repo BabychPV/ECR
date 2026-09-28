@@ -2976,10 +2976,15 @@
               "$ref": "#/components/schemas/DocumentHeaderFieldDto"
             },
             "type": "array"
+          },
+          "version": {
+            "description": "Версія значень шапки — її клієнт повертає в `baseVersion` наступного\n`PATCH`. Виводиться зі ЗНАЧЕНЬ (хеш), а не з колонки: у\n`doc.DocumentHeaderValue` немає власного `rowversion`, а\n`doc.Document.RowVersion` змінюється й від правки будь-якої комірки.",
+            "type": "string"
           }
         },
         "required": [
-          "fields"
+          "fields",
+          "version"
         ],
         "type": "object"
       },
@@ -6548,6 +6553,10 @@
       "PatchDocumentHeaderRequest": {
         "description": "Пакетна зміна шапки документа.",
         "properties": {
+          "baseVersion": {
+            "description": "Версія шапки (`version` з `GET …/header`), з якої почалася правка. Обов'язкова:\nрозбіжність із чинною — `409 ECR-DOC-0409`, а не мовчазне затирання\nчужої правки (enterprise-аудит, `C2`).",
+            "type": "string"
+          },
           "fields": {
             "description": "Зміни полів; поле, якого немає в списку, не чіпається.",
             "items": {
@@ -6557,7 +6566,8 @@
           }
         },
         "required": [
-          "fields"
+          "fields",
+          "baseVersion"
         ],
         "type": "object"
       },
@@ -16629,6 +16639,26 @@
             },
             "description": "OK"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -16648,6 +16678,26 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

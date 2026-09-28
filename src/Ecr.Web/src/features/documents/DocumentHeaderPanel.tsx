@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Select, Stack, TextInput, Title } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { apiFetch, EcrApiError } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type { components } from '@/api/schema';
 import type { RegistryDefDto, RegistryEntryDto, UnitRef } from '@/api/types';
@@ -69,15 +69,21 @@ function documentHeader(documentId: number): Promise<DocumentHeaderDto> {
 /**
  * Запис шапки: `PATCH /api/v1/documents/{id}/header` — грант `Write` на
  * проєкт документа, без окремого функціонального права (як `PATCH …/cells`).
+ *
+ * ⛔ `baseVersion` — версія з ТОГО `GET`, на якому людина правила (C2). Без неї
+ * сервер відмовляє `422`, а із застарілою — `409 ECR-DOC-0409`: дві правки
+ * шапки більше не затирають одна одну мовчки.
  */
 function patchDocumentHeader(
   documentId: number,
   fields: readonly PatchHeaderField[],
+  baseVersion: string,
 ): Promise<DocumentHeaderDto> {
   return apiFetch<DocumentHeaderDto>(`/api/v1/documents/${String(documentId)}/header`, {
     method: 'PATCH',
     body: JSON.stringify({
       fields: [...fields],
+      baseVersion,
     } satisfies components['schemas']['PatchDocumentHeaderRequest']),
   });
 }
@@ -363,11 +369,21 @@ export function DocumentHeaderPanel({
   }
 
   const save = useMutation({
-    mutationFn: (fields: readonly PatchHeaderField[]) => patchDocumentHeader(documentId, fields),
+    mutationFn: (fields: readonly PatchHeaderField[]) =>
+      patchDocumentHeader(documentId, fields, header.data?.version ?? ''),
     onSuccess: (result) => {
       queryClient.setQueryData(['document-header', documentId], result);
       setDraft(draftOf(fieldsOf(result)));
       showDone(t('document.header.saved'));
+    },
+    onError: async (error) => {
+      // ⛔ Шапку змінив хтось інший (`409`): перечитати й показати ЧИННІ
+      // значення, а не лишити чернетку поверх чужих — інакше повторне
+      // «Зберегти» з новою версією перезаписало б те, чого людина не бачила.
+      if (error instanceof EcrApiError && error.problem.status === 409) {
+        const fresh = await header.refetch();
+        if (fresh.data !== undefined) setDraft(draftOf(fieldsOf(fresh.data)));
+      }
     },
   });
 

@@ -38,11 +38,22 @@ public sealed record DocumentHeaderFieldDto(
 
 /// <summary>Шапка документа: усі поля версії шаблону з поточними значеннями.</summary>
 /// <param name="Fields">Поля в порядку <c>Ordinal</c>.</param>
-public sealed record DocumentHeaderDto(IReadOnlyList<DocumentHeaderFieldDto> Fields);
+/// <param name="Version">
+/// Версія значень шапки — її клієнт повертає в <c>baseVersion</c> наступного
+/// <c>PATCH</c>. Виводиться зі ЗНАЧЕНЬ (хеш), а не з колонки: у
+/// <c>doc.DocumentHeaderValue</c> немає власного <c>rowversion</c>, а
+/// <c>doc.Document.RowVersion</c> змінюється й від правки будь-якої комірки.
+/// </param>
+public sealed record DocumentHeaderDto(IReadOnlyList<DocumentHeaderFieldDto> Fields, string Version);
 
 /// <summary>Пакетна зміна шапки документа.</summary>
 /// <param name="Fields">Зміни полів; поле, якого немає в списку, не чіпається.</param>
-public sealed record PatchDocumentHeaderRequest(IReadOnlyList<PatchHeaderField> Fields);
+/// <param name="BaseVersion">
+/// Версія шапки (<c>version</c> з <c>GET …/header</c>), з якої почалася правка. Обов'язкова:
+/// розбіжність із чинною — <c>409 ECR-DOC-0409</c>, а не мовчазне затирання
+/// чужої правки (enterprise-аудит, <c>C2</c>).
+/// </param>
+public sealed record PatchDocumentHeaderRequest(IReadOnlyList<PatchHeaderField> Fields, string BaseVersion);
 
 /// <summary>
 /// Зміна одного поля шапки. Той самий контракт, що <c>PatchCell</c> (R-B4):
