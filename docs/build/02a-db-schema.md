@@ -1588,6 +1588,12 @@ CREATE TABLE calc.MethodologyFormula
     -- Порядок НЕ зберігається: він топологічний і рахується при Publish (ФВ-9.4).
     -- Це поле — результат обчислення, а не введення користувача.
     EvaluationOrder       int            NOT NULL CONSTRAINT DF_MF_Order DEFAULT(0),
+    -- HSE301M3 (D-176, V-7): область формули — 0 Substance (на кожну речовину,
+    -- поведінка до колонки), 1 Row (раз на рядок, до циклу речовин).
+    Scope                 tinyint        NOT NULL CONSTRAINT DF_MF_Scope DEFAULT(0),   -- MethodologyFormulaScope
+    -- HSE301M3 (D-175, V-6): показувати значення як проміжний результат —
+    -- рядок calc.CalculationResult з Kind = 1.
+    IsVisible             bit            NOT NULL CONSTRAINT DF_MF_Visible DEFAULT(0),
     CONSTRAINT PK_MethodologyFormula PRIMARY KEY (Id),
     CONSTRAINT UQ_MethodologyFormula UNIQUE (MethodologyVersionId, Code),
     CONSTRAINT FK_MF_Version FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
@@ -1673,6 +1679,9 @@ CREATE TABLE calc.MethodologyOutput
     Code                 nvarchar(64) NOT NULL,   -- 'tons', 'gsec'
     UnitId               int          NOT NULL,
     Ordinal              int          NOT NULL,
+    -- HSE301M3 (D-176, V-7): 1 — на кожну речовину (поведінка до колонки),
+    -- 0 — раз на рядок без речовини (M_t, парникові гази HSE301.FLARE).
+    IsPerSubstance       bit          NOT NULL CONSTRAINT DF_MO_PerSub DEFAULT(1),
     CONSTRAINT PK_MethodologyOutput PRIMARY KEY (Id),
     CONSTRAINT UQ_MethodologyOutput UNIQUE (MethodologyVersionId, Code),
     CONSTRAINT FK_MO_Version FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
@@ -1723,6 +1732,9 @@ CREATE TABLE calc.CalculationResult
     OutputCode           nvarchar(64)   NOT NULL,
     Value                decimal(34,16) NOT NULL,   -- float заборонений (D-30); 16 знаків — D-148
     UnitId               int            NOT NULL,
+    -- HSE301M3 (D-175, V-6): 0 Output — оголошений вихід; 1 Intermediate —
+    -- значення видимої формули (OutputCode = код формули). rpt.* бере лише 0.
+    Kind                 tinyint        NOT NULL CONSTRAINT DF_CRes_Kind DEFAULT(0),   -- CalculationResultKind
     CONSTRAINT PK_CalculationResult PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CRes_Run    FOREIGN KEY (CalculationRunId)     REFERENCES calc.CalculationRun (Id),
     CONSTRAINT FK_CRes_MV     FOREIGN KEY (MethodologyVersionId) REFERENCES calc.MethodologyVersion (Id),
@@ -1770,6 +1782,15 @@ CREATE TABLE calc.CalculationStep
     Expression       nvarchar(2000) NULL,
     Value            decimal(34,16) NULL,
     TraceJson        nvarchar(max)  NULL,
+    -- H-24d-1: чому значення стало нулем (MaskedZeroReason); окрема колонка, щоб
+    -- такі кроки можна було перелічити фільтрованим IX_CStep_Masked.
+    MaskedZero       tinyint        NOT NULL DEFAULT(0),
+    -- HSE301M3: адреса кроку — трейс на комірку (FEATURE-HSE301-VIEW §7.1).
+    -- Типи як у calc.CalculationResult, щоб крок і результат з'єднувалися без
+    -- перетворень. NULL — крок до міграції або без адреси.
+    DocumentId       bigint         NULL,
+    SourceRowKey     nvarchar(100)  NULL,
+    SubstanceEntryId int            NULL,
     CONSTRAINT PK_CalculationStep PRIMARY KEY CLUSTERED (PeriodKey, Id) ON ps_ByPeriodKey(PeriodKey),
     CONSTRAINT FK_CStep_Run FOREIGN KEY (CalculationRunId) REFERENCES calc.CalculationRun (Id)
 ) ON ps_ByPeriodKey(PeriodKey);
@@ -2963,6 +2984,7 @@ CREATE TABLE arc.CalculationResult
     OutputCode           nvarchar(64)   NOT NULL,
     Value                decimal(34,16) NOT NULL,
     UnitId               int            NOT NULL,
+    Kind                 tinyint        NOT NULL CONSTRAINT DF_arc_CRes_Kind DEFAULT (0),  -- HSE301M3
     INDEX CCI_arc_CalculationResult CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
 GO
@@ -2978,9 +3000,21 @@ CREATE TABLE arc.CalculationStep
     Expression       nvarchar(2000) NULL,
     Value            decimal(34,16) NULL,
     TraceJson        nvarchar(max)  NULL,
+    MaskedZero       tinyint        NOT NULL CONSTRAINT DF_arc_CStep_Masked DEFAULT (0),
+    DocumentId       bigint         NULL,                                              -- HSE301M3
+    SourceRowKey     nvarchar(100)  NULL,                                              -- HSE301M3
+    SubstanceEntryId int            NULL,                                              -- HSE301M3
     INDEX CCI_arc_CalculationStep CLUSTERED COLUMNSTORE
 ) ON [DATA_ARCHIVE];
 GO
+
+-- ⚠ Колонки, що з'явилися в calc.* після першого розгортання (Kind, MaskedZero,
+-- адреса кроку), у 12-archive-tables.sql додаються не в CREATE TABLE, а окремими
+-- `IF COL_LENGTH(...) IS NULL ALTER TABLE … ADD` — CREATE на розгорнутій базі не
+-- виконується. Дзеркало стереже ArchiveMirrorTests (кожна колонка
+-- calc.CalculationResult / calc.CalculationStep має двійника того самого типу).
+-- ⚠ arc.usp_ArchiveYear (03-archive-proc.sql) переносить лише doc.*; calc.* у
+-- архів поки не копіює жодна процедура.
 ```
 
 ---

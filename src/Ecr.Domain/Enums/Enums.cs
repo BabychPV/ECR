@@ -696,3 +696,37 @@ public enum RegistryCodeMode : byte
     /// <summary>Код видає послідовність <c>dic.RegistryEntryCodeSeq</c>.</summary>
     Auto = 1,
 }
+
+/// <summary>
+/// Область формули методології (<c>D-176</c>, V-7 FEATURE-HSE301-VIEW §6.1).
+/// </summary>
+/// <remarks>
+/// ⛔ <see cref="Substance"/> — нуль, і це не порядок оголошення, а вся суть
+/// кроку: наявні формули й кожна нова без явної області поводяться рівно так,
+/// як до появи колонки, — рахуються на кожну речовину.
+/// </remarks>
+public enum MethodologyFormulaScope : byte
+{
+    /// <summary>Рахується на кожну речовину методології — поведінка до <c>D-176</c>.</summary>
+    Substance = 0,
+
+    /// <summary>Рахується один раз на рядок, до циклу речовин.</summary>
+    Row = 1,
+}
+
+/// <summary>
+/// Вид рядка <c>calc.CalculationResult</c> (<c>D-175</c>, V-6 FEATURE-HSE301-VIEW §7.1).
+/// </summary>
+/// <remarks>
+/// ⛔ <see cref="Output"/> — нуль: наявні результати — оголошені виходи, і
+/// зрізи <c>rpt.*</c> беруть лише їх. Проміжне значення, яке без цього поля
+/// потрапило б у зріз, змінило б його <c>ContentHash</c> (D-53).
+/// </remarks>
+public enum CalculationResultKind : byte
+{
+    /// <summary>Оголошений вихід методології.</summary>
+    Output = 0,
+
+    /// <summary>Значення видимої формули — проміжний результат.</summary>
+    Intermediate = 1,
+}

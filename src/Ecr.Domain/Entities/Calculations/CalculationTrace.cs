@@ -128,6 +128,43 @@ public sealed class CalculationStep : Entity<long>
     /// </remarks>
     public Enums.MaskedZeroReason Masked { get; private set; }
 
+    /// <summary>Документ, до комірки якого належить крок; <c>null</c> — адреси немає.</summary>
+    /// <remarks>
+    /// ⚠ Адреса (<see cref="DocumentId"/>, <see cref="SourceRowKey"/>,
+    /// <see cref="SubstanceEntryId"/>) — те, за чим трейс знаходять із комірки
+    /// (FEATURE-HSE301-VIEW §7.1). Наявні кроки лишаються без неї: до цього поля
+    /// крок знав лише прогін, і вигадати йому адресу заднім числом нема з чого.
+    /// </remarks>
+    public long? DocumentId { get; private set; }
+
+    /// <summary>Рядок документа за КЛЮЧЕМ, як у <see cref="CalculationResult.SourceRowKey"/>.</summary>
+    public string? SourceRowKey { get; private set; }
+
+    /// <summary>Речовина кроку; <c>null</c> — крок Row-формули або без речовини.</summary>
+    public long? SubstanceEntryId { get; private set; }
+
+    /// <summary>Задає адресу кроку: документ, рядок і речовину.</summary>
+    /// <param name="documentId">Документ; <c>null</c> — адреси немає.</param>
+    /// <param name="sourceRowKey">Ключ рядка; <c>null</c> — рівень таблиці.</param>
+    /// <param name="substanceEntryId">Речовина; <c>null</c> — без речовини.</param>
+    /// <exception cref="ArgumentException">Рядок чи речовина без документа.</exception>
+    /// <remarks>
+    /// ⛔ Рядок і речовина без документа — не адреса: ключ рядка унікальний лише
+    /// в межах документа, і такий крок показався б у чужій комірці.
+    /// </remarks>
+    public void SetAddress(long? documentId, string? sourceRowKey, long? substanceEntryId)
+    {
+        if (documentId is null && (sourceRowKey is not null || substanceEntryId is not null))
+        {
+            throw new ArgumentException(
+                "Рядок чи речовина кроку трейсу без документа — не адреса.", nameof(documentId));
+        }
+
+        DocumentId = documentId;
+        SourceRowKey = sourceRowKey;
+        SubstanceEntryId = substanceEntryId;
+    }
+
     /// <summary>Записує деталі кроку.</summary>
     /// <param name="expression">Вираз.</param>
     /// <param name="value">Значення.</param>

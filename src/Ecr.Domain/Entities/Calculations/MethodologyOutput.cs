@@ -36,6 +36,21 @@ public sealed class MethodologyOutput : Entity<int>
     /// </remarks>
     public int Ordinal { get; private set; }
 
+    /// <summary>
+    /// Вихід пишеться на кожну речовину (<c>true</c>) чи раз на рядок без
+    /// речовини (<c>false</c>) — <c>D-176</c>, V-7.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Типове — <c>true</c>: так рушій пише кожен вихід сьогодні. Інакше
+    /// Row-величини на кшталт <c>M_t</c> лягли б у результати N разів, по
+    /// одному на речовину, і сума по них дала б N-кратне число.
+    /// </remarks>
+    public bool IsPerSubstance { get; private set; } = true;
+
+    /// <summary>Оголошує, чи вихід пишеться на кожну речовину.</summary>
+    /// <param name="isPerSubstance"><c>false</c> — раз на рядок, без речовини.</param>
+    public void SetPerSubstance(bool isPerSubstance) => IsPerSubstance = isPerSubstance;
+
     /// <summary>Переписує одиницю й порядок наявного виходу.</summary>
     /// <param name="unitId">Нова одиниця результату.</param>
     /// <param name="ordinal">Новий порядок у переліку.</param>
