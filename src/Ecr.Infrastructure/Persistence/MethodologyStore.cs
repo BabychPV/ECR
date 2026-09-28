@@ -7,8 +7,21 @@ using Microsoft.EntityFrameworkCore;
 namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="IMethodologyStore"/> над <see cref="EcrDbContext"/>.</summary>
-public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
+/// <param name="db">Контекст бази.</param>
+/// <param name="constantCap">
+/// Стеля констант однієї версії (<see cref="GetConstantsAsync"/>). Параметр —
+/// лише щоб тест міг перевірити відмову на малій стелі; продукт іде через
+/// конструктор з одним параметром і бере <see cref="MaxChildren"/>.
+/// </param>
+public sealed class MethodologyStore(EcrDbContext db, int constantCap) : IMethodologyStore
 {
+    /// <summary>Сховище зі стелею констант за замовчуванням.</summary>
+    /// <param name="db">Контекст бази.</param>
+    public MethodologyStore(EcrDbContext db)
+        : this(db, MaxChildren)
+    {
+    }
+
     /// <summary>
     /// Стеля вибірки дочірніх записів версії.
     /// </summary>
@@ -140,16 +153,42 @@ public sealed class MethodologyStore(EcrDbContext db) : IMethodologyStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Стеля не обрізає мовчки — вона відмовляє. З аудиту P1 прогін читає
+    /// константи ВСІЄЇ версії цим запитом і вибирає кандидата в пам'яті, тож
+    /// обрізаний хвіст означав би, що частина констант «не існує»: формула
+    /// тихо читала б <c>#REF</c>, і причину не було б видно ніде. Раніше
+    /// стеля стояла на один код (<c>ConstantStore</c>) і такого ризику не
+    /// несла. Читаємо <c>стеля + 1</c>: зайвий рядок і є доказом переповнення.
+    /// </remarks>
     public async Task<IReadOnlyList<MethodologyConstant>> GetConstantsAsync(
         int methodologyVersionId, CancellationToken ct)
-        => await db.MethodologyConstants
+    {
+        var constants = await db.MethodologyConstants
             .AsNoTracking()
             .Where(c => c.MethodologyVersionId == methodologyVersionId)
             .OrderBy(c => c.Code)
             .ThenBy(c => c.Id)
-            .Take(MaxChildren)
+            .Take(constantCap + 1)
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        if (constants.Count > constantCap)
+        {
+            throw new Domain.Abstractions.DomainException(
+                "ECR-CALC-0422",
+                $"Methodology version {methodologyVersionId} has more than {constantCap} constants: "
+                + "they cannot all be read, and a constant left out would silently evaluate to #REF.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.constantsOverCap",
+                    ["methodologyVersionId"] = methodologyVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["cap"] = constantCap.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return constants;
+    }
 
     /// <inheritdoc />
     /// <remarks>

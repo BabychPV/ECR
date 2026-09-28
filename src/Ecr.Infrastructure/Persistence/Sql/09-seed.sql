@@ -4564,6 +4564,11 @@ USING (VALUES
     (N'err.ECR-INT-0422.rowWindowSelectorWithoutColumn', N'en', N'The binding has no selector column, so selector value "{selectorValue}" would never match a row.', 1),
     (N'err.ECR-INT-0409.rowWindowSelectorTaken', N'en', N'This selector value already has a source in the binding.', 1),
     -- HSE301:F5 ── кінець секції
+
+    -- HSE301:A1P1 ── стеля констант версії відмовляє, а не обрізає мовчки (аудит P1):
+    -- прогін читає всі константи версії одним запитом, і відкинутий хвіст дав би тихий #REF.
+    (N'err.ECR-CALC-0422.constantsOverCap', N'en', N'Methodology version {methodologyVersionId} has more than {cap} constants: they cannot all be read, and a constant left out would silently evaluate to #REF.', 1),
+    -- HSE301:A1P1 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
