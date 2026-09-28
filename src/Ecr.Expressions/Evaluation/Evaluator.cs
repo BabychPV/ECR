@@ -313,15 +313,28 @@ public sealed class Evaluator(
             return ExpressionValue.Null;
         }
 
+        // ⛔ Аудит A4: заперечення НЕ звужує. Доти тут стояло
+        // `operand.AsNumber()` — `(decimal)double` із округленням до 15
+        // значущих цифр, — і `Legacy`-значення посеред формули ставало
+        // `decimal`: `-(1/3)*3` давало −0.999999999999999 замість −1 (NCalc
+        // 1.3.8 рахує `0 - x` у типі операнда), а `-(1/0)` — `#VALUE` замість
+        // −∞. Заперечення точне в обох поданнях, тож подання зберігається.
         switch (node.Operator)
         {
             case UnaryOperator.Negate:
-                return operand.AsNumber() is { } negate
-                    ? ExpressionValue.Number(-negate)
-                    : ExpressionValue.Error(ExpressionErrors.BadValue);
+                if (operand.Type != ExpressionValueType.Number)
+                {
+                    return ExpressionValue.Error(ExpressionErrors.BadValue);
+                }
 
+                return operand.Value is double d
+                    ? ExpressionValue.LegacyNumber(-d)
+                    : ExpressionValue.Number(-(decimal)operand.Value!);
+
+            // ⚠ Перевірка типу, а не `AsNumber() is not null`: той дає `null` і
+            // для `±∞`/`NaN`, і для |x| > 7.9e28, тобто відкидав числа `Legacy`.
             case UnaryOperator.Plus:
-                return operand.AsNumber() is not null
+                return operand.Type == ExpressionValueType.Number
                     ? operand
                     : ExpressionValue.Error(ExpressionErrors.BadValue);
 

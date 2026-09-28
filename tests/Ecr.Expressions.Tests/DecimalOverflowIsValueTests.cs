@@ -206,13 +206,14 @@ public sealed class DecimalOverflowIsValueTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    public void Legacy_унарний_мінус_над_числом_поза_decimal_дає_VALUE_а_не_виняток()
+    public void Legacy_унарний_мінус_над_числом_поза_decimal_не_кидає()
     {
-        // ⚠ Унарний мінус звужує через `AsNumber()` (аудит A4, окремий пункт):
-        // тут перевіряється лише те, що звуження більше не КИДАЄ.
+        // ⚠ Аудит A4 закрито (`LegacyUnaryMinusKeepsDoubleTests`): мінус більше
+        // не звужує, тож тут −1e30 — число, як у NCalc, а не `#VALUE`.
+        // Твердження цього файла лишається тим самим — виняток не летить.
         var value = Methodology("-Pow(10, 30)", new LegacyDoubleArithmetic());
 
-        Assert.Equal(ExpressionErrors.BadValue, value.ErrorCode);
+        Assert.Equal(-1e30, value.AsDouble());
     }
 
     [Theory]
