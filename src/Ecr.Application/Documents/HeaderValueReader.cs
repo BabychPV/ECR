@@ -61,7 +61,10 @@ public static class HeaderValueReader
         double number => (decimal)number,
         float number => (decimal)number,
         bool flag => flag ? 1m : 0m,
-        string text when decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+        // ⛔ `C1`: `Float`, не `Number` — те саме правило, що в
+        // `CellValueReader`: кома в числі з API — відмова, а не тисячі
+        // («12,5» доти лягало як 125).
+        string text when decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
         _ => throw Mismatch(field, value, ExpectedType.Number),
     };

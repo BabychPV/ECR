@@ -174,7 +174,13 @@ public static class CellValueReader
         double number => (decimal)number,
         float number => (decimal)number,
         bool flag => flag ? 1m : 0m,
-        string text when decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+        // ⛔ `C1`: `Float`, не `Number`. `AllowThousands` під Invariant викидав
+        // кожну кому, і «12,5» через PATCH лягало як 125. Значення API —
+        // машинні: клієнт шле канонічний рядок без коми (`decimalTextOf`), як і
+        // `DecimalAsStringJsonConverter`, тож кома тут — завжди відмова.
+        // Людський текст із комою (Excel) розбирає `ImportDiffBuilder` сам і
+        // сюди віддає вже число.
+        string text when decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
             => parsed,
         _ => throw Mismatch(column, value, ExpectedType.Number),
     };
