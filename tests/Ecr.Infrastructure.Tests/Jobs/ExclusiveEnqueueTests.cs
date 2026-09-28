@@ -25,9 +25,27 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// задач, а не їх виконання. Бази для цього не треба, і саме тому перевірка
 /// входить у звичайний прогін, а не в інтеграційний.
 /// </remarks>
-public sealed class ExclusiveEnqueueTests
+public sealed class ExclusiveEnqueueTests : IAsyncLifetime
 {
-    private static async Task<(QuartzJobScheduler Jobs, IScheduler Quartz)> SchedulerAsync()
+    /// <summary>Планувальники тесту — зупиняються після нього (<see cref="DisposeAsync"/>).</summary>
+    private readonly List<IScheduler> schedulers = [];
+
+    /// <inheritdoc />
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    /// <summary>
+    /// ⚠ Незупинений планувальник лишається в статичному реєстрі Quartz разом
+    /// зі своїми потоками до кінця процесу — на всі наступні тести збірки.
+    /// </summary>
+    public async Task DisposeAsync()
+    {
+        foreach (var scheduler in schedulers)
+        {
+            await scheduler.Shutdown(waitForJobsToComplete: false).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(QuartzJobScheduler Jobs, IScheduler Quartz)> SchedulerAsync()
     {
         var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
         {
@@ -37,7 +55,10 @@ public sealed class ExclusiveEnqueueTests
             ["quartz.threadPool.threadCount"] = "1",
         });
 
-        return (new QuartzJobScheduler(factory), await factory.GetScheduler().ConfigureAwait(false));
+        var scheduler = await factory.GetScheduler().ConfigureAwait(false);
+        schedulers.Add(scheduler);
+
+        return (new QuartzJobScheduler(factory), scheduler);
     }
 
     private static async Task<List<string>> KeysAsync(IScheduler scheduler)

@@ -147,24 +147,32 @@ public sealed class JobAttemptCorrelationTests
 
         // Планувальник не запускається: предмет — вміст деталі й записи прогресу.
         var scheduler = await factory.GetScheduler();
-        var queued = Substitute.For<IJobProgressStore>();
-        var request = Substitute.For<ICorrelationIdAccessor>();
-        request.CorrelationId.Returns(RequestCorrelation);
+        try
+        {
+            var queued = Substitute.For<IJobProgressStore>();
+            var request = Substitute.For<ICorrelationIdAccessor>();
+            request.CorrelationId.Returns(RequestCorrelation);
 
-        var jobs = new QuartzJobScheduler(factory, queued, new TestClock(Now), request);
-        var jobId = await jobs.EnqueueAsync<IFormulaRecalculationJob>(null, CancellationToken.None, 7);
+            var jobs = new QuartzJobScheduler(factory, queued, new TestClock(Now), request);
+            var jobId = await jobs.EnqueueAsync<IFormulaRecalculationJob>(null, CancellationToken.None, 7);
 
-        await queued.Received(1).QueueAsync(
-            jobId, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), 7, RequestCorrelation);
+            await queued.Received(1).QueueAsync(
+                jobId, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), 7, RequestCorrelation);
 
-        var detail = await scheduler.GetJobDetail(new JobKey(jobId));
-        Assert.NotNull(detail);
+            var detail = await scheduler.GetJobDetail(new JobKey(jobId));
+            Assert.NotNull(detail);
 
-        var (adapter, progress) = Adapter();
-        await adapter.Execute(Context(retries: 0, jobCorrelation: null, detail).Context);
+            var (adapter, progress) = Adapter();
+            await adapter.Execute(Context(retries: 0, jobCorrelation: null, detail).Context);
 
-        await progress.Received(1).StartAsync(
-            jobId, Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), 1, RequestCorrelation);
+            await progress.Received(1).StartAsync(
+                jobId, Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>(), 1, RequestCorrelation);
+        }
+        finally
+        {
+            // Незупинений планувальник лишився б у реєстрі Quartz до кінця процесу.
+            await scheduler.Shutdown(waitForJobsToComplete: false);
+        }
     }
 
     [Fact]
@@ -181,16 +189,24 @@ public sealed class JobAttemptCorrelationTests
         var queued = Substitute.For<IJobProgressStore>();
         var jobs = new QuartzJobScheduler(factory, queued, new TestClock(Now));
 
-        var withDoc = await jobs.EnqueueAsync<IFormulaRecalculationJob>(
-            new { DocumentId = 9_000_000_001L, PeriodKey = "2026-09" }, CancellationToken.None);
-        var noDoc = await jobs.EnqueueAsync<IFormulaRecalculationJob>(
-            new { TableInstanceId = 5L }, CancellationToken.None);
+        try
+        {
+            var withDoc = await jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                new { DocumentId = 9_000_000_001L, PeriodKey = "2026-09" }, CancellationToken.None);
+            var noDoc = await jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                new { TableInstanceId = 5L }, CancellationToken.None);
 
-        await queued.Received(1).QueueAsync(
-            withDoc, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), Arg.Any<int?>(), Arg.Any<string?>(),
-            9_000_000_001L);
-        await queued.Received(1).QueueAsync(
-            noDoc, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), Arg.Any<int?>(), Arg.Any<string?>(),
-            Arg.Is<long?>(d => d == null));
+            await queued.Received(1).QueueAsync(
+                withDoc, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), Arg.Any<int?>(), Arg.Any<string?>(),
+                9_000_000_001L);
+            await queued.Received(1).QueueAsync(
+                noDoc, Arg.Any<string>(), Now, Arg.Any<CancellationToken>(), Arg.Any<int?>(), Arg.Any<string?>(),
+                Arg.Is<long?>(d => d == null));
+        }
+        finally
+        {
+            // Планувальник створює EnqueueAsync — через ту саму фабрику.
+            await (await factory.GetScheduler()).Shutdown(waitForJobsToComplete: false);
+        }
     }
 }
