@@ -59,8 +59,10 @@ public sealed class SourceEntitiesApiTests(SqlServerFixture sql)
             // Рядок у базі, а не лише у відповіді.
             Assert.True(await ExistsAsync(dataSourceId, code).ConfigureAwait(true));
 
-            // ⛔ МУТАЦІЙНИЙ ДОКАЗ: прибрати перевірку `SourceEntityCodeExistsAsync`
-            // — відповідає не 409, а збій запису об UQ_SourceEntity.
+            // ⚠ Мутаційно НЕ доведено (класифікатор / рішення людини 2026-09-28).
+            // Очікування, не перевірене прогоном: без перевірки
+            // `SourceEntityCodeExistsAsync` відповідь була б не 409, а збій запису
+            // об UQ_SourceEntity.
             var duplicate = await client.PostAsJsonAsync(Sources, new { dataSourceId, code });
 
             Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);

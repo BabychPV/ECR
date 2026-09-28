@@ -95,9 +95,10 @@ public sealed class SourceEntityHandlersTests
     [Trait("Requirement", "ФВ-13.11")]
     public async Task Дубль_коду_в_з_єднанні_дає_конфлікт_і_не_пише()
     {
-        // ⛔ Мутаційний доказ: прибери перевірку `SourceEntityCodeExistsAsync` у
-        // `CreateSourceEntityHandler` — запис доходить до сховища, і в базі
-        // відмову дав би вже UQ_SourceEntity як збій, а не 409.
+        // ⚠ Мутаційно НЕ доведено (класифікатор / рішення людини 2026-09-28).
+        // Очікування, не перевірене прогоном: без перевірки
+        // `SourceEntityCodeExistsAsync` у `CreateSourceEntityHandler` запис
+        // дійшов би до сховища, і в базі відмову дав би UQ_SourceEntity як збій, а не 409.
         _sources.SourceEntityCodeExistsAsync(Arg.Any<int>(), "Flare_01", Arg.Any<CancellationToken>())
             .Returns(true);
 
@@ -193,8 +194,9 @@ public sealed class SourceEntityHandlersTests
     [Trait("Requirement", "ФВ-8.11")]
     public async Task Прив_язка_до_неіснуючого_довідника_дає_404_і_не_пише()
     {
-        // ⛔ Мутаційний доказ: прибери перевірку `RegistryDefExistsAsync` у
-        // `BindSourceEntityRegistryHandler` — прив'язка пишеться, і в базі
+        // ⚠ Мутаційно НЕ доведено (класифікатор / рішення людини 2026-09-28).
+        // Очікування, не перевірене прогоном: без перевірки `RegistryDefExistsAsync`
+        // у `BindSourceEntityRegistryHandler` прив'язка писалася б, і в базі
         // відмову дав би FK_SE_Registry як збій, а не 404.
         var ex = await Assert.ThrowsAsync<NotFoundException>(
             () => Bind().HandleAsync(EntityId, RegistryId + 1, CancellationToken.None));

@@ -140,9 +140,6 @@ public interface ICollectionStore
     /// <summary>Колонка-ціль існує і не м'яко видалена.</summary>
     public Task<bool> ColumnDefExistsAsync(int columnDefId, CancellationToken ct);
 
-    /// <summary>Поле реєстру-ціль існує.</summary>
-    public Task<bool> RegistryFieldDefExistsAsync(int registryFieldDefId, CancellationToken ct);
-
     /// <summary>Одиниця межі інтеграції (ФВ-16.9) існує.</summary>
     public Task<bool> UnitExistsAsync(int unitId, CancellationToken ct);
 

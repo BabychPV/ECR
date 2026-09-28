@@ -275,10 +275,6 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         => db.ColumnDefs.AsNoTracking().AnyAsync(c => c.Id == columnDefId && !c.IsDeleted, ct);
 
     /// <inheritdoc />
-    public Task<bool> RegistryFieldDefExistsAsync(int registryFieldDefId, CancellationToken ct)
-        => db.RegistryFieldDefs.AsNoTracking().AnyAsync(f => f.Id == registryFieldDefId, ct);
-
-    /// <inheritdoc />
     public Task<bool> UnitExistsAsync(int unitId, CancellationToken ct)
         => db.Units.AsNoTracking().AnyAsync(u => u.Id == unitId, ct);
 

@@ -130,10 +130,11 @@ public sealed class CreateEntityFieldMapTests
     public async Task Мапінг_на_поле_реєстру_з_рядком_чи_агрегацією_відхиляється(
         string? targetRowKey, AggregationKind? aggregation)
     {
-        // ⛔ Мутаційний доказ: прибери перевірку `TargetRowKey/Aggregation` у
-        // гілці RegistryField `CreateEntityFieldMapHandler.BuildTargetAsync` —
-        // перший і третій рядки доходять до запису (домен приймає пару для
-        // будь-якої цілі), другий падає доменним ECR-INT-0422 замість 422 REQ.
+        // ⚠ Мутаційно НЕ доведено (класифікатор / рішення людини 2026-09-28).
+        // Очікування, не перевірене прогоном: без перевірки `TargetRowKey/Aggregation`
+        // у гілці RegistryField `CreateEntityFieldMapHandler.BuildTargetAsync`
+        // перший і третій рядки дійшли б до запису, другий упав би доменним
+        // ECR-INT-0422 замість 422 REQ.
         EntityBoundTo(BoundRegistryId);
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
@@ -151,9 +152,10 @@ public sealed class CreateEntityFieldMapTests
     [Trait("Requirement", "ФВ-8.11")]
     public async Task Мапінг_на_поле_чужого_довідника_відхиляється()
     {
-        // ⛔ Мутаційний доказ: прибери порівняння `entity.RegistryDefId != owner`
-        // — мапінг на поле сусіднього довідника заводиться, і синхронізація
-        // пише в чужі записи.
+        // ⚠ Мутаційно НЕ доведено (класифікатор / рішення людини 2026-09-28).
+        // Очікування, не перевірене прогоном: без порівняння
+        // `entity.RegistryDefId != owner` мапінг на поле сусіднього довідника
+        // заводився б, і синхронізація писала б у чужі записи.
         EntityBoundTo(BoundRegistryId);
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
