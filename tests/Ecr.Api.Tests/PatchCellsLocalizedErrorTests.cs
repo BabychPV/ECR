@@ -111,6 +111,9 @@ public sealed class PatchCellsLocalizedErrorTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
+        // S6: межі читання — «бачить усе»; про заборони — DenyReadTests.
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(snapshot));
         // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
         // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
         _access.CanEditCellsAsync(

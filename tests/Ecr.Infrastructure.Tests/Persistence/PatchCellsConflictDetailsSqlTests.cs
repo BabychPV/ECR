@@ -170,6 +170,9 @@ public sealed class PatchCellsConflictDetailsSqlTests(SqlServerFixture sql)
         access.BuildProfileAsync(userId, Arg.Any<CancellationToken>()).Returns(profile);
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
+        // S6: межі читання — «бачить усе»; про заборони — DenyReadTests (Api).
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(ReadScopes.Everything(snapshot));
         // ⚠ WR-03: `EnsureAccessAsync` тепер запитує лише адреси батчу через
         // `CanEditCellsAsync`, не весь зріз через `CanEditSliceAsync`.
         access.CanEditCellsAsync(
