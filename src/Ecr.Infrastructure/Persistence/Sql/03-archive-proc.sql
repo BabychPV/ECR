@@ -460,63 +460,189 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @RunId bigint, @k int, @srcCount bigint, @dstCount bigint;
+    DECLARE @k int, @moved bigint = 0;
+    DECLARE @srcCells bigint, @srcSum decimal(38,16), @srcRows bigint, @srcInst bigint;
+    DECLARE @dstCells bigint, @dstSum decimal(38,16), @dstRows bigint, @dstInst bigint;
+
+    ------------------------------------------------------------------------
+    -- ЖУРНАЛ — на КОЖЕН проєкт, чиї дані повертаються, а не лише на @ProjectId.
+    --
+    -- ⛔ Партиція йде по періоду, а не по проєкту (див. ЗАПОБІЖНИК 1 у
+    --    `usp_ArchiveYear`), і повертається так само ЦІЛКОМ. Попередня версія
+    --    писала `FromArchive` лише для @ProjectId: у сусіда останнім
+    --    завершеним прогоном лишався `ToArchive`, `ArchiveAwareCellReader`
+    --    читав для нього `arc.*` — застарілу копію, — а правки в гарячій схемі
+    --    після розархівації були невидимі.
+    --
+    -- ⚠ Обрано «повернути період усім і записати всіх», а не фільтр за
+    --    проєктом. Фільтр породжує гірший дефект: наступна `usp_ArchiveYear`
+    --    бачить непорожнє джерело, ОЧИЩАЄ `arc.*` на весь діапазон і копіює
+    --    туди лише повернутий проєкт — архів сусіда знищено без сліду.
+    --    Симетрія з архівацією (той самий набір проєктів — `doc.Period` у
+    --    діапазоні) тримає журнал обох напрямів узгодженим; плюс проєкти,
+    --    чиї документи реально лежать в `arc.TableInstance`.
+    ------------------------------------------------------------------------
+    DECLARE @Runs TABLE (RunId bigint PRIMARY KEY, ProjectId int NOT NULL);
 
     INSERT INTO itg.ArchiveRun (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status)
+    OUTPUT inserted.Id, inserted.ProjectId INTO @Runs (RunId, ProjectId)
     VALUES (@ProjectId, N'FromArchive', @FromPeriodKey, @ToPeriodKey, SYSUTCDATETIME(), N'Running');
-    SET @RunId = SCOPE_IDENTITY();
 
-    UPDATE doc.Project SET IsArchiving = 1 WHERE Id = @ProjectId;
+    INSERT INTO itg.ArchiveRun
+        (ProjectId, Direction, FromPeriodKey, ToPeriodKey, StartedAt, Status, ErrorMessage)
+    OUTPUT inserted.Id, inserted.ProjectId INTO @Runs (RunId, ProjectId)
+    SELECT x.ProjectId, N'FromArchive', @FromPeriodKey, @ToPeriodKey,
+           SYSUTCDATETIME(), N'Running',
+           N'Спільна партиція: період повернуто прогоном проєкту '
+           + CAST(@ProjectId AS nvarchar(10)) + N'.'
+    FROM (SELECT d.ProjectId
+            FROM doc.Period AS d
+           WHERE d.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey
+          UNION
+          SELECT dd.ProjectId
+            FROM arc.TableInstance AS t
+            JOIN doc.Document AS dd ON dd.Id = t.DocumentId
+           WHERE t.PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey) AS x
+    WHERE x.ProjectId <> @ProjectId;
 
-    SET @k = @FromPeriodKey;
+    UPDATE doc.Project SET IsArchiving = 1 WHERE Id IN (SELECT ProjectId FROM @Runs);
 
-    WHILE @k <= @ToPeriodKey
-    BEGIN
-        SELECT @srcCount = COUNT_BIG(*) FROM arc.CellValue WHERE PeriodKey = @k;
+    BEGIN TRY
 
-        -- Порядок зворотний до архівації: спершу батьківські рядки, потім
-        -- комірки. Інакше FK не дає вставити комірку без свого рядка.
-        INSERT INTO doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
-        SELECT PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt
-        FROM arc.TableInstance WHERE PeriodKey = @k;
+    ------------------------------------------------------------------------
+    -- ОДНА транзакція на весь діапазон.
+    --
+    -- ⛔ Попередня версія мала `XACT_ABORT ON` без `BEGIN TRAN` — тобто
+    --    кожна вставка комітилася окремо. Збій на `doc.CellValue` (FK, місце,
+    --    50011) лишав закомічені `TableInstance`/`TableRow` без комірок, а
+    --    повторний запуск падав на `PK_TableInstance`: розархівація
+    --    застрягала до ручного прибирання.
+    --
+    -- ⚠ Журнал `Running` записано ДО транзакції навмисно: відкат не повинен
+    --    стерти слід прогону, а `CATCH` нижче ставить йому `Failed`.
+    ------------------------------------------------------------------------
+    BEGIN TRAN;
 
-        INSERT INTO doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal,
-                                  IsDeleted, IsOrphaned, ModifiedAt)
-        SELECT PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal, IsDeleted, 0, ModifiedAt
-        FROM arc.TableRow WHERE PeriodKey = @k;
+        SET @k = @FromPeriodKey;
 
-        INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString,
-                                   ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId,
-                                   ValueUnitId, IsCalculated, IsEmpty)
-        SELECT PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric,
-               ValueDate, ValueBool, ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty
-        FROM arc.CellValue WHERE PeriodKey = @k;
-
-        SELECT @dstCount = COUNT_BIG(*) FROM doc.CellValue WHERE PeriodKey = @k;
-
-        IF (@srcCount <> @dstCount)
+        WHILE @k <= @ToPeriodKey
         BEGIN
+            SELECT @srcCells = COUNT_BIG(*), @srcSum = ISNULL(SUM(ValueNumeric), 0)
+            FROM arc.CellValue WHERE PeriodKey = @k;
+            SELECT @srcRows = COUNT_BIG(*) FROM arc.TableRow      WHERE PeriodKey = @k;
+            SELECT @srcInst = COUNT_BIG(*) FROM arc.TableInstance WHERE PeriodKey = @k;
+
+            -- Порядок зворотний до архівації: спершу батьківські рядки, потім
+            -- комірки. Інакше FK не дає вставити комірку без свого рядка.
+            --
+            -- ⚠ `NOT EXISTS` — не маскування конфлікту, а відновлення після
+            -- ПОПЕРЕДНЬОЇ версії процедури, яка могла лишити частково
+            -- повернутий період. Уже наявний рядок не перезаписується; чи він
+            -- збігається з архівом, вирішує звірка нижче — і зупиняє все, якщо ні.
+            INSERT INTO doc.TableInstance (PeriodKey, Id, DocumentId, TableDefId, CreatedAt, ModifiedAt)
+            SELECT a.PeriodKey, a.Id, a.DocumentId, a.TableDefId, a.CreatedAt, a.ModifiedAt
+            FROM arc.TableInstance AS a
+            WHERE a.PeriodKey = @k
+              AND NOT EXISTS (SELECT 1 FROM doc.TableInstance AS d
+                               WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id);
+
+            -- ⚠ `IsOrphaned = 0`: `arc.TableRow` цієї колонки не має (D4 аудиту,
+            -- окреме рішення про схему архіву). Нічний перерахунок ставить її знову.
+            INSERT INTO doc.TableRow (PeriodKey, Id, TableInstanceId, RowKey, RowDefId, Ordinal,
+                                      IsDeleted, IsOrphaned, ModifiedAt)
+            SELECT a.PeriodKey, a.Id, a.TableInstanceId, a.RowKey, a.RowDefId, a.Ordinal,
+                   a.IsDeleted, 0, a.ModifiedAt
+            FROM arc.TableRow AS a
+            WHERE a.PeriodKey = @k
+              AND NOT EXISTS (SELECT 1 FROM doc.TableRow AS d
+                               WHERE d.PeriodKey = a.PeriodKey AND d.Id = a.Id);
+
+            INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString,
+                                       ValueNumeric, ValueDate, ValueBool, ValueRegistryEntryId,
+                                       ValueUnitId, IsCalculated, IsEmpty)
+            SELECT a.PeriodKey, a.TableRowId, a.ColumnDefId, a.TableDefId, a.ValueString,
+                   a.ValueNumeric, a.ValueDate, a.ValueBool, a.ValueRegistryEntryId,
+                   a.ValueUnitId, a.IsCalculated, a.IsEmpty
+            FROM arc.CellValue AS a
+            WHERE a.PeriodKey = @k
+              AND NOT EXISTS (SELECT 1 FROM doc.CellValue AS d
+                               WHERE d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId
+                                 AND d.ColumnDefId = a.ColumnDefId);
+
+            -- ⛔ Звірка — ПО КЛЮЧАХ архіву, а не «усе в партиції». Гаряча
+            --    партиція може вже містити інші рядки (нові документи після
+            --    архівації), і `COUNT(*)` по ній давав хибну розбіжність; а
+            --    звірка по ключах ще й ловить наявний рядок з іншим значенням.
+            SELECT @dstCells = COUNT_BIG(*), @dstSum = ISNULL(SUM(d.ValueNumeric), 0)
+            FROM arc.CellValue AS a
+            JOIN doc.CellValue AS d
+              ON d.PeriodKey = a.PeriodKey AND d.TableRowId = a.TableRowId
+             AND d.ColumnDefId = a.ColumnDefId
+            WHERE a.PeriodKey = @k;
+
+            SELECT @dstRows = COUNT_BIG(*)
+            FROM arc.TableRow AS a
+            JOIN doc.TableRow AS d ON d.PeriodKey = a.PeriodKey AND d.Id = a.Id
+            WHERE a.PeriodKey = @k;
+
+            SELECT @dstInst = COUNT_BIG(*)
+            FROM arc.TableInstance AS a
+            JOIN doc.TableInstance AS d ON d.PeriodKey = a.PeriodKey AND d.Id = a.Id
+            WHERE a.PeriodKey = @k;
+
+            IF @srcCells <> @dstCells OR @srcSum <> @dstSum
+               OR @srcRows <> @dstRows OR @srcInst <> @dstInst
+                THROW 50011, N'Розбіжність кількості рядків або сум при розархівації.', 1;
+
+            SET @moved = @moved + @srcCells + @srcRows + @srcInst;
+
+            UPDATE itg.ArchiveRun
+               SET RowsMoved = RowsMoved
+                             + CASE WHEN ProjectId = @ProjectId THEN @srcCells ELSE 0 END,
+                   LastDonePeriodKey = @k
+             WHERE Id IN (SELECT RunId FROM @Runs);
+
+            SET @k = @k + 1;
+        END
+
+        --------------------------------------------------------------------
+        -- Архів діапазону прибирається ЛИШЕ після збігу всіх сум і в тій
+        -- самій транзакції: або дані в гарячій схемі й архів порожній, або
+        -- навпаки — стану «обидва джерела живі й розходяться» не буває.
+        --
+        -- ⚠ Саме це робить повтор безпечним: другий виклик бачить порожній
+        --    архів і нічого не вставляє, а не падає на PK.
+        --------------------------------------------------------------------
+        DELETE FROM arc.CellValue     WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.TableRow      WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+        DELETE FROM arc.TableInstance WHERE PeriodKey BETWEEN @FromPeriodKey AND @ToPeriodKey;
+
+    COMMIT;
+
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK;
+
+        -- ⚠ Знахідка — ПІСЛЯ відкату, інакше відкотилася б разом із ним.
+        IF ERROR_NUMBER() = 50011
             INSERT INTO aud.ConsistencyIssue (DetectedAt, Severity, RuleCode, EntityType, EntityId, Message)
             VALUES (SYSUTCDATETIME(), 3, N'RESTORE_CHECKSUM', N'Period', @k,
                     N'Розбіжність при розархівації; дані архіву збережено.');
 
-            UPDATE itg.ArchiveRun
-               SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(), LastDonePeriodKey = @k - 1,
-                   ErrorMessage = N'Restore count mismatch'
-             WHERE Id = @RunId;
-
-            UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
-            THROW 50011, N'Розбіжність кількості рядків при розархівації.', 1;
-        END
-
         UPDATE itg.ArchiveRun
-           SET RowsMoved = RowsMoved + @srcCount, LastDonePeriodKey = @k
-         WHERE Id = @RunId;
+           SET Status = N'Failed', FinishedAt = SYSUTCDATETIME(), ErrorMessage = ERROR_MESSAGE()
+         WHERE Id IN (SELECT RunId FROM @Runs);
 
-        SET @k = @k + 1;
-    END
+        UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
+        THROW;
+    END CATCH;
 
-    UPDATE itg.ArchiveRun SET Status = N'Completed', FinishedAt = SYSUTCDATETIME() WHERE Id = @RunId;
-    UPDATE doc.Project SET IsArchiving = 0 WHERE Id = @ProjectId;
+    UPDATE itg.ArchiveRun
+       SET Status = N'Completed', FinishedAt = SYSUTCDATETIME(),
+           ErrorMessage = CASE WHEN @moved = 0 AND ErrorMessage IS NULL
+                               THEN N'Архів діапазону порожній: період уже повернуто або не архівувався.'
+                               ELSE ErrorMessage END
+     WHERE Id IN (SELECT RunId FROM @Runs);
+    UPDATE doc.Project SET IsArchiving = 0 WHERE Id IN (SELECT ProjectId FROM @Runs);
 END;
 GO
