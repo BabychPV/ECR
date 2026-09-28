@@ -1,5 +1,7 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/YearGraceArchiveGateTests.cs
 using Ecr.Application.Ports;
+using Ecr.Domain.Services;
+using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
@@ -11,65 +13,110 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Jobs;
 
 /// <summary>
-/// ФВ-1.8: offset на рівні року — <c>Project.YearGraceOffsetDays</c> — стримує
-/// перенесення року в архів, доки він не сплив.
+/// ФВ-1.8 / АРХ-1: фізична архівація року в <c>arc.*</c> — не раніше кінця
+/// річного вікна, відлік якого йде від <b>31.12 року проєкту</b>
+/// (<c>Project.PeriodEnd</c>), а не від моменту позначки «заархівовано».
 /// </summary>
 /// <remarks>
-/// ⚠ Вимога реалізована ЧАСТКОВО, і тест фіксує саме реалізовану частину.
-/// Задум (<c>reference/design/06</c> §ФВ-1.8, АРХ-1): відлік від кінця року
-/// (<c>31.12 + 45</c>), протягом якого дані минулого року ще правляться, а
-/// після — проєкт закривається. Код (<c>ArchiveJob.ExecuteAsync</c>) рахує від
-/// <c>Project.ClosedAt</c> — моменту, коли людина позначила проєкт
-/// заархівованим, — і стримує лише фізичне перенесення в <c>arc.*</c>; на право
-/// редагування рік-offset не впливає (його дають межі періодів).
-///
-/// Значення 90, а не типові 45, узято навмисно: інакше тест не відрізнив би
-/// значення проєкту від літерала.
-///
-/// Мутаційний доказ: в <c>ArchiveJob.ExecuteAsync</c> замінити
-/// <c>project.ClosedAt?.AddDays(project.YearGraceOffsetDays)</c> на
-/// <c>project.ClosedAt?.AddDays(45)</c> — на 50-й день задача вже не
-/// відмовляє, і тест червоніє.
+/// Три точки:
+/// <list type="bullet">
+/// <item>день 51 після 31.12 (більше за типові 45, менше за 90 проєкту) —
+/// відмова;</item>
+/// <item>останній момент вікна — відмова;</item>
+/// <item>перший момент після вікна — пропуск, хоча позначку «заархівовано»
+/// поставлено ПІЗНО (<c>ClosedAt</c> + 90 днів ще попереду).</item>
+/// </list>
+/// Мутаційні докази (перевірено 2026-09-28, червоний → зелений після повернення):
+/// в <c>ArchiveJob.ExecuteAsync</c> (1) ворота від
+/// <c>project.ClosedAt?.AddDays(project.YearGraceOffsetDays)</c> (стара
+/// формула) → червоний; (2) <c>YearGraceWindow.For(project.PeriodEnd, 45, …)</c>
+/// замість значення проєкту → червоний. Мутацію «кінець вікна без останньої
+/// доби» доведено в домені (<c>YearGracePeriodStateTests</c>), тут окремо не
+/// ганялась.
+/// Значення 90, а не типові 45, — щоб тест відрізняв значення проєкту від літерала.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class YearGraceArchiveGateTests(SqlServerFixture sql)
 {
-    private static readonly DateTime MarkedArchived = new(2027, 1, 10, 0, 0, 0, DateTimeKind.Utc);
+    /// <summary>Позначку поставлено пізно — через 80 днів після кінця року.</summary>
+    private static readonly DateTime MarkedArchived = new(2027, 3, 21, 0, 0, 0, DateTimeKind.Utc);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-1.8")]
-    public async Task Архівація_року_чекає_на_YearGraceOffsetDays_проєкту()
+    public async Task Архівація_року_чекає_кінця_вікна_від_31_12_а_не_від_ClosedAt()
     {
         var doc = await new TestDocumentBuilder(sql.ConnectionString)
             .BuildAsync(periodKey: 202601, rowCount: 1, ct: CancellationToken.None);
 
-        await MarkArchivedAsync(doc.ProjectId, yearGraceOffsetDays: 90);
+        var original = await ReadProjectAsync(doc.ProjectId);
 
-        // День 50: більше за типові 45, менше за 90 проєкту — ще рано.
-        var early = Recorder();
-        await using (var db = Context(early))
+        try
         {
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => Job(db, MarkedArchived.AddDays(50)).ExecuteAsync(
-                    new ArchiveRequest(doc.ProjectId, 2026), Substitute.For<IJobProgress>(), CancellationToken.None));
+            await SetProjectAsync(doc.ProjectId, status: 4, closedAt: MarkedArchived, yearGraceOffsetDays: 90);
 
-            Assert.Contains("2027-04-10", error.Message, StringComparison.Ordinal);
+            // Кінець вікна рахується в поясі проєкту: 31.12.2026 + 90 діб →
+            // останній день 31.03.2027, зачиняється опівночі 01.04.2027 за
+            // майданчиком. Пояс — з тієї ж бази, що й у задачі; тест — про
+            // відлік, а не про таблиці поясів ОС.
+            var zone = SiteTimeZone.Create(original.TimeZoneId).ToTimeZoneInfo();
+            var windowEnd = TimeZoneInfo.ConvertTimeToUtc(
+                new DateTime(2027, 4, 1, 0, 0, 0, DateTimeKind.Unspecified), zone);
+            var day51 = TimeZoneInfo.ConvertTimeToUtc(
+                new DateTime(2027, 2, 20, 12, 0, 0, DateTimeKind.Unspecified), zone);
+
+            foreach (var early in new[] { day51, windowEnd.AddSeconds(-1) })
+            {
+                var recorder = Recorder();
+                await using (var db = Context(recorder))
+                {
+                    var error = await Assert.ThrowsAsync<InvalidOperationException>(
+                        () => Job(db, early).ExecuteAsync(
+                            new ArchiveRequest(doc.ProjectId, 2026), Substitute.For<IJobProgress>(), CancellationToken.None));
+
+                    Assert.Contains("2027-03-31", error.Message, StringComparison.Ordinal);
+                }
+
+                Assert.Empty(recorder.Matching("usp_ArchiveYear"));
+            }
+
+            // Вікно зачинилось — задача доходить до процедури (вона приглушена:
+            // тест про ворота, а не про перенесення; його доводить ArchiveJobTests).
+            // ⚠ Від ClosedAt (21.03) + 90 до кінця ще ~80 днів: стара формула
+            // тут відмовила б.
+            var late = Recorder();
+            await using (var db = Context(late))
+            {
+                await Job(db, windowEnd).ExecuteAsync(
+                    new ArchiveRequest(doc.ProjectId, 2026), Substitute.For<IJobProgress>(), CancellationToken.None);
+            }
+
+            Assert.Single(late.Matching("usp_ArchiveYear"));
         }
-
-        Assert.Empty(early.Matching("usp_ArchiveYear"));
-
-        // День 91: грейс сплив — задача доходить до процедури (вона приглушена:
-        // тест про ворота, а не про саме перенесення; його доводить ArchiveJobTests).
-        var late = Recorder();
-        await using (var db = Context(late))
+        finally
         {
-            await Job(db, MarkedArchived.AddDays(91)).ExecuteAsync(
-                new ArchiveRequest(doc.ProjectId, 2026), Substitute.For<IJobProgress>(), CancellationToken.None);
+            // ⚠ База спільна для колекції: проєкт повертається в той стан, у
+            // якому його віддав будівельник, — інакше задачі, що обходять УСІ
+            // проєкти, бачили б чужий «заархівований».
+            await SetProjectAsync(
+                doc.ProjectId, original.Status, original.ClosedAt, original.YearGraceOffsetDays);
         }
+    }
 
-        Assert.Single(late.Matching("usp_ArchiveYear"));
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-1.8")]
+    public void Вікно_архівації_і_вікно_станів_періоду_одне_й_те_саме()
+    {
+        // Задача рахує ворота тим самим `YearGraceWindow`, що й калькулятор
+        // станів: для типового проєкту 2026 (+45) останній день — 14.02.2027,
+        // як у прикладі reference/design/06 §ФВ-1.8.
+        var window = YearGraceWindow.For(new DateOnly(2026, 12, 31), 45, TimeZoneInfo.Utc);
+
+        Assert.Equal(new DateOnly(2027, 2, 14), window.LastDay);
+        Assert.Equal(new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc), window.YearEndUtc);
+        Assert.Equal(new DateTime(2027, 2, 15, 0, 0, 0, DateTimeKind.Utc), window.EndsAtUtc);
     }
 
     private static CommandRecorder Recorder()
@@ -89,17 +136,38 @@ public sealed class YearGraceArchiveGateTests(SqlServerFixture sql)
             .AddInterceptors(recorder)
             .Options);
 
-    /// <summary>Позначка «заархівовано» і річний грейс — сирим UPDATE (приватні сетери).</summary>
-    private async Task MarkArchivedAsync(int projectId, int yearGraceOffsetDays)
+    private async Task<ProjectRow> ReadProjectAsync(int projectId)
     {
         await using var connection = new SqlConnection(sql.ConnectionString);
         await connection.OpenAsync(CancellationToken.None);
         await using var command = connection.CreateCommand();
         command.CommandText =
-            "UPDATE doc.Project SET Status = 4, ClosedAt = @closedAt, YearGraceOffsetDays = @grace WHERE Id = @id;";
-        command.Parameters.AddWithValue("@closedAt", MarkedArchived);
+            "SELECT Status, ClosedAt, YearGraceOffsetDays, TimeZoneId FROM doc.Project WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", projectId);
+        await using var reader = await command.ExecuteReaderAsync(CancellationToken.None);
+        Assert.True(await reader.ReadAsync(CancellationToken.None));
+
+        return new ProjectRow(
+            Convert.ToInt32(reader.GetValue(0), System.Globalization.CultureInfo.InvariantCulture),
+            reader.IsDBNull(1) ? null : reader.GetDateTime(1),
+            reader.GetInt32(2),
+            reader.GetString(3));
+    }
+
+    /// <summary>Стан, позначка й річний грейс — сирим UPDATE (приватні сетери).</summary>
+    private async Task SetProjectAsync(int projectId, int status, DateTime? closedAt, int yearGraceOffsetDays)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync(CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "UPDATE doc.Project SET Status = @status, ClosedAt = @closedAt, YearGraceOffsetDays = @grace WHERE Id = @id;";
+        command.Parameters.AddWithValue("@status", status);
+        command.Parameters.AddWithValue("@closedAt", (object?)closedAt ?? DBNull.Value);
         command.Parameters.AddWithValue("@grace", yearGraceOffsetDays);
         command.Parameters.AddWithValue("@id", projectId);
         await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
+
+    private sealed record ProjectRow(int Status, DateTime? ClosedAt, int YearGraceOffsetDays, string TimeZoneId);
 }

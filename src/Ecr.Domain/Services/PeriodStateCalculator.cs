@@ -22,7 +22,26 @@ public sealed class PeriodStateCalculator
     /// <param name="period">Період із обчисленими межами.</param>
     /// <param name="utcNow">Поточний момент у UTC (з <c>IClock</c>).</param>
     /// <param name="siteTimeZone">Пояс майданчика: межі — саме в ньому (D-68).</param>
-    public PeriodState Calculate(Period period, DateTime utcNow, TimeZoneInfo siteTimeZone)
+    /// <param name="yearGrace">
+    /// Річне пільгове вікно проєкту (ФВ-1.8); <c>null</c> — без нього, лише
+    /// межі самого періоду.
+    /// </param>
+    /// <remarks>
+    /// ⚠ ФВ-1.8: період, який на кінець року проєкту ще НЕ закрився за власними
+    /// межами (грудень; довгий пільговий строк листопада), лишається
+    /// <c>Grace</c> до кінця вікна <see cref="YearGraceWindow.EndsAtUtc"/>, а
+    /// не закривається за <c>ComputedCloseAt</c>. Це той самий стан
+    /// <c>Grace</c>, що й у звичайного періоду: запис дозволено з позначкою
+    /// <c>IsLateEdit</c> (ФВ-1.9, <see cref="Period.IsLateEditWindow"/>) — другого
+    /// механізму немає.
+    /// <para>
+    /// ⚠ Період, що закрився ДО кінця року за своїми межами, вікно не
+    /// відкриває: інакше в стані лишався б зворотний перехід
+    /// <c>Closed → Grace</c>, який дозволено лише Reopen людини (ФВ-1.10).
+    /// </para>
+    /// </remarks>
+    public PeriodState Calculate(
+        Period period, DateTime utcNow, TimeZoneInfo siteTimeZone, YearGraceWindow? yearGrace = null)
     {
         ArgumentNullException.ThrowIfNull(period);
         ArgumentNullException.ThrowIfNull(siteTimeZone);
@@ -47,7 +66,9 @@ public sealed class PeriodStateCalculator
             return PeriodState.Open;
         }
 
-        return utcNow < period.ComputedCloseAt ? PeriodState.Grace : PeriodState.Closed;
+        var closeAt = yearGrace is { } year ? year.ExtendClose(period.ComputedCloseAt) : period.ComputedCloseAt;
+
+        return utcNow < closeAt ? PeriodState.Grace : PeriodState.Closed;
     }
 
     /// <summary>
@@ -56,6 +77,12 @@ public sealed class PeriodStateCalculator
     /// </summary>
     /// <param name="period">Період із обчисленими межами.</param>
     /// <param name="utcNow">Поточний момент у UTC (з <c>IClock</c>).</param>
+    /// <param name="yearGrace">
+    /// Річне вікно проєкту (ФВ-1.8). ⚠ Викликач, що рахує СТАН для задачі, і
+    /// викликач, що рахує РІШЕННЯ про запис, мусять передавати одне й те саме
+    /// вікно: інакше задача збереже <c>Grace</c>, а рішення за межами періоду
+    /// дасть <c>Closed</c> і відмовить у записі, який інтерфейс показує дозволеним.
+    /// </param>
     /// <remarks>
     /// ⛔ F-08 (UX-PASS, четвертий раунд). Перевідкритий період після
     /// <c>ReopenedUntil</c> лишався відкритим для запису до години: запис
@@ -75,7 +102,7 @@ public sealed class PeriodStateCalculator
     /// Тут — лише РІШЕННЯ, що мусить бути правдивим зараз, а не за годину.
     /// </para>
     /// </remarks>
-    public PeriodState Effective(Period period, DateTime utcNow)
+    public PeriodState Effective(Period period, DateTime utcNow, YearGraceWindow? yearGrace = null)
     {
         ArgumentNullException.ThrowIfNull(period);
 
@@ -90,7 +117,7 @@ public sealed class PeriodStateCalculator
         // ⚠ Лише ВПЕРЕД (`Scheduled → Open → Grace → Closed`), як і переходи
         // самого періоду (`Period.TransitionTo`): рішення не має відкривати те,
         // що збережений стан уже просунув далі, — назад веде лише Reopen.
-        var computed = Calculate(period, utcNow, TimeZoneInfo.Utc);
+        var computed = Calculate(period, utcNow, TimeZoneInfo.Utc, yearGrace);
 
         return computed > period.State ? computed : period.State;
     }
@@ -110,9 +137,11 @@ public sealed class PeriodStateCalculator
     /// №09 §7 `W8`, `S-11`). Тепер рішення живе в домені, а задача і обробник
     /// активації беруть його з одного місця.
     /// </remarks>
+    /// <param name="yearGrace">Річне вікно проєкту (ФВ-1.8); див. <see cref="Calculate"/>.</param>
     public IReadOnlyList<PeriodTransition> Plan(
-        IReadOnlyList<Period> periods, DateTime utcNow, TimeZoneInfo siteTimeZone)
-        => PlanTransitions(periods, utcNow, siteTimeZone).Transitions;
+        IReadOnlyList<Period> periods, DateTime utcNow, TimeZoneInfo siteTimeZone,
+        YearGraceWindow? yearGrace = null)
+        => PlanTransitions(periods, utcNow, siteTimeZone, yearGrace).Transitions;
 
     /// <summary>
     /// Те саме, що <see cref="Plan"/>, плюс перелік переходів, які розрахунок
@@ -135,8 +164,10 @@ public sealed class PeriodStateCalculator
     /// адміністраторові (задача станів — журналом і <c>itg.MaintenanceRun</c>).
     /// </para>
     /// </remarks>
+    /// <param name="yearGrace">Річне вікно проєкту (ФВ-1.8); див. <see cref="Calculate"/>.</param>
     public PeriodTransitionPlan PlanTransitions(
-        IReadOnlyList<Period> periods, DateTime utcNow, TimeZoneInfo siteTimeZone)
+        IReadOnlyList<Period> periods, DateTime utcNow, TimeZoneInfo siteTimeZone,
+        YearGraceWindow? yearGrace = null)
     {
         ArgumentNullException.ThrowIfNull(periods);
 
@@ -145,7 +176,7 @@ public sealed class PeriodStateCalculator
 
         foreach (var period in periods)
         {
-            var target = Calculate(period, utcNow, siteTimeZone);
+            var target = Calculate(period, utcNow, siteTimeZone, yearGrace);
 
             // Уже в цільовому стані — не чіпаємо. Повторний прогін має бути
             // безслідним: інакше StateChangedAt оновлювався б щоразу і журнал
@@ -219,6 +250,65 @@ public readonly record struct SkippedPeriodTransition(Period Period, PeriodState
     /// <summary>Пояснення для адміністратора: чому стан не змінено і що з цим робити.</summary>
     public const string Reason =
         "Межі змінились після зміни політики, стан лишається; зворотний перехід — лише ручним Reopen.";
+}
+
+/// <summary>
+/// Річне пільгове вікно проєкту (ФВ-1.8): <c>[кінець року, кінець року +
+/// YearGraceOffsetDays днів)</c> у поясі майданчика.
+/// </summary>
+/// <param name="YearEndUtc">Опівніч після останнього дня проєкту (після 31.12) — початок вікна.</param>
+/// <param name="EndsAtUtc">Кінець вікна, виключно.</param>
+/// <param name="LastDay">Останній день вікна за майданчиком, включно — для повідомлень.</param>
+/// <remarks>
+/// ⚠ «Рік проєкту» — це <c>Project.PeriodStart…Project.PeriodEnd</c>
+/// (джерело істини про межі; <c>CreateProjectHandler</c> ставить
+/// <c>01.01…31.12</c> звітного року), а НЕ <c>Project.Year</c> — той лише
+/// підпис для UI і може бути порожнім.
+/// <para>
+/// ⚠ Відлік «+45 до 31.12» читається як 45 ПОВНИХ діб після кінця року:
+/// 31.12.2026 + 45 → останній день правок 14.02.2027 включно, вікно
+/// зачиняється опівночі 15.02 за майданчиком. Саме так читається приклад
+/// <c>reference/design/06</c> §ФВ-1.8 («до 14.02.2027 користувачі можуть
+/// виправляти»). Нуль днів — вікна немає.
+/// </para>
+/// <para>
+/// ⛔ Одне вікно на двох споживачів: стан періоду (<see cref="PeriodStateCalculator"/>)
+/// і ворота фізичної архівації (<c>ArchiveJob</c>, АРХ-1). Два окремі
+/// відліки — від 31.12 і від моменту позначки «заархівовано» — уже
+/// розходились (архівація чекала від <c>ClosedAt</c>, а редагування року не
+/// чекало нічого).
+/// </para>
+/// </remarks>
+public readonly record struct YearGraceWindow(DateTime YearEndUtc, DateTime EndsAtUtc, DateOnly LastDay)
+{
+    /// <summary>Вікно для проєкту.</summary>
+    /// <param name="projectEnd">Останній день проєкту — <c>Project.PeriodEnd</c> (31.12).</param>
+    /// <param name="yearGraceOffsetDays"><c>Project.YearGraceOffsetDays</c>.</param>
+    /// <param name="siteTimeZone">Пояс майданчика проєкту (D-68).</param>
+    public static YearGraceWindow For(DateOnly projectEnd, int yearGraceOffsetDays, TimeZoneInfo siteTimeZone)
+    {
+        ArgumentNullException.ThrowIfNull(siteTimeZone);
+
+        // ⚠ Те саме перетворення «опівніч дати в поясі → UTC», що й межі
+        // періодів (`Period.UtcBounds`), а не друга арифметика.
+        var yearEnd = Period.UtcBounds(projectEnd, projectEnd, siteTimeZone).EndUtc;
+        var lastDay = projectEnd.AddDays(Math.Max(0, yearGraceOffsetDays));
+        var endsAt = Period.UtcBounds(lastDay, lastDay, siteTimeZone).EndUtc;
+
+        return new YearGraceWindow(yearEnd, endsAt, lastDay);
+    }
+
+    /// <summary>Чи триває вікно в указаний момент.</summary>
+    /// <param name="utcNow">Момент у UTC.</param>
+    public bool Contains(DateTime utcNow) => YearEndUtc <= utcNow && utcNow < EndsAtUtc;
+
+    /// <summary>
+    /// Межа закриття періоду з урахуванням вікна: період, що на кінець року ще
+    /// не закрився, закривається не раніше кінця вікна.
+    /// </summary>
+    /// <param name="computedCloseAt"><c>Period.ComputedCloseAt</c>.</param>
+    public DateTime ExtendClose(DateTime computedCloseAt)
+        => computedCloseAt >= YearEndUtc && EndsAtUtc > computedCloseAt ? EndsAtUtc : computedCloseAt;
 }
 
 /// <summary>Результат планування переходів набору періодів.</summary>
