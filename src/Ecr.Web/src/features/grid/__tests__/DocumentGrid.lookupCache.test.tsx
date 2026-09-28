@@ -129,6 +129,25 @@ function grid(client: QueryClient): ReactElement {
   );
 }
 
+/**
+ * «Людина повернулась у вкладку через `elapsedMs`»: годинник TanStack
+ * (`Date.now`) зсунуто вперед, фокус знято й повернуто, і дано час рефетчу
+ * стартувати й завершитись, якби він був.
+ */
+async function focusAfter(elapsedMs: number): Promise<void> {
+  const later = Date.now() + elapsedMs;
+  vi.spyOn(Date, 'now').mockReturnValue(later);
+
+  act(() => {
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+  });
+
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
 afterEach(() => {
   cancelAutosave();
   resetPending();
@@ -148,20 +167,27 @@ describe('DocumentGrid: кеш записів Lookup-довідників', () =
     await waitFor(() => expect(entriesRequests).toBe(1));
 
     // Минуло більше, ніж дефолтний `staleTime` застосунку (30 с).
-    const later = Date.now() + 31_000;
-    vi.spyOn(Date, 'now').mockReturnValue(later);
+    await focusAfter(31_000);
 
-    act(() => {
-      focusManager.setFocused(false);
-      focusManager.setFocused(true);
-    });
-    // Дати шанс рефетчу стартувати, якби він був.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    // ⛔ Мутаційний доказ: прибери `staleTime: Infinity` /
-    // `refetchOnWindowFocus: false` із запитів entries у `DocumentGrid.tsx` —
-    // тут стане 2.
+    // ⛔ Мутаційний доказ: поверни `staleTime` запитів entries у
+    // `DocumentGrid.tsx` на дефолт 30 с — тут стане 2.
     expect(entriesRequests).toBe(1);
+  });
+
+  it('повернення у вкладку після > 5 хв — рівно один новий запит entries', async () => {
+    mockServer();
+    const client = appLikeClient();
+    render(grid(client));
+
+    await screen.findByTestId('revogrid-stub');
+    await waitFor(() => expect(entriesRequests).toBe(1));
+
+    await focusAfter(5 * 60_000 + 1_000);
+
+    // ⛔ Мутаційний доказ: `staleTime: Infinity` (або
+    // `refetchOnWindowFocus: false`) — тут лишиться 1: застарілий довідник
+    // ніколи не оновився б без перевідкриття документа.
+    expect(entriesRequests).toBe(2);
   });
 
   it('інвалідація ключа довідника (мутація записів) — дані все ж перезапитуються', async () => {

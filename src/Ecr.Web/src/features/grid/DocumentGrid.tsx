@@ -221,6 +221,13 @@ function dataColumnIndexOf(gridColumnIndex: number, data: TableSliceDto): number
 const RowLabelColumnWidth = 260;
 
 /**
+ * Скільки записи Lookup-довідника в сітці вважаються свіжими: повернення у
+ * вкладку раніше не перекачує довідник (до 50 тис. записів), пізніше — один
+ * рефетч на фокус.
+ */
+const LookupEntriesStaleTimeMs = 5 * 60_000;
+
+/**
  * `combine` для `useQueries` записів Lookup-довідників: паралельні масиви за
  * індексом довідника. Модульна функція — стабільне посилання, тож TanStack не
  * перераховує результат без зміни даних, а `replaceEqualDeep` лишає масиви
@@ -846,13 +853,14 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         // ⚠ Перф: довідник — до 50 тис. записів, а міняє його адміністратор,
         // не оператор сітки. Дефолт застосунку (`staleTime` 30 с + рефетч на
         // фокус) перекачував УСІ Lookup-довідники на кожне повернення у
-        // вкладку. Свіжість після правки довідника тримає інвалідація
-        // `queryKeys.registries.entries(code)` (редактор/імпорт записів) —
-        // вона перезапитує активний запит незалежно від `staleTime`.
-        // Ревізії довідника в `RegistryEntryDto`/`RegistryDefDto` немає, тож
-        // у ключ її не додано.
-        staleTime: Infinity,
-        refetchOnWindowFocus: false,
+        // вкладку. Обмежена застарілість (`LookupEntriesStaleTimeMs`), а не
+        // `Infinity`: фокус-рефетч лишається, але лише для застарілого кешу —
+        // правка довідника в іншій вкладці/іншим користувачем доходить до
+        // сітки не пізніше ніж за 5 хв. Правку в цій вкладці доносить
+        // інвалідація `queryKeys.registries.entries(code)` (редактор/імпорт
+        // записів) незалежно від `staleTime`. Ревізії довідника в
+        // `RegistryEntryDto`/`RegistryDefDto` немає, тож у ключ її не додано.
+        staleTime: LookupEntriesStaleTimeMs,
       };
     }),
 
