@@ -295,6 +295,9 @@ public sealed class RecalculationJob(
                                 : [],
                             new PhaseProgress(
                                 progress, periodFloor, periodCeiling, "jobs.phaseMethodologies"),
+
+                            // RT-23a: довідники — станом на момент прогону (AC-7).
+                            run.RegistryAsOfUtc,
                             ct)
                         .ConfigureAwait(false);
 

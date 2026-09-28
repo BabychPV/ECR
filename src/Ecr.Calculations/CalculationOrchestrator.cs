@@ -53,10 +53,9 @@ public sealed class CalculationOrchestrator(
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Профіль по модулях — заповнюється завжди (J-1).</returns>
     /// <remarks>
-    /// ⚠ Порт <see cref="ICalculationRunner"/> моменту знімка прогону ще не несе, тож
-    /// довідники тут читаються на поточний момент (<c>null</c>). Щойно задача
-    /// перерахунку передаватиме <c>CalculationRun.RegistryAsOfUtc</c>, вона кличе
-    /// перевантаження з моментом.
+    /// ⚠ Без моменту довідники читаються на поточний момент (<c>null</c>). Задача
+    /// перерахунку кличе перевантаження з моментом і передає
+    /// <c>CalculationRun.RegistryAsOfUtc</c> (RT-23a).
     /// </remarks>
     public Task<ModuleProfile> RunAsync(
         long calculationRunId,
