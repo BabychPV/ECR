@@ -407,7 +407,7 @@ public sealed class Evaluator(
             BinaryOperator.Modulo => Arithmetic(left, right, node.Operator),
             BinaryOperator.Power => Arithmetic(left, right, node.Operator),
             BinaryOperator.Less or BinaryOperator.LessOrEqual
-                or BinaryOperator.Greater or BinaryOperator.GreaterOrEqual => Compare(left, right, node.Operator),
+                or BinaryOperator.Greater or BinaryOperator.GreaterOrEqual => Compare(left, right, node.Operator, dialect),
             BinaryOperator.And or BinaryOperator.Or => Logic(left, right, node.Operator),
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
@@ -579,8 +579,22 @@ public sealed class Evaluator(
     /// рядка. Формула, що публікується без помилок і ніколи не дає числа, —
     /// найгірший із двох варіантів; узгодження в бік «працює як у SQL і Excel»
     /// дешевше за заборону, яка зламала б уже опубліковані методології.
+    ///
+    /// ⛔ Аудит A6: у діалекті методологій числа впорядковує АРИФМЕТИКА режиму
+    /// (<see cref="IEvaluationArithmetic.CompareNumbers"/>) — та сама, що рахує
+    /// рівність. Доти впорядкування завжди йшло в <c>double</c>, а рівність — у
+    /// <c>decimal</c>, і в <c>Strict</c> для <c>1.0000000000000001</c> проти
+    /// <c>1</c> виходило <c>&gt;=</c> і <c>&lt;&gt;</c> при <c>NOT &gt;</c>.
+    /// <c>Legacy</c> лишається в <c>double</c> — там це і є NCalc.
+    ///
+    /// ⚠ Діалекти шаблонів і звітів тут свідомо НЕ змінено: їхнє впорядкування
+    /// й далі <c>double</c>. Перевести їх у <c>decimal</c> — значить розвести
+    /// сервер із клієнтською підказкою (<c>evaluate.ts</c> рахує в JS
+    /// <c>number</c>) на літералах із 16+ значущими цифрами. Це рішення
+    /// координатора, а не цього виправлення.
     /// </remarks>
-    private static ExpressionValue Compare(ExpressionValue left, ExpressionValue right, BinaryOperator op)
+    private ExpressionValue Compare(
+        ExpressionValue left, ExpressionValue right, BinaryOperator op, ExpressionDialect dialect)
     {
         int order;
         if (left.AsDouble() is { } a && right.AsDouble() is { } b)
@@ -593,7 +607,9 @@ public sealed class Evaluator(
                 return ExpressionValue.Error(ExpressionErrors.BadValue);
             }
 
-            order = a.CompareTo(b);
+            order = dialect == ExpressionDialect.Methodology
+                ? arithmetic.CompareNumbers(left, right)!.Value
+                : a.CompareTo(b);
         }
         else if (left.Type == ExpressionValueType.Boolean && right.Type == ExpressionValueType.Boolean)
         {
