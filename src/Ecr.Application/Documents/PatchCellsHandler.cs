@@ -151,8 +151,8 @@ public sealed partial class PatchCellsHandler(
         var registryFields = await Validation.TableValidation
             .LoadRegistryFieldsAsync(validation, registries, context.Snapshot, context.Table, changes.Upserts, ct)
             .ConfigureAwait(false);
-        var messages = EnsureValidationPasses(
-            context, request, changes, requiredInputMessages, headerValues, registryFields);
+        var messages = await EnsureValidationPassesAsync(
+            context, request, changes, requiredInputMessages, headerValues, registryFields, ct).ConfigureAwait(false);
 
         // ⚠ `C7`: старі значення читаються ДО перевірки посилань, а не після:
         // «те саме значення, що вже стоїть» пропускається без відмови, і
@@ -688,10 +688,27 @@ public sealed partial class PatchCellsHandler(
     /// `BE-03`. Воно обов'язкове (інакше засічка пробиває всі партиції), а
     /// коротше вікно мовчки лишало б без автора саме той випадок, який до
     /// конфлікту й призводить найчастіше: вкладку, відкриту давно.
+    ///
+    /// ⛔ S6 (ФВ-6.6): перевірка версії йде ДО перевірки прав
+    /// (<see cref="EnsureAccessAsync"/>), тож у батчі може стояти колонка, якої
+    /// автор не бачить. Для неї чинне значення, автор і момент зміни НЕ
+    /// дочитуються — рядок конфлікту лишається, але без подробиць, як у
+    /// колонки, чий код не резолвиться: інакше застарілий <c>baseVersion</c>
+    /// був би оракулом значення прихованої колонки. Межі читання питаються
+    /// лише тут, на шляху відмови.
     /// </remarks>
     private async Task<List<CellConflictDto>> DescribeConflictsAsync(
         RequestContext context, IReadOnlyList<StaleCell> stale, CancellationToken ct)
     {
+        if (stale.Any(cell => cell.ColumnDefId is not null))
+        {
+            var scope = await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct)
+                .ConfigureAwait(false);
+            stale = [.. stale.Select(cell => cell.ColumnDefId is { } columnDefId && !scope.CanReadColumn(columnDefId)
+                ? cell with { ColumnDefId = null }
+                : cell)];
+        }
+
         var addressable = stale
             .Where(cell => cell.TableRowId is not null && cell.ColumnDefId is not null)
             .Select(cell => (TableRowId: cell.TableRowId!.Value, ColumnDefId: cell.ColumnDefId!.Value))
@@ -1523,18 +1540,32 @@ public sealed partial class PatchCellsHandler(
     /// <c>ECR-CELL-0422</c> — той самий код, що й звичайна помилка формату
     /// значення, — і людина шукала б причину не там (директива «обов'язкові
     /// вхідні колонки методології», §1.3).
+    ///
+    /// ⛔ S6 (ФВ-6.6): повідомлення про колонку, якої користувач НЕ бачить
+    /// (правило рядка з ціллю в прихованій колонці, обов'язковий вхід
+    /// методології в прихованій колонці), у відповідь не їде — ні в
+    /// <c>422</c>, ні в <see cref="PatchCellsResponse.Validation"/>: код
+    /// правила, адреса й текст називали б її. Блокування при цьому те саме —
+    /// рахується по ВСІХ повідомленнях, тож запис, що порушує правило в
+    /// прихованій колонці, так само відхиляється, лише без розкриття.
+    /// Лічильники (<c>cellCount</c>, <c>rowCount</c>) — по всіх: відмова вже
+    /// каже, що причина є, а число не називає ні колонки, ні значення.
     /// </remarks>
-    private List<Validation.ValidationMessage> EnsureValidationPasses(
+    private async Task<List<Validation.ValidationMessage>> EnsureValidationPassesAsync(
         RequestContext context,
         PatchCellsRequest request,
         CellChangeLists changes,
         IReadOnlyList<Validation.ValidationMessage> requiredInputMessages,
         IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue> headerValues,
-        IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? registryFields)
+        IReadOnlyDictionary<long, IReadOnlyDictionary<string, Ecr.Expressions.Evaluation.ExpressionValue>>? registryFields,
+        CancellationToken ct)
     {
         var messages = Validate(
             context.Snapshot, context.Instance.TableDefId, request, changes.Upserts, changes.RowKeyById, headerValues,
             registryFields);
+        var visible = await VisibleMessagesFilterAsync(
+            context, request, messages.Concat(requiredInputMessages), ct).ConfigureAwait(false);
+
         var blocking = messages.Where(m => m.BlocksSave).ToList();
         if (blocking.Count > 0)
         {
@@ -1546,6 +1577,7 @@ public sealed partial class PatchCellsHandler(
                     ["messageKey"] = "err.ECR-CELL-0422.validationBlocked",
                     ["cellCount"] = blocking.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["cells"] = blocking
+                        .Where(visible)
                         .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message })
                         .ToList(),
                 });
@@ -1565,6 +1597,7 @@ public sealed partial class PatchCellsHandler(
                     ["messageKey"] = "err.ECR-CALC-0437.requiredInputs",
                     ["rowCount"] = affectedRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["cells"] = blockingRequiredInputs
+                        .Where(visible)
                         .Select(m => new { m.RowKey, m.ColumnCode, m.RuleCode, m.Message })
                         .ToList(),
                 });
@@ -1572,7 +1605,44 @@ public sealed partial class PatchCellsHandler(
 
         messages.AddRange(requiredInputMessages);
 
-        return messages;
+        return messages.Where(visible).ToList();
+    }
+
+    /// <summary>
+    /// Які повідомлення можна показати автору батчу: ті, що не називають
+    /// колонки, якої він не бачить (S6).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Межі читання (<see cref="IAccessDecisionService.ReadScopeAsync"/>,
+    /// одне звернення до бази) питаються ЛИШЕ тоді, коли хоч одне повідомлення
+    /// називає колонку, якої батч НЕ пише. Колонку, яку батч пише, користувач
+    /// бачить: <see cref="EnsureAccessAsync"/> уже пропустив запис у неї, а
+    /// заборона читання забороняє й запис (ФВ-6.6). Тож чистий <c>PATCH</c> і
+    /// звичайні коміркові повідомлення не платять жодного звернення
+    /// (<c>PatchCellsQueryCountTests</c>, стеля та сама).
+    /// </remarks>
+    private async Task<Func<Validation.ValidationMessage, bool>> VisibleMessagesFilterAsync(
+        RequestContext context,
+        PatchCellsRequest request,
+        IEnumerable<Validation.ValidationMessage> messages,
+        CancellationToken ct)
+    {
+        var written = request.Rows
+            .SelectMany(r => r.Cells)
+            .Select(c => c.ColumnCode)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        bool Own(Validation.ValidationMessage m) => m.ColumnCode is null || written.Contains(m.ColumnCode);
+
+        if (messages.All(Own))
+        {
+            return static _ => true;
+        }
+
+        var scope = await access.ReadScopeAsync(context.Profile, context.Instance.DocumentId, ct).ConfigureAwait(false);
+        var tableDefId = context.Instance.TableDefId;
+
+        return m => Own(m) || scope.CanReadAt(tableDefId, m.ColumnCode);
     }
 
     /// <summary>
@@ -1590,7 +1660,7 @@ public sealed partial class PatchCellsHandler(
     /// а не по одному на комірку: бюджет запису лишається p95 300 мс на
     /// 100 комірок незалежно від того, скільки з них <c>Lookup</c>-типу.
     ///
-    /// ⚠ Викликається ПІСЛЯ <see cref="EnsureValidationPasses"/> навмисно:
+    /// ⚠ Викликається ПІСЛЯ <see cref="EnsureValidationPassesAsync"/> навмисно:
     /// та перевірка вже гарантує, що <c>Lookup</c>-комірка несе НЕПОРОЖНІЙ
     /// <c>ValueRegistryEntryId</c> (інакше — <c>ECR-CELL-0422</c>) — питати
     /// існування порожнього ідентифікатора немає сенсу.

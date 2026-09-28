@@ -114,6 +114,9 @@ public sealed class PatchCellsTests
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
             .Returns(EditDecision.Allow());
+        // S6: межі читання — «бачить усе»; про заборони — DenyReadTests (Api).
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
         // ⛔ Тут стояв ПОРОЖНІЙ словник, і всі тести нижче проходили — бо
         // обробник трактував відсутність рішення про доступ як ДОЗВІЛ
         // (`DIRECTIVE-14-ARCH.md`, `DAT-04`; `S-15` частини 1). Після
@@ -1126,6 +1129,78 @@ public sealed class PatchCellsTests
         Assert.Equal("7001001", warning.RowKey);
         Assert.Equal("Category", warning.ColumnCode);
         Assert.Contains("Category", warning.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Межі читання, де колонка <paramref name="columnDefId"/> під забороною (S6).</summary>
+    private void HiddenColumn(int columnDefId)
+        => _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+            .Returns(async _ => DocumentReadScope.For(
+                new AccessBuilder()
+                    .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+                    .Deny(ResourceKind.Column, columnDefId)
+                    .Build(),
+                AccessBuilder.ProjectId,
+                await _metadata.GetAsync(2, CancellationToken.None)));
+
+    /// <summary>
+    /// S6: попередження про обов'язковий вхід у колонці, якої автор не бачить,
+    /// у відповідь не їде — ні код, ні адреса, ні текст із назвою колонки.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Попередження_про_приховану_колонку_не_їде_у_відповідь()
+    {
+        var categoryId = WithMethodology(RequiredInputSeverity.Warn);
+        HiddenColumn(categoryId);
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+            CancellationToken.None);
+
+        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+        Assert.DoesNotContain(response.Validation, m => m.RuleCode == "ECR-CALC-0437");
+        Assert.DoesNotContain("Category", System.Text.Json.JsonSerializer.Serialize(response), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// S6: блокування те саме — запис, що не заповнив обов'язковий вхід у
+    /// прихованій колонці, відхиляється, але відмова колонки не називає.
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Блокування_через_приховану_колонку_лишається_але_без_її_назви()
+    {
+        var categoryId = WithMethodology(RequiredInputSeverity.Block);
+        HiddenColumn(categoryId);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0437", error.ErrorCode);
+        var details = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.DoesNotContain("Category", details, StringComparison.Ordinal);
+        Assert.DoesNotContain("ECW_TEST", details, StringComparison.Ordinal);
+        Assert.DoesNotContain("Category", error.Message, StringComparison.Ordinal);
+        await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// S6, храповик звернень: повідомлення лише про записані колонки — межі
+    /// читання не питаються (<c>PatchCellsQueryCountTests</c>, стеля 22).
+    /// </summary>
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Повідомлення_лише_про_записані_колонки_не_питають_меж_читання()
+    {
+        WithRule(ValidationSeverity.Warning, scope: 0, "[Volume] < 0");
+
+        var response = await Handler().HandleAsync(
+            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 5m)])),
+            CancellationToken.None);
+
+        Assert.NotEmpty(response.Validation);
+        await _access.DidNotReceiveWithAnyArgs().ReadScopeAsync(default!, default, default);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage7)]
