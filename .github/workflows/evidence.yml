@@ -100,8 +100,33 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # ⛔ На push (lane/**) у події немає pull_request.*, і сторож отримував
+      # порожні BASE/HEAD: `git diff "..."` давав порожній diff, а скрипт
+      # виходив нулем — зелений гейт, що нічого не перевірив. Тому на push
+      # база — merge-base з dev/integration (історія є: fetch-depth: 0), а
+      # порожня чи неіснуюча база — падіння, а не «змін у .cs немає».
       - name: honesty
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: bash .github/guards/honesty-guard.sh
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            HEAD_SHA="$PUSH_SHA"
+            BASE_SHA="$(git merge-base origin/dev/integration "$HEAD_SHA" || true)"
+          fi
+          if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+            echo "::error::honesty-guard: порожня база або вершина (подія $EVENT_NAME, BASE_SHA='${BASE_SHA:-}', HEAD_SHA='${HEAD_SHA:-}'). Без бази сторож нічого не перевіряє — це падіння, а не зелений."
+            exit 1
+          fi
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+              echo "::error::honesty-guard: коміт $sha відсутній у чекауті — diff був би порожнім і гейт хибно зеленим."
+              exit 1
+            fi
+          done
+          echo "honesty-guard: $EVENT_NAME, база $BASE_SHA, вершина $HEAD_SHA"
+          export BASE_SHA HEAD_SHA
+          bash .github/guards/honesty-guard.sh
