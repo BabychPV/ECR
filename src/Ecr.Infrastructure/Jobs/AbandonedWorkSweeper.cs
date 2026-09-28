@@ -93,12 +93,26 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     /// <param name="utcNow">Поточний момент у UTC.</param>
     /// <param name="purge">Чи виконувати ретенцію завершених записів прогресу.</param>
     /// <param name="ct">Скасування.</param>
-    public async Task<SweepOutcome> SweepAsync(string jobReason, DateTime utcNow, bool purge, CancellationToken ct)
+    /// <param name="startingInstance">
+    /// Лише на СТАРТІ: процес, що стартує (<c>JobProgressStore.CurrentMachineName</c>,
+    /// <c>JobProgressStore.CurrentInstanceId</c>). Тоді активні рядки
+    /// попередніх процесів цієї машини закриваються НЕЗАЛЕЖНО від биття.
+    /// <c>null</c> — періодичний прохід: лише за віком биття.
+    /// </param>
+    public async Task<SweepOutcome> SweepAsync(
+        string jobReason, DateTime utcNow, bool purge, CancellationToken ct,
+        (string MachineName, string InstanceId)? startingInstance = null)
     {
         // ⚠ Задачі — ПЕРШИМИ: живість прогонів нижче визначається саме за
         // активними задачами, і покинута задача, ще не закрита, тримала б
         // «живим» і свій покинутий прогін.
-        var jobs = await progress.FailStaleAsync(jobReason, utcNow, ct).ConfigureAwait(false);
+        var previous = startingInstance is { } me
+            ? await progress
+                .FailPreviousInstanceAsync(me.MachineName, me.InstanceId, jobReason, utcNow, ct)
+                .ConfigureAwait(false)
+            : 0;
+
+        var jobs = previous + await progress.FailStaleAsync(jobReason, utcNow, ct).ConfigureAwait(false);
 
         var live = await LiveJobCodesAsync(utcNow, ct).ConfigureAwait(false);
         var collection = await CloseCollectionRunsAsync(utcNow, live, ct).ConfigureAwait(false);

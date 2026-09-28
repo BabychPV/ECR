@@ -132,10 +132,9 @@ public static partial class StartupSequence
         // ⚠ U4/U11: той самий прохід, що й періодичне прибирання
         //     (`RecurringScheduleService.SweepOnceAsync`), — разом із журналами
         //     прогонів збору й обслуговування, які раніше не прибирав ніхто.
-        //     Рядки ПОПЕРЕДНЬОГО процесу цього ж інстанса зі свіжим биттям тут не
-        //     відрізнити від живих рядків сусіда: ідентифікатора інстансу в
-        //     `itg.JobProgress` немає (потрібна міграція). Їх закриє періодичний
-        //     прохід — щойно биття застаріє, тобто за ~6 хв, а не «ніколи».
+        //     Рядки ПОПЕРЕДНЬОГО процесу цієї ж машини закриваються НЕЗАЛЕЖНО від
+        //     свіжості биття — за `itg.JobProgress.InstanceId`; рядки інших машин
+        //     — як і раніше, лише за віком биття.
         var progress = scope.ServiceProvider.GetService<IJobProgressStore>();
         if (progress is not null)
         {
@@ -145,7 +144,9 @@ public static partial class StartupSequence
                     "Застосунок перезапущено: задача не завершилася до зупинки процесу.",
                     clock.UtcNow,
                     purge: false,
-                    CancellationToken.None)
+                    CancellationToken.None,
+                    (Infrastructure.Persistence.JobProgressStore.CurrentMachineName,
+                     Infrastructure.Persistence.JobProgressStore.CurrentInstanceId))
                 .ConfigureAwait(false);
 
             if (swept.Any)

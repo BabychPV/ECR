@@ -332,6 +332,12 @@ public sealed class CollectionCoverageConfiguration : IEntityTypeConfiguration<C
         // Деталь прогону: покриття одного прогону в порядку CoveredFrom — seek без сортування.
         builder.HasIndex(x => new { x.CollectionRunId, x.CoveredFrom }, "IX_CollectionCoverage_CollectionRunId")
                .IncludeProperties(x => x.CoveredTo);
+
+        // Острови покриття джерела (P5, `CollectionStore.ReadCoverageIslandsAsync`):
+        // успішні інтервали (`Status IS NULL`) однієї сутності в порядку CoveredTo.
+        builder.HasIndex(x => new { x.SourceEntityId, x.CoveredTo }, "IX_CollectionCoverage_SourceEntity_CoveredTo")
+               .IncludeProperties(x => x.CoveredFrom)
+               .HasFilter("[Status] IS NULL");
     }
 }
 
@@ -432,6 +438,20 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         // старті фільтрує саме за парою (State, HeartbeatAt), і без індексу
         // воно сканувало б усю історію задач, яка не видаляється.
         builder.HasIndex(x => new { x.State, x.HeartbeatAt }).HasDatabaseName("IX_JobProgress_Stale");
+
+        // Процес-власник: «{машина}/{GUID}». nvarchar — ім'я хоста не зобов'язане бути ASCII.
+        builder.Property(x => x.InstanceId).HasMaxLength(JobProgress.MaxInstanceIdLength);
+
+        // ⚠ «Мої задачі» (`ListRecentAsync`, шапка опитує кожні 3–30 с):
+        // `WHERE CreatedByUserId = @u [AND State/JobCode] ORDER BY UpdatedAt DESC`
+        // + TOP. `IX_JobProgress_Stale` веде за State і автора не бачить —
+        // без цього індексу кожне опитування сканує всю історію задач.
+        // State/JobCode у INCLUDE — необов'язкові фільтри екрана черги
+        // перевіряються в індексі, до key lookup лише TOP рядків.
+        // Нефільтрований: предиката на активні стани запит не має.
+        builder.HasIndex(x => new { x.CreatedByUserId, x.UpdatedAt }, "IX_JobProgress_CreatedBy_UpdatedAt")
+               .IsDescending(false, true)
+               .IncludeProperties(x => new { x.State, x.JobCode });
     }
 }
 

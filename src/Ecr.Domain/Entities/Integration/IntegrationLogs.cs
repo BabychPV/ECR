@@ -692,6 +692,31 @@ public sealed class JobProgress
     /// <summary>Межа стовпця <see cref="ErrorCode"/>.</summary>
     public const int MaxErrorCodeLength = 32;
 
+    /// <summary>Межа стовпця <see cref="InstanceId"/>.</summary>
+    public const int MaxInstanceIdLength = 64;
+
+    /// <summary>
+    /// Процес, що тримає задачу в черзі або виконує її: <c>{машина}/{GUID процесу}</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Потрібен прибиранню на старті: рядки ПОПЕРЕДНЬОГО процесу цієї ж
+    /// машини зі свіжим биттям без нього не відрізнити від живих рядків сусіда
+    /// (<c>AbandonedWorkSweeper</c>). <c>null</c> — рядок старший за колонку;
+    /// такий закриває лише прибирання за віком биття.
+    /// </remarks>
+    public string? InstanceId { get; private set; }
+
+    private void SetInstance(string? instanceId)
+    {
+        if (instanceId is null)
+        {
+            return;
+        }
+
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(instanceId.Length, MaxInstanceIdLength);
+        InstanceId = instanceId;
+    }
+
     /// <summary>
     /// Підтверджує, що задача досі виконується.
     /// </summary>
@@ -716,9 +741,11 @@ public sealed class JobProgress
     /// </remarks>
     /// <param name="correlationId">Кореляція запиту-постановника; <c>null</c> — лишити наявну.</param>
     /// <param name="documentId">Документ задачі; <c>null</c> — лишити наявний.</param>
-    public void Queue(DateTime utcNow, string? correlationId = null, long? documentId = null)
+    /// <param name="instanceId">Процес, у чиїй черзі задача; <c>null</c> — лишити наявний.</param>
+    public void Queue(DateTime utcNow, string? correlationId = null, long? documentId = null, string? instanceId = null)
     {
         SetCorrelation(correlationId);
+        SetInstance(instanceId);
         CreatedAt ??= utcNow;
         DocumentId = documentId ?? DocumentId;
         Attempt = null;
@@ -740,11 +767,13 @@ public sealed class JobProgress
     /// <param name="utcNow">Момент старту в UTC.</param>
     /// <param name="attempt">Номер спроби, від 1.</param>
     /// <param name="correlationId">Кореляція прогону; <c>null</c> — лишити наявну.</param>
-    public void Begin(DateTime utcNow, int attempt = 1, string? correlationId = null)
+    /// <param name="instanceId">Процес, що виконує задачу; <c>null</c> — лишити наявний.</param>
+    public void Begin(DateTime utcNow, int attempt = 1, string? correlationId = null, string? instanceId = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(attempt, 1);
 
         SetCorrelation(correlationId);
+        SetInstance(instanceId);
         Attempt = attempt;
         State = "Running";
         Percent = 0;

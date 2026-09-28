@@ -10,19 +10,50 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// <summary>Спроб загалом: перша + <see cref="Jobs.QuartzJobAdapter.MaxRetryAttempts"/> ретраїв (BE-08).</summary>
     private const int MaxAttempts = Jobs.QuartzJobAdapter.MaxRetryAttempts + 1;
 
+    /// <summary>Скільки символів імені машини йде в <see cref="JobProgress.InstanceId"/>.</summary>
+    /// <remarks>31 + «/» + 32 (GUID «N») = 64 — рівно межа стовпця.</remarks>
+    private const int MaxMachineNameLength = 31;
+
+    /// <summary>Ім'я цієї машини в тому вигляді, в якому воно стоїть в <see cref="JobProgress.InstanceId"/>.</summary>
+    public static string CurrentMachineName { get; } = MachineNameOf(Environment.MachineName);
+
+    /// <summary>
+    /// Ідентифікатор ЦЬОГО процесу: <c>{машина}/{GUID}</c>, GUID генерується раз на старті.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ GUID, а не PID: Windows повторно видає PID, і новий процес із PID
+    /// попереднього не відрізнив би його рядки від своїх.
+    /// </remarks>
+    public static string CurrentInstanceId { get; } = InstanceIdOf(CurrentMachineName, Guid.NewGuid());
+
+    /// <summary>Ім'я машини, обрізане до межі.</summary>
+    /// <param name="machineName">Сире ім'я.</param>
+    public static string MachineNameOf(string machineName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(machineName);
+        return machineName.Length <= MaxMachineNameLength ? machineName : machineName[..MaxMachineNameLength];
+    }
+
+    /// <summary>Ідентифікатор процесу для <paramref name="machineName"/> і <paramref name="process"/>.</summary>
+    /// <param name="machineName">Ім'я машини (вже обрізане, <see cref="MachineNameOf"/>).</param>
+    /// <param name="process">GUID процесу.</param>
+    public static string InstanceIdOf(string machineName, Guid process) => $"{machineName}/{process:N}";
+
     /// <inheritdoc />
     public Task QueueAsync(
         string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int? createdByUserId = null,
         string? correlationId = null, long? documentId = null)
         => UpsertAsync(
-            jobId, jobCode, utcNow, entry => entry.Queue(utcNow, correlationId, documentId), createdByUserId, ct);
+            jobId, jobCode, utcNow, entry => entry.Queue(utcNow, correlationId, documentId, CurrentInstanceId),
+            createdByUserId, ct);
 
     /// <inheritdoc />
     public Task StartAsync(
         string jobId, string jobCode, DateTime utcNow, CancellationToken ct, int attempt = 1,
         string? correlationId = null)
         => UpsertAsync(
-            jobId, jobCode, utcNow, entry => entry.Begin(utcNow, attempt, correlationId), createdByUserId: null, ct);
+            jobId, jobCode, utcNow, entry => entry.Begin(utcNow, attempt, correlationId, CurrentInstanceId),
+            createdByUserId: null, ct);
 
     /// <summary>Створює або оновлює запис прогресу.</summary>
     /// <remarks>
@@ -102,7 +133,8 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             return false;
         }
 
-        entry.Queue(utcNow);
+        // Ручний перезапуск ставить задачу в чергу ЦЬОГО процесу.
+        entry.Queue(utcNow, instanceId: CurrentInstanceId);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return true;
@@ -347,5 +379,37 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         // вибірки: число йде в лог старту, і завищене означало б розслідування
         // задач, яких ніхто не валив.
         return failed;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> FailPreviousInstanceAsync(
+        string machineName, string currentInstanceId, string reason, DateTime utcNow, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(machineName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(currentInstanceId);
+
+        var prefix = machineName + "/";
+
+        // ⛔ Биття тут НЕ перевіряється, і саме в цьому сенс: попередній процес
+        // цієї машини мертвий (його чергу в пам'яті Quartz втрачено), навіть
+        // якщо встиг ударити секунду тому. Рядки інших машин — не тут: їхню
+        // живість видно лише з биття (`FailStaleAsync`).
+        //
+        // ⚠ Поля — ті самі, що пише `JobProgress.Finish("Failed", reason)`
+        // (Percent не чіпає), і умова «досі активний» — у самому UPDATE: задачу
+        // могли перезапустити в цьому процесі між рядком і записом.
+        return await db.JobProgresses
+            .Where(p => (p.State == "Running" || p.State == "Queued")
+                        && p.InstanceId != null
+                        && p.InstanceId.StartsWith(prefix)
+                        && p.InstanceId != currentInstanceId)
+            .ExecuteUpdateAsync(
+                s => s
+                    .SetProperty(p => p.State, "Failed")
+                    .SetProperty(p => p.Error, reason)
+                    .SetProperty(p => p.ErrorCode, (string?)null)
+                    .SetProperty(p => p.UpdatedAt, utcNow),
+                ct)
+            .ConfigureAwait(false);
     }
 }

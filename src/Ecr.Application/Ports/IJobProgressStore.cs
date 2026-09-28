@@ -226,6 +226,25 @@ public interface IJobProgressStore
     /// <see cref="StaleAfter"/>.
     /// </remarks>
     public Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct);
+
+    /// <summary>
+    /// Позначає <c>Failed</c> активні задачі ПОПЕРЕДНІХ процесів цієї машини —
+    /// незалежно від свіжості биття.
+    /// </summary>
+    /// <param name="machineName">Ім'я цієї машини (префікс <c>InstanceId</c>).</param>
+    /// <param name="currentInstanceId">Ідентифікатор поточного процесу — його рядки не чіпаються.</param>
+    /// <param name="reason">Причина, що йде в <c>Error</c>.</param>
+    /// <param name="utcNow">Момент позначення в UTC.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Скільки записів позначено.</returns>
+    /// <remarks>
+    /// ⛔ Лише на СТАРТІ. Перезапуск, коротший за <see cref="StaleAfter"/>,
+    /// інакше лишав рядки попереднього процесу «живими» ще ~6 хв. Рядки інших
+    /// машин і рядки без <c>InstanceId</c> — поза цим методом
+    /// (<see cref="FailStaleAsync"/>).
+    /// </remarks>
+    public Task<int> FailPreviousInstanceAsync(
+        string machineName, string currentInstanceId, string reason, DateTime utcNow, CancellationToken ct);
 }
 
 /// <summary>Активні задачі без биття довше за <see cref="IJobProgressStore.StaleAfter"/>.</summary>

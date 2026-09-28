@@ -2721,6 +2721,15 @@ CREATE TABLE itg.CollectionCoverage
 );
 GO
 
+-- Острови покриття джерела (P5, CollectionStore.ReadCoverageIslandsAsync):
+-- лише успішні інтервали (Status IS NULL) однієї сутності в порядку CoveredTo.
+-- Міграція Analiz1JobsCoverageIndexes.
+CREATE INDEX IX_CollectionCoverage_SourceEntity_CoveredTo
+    ON itg.CollectionCoverage (SourceEntityId, CoveredTo)
+    INCLUDE (CoveredFrom)
+    WHERE [Status] IS NULL;
+GO
+
 CREATE TABLE itg.ArchiveRun
 (
     Id              bigint        IDENTITY(1,1) NOT NULL,
@@ -2769,8 +2778,23 @@ CREATE TABLE itg.JobProgress
     CreatedAt     datetime2(3)  NULL,  -- BE-08: перша постановка; старт і перезапуск не чіпають; NULL — розклад
     ErrorCode     varchar(32)   NULL,  -- BE-08: код каталогу помилок провалу (ErrorCodes)
     DocumentId    bigint        NULL,  -- BE-08: документ задачі, з payload при постановці
+    -- Процес-власник «{машина}/{GUID процесу}»: пишеться при постановці, старті
+    -- й ручному перезапуску. На старті процесу активні рядки ПОПЕРЕДНІХ процесів
+    -- цієї ж машини закриваються Failed незалежно від биття; рядки інших машин
+    -- — лише за віком HeartbeatAt. NULL — рядок старший за колонку.
+    -- Міграція Analiz1JobsCoverageIndexes.
+    InstanceId    nvarchar(64)  NULL,
     CONSTRAINT PK_JobProgress PRIMARY KEY (JobId)
 );
+GO
+
+-- «Мої задачі» (JobProgressStore.ListRecentAsync; шапка опитує кожні 3–30 с):
+-- WHERE CreatedByUserId = @u [AND State / JobCode] ORDER BY UpdatedAt DESC, TOP.
+-- IX_JobProgress_Stale (State, HeartbeatAt) автора не веде і порядку не дає.
+-- Міграція Analiz1JobsCoverageIndexes.
+CREATE INDEX IX_JobProgress_CreatedBy_UpdatedAt
+    ON itg.JobProgress (CreatedByUserId, UpdatedAt DESC)
+    INCLUDE (State, JobCode);
 GO
 ```
 
