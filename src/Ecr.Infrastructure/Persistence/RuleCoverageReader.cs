@@ -21,6 +21,7 @@ public sealed class RuleCoverageReader(EcrDbContext db) : IRuleCoverageReader
     public async Task<IReadOnlyList<RuleCoverageCombination>> ReadAsync(
         IReadOnlyList<int> tableDefIds,
         IReadOnlyList<int> columnDefIds,
+        IReadOnlyCollection<int> projectIds,
         int periodFrom,
         int periodTo,
         int limit,
@@ -28,8 +29,10 @@ public sealed class RuleCoverageReader(EcrDbContext db) : IRuleCoverageReader
     {
         ArgumentNullException.ThrowIfNull(tableDefIds);
         ArgumentNullException.ThrowIfNull(columnDefIds);
+        ArgumentNullException.ThrowIfNull(projectIds);
 
-        if (tableDefIds.Count == 0)
+        // Порожній набір проєктів — жодного рядка (аудит S7), а не «без фільтра».
+        if (tableDefIds.Count == 0 || projectIds.Count == 0)
         {
             return [];
         }
@@ -54,9 +57,16 @@ public sealed class RuleCoverageReader(EcrDbContext db) : IRuleCoverageReader
         await using var command = connection.CreateCommand();
 
         // Живі рядки (IsDeleted = 0) — ті самі, що бачить прогін (RowStore.RowsQuery).
+        // ⛔ Фільтр проєктів — у самому запиті, до GROUP BY (аудит S7): і значення, і
+        // лічильники RowsCount/Documents, і ознака обрізання рахуються лише по документах
+        // проєктів, які користувач може читати. Постфільтр у обробнику тут неможливий —
+        // комбінація вже зведена з рядків різних проєктів.
         command.CommandText = $"""
             SELECT TOP (@take) {select}COUNT_BIG(*) AS RowsCount, COUNT(DISTINCT ti.DocumentId) AS Documents
               FROM doc.TableInstance ti
+              JOIN doc.Document d
+                ON d.Id = ti.DocumentId
+               AND d.ProjectId IN (SELECT CAST(p.value AS int) FROM OPENJSON(@projects) p)
               JOIN doc.TableRow r
                 ON r.PeriodKey = ti.PeriodKey AND r.TableInstanceId = ti.Id AND r.IsDeleted = 0
             {joins}
@@ -70,6 +80,7 @@ public sealed class RuleCoverageReader(EcrDbContext db) : IRuleCoverageReader
         command.Parameters.AddWithValue("@from", periodFrom);
         command.Parameters.AddWithValue("@to", periodTo);
         command.Parameters.AddWithValue("@tables", JsonSerializer.Serialize(tableDefIds));
+        command.Parameters.AddWithValue("@projects", JsonSerializer.Serialize(projectIds));
         for (var i = 0; i < columnDefIds.Count; i++)
         {
             command.Parameters.AddWithValue($"@col{i.ToString(CultureInfo.InvariantCulture)}", columnDefIds[i]);
