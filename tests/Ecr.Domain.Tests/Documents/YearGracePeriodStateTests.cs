@@ -9,8 +9,9 @@ namespace Ecr.Domain.Tests.Documents;
 
 /// <summary>
 /// ФВ-1.8: річне пільгове вікно <c>31.12 + YearGraceOffsetDays</c> тримає
-/// періоди року, що на кінець року ще не закрилися, у <c>Grace</c> (запис із
-/// позначкою <c>IsLateEdit</c>, ФВ-1.9) до кінця вікна; після вікна — <c>Closed</c>.
+/// періоди року у <c>Grace</c> (запис із позначкою <c>IsLateEdit</c>, ФВ-1.9)
+/// до кінця вікна — з D-204 усі, і закриті до 31.12; після вікна — <c>Closed</c>.
+/// Системний Reopen закритих — <see cref="YearGraceSystemReopenTests"/>.
 /// </summary>
 /// <remarks>
 /// Політика навмисно коротка (<c>grace 15</c>, <c>hard-close 30</c>): грудень
@@ -50,8 +51,8 @@ public sealed class YearGracePeriodStateTests
 
     /// <remarks>
     /// Мутаційні докази (у <c>PeriodStateCalculator.Calculate</c> /
-    /// <c>YearGraceWindow</c>): (1) повернути <c>period.ComputedCloseAt</c>
-    /// замість <c>year.ExtendClose(...)</c> → 01.02 дає <c>Closed</c>, червоний;
+    /// <c>YearGraceWindow</c>): (1) не питати <c>year.HoldsInGrace(...)</c>
+    /// (до D-204 — <c>ExtendClose</c>) → 01.02 дає <c>Closed</c>, червоний;
     /// (2) кінець вікна без останньої доби (<c>endsAt</c> від <c>projectEnd +
     /// N - 1</c>) → 14.02 23:59 дає <c>Closed</c>, червоний.
     /// </remarks>
@@ -75,13 +76,15 @@ public sealed class YearGracePeriodStateTests
     }
 
     /// <remarks>
-    /// Мутація: у <c>ExtendClose</c> прибрати умову <c>computedCloseAt &gt;=
-    /// YearEndUtc</c> → січень «мав би» бути <c>Grace</c> 01.02.2027, червоний.
+    /// ⚠ D-204 (варіант «б», рішення людини 2026-09-28): вікно тримає в
+    /// <c>Grace</c> УСІ періоди року, і ті, що закрилися до 31.12. Мутація:
+    /// повернути старе правило (лише незакриті на 31.12) → січень 01.02 дає
+    /// <c>Closed</c>, червоний.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait("Requirement", "ФВ-1.8")]
-    public void Інші_періоди_року_вікно_тримає_лише_якщо_на_кінець_року_вони_ще_не_закрились()
+    public void Вікно_тримає_в_Grace_усі_періоди_року_і_закриті_до_31_12()
     {
         var window = Window(45);
         var now = SiteTime(2027, 2, 1);
@@ -92,9 +95,14 @@ public sealed class YearGracePeriodStateTests
         Assert.Equal(PeriodState.Closed, Calculator.Calculate(november, now, Site));
         Assert.Equal(PeriodState.Grace, Calculator.Calculate(november, now, Site, window));
 
-        // Січень закрився ще в березні 2026 за власними межами — вікно його НЕ
-        // відкриває: Closed → Grace лише через Reopen людини (ФВ-1.10).
-        Assert.Equal(PeriodState.Closed, Calculator.Calculate(Month(1), now, Site, window));
+        // Січень закрився ще в березні 2026 за власними межами — у вікні року
+        // він теж Grace (контроль без вікна — Closed), а після вікна — Closed.
+        Assert.Equal(PeriodState.Closed, Calculator.Calculate(Month(1), now, Site));
+        Assert.Equal(PeriodState.Grace, Calculator.Calculate(Month(1), now, Site, window));
+        Assert.Equal(PeriodState.Closed, Calculator.Calculate(Month(1), SiteTime(2027, 2, 15), Site, window));
+
+        // До кінця року вікно нічого не відкриває: 20.12 січень закритий.
+        Assert.Equal(PeriodState.Closed, Calculator.Calculate(Month(1), SiteTime(2026, 12, 20), Site, window));
     }
 
     /// <remarks>

@@ -619,7 +619,10 @@ public sealed class ActivateProjectHandler(
         var toMaterialize = new List<int>();
 
         // ⚠ ФВ-1.8: те саме річне вікно, що передає `PeriodStateJob`: активація
-        // в межах вікна лишає грудень `Grace`, як і наступний прогін задачі.
+        // в межах вікна переводить періоди року в `Grace` (D-204 — усі, що вже
+        // пройшли власний пільговий строк), як і наступний прогін задачі.
+        // Закритих періодів у чернетки немає; системний Reopen закритого
+        // (`YearReopens`) робить лише задача — вона пише аудит.
         var yearGrace = Domain.Services.YearGraceWindow.For(project.PeriodEnd, project.YearGraceOffsetDays, zone);
 
         foreach (var (period, target) in periodStates.Plan(allPeriods, now, zone, yearGrace))
@@ -740,8 +743,14 @@ public sealed class ArchiveProjectHandler(
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за
         // текстом: людині треба знати, які саме періоди закрити, а не що
         // «щось відкрите».
+        //
+        // ⚠ D-204: у вікні року ЗАКРИТИЙ період року теж не закритий — задача
+        // станів відкриє його системним Reopen найближчим прогоном. Без цієї
+        // умови архівація між опівніччю 31.12 і тим прогоном позначила б рік
+        // заархівованим, і `PeriodStateJob` (лише активні проєкти) його вже не
+        // відкрив би.
         var open = project.Periods
-            .Where(p => p.State is not (Domain.Enums.PeriodState.Closed))
+            .Where(p => p.State is not (Domain.Enums.PeriodState.Closed) || yearGrace.HoldsInGrace(p, now))
             .Select(p => p.PeriodKeyValue)
             .Order()
             .ToList();

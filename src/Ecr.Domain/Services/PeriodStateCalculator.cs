@@ -27,17 +27,19 @@ public sealed class PeriodStateCalculator
     /// межі самого періоду.
     /// </param>
     /// <remarks>
-    /// ⚠ ФВ-1.8: період, який на кінець року проєкту ще НЕ закрився за власними
-    /// межами (грудень; довгий пільговий строк листопада), лишається
-    /// <c>Grace</c> до кінця вікна <see cref="YearGraceWindow.EndsAtUtc"/>, а
-    /// не закривається за <c>ComputedCloseAt</c>. Це той самий стан
-    /// <c>Grace</c>, що й у звичайного періоду: запис дозволено з позначкою
-    /// <c>IsLateEdit</c> (ФВ-1.9, <see cref="Period.IsLateEditWindow"/>) — другого
-    /// механізму немає.
+    /// ⚠ ФВ-1.8, <c>D-204</c> (варіант «б», рішення людини 2026-09-28): у вікні
+    /// <c>[кінець року, кінець року + YearGraceOffsetDays)</c> УСІ періоди року
+    /// проєкту, що вже пройшли власний пільговий строк, мають стан
+    /// <c>Grace</c> — і ті, що на 31.12 ще не закрилися (грудень), і ті, що
+    /// закрилися раніше (листопад, січень). Після вікна — <c>Closed</c>. Це
+    /// той самий стан <c>Grace</c>, що й у звичайного періоду: запис дозволено
+    /// з позначкою <c>IsLateEdit</c> (ФВ-1.9, <see cref="Period.IsLateEditWindow"/>)
+    /// — другого механізму немає.
     /// <para>
-    /// ⚠ Період, що закрився ДО кінця року за своїми межами, вікно не
-    /// відкриває: інакше в стані лишався б зворотний перехід
-    /// <c>Closed → Grace</c>, який дозволено лише Reopen людини (ФВ-1.10).
+    /// ⚠ Для збереженого <c>Closed</c> це зворотний перехід. Його застосовує
+    /// не <see cref="Period.AdvanceTo"/>, а системний Reopen
+    /// (<see cref="PeriodTransitionPlan.YearReopens"/>) — з причиною й
+    /// аудитом, як і ручний (ФВ-1.10).
     /// </para>
     /// </remarks>
     public PeriodState Calculate(
@@ -66,9 +68,16 @@ public sealed class PeriodStateCalculator
             return PeriodState.Open;
         }
 
-        var closeAt = yearGrace is { } year ? year.ExtendClose(period.ComputedCloseAt) : period.ComputedCloseAt;
+        if (utcNow < period.ComputedCloseAt)
+        {
+            return PeriodState.Grace;
+        }
 
-        return utcNow < closeAt ? PeriodState.Grace : PeriodState.Closed;
+        // ⚠ ФВ-1.8 / D-204: правило «які періоди тримає вікно» — рівно в
+        // одному методі, YearGraceWindow.HoldsInGrace.
+        return yearGrace is { } year && year.HoldsInGrace(period, utcNow)
+            ? PeriodState.Grace
+            : PeriodState.Closed;
     }
 
     /// <summary>
@@ -95,6 +104,13 @@ public sealed class PeriodStateCalculator
     /// <see cref="Calculate"/>, і <c>Closed</c> НІКОЛИ не повертається назад —
     /// відкриває закритий період лише Reopen людини. Інакше збій розрахунку
     /// (межі, яких ще не пораховано) тихо відкривав би закрите.
+    /// </para>
+    /// <para>
+    /// ⚠ D-204: системний Reopen «вікно року» теж не тут, а в задачі станів
+    /// (<see cref="PeriodTransitionPlan.YearReopens"/>): він пише аудит, а
+    /// <c>IsLateEdit</c> читає ЗБЕРЕЖЕНИЙ стан. Рішення «можна» при збереженому
+    /// <c>Closed</c> дало б запис без позначки пізньої правки. Ціна — до
+    /// години після опівночі 31.12 закриті періоди року ще закриті.
     /// </para>
     /// <para>
     /// ⚠ Застереження ФВ-1.12 («стан — збережене значення») не скасовано:
@@ -173,6 +189,7 @@ public sealed class PeriodStateCalculator
 
         var transitions = new List<PeriodTransition>();
         var skipped = new List<SkippedPeriodTransition>();
+        var yearReopens = new List<YearGraceReopen>();
 
         foreach (var period in periods)
         {
@@ -180,20 +197,33 @@ public sealed class PeriodStateCalculator
 
             // Уже в цільовому стані — не чіпаємо. Повторний прогін має бути
             // безслідним: інакше StateChangedAt оновлювався б щоразу і журнал
-            // перестав би відповідати, коли період справді змінився.
+            // перестав би відповідати, коли період справді змінився. Зокрема
+            // перевідкритий вікном року період далі Grace — другого Reopen і
+            // другого запису аудиту немає.
             if (target == period.State)
             {
                 continue;
             }
 
-            // ⚠ Назад не переводимо НІКОЛИ — ні з `Closed`, ні з будь-якого
-            // іншого стану (`Scheduled < Open < Grace < Closed`, як і дозволені
-            // переходи `Period.TransitionTo`). `Closed → Grace` — виключно
-            // рішення адміністратора через Reopen; збій або зміна розрахунку не
-            // мають тихо відкривати закритий період чи повертати пільговий у
-            // відкритий.
             if (target < period.State)
             {
+                // ⚠ D-204, ОКРЕМА явна гілка, не загальний дозвіл зворотних
+                // переходів: `Closed → Grace` лише для періоду року проєкту і
+                // лише поки триває вікно року. Застосовує її викликач системним
+                // Reopen (причина + аудит), а не `AdvanceTo`.
+                if (period.State == PeriodState.Closed
+                    && target == PeriodState.Grace
+                    && yearGrace is { } year
+                    && year.HoldsInGrace(period, utcNow))
+                {
+                    yearReopens.Add(new YearGraceReopen(period, year.EndsAtUtc, year.ReopenReason));
+                    continue;
+                }
+
+                // ⚠ Решта зворотних — НІКОЛИ (`Scheduled < Open < Grace <
+                // Closed`, як і дозволені переходи `Period.TransitionTo`): зміна
+                // політики чи збій розрахунку не мають тихо відкривати закритий
+                // період чи повертати пільговий у відкритий.
                 skipped.Add(new SkippedPeriodTransition(period, period.State, target));
                 continue;
             }
@@ -201,7 +231,7 @@ public sealed class PeriodStateCalculator
             transitions.Add(new PeriodTransition(period, target));
         }
 
-        return new PeriodTransitionPlan(transitions, skipped);
+        return new PeriodTransitionPlan(transitions, skipped) { YearReopens = yearReopens };
     }
 
     /// <summary>
@@ -253,12 +283,23 @@ public readonly record struct SkippedPeriodTransition(Period Period, PeriodState
 }
 
 /// <summary>
+/// Зворотний перехід <c>Closed → Grace</c> «вікно року» (ФВ-1.8, D-204), який
+/// викликач застосовує системним Reopen (<see cref="Period.Reopen"/>) з
+/// аудитом, а не <see cref="Period.AdvanceTo"/>.
+/// </summary>
+/// <param name="Period">Закритий період року проєкту.</param>
+/// <param name="Until">До якого моменту відкрито — кінець вікна року (<see cref="YearGraceWindow.EndsAtUtc"/>).</param>
+/// <param name="Reason">Причина для <c>Period.ReopenReason</c> і аудиту.</param>
+public readonly record struct YearGraceReopen(Period Period, DateTime Until, string Reason);
+
+/// <summary>
 /// Річне пільгове вікно проєкту (ФВ-1.8): <c>[кінець року, кінець року +
 /// YearGraceOffsetDays днів)</c> у поясі майданчика.
 /// </summary>
 /// <param name="YearEndUtc">Опівніч після останнього дня проєкту (після 31.12) — початок вікна.</param>
 /// <param name="EndsAtUtc">Кінець вікна, виключно.</param>
 /// <param name="LastDay">Останній день вікна за майданчиком, включно — для повідомлень.</param>
+/// <param name="ProjectEnd">Останній день року проєкту (<c>Project.PeriodEnd</c>): періоди, що кінчаються не пізніше, — «цього року».</param>
 /// <remarks>
 /// ⚠ «Рік проєкту» — це <c>Project.PeriodStart…Project.PeriodEnd</c>
 /// (джерело істини про межі; <c>CreateProjectHandler</c> ставить
@@ -279,7 +320,7 @@ public readonly record struct SkippedPeriodTransition(Period Period, PeriodState
 /// чекало нічого).
 /// </para>
 /// </remarks>
-public readonly record struct YearGraceWindow(DateTime YearEndUtc, DateTime EndsAtUtc, DateOnly LastDay)
+public readonly record struct YearGraceWindow(DateTime YearEndUtc, DateTime EndsAtUtc, DateOnly LastDay, DateOnly ProjectEnd)
 {
     /// <summary>Вікно для проєкту.</summary>
     /// <param name="projectEnd">Останній день проєкту — <c>Project.PeriodEnd</c> (31.12).</param>
@@ -295,7 +336,7 @@ public readonly record struct YearGraceWindow(DateTime YearEndUtc, DateTime Ends
         var lastDay = projectEnd.AddDays(Math.Max(0, yearGraceOffsetDays));
         var endsAt = Period.UtcBounds(lastDay, lastDay, siteTimeZone).EndUtc;
 
-        return new YearGraceWindow(yearEnd, endsAt, lastDay);
+        return new YearGraceWindow(yearEnd, endsAt, lastDay, projectEnd);
     }
 
     /// <summary>Чи триває вікно в указаний момент.</summary>
@@ -303,12 +344,30 @@ public readonly record struct YearGraceWindow(DateTime YearEndUtc, DateTime Ends
     public bool Contains(DateTime utcNow) => YearEndUtc <= utcNow && utcNow < EndsAtUtc;
 
     /// <summary>
-    /// Межа закриття періоду з урахуванням вікна: період, що на кінець року ще
-    /// не закрився, закривається не раніше кінця вікна.
+    /// Чи тримає вікно період у <c>Grace</c> у вказаний момент — ЄДИНЕ місце
+    /// правила «які періоди відкриває вікно року» (D-204).
     /// </summary>
-    /// <param name="computedCloseAt"><c>Period.ComputedCloseAt</c>.</param>
-    public DateTime ExtendClose(DateTime computedCloseAt)
-        => computedCloseAt >= YearEndUtc && EndsAtUtc > computedCloseAt ? EndsAtUtc : computedCloseAt;
+    /// <param name="period">Період проєкту.</param>
+    /// <param name="utcNow">Момент у UTC.</param>
+    /// <remarks>
+    /// ⚠ Варіант «б» (рішення людини 2026-09-28): УСІ періоди цього року
+    /// проєкту, а не лише ті, що на 31.12 ще не закрилися, — «нам потрібно
+    /// мати можливість змінити дані … і щоб система знов перерахувала до
+    /// закінчення нашого періоду». Період наступного року (кінчається після
+    /// <see cref="ProjectEnd"/>) вікно не чіпає; поза вікном не чіпає нічого.
+    /// </remarks>
+    public bool HoldsInGrace(Period period, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(period);
+
+        return Contains(utcNow) && period.PeriodEnd <= ProjectEnd;
+    }
+
+    /// <summary>Причина системного Reopen «вікно року» — у <c>Period.ReopenReason</c> і в аудит.</summary>
+    public string ReopenReason
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"Вікно року (ФВ-1.8, D-204): період року {ProjectEnd:yyyy} відкрито системою для правок і перерахунку до {LastDay:dd.MM.yyyy} включно.");
 }
 
 /// <summary>Результат планування переходів набору періодів.</summary>
@@ -316,4 +375,17 @@ public readonly record struct YearGraceWindow(DateTime YearEndUtc, DateTime Ends
 /// <param name="Skipped">Зворотні переходи, пропущені навмисно.</param>
 public sealed record PeriodTransitionPlan(
     IReadOnlyList<PeriodTransition> Transitions,
-    IReadOnlyList<SkippedPeriodTransition> Skipped);
+    IReadOnlyList<SkippedPeriodTransition> Skipped)
+{
+    /// <summary>
+    /// Закриті періоди року, які вікно року (ФВ-1.8, D-204) відкриває
+    /// системним Reopen — з причиною й аудитом (ФВ-1.10).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремо від <see cref="Transitions"/> навмисно: <c>Period.AdvanceTo</c>
+    /// зворотного переходу не допускає, і викликач, що знає лише переходи
+    /// вперед (активація, <c>PeriodStateCalculator.Plan</c>), їх не
+    /// застосує мовчки — лише <c>PeriodStateJob</c>, що пише аудит.
+    /// </remarks>
+    public IReadOnlyList<YearGraceReopen> YearReopens { get; init; } = [];
+}

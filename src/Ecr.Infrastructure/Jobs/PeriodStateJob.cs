@@ -35,8 +35,23 @@ public sealed partial class PeriodStateJob(
     IUnitOfWork uow,
     IClock clock,
     IMaterializationScheduler materialization,
-    ILogger<PeriodStateJob>? logger = null) : IBackgroundJob
+    ILogger<PeriodStateJob>? logger = null,
+    IAuditWriter? audit = null) : IBackgroundJob
 {
+    /// <summary>
+    /// Автор системного Reopen «вікно року» в <c>aud.StructureChange</c>: не
+    /// людина. Та сама умовність, що й у перерахунку (<c>RecalculationService.SystemUserId</c>).
+    /// </summary>
+    public const int SystemUserId = 0;
+
+    /// <summary><c>CorrelationId</c> записів аудиту задачі — за ним їх видно в журналі.</summary>
+    public const string AuditCorrelationId = "period-state:year-grace";
+
+    // ⚠ Аудит необов'язковий у конструкторі лише для наявних прямих
+    // конструювань у тестах; без нього — той самий `AuditWriter` на тому самому
+    // контексті, тобто в тій самій транзакції. Мовчазного «без аудиту» немає.
+    private readonly IAuditWriter _audit = audit ?? new AuditWriter(db);
+
     /// <summary>Код задачі в журналі обслуговування (<c>itg.MaintenanceRun</c>).</summary>
     public static string Code => "period-state";
 
@@ -253,6 +268,45 @@ public sealed partial class PeriodStateJob(
                 // простояла весь Open+Grace): задача нічого не запише, але
                 // лишить `SkippedPeriodClosed` у журналі покриття — інакше
                 // точки лишились би сирими мовчки.
+                if (PeriodMaterializationTrigger.Requires(before, period.State))
+                {
+                    toMaterialize.Add(period.PeriodKeyValue);
+                }
+            }
+
+            // ⚠ ФВ-1.8, D-204: закриті періоди року у вікні року — системний
+            // Reopen тим самим доменним `Period.Reopen`, що й ручний (ФВ-1.10):
+            // `Closed → Grace`, `ReopenedUntil` = кінець вікна, причина. Далі
+            // період — звичайний Grace: запис з IsLateEdit, перерахунок, а
+            // наприкінці вікна калькулятор сам закриває його (`Grace → Closed`).
+            //
+            // ⚠ Аудит — у ЦІЙ транзакції (`AuditWriter` пише тим самим
+            // підключенням), як у `ReopenPeriodHandler`: журнал не має
+            // розходитися з тим, що він описує.
+            foreach (var reopen in plan.YearReopens)
+            {
+                var period = reopen.Period;
+                var before = period.State;
+                period.Reopen(reopen.Until, reopen.Reason, utcNow);
+
+                await _audit.WriteStructureChangeAsync(
+                    new StructureChangeRecord(
+                        utcNow,
+                        TemplateVersionId: project.TemplateVersionId,
+                        EntityType: "Period",
+                        EntityId: period.Id,
+                        ChangeClass: ChangeClass.Guarded,
+                        Operation: "Reopen",
+                        OldJson: JsonSerializer.Serialize(new { state = before.ToString() }),
+                        NewJson: JsonSerializer.Serialize(new { state = period.State.ToString(), until = reopen.Until }),
+                        ChangeReason: reopen.Reason,
+                        ChangedByUserId: SystemUserId,
+                        CorrelationId: AuditCorrelationId),
+                    innerCt).ConfigureAwait(false);
+
+                // `Closed → Grace` — перевідкриття: матеріалізація підхоплює
+                // точки, пропущені як `SkippedPeriodClosed` (той самий тригер,
+                // що в ручного Reopen).
                 if (PeriodMaterializationTrigger.Requires(before, period.State))
                 {
                     toMaterialize.Add(period.PeriodKeyValue);

@@ -51,7 +51,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// (2) <c>PeriodStateJob</c> без вікна в <c>PlanTransitions</c> → червоний
 /// <see cref="Задача_станів_у_вікні_лишає_грудень_Grace_після_вікна_Closed"/>;
 /// (3) активація без вікна в <c>Plan</c> → червоний
-/// <see cref="Активація_у_вікні_лишає_грудень_Grace_а_листопад_Closed"/>;
+/// <see cref="Активація_у_вікні_переводить_у_Grace_і_грудень_і_листопад"/>;
 /// (4) архівація без вікна в <c>Effective</c> → червоний
 /// <see cref="Архівація_у_вікні_відмовляє_грудень_ще_не_закритий"/>.
 /// </para>
@@ -178,7 +178,7 @@ public sealed class YearGraceWiringTests(SqlServerFixture sql) : IDisposable
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-1.8")]
-    public async Task Активація_у_вікні_лишає_грудень_Grace_а_листопад_Closed()
+    public async Task Активація_у_вікні_переводить_у_Grace_і_грудень_і_листопад()
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var doc = await builder.BuildAsync(December, rowCount: 1);
@@ -194,9 +194,9 @@ public sealed class YearGraceWiringTests(SqlServerFixture sql) : IDisposable
 
             Assert.Equal(PeriodState.Grace, await StateAsync(builder, doc.ProjectId, December));
 
-            // ⚠ Закритий до 31.12 період вікно НЕ відкриває (листопад закрився
-            // 30.12 за власними межами) — інакше вікно відкривало б увесь рік.
-            Assert.Equal(PeriodState.Closed, await StateAsync(builder, doc.ProjectId, 202611));
+            // ⚠ D-204 (варіант «б»): у вікні року Grace — УСІ періоди року,
+            // і листопад, що за власними межами закрився 30.12.
+            Assert.Equal(PeriodState.Grace, await StateAsync(builder, doc.ProjectId, 202611));
         }
         finally
         {
@@ -257,9 +257,12 @@ public sealed class YearGraceWiringTests(SqlServerFixture sql) : IDisposable
 
                 Assert.Equal("ECR-PRD-0409", error.ErrorCode);
 
-                // Незакритий — рівно грудень: решта року закрилась до 31.12.
-                var open = Assert.IsAssignableFrom<IEnumerable<int>>(error.Details!["periodKeys"]);
-                Assert.Equal([December], open);
+                // D-204: у вікні незакриті — усі періоди року (активація
+                // перевела їх у Grace), серед них грудень і листопад.
+                var open = Assert.IsAssignableFrom<IEnumerable<int>>(error.Details!["periodKeys"]).ToList();
+                Assert.Contains(December, open);
+                Assert.Contains(202611, open);
+                Assert.Equal(12, open.Count);
             }
         }
         finally
