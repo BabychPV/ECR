@@ -3,6 +3,7 @@ using Ecr.Application;
 using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries;
+using Ecr.Application.Registries.Keys;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.External;
@@ -228,6 +229,215 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         }
     }
 
+    // ─── S7-3: ключ довідника в пакеті синку ────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task Дубль_ключа_в_пакеті_синку_відхиляє_обидва_записи_а_не_валить_прогін()
+    {
+        // Нетемпоральний, ключ на CAP: g1 і g2 дають те саме 12.5 — кожне окремо вільне, разом — дубль.
+        var stand = await ArrangeAsync(
+            RegistrySourceKind.External, Author.Svc, keyed: new KeyedSetup(false, null, null, null, null, 12.5m, 12.5m));
+        await using var provider = BuildProvider();
+
+        try
+        {
+            var revision = await RevisionAsync(stand);
+
+            // ⛔ Не кидає: доти пакет доходив до UX_RegistryEntryKey_Live, і
+            // ConcurrencyConflictException валила весь прогін.
+            await RunAsync(provider, stand);
+
+            var values = await CapValuesAsync(stand);
+            Assert.Equal(V(10m, stand.SvcId), values[stand.E1]);
+            Assert.Equal(V(20m, stand.SvcId), values[stand.E2]);
+            Assert.Equal(revision, await RevisionAsync(stand));
+            Assert.Equal(0, await CountAsync(AuditQuery(stand.E1, stand.SvcId)) + await CountAsync(AuditQuery(stand.E2, stand.SvcId)));
+
+            AssertRejected(await EventsAsync(stand.EntityId), stand, $"messageKey={RegistryEntryWriter.KeyDuplicateInBatchKey}");
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task Обмін_ключами_між_записами_пакета_не_валить_прогін()
+    {
+        // E1: 10 → 20, E2: 20 → 10. Звірка пакета дублів не бачить (після застосування ключі різні),
+        // служба ключів тримачів із пакета не перевіряє — зупиняє лише індекс бази на першій же
+        // інструкції UPDATE (keyTakenConcurrently, ConcurrencyConflictException). Поштучний повтор
+        // бачить тримача поза пакетом → keyTaken на обидва; значення лишаються.
+        var stand = await ArrangeAsync(
+            RegistrySourceKind.External, Author.Svc, keyed: new KeyedSetup(false, null, null, null, null, 20m, 10m));
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            var values = await CapValuesAsync(stand);
+            Assert.Equal(V(10m, stand.SvcId), values[stand.E1]);
+            Assert.Equal(V(20m, stand.SvcId), values[stand.E2]);
+
+            AssertRejected(await EventsAsync(stand.EntityId), stand, "error=ECR-REG-4092");
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task Темпоральний_дубль_ключа_у_вікнах_що_перетинаються_не_записується()
+    {
+        // Різний ValidFrom — індекс (KeyDefId, KeyHash, ValidFromKey) дубля не бачить; вікна
+        // [2026-01-01, ∞) і [2026-06-01, ∞) перетинаються.
+        var stand = await ArrangeAsync(
+            RegistrySourceKind.External,
+            Author.Svc,
+            keyed: new KeyedSetup(true, new DateOnly(2026, 1, 1), null, new DateOnly(2026, 6, 1), null, 12.5m, 12.5m));
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            Assert.Equal(0, await CountAsync(
+                "SELECT COUNT(*) - COUNT(DISTINCT KeyHash) AS [Value] FROM dic.RegistryEntryKey "
+                + $"WHERE RegistryKeyDefId = {stand.KeyDefId} AND IsLive = 1"));
+
+            var values = await CapValuesAsync(stand);
+            Assert.Equal(V(10m, stand.SvcId), values[stand.E1]);
+            Assert.Equal(V(20m, stand.SvcId), values[stand.E2]);
+
+            AssertRejected(await EventsAsync(stand.EntityId), stand, $"messageKey={RegistryEntryWriter.KeyDuplicateInBatchKey}");
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task Темпоральний_той_самий_ключ_у_вікнах_що_не_перетинаються_записується()
+    {
+        // ⛔ Вимога HSE301 (RT-10b, §4.4): E1 [2025-01-01, 2026-01-01) і E2 [2026-01-01, ∞) — у кожен
+        // момент бізнес-часу ключ один, це законно. Звірка пакета не мусить цього зачепити.
+        var stand = await ArrangeAsync(
+            RegistrySourceKind.External,
+            Author.Svc,
+            keyed: new KeyedSetup(
+                true, new DateOnly(2025, 1, 1), new DateOnly(2026, 1, 1), new DateOnly(2026, 1, 1), null, 12.5m, 12.5m));
+        await using var provider = BuildProvider();
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            var values = await CapValuesAsync(stand);
+            Assert.Equal(V(12.5m, stand.SvcId), values[stand.E1]);
+            Assert.Equal(V(12.5m, stand.SvcId), values[stand.E2]);
+            Assert.Equal(2, await CountAsync(
+                "SELECT COUNT(*) AS [Value] FROM dic.RegistryEntryKey "
+                + $"WHERE RegistryKeyDefId = {stand.KeyDefId} AND IsLive = 1 "
+                + $"AND KeyHash = (SELECT KeyHash FROM dic.RegistryEntryKey WHERE RegistryEntryId = {stand.E1} AND RegistryKeyDefId = {stand.KeyDefId})"));
+
+            Assert.DoesNotContain(
+                await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistryValueRejected);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    // ─── C3: межа довідника ─────────────────────────────────────────────────
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Синк_довідника_A_не_торкається_запису_довідника_B_з_ключем_того_самого_джерела()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Svc);
+        var gx = Guid.NewGuid().ToString("D");
+        var (xb, registryB, capB) = await ArrangeForeignAsync(stand, gx);
+
+        // Елемент XB є серед дітей елемента сутності A — зі значенням, яке синк A записав би.
+        stand = stand with
+        {
+            Children = [.. stand.Children, new("StackX", null, $@"{stand.Parent}\StackX", null, "Element", gx)],
+        };
+        stand.Values[$@"{stand.Parent}\StackX|Capacity"] = Point($@"{stand.Parent}\StackX|Capacity", 99m);
+        await using var provider = BuildProvider();
+
+        try
+        {
+            var before = await ForeignFingerprintAsync(xb, registryB, capB, stand.SvcId);
+
+            await RunAsync(provider, stand);
+
+            // ⛔ Зв'язок чужого довідника в план не йде: ні значення, ні ревізії B, ні шляху ключа,
+            // ні аудиту, ні подій на XB. (Для A елемент gx — просто неприв'язаний: подія
+            // RegistryElementUnlinked без запису — законна.)
+            Assert.Equal(before, await ForeignFingerprintAsync(xb, registryB, capB, stand.SvcId));
+            Assert.DoesNotContain(
+                await EventsAsync(stand.EntityId),
+                e => e.Details!.Split("; ").Contains($"entry={xb}"));
+
+            // Контроль: записи самого A оновлено.
+            Assert.Equal(V(30m, stand.SvcId), (await CapValuesAsync(stand))[stand.E2]);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    /// <summary>По одній відмові writer'а на E1 і E2 — з очікуваною ознакою причини.</summary>
+    private static void AssertRejected(IReadOnlyList<CollectionCoverage> events, Stand stand, string reason)
+    {
+        var rejected = events.Where(e => e.Status == CollectionCoverage.RegistryValueRejected).ToList();
+        Assert.Equal(2, rejected.Count);
+        Assert.Single(rejected, e => e.Details!.Contains($"entry={stand.E1};", StringComparison.Ordinal));
+        Assert.Single(rejected, e => e.Details!.Contains($"entry={stand.E2};", StringComparison.Ordinal));
+        Assert.All(rejected, e => Assert.Contains(reason, e.Details, StringComparison.Ordinal));
+    }
+
+    /// <summary>Усе, що синк міг би змінити в записі XB чужого довідника.</summary>
+    private async Task<string> ForeignFingerprintAsync(long xb, int registryB, int capB, int svcId)
+    {
+        await using var db = Context();
+
+        var value = await db.RegistryValues.AsNoTracking()
+            .Where(v => v.RegistryEntryId == xb && v.RegistryFieldDefId == capB)
+            .Select(v => $"{v.Id}:{v.ValueNumeric}:{v.ChangedByUserId}")
+            .SingleAsync();
+        var count = await db.RegistryValues.AsNoTracking().CountAsync(v => v.RegistryEntryId == xb);
+        var key = await db.RegistryExternalKeys.AsNoTracking()
+            .Where(k => k.RegistryEntryId == xb)
+            .Select(k => $"{k.Id}:{k.ExternalPath}:{k.LastSyncedAt}")
+            .SingleAsync();
+        var revision = await db.RegistryDefs.AsNoTracking().Where(d => d.Id == registryB).Select(d => d.DataRevision).SingleAsync();
+
+        return string.Join(
+            "|", value, count, key, revision, await CountAsync(AuditQuery(xb, svcId)),
+            await CountAsync($"SELECT COUNT(*) AS [Value] FROM dic.RegistryValueHistory WHERE RegistryEntryId = {xb}"));
+    }
+
     // ─── Стенд ──────────────────────────────────────────────────────────────
 
     private enum Author
@@ -242,11 +452,13 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
     /// <paramref name="e1Author"/>), E2.CAP = 20 (svc). Джерело: g1 12.5, g2 30; з
     /// <paramref name="withRef"/> — g1.Ref = неіснуючий Id, g2.Ref — Id самого E2 (живий запис).
     /// </summary>
-    private async Task<Stand> ArrangeAsync(RegistrySourceKind kind, Author e1Author, bool withRef = false)
+    private async Task<Stand> ArrangeAsync(
+        RegistrySourceKind kind, Author e1Author, bool withRef = false, KeyedSetup? keyed = null)
     {
         await using var db = Context();
 
-        var registry = new RegistryDef(EcrCode.Create($"SYNC7_{_tag}"), Text("Stacks"), isTemporal: false);
+        var registry = new RegistryDef(
+            EcrCode.Create($"SYNC7_{_tag}"), Text("Stacks"), isTemporal: keyed?.Temporal ?? false);
         registry.SwitchSource(kind);
         db.RegistryDefs.Add(registry);
         await db.SaveChangesAsync();
@@ -254,6 +466,12 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         var cap = new RegistryFieldDef(registry.Id, EcrCode.Create("CAP"), Text("Capacity"), CellDataType.Decimal, 1);
         var reference = new RegistryFieldDef(registry.Id, EcrCode.Create("REF"), Text("Ref"), CellDataType.Lookup, 2);
         reference.PointTo(registry.Id);
+        if (keyed is not null)
+        {
+            // Поле первинного ключа обов'язкове (D-153).
+            cap.Update(Text("Capacity"), 1, isRequired: true);
+        }
+
         db.RegistryFieldDefs.AddRange(cap, reference);
         await db.SaveChangesAsync();
 
@@ -273,6 +491,12 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
 
         var e1 = new RegistryEntry(registry.Id, EcrCode.Create("E1"), Text("E1"));
         var e2 = new RegistryEntry(registry.Id, EcrCode.Create("E2"), Text("E2"));
+        if (keyed is not null)
+        {
+            e1.SetValidity(keyed.E1From, keyed.E1To);
+            e2.SetValidity(keyed.E2From, keyed.E2To);
+        }
+
         db.RegistryEntries.AddRange(e1, e2);
         await db.SaveChangesAsync();
 
@@ -302,6 +526,23 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
 
         await db.SaveChangesAsync();
 
+        var keyDefId = 0;
+        if (keyed is not null)
+        {
+            // Первинний ключ на CAP і рядки ключа наявних записів — тією самою службою, що й запис.
+            var key = new RegistryKeyDef(
+                registry.Id, EcrCode.Create("PK"), Text("PK"), [cap], isPrimary: true, ignoreCase: true, 0, Now);
+            db.RegistryKeyDefs.Add(key);
+            await db.SaveChangesAsync();
+            keyDefId = key.Id;
+
+            var definition = await db.RegistryDefs.Include(d => d.Fields).SingleAsync(d => d.Id == registry.Id);
+            var service = new RegistryKeyService(new RegistryKeyStore(db), new UnitOfWork(db));
+            await service.ApplyAsync(
+                definition, await service.ListActiveKeysAsync(registry.Id, CancellationToken.None), [e1, e2], CancellationToken.None);
+            await db.SaveChangesAsync();
+        }
+
         var children = new List<SourceEntityDescriptor>
         {
             new("Stack1", null, $@"{parent}\Stack1", null, "Element", g1),
@@ -311,8 +552,8 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
 
         var values = new Dictionary<string, SourceDataPoint>(StringComparer.OrdinalIgnoreCase);
         void Put(string path, decimal value) => values[path] = Point(path, value);
-        Put($@"{parent}\Stack1|Capacity", 12.5m);
-        Put($@"{parent}\Stack2|Capacity", 30m);
+        Put($@"{parent}\Stack1|Capacity", keyed?.Source1 ?? 12.5m);
+        Put($@"{parent}\Stack2|Capacity", keyed?.Source2 ?? 30m);
         Put($@"{parent}\Stack9|Capacity", 3m);
 
         if (withRef)
@@ -322,7 +563,49 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
             Put($@"{parent}\Stack9|Ref", e2.Id);
         }
 
-        return new Stand(entity.Id, registry.Id, cap.Id, parent, e1.Id, e2.Id, svcId, children, values);
+        return new Stand(entity.Id, registry.Id, cap.Id, parent, e1.Id, e2.Id, svcId, children, values)
+        {
+            KeyDefId = keyDefId,
+            DataSourceId = dataSource.Id,
+        };
+    }
+
+    /// <summary>
+    /// Довідник B поруч із довідником A стенду: запис XB, прив'язаний зовнішнім ключем
+    /// <paramref name="externalId"/> до ТОГО САМОГО джерела, що й сутність A, зі значенням CAP = 7.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ GUID XB — не g1: <c>UQ_RegistryExternalKey</c> (джерело, зовнішній Id) не дає одному GUID
+    /// одного джерела вказувати на два записи, тож «той самий g1» у базі неможливий.
+    /// </remarks>
+    private async Task<(long EntryId, int RegistryId, int CapId)> ArrangeForeignAsync(Stand stand, string externalId)
+    {
+        await using var db = Context();
+
+        var registry = new RegistryDef(EcrCode.Create($"SYNC7B_{_tag}"), Text("Other stacks"), isTemporal: false);
+        registry.SwitchSource(RegistrySourceKind.External);
+        db.RegistryDefs.Add(registry);
+        await db.SaveChangesAsync();
+
+        var cap = new RegistryFieldDef(registry.Id, EcrCode.Create("CAP"), Text("Capacity"), CellDataType.Decimal, 1);
+        db.RegistryFieldDefs.Add(cap);
+        await db.SaveChangesAsync();
+
+        var xb = new RegistryEntry(registry.Id, EcrCode.Create("XB"), Text("XB"));
+        db.RegistryEntries.Add(xb);
+        await db.SaveChangesAsync();
+
+        var value = new RegistryValue(xb.Id, cap.Id);
+        value.Set(CellDataType.Decimal, 7m, null);
+        value.MarkChangedBy(stand.SvcId);
+        db.RegistryValues.Add(value);
+
+        var key = new RegistryExternalKey(xb.Id, stand.DataSourceId, externalId);
+        key.MarkSynced($@"\\AF\Db\OtherOld_{_tag}\StackX", Now.AddDays(-1));
+        db.RegistryExternalKeys.Add(key);
+        await db.SaveChangesAsync();
+
+        return (xb.Id, registry.Id, cap.Id);
     }
 
     private static SourceDataPoint Point(string path, decimal value) => new(path, Now, value, null, null, "Good");
@@ -469,7 +752,31 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         long E2,
         int SvcId,
         IReadOnlyList<SourceEntityDescriptor> Children,
-        Dictionary<string, SourceDataPoint> Values);
+        Dictionary<string, SourceDataPoint> Values)
+    {
+        /// <summary>Первинний ключ на CAP (0 — ключа немає).</summary>
+        public int KeyDefId { get; init; }
+
+        /// <summary>Джерело сутності.</summary>
+        public int DataSourceId { get; init; }
+    }
+
+    /// <summary>Довідник із первинним ключем на CAP (S7-3).</summary>
+    /// <param name="Temporal">Темпоральний довідник.</param>
+    /// <param name="E1From">Початок вікна E1.</param>
+    /// <param name="E1To">Виключний кінець вікна E1.</param>
+    /// <param name="E2From">Початок вікна E2.</param>
+    /// <param name="E2To">Виключний кінець вікна E2.</param>
+    /// <param name="Source1">CAP у джерелі для g1 (E1).</param>
+    /// <param name="Source2">CAP у джерелі для g2 (E2).</param>
+    private sealed record KeyedSetup(
+        bool Temporal,
+        DateOnly? E1From,
+        DateOnly? E1To,
+        DateOnly? E2From,
+        DateOnly? E2To,
+        decimal Source1,
+        decimal Source2);
 
     /// <summary>Каталог: діти елемента сутності.</summary>
     private sealed class FakeCatalog(IReadOnlyList<SourceEntityDescriptor> children) : ISourceCatalogReader
