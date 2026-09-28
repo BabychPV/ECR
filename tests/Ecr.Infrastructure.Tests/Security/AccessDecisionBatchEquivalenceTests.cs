@@ -3,6 +3,7 @@ using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Entities.Workflow;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -142,6 +143,216 @@ public sealed class AccessDecisionBatchEquivalenceTests(SqlServerFixture sql) : 
         Assert.All(batch[world.Approved.TableInstanceId].Values, d => Assert.Equal(EditDenyReason.DocumentApproved, d.Reason));
         Assert.All(batch[world.ClosedInstanceId].Values, d => Assert.Equal(EditDenyReason.PeriodClosed, d.Reason));
         Assert.Contains(batch[world.Base.TableInstanceId].Values, d => d.IsAllowed);
+    }
+
+    /// <summary>
+    /// P8 + симуляція «очима користувача X» (<c>ФВ-6.16a</c>, <c>D-96</c>):
+    /// пакет через <see cref="SimulationAwareAccessDecisionService"/> дає те
+    /// саме, що поштучний шлях під тією ж симуляцією, а права всередині
+    /// симуляції — ті самі, що в реального X.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Профіль підміняє ЛИШЕ <c>BuildProfileAsync</c>; обидва методи зрізу
+    /// отримують профіль параметром і делегують його без змін. Тест стереже,
+    /// щоб так і лишилось: пакетний шлях, який сам перебудував би профіль (чи
+    /// взяв профіль того, хто симулює), розійшовся б тут.
+    ///
+    /// ⚠ «Ті самі рішення, що в реального X» буквально не можуть збігтися:
+    /// <c>EditRules.CanEdit</c> ПЕРШОЮ відмовляє будь-який запис у симуляції
+    /// (<c>SimulationReadOnly</c>, <c>D-96</c>) — інакше «подивитися очима»
+    /// стало б способом писати від чужого імені. Тому порівнюється так:
+    /// (1) під симуляцією КОЖНА комірка — <c>SimulationReadOnly</c>, набір
+    /// комірок той самий, що в X; (2) профіль симуляції несе рівно гранти,
+    /// заборони й ролі X, і той самий профіль без ознаки симуляції дає пакетом
+    /// рівно рішення реального X.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "P8")]
+    [Trait("Requirement", "ФВ-6.16a")]
+    public async Task Пакет_під_симуляцією_тотожний_поштучному_і_правам_самого_користувача()
+    {
+        var world = await ArrangeAsync();
+        var (actorId, subjectId) = await ArrangeUsersAsync(world);
+
+        await using var db = world.Builder.CreateContext();
+
+        var current = new FakeCurrentUser(actorId);
+        var inner = new AccessDecisionService(
+            db, new MetadataCache(_memory, db), new AccessProfileCache(_memory),
+            new TestClock(Now), current, new WorkflowStore(db));
+        var simulation = new SimulationService(db, inner);
+
+        var sessionId = await simulation.StartAsync(
+            actorId, subjectId, "P8 simulation equivalence", CancellationToken.None);
+        current.SimulationSessionId = sessionId;
+
+        try
+        {
+            var aware = new SimulationAwareAccessDecisionService(inner, simulation, current);
+
+            // ── Профіль симуляції: суб'єкт X, а не той, хто симулює ─────────
+            var simulated = await aware.BuildProfileAsync(actorId, CancellationToken.None);
+
+            Assert.True(simulated.IsSimulation);
+            Assert.Equal(subjectId, simulated.UserId);
+            Assert.Equal(subjectId, simulated.SimulatedForUserId);
+            Assert.Equal(actorId, simulated.SimulationActorUserId);
+
+            var real = await inner.BuildProfileAsync(subjectId, CancellationToken.None);
+
+            Assert.False(real.IsSimulation);
+            Assert.Equal(real.Grants.OrderBy(g => g.Key), simulated.Grants.OrderBy(g => g.Key));
+            Assert.Equal(real.Denies.Order(), simulated.Denies.Order());
+            Assert.Equal(real.RoleIds.Order(), simulated.RoleIds.Order());
+
+            // ── (1) Пакет == поштучний під тією самою симуляцією ─────────────
+            var simulatedBatch = await aware.CanEditSlicesAsync(simulated, world.InstanceIds, CancellationToken.None);
+            var realBatch = await inner.CanEditSlicesAsync(real, world.InstanceIds, CancellationToken.None);
+
+            Assert.Equal(world.InstanceIds.Order(), simulatedBatch.Keys.Order());
+
+            foreach (var instanceId in world.InstanceIds)
+            {
+                var single = await aware.CanEditSliceAsync(simulated, instanceId, CancellationToken.None);
+
+                Assert.NotEmpty(single);
+                AssertSame($"симуляція, пакет vs поштучний, екземпляр {instanceId}", single, simulatedBatch[instanceId]);
+
+                // Симуляція не ховає й не додає комірок — лише забороняє запис.
+                Assert.Equal(realBatch[instanceId].Keys.OrderBy(Key), single.Keys.OrderBy(Key));
+                Assert.All(single.Values, d =>
+                {
+                    Assert.False(d.IsAllowed);
+                    Assert.Equal(EditDenyReason.SimulationReadOnly, d.Reason);
+                });
+            }
+
+            // ── (2) Права всередині симуляції == права реального X ───────────
+            var unmasked = new AccessProfile
+            {
+                CacheKey = simulated.CacheKey + "|unmasked",
+                UserId = simulated.UserId,
+                SecurityStamp = simulated.SecurityStamp,
+                Permissions = simulated.Permissions,
+                Grants = simulated.Grants,
+                Denies = simulated.Denies,
+                RoleIds = simulated.RoleIds,
+            };
+
+            var unmaskedBatch = await aware.CanEditSlicesAsync(unmasked, world.InstanceIds, CancellationToken.None);
+
+            var reasons = new HashSet<EditDenyReason>();
+            var allowed = 0;
+
+            foreach (var instanceId in world.InstanceIds)
+            {
+                AssertSame(
+                    $"права X у симуляції vs реальний X, екземпляр {instanceId}",
+                    realBatch[instanceId], unmaskedBatch[instanceId]);
+
+                foreach (var decision in realBatch[instanceId].Values)
+                {
+                    reasons.Add(decision.Reason);
+                    allowed += decision.IsAllowed ? 1 : 0;
+                }
+            }
+
+            // ⛔ Проти хибнозеленого: права X мусять справді давати і дозвіл, і
+            // різні відмови — інакше збіг нічого не доводить.
+            Assert.True(allowed > 0, "У X немає жодної дозволеної комірки — набір не перевіряє дозволу.");
+            Assert.Contains(EditDenyReason.NoGrant, reasons);
+            Assert.Contains(EditDenyReason.DocumentSubmitted, reasons);
+            Assert.Contains(EditDenyReason.DocumentApproved, reasons);
+            Assert.Contains(EditDenyReason.PeriodClosed, reasons);
+            Assert.Contains(EditDenyReason.OutsidePermitWindow, reasons);
+        }
+        finally
+        {
+            await simulation.EndAsync(sessionId, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Той, хто симулює (без ролей), і суб'єкт X із роллю: <c>Write</c> на
+    /// обидва проєкти, заборона колонки базової таблиці й заборона таблиці
+    /// документа B — справжні рядки <c>sec.*</c>, щоб профіль X будувався з
+    /// бази так само, як у продуктиві.
+    /// </summary>
+    private static async Task<(int ActorId, int SubjectId)> ArrangeUsersAsync(World world)
+    {
+        await using var db = world.Builder.CreateContext();
+
+        var tag = Guid.NewGuid().ToString("N")[..10];
+        var actor = new User($"p8sim_a_{tag}", "P8 actor", AuthProvider.Local);
+        var subject = new User($"p8sim_x_{tag}", "P8 subject", AuthProvider.Local);
+
+        // ⚠ Локальний запис без хеша пароля відхиляє `CK_User_Provider`.
+        var hash = new PasswordHasher().Hash("P8-Simulation-2026!");
+        actor.SetPassword(hash);
+        subject.SetPassword(hash);
+        db.Users.AddRange(actor, subject);
+
+        var role = new Role(
+            EcrCode.Create($"P8SIM_{tag}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "P8 simulation subject" }));
+        db.Roles.Add(role);
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var closed = await db.TableInstances
+            .Where(t => t.Id == world.ClosedInstanceId)
+            .Join(db.Documents, t => t.DocumentId, d => d.Id, (t, d) => new { d.ProjectId, t.TableDefId })
+            .FirstAsync(CancellationToken.None);
+
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, subject.Id, null));
+        db.ResourceGrants.AddRange(
+            new ResourceGrant(role.Id, ResourceKind.Project, world.Base.ProjectId, GrantLevel.Write),
+            new ResourceGrant(role.Id, ResourceKind.Project, closed.ProjectId, GrantLevel.Write),
+            new ResourceGrant(role.Id, ResourceKind.Column, world.Base.ColumnDefIds[1], GrantLevel.None, isDeny: true),
+            new ResourceGrant(role.Id, ResourceKind.Table, closed.TableDefId, GrantLevel.None, isDeny: true));
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        return (actor.Id, subject.Id);
+    }
+
+    private static void AssertSame(
+        string what,
+        IReadOnlyDictionary<CellAddress, EditDecision> expected,
+        IReadOnlyDictionary<CellAddress, EditDecision> actual)
+    {
+        Assert.Equal(expected.Keys.OrderBy(Key), actual.Keys.OrderBy(Key));
+
+        foreach (var (address, e) in expected)
+        {
+            var a = actual[address];
+            var where = $"{what}, {address}";
+
+            Assert.True(e.IsAllowed == a.IsAllowed, $"{where}: IsAllowed {e.IsAllowed} ≠ {a.IsAllowed}");
+            Assert.True(e.Reason == a.Reason, $"{where}: Reason {e.Reason} ≠ {a.Reason}");
+            Assert.True(e.RequiresConfirmation == a.RequiresConfirmation, $"{where}: RequiresConfirmation");
+            Assert.True(string.Equals(e.Detail, a.Detail, StringComparison.Ordinal), $"{where}: Detail");
+        }
+    }
+
+    /// <summary>Двійник поточного користувача з сеансом симуляції.</summary>
+    /// <remarks>
+    /// ⚠ Клас, а не NSubstitute: <c>SimulationSessionId</c> — член інтерфейсу
+    /// з тілом за замовчуванням, і на його заміну в сабі тут ніхто не спирався.
+    /// </remarks>
+    private sealed class FakeCurrentUser(int userId) : ICurrentUser
+    {
+        public int? UserId => userId;
+
+        public string? UserName => "p8-actor";
+
+        public string CorrelationId => "p8-sim";
+
+        public string Language => "en";
+
+        public IReadOnlyList<string> GroupSids => [];
+
+        public long? SimulationSessionId { get; set; }
     }
 
     private static string Key(CellAddress address) => address.ToString();
