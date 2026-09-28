@@ -1064,10 +1064,13 @@ CREATE TABLE dic.RegistryEntry
     ChangedByUserId int           NULL,
     -- RK03 (D-158): системна історія — dic.RegistryEntryHistory нижче.
     -- datetime2(3), а не типовий 7 (D-68); HIDDEN — `SELECT *` їх не бачить.
-    -- DEFAULT SYSUTCDATETIME(): рядки, що були до RK03, отримують момент міграції,
-    -- тож «станом на» раніше за неї — порожньо (FEATURE-REGISTRY-TABLES §3.5).
+    -- DEFAULT від SYSUTCDATETIME(): рядки, що були до RK03, отримують момент міграції
+    -- (не 0001-01-01), тож «станом на» раніше за неї — порожньо (FEATURE-REGISTRY-TABLES §3.5).
+    -- ⚠ Мінус 1 с навмисно: datetime2(7) → datetime2(3) округлює вгору, і ADD PERIOD
+    -- на таблиці з рядками падав Msg 13542 «start of period … in the future» (CI, Linux).
+    -- На нові рядки DEFAULT не впливає — GENERATED ALWAYS ставить час сам.
     PeriodStart     datetime2(3)  GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
-        CONSTRAINT DF_RegEntry_PS DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT DF_RegEntry_PS DEFAULT DATEADD(second, -1, SYSUTCDATETIME()),
     PeriodEnd       datetime2(3)  GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL
         CONSTRAINT DF_RegEntry_PE DEFAULT CONVERT(datetime2(3), '9999-12-31 23:59:59.999'),
     PERIOD FOR SYSTEM_TIME (PeriodStart, PeriodEnd),
@@ -1106,7 +1109,7 @@ CREATE TABLE dic.RegistryValue
     ValueUnitId         int            NULL,
     ChangedByUserId     int            NULL,        -- RK03: як у dic.RegistryEntry
     PeriodStart         datetime2(3)   GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
-        CONSTRAINT DF_RegValue_PS DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT DF_RegValue_PS DEFAULT DATEADD(second, -1, SYSUTCDATETIME()),  -- як DF_RegEntry_PS
     PeriodEnd           datetime2(3)   GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL
         CONSTRAINT DF_RegValue_PE DEFAULT CONVERT(datetime2(3), '9999-12-31 23:59:59.999'),
     PERIOD FOR SYSTEM_TIME (PeriodStart, PeriodEnd),

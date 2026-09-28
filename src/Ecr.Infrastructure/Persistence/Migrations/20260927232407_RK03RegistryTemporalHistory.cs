@@ -17,7 +17,8 @@ namespace Ecr.Infrastructure.Persistence.Migrations
     /// «станом на» БУДЬ-ЯКИЙ момент до міграції повертав би нинішні значення так,
     /// ніби вони були чинні завжди. Контракт (§3.5): до міграції системного часу
     /// немає — <c>AS OF</c> раніше за неї порожній, тому
-    /// <c>DEFAULT SYSUTCDATETIME()</c>;</item>
+    /// <c>DEFAULT</c> від <c>SYSUTCDATETIME()</c> (із запасом у минуле — див.
+    /// <see cref="PeriodStartDefault"/>);</item>
     /// <item>обмеження за замовчуванням — безіменні (<c>DF__RegistryE__…</c>), а
     /// відкат мусить знімати їх за іменем;</item>
     /// <item>генерований <c>Down</c> ВИДАЛЯЄ історичні таблиці, а <c>D-25</c>
@@ -32,6 +33,29 @@ namespace Ecr.Infrastructure.Persistence.Migrations
     /// </remarks>
     public partial class RK03RegistryTemporalHistory : Migration
     {
+        /// <summary>
+        /// Початок періоду, який SQL Server ставить рядкам, що вже є в таблиці.
+        /// </summary>
+        /// <remarks>
+        /// ⛔ Не голий <c>SYSUTCDATETIME()</c>. <c>ADD PERIOD FOR SYSTEM_TIME</c>
+        /// відхиляє відкриті рядки з початком періоду в майбутньому (Msg 13542)
+        /// і порівнює з годинником у момент ПЕРЕВІРКИ, а не обчислення
+        /// <c>DEFAULT</c>. <c>SYSUTCDATETIME()</c> — <c>datetime2(7)</c>, і
+        /// перетворення в <c>datetime2(3)</c> округлює ВГОРУ до 0,5 мс: якщо
+        /// перевірка встигає раніше, ніж минуло це півмілісекунди, міграція
+        /// падає на базі з рядками. Так і було в CI (Linux-контейнер, b12c5860,
+        /// <c>D148ScalePrecheckTests</c>); на Windows той самий ALTER триває
+        /// довше за похибку, тож локально не відтворювалось.
+        /// Запас в одну секунду перекриває і округлення, і розбіжність джерел
+        /// часу. Ціна: «станом на» в останню секунду перед міграцією вже бачить
+        /// нинішні значення; наявні рядки однаково НЕ отримують <c>0001-01-01</c>,
+        /// тож <c>AS OF</c> раніше за міграцію лишається порожнім (§3.5).
+        /// ⚠ На вставки після міграції не впливає: <c>GENERATED ALWAYS</c>
+        /// ставить час сам, ігноруючи <c>DEFAULT</c>.
+        /// Доказ — <c>RK03PeriodStartMarginTests</c>.
+        /// </remarks>
+        internal const string PeriodStartDefault = "DATEADD(second, -1, SYSUTCDATETIME())";
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -52,7 +76,7 @@ namespace Ecr.Infrastructure.Persistence.Migrations
                 ALTER TABLE [dic].[{table}] ADD
                     [ChangedByUserId] int NULL,
                     [PeriodStart] datetime2(3) GENERATED ALWAYS AS ROW START HIDDEN NOT NULL
-                        CONSTRAINT [DF_{prefix}_PS] DEFAULT SYSUTCDATETIME(),
+                        CONSTRAINT [DF_{prefix}_PS] DEFAULT {PeriodStartDefault},
                     [PeriodEnd]   datetime2(3) GENERATED ALWAYS AS ROW END   HIDDEN NOT NULL
                         CONSTRAINT [DF_{prefix}_PE] DEFAULT CONVERT(datetime2(3), '9999-12-31 23:59:59.999'),
                     PERIOD FOR SYSTEM_TIME ([PeriodStart], [PeriodEnd]);
