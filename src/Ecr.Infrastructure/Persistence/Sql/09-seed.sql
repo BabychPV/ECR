@@ -4051,6 +4051,9 @@ USING (VALUES
     -- (readiness не червоніє від тла): чекають прибирання / прибирання стоїть.
     (N'health.jobs.stale',                      N'en', N'Background jobs without a heartbeat, awaiting cleanup: {count}.', 1),
     (N'health.jobs.staleUnswept',               N'en', N'Background jobs hang without a heartbeat and the cleanup does not close them: {count}.', 1),
+    -- Аудит U2: `/health/ready` відповів 503 зі звітом — сторінка стану показує
+    -- звіт, а над ним цю позначку, а не загальну помилку запиту.
+    (N'health.notReady',                        N'en', N'The system is not ready: the readiness check failed. The component states below show what is failing.', 1),
     -- COLL:jobs ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),

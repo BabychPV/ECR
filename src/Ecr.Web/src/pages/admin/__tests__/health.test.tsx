@@ -178,3 +178,105 @@ describe('Дашборд здоров’я', () => {
     expect(await screen.findAllByText('Enterprise')).not.toHaveLength(0);
   });
 });
+
+/**
+ * Аудит U2: `/health/ready` відповідає `503`, коли зведений стан `Unhealthy`,
+ * і саме тоді тіло несе звіт — яка перевірка впала. Сторінка мусить показати
+ * звіт із позначкою «не готова», а загальну помилку — лише коли звіту немає.
+ */
+describe('Дашборд здоров’я: 503 від /health/ready (аудит U2)', () => {
+  const unhealthy = {
+    status: 'Unhealthy',
+    totalDurationMs: 12.5,
+    checks: [
+      { name: 'db', status: 'Unhealthy', description: 'Database is unreachable.', durationMs: 10, data: {} },
+      { name: 'jobs', status: 'Healthy', description: 'Scheduler is running.', durationMs: 1, data: {} },
+    ],
+  };
+
+  /**
+   * `/health/ready` відповідає тим, що дає `ready`; решта шляхів — зразком.
+   * ⚠ Мережева відмова — справжній відхилений проміс із `fetch`, а не
+   * `mockRejectedValue`: доказ іде через увесь шлях `apiFetch` → запит.
+   */
+  function stubReady(ready: () => Promise<Response>): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes('/health/ready')) return ready();
+
+        return new Response(JSON.stringify(sample), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  }
+
+  function json503(body: unknown): () => Promise<Response> {
+    return () =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+  }
+
+  it('503 зі звітом показує стан кожного компонента і позначку «не готова», а не помилку запиту', async () => {
+    stubReady(json503(unhealthy));
+    show();
+
+    expect(await screen.findByText('Database is unreachable.')).toBeDefined();
+    expect(await screen.findByText('Scheduler is running.')).toBeDefined();
+
+    const alerts = await screen.findAllByRole('alert');
+    const text = alerts.map((a) => a.textContent).join(' ');
+    expect(text).toContain('⟦health.notReady⟧');
+    // ⛔ Загальна помилка транспорту — рівно те, що показувалось до фіксу.
+    expect(text).not.toContain('HTTP-503');
+  });
+
+  it('200 не показує позначку «не готова»', async () => {
+    stubReady(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(sample), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    show();
+
+    expect(await screen.findByText(sample.checks[0]!.description)).toBeDefined();
+    expect(screen.queryByText('⟦health.notReady⟧')).toBeNull();
+  });
+
+  it('503 без тіла показує помилку запиту, а не порожній звіт', async () => {
+    stubReady(() => Promise.resolve(new Response(null, { status: 503 })));
+    show();
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.map((a) => a.textContent).join(' ')).toContain('HTTP-503');
+    expect(screen.queryByText('⟦health.notReady⟧')).toBeNull();
+  });
+
+  it('503 з тілом не тієї форми (перевірка без імені) показує помилку запиту', async () => {
+    stubReady(json503({ status: 'Unhealthy', totalDurationMs: 1, checks: [{ status: 'Unhealthy' }] }));
+    show();
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.map((a) => a.textContent).join(' ')).toContain('HTTP-503');
+    expect(screen.queryByText('⟦health.notReady⟧')).toBeNull();
+  });
+
+  it('мережева відмова показує помилку запиту', async () => {
+    stubReady(() => Promise.reject(new TypeError('Failed to fetch')));
+    show();
+
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts.length).toBeGreaterThan(0);
+    expect(screen.queryByText('⟦health.notReady⟧')).toBeNull();
+    expect(screen.queryByText('Database is unreachable.')).toBeNull();
+  });
+});

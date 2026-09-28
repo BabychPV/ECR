@@ -1,5 +1,5 @@
 ﻿import type { JSX, ReactNode } from 'react';
-import { Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, Card, Group, SimpleGrid, Stack, Table, Text } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -11,6 +11,7 @@ import { PageHeader } from '@/shared/ui/PageHeader';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { hasText, t } from '@/shared/i18n';
+import { fetchReadiness } from '@/pages/admin/healthReadiness';
 
 type SystemFacts = components['schemas']['SystemFactsResponse'];
 
@@ -47,9 +48,11 @@ async function copyPartitionScript(): Promise<void> {
  * половини того, на що розрахований регламент.
  */
 export function HealthPage(): JSX.Element {
+  // ⛔ `fetchReadiness`, а не `apiFetch`: `503` зі звітом — це стан системи,
+  // а не відмова запиту (аудит U2, див. `healthReadiness.ts`).
   const ready = useQuery({
     queryKey: ['health', 'ready'],
-    queryFn: () => apiFetch<HealthReport>('/health/ready'),
+    queryFn: fetchReadiness,
     refetchInterval: 30_000,
   });
 
@@ -77,10 +80,16 @@ export function HealthPage(): JSX.Element {
                фарбувала власна `badgeColor` цієї сторінки — п'ята з п'яти
                розбіжних копій такого рішення (перелік — у шапці
                `StatusBadge.tsx`). */
-            <StatusBadge kind="health" state={ready.data.status} />
+            <StatusBadge kind="health" state={ready.data.report.status} />
           )
         }
       />
+
+      {ready.data?.ready === false && (
+        <Alert color="statusError" mb="md" data-health-not-ready="">
+          {t('health.notReady')}
+        </Alert>
+      )}
 
       {/*
        * ⛔ Через `<AsyncBoundary>`, а не через `?? {}`. Саме `?? {}` і був
@@ -90,7 +99,7 @@ export function HealthPage(): JSX.Element {
       <AsyncBoundary<HealthReport>
         isPending={ready.isPending}
         error={ready.error}
-        data={ready.data}
+        data={ready.data?.report}
         isEmpty={(report) => report.checks.length === 0}
         emptyTitle={t('health.noChecks')}
         emptyHint={t('health.noChecksHint')}
