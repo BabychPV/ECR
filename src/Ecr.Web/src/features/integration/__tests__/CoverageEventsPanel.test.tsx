@@ -150,6 +150,69 @@ describe('CoverageEventsPanel', () => {
     expect(screen.getByRole('option', { name: '⟦status.coverage.SkippedNeedsConfirmation⟧' })).toBeTruthy();
   });
 
+  it('події синку довідника — власні бейджі з тоном і без періоду (S5)', async () => {
+    const expected = [
+      ['9101', 'RegistryDiverged', 'warning'],
+      ['9102', 'RegistryConflictKeptManual', 'info'],
+      ['9103', 'RegistrySourceMissing', 'warning'],
+      ['9104', 'RegistryElementUnlinked', 'warning'],
+      ['9105', 'RegistryValueRejected', 'danger'],
+      ['9106', 'RegistryPendingUpdate', 'info'],
+    ] as const;
+    const items = expected.map(([id, status], index) => ({
+      ...Ceiling,
+      id: Number(id),
+      sourceEntityCode: `STACKS-${index}`,
+      sourceEntityName: null,
+      periodKey: null,
+      status,
+    }));
+    respond(() => ({ items, nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('STACKS-0');
+
+    for (const [id, status, tone] of expected) {
+      const row = document.querySelector<HTMLElement>(`tr[data-row-key="${id}"]`) as HTMLElement;
+      const badge = row.querySelector<HTMLElement>('[data-status-kind="coverage"]');
+      expect(badge?.dataset.statusState, `стан рядка ${id}`).toBe(status);
+      expect(badge?.dataset.statusTone, `тон рядка ${id}`).toBe(tone);
+      expect(badge?.textContent).toBe(`⟦status.coverage.${status}⟧`);
+      // Довідник не живе за періодами — тире, а не вигаданий ключ.
+      expect(within(row).getByText('—', { selector: 'p' })).toBeTruthy();
+    }
+  });
+
+  it('фільтр статусу пропонує події синку довідника з підписами каталогу', async () => {
+    respond(() => ({ items: [], nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('⟦coverageEvents.empty⟧');
+
+    fireEvent.click(await screen.findByRole('textbox', { name: '⟦coverageEvents.filterStatus⟧' }));
+
+    for (const status of [
+      'RegistryDiverged',
+      'RegistryConflictKeptManual',
+      'RegistrySourceMissing',
+      'RegistryElementUnlinked',
+      'RegistryValueRejected',
+      'RegistryPendingUpdate',
+    ]) {
+      expect(await screen.findByRole('option', { name: `⟦status.coverage.${status}⟧` })).toBeTruthy();
+    }
+  });
+
+  it('фільтр `coverageStatus=RegistrySourceMissing` іде в запит як `status`', async () => {
+    const seen = respond(() => ({ items: [], nextCursor: null, totalCount: null }));
+    show('/admin/sources?coverageStatus=RegistrySourceMissing');
+
+    await screen.findByText('⟦coverageEvents.empty⟧');
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((params) => params.get('status') === 'RegistrySourceMissing')).toBe(true);
+  });
+
   it('фільтр `coverageStatus=SkippedWriteConflict` іде в запит як `status`', async () => {
     const seen = respond(() => ({ items: [], nextCursor: null, totalCount: null }));
     show('/admin/sources?coverageStatus=SkippedWriteConflict');

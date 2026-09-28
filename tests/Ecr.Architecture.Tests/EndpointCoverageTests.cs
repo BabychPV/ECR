@@ -626,7 +626,9 @@ public sealed partial class EndpointCoverageTests
         "collectionRun" => Status(kind, "Succeeded", "Degraded", "Failed"),
         "coverage" => Status(
             kind, "SkippedPointCeiling", "SkippedPeriodClosed", "ConflictKeptManual",
-            "SkippedWriteConflict", "SkippedNeedsConfirmation"),
+            "SkippedWriteConflict", "SkippedNeedsConfirmation",
+            "RegistryDiverged", "RegistryConflictKeptManual", "RegistrySourceMissing",
+            "RegistryElementUnlinked", "RegistryValueRejected", "RegistryPendingUpdate"),
         "snapshot" => Status(kind, "Draft", "Approved", "Submitted"),
         "notificationDelivery" => Status(kind, "Sent", "Failed", "Suppressed"),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Невідомий різновид статусу."),

@@ -115,6 +115,13 @@ export const CoverageEventStatuses = [
   'SkippedWriteConflict',
   'SkippedNeedsConfirmation',
   'ConflictKeptManual',
+  // Синк довідника (RegistrySyncJob, S5): події без періоду (`periodKey = null`).
+  'RegistryDiverged',
+  'RegistryConflictKeptManual',
+  'RegistrySourceMissing',
+  'RegistryElementUnlinked',
+  'RegistryValueRejected',
+  'RegistryPendingUpdate',
 ] as const;
 export type CoverageEventStatus = (typeof CoverageEventStatuses)[number];
 

@@ -180,12 +180,20 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// ⚠ Стелі вибірки тут немає навмисно — вона вже є в самому запиті:
     /// мапінгів на одну сутність джерела одиниці, і <c>Take</c> міг би тихо
     /// відрізати саме той, чия одиниця змінилася.
+    /// <para>
+    /// ⛔ Лише мапінги на КОЛОНКУ (<see cref="FieldTargetKind.Column"/>).
+    /// Атрибут, змаплений на поле довідника, — не часовий ряд: його поточне
+    /// значення читає <c>RegistrySyncJob</c> (<c>ФВ-8.11</c>, S5). Без звуження
+    /// збирач тягнув би історію атрибута довідника в <c>ext.RawDataPoint</c>,
+    /// де її не читає ніхто, а зміна його одиниці ставила б на паузу мапінг,
+    /// якого збір не стосується.
+    /// </para>
     /// </remarks>
     public async Task<IReadOnlyList<EntityFieldMap>> GetFieldMapsAsync(
         int sourceEntityId, CancellationToken ct)
         => await db.EntityFieldMaps
             .AsNoTracking()
-            .Where(m => m.SourceEntityId == sourceEntityId && m.IsActive)
+            .Where(m => m.SourceEntityId == sourceEntityId && m.IsActive && m.TargetKind == FieldTargetKind.Column)
             .OrderBy(m => m.SourceField)
             .Take(MaxFieldMaps)
             .ToListAsync(ct)

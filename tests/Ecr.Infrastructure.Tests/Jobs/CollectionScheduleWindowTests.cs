@@ -50,7 +50,8 @@ public sealed class CollectionScheduleWindowTests(SqlServerFixture sql)
             Substitute.For<IBackgroundJobScheduler>(),
             new TestClock(Now),
             Substitute.For<INotificationOutbox>(),
-            new OutboxDispatcher(db, new TestClock(Now), Substitute.For<INotificationSender>()));
+            new OutboxDispatcher(db, new TestClock(Now), Substitute.For<INotificationSender>()),
+            Substitute.For<IRegistrySyncJob>());
 
         // Payload планового збору — без меж: початок має взятися з розкладу.
         await job.ExecuteAsync(

@@ -29,7 +29,8 @@ public sealed class CollectionJob(
     IBackgroundJobScheduler jobs,
     IClock clock,
     INotificationOutbox outbox,
-    Integration.OutboxDispatcher dispatcher) : ICollectionJob
+    Integration.OutboxDispatcher dispatcher,
+    IRegistrySyncJob registrySync) : ICollectionJob
 {
     /// <summary>Код задачі в черзі.</summary>
     public static string Code => "collection";
@@ -43,6 +44,25 @@ public sealed class CollectionJob(
         var schedule = await ScheduleAsync(request.SourceEntityId, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
+
+        // ⛔ Сутність, прив'язана до довідника, — не часовий ряд (ФВ-8.11, S5):
+        // її атрибути — поточні значення полів записів, і збирати їх у
+        // ext.RawDataPoint з матеріалізацією в комірки означало б записати
+        // довідник у документи. Той самий розклад і та сама кнопка «Зібрати»
+        // ведуть у синк довідника замість збору.
+        if (await IsRegistryBoundAsync(request.SourceEntityId, ct).ConfigureAwait(false))
+        {
+            await registrySync.ExecuteAsync(request.SourceEntityId, ct).ConfigureAwait(false);
+
+            if (schedule is not null)
+            {
+                // Прогін фіксується, watermark — ні: у синку довідника немає
+                // «зібраного до» моменту.
+                await SaveRunAsync(db, schedule, now, watermark: null, ct).ConfigureAwait(false);
+            }
+
+            return;
+        }
         var to = request.ToUtc ?? now;
 
         // ⚠ Початок береться з LookbackDays, а НЕ з Watermark. Watermark —
@@ -251,6 +271,12 @@ public sealed class CollectionJob(
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Сутність наповнює довідник (<c>ext.SourceEntity.RegistryDefId</c>).</summary>
+    private Task<bool> IsRegistryBoundAsync(int sourceEntityId, CancellationToken ct)
+        => db.SourceEntities
+            .AsNoTracking()
+            .AnyAsync(e => e.Id == sourceEntityId && e.RegistryDefId != null, ct);
 
     /// <summary>Розклад сутності; <c>null</c> — збір запустили руками.</summary>
     private Task<Domain.Entities.External.CollectionSchedule?> ScheduleAsync(

@@ -132,6 +132,12 @@ public sealed class CollectionRunHandlersTests
     [Theory]
     [InlineData("skippedwriteconflict", CollectionCoverage.SkippedWriteConflict)]
     [InlineData("SkippedNeedsConfirmation", CollectionCoverage.SkippedNeedsConfirmation)]
+    [InlineData("registrydiverged", CollectionCoverage.RegistryDiverged)]
+    [InlineData("RegistryConflictKeptManual", CollectionCoverage.RegistryConflictKeptManual)]
+    [InlineData("RegistrySourceMissing", CollectionCoverage.RegistrySourceMissing)]
+    [InlineData("RegistryElementUnlinked", CollectionCoverage.RegistryElementUnlinked)]
+    [InlineData("RegistryValueRejected", CollectionCoverage.RegistryValueRejected)]
+    [InlineData("RegistryPendingUpdate", CollectionCoverage.RegistryPendingUpdate)]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ІНТ-3.3")]
     public async Task Фільтр_приймає_статуси_конфлікту_запису_і_підтвердження(string asked, string expected)

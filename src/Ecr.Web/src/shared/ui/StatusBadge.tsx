@@ -232,6 +232,14 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
    * прогін і спробує знову. `SkippedNeedsConfirmation` — `warning`, а не
    * `info`: значення не записано, і без дії людини (підтвердження) воно не
    * ляже; `info` тут означав би «нічого робити не треба», як у `ConflictKeptManual`.
+   *
+   * Події синку довідника (`RegistrySyncJob`, FEATURE-REGISTRY-SYNC S5):
+   * `RegistryValueRejected` — `danger` (значення джерела не лягло б у поле ніколи
+   * без правки мапінгу чи джерела); `RegistryDiverged`, `RegistrySourceMissing`,
+   * `RegistryElementUnlinked` — `warning` (довідник і джерело розійшлися, потрібне
+   * рішення людини: звірити, прив'язати); `RegistryConflictKeptManual` і
+   * `RegistryPendingUpdate` — `info`: перше — правило `D-118`, друге — лише звірка
+   * S5, синк ще не пише.
    */
   coverage: {
     SkippedPointCeiling: 'danger',
@@ -239,6 +247,12 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     SkippedWriteConflict: 'warning',
     SkippedNeedsConfirmation: 'warning',
     ConflictKeptManual: 'info',
+    RegistryDiverged: 'warning',
+    RegistryConflictKeptManual: 'info',
+    RegistrySourceMissing: 'warning',
+    RegistryElementUnlinked: 'warning',
+    RegistryValueRejected: 'danger',
+    RegistryPendingUpdate: 'info',
   },
 
   /**

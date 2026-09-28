@@ -189,6 +189,15 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   // прогоном) і потрібне підтвердження — обидва `warning`, не `info`.
   ['coverage', 'SkippedWriteConflict', 'warning'],
   ['coverage', 'SkippedNeedsConfirmation', 'warning'],
+  // Синк довідника (S5): відмова значення — `danger`; розбіжність, зниклий і
+  // неприв'язаний елемент потребують рішення людини — `warning`; ручне значення
+  // за правилом `D-118` і оновлення, яке синк лише звірив, — `info`.
+  ['coverage', 'RegistryDiverged', 'warning'],
+  ['coverage', 'RegistryConflictKeptManual', 'info'],
+  ['coverage', 'RegistrySourceMissing', 'warning'],
+  ['coverage', 'RegistryElementUnlinked', 'warning'],
+  ['coverage', 'RegistryValueRejected', 'danger'],
+  ['coverage', 'RegistryPendingUpdate', 'info'],
 
   // `SnapshotStatus` (`Enums.cs`, `D-65`): `Rejected` у зрізі немає.
   ['snapshot', 'Draft', 'muted'],
@@ -213,8 +222,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 41 пара, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(41);
+  it('перелік вичерпний: 47 пар, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(47);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>

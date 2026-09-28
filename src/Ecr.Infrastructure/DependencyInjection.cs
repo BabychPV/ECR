@@ -223,6 +223,10 @@ public static class DependencyInjection
         // `ICurrentUser` — обидва мусять бути ОДНИМ екземпляром на scope.
         services.AddScoped<Jobs.IntegrationActor>();
 
+        // Синк довідника (FEATURE-REGISTRY-SYNC S5): його ставить `CollectionJob`
+        // для сутності з `RegistryDefId` — окремого коду в черзі немає.
+        services.AddScoped<Jobs.IRegistrySyncJob, Jobs.RegistrySyncJob>();
+
         // ⚠ Планувальник тепер справжній. Quartz піднімається як hosted
         // service, а порт лишається тим самим: заміна на Hangfire, якщо ІБ
         // погодить LGPL, коштує день (D-09).

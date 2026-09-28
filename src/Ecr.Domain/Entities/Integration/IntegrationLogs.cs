@@ -108,16 +108,71 @@ public sealed class CollectionCoverage : Entity<long>
     public const string SkippedNeedsConfirmation = "SkippedNeedsConfirmation";
 
     /// <summary>
+    /// Синк довідника (<c>RegistrySyncJob</c>, <c>ФВ-8.11</c>): значення в джерелі
+    /// інше, а писати синк не має права — довідник <c>Local</c> або мапінг вимкнено.
+    /// </summary>
+    public const string RegistryDiverged = "RegistryDiverged";
+
+    /// <summary>
+    /// Синк довідника: джерело змінило поле, яке останньою правила людина —
+    /// лишається людське (<c>D-118</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не <see cref="ConflictKeptManual"/>: той — про комірку документа, цей —
+    /// про поле запису довідника; фільтр журналу мусить їх розрізняти.
+    /// </remarks>
+    public const string RegistryConflictKeptManual = "RegistryConflictKeptManual";
+
+    /// <summary>
+    /// Синк довідника: прив'язаного елемента немає в ПОВНОМУ знімку джерела
+    /// (<c>D-187</c>); запис не видаляється.
+    /// </summary>
+    public const string RegistrySourceMissing = "RegistrySourceMissing";
+
+    /// <summary>
+    /// Синк довідника: елемент джерела без зв'язку <c>dic.RegistryExternalKey</c>;
+    /// запис не створюється (прив'язує людина).
+    /// </summary>
+    public const string RegistryElementUnlinked = "RegistryElementUnlinked";
+
+    /// <summary>
+    /// Синк довідника: значення не приводиться до типу поля (<c>ECR-REG-0422</c>)
+    /// або атрибут не прочитано (<c>ECR-INT-0404</c>/<c>ECR-INT-0503</c>).
+    /// </summary>
+    public const string RegistryValueRejected = "RegistryValueRejected";
+
+    /// <summary>
+    /// Синк довідника в режимі лише звірки (S5): оновлення, яке синк ЗАПИСАВ
+    /// би, якби писав (поле або шлях елемента). Нічого не записано.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Зникне з журналу, щойно синк почне писати через <c>RegistryEntryWriter</c>
+    /// (S7): тоді оновлення — вже не подія, а запис.
+    /// </remarks>
+    public const string RegistryPendingUpdate = "RegistryPendingUpdate";
+
+    /// <summary>
     /// Усі статуси подій журналу покриття (<c>D-118</c>, ФВ-5.23).
     /// </summary>
     /// <remarks>
-    /// ⚠ Рядки дослівно ті, що пише <c>MaterializeCollectedDataJob</c>: фільтр
-    /// журналу відмовляє на всьому поза цим переліком, тож новий статус без
-    /// рядка тут був би невидимим для адміністратора — саме тим мовчазним
-    /// пропуском, від якого цей перелік і рятує.
+    /// ⚠ Рядки дослівно ті, що пишуть <c>MaterializeCollectedDataJob</c> і
+    /// <c>RegistrySyncJob</c>: фільтр журналу відмовляє на всьому поза цим
+    /// переліком, тож новий статус без рядка тут був би невидимим для
+    /// адміністратора — саме тим мовчазним пропуском, від якого цей перелік і рятує.
     /// </remarks>
     public static readonly IReadOnlyList<string> KnownStatuses =
-        [SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling, SkippedWriteConflict, SkippedNeedsConfirmation];
+    [
+        SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling, SkippedWriteConflict, SkippedNeedsConfirmation,
+        RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
+        RegistryValueRejected, RegistryPendingUpdate,
+    ];
+
+    /// <summary>Статуси подій синку довідника — підмножина <see cref="KnownStatuses"/>.</summary>
+    public static readonly IReadOnlyList<string> RegistryStatuses =
+    [
+        RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
+        RegistryValueRejected, RegistryPendingUpdate,
+    ];
 
     /// <summary>Записує покритий інтервал.</summary>
     /// <param name="sourceEntityId">Сутність джерела.</param>
@@ -178,6 +233,43 @@ public sealed class CollectionCoverage : Entity<long>
             Details = details,
         };
     }
+
+    /// <summary>
+    /// Подія синхронізації довідника (<c>RegistrySyncJob</c>, <c>ФВ-8.10</c>/<c>ФВ-8.11</c>).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела, прив'язана до довідника.</param>
+    /// <param name="status">Статус із <see cref="RegistryStatuses"/>.</param>
+    /// <param name="details">Пояснення для людини; без стеків (ФВ-6.11). Обрізається до <see cref="MaxDetailsLength"/>.</param>
+    /// <param name="utcNow">Момент запису.</param>
+    /// <remarks>
+    /// ⚠ <c>PeriodKey = null</c>: довідник не живе за періодами, і вигаданий
+    /// період зробив би подію видимою у фільтрі періоду, до якого вона не має
+    /// стосунку. Прогону теж немає (<c>CollectionRunId = null</c>, як у
+    /// <see cref="Skipped"/>, Q-186).
+    /// </remarks>
+    /// <exception cref="ArgumentException">Статус не з <see cref="RegistryStatuses"/>.</exception>
+    public static CollectionCoverage SkippedRegistry(
+        int sourceEntityId, string status, string details, DateTime utcNow)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+
+        // ⛔ Статус матеріалізації тут був би неправдою: подія синку довідника
+        // не стосується жодної комірки й жодного періоду.
+        if (!RegistryStatuses.Contains(status, StringComparer.Ordinal))
+        {
+            throw new ArgumentException($"Статус «{status}» не є статусом синку довідника.", nameof(status));
+        }
+
+        return new CollectionCoverage(sourceEntityId, utcNow, utcNow)
+        {
+            PeriodKey = null,
+            Status = status,
+            Details = details is { Length: > MaxDetailsLength } ? details[..MaxDetailsLength] : details,
+        };
+    }
+
+    /// <summary>Межа стовпця <c>itg.CollectionCoverage.Details</c> — <c>nvarchar(1000)</c>.</summary>
+    public const int MaxDetailsLength = 1000;
 
     public int SourceEntityId { get; private set; }
     public DateTime CoveredFrom { get; private set; }

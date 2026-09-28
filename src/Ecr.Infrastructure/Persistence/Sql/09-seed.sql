@@ -4164,6 +4164,13 @@ USING (VALUES
     (N'status.coverage.ConflictKeptManual',  N'en', N'Manual value kept', 1),
     (N'status.coverage.SkippedWriteConflict', N'en', N'Write conflict, will retry', 1),
     (N'status.coverage.SkippedNeedsConfirmation', N'en', N'Needs confirmation', 1),
+    -- Події синку довідника (RegistrySyncJob, FEATURE-REGISTRY-SYNC S5).
+    (N'status.coverage.RegistryDiverged',           N'en', N'Registry differs from source', 1),
+    (N'status.coverage.RegistryConflictKeptManual', N'en', N'Registry: manual value kept', 1),
+    (N'status.coverage.RegistrySourceMissing',      N'en', N'Missing in source', 1),
+    (N'status.coverage.RegistryElementUnlinked',    N'en', N'Source element not linked', 1),
+    (N'status.coverage.RegistryValueRejected',      N'en', N'Registry value rejected', 1),
+    (N'status.coverage.RegistryPendingUpdate',      N'en', N'Registry update pending', 1),
 
     -- `SnapshotStatus` (Enums.cs, D-65). Словник окремий від `status.sheet.*`:
     -- `Rejected` у зрізі немає, а `Submitted` — кінцевий іммутабельний стан.

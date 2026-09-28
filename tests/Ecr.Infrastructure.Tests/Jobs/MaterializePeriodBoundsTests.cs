@@ -142,7 +142,8 @@ public sealed class MaterializePeriodBoundsTests(SqlServerFixture sql)
             jobs,
             new TestClock(Now),
             Substitute.For<INotificationOutbox>(),
-            new OutboxDispatcher(db, new TestClock(Now), Substitute.For<INotificationSender>()));
+            new OutboxDispatcher(db, new TestClock(Now), Substitute.For<INotificationSender>()),
+            Substitute.For<IRegistrySyncJob>());
 
         await collection.ExecuteAsync(
             new CollectionJobRequest(

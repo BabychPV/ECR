@@ -153,6 +153,18 @@ function statusFilterLabel(status: CoverageEventStatus): string {
       return t('status.coverage.SkippedNeedsConfirmation');
     case 'ConflictKeptManual':
       return t('status.coverage.ConflictKeptManual');
+    case 'RegistryDiverged':
+      return t('status.coverage.RegistryDiverged');
+    case 'RegistryConflictKeptManual':
+      return t('status.coverage.RegistryConflictKeptManual');
+    case 'RegistrySourceMissing':
+      return t('status.coverage.RegistrySourceMissing');
+    case 'RegistryElementUnlinked':
+      return t('status.coverage.RegistryElementUnlinked');
+    case 'RegistryValueRejected':
+      return t('status.coverage.RegistryValueRejected');
+    case 'RegistryPendingUpdate':
+      return t('status.coverage.RegistryPendingUpdate');
     default:
       return status;
   }
