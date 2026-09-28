@@ -537,6 +537,7 @@ CREATE TABLE cfg.ColumnDef
     CONSTRAINT UQ_ColumnDef_ForFk UNIQUE (TableDefId, Id),
     CONSTRAINT FK_ColumnDef_Table FOREIGN KEY (TableDefId) REFERENCES cfg.TableDef (Id),
     CONSTRAINT FK_ColumnDef_Cascade FOREIGN KEY (CascadeFromColumnId) REFERENCES cfg.ColumnDef (Id),
+    -- FK_ColumnDef_Unit (UnitId → uom.Unit) — ALTER TABLE після uom.Unit.
     CONSTRAINT CK_ColumnDef_Month CHECK (IsMonthColumn = 0 OR MonthNumber BETWEEN 1 AND 12),
     CONSTRAINT CK_ColumnDef_Lookup CHECK (DataType <> 5 OR LookupRegistryDefId IS NOT NULL)
 );
@@ -771,6 +772,7 @@ CREATE TABLE cfg.RegistryFieldDef
     CONSTRAINT UQ_RegistryFieldDef UNIQUE (RegistryDefId, Code),
     CONSTRAINT FK_RegField_Reg  FOREIGN KEY (RegistryDefId)    REFERENCES cfg.RegistryDef (Id),
     CONSTRAINT FK_RegField_Ref  FOREIGN KEY (RefRegistryDefId) REFERENCES cfg.RegistryDef (Id),
+    -- FK_RegField_Unit (UnitId → uom.Unit) — ALTER TABLE після uom.Unit.
     CONSTRAINT CK_RegField_Rel CHECK (RelationKind BETWEEN 0 AND 1 AND OnParentDelete BETWEEN 0 AND 1),
     -- ⛔ Композиція лише на полі Lookup (DataType = 5): база тримає інваріант і
     -- для вставок повз домен — інакше «частиною батька» ставало б поле, в
@@ -980,6 +982,21 @@ GO
 
 ALTER TABLE uom.Dimension
     ADD CONSTRAINT FK_Dim_BaseUnit FOREIGN KEY (BaseUnitId) REFERENCES uom.Unit (Id);
+GO
+
+-- HSE301 U1 (аудит C6 п.1), міграція U1UnitForeignKeys. До неї одиниця колонки
+-- шаблону й поля довідника ключа не мала: видалення одиниці лишало висячий UnitId,
+-- і першим його бачив перерахунок. ON DELETE NO ACTION, як у решти FK на uom.Unit.
+-- ⛔ Міграція перед ADD CONSTRAINT перевіряє висячі UnitId і зупиняється THROW 50301
+-- з переліком (operations-runbook.md §8.2), а не 547; тихого обнулення немає.
+-- Індекс під FK_ColumnDef_Unit — IX_ColumnDef_UnitId (B-18); під FK_RegField_Unit
+-- його немає навмисно: таблиця мала, перевірка ключа сканує її за мілісекунди.
+ALTER TABLE cfg.ColumnDef
+    ADD CONSTRAINT FK_ColumnDef_Unit FOREIGN KEY (UnitId) REFERENCES uom.Unit (Id);
+GO
+
+ALTER TABLE cfg.RegistryFieldDef
+    ADD CONSTRAINT FK_RegField_Unit FOREIGN KEY (UnitId) REFERENCES uom.Unit (Id);
 GO
 
 CREATE UNIQUE INDEX UX_Unit_BasePerDimension
@@ -1751,6 +1768,16 @@ GO
 CREATE INDEX IX_CalculationResult_Lookup
     ON calc.CalculationResult (PeriodKey, DocumentId, MethodologyVersionId, OutputCode)
     INCLUDE (Value, UnitId, SubstanceEntryId, SourceRowKey) ON ps_ByPeriodKey(PeriodKey);
+GO
+
+-- HSE301 U1 (аудит C6 п.3), міграція U1UnitForeignKeys: індекс під FK_CRes_Unit.
+-- Без нього і перевірка ключа при видаленні одиниці, і «де використовується»
+-- (UnitStore) сканують усю таблицю. Вирівняний зі схемою партиціонування.
+-- ⚠ Міграція будує його з WITH (ONLINE = ON) лише на EngineEdition 3/5/8
+-- (Enterprise/Developer, Azure); на Standard і Express — офлайн, таблиця на
+-- час побудови заблокована (operations-runbook.md §8.2, вікно обслуговування).
+CREATE INDEX IX_CalculationResult_UnitId
+    ON calc.CalculationResult (UnitId) ON ps_ByPeriodKey(PeriodKey);
 GO
 
 CREATE TABLE calc.CalculationInput

@@ -167,6 +167,16 @@ public sealed class ColumnDefConfiguration : IEntityTypeConfiguration<ColumnDef>
                .WithMany()
                .HasForeignKey(x => x.CascadeFromColumnId)
                .HasConstraintName("FK_ColumnDef_Cascade");
+
+        // ⛔ HSE301 U1 (аудит C6 п.1): одиниця колонки — зовнішній ключ. Без нього
+        // видалена одиниця лишала колонку з висячим UnitId, і першим це бачив
+        // перерахунок, а не адміністратор. Видалення одиниці — NO ACTION, як у
+        // решти FK на uom.Unit: перелік «де використовується» дає 409 раніше.
+        // Індекс під ключ — IX_ColumnDef_UnitId вище.
+        builder.HasOne<Ecr.Domain.Entities.Units.Unit>()
+               .WithMany()
+               .HasForeignKey(x => x.UnitId)
+               .HasConstraintName("FK_ColumnDef_Unit");
     }
 }
 

@@ -31,6 +31,9 @@ public sealed class RegistryDefinitionDraftTests
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
+
+    // HSE301 U1: поля тут без одиниць, довідник одиниць не читається.
+    private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
     private readonly RegistryDef _registry;
 
     public RegistryDefinitionDraftTests()
@@ -110,7 +113,7 @@ public sealed class RegistryDefinitionDraftTests
 
         var request = DraftRequest("Renamed", null);
         await Assert.ThrowsAsync<AccessDeniedException>(() => new SaveRegistryDefinitionHandler(
-                _registries, _uow, _audit, _access, _user, _clock)
+                _registries, _uow, _audit, _access, _user, _clock, _units)
             .HandleAsync("PERMIT", new(request.Fields, request.Rules, request.Reason), default));
     }
 
@@ -212,7 +215,7 @@ public sealed class RegistryDefinitionDraftTests
         => new(_registries, _drafts, _uow, _audit, _access, _user, _clock);
 
     private PublishRegistryDefinitionHandler Publish()
-        => new(_registries, _drafts, new SaveRegistryDefinitionHandler(_registries, _uow, _audit, _access, _user, _clock), _access, _user);
+        => new(_registries, _drafts, new SaveRegistryDefinitionHandler(_registries, _uow, _audit, _access, _user, _clock, _units), _access, _user);
 
     private void Allow(params string[] permissions)
     {

@@ -534,6 +534,14 @@ public sealed class CalculationResultConfiguration : IEntityTypeConfiguration<Ca
                .HasDatabaseName("IX_CalculationResult_Lookup")
                .IncludeProperties(x => new { x.Value, x.UnitId, x.SubstanceEntryId, x.SourceRowKey });
 
+        // ⛔ HSE301 U1 (аудит C6 п.3): індекс під FK_CRes_Unit. Без нього і
+        // перевірка ключа при видаленні одиниці, і «де використовується»
+        // (UnitStore: CalculationResults.AnyAsync(UnitId == …)) сканують усю
+        // таблицю — мільйони рядків на рік. Міграція U1UnitForeignKeys створює
+        // його сирим SQL (ONLINE лише на Enterprise/Azure, вирівняно зі схемою
+        // партиціонування таблиці); тут — лише форма для моделі.
+        builder.HasIndex(x => x.UnitId).HasDatabaseName("IX_CalculationResult_UnitId");
+
         builder.HasOne<CalculationRun>().WithMany().HasForeignKey(x => x.CalculationRunId)
                .HasConstraintName("FK_CRes_Run");
         builder.HasOne<MethodologyVersion>().WithMany().HasForeignKey(x => x.MethodologyVersionId)

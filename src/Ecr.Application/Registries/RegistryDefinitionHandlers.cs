@@ -250,7 +250,8 @@ public sealed class SaveRegistryDefinitionHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IUnitCatalog units)
 {
     /// <summary>Право на зміну ОПИСУ довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditDefinition";
@@ -327,6 +328,8 @@ public sealed class SaveRegistryDefinitionHandler(
 
         var before = Snapshot(definition, rules);
 
+        await RequireKnownUnitsAsync(dto.Fields, ct).ConfigureAwait(false);
+
         ApplyFields(definition, dto.Fields);
         var applied = ApplyRules(definition, rules, dto.Rules);
 
@@ -382,6 +385,47 @@ public sealed class SaveRegistryDefinitionHandler(
         }, ct).ConfigureAwait(false);
 
         return definition.DefinitionVersion;
+    }
+
+    /// <summary>Відмовляє, якщо одиниці якогось поля в довіднику одиниць немає (HSE301 U1).</summary>
+    /// <remarks>
+    /// ⛔ Доти неіснуючий <c>UnitId</c> поля записувався мовчки: ключа на
+    /// <c>uom.Unit</c> не було. Тепер <c>FK_RegField_Unit</c> є, і без цієї перевірки
+    /// описка давала б голий <c>500</c> на 547 замість <c>422</c> з ключем. Перевіряється
+    /// ДО застосування полів, одним знімком довідника на весь опис; спільне для
+    /// прямого збереження і публікації чернетки (обидва йдуть через
+    /// <see cref="ApplyAsync"/>).
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-REG-0422</c>, ключ <c>unknownUnit</c>.</exception>
+    private async Task RequireKnownUnitsAsync(IReadOnlyList<RegistryFieldSaveDto> fields, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        var withUnit = fields.Where(f => f.UnitId is not null).ToList();
+        if (withUnit.Count == 0)
+        {
+            return;
+        }
+
+        var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
+        var known = catalogue.Units.Values.Select(u => u.Id).ToHashSet();
+
+        var unknown = withUnit.FirstOrDefault(f => !known.Contains(f.UnitId!.Value));
+        if (unknown is null)
+        {
+            return;
+        }
+
+        var unitId = unknown.UnitId!.Value.ToString(CultureInfo.InvariantCulture);
+        throw new BusinessRuleException(
+            "ECR-REG-0422",
+            $"Поле «{unknown.Code}»: одиниці {unitId} у довіднику немає.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REG-0422.unknownUnit",
+                ["fieldCode"] = unknown.Code,
+                ["unitId"] = unitId,
+            });
     }
 
     /// <summary>Застосовує перелік полів до опису.</summary>

@@ -50,10 +50,15 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 public sealed partial class UnitUsageForeignKeyTests(SqlServerFixture sql)
 {
     /// <summary>
-    /// Посилання на одиницю, які перелік читає, хоча FK на них НЕМАЄ (див. <c>DeleteUnitHandler</c>):
-    /// їх храповик не виводить зі схеми, тож вони названі явно.
+    /// Посилання, які до HSE301 U1 перелік читав БЕЗ зовнішнього ключа і тому називав явно.
     /// </summary>
-    private static readonly string[] ReferencesWithoutForeignKey =
+    /// <remarks>
+    /// ⛔ Міграція <c>U1UnitForeignKeys</c> поставила на них <c>FK_ColumnDef_Unit</c> і
+    /// <c>FK_RegField_Unit</c>: тепер храповик виводить їх зі схеми сам, а посилань на
+    /// одиницю без ключа не лишилось жодного. Тест нижче вимагає, щоб обидва стояли і в
+    /// моделі EF, і в розгорнутій базі.
+    /// </remarks>
+    private static readonly string[] FormerlyWithoutForeignKey =
     [
         "cfg.ColumnDef.UnitId",
         "cfg.RegistryFieldDef.UnitId",
@@ -75,9 +80,17 @@ public sealed partial class UnitUsageForeignKeyTests(SqlServerFixture sql)
         Assert.NotEmpty(fromModel);
         Assert.NotEmpty(fromDatabase);
 
+        // HSE301 U1: колишні посилання без ключа тепер мають ключ і в моделі, і в базі.
+        // Мутація: прибрати HasOne<Unit>() з конфігурації ColumnDef чи RegistryFieldDef —
+        // червоне тут (модель), прибрати AddForeignKey з міграції — червоне тут (база).
+        foreach (var reference in FormerlyWithoutForeignKey)
+        {
+            Assert.Contains(reference, fromModel);
+            Assert.Contains(reference, fromDatabase);
+        }
+
         var expected = fromModel
             .Union(fromDatabase)
-            .Union(ReferencesWithoutForeignKey)
             .Order(StringComparer.Ordinal)
             .ToList();
 
@@ -102,7 +115,7 @@ public sealed partial class UnitUsageForeignKeyTests(SqlServerFixture sql)
             + "Не читає (видалення впаде на FK голим 500 замість 409): "
             + (missing.Count == 0 ? "—" : string.Join(", ", missing))
             + Environment.NewLine
-            + "Читає стовпці без FK, не названі в ReferencesWithoutForeignKey: "
+            + "Читає стовпці, на яких FK немає: "
             + (extra.Count == 0 ? "—" : string.Join(", ", extra))
             + Environment.NewLine
             + "FK моделі EF: " + string.Join(", ", fromModel)

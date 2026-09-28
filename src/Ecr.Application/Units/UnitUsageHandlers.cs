@@ -66,9 +66,9 @@ public sealed class UnitUsageHandler(
 /// посилання, що комітилося між перевіркою й записом, перевірка не бачила, і видалення падало
 /// на FK голим <c>500</c> замість <c>409</c> з переліком.
 ///
-/// ⚠ Посилання, які не тримає зовнішній ключ (<c>cfg.ColumnDef.UnitId</c>,
-/// <c>dic.RegistryFieldDef.UnitId</c>), нова вставка після видалення однаково лишить висячими:
-/// їхні обробники існування одиниці не перевіряють. Закрити це може лише FK — міграція.
+/// ⚠ HSE301 U1: <c>cfg.ColumnDef.UnitId</c> і <c>cfg.RegistryFieldDef.UnitId</c> тепер теж тримають
+/// зовнішні ключі (<c>FK_ColumnDef_Unit</c>, <c>FK_RegField_Unit</c>), а їхні обробники перевіряють
+/// існування одиниці: посилань на одиницю без ключа не лишилось жодного виду.
 /// </remarks>
 public sealed class DeleteUnitHandler(
     IUnitStore units,

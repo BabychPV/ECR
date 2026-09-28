@@ -4606,6 +4606,12 @@ USING (VALUES
     -- (ext.RowWindowMap / ext.RowWindowSource): без виду видалення падало на FK голим 500.
     (N'usageKind.rowWindowMap', N'en', N'PI row-window binding', 1),
     -- HSE301:U2 ── кінець секції
+
+    -- HSE301:U1 ── одиниця колонки шаблону й поля довідника звіряється з uom.Unit
+    -- (FK_ColumnDef_Unit / FK_RegField_Unit): описка в номері — 422, а не 500 на ключі.
+    (N'err.ECR-TMPL-0422.unknownUnit', N'en', N'Column "{columnCode}": unit {unitId} does not exist in the unit catalog.', 1),
+    (N'err.ECR-REG-0422.unknownUnit', N'en', N'Field "{fieldCode}": unit {unitId} does not exist in the unit catalog.', 1),
+    -- HSE301:U1 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,

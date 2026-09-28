@@ -146,7 +146,7 @@ public sealed class RegistryConstructorChainTests(SqlServerFixture sql)
             .HandleAsync(permitCode, CancellationToken.None);
 
         var save = new SaveRegistryDefinitionHandler(
-            store, new UnitOfWork(db), new AuditWriter(db), Editor(), User(), Clock());
+            store, new UnitOfWork(db), new AuditWriter(db), Editor(), User(), Clock(), new UnitCatalog(db));
 
         var rules = existing.Rules
             .Select(r => new RegistryRuleSaveDto(

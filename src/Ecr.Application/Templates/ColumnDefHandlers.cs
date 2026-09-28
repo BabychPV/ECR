@@ -50,7 +50,8 @@ public sealed class SaveColumnDefHandler(
     IUnitOfWork uow,
     IClock clock,
     IAccessDecisionService access,
-    Common.ICurrentUser currentUser)
+    Common.ICurrentUser currentUser,
+    IUnitCatalog units)
 {
     /// <summary>Право на редагування структури версії (`02-contracts.md` §9).</summary>
     public const string Permission = "Template.Edit";
@@ -63,8 +64,9 @@ public sealed class SaveColumnDefHandler(
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Версії або таблиці немає.</exception>
     /// <exception cref="BusinessRuleException">
-    /// Версія структурно заморожена (<c>ECR-TMPL-0409</c>), або повторний
-    /// запис змінює <c>DataType</c> наявної колонки (<c>ECR-TMPL-0422</c>).
+    /// Версія структурно заморожена (<c>ECR-TMPL-0409</c>), повторний запис
+    /// змінює <c>DataType</c> наявної колонки або одиниці <c>UnitId</c> у
+    /// довіднику немає (<c>ECR-TMPL-0422</c>).
     /// </exception>
     public async Task<ColumnDefDto> HandleAsync(
         int templateVersionId, int tableDefId, string code, SaveColumnDefCommand command, CancellationToken ct)
@@ -136,6 +138,8 @@ public sealed class SaveColumnDefHandler(
                     ["newDataType"] = command.DataType.ToString(),
                 });
         }
+
+        await RequireKnownUnitAsync(units, command.UnitId, code, ct).ConfigureAwait(false);
 
         var hasDocuments = await store.HasDocumentsAsync(templateVersionId, ct).ConfigureAwait(false);
 
@@ -236,6 +240,39 @@ public sealed class SaveColumnDefHandler(
         {
             column.SetUnit(unitId);
         }
+    }
+
+    /// <summary>Відмовляє, якщо одиниці колонки в довіднику немає (HSE301 U1).</summary>
+    /// <remarks>
+    /// ⛔ Доти неіснуючий <c>UnitId</c> записувався мовчки: ключа на
+    /// <c>uom.Unit</c> не було, і висяча одиниця виринала аж у перерахунку. Тепер
+    /// ключ <c>FK_ColumnDef_Unit</c> є, і без цієї перевірки описка в номері
+    /// давала б голий <c>500</c> на 547 замість <c>422</c> з ключем.
+    /// </remarks>
+    /// <exception cref="BusinessRuleException"><c>ECR-TMPL-0422</c>, ключ <c>unknownUnit</c>.</exception>
+    private static async Task RequireKnownUnitAsync(
+        IUnitCatalog units, int? unitId, string code, CancellationToken ct)
+    {
+        if (unitId is not { } id)
+        {
+            return;
+        }
+
+        var catalogue = await units.GetAsync(ct).ConfigureAwait(false);
+        if (catalogue.Units.Values.Any(u => u.Id == id))
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            ErrorCodes.TemplateInvalid,
+            $"Колонка «{code}»: одиниці {id.ToString(System.Globalization.CultureInfo.InvariantCulture)} у довіднику немає.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-0422.unknownUnit",
+                ["columnCode"] = code,
+                ["unitId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
     }
 
     /// <summary>Знаходить таблицю версії за числовим ідентифікатором.</summary>

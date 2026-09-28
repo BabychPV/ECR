@@ -313,6 +313,13 @@ public sealed class RegistryFieldDefConfiguration : IEntityTypeConfiguration<Reg
         // другим зв'язком і тягне за собою тіньову колонку RegistryDefId1.
         builder.HasOne<RegistryDef>().WithMany(r => r.Fields).HasForeignKey(x => x.RegistryDefId)
                .HasConstraintName("FK_RegField_Registry");
+
+        // ⛔ HSE301 U1 (аудит C6 п.1): одиниця поля — зовнішній ключ, як у
+        // ColumnDef (FK_ColumnDef_Unit). Видалення одиниці — NO ACTION.
+        // ⚠ Індексу під ключ немає навмисно: таблиця мала (поля описів довідників),
+        // і перевірка ключа при видаленні одиниці сканує її за мілісекунди.
+        builder.HasOne<Unit>().WithMany().HasForeignKey(x => x.UnitId)
+               .HasConstraintName("FK_RegField_Unit");
     }
 }
 
