@@ -37,11 +37,7 @@ public sealed class PeriodStateStartupLockTests(SqlServerFixture sql)
     public async Task Погодинний_прогін_тримає_лок_стартове_вирівнювання_пропускається()
     {
         // "Інший інстанс" посеред погодинного тику PeriodStateJob.
-        await using var hourlyTick = await SqlDistributedLock.TryAcquireAsync(
-            sql.ConnectionString,
-            QuartzJobScheduler.RecurringLockName<PeriodStateJob>(null),
-            CancellationToken.None);
-        Assert.NotNull(hourlyTick);
+        await using var hourlyTick = await AcquireAsync(QuartzJobScheduler.RecurringLockName<PeriodStateJob>(null));
 
         var services = new ServiceCollection();
         services.AddDbContext<EcrDbContext>(o => o.UseSqlServer(sql.ConnectionString));
@@ -57,5 +53,47 @@ public sealed class PeriodStateStartupLockTests(SqlServerFixture sql)
             logger.OfLevel(LogLevel.Information),
             r => r.Message.Contains("пропущено", StringComparison.Ordinal));
         Assert.Empty(logger.OfLevel(LogLevel.Warning));
+    }
+
+    /// <summary>Скільки чекати, поки лок відпустить інший учасник того самого прогону.</summary>
+    private static readonly TimeSpan AcquireWait = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Бере лок, ДОЧЕКАВШИСЬ, поки його відпустить сусід по прогону.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Негайна спроба (як у самого застосунку) давала плаваючий провал
+    /// «<c>Assert.NotNull() Failure: Value is null</c>» у повному прогоні Api:
+    /// база <c>EcrTest_Api_*</c> спільна для всього прогону, і той самий лок
+    /// законно тримали стартове вирівнювання іншої <c>EcrApiFactory</c> (кожен
+    /// хост кличе <see cref="RecurringScheduleService.RunPeriodStateOnceAsync"/>)
+    /// або погодинний тик <see cref="PeriodStateJob"/> у ще живому хості.
+    /// Окремо тест був зелений — бо сусідів не було.
+    /// <para>
+    /// ⚠ Суть тесту не послаблено: ім'я локу те саме, і перевірка йде лише
+    /// тоді, коли лок у руках тесту. Чекання — лише ПІДГОТОВКА: без нього тест
+    /// перевіряв не «старт пропускає зайнятий лок», а «ніхто інший саме зараз
+    /// не стартує». Тримачі — короткі (вирівнювання, тик), тож хвилина — з
+    /// великим запасом; довше — провал із причиною, а не мовчазне очікування.
+    /// </para>
+    /// </remarks>
+    private async Task<SqlDistributedLock> AcquireAsync(string resource)
+    {
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+
+        while (true)
+        {
+            var held = await SqlDistributedLock.TryAcquireAsync(sql.ConnectionString, resource, CancellationToken.None);
+            if (held is not null)
+            {
+                return held;
+            }
+
+            Assert.True(
+                waited.Elapsed < AcquireWait,
+                $"Лок «{resource}» тримає інший учасник прогону довше за {AcquireWait.TotalSeconds:0} с.");
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+        }
     }
 }
