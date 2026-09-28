@@ -244,12 +244,27 @@ public sealed class User : Entity<int>
     /// ⚠ Лічильник живе в домені, а не в обробнику входу. Інакше кожен новий
     /// спосіб автентифікації довелося б навчати рахувати спроби заново — і
     /// один із них неминуче навчити забули б.
+    ///
+    /// ⛔ S8(б): блокування, що вже МИНУЛО, скидає лічильник перед інкрементом.
+    /// Без цього перша ж хибна спроба після блокування знову давала лічильник
+    /// понад межу і блокувала ще на 15 хв — одна спроба на чверть години
+    /// тримала законного власника зачиненим безстроково.
+    ///
+    /// ⚠ ЧИННЕ блокування спроба не скорочує і не подовжує: інакше хибний
+    /// пароль перетворював би адміністративне «доки не розблокують» (BE-12) на
+    /// 15 хвилин.
     /// </remarks>
     public bool RegisterFailedAttempt(int maxFailedAttempts, int lockoutMinutes, DateTime utcNow)
     {
+        if (LockedUntil is { } until && until <= utcNow)
+        {
+            FailedAttempts = 0;
+            LockedUntil = null;
+        }
+
         FailedAttempts++;
 
-        if (maxFailedAttempts <= 0 || FailedAttempts < maxFailedAttempts)
+        if (maxFailedAttempts <= 0 || FailedAttempts < maxFailedAttempts || IsLockedOut(utcNow))
         {
             return false;
         }
