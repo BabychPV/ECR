@@ -24,9 +24,11 @@ public readonly record struct RegistryFieldRequest(long EntryId, int RegistryDef
 /// правилі давав <c>#REF</c> на будь-який запис. Друга копія тих самих кроків
 /// розійшлася б із першою мовчки (тип поля, регістр коду).
 ///
-/// ⚠ Без пакетної оптимізації: запит на ДОВІДНИК (раз на унікальний
-/// <c>RegistryDefId</c>) і запит на ЗАПИС (раз на унікальний <c>EntryId</c>).
-/// Порожній вхід — нуль звернень.
+/// ⚠ Звернень стало (аудит P9): запит на ДОВІДНИК (раз на унікальний
+/// <c>RegistryDefId</c> — їх стільки, скільки Lookup-колонок, а не рядків) і
+/// одне пакетне читання значень УСІХ записів (порції — у сховищі). Доти
+/// значення читалися запитом на кожен унікальний запис — сотні запитів на
+/// таблицю з сотнею речовин. Порожній вхід — нуль звернень.
 /// </remarks>
 public static class RegistryFieldSnapshotLoader
 {
@@ -72,7 +74,7 @@ public static class RegistryFieldSnapshotLoader
                 ?? new Dictionary<string, RegistryFieldDef>(StringComparer.OrdinalIgnoreCase);
         }
 
-        // Значення — по одному запиту на УНІКАЛЬНИЙ запис.
+        var valuesByEntry = await ListValuesAsync(registries, [.. neededFieldsByEntry.Keys], ct).ConfigureAwait(false);
         var snapshot = new Dictionary<long, IReadOnlyDictionary<string, ExpressionValue>>();
 
         foreach (var (entryId, fieldCodes) in neededFieldsByEntry)
@@ -82,8 +84,9 @@ public static class RegistryFieldSnapshotLoader
                 continue;
             }
 
-            var registryValues = await registries.ListValuesAsync(entryId, ct).ConfigureAwait(false);
-            var byFieldDefId = registryValues.ToDictionary(v => v.RegistryFieldDefId);
+            var byFieldDefId = valuesByEntry.TryGetValue(entryId, out var registryValues)
+                ? registryValues.ToDictionary(v => v.RegistryFieldDefId)
+                : [];
 
             var perEntry = new Dictionary<string, ExpressionValue>(StringComparer.OrdinalIgnoreCase);
 
@@ -111,6 +114,30 @@ public static class RegistryFieldSnapshotLoader
         }
 
         return snapshot;
+    }
+
+    /// <summary>
+    /// Значення всіх записів знімка — одним пакетним читанням (аудит P9), порціями всередині
+    /// сховища (<see cref="IRegistryStore.ListValuesForEntriesAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Один запис — поштучний <see cref="IRegistryStore.ListValuesAsync"/>: це той самий один
+    /// запит, лише без <c>IN (…)</c>. Звернень у будь-якому разі стало, скільки б записів не було.
+    /// </remarks>
+    private static async Task<Dictionary<long, List<RegistryValue>>> ListValuesAsync(
+        IRegistryStore registries, IReadOnlyList<long> entryIds, CancellationToken ct)
+    {
+        if (entryIds.Count == 1)
+        {
+            return new Dictionary<long, List<RegistryValue>>
+            {
+                [entryIds[0]] = [.. await registries.ListValuesAsync(entryIds[0], ct).ConfigureAwait(false)],
+            };
+        }
+
+        return (await registries.ListValuesForEntriesAsync(entryIds, ct).ConfigureAwait(false))
+            .GroupBy(v => v.RegistryEntryId)
+            .ToDictionary(g => g.Key, g => g.ToList());
     }
 
     /// <summary>Значення поля довідника як значення виразу; типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
