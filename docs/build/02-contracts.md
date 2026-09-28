@@ -3004,6 +3004,23 @@ public interface IUserPreferenceStore
 }
 ```
 
+#### `IRecalculationApprovalStore`
+
+Погодження перерахунку закритого періоду `calc.RecalculationApproval` (ФВ-9.7,
+аудит безпеки S1). Підтвердження й використання — умовні `UPDATE` з одним
+рядком результату: «ще чекає / ще не використано» перевіряє база в момент запису.
+
+```csharp
+public interface IRecalculationApprovalStore
+{
+    public void Add(RecalculationApproval approval);
+    public Task<IReadOnlyList<RecalculationApprovalDto>> ListActiveAsync(int projectId, DateTime utcNow, CancellationToken ct);
+    public Task<RecalculationApprovalDto?> FindAsync(long id, int projectId, CancellationToken ct);
+    public Task<bool> TryConfirmAsync(long id, int projectId, int confirmedByUserId, DateTime utcNow, CancellationToken ct);
+    public Task<RecalculationApprovalDto?> TryConsumeAsync(long id, int projectId, int periodKey, int requestedByUserId, DateTime utcNow, CancellationToken ct);
+}
+```
+
 #### `IUserStore`
 
 Доступ до облікових записів для use-cases безпеки.
@@ -3377,6 +3394,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/projects/{id}/timezone` | `Project.Manage` | 8 |
 | `GET` | `/api/v1/projects/{id}/periods` | `Document.View` | 3 |
 | `POST` | `/api/v1/projects/{id}/recalculate` | `Calculation.Recalculate` | 3 |
+| `GET` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
+| `POST` | `/api/v1/projects/{id}/recalculation-approvals` | `Calculation.Recalculate` | 4 |
+| `POST` | `/api/v1/projects/{id}/recalculation-approvals/{approvalId}/confirm` | `Calculation.Recalculate` | 4 |
 | `POST` | `/api/v1/periods/{id}/reopen` | `Period.Reopen` | 3 |
 | `GET` | `/api/v1/documents` | `Document.View` | 1 |
 | `GET` | `/api/v1/documents/summary` | `Document.View` | 6 |

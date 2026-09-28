@@ -549,8 +549,7 @@ export function PeriodsPage(): JSX.Element {
     mutationFn: (id: number) =>
       apiEnqueue(`/api/v1/projects/${id}/recalculate`, {
         periodKey: null,
-        approvedByUserId: null,
-        approvalReason: null,
+        approvalId: null,
       } satisfies ProjectRecalculationRequest),
     onSuccess: (job) => {
       setRecalcJobId(job.jobId);

@@ -23,8 +23,12 @@ public sealed class CalculationOrchestratorTests
     private const int Period = 202601;
     private const int Runner = 9;
     private const int Approver = 7;
+    private const long ApprovalId = 5;
 
     private static readonly DateTime Now = new(2026, 4, 10, 9, 0, 0, DateTimeKind.Utc);
+
+    private readonly IRecalculationApprovalStore _approvals = Substitute.For<IRecalculationApprovalStore>();
+    private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
 
     private readonly IPeriodStore _periods = Substitute.For<IPeriodStore>();
     private readonly IWorkflowStore _workflow = Substitute.For<IWorkflowStore>();
@@ -45,6 +49,13 @@ public sealed class CalculationOrchestratorTests
                  .Returns(false);
         _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
              .Returns("job-1");
+
+        // Підтверджене іншою людиною погодження ініціатора `Runner` на `Period`
+        // (аудит S1): сховище віддає його рівно на цей набір умов.
+        _approvals.TryConsumeAsync(ApprovalId, Project, Period, Runner, Now, Arg.Any<CancellationToken>())
+                  .Returns(new RecalculationApprovalDto(
+                      ApprovalId, Period, "Помилка коефіцієнта, лист №17", Runner, null, Now, Now.AddHours(24),
+                      Approver, null, Now));
 
         // ⛔ Q-151 (аудит фази 1): `RunCalculationHandler` не перевіряв ЖОДНОГО
         // права до цього пакета — лише те, що запит автентифікований. Профіль
@@ -137,7 +148,7 @@ public sealed class CalculationOrchestratorTests
         States(PeriodState.Closed);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Handler().HandleAsync(Project, Period, approval: null, CancellationToken.None));
+            () => Handler().HandleAsync(Project, Period, approvalId: null, CancellationToken.None));
 
         // ⛔ Перерахунок закритого періоду змінює числа, які вже подані
         // регулятору, і робить це без жодного сліду в самих даних (ФВ-9.7).
@@ -150,10 +161,20 @@ public sealed class CalculationOrchestratorTests
         // З погодженням від іншої людини і з причиною — проходить. Погодження
         // саме окреме: прапорець у запиті звівся б до зайвого поля у формі.
         var jobId = await Handler().HandleAsync(
-            Project, Period, new ClosedPeriodApproval(Approver, "Помилка коефіцієнта, лист №17"),
+            Project, Period, ApprovalId,
             CancellationToken.None);
 
         Assert.Equal("job-1", jobId);
+        await _audit.Received(1).WriteSecurityEventAsync(
+            Arg.Is<SecurityEventRecord>(e => e.EventType == RecalculationApprovalHandlers.UsedEventType
+                                             && e.ChangedByUserId == Runner),
+            Arg.Any<CancellationToken>());
+
+        // ⛔ Аудит S1: погодження, якого сховище не віддає (чуже, використане,
+        // іншого періоду), закритий період не відкриває.
+        var unusable = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(Project, Period, ApprovalId + 1, CancellationToken.None));
+        Assert.Equal("err.ECR-CALC-4221.approvalNotUsable", unusable.Details?["messageKey"]);
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -163,7 +184,7 @@ public sealed class CalculationOrchestratorTests
                  .Returns(true);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Handler().HandleAsync(Project, Period, approval: null, CancellationToken.None));
+            () => Handler().HandleAsync(Project, Period, approvalId: null, CancellationToken.None));
 
         // ⛔ Період ВІДКРИТИЙ — і все одно відмова (ФВ-9.17). Потреба змінити
         // подану цифру закривається Reopen, який лишає слід у робочому процесі,
@@ -205,7 +226,7 @@ public sealed class CalculationOrchestratorTests
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
             Project,
             periodKey: null,
-            new ClosedPeriodApproval(Approver, "Помилка коефіцієнта, лист №17"),
+            ApprovalId,
             CancellationToken.None));
 
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
@@ -227,14 +248,14 @@ public sealed class CalculationOrchestratorTests
     [Trait("Requirement", "ФВ-9.17")]
     public async Task Поданий_зріз_не_перераховується_і_З_погодженням()
     {
-        // Те саме правило в найпростішій формі: `ClosedPeriodApproval`
+        // Те саме правило в найпростішій формі: погодження
         // погоджує перерахунок ЗАКРИТОГО періоду, а не подану цифру. Шлях
         // змінити подану цифру один — Reopen, і він лишає слід.
         _workflow.HasSubmittedSheetsAsync(Project, Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
                  .Returns(true);
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Handler().HandleAsync(
-            Project, Period, new ClosedPeriodApproval(Approver, "Помилка коефіцієнта, лист №17"),
+            Project, Period, ApprovalId,
             CancellationToken.None));
 
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
@@ -277,7 +298,7 @@ public sealed class CalculationOrchestratorTests
                .Returns(Profile([]));
 
         var error = await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Handler().HandleAsync(Project, Period, approval: null, CancellationToken.None));
+            () => Handler().HandleAsync(Project, Period, approvalId: null, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
@@ -296,7 +317,7 @@ public sealed class CalculationOrchestratorTests
                .Returns(Profile([RunCalculationHandler.Permission]));
 
         var error = await Assert.ThrowsAsync<AccessDeniedException>(
-            () => Handler().HandleAsync(Project, Period, approval: null, CancellationToken.None));
+            () => Handler().HandleAsync(Project, Period, approvalId: null, CancellationToken.None));
 
         Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
@@ -304,7 +325,7 @@ public sealed class CalculationOrchestratorTests
     }
 
     private RunCalculationHandler Handler()
-        => new(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock);
+        => new(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock, _approvals, _audit);
 
     private void States(PeriodState state)
         => _periods.GetPeriodStatesAsync(Project, Period, Arg.Any<CancellationToken>())

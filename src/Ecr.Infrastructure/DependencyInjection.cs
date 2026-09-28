@@ -108,6 +108,7 @@ public static class DependencyInjection
         services.AddScoped<IUnitStore, UnitStore>();
         services.AddScoped<IWhereUsedStore, WhereUsedStore>();
         services.AddScoped<IUserPreferenceStore, UserPreferenceStore>();
+        services.AddScoped<IRecalculationApprovalStore, RecalculationApprovalStore>();
         services.AddScoped<IMethodologyStore, MethodologyStore>();
         services.AddScoped<IRuleCoverageReader, RuleCoverageReader>();
         services.AddScoped<IMethodologyDraftStore, MethodologyDraftStore>();

@@ -4645,7 +4645,10 @@ USING (VALUES
     -- D16:C2 — шапка документа: стан, конкурентність (`PatchDocumentHeaderHandler`).
     (N'err.ECR-ACCS-0403.headerLocked', N'en', N'The document header cannot be changed now. Reason: {reason}.', 1),
     (N'err.ECR-DOC-0409.headerStale', N'en', N'Someone else changed the document header after you opened it. Reload the header and repeat your change.', 1),
-    (N'err.ECR-REQ-0422.headerBaseVersion', N'en', N'The header change must say which version of the header it started from (baseVersion).', 1)
+    (N'err.ECR-REQ-0422.headerBaseVersion', N'en', N'The header change must say which version of the header it started from (baseVersion).', 1),
+    -- D16: S1 — погодження перерахунку закритого періоду окремою сутністю (ФВ-9.7).
+    (N'err.ECR-CALC-0409.approvalNotPending', N'en', N'This recalculation approval is not waiting for confirmation: it does not exist, is already confirmed or used, or has expired.', 1),
+    (N'err.ECR-CALC-4221.approvalNotUsable', N'en', N'This approval cannot be used for this recalculation. It must be confirmed by another person, unused and unexpired, and issued to you for this project and period.', 1)
     -- D16: кінець секції
 ) AS s ([Key], Lang, Val, Scope)
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang

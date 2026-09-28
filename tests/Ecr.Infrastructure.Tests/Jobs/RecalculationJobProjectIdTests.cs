@@ -128,7 +128,9 @@ public sealed class RecalculationJobProjectIdTests(SqlServerFixture sql)
             Substitute.For<Ecr.Application.Ports.IUnitOfWork>(),
             Substitute.For<Ecr.Application.Security.IAccessDecisionService>(),
             Substitute.For<ICurrentUser>(),
-            new TestClock(DateTime.UtcNow));
+            new TestClock(DateTime.UtcNow),
+            Substitute.For<Ecr.Application.Ports.IRecalculationApprovalStore>(),
+            Substitute.For<Ecr.Application.Ports.IAuditWriter>());
 
     /// <summary>Оркестратор-заглушка: прогін завжди «успішний і порожній».</summary>
     private sealed class StubRunner : ICalculationRunner

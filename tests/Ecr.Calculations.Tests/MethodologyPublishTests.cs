@@ -324,36 +324,37 @@ public sealed class MethodologyPublishTests
             RoleIds = new HashSet<int>(),
         });
 
-        var handler = new RunCalculationHandler(_periods, _workflow, _results, _jobs, _uow, _access, _user, _clock);
+        // ⚠ Аудит S1: погодження — окремий запис, і сховище віддає його лише
+        // підтвердженим іншою людиною (`Author`), для цього періоду й один раз.
+        var approvals = Substitute.For<IRecalculationApprovalStore>();
+        approvals.TryConsumeAsync(3, 1, 202601, Arg.Any<int>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>())
+                 .Returns(new RecalculationApprovalDto(
+                     3, 202601, "Помилка коефіцієнта, лист №17", Reviewer, null, DateTime.UtcNow,
+                     DateTime.UtcNow.AddHours(24), Author, null, DateTime.UtcNow));
+
+        var handler = new RunCalculationHandler(
+            _periods, _workflow, _results, _jobs, _uow, _access, _user, _clock,
+            approvals, Substitute.For<IAuditWriter>());
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(1, 202601, approval: null, CancellationToken.None));
+            () => handler.HandleAsync(1, 202601, approvalId: null, CancellationToken.None));
 
         Assert.Equal("ECR-CALC-4221", error.ErrorCode);
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
             Arg.Any<object?>(), Arg.Any<CancellationToken>());
 
-        // ⚠ Погодження ≠ прапорець у запиті: причина обов'язкова, і погодити
-        // власний перерахунок не можна.
-        var own = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(
-                1, 202601, new ClosedPeriodApproval(Reviewer, "треба"), CancellationToken.None));
-        Assert.Equal("ECR-CALC-0409", own.ErrorCode);
-        Assert.Equal("err.ECR-CALC-0409.ownRecalculationApproval", own.Details?["messageKey"]);
+        // ⚠ Погодження ≠ прапорець у запиті: чуже, використане чи непідтверджене
+        // (сховище його не віддає) закритого періоду не відкриває.
+        var unusable = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => handler.HandleAsync(1, 202601, approvalId: 4, CancellationToken.None));
+        Assert.Equal("ECR-CALC-4221", unusable.ErrorCode);
+        Assert.Equal("err.ECR-CALC-4221.approvalNotUsable", unusable.Details?["messageKey"]);
 
-        var blank = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => handler.HandleAsync(
-                1, 202601, new ClosedPeriodApproval(Author, "  "), CancellationToken.None));
-        Assert.Equal("ECR-CALC-4221", blank.ErrorCode);
-        Assert.Equal("err.ECR-CALC-4221.approvalReasonRequired", blank.Details?["messageKey"]);
-
-        // З погодженням від іншої людини і з причиною — проходить.
+        // З підтвердженим погодженням — проходить.
         _jobs.EnqueueAsync<IRecalculationJob>(Arg.Any<object?>(), Arg.Any<CancellationToken>())
              .Returns("job-1");
 
-        var jobId = await handler.HandleAsync(
-            1, 202601, new ClosedPeriodApproval(Author, "Помилка коефіцієнта, лист №17"),
-            CancellationToken.None);
+        var jobId = await handler.HandleAsync(1, 202601, approvalId: 3, CancellationToken.None);
 
         Assert.Equal("job-1", jobId);
     }

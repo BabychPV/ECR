@@ -318,16 +318,11 @@ public sealed class ProjectsController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // ⚠ Погодження передається лише коли обидва поля заповнені: часткове
-        // (сама причина без того, хто погодив, чи навпаки) для
-        // `RunCalculationHandler` означає «погодження немає» — і саме так
-        // правило ФВ-9.7 і мало відмовити.
-        var approval = request is { ApprovedByUserId: { } approvedBy, ApprovalReason: { } reason }
-            ? new ClosedPeriodApproval(approvedBy, reason)
-            : null;
-
+        // ⛔ Аудит безпеки S1: погоджувача з тіла запиту тут більше немає —
+        // лише ідентифікатор погодження, яке друга людина підтвердила власною
+        // сесією (`POST …/recalculation-approvals/{id}/confirm`).
         var jobId = await recalculate
-            .HandleAsync(id, request.PeriodKey, approval, ct)
+            .HandleAsync(id, request.PeriodKey, request.ApprovalId, ct)
             .ConfigureAwait(false);
 
         return Accepted(new Contracts.ProjectRecalculationAcceptedResponse(jobId, id, request.PeriodKey));
@@ -401,12 +396,12 @@ public sealed record SetCurrentPeriodRequest(int? PinnedPeriodId, string? Reason
 
 /// <summary>Запит на перерахунок усього проєкту (Q-151).</summary>
 /// <param name="PeriodKey">Період; <c>null</c> — повний рік, усі документи проєкту.</param>
-/// <param name="ApprovedByUserId">
-/// Хто погодив перерахунок закритого періоду (ФВ-9.7); <c>null</c> — без погодження.
+/// <param name="ApprovalId">
+/// Підтверджене погодження перерахунку закритого періоду (ФВ-9.7,
+/// <c>…/recalculation-approvals</c>); <c>null</c> — без погодження. Одноразове,
+/// лише для свого ініціатора, цього проєкту й періоду.
 /// </param>
-/// <param name="ApprovalReason">Причина погодження; обов'язкова разом із <c>ApprovedByUserId</c>.</param>
-public sealed record ProjectRecalculationRequest(
-    int? PeriodKey, int? ApprovedByUserId, string? ApprovalReason);
+public sealed record ProjectRecalculationRequest(int? PeriodKey, long? ApprovalId);
 
 /// <summary>Запит на створення політики періодів (T6/#37).</summary>
 /// <param name="Code">Код політики; має бути унікальним.</param>
