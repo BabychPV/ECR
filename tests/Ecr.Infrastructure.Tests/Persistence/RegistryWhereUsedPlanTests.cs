@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using Ecr.Application.Common;
+using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.Documents;
@@ -25,11 +26,24 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// ⚠ Чому план, а не секунди чи логічні читання. Тестова база мала, і скан
 /// кількох сторінок тут дешевий так само, як seek: поріг на читаннях чи часі
 /// або хибно зеленів би, або залежав би від того, скільки комірок лишили
-/// сусідні тести. План же не залежить від обсягу: або в ньому є доступ до
-/// <c>doc.CellValue</c> іншим індексом (скан кластерного чи
-/// <c>IX_CellValue_Fill</c>), або немає. План береться з кешу за міткою
+/// сусідні тести. План береться з кешу за міткою
 /// <see cref="RegistryStore.WhereUsedCellsTag"/> — тобто той самий, яким
 /// виконався бойовий запит, а не оцінка копії.
+/// </para>
+/// <para>
+/// ⛔ Але й план ЗАЛЕЖИТЬ від обсягу — тут стояло протилежне, і тест через це
+/// плавав: 2026-09-28 двічі локально й раз у CI (run 36394757706) він дав
+/// <c>["[PK_CellValue]"]</c> на першому повному прогоні й зелень на повторі.
+/// У спільній тестовій базі після сусідніх тестів лишаються десятки комірок,
+/// розкиданих по 25 розділах, і скан кластерного індексу коштує стільки ж,
+/// скільки скан фільтрованого: заміряно на такій базі
+/// <c>0.0976953</c> (примусово <c>PK_CellValue</c>) проти <c>0.0976853</c>
+/// (<c>IX_CellValue_RegistryEntry</c>) — різниця 0.01 %. Хто з двох виграє,
+/// вирішували застаріла статистика й кількість сторінок після чужих вставок і
+/// видалень, а не індекс. Тому тест сам задає форму стенду — багато комірок
+/// без посилань (<see cref="BackgroundCells"/>), свіжа статистика і план,
+/// скомпільований саме зараз, а не успадкований від сусіднього тесту, — і
+/// тоді скан кластерного програє з запасом, як і на 2.06 млн комірок.
 /// </para>
 /// <para>
 /// ⛔ Мутації, що валять тест (перевірено перезбіркою): прибрати
@@ -43,6 +57,21 @@ public sealed class RegistryWhereUsedPlanTests(SqlServerFixture sql)
 {
     private const string ShowPlanNs = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
 
+    /// <summary>Скільки комірок без посилань тест кладе перед виміром плану.</summary>
+    /// <remarks>
+    /// 500 рядків × 40 колонок = 20 000 комірок, ~75 сторінок кластерного
+    /// індексу, а у фільтрованому від них — нуль. Заміряно: план із примусовим
+    /// <c>PK_CellValue</c> дорожчий за природний на ~80 % (0.163 проти 0.089),
+    /// а не на 0.01 %, як без них (див. зауваження до класу); шум від сусідніх
+    /// тестів — кілька сторінок, тобто тисячні частки. Менший обсяг (5 000)
+    /// давав лише ~16 % запасу. На спільну базу — ~1 МБ.
+    /// </remarks>
+    private const int BackgroundRows = 500;
+
+    private const int BackgroundColumns = 40;
+
+    private const int BackgroundCells = BackgroundRows * BackgroundColumns;
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
@@ -50,6 +79,12 @@ public sealed class RegistryWhereUsedPlanTests(SqlServerFixture sql)
     public async Task Комірки_довідника_без_посилань_читаються_індексом_а_не_сканом()
     {
         var fixture = await SeedAsync(referenced: false).ConfigureAwait(true);
+        await SeedBackgroundCellsAsync().ConfigureAwait(true);
+
+        // ⚠ Свіжа статистика і порожній кеш плану цього запиту — щоб план
+        // компілювався для щойно заданої форми даних, а не залежав від того,
+        // що лишили сусідні тести і який план скомпілював попередній тест.
+        await PrepareMeasurementAsync().ConfigureAwait(true);
 
         await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
         var usage = await new RegistryStore(db)
@@ -128,6 +163,58 @@ public sealed class RegistryWhereUsedPlanTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         return (registry.Id, second.Id);
+    }
+
+    /// <summary>
+    /// Форма стенду: окремий документ із <see cref="BackgroundCells"/> введеними
+    /// комірками без посилань на довідник — масовим шляхом, як і в бойовому
+    /// завантаженні.
+    /// </summary>
+    private async Task SeedBackgroundCellsAsync()
+    {
+        var document = await new TestDocumentBuilder(sql.ConnectionString)
+            .BuildAsync(columnCount: BackgroundColumns, rowCount: BackgroundRows)
+            .ConfigureAwait(false);
+
+        var cells = new List<CellRecord>(BackgroundCells);
+        foreach (var rowId in document.RowIds)
+        {
+            foreach (var columnId in document.ColumnDefIds)
+            {
+                cells.Add(new CellRecord(
+                    new CellAddress(document.PeriodKey, rowId, columnId),
+                    document.TableDefId,
+                    new CellValueData { ValueNumeric = cells.Count }));
+            }
+        }
+
+        await new BulkCellLoader(sql.ConnectionString, BackgroundCells)
+            .LoadAsync(cells, CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Оновлює статистику таблиць запиту і прибирає з кешу ЦІЄЇ бази його
+    /// план, щоб бойовий запит скомпілювався заново.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Саме <c>DATABASE SCOPED</c>, а не <c>DBCC FREEPROCCACHE</c>: сервер
+    /// спільний з іншими прогонами й сесіями (так само чистять кеш
+    /// <c>WritePathPlanCacheTests</c> і <c>TvpBatchWriteTests</c> у цій
+    /// колекції, тобто послідовно з цим тестом).
+    /// </remarks>
+    private async Task PrepareMeasurementAsync()
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE STATISTICS doc.CellValue;
+            UPDATE STATISTICS dic.RegistryEntry;
+            ALTER DATABASE SCOPED CONFIGURATION CLEAR PROCEDURE_CACHE;
+            """;
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     /// <summary>Імена індексів, якими план запиту з міткою R-05 читає <c>doc.CellValue</c>.</summary>
