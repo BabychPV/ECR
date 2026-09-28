@@ -1817,6 +1817,10 @@ USING (VALUES
     (N'grid.rejectedTitle',              N'en', N'Some cells were not saved', 1),
     (N'grid.rejectedHint',               N'en', N'The cells below are read-only for you. Nothing from this paste was saved.', 1),
     (N'grid.unknownColumn',              N'en', N'There is no column {column} in this table.', 1),
+    -- COLL:grid ── Вставка чисел за роздільниками мови інтерфейсу (`clipboard.ts`, `readNumber`) ──
+    -- ⛔ `1,234` в англійському інтерфейсі — і тисяча, і одна ціла: не вгадується.
+    (N'grid.pasteAmbiguousNumber',       N'en', N'"{value}" can be read as {asGroup} or as {asDecimal}. Paste it without thousands separators so the number is unambiguous.', 1),
+    -- COLL:grid ── кінець секції ──
     (N'grid.roundedTitle',               N'en', N'Rounded {count} value(s)', 1),
     (N'grid.roundedHint',                N'en', N'Extra decimals from the pasted sheet were rounded to the column scale. Nothing was rounded silently.', 1),
     (N'grid.roundedShow',                N'en', N'Show the list', 1),

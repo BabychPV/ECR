@@ -1,4 +1,6 @@
 import type { ColumnDto } from '@/api/types';
+import { formatLocale } from '@/shared/format';
+import { readNumber } from './clipboard';
 
 /**
  * Округлення при вставці (`ФВ-9.16c`, `D-116`).
@@ -55,13 +57,17 @@ export interface RoundedCell {
  * означає саме «нічого не змінилося», і викликач не ставить позначки —
  * позначка лише на ЗМІНЕНІ комірки, інакше лічильник втрачає сенс.
  */
-export function roundToScale(text: string, column: ColumnDto): string | null {
+export function roundToScale(
+  text: string,
+  column: ColumnDto,
+  locale: string = formatLocale(),
+): string | null {
   if (column.dataType !== 'Decimal') return null;
 
   const scale = column.scale;
   if (scale === null || scale === undefined) return null;
 
-  return roundDecimalText(text, scale);
+  return roundDecimalText(text, scale, locale);
 }
 
 /**
@@ -71,10 +77,14 @@ export function roundToScale(text: string, column: ColumnDto): string | null {
  * ⚠ Спільне для вводу (`roundToScale`, лише `Decimal`) і для ПОКАЗУ
  * (`cellDisplay`, усі числові типи зі `scale`) — одне правило, не дві копії.
  */
-export function roundDecimalText(text: string, scale: number): string | null {
+export function roundDecimalText(
+  text: string,
+  scale: number,
+  locale: string = formatLocale(),
+): string | null {
   if (!Number.isInteger(scale) || scale < 0) return null;
 
-  const parts = parseDecimal(text);
+  const parts = parseDecimal(text, locale);
   if (parts === null) return null;
 
   // ⚠ Дробова частина вже без хвостових нулів, тож «знаків не більше за
@@ -108,10 +118,10 @@ const MaxExponent = 400;
 /**
  * Розбирає текст буфера в десяткове без втрати знаків.
  *
- * ⚠ Нормалізація — дзеркало `parseNumber` (`clipboard.ts`), через яку той
- * самий текст проходить у `coerce`: пробіли (зокрема нерозривні — їх покриває
- * `\s`) відкидаються, а самотня кома вважається десятковим роздільником.
- * Розійтися ці двоє не мають права: значення, яке `coerce` вважає числом, а
+ * ⚠ Нормалізація — ТА САМА функція, що в `parseNumber` (`readNumber`,
+ * `clipboard.ts`), через яку той самий текст проходить у `coerce`: пробіли
+ * (зокрема нерозривні) відкидаються, кома й крапка читаються за роздільниками
+ * локалі інтерфейсу. Розійтися ці двоє не мають права: значення, яке `coerce` вважає числом, а
  * округлення — ні, поїхало б на сервер неокругленим і отримало б
  * `ECR-CELL-0422` на головному шляху введення.
  *
@@ -125,12 +135,14 @@ const MaxExponent = 400;
  * неокругленими означало б відхилення на сервері. Показник розгортається
  * зсувом десяткової точки — теж суто рядково.
  */
-function parseDecimal(text: string): DecimalParts | null {
-  const stripped = text.replace(/\s/g, '');
-  if (stripped.length === 0) return null;
+function parseDecimal(text: string, locale: string): DecimalParts | null {
+  // ⛔ Роздільники — за локаллю інтерфейсу, тим самим `readNumber`, що й
+  // `parseNumber`: до 2026-09-28 тут стояла «єдина кома — десяткова», і
+  // `1,234` з en-US Excel округлювалося як `1.234`. Неоднозначне — не число.
+  const reading = readNumber(text, locale);
+  if (reading.kind !== 'number') return null;
 
-  const normalized =
-    stripped.includes(',') && !stripped.includes('.') ? stripped.replace(',', '.') : stripped;
+  const normalized = reading.text;
 
   const match = /^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(normalized);
   if (match === null) return null;
@@ -180,8 +192,8 @@ function parseDecimal(text: string): DecimalParts | null {
  *
  * @returns Десятковий запис без експоненти; `null` — вхід не є числом.
  */
-export function decimalTextOf(text: string): string | null {
-  const parts = parseDecimal(text);
+export function decimalTextOf(text: string, locale: string = formatLocale()): string | null {
+  const parts = parseDecimal(text, locale);
 
   return parts === null ? null : magnitudeOf(parts);
 }
