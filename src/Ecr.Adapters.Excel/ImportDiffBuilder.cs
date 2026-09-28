@@ -195,6 +195,26 @@ public sealed class ImportDiffBuilder
                 // числовій колонці ставав звичайною зміною, Apply був активний, а
                 // застосування відповідало 422 «expects a number» — на всю
                 // книгу, вже після того, як людина погодилася на перегляд.
+                //
+                // ⛔ `C1`: рядок у числовій колонці — це те, що `ReadNumber`
+                // свідомо НЕ прочитав числом (напр. неоднозначне «1,234» чи
+                // «1,23,4»). Сам `CellValueReader` розбирає текст з
+                // `AllowThousands` і прийняв би його як 1234, тому відмова
+                // ставиться тут, тим самим ключем.
+                if (incoming is string raw && IsNumeric(definition))
+                {
+                    _ = WithoutComma(raw, out var ambiguous);
+
+                    rejected.Add(new ImportRejection(
+                        row.RowKey, column.Code, CellValueReader.TypeMismatch,
+                        ambiguous
+                            ? "The value does not match the column type (err.ECR-CELL-0422.expectsNumber): ambiguous separator, the comma may be thousands or decimal."
+                            : "The value does not match the column type (err.ECR-CELL-0422.expectsNumber).",
+                        table.Code, table.NameL10n, ImportMessageKeys.ExpectsNumber));
+
+                    continue;
+                }
+
                 if (TypeMismatch(incoming, definition) is { } mismatch)
                 {
                     rejected.Add(new ImportRejection(
@@ -369,11 +389,92 @@ public sealed class ImportDiffBuilder
                 : null;
         }
 
-        return decimal.TryParse(
-            text, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var parsed)
+        return WithoutComma(text, out _) is { } invariant
+               && decimal.TryParse(
+                   invariant, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var parsed)
             ? parsed
             : null;
     }
+
+    /// <summary>
+    /// Текст числа без коми — у формі Invariant; <c>null</c> — кому не можна
+    /// прочитати однозначно (<paramref name="ambiguous"/> — саме через
+    /// неоднозначний роздільник).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Аудит `C1`, текстовий бік. <c>AllowThousands</c> під Invariant просто
+    /// викидає кожну кому, тож «12,5», набране людиною з десятковою комою,
+    /// мовчки ставало 125. У книзі немає локалі, тож роздільник не вгадується
+    /// в жоден бік (рішення інтегратора):
+    /// <list type="number">
+    /// <item>без коми — як є: «7.25» → 7.25;</item>
+    /// <item>одна кома без крапки: 1–3 цифри, кома, рівно 3 цифри — «1,234» —
+    /// НЕОДНОЗНАЧНО (1234 чи 1.234), відмова; інакше кома десяткова: «12,5» →
+    /// 12.5, «1234,567» → 1234.567;</item>
+    /// <item>кілька ком або кома з крапкою — лише правильне групування тисяч
+    /// (1–3 цифри, далі групи рівно по 3, дріб — через крапку): «1,234,567» →
+    /// 1234567, «1,234.5» → 1234.5;</item>
+    /// <item>усе інше з комою — відмова: «1,23,4», «1.234,5», «12,5.3».</item>
+    /// </list>
+    /// Мінус (чи плюс) на початку допустимий скрізь. Експонента разом із комою
+    /// не приймається.
+    /// </remarks>
+    private static string? WithoutComma(string text, out bool ambiguous)
+    {
+        ambiguous = false;
+
+        if (!text.Contains(',', StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        var sign = text.Length > 0 && text[0] is '+' or '-' ? text[..1] : string.Empty;
+        var body = text[sign.Length..];
+        var groups = body.Split(',');
+
+        if (groups.Length == 2 && !body.Contains('.', StringComparison.Ordinal))
+        {
+            if (!IsDigits(groups[0]) || !IsDigits(groups[1]))
+            {
+                return null;
+            }
+
+            if (groups[0].Length <= 3 && groups[1].Length == 3)
+            {
+                ambiguous = true;
+
+                return null;
+            }
+
+            return $"{sign}{groups[0]}.{groups[1]}";
+        }
+
+        var dot = body.IndexOf('.', StringComparison.Ordinal);
+        var integer = dot >= 0 ? body[..dot] : body;
+        var fraction = dot >= 0 ? body[(dot + 1)..] : null;
+
+        if (fraction is not null && !IsDigits(fraction))
+        {
+            return null;
+        }
+
+        var integerGroups = integer.Split(',');
+
+        var grouped = integerGroups[0].Length is >= 1 and <= 3
+                      && integerGroups.All(IsDigits)
+                      && integerGroups.Skip(1).All(group => group.Length == 3);
+
+        return grouped
+            ? $"{sign}{string.Concat(integerGroups)}{(fraction is null ? string.Empty : "." + fraction)}"
+            : null;
+
+        static bool IsDigits(string part)
+            => part.Length > 0 && part.All(c => c is >= '0' and <= '9');
+    }
+
+    /// <summary>Колонка тримає число (<c>ValueNumeric</c>).</summary>
+    private static bool IsNumeric(ColumnDef definition)
+        => definition.DataType is CellDataType.Decimal or CellDataType.Formula or CellDataType.Calculated;
 
     /// <summary>Чи рахує комірки цієї колонки система — за ЖИВИМ визначенням.</summary>
     /// <remarks>

@@ -1,6 +1,7 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using Ecr.Adapters.Excel;
+using Ecr.Application.Documents;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
@@ -96,6 +97,155 @@ public sealed class ImportDiffBuilderCultureTests
 
         Assert.Empty(diff.Rejected);
         Assert.Equal(123456789.12345679m, Assert.IsType<decimal>(Assert.Single(diff.Changes).NewValue));
+    }
+
+    /// <summary>Культури сервера, під якими правило коми мусить бути однаковим.</summary>
+    private static readonly string[] Cultures = ["uk-UA", ""];
+
+    /// <summary>
+    /// Текст, який кома робить нечитабельним однозначно: (пункт правила, текст,
+    /// чи це саме неоднозначний роздільник).
+    /// </summary>
+    private static readonly (string Rule, string Text, bool Ambiguous)[] RejectedTexts =
+    [
+        ("2a", "1,234", true),
+        ("2a", "-1,234", true),
+        ("2a", "12,345", true),
+        ("5", "1,23,4", false),
+        ("5", "1.234,5", false),
+        ("5", "12,5.3", false),
+        ("5", "1,2345.6", false),
+    ];
+
+    /// <summary>Текст, який читається однозначно: (пункт правила, текст, число Invariant).</summary>
+    private static readonly (string Rule, string Text, string Expected)[] AcceptedTexts =
+    [
+        ("1", "7.25", "7.25"),
+        ("1", "-2E-05", "-0.00002"),
+        ("2b", "12,5", "12.5"),
+        ("2b", "-12,5", "-12.5"),
+        ("2b", "1234,567", "1234.567"),
+        ("2b", "0,00001", "0.00001"),
+        ("2b", "1,2345", "1.2345"),
+        ("3", "1,234,567", "1234567"),
+        ("3", "1,234,567.5", "1234567.5"),
+        ("3", "-12,345,678.25", "-12345678.25"),
+        ("4", "1,234.5", "1234.5"),
+        ("4", "-1,234.5", "-1234.5"),
+    ];
+
+    public static TheoryData<string, string, string, bool> Rejected()
+    {
+        var data = new TheoryData<string, string, string, bool>();
+
+        foreach (var culture in Cultures)
+        {
+            foreach (var (rule, text, ambiguous) in RejectedTexts)
+            {
+                data.Add(culture, rule, text, ambiguous);
+            }
+        }
+
+        return data;
+    }
+
+    public static TheoryData<string, string, string, string> Accepted()
+    {
+        var data = new TheoryData<string, string, string, string>();
+
+        foreach (var culture in Cultures)
+        {
+            foreach (var (rule, text, expected) in AcceptedTexts)
+            {
+                data.Add(culture, rule, text, expected);
+            }
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Кома в ТЕКСТОВІЙ комірці, яку не можна прочитати однозначно, — відмова
+    /// <see cref="ImportMessageKeys.ExpectsNumber"/>, а не вгадане число.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутації:
+    /// <list type="bullet">
+    /// <item>повернути голий <c>NumberStyles.Number</c> (з <c>AllowThousands</c>)
+    /// без <c>WithoutComma</c> — «1,234» і «1,23,4» знову мовчки стануть 1234;</item>
+    /// <item>прибрати пункт 2а — «1,234» стане 1.234, хоча для людини з
+    /// крапкою-роздільником це 1234.</item>
+    /// </list>
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "C1")]
+    [MemberData(nameof(Rejected))]
+    public void Кома_яку_не_можна_прочитати_однозначно_відхиляється(
+        string cultureName, string rule, string text, bool ambiguous)
+    {
+        _ = rule;
+        var diff = WithCulture(cultureName, () => BuildText(text));
+
+        Assert.Empty(diff.Changes);
+        var rejection = Assert.Single(diff.Rejected);
+        Assert.Equal(CellValueReader.TypeMismatch, rejection.ReasonCode);
+        Assert.Equal(ImportMessageKeys.ExpectsNumber, rejection.MessageKey);
+        Assert.Equal(ambiguous, rejection.Message.Contains("ambiguous separator", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Однозначний текст читається тим самим числом під будь-якою культурою:
+    /// кома — десяткова, коли групуванням бути не може, і роздільник тисяч,
+    /// коли інакше прочитати не можна.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Мутація: голий <c>AllowThousands</c> — «12,5» стане 125, «1234,567» —
+    /// 1234567.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "C1")]
+    [MemberData(nameof(Accepted))]
+    public void Однозначний_текст_читається_однаково_під_будь_якою_культурою(
+        string cultureName, string rule, string text, string expected)
+    {
+        _ = rule;
+        var diff = WithCulture(cultureName, () => BuildText(text));
+
+        Assert.Empty(diff.Rejected);
+        Assert.Equal(
+            decimal.Parse(expected, CultureInfo.InvariantCulture),
+            Assert.IsType<decimal>(Assert.Single(diff.Changes).NewValue));
+    }
+
+    private static TableDiff BuildText(string text)
+    {
+        var (table, columns) = Table(("T1", CellDataType.Decimal));
+
+        using var workbook = new XLWorkbook();
+        workbook.Worksheets.Add("S0").Cell(2, 1).SetValue(text);
+
+        return Build(workbook.Worksheet("S0"), table, columns);
+    }
+
+    private static T WithCulture<T>(string name, Func<T> action)
+    {
+        var culture = CultureInfo.CurrentCulture;
+        var uiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo(name);
+            CultureInfo.CurrentUICulture = new CultureInfo(name);
+
+            return action();
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = uiCulture;
+        }
     }
 
     /// <summary>Книга проходить через справжній <c>.xlsx</c>, а не лише через об'єкт у пам'яті.</summary>
