@@ -26,7 +26,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
     /// ⛔ Директива №11, T10 #50: був публічним членом <c>ICalculationResultStore</c>
     /// без жодного зовнішнього викликача через порт (тільки внутрішній
     /// виклик із <see cref="WriteResultsAsync"/>) — той самий шаблон, що й
-    /// приватний <see cref="NextStepIdAsync"/> поруч. Прибрано з порту, а не
+    /// приватний <see cref="ReserveStepIdRangeAsync"/> поруч. Прибрано з порту, а не
     /// видалено: логіка жива й потрібна, просто ніхто, крім цього класу, її
     /// не викликає.
     /// </para>
@@ -54,12 +54,26 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             return (last ?? 0) + 1;
         }
 
+        return await SequenceRangeAsync(count, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Резервує <paramref name="size"/> послідовних значень із
+    /// <c>calc.CalculationResultSeq</c> і повертає перше.
+    /// </summary>
+    /// <remarks>
+    /// Резервування атомарне й поза транзакцією викликача: два паралельні
+    /// записувачі ніколи не отримають спільного значення, хоч би коли кожен із
+    /// них потім закомітив.
+    /// </remarks>
+    private async Task<long> SequenceRangeAsync(long size, CancellationToken ct)
+    {
         var range = await db.Database
             .SqlQuery<long>($"""
                 DECLARE @first sql_variant;
                 EXEC sys.sp_sequence_get_range
                     @sequence_name = N'calc.CalculationResultSeq',
-                    @range_size = {count},
+                    @range_size = {size},
                     @range_first_value = @first OUTPUT;
                 SELECT CONVERT(bigint, @first) AS Value;
                 """)
@@ -142,7 +156,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
 
         var periodKey = run.PeriodKey ?? 0;
-        var nextId = await NextStepIdAsync(ct).ConfigureAwait(false);
+        var nextId = await ReserveStepIdRangeAsync(steps.Count, ct).ConfigureAwait(false);
 
         foreach (var step in steps)
         {
@@ -307,15 +321,57 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             r.MethodologyVersionId, r.SourceRowKey, r.OutputCode, r.Value, r.UnitId, r.SubstanceEntryId));
     }
 
-    /// <summary>Наступний ідентифікатор кроку трейсу.</summary>
-    private async Task<long> NextStepIdAsync(CancellationToken ct)
+    /// <summary>
+    /// Резервує безперервний діапазон ідентифікаторів кроків трейсу й
+    /// повертає перший.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Тут стояло <c>MAX(Id)+1</c> без блокування, а вставка відбувається аж
+    /// на <c>SaveChanges</c> у <c>CalculationOutputWriter</c>.
+    /// <c>CalculationOrchestrator</c> виконує методології пакета паралельно,
+    /// кожну — зі своїм <c>EcrDbContext</c>, і всі пишуть трейс того самого
+    /// прогону в той самий <c>PeriodKey</c>: гілки читали однаковий MAX, і всі,
+    /// крім першої, падали на <c>PK_CalculationStep</c> — разом із
+    /// результатами своєї методології (<c>CalculationStepIdRaceTests</c>).
+    /// <para>
+    /// Власної послідовності в кроків немає, а нова — це міграція. Тому Id
+    /// береться зі спільної <c>calc.CalculationResultSeq</c>: ключ кроку —
+    /// <c>(PeriodKey, Id)</c> у своїй таблиці, і перетин значень із
+    /// <c>calc.CalculationResult</c> нічого не ламає — потрібна лише
+    /// унікальність серед кроків.
+    /// </para>
+    /// <para>
+    /// ⚠ Кроки, записані до цієї зміни, мають Id від 1 (старий MAX+1), і
+    /// послідовність про них не знає. MAX читається ДО резервування: усе, що
+    /// видала послідовність раніше, менше за наш діапазон, тож
+    /// «перше &gt; MAX» означає, що старих Id попереду немає. Інакше значення
+    /// до MAX спалюються одним резервуванням — один раз на базу, далі
+    /// послідовність завжди попереду.
+    /// </para>
+    /// </remarks>
+    private async Task<long> ReserveStepIdRangeAsync(int count, CancellationToken ct)
     {
-        var last = await db.CalculationSteps
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        var legacyMax = await db.CalculationSteps
             .AsNoTracking()
             .Select(s => (long?)s.Id)
             .MaxAsync(ct)
-            .ConfigureAwait(false);
+            .ConfigureAwait(false) ?? 0;
 
-        return (last ?? 0) + 1;
+        // Запас на провайдера без послідовностей — як у ReserveResultIdRangeAsync.
+        if (!db.Database.IsSqlServer())
+        {
+            return legacyMax + 1;
+        }
+
+        var first = await SequenceRangeAsync(count, ct).ConfigureAwait(false);
+        if (first > legacyMax)
+        {
+            return first;
+        }
+
+        await SequenceRangeAsync(legacyMax - first + 1, ct).ConfigureAwait(false);
+        return await SequenceRangeAsync(count, ct).ConfigureAwait(false);
     }
 }
