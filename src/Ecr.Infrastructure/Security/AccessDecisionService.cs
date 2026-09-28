@@ -1011,6 +1011,12 @@ public sealed class AccessDecisionService(
                     p.Status,
                     p.IsArchiving,
                     p.TemplateVersionId,
+
+                    // ⚠ ФВ-1.8: річне вікно — з того самого рядка проєкту, без
+                    // окремого звернення (храповик `PatchCellsQueryCountTests`).
+                    p.PeriodEnd,
+                    p.YearGraceOffsetDays,
+                    p.TimeZoneId,
                     Period = db.Periods
                         .AsNoTracking()
                         .Where(x => x.ProjectId == d.ProjectId && x.PeriodKeyValue == periodValue)
@@ -1044,10 +1050,19 @@ public sealed class AccessDecisionService(
         // ⚠ Лише для АКТИВНОГО проєкту — як і в самій задачі: періоди чернетки
         // не відкриваються за датами, доки проєкт не активовано (`A7-25`), і
         // розрахунок тут відкрив би їх повз активацію.
+        //
+        // ⚠ ФВ-1.8: вікно — те саме, що передає `PeriodStateJob`; інакше задача
+        // тримала б грудень у `Grace`, а рішення про запис сказало б `Closed`.
         var periodState = period is null
             ? PeriodState.Scheduled
             : state.Status == ProjectStatus.Active
-                ? PeriodStates.Effective(period, clock.UtcNow)
+                ? PeriodStates.Effective(
+                    period,
+                    clock.UtcNow,
+                    Domain.Services.YearGraceWindow.For(
+                        state.PeriodEnd,
+                        state.YearGraceOffsetDays,
+                        SiteTimeZone.Create(state.TimeZoneId).ToTimeZoneInfo()))
                 : period.State;
 
         var sheetStatus = sheetDefId is null ? null : state.SheetStatus;

@@ -618,7 +618,11 @@ public sealed class ActivateProjectHandler(
 
         var toMaterialize = new List<int>();
 
-        foreach (var (period, target) in periodStates.Plan(allPeriods, now, zone))
+        // ⚠ ФВ-1.8: те саме річне вікно, що передає `PeriodStateJob`: активація
+        // в межах вікна лишає грудень `Grace`, як і наступний прогін задачі.
+        var yearGrace = Domain.Services.YearGraceWindow.For(project.PeriodEnd, project.YearGraceOffsetDays, zone);
+
+        foreach (var (period, target) in periodStates.Plan(allPeriods, now, zone, yearGrace))
         {
             var before = period.State;
             period.AdvanceTo(target, now);
@@ -721,9 +725,16 @@ public sealed class ArchiveProjectHandler(
         var now = clock.UtcNow;
         var states = new Domain.Services.PeriodStateCalculator();
 
+        // ⚠ ФВ-1.8: те саме річне вікно, що в задачі станів і в рішенні про
+        // запис: у вікні грудень ще `Grace`, і архівація його не закриває повз вікно.
+        var yearGrace = Domain.Services.YearGraceWindow.For(
+            project.PeriodEnd,
+            project.YearGraceOffsetDays,
+            Domain.ValueObjects.SiteTimeZone.Create(project.TimeZoneId).ToTimeZoneInfo());
+
         foreach (var period in project.Periods)
         {
-            period.AdvanceTo(states.Effective(period, now), now);
+            period.AdvanceTo(states.Effective(period, now, yearGrace), now);
         }
 
         // ⚠ Перелік незакритих повертається В ПОДРОБИЦЯХ, а не ховається за

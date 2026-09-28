@@ -235,7 +235,13 @@ public sealed partial class PeriodStateJob(
 
             // ⚠ Зворотні переходи (межі змінились після зміни політики) план
             // не застосовує, а повертає окремо — їх показуємо, а не кидаємо.
-            var plan = calculator.PlanTransitions(periods, utcNow, zone);
+            //
+            // ⚠ ФВ-1.8: річне вікно проєкту — те саме, що передають рішення про
+            // запис (`AccessDecisionService`) і активація: інакше задача закрила б
+            // грудень, а запис його ще дозволяв би (або навпаки).
+            var plan = calculator.PlanTransitions(
+                periods, utcNow, zone,
+                YearGraceWindow.For(project.PeriodEnd, project.YearGraceOffsetDays, zone));
             skipped.AddRange(plan.Skipped);
 
             foreach (var (period, target) in plan.Transitions)
