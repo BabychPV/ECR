@@ -173,6 +173,7 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 | `jobs` Unhealthy | планувальник зупинився | лог за `Quartz`, перезапуск служби |
 | розгортання: `01-filegroups.sql`, `Msg 5149 … error 112` | немає місця на диску даних | звільнити місце. Файлові групи займають ~14 ГБ на повній редакції (п. 6.1) |
 | збірка чи оновлення: `The file is locked by: "Ecr.Api (<pid>)"` | DLL тримає запущена служба | `Stop-Service EcrApi`, потім оновлення |
+| оновлення: `Msg 50148 … Передперевірка D148` на `migration.sql` | у базі до 2026-09-20 є значення з модулем ≥ 1e12 | п. 8.1 |
 | `404` на `GET /api/v1/jobs/…` | `#` в ідентифікаторі не закодовано | кодувати `%23` |
 | пошта не йде | не задано `Smtp:Host`/`Smtp:From` | задати й перевірити `POST /api/v1/notifications/channels/{id}/test` |
 
@@ -288,6 +289,98 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 3. Перевірити `/health/ready` і `/health/db`.
 
 Графічний майстер `tools/Ecr.Setup` запускає той самий `deploy-ecr.ps1`.
+
+### 8.1. Помилка 50148: «Передперевірка D148»
+
+**Кого стосується.** Лише бази, розгорнуті до 2026-09-20, тобто до міграції
+`20260920223149_D148CellValueScale16`. Нові бази й бази, де D148 уже
+застосовано, цю перевірку не проходять узагалі.
+
+**Що сталося.** Три міграції `D148*Scale16` переводять десять стовпців із
+`decimal(28,10)` у `decimal(28,16)`. Ціла частина на цьому кроці скорочується з
+18 розрядів до 12. Наступні `D148*Precision34` повертають 18 розрядів
+(`decimal(34,16)`). Тобто межа 1e12 **не є межею домену**: кінцевий тип
+вміщує значення до 1e18. Це обмеження лише проміжного кроку. Приклад такого
+значення — 1 ТДж у джоулях.
+
+Без перевірки SQL Server зупинив би `ALTER COLUMN` помилкою
+`Msg 8115 Arithmetic overflow`. Вона не називає ні стовпця, ні рядків.
+Перевірка йде першою командою в кожній із трьох міграцій, тобто **до зміни
+схеми**. Вона перелічує стовпці, кількість рядків і максимум за модулем:
+
+```
+Msg 50148 … Передперевірка D148: оновлення зупинено ДО зміни схеми. …
+Поза межею:
+  doc.CellValue.ValueNumeric: рядків 1, max |x| = 1000000000000.0000000000
+Схему й дані не змінено. …
+```
+
+Після цієї помилки `deploy-ecr.ps1` зупиняється на кроці 2/7. MSI не
+ставиться, стара версія лишається робочою, схема й дані — без змін.
+
+**Що робити.** Суть процедури: тимчасово відкласти ці значення, пройти всю
+серію D148 і повернути їх. Служба весь цей час зупинена.
+
+1. `Stop-Service EcrApi`, повний бекап (п. 6.2).
+2. Для **кожного** стовпця з повідомлення відкласти значення в таблицю
+   `dbo.D148Hold_<схема>_<таблиця>` за первинним ключем і поставити 0.
+   Приклад для `doc.CellValue`:
+
+   ```sql
+   SET XACT_ABORT ON;
+   BEGIN TRANSACTION;
+   SELECT PeriodKey, TableRowId, ColumnDefId, ValueNumeric AS OldValue
+   INTO dbo.D148Hold_doc_CellValue
+   FROM doc.CellValue
+   WHERE ValueNumeric >= 1000000000000 OR ValueNumeric <= -1000000000000;
+
+   UPDATE t SET ValueNumeric = 0
+   FROM doc.CellValue AS t
+   JOIN dbo.D148Hold_doc_CellValue AS h
+     ON h.PeriodKey = t.PeriodKey AND h.TableRowId = t.TableRowId AND h.ColumnDefId = t.ColumnDefId;
+   COMMIT;
+   ```
+
+   ⚠ Межу пишіть цілим літералом `1000000000000`, не `1e12`. Літерал `1e12` у
+   T-SQL має тип `float`, і значення біля межі (`999999999999.9999999999`)
+   округлюються до нього, тобто відкладаються зайві рядки.
+
+   Ключі решти стовпців:
+
+   | Стовпець | Первинний ключ |
+   |---|---|
+   | `doc.CellValue.ValueNumeric` | `PeriodKey, TableRowId, ColumnDefId` |
+   | `doc.DocumentIndexValue.ValueNumeric` | `Id` |
+   | `rpt.ReportRow.ValueNumeric` | `SnapshotId, RowNo, ColumnCode` |
+   | `ext.RawDataPoint.ValueNumeric` | `Id` |
+   | `dic.RegistryValue.ValueNumeric` | `Id` |
+   | `calc.CalculationResult.Value` | `PeriodKey, Id` |
+   | `calc.CalculationInput.Value` | `PeriodKey, Id` |
+   | `calc.CalculationStep.Value` | `PeriodKey, Id` |
+   | `calc.MethodologyConstant.Value` | `Id` |
+   | `calc.TestCase.Tolerance` | `Id` |
+
+3. Застосувати `01-filegroups.sql`, `02-partitions.sql` і `migration.sql`.
+   Прапорці ті самі, що в `deploy-ecr.ps1`:
+   `sqlcmd -S <сервер> -E -C -b -I -d <база> -i <файл>`. Тепер `migration.sql`
+   проходить до кінця, стовпці стають `decimal(34,16)`.
+4. Повернути значення за ключем:
+   `UPDATE t SET ValueNumeric = h.OldValue FROM … JOIN dbo.D148Hold_… AS h ON …`.
+   Потім перевірити, що розбіжностей немає:
+   `SELECT COUNT(*) … WHERE t.ValueNumeric <> h.OldValue` → `0`.
+5. Видалити таблиці `dbo.D148Hold_*`.
+6. Звичайне розгортання (п. 8, крок 2). `migration.sql` ідемпотентний, тож
+   застосовані міграції він пропускає.
+
+✎ 2026-09-28: процедуру перевірено на стенді для `doc.CellValue` (`1e12`) і
+`calc.CalculationResult` (`-2.5e13`, `NOT NULL`). Шлях: `sqlcmd` з прапорцями
+`deploy-ecr.ps1` → 50148 → відкладення → `migration.sql` → повернення. Значення
+повернулися без змін, тип `34,16`, розбіжностей 0. Решту восьми стовпців
+вручну не проходили. Передперевірку для всіх десяти тримає тест
+`D148ScalePrecheckTests`.
+
+⛔ Не редагуйте міграції й не видаляйте рядки, щоб «пройти» перевірку. Це
+справжні дані, і кінцевий тип їх вміщує.
 
 ## 9. Відкат
 

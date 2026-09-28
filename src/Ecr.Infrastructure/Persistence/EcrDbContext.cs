@@ -282,6 +282,21 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Генератор SQL міграцій замінюється ТУТ, а не в DI: контекст будують
+    /// і <c>DependencyInjection</c>, і <c>EcrDbContextFactory</c> (<c>dotnet ef
+    /// migrations script</c>, яким розгортають прод), і тести. Передперевірка
+    /// <c>D148ScalePrecheck</c> мусить бути в SQL кожного з цих шляхів.
+    /// </remarks>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+
+        optionsBuilder.ReplaceService<
+            Microsoft.EntityFrameworkCore.Migrations.IMigrationsSqlGenerator, EcrMigrationsSqlGenerator>();
+    }
+
+    /// <inheritdoc />
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         ArgumentNullException.ThrowIfNull(configurationBuilder);
