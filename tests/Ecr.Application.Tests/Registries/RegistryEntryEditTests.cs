@@ -165,7 +165,8 @@ public sealed class RegistryEntryEditTests
             () => Get().HandleAsync("PERMITS", EntryId, CancellationToken.None));
     }
 
-    private UpsertRegistryEntryHandler Upsert() => new(_registries, _uow, _audit, _access, _user, _clock);
+    private UpsertRegistryEntryHandler Upsert()
+        => new(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
     private GetRegistryEntryHandler Get() => new(_registries, _access, _user);
 

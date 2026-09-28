@@ -181,7 +181,7 @@ public sealed class RegistryResourceGrantAccessTests
     // ---- helpers ----
 
     private UpsertRegistryEntryHandler UpsertHandler()
-        => new(_registries, _uow, _audit, _access, _user, _clock);
+        => new(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
     private GetRegistryEntriesHandler GetHandler()
         => new(_registries, new RegistryResolver(), _cache, _access, _user);

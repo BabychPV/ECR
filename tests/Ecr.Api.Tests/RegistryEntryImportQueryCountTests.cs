@@ -135,13 +135,17 @@ public sealed class RegistryEntryImportQueryCountTests(SqlServerFixture sql)
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(Now);
 
+        var registries = new RegistryStore(db);
+        var audit = Substitute.For<IAuditWriter>();
+        var user = User();
+
         return new ImportRegistryEntriesHandler(
-            new RegistryStore(db),
-            Substitute.For<IUnitOfWork>(),
-            Substitute.For<IAuditWriter>(),
+            registries,
+            audit,
             Access(UpsertRegistryEntryHandler.Permission),
-            User(),
-            clock);
+            user,
+            clock,
+            new RegistryEntryWriter(registries, Substitute.For<IUnitOfWork>(), audit, user, clock));
     }
 
     /// <summary>

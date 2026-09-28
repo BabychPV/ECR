@@ -47,7 +47,7 @@ public sealed record RegistryEntryImportReport(
 /// запису.
 /// <para>
 /// Перевірка типу й обов'язковості полів — ТОЙ САМИЙ код, що й ручний upsert:
-/// <see cref="UpsertRegistryEntryHandler.ApplyValuesAsync"/> викликається тут
+/// <see cref="RegistryEntryWriter.ApplyValuesAsync"/> викликається тут
 /// напряму, а не копіюється. Посилання <c>Lookup</c>-поля на запис ІНШОГО
 /// довідника резолвиться за бізнес-кодом ТИМ САМИМ методом сховища
 /// (<see cref="IRegistryStore.FindEntryByCodeAsync"/>), яким
@@ -56,17 +56,16 @@ public sealed record RegistryEntryImportReport(
 /// </remarks>
 public sealed class ImportRegistryEntriesHandler(
     IRegistryStore registries,
-    IUnitOfWork uow,
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    Keys.RegistryKeyService? keys = null)
+    RegistryEntryWriter writer)
 {
-    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (як в
-    // `UpsertRegistryEntryHandler`; храповик запитів B-10 так і міряє довідник без ключів);
-    // контейнер підставляє `RegistryKeyService` завжди. Справжній шлях тримає
-    // `RegistryKeyLifecycleHttpTests`.
+    // ⚠ Значення, ключі, ревізія й аудит значень — через `RegistryEntryWriter` (S6), той самий,
+    // що в ручного upsert; служба ключів — його (`writer.Keys`): `null` лише в тестах, що
+    // будують writer руками (храповик запитів B-10 так і міряє довідник без ключів). Справжній
+    // шлях тримає `RegistryKeyLifecycleHttpTests`.
 
     /// <summary>Ключ помилки рядка: той самий ключ має інший рядок файлу (§4.6).</summary>
     public const string KeyDuplicateInFileKey = "err.ECR-REG-4092.keyDuplicateInFile";
@@ -186,7 +185,7 @@ public sealed class ImportRegistryEntriesHandler(
         // ⛔ RT-10b (§4.6): складений ключ довідника. Первинний ключ знаходить наявний запис
         // рядка раніше за код; дубль ключа у файлі — помилка обох рядків; вільність ключа
         // проти бази — у транзакції запису, тим самим сервісом, що й ручний upsert.
-        IReadOnlyList<RegistryKeyDef> keyDefs = keys is null
+        IReadOnlyList<RegistryKeyDef> keyDefs = writer.Keys is not { } keys
             ? []
             : await keys.ListActiveKeysAsync(definition.Id, ct).ConfigureAwait(false);
         var keyMatch = await MatchPrimaryKeyAsync(definition, keyDefs, records, codeColumn, columns, prefetched, ct)
@@ -280,23 +279,14 @@ public sealed class ImportRegistryEntriesHandler(
                 continue;
             }
 
-            entry ??= new RegistryEntry(
+            // ⚠ Спершу Add (writer.AddEntry), лише потім ApplyValuesAsync. Навпаки — EF довантажує
+            // запис у чергу вставки каскадом через навігацію RegistryValue.Entry, і подвійне
+            // додавання дало `IDENTITY_INSERT`.
+            entry ??= writer.AddEntry(
                 definition.Id,
                 ecrCode,
                 new LocalizedText(new Dictionary<string, string> { [UiStringResolver.DefaultLanguage] = code }),
-                userId,
-                clock.UtcNow);
-
-            // ⚠ Порядок як в UpsertRegistryEntryHandler.CreateAsync: спершу
-            // Add, лише потім ApplyValuesAsync. Навпаки — EF довантажує запис
-            // у чергу вставки каскадом через навігацію RegistryValue.Entry
-            // (сам RegistryValue це й документує), і подвійне додавання дало
-            // `IDENTITY_INSERT`: другий Add() ішов уже з клієнтським Id,
-            // залишеним від першого проходу.
-            if (isNew)
-            {
-                registries.Add(entry);
-            }
+                userId);
 
             // ⚠ Запис, знайдений за ключем, міг не потрапити в пакет «за кодами» — його значення
             // прочитав пошук за ключем. Порожній список тут означав би «полів немає», і кожне
@@ -314,13 +304,14 @@ public sealed class ImportRegistryEntriesHandler(
                 // що при ручному редагуванні запису — жодного дубля правила.
                 var prefetch = new RegistryValuesPrefetch(existingValues, prefetched.LookupTargets);
 
-                changes = await UpsertRegistryEntryHandler
-                    .ApplyValuesAsync(registries, definition, entry, values, prefetch, ct)
+                changes = await writer
+                    .ApplyValuesAsync(definition, entry, values, prefetch, ct)
                     .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is DomainException or BusinessRuleException)
             {
-                errors.Add(new RegistryEntryImportError(rowNumber, code, FieldOf(ex), MessageKeyOf(ex)));
+                errors.Add(new RegistryEntryImportError(
+                    rowNumber, code, RegistryEntryWriter.FieldOf(ex), RegistryEntryWriter.MessageKeyOf(ex)));
                 continue;
             }
 
@@ -396,23 +387,18 @@ public sealed class ImportRegistryEntriesHandler(
             return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: false);
         }
 
-        definition.BumpDataRevision();
-
-        // ⛔ Аудит пише СИРИМ SQL поза відстеженням EF (`Q-244`, той самий
-        // урок, що SwitchRegistrySourceHandler): без явної транзакції збій між
-        // журналом і SaveChangesAsync лишив би їх у різних станах.
-        await uow.ExecuteInTransactionAsync(async innerCt =>
-        {
-            // ⛔ RT-10b: ключі — тим самим сервісом, що й ручний upsert, у тій самій транзакції,
-            // що й записи. Ключ, який тримає запис поза файлом, — 409 на весь файл (не помилка
-            // рядка): це перевірка під блокуванням, і в dryRun її немає.
-            if (keys is not null && keyed.Count > 0)
-            {
-                await keys.ApplyAsync(definition, keyDefs, [.. keyed.Select(r => r.Entry)], innerCt)
-                    .ConfigureAwait(false);
-            }
-
-            await audit.WriteStructureChangeAsync(
+        // ⛔ Одна транзакція writer'а (`Q-244`): ревізія, ключі RT-10b (ключ, який тримає запис
+        // поза файлом, — 409 на весь файл, не помилка рядка: це перевірка під блокуванням, і в
+        // dryRun її немає), сумарний журнал імпорту нижче, збереження, per-row події
+        // `RegistryValueChanged` одним пакетним викликом — формат DetailsJson той самий, що в
+        // ручного upsert.
+        await writer.SaveBatchAsync(
+            definition,
+            keyDefs,
+            [.. keyed.Select(r => r.Entry)],
+            valueChanges,
+            userId,
+            innerCt => audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     ChangedAt: clock.UtcNow,
                     TemplateVersionId: 0,
@@ -429,37 +415,8 @@ public sealed class ImportRegistryEntriesHandler(
                     ChangeReason: $"Імпорт CSV довідника «{registryCode}»: додано {added}, оновлено {updated}.",
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
-                innerCt).ConfigureAwait(false);
-
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
-
-            // Per-row слід — ПІСЛЯ SaveChangesAsync: Id щойно доданих записів
-            // EF підставляє лише тепер (той самий порядок, що
-            // UpsertRegistryEntryHandler.HandleAsync). Формат DetailsJson —
-            // буквально той самий, що там: registryDefId/entryId/changes,
-            // щоб один і той самий запис читав обидва шляхи однаково.
-            //
-            // ⛔ Один пакетний виклик, а не цикл поштучних await — та сама
-            // логіка, що B-10 (ca63ed56) уже застосував до ЧИТАННЯ в цьому ж
-            // імпорті: N окремих round-trip на N змінених записів довідника
-            // не масштабується для великого CSV.
-            if (valueChanges.Count > 0)
-            {
-                var securityEvents = valueChanges
-                    .Select(vc => new SecurityEventRecord(
-                        clock.UtcNow, UpsertRegistryEntryHandler.ValueChangedEventType, TargetUserId: null, TargetRoleId: null,
-                        JsonSerializer.Serialize(new
-                        {
-                            registryDefId = definition.Id,
-                            entryId = vc.Entry.Id,
-                            changes = vc.Changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
-                        }),
-                        userId, currentUser.CorrelationId))
-                    .ToList();
-
-                await audit.WriteSecurityEventsAsync(securityEvents, innerCt).ConfigureAwait(false);
-            }
-        }, ct).ConfigureAwait(false);
+                innerCt),
+            ct).ConfigureAwait(false);
 
         return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true);
     }
@@ -554,7 +511,7 @@ public sealed class ImportRegistryEntriesHandler(
     /// Значення полів рядка: <c>Lookup</c> резолвиться в Id запису-джерела за
     /// бізнес-кодом, решта перевіряється ПРОБНИМ викликом
     /// <see cref="RegistryValue.Set"/> — тим самим методом, який реально
-    /// застосує значення далі, у <see cref="UpsertRegistryEntryHandler.ApplyValuesAsync"/>.
+    /// застосує значення далі, у <see cref="RegistryEntryWriter.ApplyValuesAsync"/>.
     /// </summary>
     /// <remarks>
     /// ⚠ Проба потрібна САМЕ заради номера поля в звіті. Спільний метод
@@ -590,7 +547,7 @@ public sealed class ImportRegistryEntriesHandler(
                 }
                 catch (DomainException ex)
                 {
-                    return (values, field.Code, MessageKeyOf(ex));
+                    return (values, field.Code, RegistryEntryWriter.MessageKeyOf(ex));
                 }
 
                 values[field.Code] = raw;
@@ -649,6 +606,7 @@ public sealed class ImportRegistryEntriesHandler(
         ImportPrefetch prefetched,
         CancellationToken ct)
     {
+        var keys = writer.Keys;
         var primary = keyDefs.FirstOrDefault(k => k.IsPrimary);
         var present = columns.Select(c => c.Field.Id).ToHashSet();
         if (keys is null || primary is null || !primary.Fields.All(f => present.Contains(f.RegistryFieldDefId)))
@@ -739,7 +697,7 @@ public sealed class ImportRegistryEntriesHandler(
     /// <remarks>
     /// ⚠ Значення з файлу — пробні об'єкти, як у <see cref="ResolveRowAsync"/>: у контекст вони не
     /// додаються. Порожня клітинка поля не змінює — як і в
-    /// <see cref="UpsertRegistryEntryHandler.ApplyValuesAsync"/>, куди вона не потрапляє.
+    /// <see cref="RegistryEntryWriter.ApplyValuesAsync"/>, куди вона не потрапляє.
     /// </remarks>
     private static Dictionary<int, RegistryValue> EffectiveValues(
         RegistryDef definition, IReadOnlyList<RegistryValue> existing, IReadOnlyDictionary<string, object?> values)
@@ -827,29 +785,6 @@ public sealed class ImportRegistryEntriesHandler(
             message,
             new Dictionary<string, object?> { ["messageKey"] = messageKey, ["registryCode"] = registryCode });
 
-    /// <summary>Ключ тексту з винятку валідації; типова фраза домену — запасний варіант.</summary>
-    private static string MessageKeyOf(Exception ex) => Details(ex)?.GetValueOrDefault("messageKey") as string
-        ?? "err.ECR-REG-0422.entryImportRowFailed";
-
-    /// <summary>Поле, назване в подробиці винятку (<c>fieldCode</c> одиночного поля, <c>fields</c> — перелік).</summary>
-    private static string? FieldOf(Exception ex)
-    {
-        var details = Details(ex);
-        if (details is null)
-        {
-            return null;
-        }
-
-        return details.GetValueOrDefault("fieldCode") as string ?? details.GetValueOrDefault("fields") as string;
-    }
-
-    private static IReadOnlyDictionary<string, object?>? Details(Exception ex) => ex switch
-    {
-        DomainException de => de.Details,
-        BusinessRuleException be => be.Details,
-        _ => null,
-    };
-
     private static int IndexOf(IReadOnlyList<string> header, string name)
     {
         for (var i = 0; i < header.Count; i++)
@@ -906,18 +841,3 @@ public sealed class ImportRegistryEntriesHandler(
         Unchanged,
     }
 }
-
-/// <summary>
-/// Прочитане пакетом для <see cref="UpsertRegistryEntryHandler.ApplyValuesAsync"/>
-/// (<c>B-10</c>, імпорт CSV).
-/// </summary>
-/// <param name="ExistingValues">
-/// Наявні значення запису; <c>null</c> — прочитати з бази (<c>ListValuesAsync</c>).
-/// </param>
-/// <param name="LookupTargets">
-/// Уже прочитані записи — цілі <c>Lookup</c>-посилань; чого тут немає, те
-/// читається з бази, як і без пакета.
-/// </param>
-internal sealed record RegistryValuesPrefetch(
-    IReadOnlyList<RegistryValue>? ExistingValues,
-    IReadOnlyDictionary<long, RegistryEntry>? LookupTargets);

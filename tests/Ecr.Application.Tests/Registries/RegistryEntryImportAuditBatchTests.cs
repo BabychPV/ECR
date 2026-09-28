@@ -107,7 +107,7 @@ public sealed class RegistryEntryImportAuditBatchTests
             .WriteSecurityEventsAsync(Arg.Do<IReadOnlyList<SecurityEventRecord>>(r => captured = [.. r]), Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
 
-        var handler = new ImportRegistryEntriesHandler(_registries, _uow, _audit, _access, _user, _clock);
+        var handler = new ImportRegistryEntriesHandler(_registries, _audit, _access, _user, _clock, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
         var csv = new StringBuilder("code,NAME\r\n");
         for (var i = 0; i < entries.Count; i++)
@@ -175,7 +175,7 @@ public sealed class RegistryEntryImportAuditBatchTests
             .ListValuesForEntriesAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
             .Returns((IReadOnlyList<RegistryValue>)[value]);
 
-        var handler = new ImportRegistryEntriesHandler(_registries, _uow, _audit, _access, _user, _clock);
+        var handler = new ImportRegistryEntriesHandler(_registries, _audit, _access, _user, _clock, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
         // ⚠ Те саме значення, що вже лежить у value — жодної фактичної зміни.
         var content = $"code,NAME\r\n{entry.Code},same\r\n";

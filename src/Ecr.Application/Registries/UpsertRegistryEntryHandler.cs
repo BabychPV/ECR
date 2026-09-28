@@ -1,39 +1,26 @@
 // src/Ecr.Application/Registries/UpsertRegistryEntryHandler.cs
-using System.Text.Json;
 using Ecr.Application.Common;
-using Ecr.Application.Documents;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
-using Ecr.Domain.Abstractions;
-using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Registries;
 
-/// <summary>Одна фактична зміна значення поля запису довідника — для аудиту.</summary>
-/// <param name="FieldCode">Код поля довідника.</param>
-/// <param name="OldValue">Значення до зміни; <c>null</c> — поле не було заповнене.</param>
-/// <param name="NewValue">Значення після зміни; <c>null</c> — поле очищене.</param>
-internal sealed record RegistryValueFieldChange(string FieldCode, object? OldValue, object? NewValue);
-
 /// <summary>Створення і зміна запису довідника (ФВ-8.6, ФВ-8.7).</summary>
+/// <remarks>
+/// ⚠ Значення, ключі, ревізія й аудит — через <see cref="RegistryEntryWriter"/> (S6): тут лише
+/// те, що належить саме інтерактивному запиту, — право, пошук чи створення запису за Id/кодом,
+/// назва й батько.
+/// </remarks>
 public sealed class UpsertRegistryEntryHandler(
     IRegistryStore registries,
-    IUnitOfWork uow,
-    IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock,
-    Keys.RegistryKeyService? keys = null)
+    RegistryEntryWriter writer)
 {
-    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (їх кілька, і в
-    // їхніх довідниках ключів немає) — як годинник у `UnitOfWork`. Контейнер підставляє
-    // зареєстрований `RegistryKeyService` завжди; що на справжньому шляху ключ перевіряється,
-    // тримає HTTP-тест `RegistryKeyConflictHttpTests`.
-
     /// <summary>
     /// Право на зміну ДАНИХ довідника (`02-contracts.md` §9).
     /// </summary>
@@ -56,7 +43,7 @@ public sealed class UpsertRegistryEntryHandler(
     /// без міграції, а її тут свідомо нема (правило проєкту: одна міграція за
     /// раз, паралельно вже йде інша).
     /// </remarks>
-    public const string ValueChangedEventType = "RegistryValueChanged";
+    public const string ValueChangedEventType = RegistryEntryWriter.ValueChangedEventType;
 
     /// <summary>Створює або оновлює запис і повертає його ідентифікатор.</summary>
     /// <param name="dto">Опис запису.</param>
@@ -108,282 +95,19 @@ public sealed class UpsertRegistryEntryHandler(
         entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
         entry.SetParent(dto.ParentEntryId);
 
-        var changes = await ApplyValuesAsync(registries, definition, entry, dto.Values, prefetch: null, ct).ConfigureAwait(false);
+        var changes = await writer.ApplyValuesAsync(definition, entry, dto.Values, prefetch: null, ct).ConfigureAwait(false);
 
         // ⛔ Вікно дії сюди НЕ приймається, хоча воно є полем запису: його
         // зміна тягне перерахунок IsOrphaned (ФВ-8.13a), і зроблена мимохідь
         // тут вона лишила б рядки з ознакою, яку ніхто не перерахував. Для
         // цього є SetEntryValidityHandler.
 
-        // ⚠ Ревізія рухається ЗАВЖДИ, навіть коли змінилася лише назва: у
-        // ключі кешу списків лежить саме вона, і без інкременту grid показував
-        // би старий підпис, поки хтось не перезапустить процес.
-        definition.BumpDataRevision();
-
-        // ⛔ RT-10a: складений ключ (ФВ-8.15) перераховується й перевіряється ПІСЛЯ
-        // ApplyValuesAsync і зберігається в тій самій транзакції — одна точка виклику, яку
-        // спільний writer записів перенесе одним рядком.
-        if (keys is null)
-        {
-            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        else
-        {
-            await keys.SaveAsync(definition, entry, ct).ConfigureAwait(false);
-        }
-
-        // Журнал — ПІСЛЯ коміту, як у ChangeDocumentKeyHandler/DeleteDocumentHandler:
-        // IAuditWriter пише власним підключенням, а Id нового запису відомий
-        // лише тепер, коли EF підставив згенероване значення.
-        //
-        // ⚠ Подія — ОДНА на весь виклик, навіть якщо змінилося кілька полів:
-        // перелік змін лежить у DetailsJson. Подія не пишеться, якщо жодне
-        // значення фактично не змінилося (повторне збереження тим самим
-        // значенням, або запит без Values).
-        if (changes.Count > 0)
-        {
-            await audit.WriteSecurityEventAsync(
-                new SecurityEventRecord(
-                    clock.UtcNow, ValueChangedEventType, TargetUserId: null, TargetRoleId: null,
-                    JsonSerializer.Serialize(new
-                    {
-                        registryDefId = definition.Id,
-                        entryId = entry.Id,
-                        changes = changes.Select(c => new { field = c.FieldCode, oldValue = c.OldValue, newValue = c.NewValue }),
-                    }),
-                    userId, currentUser.CorrelationId),
-                ct).ConfigureAwait(false);
-        }
+        // Ревізія (завжди, навіть коли змінилася лише назва), складений ключ RT-10a у
+        // транзакції збереження, і ОДНА подія аудиту на всі змінені поля — після коміту.
+        await writer.SaveEntryAsync(definition, entry, changes, userId, ct).ConfigureAwait(false);
 
         return entry.Id;
     }
-
-    /// <summary>Записує значення полів типізовано за <c>RegistryFieldDef.DataType</c>.</summary>
-    /// <remarks>
-    /// ⚠ Тип береться з опису поля, а не з типу переданого об'єкта. Інакше
-    /// число, що прийшло рядком із JSON, лягло б у <c>ValueString</c> — і поле
-    /// «ліміт» перестало б порівнюватися й сумуватися, не давши жодної помилки.
-    /// <para>
-    /// ⚠ <c>internal static</c>, а не приватний метод екземпляра: єдине місце,
-    /// де валідується тип, обов'язковість і склад полів запису довідника, і
-    /// імпорт CSV (`BE-24`, <c>ImportRegistryEntriesHandler</c>) кличе САМЕ цей
-    /// метод — не копіює правило вдруге. <paramref name="registries"/>
-    /// передається параметром замість поля екземпляра: метод раніше читав
-    /// лише це поле, тож перетворення на static нічого не втратило.
-    /// </para>
-    /// <para>
-    /// ⛔ Значення проходить через <see cref="CellValueReader.Normalize"/> ПЕРЕД
-    /// <c>RegistryValue.Set</c> — той самий крок, який `A7-01` уже додав для
-    /// комірок документа. Через HTTP <c>values</c> приходить
-    /// <c>Dictionary&lt;string, object?&gt;</c>, і <c>System.Text.Json</c> кладе
-    /// в кожне значення <see cref="JsonElement"/>, а не готовий
-    /// <c>decimal</c>/<c>bool</c>/<c>DateTime</c>. <c>RegistryValue.Set</c>
-    /// приводить значення голими <c>Convert.ToDecimal</c>/<c>ToBoolean</c>/
-    /// <c>ToInt64</c> і патерн-матчем для дати — жоден не впізнає
-    /// <see cref="JsonElement"/>, тож СПРАВЖНІЙ запит із коректним числом,
-    /// булевим чи датою відмовляв би так само, як зіпсований ввід (виміряно
-    /// тестом до фіксу: коректне число для поля <c>Int</c> давало
-    /// <c>422 err.ECR-REG-0422.valueNotNumber</c>). Для <c>String</c> це
-    /// «випадково працювало» — <c>JsonElement.ToString()</c> повертає текст.
-    /// CSV-імпорт (<see cref="Registries.ImportRegistryEntriesHandler"/>) цей
-    /// самий метод не зачіпає: він передає ГОТОВИЙ <c>string</c> (текст рядка
-    /// CSV), а <see cref="CellValueReader.Normalize"/> для не-<c>JsonElement</c>
-    /// входу — тотожність.
-    /// </para>
-    /// </remarks>
-    /// <param name="registries">Сховище довідників.</param>
-    /// <param name="definition">Опис довідника.</param>
-    /// <param name="entry">Запис, якому застосовуються значення.</param>
-    /// <param name="values">Значення за кодами полів.</param>
-    /// <param name="prefetch">
-    /// Прочитане пакетом наперед (<c>B-10</c>, імпорт CSV): наявні значення
-    /// цього запису й цілі <c>Lookup</c>-посилань. <c>null</c> — читати з
-    /// бази поштучно, як ручний upsert. Правила ті самі в обох випадках —
-    /// змінюється лише ДЖЕРЕЛО тих самих рядків.
-    /// </param>
-    /// <param name="ct">Токен скасування.</param>
-    internal static async Task<IReadOnlyList<RegistryValueFieldChange>> ApplyValuesAsync(
-        IRegistryStore registries,
-        Domain.Entities.Configuration.RegistryDef definition,
-        RegistryEntry entry,
-        IReadOnlyDictionary<string, object?> values,
-        RegistryValuesPrefetch? prefetch,
-        CancellationToken ct)
-    {
-        if (values is null || values.Count == 0)
-        {
-            return [];
-        }
-
-        var fields = definition.Fields.ToDictionary(f => f.Code, StringComparer.Ordinal);
-
-        var unknown = values.Keys.Where(code => !fields.ContainsKey(code)).ToList();
-        if (unknown.Count > 0)
-        {
-            // Невідоме поле — це або друкарська помилка, або клієнт іншої
-            // версії. Обидва випадки треба показати: мовчки відкинуте значення
-            // виглядає як збережене.
-            throw new BusinessRuleException(
-                "ECR-REG-0422",
-                $"Довідник «{definition.Code}» не має полів: {string.Join(", ", unknown)}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0422.unknownFields",
-                    ["registryCode"] = definition.Code,
-                    ["fields"] = string.Join(", ", unknown),
-                });
-        }
-
-        var existing = entry.IsPersisted
-            ? (prefetch?.ExistingValues
-               ?? await registries.ListValuesAsync(entry.Id, ct).ConfigureAwait(false))
-                .ToDictionary(v => v.RegistryFieldDefId)
-            : [];
-
-        var changes = new List<RegistryValueFieldChange>();
-
-        foreach (var (code, raw) in values)
-        {
-            var field = fields[code];
-            var isNew = !existing.TryGetValue(field.Id, out var value);
-
-            if (isNew)
-            {
-                value = new RegistryValue(entry, field.Id);
-                registries.AddValue(value);
-            }
-
-            // ⚠ «Старе» читається З ЖИВОГО об'єкта ДО Set (Set заноляє всі
-            // колонки — RegistryValue.Clear), «нове» — з нього ж ПІСЛЯ: так
-            // порівняння бачить те саме типізоване значення, яке реально
-            // ляже в базу, а не сирий вхід запиту (він може прийти рядком
-            // для числового поля, і порівняння з боксованим decimal завжди
-            // «відрізнялося» б).
-            var oldValue = isNew ? null : RawValue(value!, field.DataType);
-            value!.Set(field.DataType, CellValueReader.Normalize(raw), field.UnitId);
-            var newValue = RawValue(value, field.DataType);
-
-            if (field.DataType == CellDataType.Lookup && value.ValueRefEntryId is { } target)
-            {
-                await RequireLookupTargetAsync(registries, field, target, prefetch?.LookupTargets, ct).ConfigureAwait(false);
-            }
-
-            if (!Equals(oldValue, newValue))
-            {
-                changes.Add(new RegistryValueFieldChange(code, oldValue, newValue));
-            }
-        }
-
-        var missing = definition.Fields
-            .Where(f => f.IsRequired)
-            .Where(f => !values.TryGetValue(f.Code, out var v) || v is null)
-            .Where(f => !existing.ContainsKey(f.Id))
-            .Select(f => f.Code)
-            .ToList();
-
-        if (missing.Count > 0)
-        {
-            throw new BusinessRuleException(
-                "ECR-REG-0422",
-                $"Не заповнені обов'язкові поля довідника «{definition.Code}»: {string.Join(", ", missing)}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0422.requiredFieldsMissing",
-                    ["registryCode"] = definition.Code,
-                    ["fields"] = string.Join(", ", missing),
-                });
-        }
-
-        return changes;
-    }
-
-    /// <summary>
-    /// Значення поля Lookup мусить бути живим записом САМЕ того довідника, який
-    /// оголошує поле (V-08(b), V-17(a), третій раунд UX).
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Доти неіснуючий Id доходив до бази й падав на <c>FK_RegValue_Ref</c> —
-    /// <c>500</c> «зверніться до адміністратора» на звичайну описку в полі, — а
-    /// Id запису ІНШОГО довідника приймався (<c>201</c>): число валідне,
-    /// посилання — ні, і каскади та списки вибору на такому значенні мовчки
-    /// показували чуже.
-    /// ⚠ Видалений логічно запис — теж «не знайдено»: він поза обігом, і нове
-    /// посилання на нього не має з'являтися.
-    /// <para>
-    /// ⚠ <paramref name="knownTargets"/> — записи, уже прочитані пакетом
-    /// (імпорт CSV резолвить код посилання в Id саме з них, <c>B-10</c>):
-    /// повторний <c>FindEntryAsync</c> на кожне значення дав би N+1 з тим самим
-    /// рядком. Той самий відстежуваний об'єкт — ті самі перевірки нижче.
-    /// </para>
-    /// </remarks>
-    private static async Task RequireLookupTargetAsync(
-        IRegistryStore registries,
-        RegistryFieldDef field,
-        long target,
-        IReadOnlyDictionary<long, RegistryEntry>? knownTargets,
-        CancellationToken ct)
-    {
-        var invariant = System.Globalization.CultureInfo.InvariantCulture;
-        var entry = knownTargets is not null && knownTargets.TryGetValue(target, out var known)
-            ? known
-            : await registries.FindEntryAsync(target, ct).ConfigureAwait(false);
-
-        if (entry is null || entry.IsDeleted)
-        {
-            throw new BusinessRuleException(
-                "ECR-REG-0422",
-                $"Поле «{field.Code}»: запису довідника {target} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0422.lookupEntryNotFound",
-                    ["field"] = field.Code,
-                    ["value"] = target.ToString(invariant),
-                });
-        }
-
-        if (field.RefRegistryDefId is { } expected && entry.RegistryDefId != expected)
-        {
-            var expectedDefinition = await registries
-                .FindDefinitionByIdAsync(expected, ct).ConfigureAwait(false);
-            var expectedCode = expectedDefinition?.Code ?? expected.ToString(invariant);
-
-            throw new BusinessRuleException(
-                "ECR-REG-0422",
-                $"Поле «{field.Code}» посилається на довідник «{expectedCode}», а запис {target} "
-                + $"(«{entry.Code}») належить іншому довіднику.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REG-0422.lookupWrongRegistry",
-                    ["field"] = field.Code,
-                    ["value"] = target.ToString(invariant),
-                    ["entryCode"] = entry.Code,
-                    ["expectedRegistry"] = expectedCode,
-                });
-        }
-    }
-
-    /// <summary>Типізоване значення поля — для порівняння до/після і для аудиту.</summary>
-    /// <remarks>
-    /// ⚠ Той самий вибір колонки за типом, що вже застосовує
-    /// <c>ImportDiffBuilder.Display</c> для комірок документа
-    /// (<c>Ecr.Adapters.Excel</c>) — тут навмисно НЕ перевикористаний напряму:
-    /// той метод читає <c>CellValueData</c> (комірка документа, посилання на
-    /// довідник), цей — <c>RegistryValue</c> (сам запис довідника); типи різні,
-    /// хоч і структурно схожі.
-    /// </remarks>
-    private static object? RawValue(RegistryValue value, CellDataType dataType) => dataType switch
-    {
-        CellDataType.String => value.ValueString,
-        CellDataType.Int or CellDataType.Decimal => value.ValueNumeric,
-        CellDataType.Bool => value.ValueBool,
-        CellDataType.Date => value.ValueDate,
-        CellDataType.Lookup => value.ValueRefEntryId,
-        CellDataType.Unit => value.ValueUnitId,
-
-        // Formula/Calculated неможливі: RegistryValue.Set кидає раніше, ніж
-        // виконання сюди дійде.
-        _ => null,
-    };
 
     /// <summary>Наявна назва, поверх якої лягли мови з запиту (X-03).</summary>
     /// <remarks>
@@ -468,8 +192,6 @@ public sealed class UpsertRegistryEntryHandler(
                 });
         }
 
-        var entry = new RegistryEntry(registryDefId, code, dto.Display, userId, clock.UtcNow);
-        registries.Add(entry);
-        return entry;
+        return writer.AddEntry(registryDefId, code, dto.Display, userId);
     }
 }

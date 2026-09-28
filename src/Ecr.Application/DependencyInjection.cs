@@ -250,6 +250,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.Keys.RegistryKeyService>(); // RT-10a
 
         // RT: data
+        services.AddScoped<Registries.RegistryEntryWriter>(); // S6
 
         // RT: expressions
 

@@ -221,7 +221,7 @@ public sealed class RegistryResolverTests
         _registries.FindDefinitionByIdAsync(Permits, Arg.Any<CancellationToken>()).Returns(definition);
         _registries.FindEntryByCodeAsync(Permits, "PERMIT_A", Arg.Any<CancellationToken>()).Returns(duplicate);
 
-        var handler = new UpsertRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock);
+        var handler = new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => handler.HandleAsync(
             new RegistryEntryUpsertDto(
@@ -248,7 +248,7 @@ public sealed class RegistryResolverTests
 
         var before = definition.DataRevision;
 
-        await new UpsertRegistryEntryHandler(_registries, _uow, _audit, _access, _user, _clock).HandleAsync(
+        await new UpsertRegistryEntryHandler(_registries, _access, _user, new RegistryEntryWriter(_registries, _uow, _audit, _user, _clock)).HandleAsync(
             new RegistryEntryUpsertDto(
                 Id: 101, RegistryDefId: Permits, Code: "PERMIT_A",
                 Display: Text("Дозвіл A (перейменований)"),
