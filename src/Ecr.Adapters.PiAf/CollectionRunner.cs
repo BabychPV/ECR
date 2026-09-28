@@ -2,6 +2,8 @@
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Ecr.Adapters.PiAf;
 
@@ -21,13 +23,17 @@ namespace Ecr.Adapters.PiAf;
 /// лишає по собі роботи в черзі.
 /// </para>
 /// </remarks>
-public sealed class CollectionRunner(
+public sealed partial class CollectionRunner(
     IEnumerable<IExternalDataSource> sources,
     SourceUnitConverter unitConverter,
     CatchUpPlanner catchUp,
     ICollectionStore store,
-    TimeSpan? maxRunDuration = null) : ICollectionRunner
+    TimeSpan? maxRunDuration = null,
+    ILogger<CollectionRunner>? logger = null) : ICollectionRunner
 {
+    /// <summary>Лог збоїв прогону; без реєстрації (тести) — порожній.</summary>
+    private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
+
     /// <summary>Стеля точок на один запит до джерела.</summary>
     /// <remarks>
     /// PI AF на надмірний запит відповідає деградацією **всім** клієнтам,
@@ -275,20 +281,71 @@ public sealed class CollectionRunner(
                 $"Прогін перевищив ліміт часу {runDuration.TotalMinutes:0} хв: джерело відповідає, "
                 + "але надто повільно. Непрочитане піде в наздоганяння наступного разу.";
         }
+        catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
+        {
+            // ⚠ Скасування ЗЗОВНІ (Quartz `Interrupt`, зупинка сервісу) —
+            // не збій і не мовчанка (аудит B4). Прогін закривається як
+            // «Degraded»: непрочитане лишилося без покриття і піде в
+            // наздоганяння, як за відмови джерела. Окремого статусу
+            // «Cancelled» журнал прогонів не знає
+            // (`CollectionRunHandlers.KnownStates`), а вводити його — це вже
+            // зміна контракту й екрана, не цього виправлення. Виняток іде
+            // далі: задача мусить побачити, що її скасували.
+            await CloseAfterFailureAsync(
+                    runId, sourceEntityId, covered, "Degraded", retrieved,
+                    $"{SourceUnavailable}: прогін скасовано ззовні (зупинка задачі). "
+                    + "Непрочитане піде в наздоганяння наступного разу.",
+                    ex)
+                .ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception ex) when (ex is not SourceAuthenticationException)
+        {
+            // ⛔ Аудит B4: будь-що, крім правила й watchdog, — збій сховища
+            // (`DbUpdateException`), прогресу, самого збирача — раніше вилітало
+            // повз `WriteCoverageAsync`/`FinishRunAsync`, і `itg.CollectionRun`
+            // лишався «Running» НАЗАВЖДИ, а покриття вже прочитаних інтервалів
+            // губилося. Тепер: покриття — за повністю прочитане, прогін —
+            // «Failed» із причиною, виняток — далі (не ковтаємо: задача має
+            // стати невдалою, а причина — потрапити в журнал задачі).
+            // Відмова в автентифікації сюди не йде: її прогін уже закрито
+            // (`FailAuthenticationAsync`).
+            await CloseAfterFailureAsync(
+                    runId, sourceEntityId, covered, CollectionFailure.FailedStatus, retrieved,
+                    Compose("Збій прогону збору.", Describe(ex)),
+                    ex)
+                .ConfigureAwait(false);
+            throw;
+        }
 
-        await store.WriteCoverageAsync(runId, sourceEntityId, covered, ct).ConfigureAwait(false);
+        try
+        {
+            await store.WriteCoverageAsync(runId, sourceEntityId, covered, ct).ConfigureAwait(false);
 
-        // ⚠ Відмова джерела — «Degraded», а не «Failed», і виняток НЕ
-        // кидається: діапазон лишився непокритим, наздоганяння візьме його
-        // наступного разу. Це затримка, а не збій.
-        await store
-            .FinishRunAsync(
-                runId,
-                failureCode is null ? "Succeeded" : "Degraded",
-                retrieved,
-                failureCode is null ? null : $"{failureCode}: {failureMessage ?? "джерело недоступне"}",
-                ct)
-            .ConfigureAwait(false);
+            // ⚠ Відмова джерела — «Degraded», а не «Failed», і виняток НЕ
+            // кидається: діапазон лишився непокритим, наздоганяння візьме його
+            // наступного разу. Це затримка, а не збій.
+            await store
+                .FinishRunAsync(
+                    runId,
+                    failureCode is null ? "Succeeded" : "Degraded",
+                    retrieved,
+                    failureCode is null ? null : $"{failureCode}: {failureMessage ?? "джерело недоступне"}",
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Те саме правило, що й вище: прогін не лишається «Running».
+            // ⚠ Покриття вдруге НЕ пишеться (`[]`): якщо впав саме його запис,
+            // повтор додав би ті самі інтервали ще раз поверх уже відстежених.
+            await CloseAfterFailureAsync(
+                    runId, sourceEntityId, [], CollectionFailure.FailedStatus, retrieved,
+                    Compose("Збій закриття прогону збору.", Describe(ex)),
+                    ex)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         await progress
             .ReportAsync(
@@ -360,6 +417,73 @@ public sealed class CollectionRunner(
                 ["sourceCode"] = sourceCode,
             });
     }
+
+    /// <summary>
+    /// Закриває прогін після непередбаченого винятку: покриття за ПОВНІСТЮ
+    /// прочитане, статус і причина — у <c>itg.CollectionRun</c>, сам виняток — у лог.
+    /// </summary>
+    /// <param name="runId">Прогін збору.</param>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="covered">Повністю прочитані інтервали; <c>[]</c> — покриття вже писали.</param>
+    /// <param name="status">Статус закриття.</param>
+    /// <param name="retrieved">Скільки точок устигли записати.</param>
+    /// <param name="message">Причина для журналу прогону — без стека (ФВ-6.11).</param>
+    /// <param name="cause">Виняток, що обірвав прогін; стек іде лише в лог.</param>
+    /// <remarks>
+    /// ⚠ <c>CancellationToken.None</c> — з тієї ж причини, що в
+    /// <see cref="FailAuthenticationAsync"/>: журнал має закритися й тоді,
+    /// коли задачу вже скасували.
+    /// <para>
+    /// ⛔ Власна відмова закриття (база лежить) лише логується і НЕ підміняє
+    /// первинного винятку: викликач кидає далі саме причину, а не наслідок.
+    /// </para>
+    /// </remarks>
+    private async Task CloseAfterFailureAsync(
+        long runId,
+        int sourceEntityId,
+        IReadOnlyList<TimeInterval> covered,
+        string status,
+        int retrieved,
+        string message,
+        Exception cause)
+    {
+        LogRunFailed(log, runId, sourceEntityId, status, cause);
+
+        try
+        {
+            await store
+                .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            await store
+                .FinishRunAsync(runId, status, retrieved, message, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception closeFailure)
+        {
+            LogRunNotClosed(log, runId, sourceEntityId, closeFailure);
+        }
+    }
+
+    /// <summary>Тип і найглибше повідомлення винятку — без стека.</summary>
+    /// <remarks>
+    /// ⚠ Найглибше: у <c>DbUpdateException</c> власний текст — «див. внутрішній
+    /// виняток», і саме внутрішній каже, ЯКЕ обмеження порушено.
+    /// </remarks>
+    private static string Describe(Exception ex)
+        => $"{ex.GetType().Name}: {ex.GetBaseException().Message}";
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "CollectionRunner: прогін {RunId} сутності {SourceEntityId} обірвано винятком; закривається як {Status}.")]
+    private static partial void LogRunFailed(
+        ILogger logger, long runId, int sourceEntityId, string status, Exception exception);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "CollectionRunner: прогін {RunId} сутності {SourceEntityId} не вдалося закрити після збою — лишається Running.")]
+    private static partial void LogRunNotClosed(
+        ILogger logger, long runId, int sourceEntityId, Exception exception);
 
     /// <summary>Скільки символів тексту від адаптера входить у журнал прогону.</summary>
     /// <remarks>

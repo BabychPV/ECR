@@ -1,7 +1,11 @@
+using System.Data;
+using System.Globalization;
+using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace Ecr.Infrastructure.Persistence;
@@ -70,6 +74,29 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
     /// самого діапазону не має дублювати точок (ФВ-11.3) — саме це робить
     /// наздоганяння безпечним: інакше кожне відновлення після простою
     /// подвоювало б суму за період.
+    /// <para>
+    /// ⛔ Одним set-based <c>MERGE</c> на батч, без change tracker і без
+    /// читання наявних точок у пам'ять (аудит B4/P6). Попередня форма —
+    /// «прочитати наявні <c>Take(100 000)</c> → <c>Add</c> решту →
+    /// <c>SaveChanges</c>» — мала три шляхи до <c>UQ_RawDataPoint</c>, і
+    /// кожен відкидав ВЕСЬ батч:
+    /// (а) мітка з точністю <c>DateTime</c> (100 нс) не знаходила збереженої
+    /// <c>datetime2(3)</c>; (б) дві точки з однаковою міткою в одному батчі
+    /// (PI це допускає) — друга не бачила першої; (в) понад стелю наявних
+    /// точок решту не читали і вставляли вдруге. Тепер ключ порівнює сама
+    /// база, мітка нормалізується до мілісекунд ДО порівняння, дублікат
+    /// батча згортається (виграє ОСТАННЯ точка — як і раніше, коли пізніший
+    /// <c>SetValue</c> перезаписував ранішній), а стелі читання немає зовсім.
+    /// </para>
+    /// <para>
+    /// ⚠ Паралельний збір тієї самої сутності (ручний «зібрати зараз» поруч
+    /// із плановим) серіалізується <c>sp_getapplock</c> на сутність у
+    /// транзакції БАТЧА, а не прогону: лок живе мілісекунди, два прогони
+    /// чергуються батчами і не чекають один одного годинами, а check-then-insert
+    /// всередині <c>MERGE</c> більше не має вікна для гонки. Лок у задачі
+    /// (<c>CollectionJob</c>) обрано НЕ було: він тримав би з'єднання весь
+    /// прогін (до 15 хв) і не захищав би інших викликачів сховища.
+    /// </para>
     /// </remarks>
     public async Task<int> UpsertRawPointsAsync(
         long collectionRunId,
@@ -84,61 +111,144 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
             return 0;
         }
 
-        var paths = points.Select(p => p.SourcePath).Distinct().ToList();
-        var from = points.Min(p => p.Timestamp);
-        var to = points.Max(p => p.Timestamp);
-
-        // Одним запитом на батч, не по точці: батч — це тисячі точок, і
-        // перевірка кожної окремо перетворила б збір на тисячі round-trip.
-        var existing = await db.RawDataPoints
-            .Where(p => p.SourceEntityId == sourceEntityId
-                        && paths.Contains(p.SourcePath)
-                        && p.Timestamp >= from
-                        && p.Timestamp <= to)
-            .OrderBy(p => p.Id)
-            .Take(MaxIntervals)
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
-
-        var index = existing.ToDictionary(p => (p.SourcePath, p.Timestamp));
-
         // Так само одним запитом на батч, не по точці: у батчі — тисячі
         // точок, але зазвичай лічені одиниці джерела (усі точки одного
         // джерела зазвичай в одній одиниці) — без цього кожна точка тягла б
         // окремий SELECT до uom.Unit (N+1).
         var unitIds = await ResolveUnitsAsync(points, ct).ConfigureAwait(false);
-        var written = 0;
 
-        foreach (var point in points)
-        {
-            var unitId = point.SourceUnitSymbol is not null
-                && unitIds.TryGetValue(point.SourceUnitSymbol, out var resolvedUnitId)
-                ? resolvedUnitId
-                : null;
+        // ⛔ Значення лягає В ОДИНИЦІ ДЖЕРЕЛА (ФВ-16.10, D-79). Конвертувати
+        // тут означало б, що повторний перерахунок з архіву дасть інший
+        // результат, якщо мапінг одиниць за цей час змінили — і ніхто не
+        // зможе сказати, яке число правильне.
+        var rows = points.Select((point, ordinal) => new RawPointRow(
+                ordinal,
+                point.SourcePath,
+                ToStoredPrecision(point.Timestamp).ToString(StoredTimestampFormat, CultureInfo.InvariantCulture),
+                point.ValueNumeric?.ToString(CultureInfo.InvariantCulture),
+                point.ValueString,
+                point.SourceUnitSymbol is not null && unitIds.TryGetValue(point.SourceUnitSymbol, out var unitId)
+                    ? unitId
+                    : null,
+                point.Quality))
+            .ToList();
 
-            if (index.TryGetValue((point.SourcePath, point.Timestamp), out var stored))
-            {
-                stored.SetValue(point.ValueNumeric, point.ValueString, unitId, point.Quality);
-            }
-            else
-            {
-                var entity = new RawDataPoint(
-                    sourceEntityId, point.SourcePath, point.Timestamp, collectionRunId, clock.UtcNow);
+        var written = new SqlParameter("@written", SqlDbType.Int) { Direction = ParameterDirection.Output };
 
-                // ⛔ Значення лягає В ОДИНИЦІ ДЖЕРЕЛА (ФВ-16.10, D-79).
-                // Конвертувати тут означало б, що повторний перерахунок з
-                // архіву дасть інший результат, якщо мапінг одиниць за цей час
-                // змінили — і ніхто не зможе сказати, яке число правильне.
-                entity.SetValue(point.ValueNumeric, point.ValueString, unitId, point.Quality);
-                db.RawDataPoints.Add(entity);
-            }
+        await db.Database
+            .ExecuteSqlRawAsync(
+                UpsertRawPointsSql,
+                [
+                    new SqlParameter("@points", SqlDbType.NVarChar, -1) { Value = JsonSerializer.Serialize(rows) },
+                    new SqlParameter("@entity", SqlDbType.Int) { Value = sourceEntityId },
+                    new SqlParameter("@run", SqlDbType.BigInt) { Value = collectionRunId },
+                    new SqlParameter("@retrievedAt", SqlDbType.DateTime2) { Scale = 3, Value = clock.UtcNow },
+                    new SqlParameter("@resource", SqlDbType.NVarChar, 255)
+                    {
+                        Value = string.Create(CultureInfo.InvariantCulture, $"Ecr.RawDataPoint:{sourceEntityId}"),
+                    },
+                    written,
+                ],
+                ct)
+            .ConfigureAwait(false);
 
-            written++;
-        }
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return written;
+        return written.Value is int count ? count : 0;
     }
+
+    /// <summary>Точність <c>ext.RawDataPoint.Timestamp</c> — <c>datetime2(3)</c>, тобто мілісекунди.</summary>
+    /// <remarks>
+    /// ⚠ ВІДКИДАННЯ, а не округлення: саме так <c>SqlClient</c> пише
+    /// <c>DateTime</c> у параметр <c>datetime2(3)</c> (ділить тіки націло), і
+    /// так лягли всі точки, записані до цієї зміни через EF. Округлення дало б
+    /// для <c>…:00.1236</c> ключ <c>.124</c> там, де в базі вже лежить
+    /// <c>.123</c>, — і та сама точка з'явилася б удруге на мілісекунду пізніше.
+    /// </remarks>
+    /// <param name="timestamp">Мітка часу від джерела.</param>
+    /// <returns>Мітка, обрізана до мілісекунд; <see cref="DateTime.Kind"/> зберігається.</returns>
+    public static DateTime ToStoredPrecision(DateTime timestamp)
+        => new(timestamp.Ticks - (timestamp.Ticks % TimeSpan.TicksPerMillisecond), timestamp.Kind);
+
+    /// <summary>Формат мітки в JSON-параметрі: ISO без зони, рівно три знаки дробу.</summary>
+    /// <remarks>⚠ Без <c>Z</c>: <c>datetime2</c> в <c>OPENJSON … WITH</c> суфікс зони не приймає (див. <c>MaterializationTargets</c>).</remarks>
+    private const string StoredTimestampFormat = "yyyy-MM-ddTHH:mm:ss.fff";
+
+    /// <summary>Скільки чекати лок сутності, мс; менше за <c>CommandTimeout</c> (60 с).</summary>
+    private const int RawPointLockTimeoutMs = 30_000;
+
+    /// <summary>Set-based upsert батча сирих точок.</summary>
+    /// <remarks>
+    /// ⚠ Типи в <c>OPENJSON … WITH</c> навмисно ШИРШІ за колонки
+    /// (<c>nvarchar(4000)</c> проти <c>nvarchar(400)</c>): вужчий тип мовчки
+    /// обрізав би шлях чи текст, і точка лягла б під чужим ключем. Із широким
+    /// задовгий рядок падає на вставці так само голосно, як падав через EF.
+    /// Число — рядком і <c>CAST</c>: JSON-число могло б пройти через
+    /// <c>float</c> (D-30).
+    /// <para>
+    /// ⚠ <c>SET XACT_ABORT ON</c>: будь-яка помилка відкочує транзакцію
+    /// батча цілком і звільняє лок; <c>EnableRetryOnFailure</c> повторює
+    /// весь пакет — він ідемпотентний.
+    /// </para>
+    /// </remarks>
+    private static readonly string UpsertRawPointsSql = $"""
+        SET XACT_ABORT ON;
+        BEGIN TRANSACTION;
+
+        DECLARE @lock int;
+        EXEC @lock = sp_getapplock @Resource = @resource, @LockMode = 'Exclusive',
+                                   @LockOwner = 'Transaction', @LockTimeout = {RawPointLockTimeoutMs};
+        IF @lock < 0
+            THROW 50001, N'ext.RawDataPoint: не вдалося взяти лок сутності джерела для запису точок (sp_getapplock < 0).', 1;
+
+        WITH batch AS (
+            SELECT j.SourcePath,
+                   j.Ts,
+                   CAST(j.Num AS decimal(34,16)) AS ValueNumeric,
+                   j.Str AS ValueString,
+                   j.UnitId,
+                   j.Quality,
+                   ROW_NUMBER() OVER (PARTITION BY j.SourcePath, j.Ts ORDER BY j.Ord DESC) AS rn
+            FROM OPENJSON(@points)
+                 WITH (Ord int '$.Ordinal',
+                       SourcePath nvarchar(4000) '$.SourcePath',
+                       Ts datetime2(3) '$.Timestamp',
+                       Num nvarchar(64) '$.ValueNumeric',
+                       Str nvarchar(max) '$.ValueString',
+                       UnitId int '$.UnitId',
+                       Quality nvarchar(4000) '$.Quality') AS j
+        )
+        MERGE ext.RawDataPoint AS t
+        USING (SELECT SourcePath, Ts, ValueNumeric, ValueString, UnitId, Quality FROM batch WHERE rn = 1) AS s
+           ON t.SourceEntityId = @entity AND t.SourcePath = s.SourcePath AND t.[Timestamp] = s.Ts
+        WHEN MATCHED THEN
+            UPDATE SET ValueNumeric = s.ValueNumeric, ValueString = s.ValueString,
+                       UnitId = s.UnitId, Quality = s.Quality
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT (SourceEntityId, SourcePath, [Timestamp], ValueNumeric, ValueString, UnitId, Quality,
+                    RetrievedAt, CollectionRunId)
+            VALUES (@entity, s.SourcePath, s.Ts, s.ValueNumeric, s.ValueString, s.UnitId, s.Quality,
+                    @retrievedAt, @run);
+
+        SET @written = @@ROWCOUNT;
+
+        COMMIT TRANSACTION;
+        """;
+
+    /// <summary>Рядок JSON-параметра upsert'а; імена властивостей — шляхи в <c>OPENJSON … WITH</c>.</summary>
+    /// <param name="Ordinal">Позиція в батчі: за однакового ключа виграє пізніша.</param>
+    /// <param name="SourcePath">Шлях атрибута.</param>
+    /// <param name="Timestamp">Мітка, уже обрізана до мілісекунд, рядком ISO.</param>
+    /// <param name="ValueNumeric">Число рядком (інваріантна культура).</param>
+    /// <param name="ValueString">Текст.</param>
+    /// <param name="UnitId">Одиниця джерела.</param>
+    /// <param name="Quality">Якість від джерела.</param>
+    private sealed record RawPointRow(
+        int Ordinal,
+        string SourcePath,
+        string Timestamp,
+        string? ValueNumeric,
+        string? ValueString,
+        int? UnitId,
+        string? Quality);
 
     /// <inheritdoc />
     public async Task WriteCoverageAsync(
