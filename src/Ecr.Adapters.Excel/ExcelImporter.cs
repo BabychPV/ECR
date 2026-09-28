@@ -194,16 +194,28 @@ public sealed class ExcelImporter(
         var versionsBatch = await rowStore.GetRowVersionsBatchAsync(tableInstanceIds, period, ct).ConfigureAwait(false);
         var slicesBatch = await cellStore.ReadSlicesAsync(tableInstanceIds, ct).ConfigureAwait(false);
 
+        // ⚠ Рішення про доступ — ПАКЕТНО на зріз. Поштучна перевірка
+        // тисяч комірок імпорту не вкладається в жоден бюджет і саме тому
+        // спокушає її пропустити.
+        // ⛔ P8 (перф-аудит): і не на зріз по черзі, а одним викликом на ВСЮ
+        // книгу. Доти `CanEditSliceAsync` на кожну таблицю коштував ~5–7
+        // звернень, тобто ~91 × 6 на типовий шаблон; тепер — стала кількість,
+        // незалежна від числа таблиць (`ImportPreviewAccessQueryCountTests`).
+        var decisionsBatch = await access
+            .CanEditSlicesAsync(profile, tableInstanceIds, ct)
+            .ConfigureAwait(false);
+
         foreach (var (block, table) in validBlocks)
         {
             var worksheet = workbook.Worksheet(block.SheetName);
 
-            // ⚠ Рішення про доступ — ПАКЕТНО на зріз. Поштучна перевірка
-            // тисяч комірок імпорту не вкладається в жоден бюджет і саме тому
-            // спокушає її пропустити.
-            var decisions = await access
-                .CanEditSliceAsync(profile, block.TableInstanceId, ct)
-                .ConfigureAwait(false);
+            // ⛔ Немає рішень на екземпляр — відмова, а не порожній словник:
+            // `ImportDiffBuilder` читає відсутнє рішення як «заборони немає».
+            if (!decisionsBatch.TryGetValue(block.TableInstanceId, out var decisions))
+            {
+                throw new InvalidOperationException(
+                    $"Служба доступу не повернула рішень для екземпляра таблиці {block.TableInstanceId}.");
+            }
 
             var rowIds = rowIdsBatch.GetValueOrDefault(
                 block.TableInstanceId, (IReadOnlyDictionary<string, long>)EmptyRowIds);

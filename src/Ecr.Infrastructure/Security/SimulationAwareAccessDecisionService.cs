@@ -79,6 +79,11 @@ public sealed class SimulationAwareAccessDecisionService(
         => inner.CanEditSliceAsync(profile, tableInstanceId, ct);
 
     /// <inheritdoc />
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditSlicesAsync(
+        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
+        => inner.CanEditSlicesAsync(profile, tableInstanceIds, ct);
+
+    /// <inheritdoc />
     public Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditCellsAsync(
         AccessProfile profile, long tableInstanceId, PeriodKey periodKey,
         IReadOnlyCollection<CellAddress> addresses, CancellationToken ct)

@@ -64,8 +64,15 @@ public sealed class ExcelImporterTemplateVersionTests
         // ⚠ Порожній словник рішень — жодна адреса не заборонена явно
         // (той самий прийом, що й у PatchCellsTests): ImportDiffBuilder
         // трактує відсутність запису як «дозволено».
-        _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
-            .Returns(new Dictionary<CellAddress, EditDecision>());
+        //
+        // ⚠ P8: перегляд питає рішення ОДНИМ пакетним викликом на всю книгу —
+        // по порожньому словнику на кожен запитаний екземпляр.
+        _access.CanEditSlicesAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(call => (IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>)
+                call.ArgAt<IReadOnlyCollection<long>>(1).Distinct().ToDictionary(
+                    id => id,
+                    _ => (IReadOnlyDictionary<CellAddress, EditDecision>)new Dictionary<CellAddress, EditDecision>()));
 
         // ⛔ Поточна (жива) версія шаблону — ЄДИНЕ, що відповідає за
         // TemplateVersionId цього документа. Файл каже інше (111), і саме
@@ -252,6 +259,40 @@ public sealed class ExcelImporterTemplateVersionTests
         // чужі дані ще до будь-якого рішення про доступ.
         await _cellStore.Received(1).ReadSlicesAsync(
             Arg.Is<IReadOnlyList<long>>(ids => ids.Count == 0), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "P8")]
+    public async Task Перегляд_питає_доступ_одним_пакетом_а_не_зрізом_на_таблицю()
+    {
+        using var workbook = BuildWorkbook(CurrentTableInstanceId);
+
+        _ = await Importer().PreviewAsync(DocumentId, workbook, CancellationToken.None);
+
+        await _access.Received(1).CanEditSlicesAsync(
+            Arg.Any<AccessProfile>(),
+            Arg.Is<IReadOnlyCollection<long>>(ids => ids.SequenceEqual(new[] { CurrentTableInstanceId })),
+            Arg.Any<CancellationToken>());
+        await _access.DidNotReceiveWithAnyArgs().CanEditSliceAsync(default!, default, default);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait("Finding", "P8")]
+    public async Task Пакет_без_рішень_на_екземпляр_це_відмова_а_не_дозвіл()
+    {
+        // ⛔ `ImportDiffBuilder` читає відсутнє рішення як «заборони немає».
+        // Пакет, що мовчки загубив екземпляр, не сміє перетворитися на
+        // перегляд, де всі комірки цієї таблиці виглядають дозволеними.
+        _access.CanEditSlicesAsync(
+                Arg.Any<AccessProfile>(), Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+            .Returns(new Dictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>());
+
+        using var workbook = BuildWorkbook(CurrentTableInstanceId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => Importer().PreviewAsync(DocumentId, workbook, CancellationToken.None));
     }
 
     /// <summary>

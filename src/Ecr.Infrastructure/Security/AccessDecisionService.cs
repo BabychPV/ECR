@@ -417,32 +417,79 @@ public sealed class AccessDecisionService(
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ P8 (перф-аудит): поштучний метод — це пакетний
+    /// <see cref="CanEditSlicesAsync"/> з одним екземпляром. Одна логіка на
+    /// обидва шляхи: друга копія розійшлася б із першою мовчки, а різниця тут
+    /// означала б, що перегляд імпорту й відкриття таблиці по-різному
+    /// вирішують, що можна писати.
+    /// </remarks>
     public async Task<IReadOnlyDictionary<CellAddress, EditDecision>> CanEditSliceAsync(
         AccessProfile profile, long tableInstanceId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        var slice = await SliceContextAsync(tableInstanceId, ct).ConfigureAwait(false);
+        var all = await CanEditSlicesAsync(profile, [tableInstanceId], ct).ConfigureAwait(false);
 
-        var rows = await SliceRowsQuery(db, tableInstanceId, slice.PeriodKey)
-            .Select(r => new { r.Id, r.RowKey })
-            .ToListAsync(ct)
-            .ConfigureAwait(false);
+        return all[tableInstanceId];
+    }
 
-        var result = new Dictionary<CellAddress, EditDecision>(rows.Count * slice.Columns.Count);
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ P8 (перф-аудит). Доти перегляд імпорту кликав
+    /// <see cref="CanEditSliceAsync"/> на КОЖНУ таблицю книги — у типовому
+    /// шаблоні ~91 × (5–7) звернень. Тут спільне для документа й періоду
+    /// (знімок шаблону, умови доступу, правила періоду) читається ОДИН раз на
+    /// групу «документ × період», стан аркушів — одним запитом на всі аркуші
+    /// групи, а рядки — одним запитом на всі екземпляри періоду. Рішення
+    /// рахує той самий <see cref="Decide"/>.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditSlicesAsync(
+        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
 
-        foreach (var row in rows)
+        var result = new Dictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>(tableInstanceIds.Count);
+
+        if (tableInstanceIds.Count == 0)
         {
-            // Вікна чинності записів довідника, на які посилається саме цей
-            // рядок: колонка → вікно. Порожньо — рядок нічого не обрав.
-            var sourceValues = slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows)
-                ? windows
-                : EmptyWindows;
+            return result;
+        }
 
-            foreach (var column in slice.Columns)
+        var slices = await SliceContextsAsync(tableInstanceIds, ct).ConfigureAwait(false);
+
+        foreach (var byPeriod in slices.GroupBy(s => s.Value.PeriodKey))
+        {
+            var ids = byPeriod.Select(s => s.Key).ToList();
+
+            var rows = (await SlicesRowsQuery(db, ids, byPeriod.Key)
+                    .Select(r => new { r.TableInstanceId, r.Id, r.RowKey })
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false))
+                .ToLookup(r => r.TableInstanceId);
+
+            foreach (var (tableInstanceId, slice) in byPeriod)
             {
-                result[new CellAddress(slice.PeriodKey, row.Id, column.Id)] =
-                    Decide(profile, slice, row.RowKey, column, sourceValues);
+                var own = rows[tableInstanceId];
+                var decisions = new Dictionary<CellAddress, EditDecision>(own.Count() * slice.Columns.Count);
+
+                foreach (var row in own)
+                {
+                    // Вікна чинності записів довідника, на які посилається саме
+                    // цей рядок: колонка → вікно. Порожньо — рядок нічого не обрав.
+                    var sourceValues = slice.Rules.SourceWindows.TryGetValue(row.Id, out var windows)
+                        ? windows
+                        : EmptyWindows;
+
+                    foreach (var column in slice.Columns)
+                    {
+                        decisions[new CellAddress(slice.PeriodKey, row.Id, column.Id)] =
+                            Decide(profile, slice, row.RowKey, column, sourceValues);
+                    }
+                }
+
+                result[tableInstanceId] = decisions;
             }
         }
 
@@ -549,6 +596,33 @@ public sealed class AccessDecisionService(
                         && !r.IsDeleted);
 
         return rowIds is null ? query : query.Where(r => rowIds.Contains(r.Id));
+    }
+
+    /// <summary>
+    /// Рядки кількох зрізів одного періоду — одним запитом
+    /// (<see cref="CanEditSlicesAsync"/>, P8).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceIds">Екземпляри таблиць, усі — за <paramref name="periodKey"/>.</param>
+    /// <param name="periodKey">Період — він же ключ партиції.</param>
+    /// <returns>Незавершений запит; проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⛔ Предикат партиції — той самий, що й у <see cref="SliceRowsQuery"/>
+    /// (<c>WR-05</c>): <c>PeriodKey</c> першим, екземпляри — <c>IN (…)</c>
+    /// поверх нього. <b>public static</b> — з тієї ж причини: сторож може
+    /// взяти <c>ToQueryString()</c> саме бойового запиту.
+    /// </remarks>
+    public static IQueryable<TableRow> SlicesRowsQuery(
+        EcrDbContext db, IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        return db.TableRows
+            .AsNoTracking()
+            .Where(r => r.PeriodKeyValue == periodKey.Value
+                        && tableInstanceIds.Contains(r.TableInstanceId)
+                        && !r.IsDeleted);
     }
 
     /// <inheritdoc />
@@ -707,59 +781,163 @@ public sealed class AccessDecisionService(
     /// пішло іншим шляхом, на якому перевірки просто не було.
     /// </remarks>
     private async Task<SliceContext> SliceContextAsync(long tableInstanceId, CancellationToken ct)
+        => (await SliceContextsAsync([tableInstanceId], ct).ConfigureAwait(false))[tableInstanceId];
+
+    /// <summary>
+    /// Збирає все, що спільне для зрізів, ОДИН раз на групу «документ × період».
+    /// </summary>
+    /// <param name="tableInstanceIds">Екземпляри таблиць.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Екземпляр → умови його зрізу; кожен запитаний екземпляр присутній.</returns>
+    /// <remarks>
+    /// ⛔ P8: єдина реалізація і для одного зрізу (<see cref="SliceContextAsync"/>),
+    /// і для книги імпорту. Кількість звернень — на ГРУПУ, а не на таблицю:
+    /// екземпляри (1), знімок (1), умови доступу (1), стан решти аркушів
+    /// групи (1, лише коли аркушів більше одного), правила періоду (1–3).
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<long, SliceContext>> SliceContextsAsync(
+        IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
     {
+        var ids = tableInstanceIds.Distinct().ToList();
+
         // ⚠ `WR-05`, названо й НЕ зроблено — той самий випадок, що
         // `RowStore.ResolveTableInstanceAsync`: саме цей запит і ВИЗНАЧАЄ
         // період, тож узяти ключ партиції нізвідки. Дати його може лише
         // викликач, а це зміна сигнатури `IAccessDecisionService` — обсяг
         // `WR-03`/`RD-02`, де порт і так переробляється.
-        var instance = await db.TableInstances
+        var instances = await db.TableInstances
             .AsNoTracking()
-            .Where(t => t.Id == tableInstanceId)
-            .Select(t => new { t.DocumentId, t.TableDefId, t.PeriodKeyValue })
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false)
-            ?? throw new NotFoundException(
+            .Where(t => ids.Contains(t.Id))
+            .Select(t => new { t.Id, t.DocumentId, t.TableDefId, t.PeriodKeyValue })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Відсутній екземпляр — та сама відмова, що й у поштучного шляху,
+        // а не мовчазний пропуск: словник без запису викликач міг би прочитати
+        // як «заборон немає».
+        var found = instances.Select(i => i.Id).ToHashSet();
+        foreach (var id in ids.Where(id => !found.Contains(id)))
+        {
+            throw new NotFoundException(
                 "ECR-DOC-0404",
-                $"Екземпляр таблиці {tableInstanceId} не знайдено.",
+                $"Екземпляр таблиці {id} не знайдено.",
                 new Dictionary<string, object?>
                 {
                     ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
-                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["tableInstanceId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
+        }
 
-        var periodKey = new PeriodKey(instance.PeriodKeyValue);
+        var result = new Dictionary<long, SliceContext>(instances.Count);
 
-        var snapshot = await SnapshotAsync(instance.DocumentId, ct).ConfigureAwait(false);
+        foreach (var group in instances.GroupBy(i => (i.DocumentId, i.PeriodKeyValue)))
+        {
+            var documentId = group.Key.DocumentId;
+            var periodKey = new PeriodKey(group.Key.PeriodKeyValue);
 
-        // ⛔ Аркуш визначається ДО побудови умов, а не лишається нульовим.
-        // З <c>sheetDefId: null</c> стан робочого процесу не читався взагалі й
-        // підставлявся як <c>Draft</c> — тобто ПОДАНИЙ аркуш залишався
-        // редаговним на єдиному шляху, яким запис і йде (<c>PatchCellsHandler</c>).
-        // Перевірка в <see cref="EditRules"/> була, тести на неї були — а
-        // викликати її ніхто не міг (`A7-51`).
-        var sheetDefId = SheetOf(snapshot, instance.TableDefId);
+            var snapshot = await SnapshotAsync(documentId, ct).ConfigureAwait(false);
 
-        // ⚠ Спільні для зрізу умови рахуються ОДИН раз. Поштучний виклик
-        // CanEditCellAsync у циклі — антипатерн: на таблиці 500×60 це 30 000
-        // запитів, а на права відведено 50 мс на весь запит (ФВ-6.10).
-        var shared = await BuildContextAsync(
-                instance.DocumentId, periodKey, sheetDefId, columnDefId: 0,
+            // ⛔ Аркуш визначається ДО побудови умов, а не лишається нульовим.
+            // З <c>sheetDefId: null</c> стан робочого процесу не читався взагалі й
+            // підставлявся як <c>Draft</c> — тобто ПОДАНИЙ аркуш залишався
+            // редаговним на єдиному шляху, яким запис і йде (<c>PatchCellsHandler</c>).
+            // Перевірка в <see cref="EditRules"/> була, тести на неї були — а
+            // викликати її ніхто не міг (`A7-51`).
+            var sheetOf = group.ToDictionary(i => i.Id, i => SheetOf(snapshot, i.TableDefId));
+
+            // ⚠ Спільні для зрізу умови рахуються ОДИН раз. Поштучний виклик
+            // CanEditCellAsync у циклі — антипатерн: на таблиці 500×60 це 30 000
+            // запитів, а на права відведено 50 мс на весь запит (ФВ-6.10).
+            var sharedBySheet = await SheetContextsAsync(
+                    documentId, periodKey, [.. sheetOf.Values.Distinct()], ct)
+                .ConfigureAwait(false);
+
+            var projectId = sharedBySheet.Values.First().ProjectId;
+
+            // ⛔ Правила доступу до періоду (`ФВ-2.15`) і все, що їм потрібно,
+            // читається ОДИН раз на групу — див. `PeriodRuleContextAsync`.
+            // Вікна чинності ключовані `TableRow.Id`, а він унікальний, тож
+            // один словник на всі екземпляри групи дає кожному рівно його рядки.
+            var ruleContext = await PeriodRuleContextAsync(
+                    snapshot.TemplateVersionId, projectId, [.. group.Select(i => i.Id)], periodKey, ct)
+                .ConfigureAwait(false);
+
+            foreach (var instance in group)
+            {
+                var sheetDefId = sheetOf[instance.Id];
+
+                var columns = snapshot.ColumnsById.Values
+                    .Where(c => c.TableDefId == instance.TableDefId)
+                    .ToList();
+
+                result[instance.Id] = new SliceContext(
+                    periodKey, instance.TableDefId, sheetDefId, sharedBySheet[sheetDefId],
+                    columns, snapshot, ruleContext);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Спільні умови доступу для кількох аркушів одного документа за період.
+    /// </summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="sheetDefIds">Аркуші; щонайменше один.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Аркуш → умови, рівні тим, що дав би <see cref="BuildContextAsync"/> з цим аркушем.</returns>
+    /// <remarks>
+    /// ⛔ Перший аркуш — рівно <see cref="BuildContextAsync"/>, як і доти. Для
+    /// решти від нього відрізняються ЛИШЕ два поля — <c>SheetDefId</c> і
+    /// <c>SheetStatus</c> (<c>columnDefId: 0</c>, вікно доступу не рахується:
+    /// жодне інше поле від аркуша не залежить), тож вони беруться одним
+    /// запитом до <c>wf.ApprovalState</c> з тим самим фільтром і тим самим
+    /// правилом «немає рядка — <c>Draft</c>».
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<int, CellAccessContext>> SheetContextsAsync(
+        long documentId, PeriodKey periodKey, IReadOnlyList<int> sheetDefIds, CancellationToken ct)
+    {
+        var first = await BuildContextAsync(
+                documentId, periodKey, sheetDefIds[0], columnDefId: 0,
                 evaluateAccessWindow: false, ct)
             .ConfigureAwait(false);
 
-        var columns = snapshot.ColumnsById.Values
-            .Where(c => c.TableDefId == instance.TableDefId)
-            .ToList();
+        var result = new Dictionary<int, CellAccessContext>(sheetDefIds.Count) { [sheetDefIds[0]] = first };
 
-        // ⛔ Правила доступу до періоду (`ФВ-2.15`) і все, що їм потрібно,
-        // читається ОДИН раз на зріз — див. `PeriodRuleContextAsync`.
-        var ruleContext = await PeriodRuleContextAsync(
-                snapshot.TemplateVersionId, shared.ProjectId, tableInstanceId, periodKey, ct)
+        if (sheetDefIds.Count == 1)
+        {
+            return result;
+        }
+
+        var others = sheetDefIds.Skip(1).ToList();
+        var periodValue = periodKey.Value;
+
+        var states = await db.ApprovalStates
+            .AsNoTracking()
+            .Where(a => a.DocumentId == documentId
+                        && a.PeriodKey == periodValue
+                        && others.Contains(a.SheetDefId))
+            .Select(a => new { a.SheetDefId, a.Status })
+            .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return new SliceContext(
-            periodKey, instance.TableDefId, sheetDefId, shared, columns, snapshot, ruleContext);
+        var statuses = new Dictionary<int, DocumentStatus>();
+        foreach (var state in states)
+        {
+            statuses.TryAdd(state.SheetDefId, state.Status);
+        }
+
+        foreach (var sheetDefId in others)
+        {
+            result[sheetDefId] = first with
+            {
+                SheetDefId = sheetDefId,
+                SheetStatus = statuses.TryGetValue(sheetDefId, out var status) ? status : DocumentStatus.Draft,
+            };
+        }
+
+        return result;
     }
 
     private static readonly IReadOnlyDictionary<int, SourceValidity> EmptyWindows
@@ -804,7 +982,7 @@ public sealed class AccessDecisionService(
     /// за механізм нічим.
     /// </remarks>
     private async Task<PeriodRuleContext> PeriodRuleContextAsync(
-        int templateVersionId, int projectId, long tableInstanceId, PeriodKey periodKey,
+        int templateVersionId, int projectId, IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey,
         CancellationToken ct)
     {
         var rules = await db.PeriodAccessRules
@@ -846,7 +1024,7 @@ public sealed class AccessDecisionService(
 
         // ⛔ ОДИН запит на весь зріз: посилання рядків на записи довідника
         // разом із вікнами чинності цих записів.
-        var references = await SourceWindowQuery(db, tableInstanceId, periodKey, sourceColumns)
+        var references = await SourceWindowQuery(db, tableInstanceIds, periodKey, sourceColumns)
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -865,8 +1043,11 @@ public sealed class AccessDecisionService(
     /// Посилання рядків зрізу на записи довідника разом із вікнами чинності.
     /// </summary>
     /// <param name="db">Контекст.</param>
-    /// <param name="tableInstanceId">Екземпляр таблиці.</param>
-    /// <param name="periodKey">Період екземпляра — він же ключ партиції.</param>
+    /// <param name="tableInstanceIds">
+    /// Екземпляри таблиць одного періоду (P8: один запит на всі зрізи групи,
+    /// а не на кожен).
+    /// </param>
+    /// <param name="periodKey">Період екземплярів — він же ключ партиції.</param>
     /// <param name="sourceColumns">Колонки, на які дивляться правила <c>SourceWindow</c>.</param>
     /// <returns>Незавершений запит.</returns>
     /// <remarks>
@@ -883,9 +1064,11 @@ public sealed class AccessDecisionService(
     /// <c>ToQueryString()</c> саме бойового запиту.
     /// </remarks>
     public static IQueryable<SourceWindowRow> SourceWindowQuery(
-        EcrDbContext db, long tableInstanceId, PeriodKey periodKey, IReadOnlyCollection<int> sourceColumns)
+        EcrDbContext db, IReadOnlyCollection<long> tableInstanceIds, PeriodKey periodKey,
+        IReadOnlyCollection<int> sourceColumns)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
         ArgumentNullException.ThrowIfNull(sourceColumns);
 
         return from cell in db.CellValues.AsNoTracking()
@@ -894,7 +1077,7 @@ public sealed class AccessDecisionService(
                    equals new { row.PeriodKeyValue, row.Id }
                join entry in db.RegistryEntries.AsNoTracking()
                    on cell.ValueRegistryEntryId!.Value equals entry.Id
-               where row.TableInstanceId == tableInstanceId
+               where tableInstanceIds.Contains(row.TableInstanceId)
                      && cell.PeriodKeyValue == periodKey.Value
                      && row.PeriodKeyValue == periodKey.Value
                      && cell.ValueRegistryEntryId != null

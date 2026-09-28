@@ -67,6 +67,28 @@ public interface IAccessDecisionService
         AccessProfile profile, long tableInstanceId, CancellationToken ct);
 
     /// <summary>
+    /// Те саме, що <see cref="CanEditSliceAsync"/>, але для КІЛЬКОХ зрізів
+    /// одним викликом — за сталу кількість звернень до бази, а не за
+    /// кількість таблиць (P8, перегляд імпорту книги).
+    /// </summary>
+    /// <param name="profile">Профіль прав користувача.</param>
+    /// <param name="tableInstanceIds">Екземпляри таблиць.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Екземпляр → рішення на кожну комірку його зрізу. Кожен запитаний
+    /// екземпляр присутній; неіснуючий — <c>ECR-DOC-0404</c>, як і в
+    /// <see cref="CanEditSliceAsync"/>.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Рішення по кожному екземпляру ТОТОЖНІ поштучному
+    /// <see cref="CanEditSliceAsync"/> — поштучний і є цим методом з одним
+    /// екземпляром (тест еквівалентності —
+    /// <c>AccessDecisionBatchEquivalenceTests</c>).
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<CellAddress, EditDecision>>> CanEditSlicesAsync(
+        AccessProfile profile, IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct);
+
+    /// <summary>
     /// Пакетна перевірка для запису: рішення лише для <paramref name="addresses"/>,
     /// а не для всього зрізу.
     /// </summary>
