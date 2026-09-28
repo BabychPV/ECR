@@ -247,6 +247,7 @@ public static class DependencyInjection
         // Крок дописує реєстрації ЛИШЕ під свій маркер; власники —
         // docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
         // RT: keys
+        services.AddScoped<Registries.Keys.RegistryKeyService>(); // RT-10a
 
         // RT: data
 

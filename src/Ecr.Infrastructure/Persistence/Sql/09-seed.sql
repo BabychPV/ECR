@@ -4444,6 +4444,10 @@ USING (VALUES
     -- би які секції були заповнені. Власники секцій —
     -- docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
     -- RT: keys
+    -- RT-10a: конфлікт складеного ключа довідника (ФВ-8.15, D-151).
+    (N'err.ECR-REG-4092', N'en', N'Key already in use', 1),
+    (N'err.ECR-REG-4092.keyTaken', N'en', N'Another entry ({entryCode}) already has {key} = {keyText}.', 1),
+    (N'err.ECR-REG-4092.keyWindowOverlap', N'en', N'Another entry ({entryCode}) already has {key} = {keyText} for an overlapping validity period.', 1),
 
     -- RT: data
 

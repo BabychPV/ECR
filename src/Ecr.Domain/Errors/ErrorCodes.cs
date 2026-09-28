@@ -386,6 +386,18 @@ public static class ErrorCodes
     public const string RegistryDefDuplicate = "ECR-REG-4091";
 
     /// <summary>
+    /// Конфлікт складеного ключа довідника (<c>ECR-REG-4092</c>, FEATURE-REGISTRY-TABLES §7.2,
+    /// <c>D-151</c>): інший живий запис уже має ті самі значення полів ключа — для
+    /// темпорального довідника в перетинному вікні чинності.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>4092</c>, а не <c>0409</c>/<c>4091</c>: ті коди вже означають «запис використано» і
+    /// «довідник із таким кодом уже є». Випадок називає <c>messageKey</c>: <c>keyTaken</c>,
+    /// <c>keyWindowOverlap</c> (крок RT-10a), далі гонка, файл і пакет (RT-10b, RT-11).
+    /// </remarks>
+    public const string RegistryKeyConflict = "ECR-REG-4092";
+
+    /// <summary>
     /// Конверсія одиниць неможлива. ⚠ Не лише різні розмірності: тим самим кодом
     /// відмовляє й множник ≤ 0 на заведенні та зміні одиниці; випадок — у <c>messageKey</c>.
     /// </summary>

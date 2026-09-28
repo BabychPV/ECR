@@ -26,8 +26,14 @@ public sealed class UpsertRegistryEntryHandler(
     IAuditWriter audit,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    Keys.RegistryKeyService? keys = null)
 {
+    // ⚠ `keys` необов'язковий лише для тестів, що будують обробник руками (їх кілька, і в
+    // їхніх довідниках ключів немає) — як годинник у `UnitOfWork`. Контейнер підставляє
+    // зареєстрований `RegistryKeyService` завжди; що на справжньому шляху ключ перевіряється,
+    // тримає HTTP-тест `RegistryKeyConflictHttpTests`.
+
     /// <summary>
     /// Право на зміну ДАНИХ довідника (`02-contracts.md` §9).
     /// </summary>
@@ -114,7 +120,17 @@ public sealed class UpsertRegistryEntryHandler(
         // би старий підпис, поки хтось не перезапустить процес.
         definition.BumpDataRevision();
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⛔ RT-10a: складений ключ (ФВ-8.15) перераховується й перевіряється ПІСЛЯ
+        // ApplyValuesAsync і зберігається в тій самій транзакції — одна точка виклику, яку
+        // спільний writer записів перенесе одним рядком.
+        if (keys is null)
+        {
+            await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await keys.SaveAsync(definition, entry, ct).ConfigureAwait(false);
+        }
 
         // Журнал — ПІСЛЯ коміту, як у ChangeDocumentKeyHandler/DeleteDocumentHandler:
         // IAuditWriter пише власним підключенням, а Id нового запису відомий

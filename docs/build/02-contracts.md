@@ -2594,6 +2594,26 @@ public interface IRegistryDraftStore
 }
 ```
 
+#### `IRegistryKeyStore`
+
+Складені ключі довідника при записі (RT-10a, FEATURE-REGISTRY-TABLES §4.3, D-151…D-153).
+Рядки `dic.RegistryEntryKey` пише лише `RegistryKeyService` через цей порт. Пошук тримачів
+ключа — під `UPDLOCK, HOLDLOCK` і лише всередині `IUnitOfWork.ExecuteInTransactionAsync`.
+
+```csharp
+public interface IRegistryKeyStore
+{
+    public Task<IReadOnlyList<RegistryKeyDef>> ListActiveKeysAsync(int registryDefId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryValue>> ListCurrentValuesAsync(RegistryEntry entry, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryEntryKey>> ListEntryKeysAsync(long registryEntryId, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryKeyHolder>> FindLiveHoldersForUpdateAsync(
+        int registryKeyDefId, byte[] keyHash, long exceptEntryId, CancellationToken ct);
+    public Task<IReadOnlyDictionary<long, string>> FindEntryCodesAsync(IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+    public Task<IReadOnlyDictionary<int, string>> FindUnitCodesAsync(IReadOnlyCollection<int> unitIds, CancellationToken ct);
+    public void Add(RegistryEntryKey key);
+}
+```
+
 #### `IRegistrySnapshotLoader`
 
 Знімок довідників для обчислення (RT-22, FEATURE-REGISTRY-TABLES §5.7, D-158, D-162):
@@ -3171,6 +3191,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-0409` | 409 | видалення запису, на який посилаються дані (ФВ-8.6) |
 | `ECR-REG-0422` | 422 | перемикання `SourceKind` у відкритому періоді (ФВ-8.9) |
 | `ECR-REG-4091` | 409 | довідник із таким кодом уже є |
+| `ECR-REG-4092` | 409 | конфлікт складеного ключа довідника (ФВ-8.15, D-151): інший живий запис уже має ті самі значення полів ключа; для темпорального довідника — у вікні чинності, що перетинається. Випадок каже `messageKey`: `keyTaken`, `keyWindowOverlap` (RT-10a); подробиці `key`, `keyText`, `entryId`, `entryCode` конфліктного запису |
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія одиниць неможлива. Заголовок нейтральний, випадок каже `messageKey`-подробиця: різні розмірності (ФВ-16.3, `incompatibleDimensions`), нульовий множник одиниці на конверсії (`zeroFactor`), явна конверсія не для цієї пари (`explicitConversionMismatch`), множник ≤ 0 на заведенні чи зміні одиниці (`factorMustBePositive`, BE-15) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
