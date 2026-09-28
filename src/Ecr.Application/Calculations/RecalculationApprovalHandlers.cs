@@ -34,20 +34,64 @@ public sealed record RecalculationApprovalDto(
     string? ConfirmedByName,
     DateTime? ConfirmedAt);
 
+/// <summary>Стан періоду і мітка його останньої зміни (<c>doc.Period.StateChangedAt</c>).</summary>
+/// <param name="State">Стан.</param>
+/// <param name="StateChangedAt">Коли стан змінився востаннє, UTC, як у базі.</param>
+public sealed record PeriodStamp(PeriodState State, DateTime StateChangedAt);
+
+/// <summary>Пороги грантів на проєкт для перерахунку й погоджень (ФВ-9.7, аудит S1).</summary>
+/// <remarks>
+/// ⚠ ОДНЕ місце для порогу ініціатора: його читають і запит погодження, і
+/// <see cref="RunCalculationHandler"/>. Питання S13 (підняти до Write) —
+/// зміна одного рядка тут.
+/// </remarks>
+public static class RecalculationApprovalPolicy
+{
+    /// <summary>Грант на проєкт, з якого можна запускати перерахунок і просити погодження.</summary>
+    public const GrantLevel InitiatorGrant = GrantLevel.Read;
+
+    /// <summary>Грант на проєкт, з якого можна підтверджувати чужі погодження.</summary>
+    public const GrantLevel ApproverGrant = GrantLevel.Manage;
+
+    /// <summary>Вимагає гранта на проєкт не нижче <paramref name="level"/>.</summary>
+    /// <exception cref="AccessDeniedException"><c>ECR-AUTH-0403</c> із ключем за рівнем.</exception>
+    public static void RequireProjectGrant(AccessProfile profile, int projectId, GrantLevel level)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (profile.LevelFor(ResourceKind.Project, projectId) >= level)
+        {
+            return;
+        }
+
+        var key = level switch
+        {
+            >= GrantLevel.Manage => "err.ECR-AUTH-0403.noProjectManageGrant",
+            >= GrantLevel.Write => "err.ECR-AUTH-0403.noProjectWriteGrant",
+            _ => "err.ECR-AUTH-0403.noProjectGrant",
+        };
+
+        throw new AccessDeniedException(
+            "ECR-AUTH-0403", $"Немає гранта {level} на проєкт {projectId}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = key,
+                ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
+            });
+    }
+}
+
 /// <summary>
 /// Запит, перелік і підтвердження погоджень перерахунку закритого періоду
 /// (ФВ-9.7, аудит безпеки S1).
 /// </summary>
 /// <remarks>
 /// ⛔ Друга людина — це <see cref="ICurrentUser"/> ЇЇ запиту, а не число в тілі
-/// чужого. Право — те саме <c>Calculation.Recalculate</c>; ініціатору досить
-/// гранта Read на проєкт (як і для самого перерахунку), погоджувачу потрібен
-/// Manage — погоджує той, хто за проєкт відповідає, а не будь-хто з правом
-/// запускати перерахунок.
+/// чужого. Право — те саме <c>Calculation.Recalculate</c>; пороги грантів —
+/// <see cref="RecalculationApprovalPolicy"/>.
 /// </remarks>
 public sealed class RecalculationApprovalHandlers(
     IRecalculationApprovalStore approvals,
-    IPeriodStore periods,
     IAccessDecisionService access,
     IUnitOfWork uow,
     IAuditWriter audit,
@@ -71,7 +115,7 @@ public sealed class RecalculationApprovalHandlers(
     public async Task<RecalculationApprovalDto> RequestAsync(
         int projectId, int periodKey, string? reason, CancellationToken ct)
     {
-        var userId = await RequireAsync(projectId, GrantLevel.Read, ct).ConfigureAwait(false);
+        var userId = await RequireAsync(projectId, RecalculationApprovalPolicy.InitiatorGrant, ct).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > RecalculationApproval.ReasonMaxLength)
         {
@@ -81,8 +125,10 @@ public sealed class RecalculationApprovalHandlers(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-CALC-4221.approvalReasonRequired" });
         }
 
-        var targets = await periods.GetPeriodStatesAsync(projectId, periodKey, ct).ConfigureAwait(false);
-        if (targets.Count == 0)
+        // ⛔ Погодження прив'язане до КОНКРЕТНОГО стану періоду: стан і мітка
+        // його зміни беруться з бази й перевіряються при використанні.
+        var stamp = await approvals.FindPeriodStampAsync(projectId, periodKey, ct).ConfigureAwait(false);
+        if (stamp is null)
         {
             throw new NotFoundException(
                 "ECR-PRD-0404", $"Періоду {periodKey} у проєкті {projectId} немає.",
@@ -94,7 +140,8 @@ public sealed class RecalculationApprovalHandlers(
                 });
         }
 
-        var approval = new RecalculationApproval(projectId, periodKey, reason.Trim(), userId, clock.UtcNow);
+        var approval = new RecalculationApproval(
+            projectId, periodKey, reason.Trim(), userId, clock.UtcNow, stamp.State, stamp.StateChangedAt);
         approvals.Add(approval);
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -109,7 +156,7 @@ public sealed class RecalculationApprovalHandlers(
     /// <param name="ct">Токен скасування.</param>
     public async Task<IReadOnlyList<RecalculationApprovalDto>> ListAsync(int projectId, CancellationToken ct)
     {
-        await RequireAsync(projectId, GrantLevel.Read, ct).ConfigureAwait(false);
+        await RequireAsync(projectId, RecalculationApprovalPolicy.InitiatorGrant, ct).ConfigureAwait(false);
         return await approvals.ListActiveAsync(projectId, clock.UtcNow, ct).ConfigureAwait(false);
     }
 
@@ -119,7 +166,7 @@ public sealed class RecalculationApprovalHandlers(
     /// <param name="ct">Токен скасування.</param>
     public async Task<RecalculationApprovalDto> ConfirmAsync(int projectId, long id, CancellationToken ct)
     {
-        var userId = await RequireAsync(projectId, GrantLevel.Manage, ct).ConfigureAwait(false);
+        var userId = await RequireAsync(projectId, RecalculationApprovalPolicy.ApproverGrant, ct).ConfigureAwait(false);
 
         var approval = await approvals.FindAsync(id, projectId, ct).ConfigureAwait(false);
         if (approval is not null && approval.RequestedByUserId == userId)
@@ -173,18 +220,7 @@ public sealed class RecalculationApprovalHandlers(
             .RequireAsync(access, currentUser, RunCalculationHandler.Permission, ct)
             .ConfigureAwait(false);
 
-        if (profile.LevelFor(ResourceKind.Project, projectId) < level)
-        {
-            var key = level >= GrantLevel.Manage ? "err.ECR-AUTH-0403.noProjectManageGrant" : "err.ECR-AUTH-0403.noProjectGrant";
-            throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта {level} на проєкт {projectId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = key,
-                    ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
-                });
-        }
-
+        RecalculationApprovalPolicy.RequireProjectGrant(profile, projectId, level);
         return currentUser.UserId!.Value;
     }
 }

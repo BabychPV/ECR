@@ -2,6 +2,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Ecr.Application.Calculations;
 using Ecr.Domain.Entities.Documents;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
@@ -28,6 +29,7 @@ public sealed class RecalculationApprovalTests(SqlServerFixture sql)
     private const string Password = "Api-Recalc-Approval-2026!";
     private const int Closed = 202601;
     private const int OtherClosed = 202602;
+    private const string Reason = "Помилка коефіцієнта, лист №17";
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage4)]
@@ -77,7 +79,8 @@ public sealed class RecalculationApprovalTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-9.7")]
     public async Task Дві_сесії_перераховують_один_раз_і_лишають_слід()
     {
-        var s = await ArrangeAsync().ConfigureAwait(true);
+        // Ініціатор — рівно НА порозі: і запит, і перерахунок мають пройти.
+        var s = await ArrangeAsync(RecalculationApprovalPolicy.InitiatorGrant).ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         using var initiator = await SignedInAsync(app, s.Initiator).ConfigureAwait(true);
         using var approver = await SignedInAsync(app, s.Approver).ConfigureAwait(true);
@@ -120,6 +123,66 @@ public sealed class RecalculationApprovalTests(SqlServerFixture sql)
                 $"RecalculationApprovalUsed|{s.InitiatorId}",
             ],
             events.Order(StringComparer.Ordinal));
+
+        // «Used» несе причину й того, хто підтвердив: журнал відповідає «чому»
+        // і «хто погодив», не зводячи читача до пошуку запиту за id.
+        var used = await db.Database
+            .SqlQuery<string>($"SELECT DetailsJson AS Value FROM aud.SecurityEvent WHERE EventType = N'RecalculationApprovalUsed' AND JSON_VALUE(DetailsJson, '$.approvalId') = {id.ToString(System.Globalization.CultureInfo.InvariantCulture)}")
+            .SingleAsync().ConfigureAwait(true);
+        var extra = JsonDocument.Parse(used).RootElement.GetProperty("extra");
+        Assert.Equal(Reason, extra.GetProperty("reason").GetString());
+        Assert.Equal(s.ApproverId, extra.GetProperty("confirmedByUserId").GetInt32());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.7")]
+    public async Task Ініціатор_нижче_порогу_не_просить_і_не_перераховує()
+    {
+        var below = (GrantLevel)((byte)RecalculationApprovalPolicy.InitiatorGrant - 1);
+        var s = await ArrangeAsync(below).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var initiator = await SignedInAsync(app, s.Initiator).ConfigureAwait(true);
+
+        var request = await initiator.PostAsJsonAsync(Approvals(s.ProjectId), new { periodKey = Closed, reason = Reason })
+            .ConfigureAwait(true);
+        Assert.True(request.StatusCode == HttpStatusCode.Forbidden, $"{request.StatusCode}: {app.ErrorsText}");
+
+        var run = await initiator.PostAsJsonAsync(Recalculate(s.ProjectId), new { periodKey = Closed }).ConfigureAwait(true);
+        Assert.True(run.StatusCode == HttpStatusCode.Forbidden, $"{run.StatusCode}: {app.ErrorsText}");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.7")]
+    public async Task Погодження_мертве_після_перевідкриття_й_повторного_закриття_періоду()
+    {
+        var s = await ArrangeAsync(RecalculationApprovalPolicy.InitiatorGrant).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        using var initiator = await SignedInAsync(app, s.Initiator).ConfigureAwait(true);
+        using var approver = await SignedInAsync(app, s.Approver).ConfigureAwait(true);
+
+        var id = await RequestAsync(initiator, app, s.ProjectId, Closed).ConfigureAwait(true);
+        var confirm = await ConfirmAsync(approver, s.ProjectId, id).ConfigureAwait(true);
+        Assert.True(confirm.IsSuccessStatusCode, $"{confirm.StatusCode}: {app.ErrorsText}");
+
+        // ⛔ Стан у підсумку той самий (`Closed`), але це вже ІНШЕ закриття:
+        // між ними період був відкритий, і дані могли змінитися.
+        await using (var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext())
+        {
+            var period = await db.Periods
+                .SingleAsync(p => p.ProjectId == s.ProjectId && p.PeriodKeyValue == Closed).ConfigureAwait(true);
+            period.Reopen(DateTime.UtcNow.AddHours(1), "Виправлення", DateTime.UtcNow);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+            await Task.Delay(20).ConfigureAwait(true);
+            period.TransitionTo(PeriodState.Closed, DateTime.UtcNow);
+            await db.SaveChangesAsync().ConfigureAwait(true);
+        }
+
+        await AssertRecalculationDeniedAsync(
+            await RunAsync(initiator, s.ProjectId, Closed, id).ConfigureAwait(true), app).ConfigureAwait(true);
     }
 
     [Fact]
@@ -153,7 +216,7 @@ public sealed class RecalculationApprovalTests(SqlServerFixture sql)
     private static async Task<long> RequestAsync(HttpClient client, EcrApiFactory app, int projectId, int periodKey)
     {
         var response = await client.PostAsJsonAsync(
-            Approvals(projectId), new { periodKey, reason = "Помилка коефіцієнта, лист №17" }).ConfigureAwait(false);
+            Approvals(projectId), new { periodKey, reason = Reason }).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
         Assert.True(response.StatusCode == HttpStatusCode.Created, $"{response.StatusCode}: {body}\n{app.ErrorsText}");
         return JsonDocument.Parse(body).RootElement.GetProperty("id").GetInt64();
@@ -183,11 +246,12 @@ public sealed class RecalculationApprovalTests(SqlServerFixture sql)
     }
 
     /// <summary>
-    /// Проєкт із двома закритими періодами і дві людини з ОДНАКОВИМИ правами:
-    /// перерахунок + Manage на проєкт. Однакові навмисно — інакше відмову в
-    /// самопідтвердженні можна було б списати на брак права, а не на правило.
+    /// Проєкт із двома закритими періодами; обидві людини мають
+    /// <c>Calculation.Recalculate</c>, погоджувач — Manage на проєкт, ініціатор —
+    /// <paramref name="initiatorGrant"/>. За замовчуванням теж Manage: тоді права
+    /// ОДНАКОВІ, і відмову в самопідтвердженні не списати на брак права.
     /// </summary>
-    private async Task<Scenario> ArrangeAsync()
+    private async Task<Scenario> ArrangeAsync(GrantLevel initiatorGrant = GrantLevel.Manage)
     {
         var builder = new TestDocumentBuilder(sql.ConnectionString);
         var document = await builder.BuildAsync(periodKey: Closed).ConfigureAwait(false);
@@ -208,24 +272,34 @@ public sealed class RecalculationApprovalTests(SqlServerFixture sql)
         await db.SaveChangesAsync().ConfigureAwait(false);
         otherPeriod.AdvanceTo(PeriodState.Closed, DateTime.UtcNow);
 
-        var role = new Role(
-            EcrCode.Create($"RCAPR_{Guid.NewGuid():N}"),
-            new LocalizedText(new Dictionary<string, string> { ["en"] = "Recalc approval" }));
-        db.Roles.Add(role);
+        var approverRole = NewRole("RCAPA");
+        var initiatorRole = NewRole("RCAPI");
+        db.Roles.AddRange(approverRole, initiatorRole);
 
         var initiator = NewUser("rcai");
         var approver = NewUser("rcaa");
         db.Users.AddRange(initiator, approver);
         await db.SaveChangesAsync().ConfigureAwait(false);
 
-        db.RolePermissions.Add(new RolePermission(role.Id, "Calculation.Recalculate"));
-        db.RoleAssignments.Add(new RoleAssignment(role.Id, initiator.Id, null));
-        db.RoleAssignments.Add(new RoleAssignment(role.Id, approver.Id, null));
-        db.ResourceGrants.Add(new ResourceGrant(role.Id, ResourceKind.Project, document.ProjectId, GrantLevel.Manage));
+        db.RolePermissions.Add(new RolePermission(approverRole.Id, "Calculation.Recalculate"));
+        db.RolePermissions.Add(new RolePermission(initiatorRole.Id, "Calculation.Recalculate"));
+        db.RoleAssignments.Add(new RoleAssignment(approverRole.Id, approver.Id, null));
+        db.RoleAssignments.Add(new RoleAssignment(initiatorRole.Id, initiator.Id, null));
+        db.ResourceGrants.Add(new ResourceGrant(approverRole.Id, ResourceKind.Project, document.ProjectId, GrantLevel.Manage));
+        if (initiatorGrant > GrantLevel.None)
+        {
+            db.ResourceGrants.Add(new ResourceGrant(initiatorRole.Id, ResourceKind.Project, document.ProjectId, initiatorGrant));
+        }
+
         await db.SaveChangesAsync().ConfigureAwait(false);
 
         return new Scenario(document.ProjectId, initiator.UserName, initiator.Id, approver.UserName, approver.Id);
     }
+
+    private static Role NewRole(string prefix)
+        => new(
+            EcrCode.Create($"{prefix}_{Guid.NewGuid():N}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Recalc approval" }));
 
     private static User NewUser(string prefix)
     {

@@ -12,6 +12,13 @@ public sealed class RecalculationApprovalStore(EcrDbContext db) : IRecalculation
     public void Add(RecalculationApproval approval) => db.RecalculationApprovals.Add(approval);
 
     /// <inheritdoc />
+    public Task<PeriodStamp?> FindPeriodStampAsync(int projectId, int periodKey, CancellationToken ct)
+        => db.Periods.AsNoTracking()
+            .Where(p => p.ProjectId == projectId && p.PeriodKeyValue == periodKey)
+            .Select(p => new PeriodStamp(p.State, p.StateChangedAt))
+            .SingleOrDefaultAsync(ct);
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<RecalculationApprovalDto>> ListActiveAsync(
         int projectId, DateTime utcNow, CancellationToken ct)
         => await Project(db.RecalculationApprovals
@@ -48,7 +55,14 @@ public sealed class RecalculationApprovalStore(EcrDbContext db) : IRecalculation
                         && a.RequestedByUserId == requestedByUserId
                         && a.ConfirmedByUserId != null
                         && a.UsedAt == null
-                        && a.ExpiresAt > utcNow)
+                        && a.ExpiresAt > utcNow
+
+                        // ⛔ Період з моменту запиту не змінював стану: ні Reopen,
+                        // ні повторного закриття. Перевіряє сам UPDATE.
+                        && db.Periods.Any(p => p.ProjectId == a.ProjectId
+                                               && p.PeriodKeyValue == a.PeriodKey
+                                               && p.State == a.PeriodState
+                                               && p.StateChangedAt == a.PeriodStateChangedAt))
             .ExecuteUpdateAsync(s => s.SetProperty(a => a.UsedAt, utcNow), ct)
             .ConfigureAwait(false);
 

@@ -3009,11 +3009,14 @@ public interface IUserPreferenceStore
 Погодження перерахунку закритого періоду `calc.RecalculationApproval` (ФВ-9.7,
 аудит безпеки S1). Підтвердження й використання — умовні `UPDATE` з одним
 рядком результату: «ще чекає / ще не використано» перевіряє база в момент запису.
+Використання вимагає ще й того самого стану періоду й тієї самої
+`doc.Period.StateChangedAt`, що були при запиті.
 
 ```csharp
 public interface IRecalculationApprovalStore
 {
     public void Add(RecalculationApproval approval);
+    public Task<PeriodStamp?> FindPeriodStampAsync(int projectId, int periodKey, CancellationToken ct);
     public Task<IReadOnlyList<RecalculationApprovalDto>> ListActiveAsync(int projectId, DateTime utcNow, CancellationToken ct);
     public Task<RecalculationApprovalDto?> FindAsync(long id, int projectId, CancellationToken ct);
     public Task<bool> TryConfirmAsync(long id, int projectId, int confirmedByUserId, DateTime utcNow, CancellationToken ct);

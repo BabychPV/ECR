@@ -14,6 +14,9 @@ public interface IRecalculationApprovalStore
     /// <summary>Додає новий запит (зберігає <c>IUnitOfWork</c>).</summary>
     public void Add(RecalculationApproval approval);
 
+    /// <summary>Стан періоду і мітка його останньої зміни, як їх бачить база; немає періоду — <c>null</c>.</summary>
+    public Task<PeriodStamp?> FindPeriodStampAsync(int projectId, int periodKey, CancellationToken ct);
+
     /// <summary>Живі погодження проєкту: не використані й не прострочені.</summary>
     public Task<IReadOnlyList<RecalculationApprovalDto>> ListActiveAsync(int projectId, DateTime utcNow, CancellationToken ct);
 
@@ -27,8 +30,9 @@ public interface IRecalculationApprovalStore
 
     /// <summary>
     /// Атомарно позначає погодження використаним, якщо воно підтверджене, не
-    /// використане, не прострочене й видане саме цьому ініціатору на цей проєкт
-    /// і період. Повертає використане погодження або <c>null</c>.
+    /// використане, не прострочене, видане саме цьому ініціатору на цей проєкт
+    /// і період, а стан періоду й мітка його зміни — ті самі, що при запиті.
+    /// Повертає використане погодження або <c>null</c>.
     /// </summary>
     public Task<RecalculationApprovalDto?> TryConsumeAsync(
         long id, int projectId, int periodKey, int requestedByUserId, DateTime utcNow, CancellationToken ct);

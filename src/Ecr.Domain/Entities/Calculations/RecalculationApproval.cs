@@ -1,5 +1,6 @@
 // src/Ecr.Domain/Entities/Calculations/RecalculationApproval.cs
 using Ecr.Domain.Abstractions;
+using Ecr.Domain.Enums;
 
 namespace Ecr.Domain.Entities.Calculations;
 
@@ -35,13 +36,27 @@ public sealed class RecalculationApproval : Entity<long>
     /// <param name="reason">Причина; обов'язкова.</param>
     /// <param name="requestedByUserId">Ініціатор — єдиний, хто зможе запустити перерахунок.</param>
     /// <param name="utcNow">Момент створення.</param>
-    public RecalculationApproval(int projectId, int periodKey, string reason, int requestedByUserId, DateTime utcNow)
+    /// <param name="periodState">Стан періоду на момент запиту.</param>
+    /// <param name="periodStateChangedAt">
+    /// <c>doc.Period.StateChangedAt</c> на момент запиту — саме значення з бази,
+    /// а не з пам'яті (точність стовпця — мілісекунди).
+    /// </param>
+    public RecalculationApproval(
+        int projectId,
+        int periodKey,
+        string reason,
+        int requestedByUserId,
+        DateTime utcNow,
+        PeriodState periodState,
+        DateTime periodStateChangedAt)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(reason.Length, ReasonMaxLength);
 
         ProjectId = projectId;
         PeriodKey = periodKey;
+        PeriodState = periodState;
+        PeriodStateChangedAt = periodStateChangedAt;
         Reason = reason;
         RequestedByUserId = requestedByUserId;
         RequestedAt = utcNow;
@@ -50,6 +65,18 @@ public sealed class RecalculationApproval : Entity<long>
 
     public int ProjectId { get; private set; }
     public int PeriodKey { get; private set; }
+
+    /// <summary>Стан періоду, під який видано погодження.</summary>
+    /// <remarks>
+    /// ⛔ Разом із <see cref="PeriodStateChangedAt"/> прив'язує погодження до
+    /// КОНКРЕТНОГО закриття: після Reopen і повторного закриття стан той самий
+    /// (<c>Closed</c>), а мітка — вже інша, і погодження мертве.
+    /// </remarks>
+    public PeriodState PeriodState { get; private set; }
+
+    /// <summary>Мітка останньої зміни стану періоду на момент запиту.</summary>
+    public DateTime PeriodStateChangedAt { get; private set; }
+
     public string Reason { get; private set; } = null!;
     public int RequestedByUserId { get; private set; }
     public DateTime RequestedAt { get; private set; }

@@ -71,19 +71,10 @@ public sealed class RunCalculationHandler(
         // прив'язана до викликача жодним грантом. До цього фіксу власник
         // проєкту A з правом Calculation.Recalculate міг перерахувати ЦІЛИЙ
         // чужий проєкт B (усі документи, увесь рік) без жодного гранта на B.
-        // Той самий рівень, що й `CanReadDocumentAsync` (`AccessDecisionService.cs`):
-        // Read досить, бо саме право на перерахунок несе окрема функціональна
-        // перевірка вище.
-        if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
-        {
-            throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectGrant",
-                    ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
-                });
-        }
+        // Поріг — `RecalculationApprovalPolicy.InitiatorGrant` (нині Read, як і
+        // `CanReadDocumentAsync`): той самий, що й для запиту погодження, і
+        // заданий в ОДНОМУ місці (аудит S1, питання S13).
+        RecalculationApprovalPolicy.RequireProjectGrant(profile, projectId, RecalculationApprovalPolicy.InitiatorGrant);
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException(
@@ -173,7 +164,9 @@ public sealed class RunCalculationHandler(
         {
             await RecalculationApprovalHandlers.WriteAuditAsync(
                 audit, currentUser, clock.UtcNow, RecalculationApprovalHandlers.UsedEventType,
-                approval.Id, projectId, approval.PeriodKey, userId, new { jobId }, ct).ConfigureAwait(false);
+                approval.Id, projectId, approval.PeriodKey, userId,
+                new { jobId, reason = approval.Reason, confirmedByUserId = approval.ConfirmedByUserId },
+                ct).ConfigureAwait(false);
         }
 
         return jobId;
