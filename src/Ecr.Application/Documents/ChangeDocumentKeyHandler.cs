@@ -67,6 +67,13 @@ public sealed class ChangeDocumentKeyHandler(
         int projectId = 0;
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ Порядок блокувань — ЄДИНИЙ з правкою шапки й видаленням: спершу
+            // стани аркушів (UPDLOCK, HOLDLOCK), потім рядок документа. Зворотний
+            // давав дедлок із поданням і видаленням (DocumentLockOrderDeadlockTests):
+            // зміна ключа тримала U на документі й чекала на стан, а власник стану
+            // чекав на документ. Стан для документа, якого немає чи не видно, — просто
+            // порожній діапазон; відмови нижче від порядку не залежать.
+            var facts = await workflowFacts.LockWorkflowFactsAsync(documentId, innerCt).ConfigureAwait(false);
             var document = await keys.FindForUpdateAsync(documentId, innerCt).ConfigureAwait(false);
             if (document is null || profile.LevelFor(ResourceKind.Project, document.ProjectId) < GrantLevel.Read)
             {
@@ -102,7 +109,6 @@ public sealed class ChangeDocumentKeyHandler(
                 throw Invalid("Новий ключ збігається з чинним.", "err.ECR-DOC-0422.rekeyKeyInvalid");
             }
 
-            var facts = await workflowFacts.LockWorkflowFactsAsync(documentId, innerCt).ConfigureAwait(false);
             DocumentKeyChange.EnsureChangeable(facts.SheetStates);
 
             if (await keys.IsKeyTakenAsync(document.ProjectId, key, documentId, innerCt).ConfigureAwait(false))
