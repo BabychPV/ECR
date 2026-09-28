@@ -381,6 +381,7 @@ public static class DependencyInjection
         // RT: data
 
         // RT: expressions
+        services.AddScoped<IRegistrySnapshotLoader, RegistrySnapshotLoader>(); // RT-22
 
         // Прогрів кешу метаданих на старті (B01 §6.3, крок 7).
         services.AddScoped<MetadataWarmup>();

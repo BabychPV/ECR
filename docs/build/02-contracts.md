@@ -2594,6 +2594,23 @@ public interface IRegistryDraftStore
 }
 ```
 
+#### `IRegistrySnapshotLoader`
+
+Знімок довідників для обчислення (RT-22, FEATURE-REGISTRY-TABLES §5.7, D-158, D-162):
+бізнес-дата — останній день періоду, системний момент — `CalculationRun.RegistryAsOfUtc`
+(`FOR SYSTEM_TIME AS OF`; `null` — поточні дані). Видимість уже застосована: не видалений,
+вікно чинності містить дату, батько композиції видимий (рекурсивно). Перелік замикається
+цілями `Lookup`-полів. Кількість запитів стала — не залежить ні від довідників, ні від записів.
+
+```csharp
+public interface IRegistrySnapshotLoader
+{
+    public Task<IRegistrySnapshot> LoadAsync(
+        IReadOnlyCollection<int> registryDefIds, DateOnly businessDate,
+        DateTime? registryAsOfUtc, CancellationToken ct);
+}
+```
+
 #### `IReportDefinitionStore`
 
 Описи звітів (rpt.ReportDef) та їхні версії.
