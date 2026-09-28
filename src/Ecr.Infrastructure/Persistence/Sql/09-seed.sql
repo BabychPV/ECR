@@ -4470,6 +4470,11 @@ USING (VALUES
 
     -- RT: ui-expressions
 
+    -- HSE301:F4 ── тип запиту джерела не налаштовано (FEATURE-HSE301-VIEW §4.3, D-172):
+    -- інтерпольований запит PI SQL Client без ключа конфігурації не підміняється сирим.
+    (N'err.ECR-INT-0422.queryKindNotConfigured', N'en', N'No {queryKind} query is configured for this source: set {configKey} in the environment settings.', 1),
+    -- HSE301:F4 ── кінець секції
+
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,

@@ -1308,7 +1308,22 @@ public interface IExternalDataSource
     /// дублює даних (ФВ-11.3).
     /// </summary>
     public Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Згортає одне вікно (HSE301 §4.3, D-172). Типова реалізація — ЛОКАЛЬНА:
+    /// сирі точки з запасом на межах і WindowFold (тобто PeriodFold). Адаптер
+    /// перевизначає її лише для налаштованого summary на сервері.
+    /// </summary>
+    public Task<WindowResult> ReadWindowAsync(WindowRequest request, CancellationToken ct)
+        => WindowFold.FromRawAsync(this, request, ct);
 }
+
+// HSE301 F4 (адитивно): SourceQueryKind { Raw, Interpolated }, SourceSummaryKind
+// { Total, Average, Minimum, Maximum, Count }, WindowComputedBy { Local, Server },
+// WindowRequest(DataSourceId, SourceEntityId, SourcePath, FromUtc, ToUtc, Summary,
+// IsStep, MaxGap?), WindowResult(Value, SourceUnitSymbol, PointCount, PercentGood,
+// ComputedBy, Gaps, ErrorCode). Інтерпольований запит без налаштованого тексту —
+// ECR-INT-0422 (.queryKindNotConfigured), а не сирі точки.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.
@@ -1361,13 +1376,17 @@ public sealed record SourceEntityDescriptor(
 /// <param name="FromUtc">Початок діапазону, включно.</param>
 /// <param name="ToUtc">Кінець діапазону, виключно.</param>
 /// <param name="MaxPoints">Обмеження розміру батча.</param>
+/// <param name="Kind">Тип запиту (HSE301 §4.3); типове — сирі точки.</param>
+/// <param name="Step">Крок; обов'язковий для Interpolated.</param>
 public sealed record CollectionRequest(
     int DataSourceId,
     int SourceEntityId,
     string SourcePath,
     DateTime FromUtc,
     DateTime ToUtc,
-    int MaxPoints);
+    int MaxPoints,
+    SourceQueryKind Kind = SourceQueryKind.Raw,
+    TimeSpan? Step = null);
 
 /// <summary>Прочитане з джерела плюс те, що прочитати не вдалося.</summary>
 /// <remarks>
@@ -3212,7 +3231,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-CALC-4221` | 422 | перерахунок закритого періоду без окремого погодження (ФВ-9.7) |
 | `ECR-IMP-0422` | 422 | імпорт xlsx: структура файлу не відповідає шаблону |
 | `ECR-INT-0503` | 503 | зовнішнє джерело недоступне; збір перейде в catch-up |
-| `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9) |
+| `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9); також тип запиту джерела не налаштовано (`.queryKindNotConfigured`, HSE301 §4.3) |
 | `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена; **або** немає самого мапінгу поля (`messageKey` розрізняє: `sourceEntity` / `fieldMap`) |
 | `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
 | `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`) |

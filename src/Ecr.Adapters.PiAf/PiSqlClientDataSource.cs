@@ -1,8 +1,10 @@
 ﻿using System.Data;
+using System.Data.Common;
 using System.Data.Odbc;
 using System.Globalization;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Enums;
 
 namespace Ecr.Adapters.PiAf;
@@ -146,6 +148,20 @@ public sealed class PiSqlClientDataSource(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // ⛔ Тип запиту перевіряється ДО джерела: без налаштованого тексту
+        // інтерпольований запит не підміняється сирим (V-3, D-172).
+        var queryText = request.Kind switch
+        {
+            SourceQueryKind.Raw => null,
+            SourceQueryKind.Interpolated => ConfiguredOrRefuse(InterpolatedQueryKey, request.Kind),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Невідомий тип запиту."),
+        };
+
+        if (request.Kind == SourceQueryKind.Interpolated && !(request.Step > TimeSpan.Zero))
+        {
+            throw new ArgumentException("Інтерпольований запит потребує додатного кроку.", nameof(request));
+        }
+
         var source = await store.FindDataSourceAsync(request.DataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(
                          $"Джерело {request.DataSourceId} не існує або вимкнене.", request.DataSourceId);
@@ -166,12 +182,22 @@ public sealed class PiSqlClientDataSource(
         }
 
         using var command = connection.CreateCommand();
-        command.CommandText = ValueQuery(template, attribute);
+        command.CommandText = queryText is null
+            ? ValueQuery(template, attribute)
+            : Fill(queryText, template, attribute);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
         command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = request.FromUtc });
         command.Parameters.Add(new OdbcParameter("to", OdbcType.DateTime) { Value = request.ToUtc });
 
-        var points = new List<SourceDataPoint>();
+        if (request.Kind == SourceQueryKind.Interpolated)
+        {
+            // Крок — секундами: так його отримує текст запиту з налаштування
+            // (наш контракт, як Ts/Val/Uom; форму RTQP задає сам текст).
+            command.Parameters.Add(new OdbcParameter("step", OdbcType.Double)
+            {
+                Value = request.Step!.Value.TotalSeconds,
+            });
+        }
 
         // ⛔ Q-251: те саме читання, що йшло без жодного повтору — разовий
         // таймаут RTQP під навантаженням одразу провалював увесь інтервал.
@@ -180,23 +206,8 @@ public sealed class PiSqlClientDataSource(
             IsTransientOdbcFailure,
             ct).ConfigureAwait(false);
 
-        while (points.Count < request.MaxPoints && await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            if (reader["Ts"] is not DateTime timestamp)
-            {
-                continue;
-            }
-
-            var (numeric, text) = Value(reader["Val"]);
-
-            points.Add(new SourceDataPoint(
-                request.SourcePath,
-                DateTime.SpecifyKind(timestamp, DateTimeKind.Utc),
-                numeric,
-                text,
-                reader["Uom"] as string,
-                "Good"));
-        }
+        var points = await ReadPointsAsync(reader, request.SourcePath, request.MaxPoints, ct)
+            .ConfigureAwait(false);
 
         // Повний батч означає, що хвіст діапазону лишився непрочитаним —
         // і покриття за нього писати не можна.
@@ -210,6 +221,219 @@ public sealed class PiSqlClientDataSource(
             truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
             null);
     }
+
+    /// <summary>
+    /// Вікно: summary на сервері, якщо налаштовано <see cref="SummaryQueryKey"/>;
+    /// інакше — типова локальна згортка сирих точок (<see cref="WindowFold"/>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Типового тексту summary-запиту немає і не буде (V-3, <c>D-172</c>): імена
+    /// табличних функцій RTQP для summary в репозиторії не підтверджені, а
+    /// вигаданий дефолт виглядав би робочим налаштуванням. Текст звіряється з
+    /// AVEVA PI SQL DAS (RTQP Engine) Reference процедурою <c>Q-197</c>.
+    /// <para>
+    /// Контракт тексту: заповнювачі <c>{template}</c>, <c>{attribute}</c>,
+    /// <c>{summary}</c> (<c>Total</c>/<c>Average</c>/<c>Minimum</c>/<c>Maximum</c>/<c>Count</c>)
+    /// — літералами; параметри <c>?</c> — елемент, від, до. Один рядок: <c>Val</c>,
+    /// необов'язкові <c>Uom</c>, <c>PercentGood</c>, <c>PointCount</c>.
+    /// ⚠ <c>Val</c> для <c>Total</c> — в «одиниця × секунда», як у локальної згортки.
+    /// PI Total за замовчуванням рахує «за добу»; поправка — справа тексту запиту,
+    /// інакше число завищене в 86 400 разів і правдоподібне (HQ-16).
+    /// </para>
+    /// </remarks>
+    /// <param name="request">Вікно.</param>
+    /// <param name="ct">Скасування.</param>
+    public async Task<WindowResult> ReadWindowAsync(WindowRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var configured = settings?.Find(SummaryQueryKey);
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return await WindowFold.FromRawAsync(this, request, ct).ConfigureAwait(false);
+        }
+
+        if (request.ToUtc <= request.FromUtc)
+        {
+            throw new ArgumentException("Вікно порожнє або перевернуте.", nameof(request));
+        }
+
+        var source = await store.FindDataSourceAsync(request.DataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable(
+                         $"Джерело {request.DataSourceId} не існує або вимкнене.", request.DataSourceId);
+
+        var (element, attribute) = Split(request.SourcePath);
+
+        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+
+        var template = await TemplateAsync(connection, element, ct).ConfigureAwait(false);
+        if (template is null)
+        {
+            return new WindowResult(
+                null, null, 0, null, WindowComputedBy.Server,
+                [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = SummaryQuery(configured, template, attribute, request.Summary);
+        command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
+        command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = request.FromUtc });
+        command.Parameters.Add(new OdbcParameter("to", OdbcType.DateTime) { Value = request.ToUtc });
+
+        using var reader = await RetryAsync(
+            () => command.ExecuteReaderAsync(CommandBehavior.SingleRow, ct),
+            IsTransientOdbcFailure,
+            ct).ConfigureAwait(false);
+
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return new WindowResult(null, null, 0, null, WindowComputedBy.Server, [], null);
+        }
+
+        var row = Row(reader);
+        var (value, _) = Value(Column(row, "Val"));
+
+        return new WindowResult(
+            value,
+            Column(row, "Uom") as string,
+            Value(Column(row, "PointCount")).Numeric is { } count ? (int)count : 0,
+            Value(Column(row, "PercentGood")).Numeric,
+            WindowComputedBy.Server,
+            [],
+            null);
+    }
+
+    /// <summary>Ключ інтерпольованого запиту (HSE301 §4.3). Типового тексту немає.</summary>
+    /// <remarks>
+    /// Заповнювачі <c>{template}</c>, <c>{attribute}</c> — літералами, як у
+    /// <see cref="ValueQueryKey"/>; параметри <c>?</c> — елемент, від, до, крок
+    /// (секунди). Результат — ті самі колонки, що в сирого: <c>Ts</c>, <c>Val</c>,
+    /// <c>Uom</c>, необов'язкова <c>Quality</c>.
+    /// </remarks>
+    public const string InterpolatedQueryKey = "PiSqlClient:InterpolatedQuery";
+
+    /// <summary>Ключ summary-запиту вікна (HSE301 §4.3). Типового тексту немає.</summary>
+    public const string SummaryQueryKey = "PiSqlClient:SummaryQuery";
+
+    /// <summary>Тип запиту не налаштовано — той самий код, що й інші відмови конфігурації збору.</summary>
+    private const string QueryNotConfigured = "ECR-INT-0422";
+
+    /// <summary>Текст запиту з налаштування або відмова <c>ECR-INT-0422</c>.</summary>
+    private string ConfiguredOrRefuse(string key, SourceQueryKind kind)
+    {
+        var configured = settings?.Find(key);
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        throw new BusinessRuleException(
+            QueryNotConfigured,
+            $"Запит типу {kind} для PI SQL Client не налаштовано: немає ключа {key}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.queryKindNotConfigured",
+                ["queryKind"] = kind.ToString(),
+                ["configKey"] = key,
+            });
+    }
+
+    /// <summary>Текст summary-запиту з підставленими літералами.</summary>
+    /// <param name="configured">Текст із <see cref="SummaryQueryKey"/>.</param>
+    /// <param name="template">Шаблон елемента.</param>
+    /// <param name="attribute">Атрибут.</param>
+    /// <param name="summary">Спосіб згортки: ім'я PI summary type.</param>
+    /// <remarks>Публічний для тестів: живого RTQP у контурі розробки немає.</remarks>
+    public static string SummaryQuery(
+        string configured, string template, string attribute, SourceSummaryKind summary)
+    {
+        ArgumentNullException.ThrowIfNull(configured);
+
+        if (!Enum.IsDefined(summary))
+        {
+            throw new ArgumentOutOfRangeException(nameof(summary), summary, "Невідомий спосіб згортки вікна.");
+        }
+
+        return Fill(configured, template, attribute)
+            .Replace("{summary}", summary.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>Підставляє <c>{template}</c> і <c>{attribute}</c> літералами.</summary>
+    private static string Fill(string query, string template, string attribute)
+        => query
+            .Replace("{template}", Literal(template), StringComparison.Ordinal)
+            .Replace("{attribute}", Literal(attribute), StringComparison.Ordinal);
+
+    /// <summary>
+    /// Точки з результату запиту: <c>Ts</c>, <c>Val</c>, необов'язкові <c>Uom</c> і <c>Quality</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Якість (Д-4, §4.6) — з колонки <c>Quality</c>, якщо запит її повертає;
+    /// немає колонки чи значення — <c>Good</c>, як у <c>SqlDataSource</c>.
+    /// Типовий <see cref="DefaultValueQuery"/> колонки якості НЕ повертає: два
+    /// <c>NULL</c> у заголовку таблиці значень, імовірно, — слоти стану/помилки,
+    /// але їхня семантика в репозиторії не підтверджена (як <c>Q-197</c>).
+    /// Увімкнути — текстом <see cref="ValueQueryKey"/> після звірки з AVEVA Reference.
+    /// Системний стан PI текстом (<c>I/O Timeout</c>) і так лягає в
+    /// <see cref="SourceDataPoint.ValueString"/> і згорткою не береться.
+    /// <para>
+    /// Рядок читається цілим (<c>GetValues</c>): під <c>SequentialAccess</c>
+    /// колонки не можна читати не по порядку, а порядок належить тексту з
+    /// налаштування. Публічний для тестів: <c>OdbcDataReader</c> ззовні не зробиш.
+    /// </para>
+    /// </remarks>
+    /// <param name="reader">Відкритий результат запиту.</param>
+    /// <param name="sourcePath">Шлях атрибута для кожної точки.</param>
+    /// <param name="maxPoints">Стеля батча.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<List<SourceDataPoint>> ReadPointsAsync(
+        DbDataReader reader, string sourcePath, int maxPoints, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        var points = new List<SourceDataPoint>();
+
+        while (points.Count < maxPoints && await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var row = Row(reader);
+            if (Column(row, "Ts") is not DateTime timestamp)
+            {
+                continue;
+            }
+
+            var (numeric, text) = Value(Column(row, "Val"));
+            var quality = Column(row, "Quality") as string;
+
+            points.Add(new SourceDataPoint(
+                sourcePath,
+                DateTime.SpecifyKind(timestamp, DateTimeKind.Utc),
+                numeric,
+                text,
+                Column(row, "Uom") as string,
+                string.IsNullOrWhiteSpace(quality) ? WindowFold.GoodQuality : quality));
+        }
+
+        return points;
+    }
+
+    /// <summary>Поточний рядок: ім'я колонки → значення.</summary>
+    private static Dictionary<string, object?> Row(DbDataReader reader)
+    {
+        var values = new object[reader.FieldCount];
+        reader.GetValues(values);
+
+        var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < values.Length; i++)
+        {
+            row[reader.GetName(i)] = values[i] is DBNull ? null : values[i];
+        }
+
+        return row;
+    }
+
+    /// <summary>Значення колонки; немає колонки — <c>null</c>.</summary>
+    private static object? Column(Dictionary<string, object?> row, string name)
+        => row.TryGetValue(name, out var value) ? value : null;
 
     /// <summary>Відкриває з'єднання під службовим обліковим записом.</summary>
     /// <remarks>
@@ -423,9 +647,7 @@ public sealed class PiSqlClientDataSource(
     /// Часові межі й ім'я елемента лишаються звичайними параметрами.
     /// </remarks>
     private string ValueQuery(string template, string attribute)
-        => Query(ValueQueryKey, DefaultValueQuery)
-            .Replace("{template}", Literal(template), StringComparison.Ordinal)
-            .Replace("{attribute}", Literal(attribute), StringComparison.Ordinal);
+        => Fill(Query(ValueQueryKey, DefaultValueQuery), template, attribute);
 
     /// <summary>Типовий запит значень; перевизначається через конфігурацію.</summary>
     public const string DefaultValueQuery = """

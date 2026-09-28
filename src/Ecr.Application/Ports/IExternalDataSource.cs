@@ -1,5 +1,6 @@
 // src/Ecr.Application/Ports/IExternalDataSource.cs
 
+using Ecr.Application.Sources;
 using Ecr.Domain.Enums;
 
 namespace Ecr.Application.Ports;
@@ -21,7 +22,104 @@ public interface IExternalDataSource
     /// дублює даних (ФВ-11.3).
     /// </summary>
     public Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// Згортає одне вікно <c>[FromUtc, ToUtc)</c> у число (HSE301 §4.3, <c>D-172</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Типова реалізація — <b>локальна</b>: сирі точки з запасом на межах
+    /// через <see cref="ReadAsync"/> і згортка <see cref="WindowFold"/>, тобто
+    /// тим самим <see cref="PeriodFold"/>, що й місячна матеріалізація. Адаптер
+    /// перевизначає метод, лише якщо вміє summary на сервері й це налаштовано
+    /// (<see cref="WindowComputedBy.Server"/>). Чинні реалізації не змінюються.
+    /// </remarks>
+    /// <param name="request">Вікно, атрибут і спосіб згортки.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<WindowResult> ReadWindowAsync(WindowRequest request, CancellationToken ct)
+        => WindowFold.FromRawAsync(this, request, ct);
 }
+
+/// <summary>Що саме читає <see cref="IExternalDataSource.ReadAsync"/>.</summary>
+public enum SourceQueryKind : byte
+{
+    /// <summary>Сирі (архівні) точки — як досі.</summary>
+    Raw = 0,
+
+    /// <summary>
+    /// Інтерпольовані значення з кроком <see cref="CollectionRequest.Step"/>.
+    /// Адаптер, у якого запит цього типу не налаштований, відмовляє
+    /// <c>ECR-INT-0422</c> (<c>.queryKindNotConfigured</c>), а не підміняє сирими.
+    /// </summary>
+    Interpolated = 1,
+}
+
+/// <summary>Спосіб згортки вікна (PI summary type).</summary>
+public enum SourceSummaryKind : byte
+{
+    /// <summary>Інтеграл за часом, «одиниця × секунда» (аналог PI Total, але без пастки «за добу»).</summary>
+    Total = 0,
+
+    /// <summary>Середнє, зважене за часом, по покритому часу.</summary>
+    Average = 1,
+
+    /// <summary>Найменше з придатних точок у вікні.</summary>
+    Minimum = 2,
+
+    /// <summary>Найбільше з придатних точок у вікні.</summary>
+    Maximum = 3,
+
+    /// <summary>Кількість придатних точок у вікні.</summary>
+    Count = 4,
+}
+
+/// <summary>Хто порахував значення вікна.</summary>
+public enum WindowComputedBy : byte
+{
+    /// <summary>Локальна згортка сирих точок — еталон (<c>D-172</c>).</summary>
+    Local = 0,
+
+    /// <summary>Summary джерела за налаштованим запитом.</summary>
+    Server = 1,
+}
+
+/// <summary>Запит згортки одного вікна.</summary>
+/// <param name="DataSourceId">Джерело.</param>
+/// <param name="SourceEntityId">Сутність джерела.</param>
+/// <param name="SourcePath">Шлях атрибута.</param>
+/// <param name="FromUtc">Початок вікна, включно.</param>
+/// <param name="ToUtc">Кінець вікна, виключно.</param>
+/// <param name="Summary">Спосіб згортки.</param>
+/// <param name="IsStep">Ряд ступінчастий (значення тримається до наступної точки).</param>
+/// <param name="MaxGap">
+/// Розрив між точками, довший за який відрізок — прогалина; <c>null</c> — порога
+/// немає. Задає й запас пошуку точок за межами вікна (<see cref="WindowFold"/>).
+/// </param>
+public sealed record WindowRequest(
+    int DataSourceId,
+    int SourceEntityId,
+    string SourcePath,
+    DateTime FromUtc,
+    DateTime ToUtc,
+    SourceSummaryKind Summary,
+    bool IsStep,
+    TimeSpan? MaxGap = null);
+
+/// <summary>Згорнуте вікно.</summary>
+/// <param name="Value">Число в одиниці джерела; <c>null</c> — згортати не було чого.</param>
+/// <param name="SourceUnitSymbol">UOM джерела останньої використаної точки.</param>
+/// <param name="PointCount">Придатних точок усередині вікна.</param>
+/// <param name="PercentGood">Покрита даними частка вікна (0–100); <c>null</c> — для згорток точок.</param>
+/// <param name="ComputedBy">Локально чи сервером.</param>
+/// <param name="Gaps">Непокриті відрізки вікна: прогалини, погана якість, невдале читання.</param>
+/// <param name="ErrorCode">Код відмови джерела; <c>null</c> — відмов не було.</param>
+public sealed record WindowResult(
+    decimal? Value,
+    string? SourceUnitSymbol,
+    int PointCount,
+    decimal? PercentGood,
+    WindowComputedBy ComputedBy,
+    IReadOnlyList<TimeInterval> Gaps,
+    string? ErrorCode);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Типи, яких у пакеті не було (Q-014). Чернетка на затвердження.
@@ -74,13 +172,17 @@ public sealed record SourceEntityDescriptor(
 /// <param name="FromUtc">Початок діапазону, включно.</param>
 /// <param name="ToUtc">Кінець діапазону, виключно.</param>
 /// <param name="MaxPoints">Обмеження розміру батча.</param>
+/// <param name="Kind">Тип запиту (HSE301 §4.3); типове — сирі точки, як досі.</param>
+/// <param name="Step">Крок; обов'язковий для <see cref="SourceQueryKind.Interpolated"/>.</param>
 public sealed record CollectionRequest(
     int DataSourceId,
     int SourceEntityId,
     string SourcePath,
     DateTime FromUtc,
     DateTime ToUtc,
-    int MaxPoints);
+    int MaxPoints,
+    SourceQueryKind Kind = SourceQueryKind.Raw,
+    TimeSpan? Step = null);
 
 /// <summary>Прочитане з джерела плюс те, що прочитати не вдалося.</summary>
 /// <remarks>
