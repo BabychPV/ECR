@@ -4619,6 +4619,13 @@ USING (VALUES
     -- X-07: перелік, що не вмістився в одну сторінку, про це каже.
     (N'common.shownOf', N'en', N'Showing {shown} of {total}', 1),
     (N'common.shownSoFar', N'en', N'Showing the first {shown}; there are more', 1),
+    -- SEC: Безпека і шлях запису
+    -- C7: Lookup-комірка не бере запис, якого пікер не пропонує (`PatchCellsHandler.EnsureRegistryReferencesExistAsync`).
+    (N'err.ECR-CELL-4223.foreignRegistry',     N'en', N'The chosen entry belongs to a different registry than the column: {cellCount} cell(s).', 1),
+    (N'err.ECR-CELL-4223.deletedEntry',        N'en', N'The chosen registry entry has been deleted: {cellCount} cell(s).', 1),
+    (N'err.ECR-CELL-4223.inactiveEntry',       N'en', N'The chosen registry entry is switched off: {cellCount} cell(s).', 1),
+    (N'err.ECR-CELL-4223.entryNotValidOnDate', N'en', N'The chosen registry entry is not valid on {asOf}, the last day of the period: {cellCount} cell(s).', 1),
+    -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
     (N'grid.batchConfirmBody', N'en', N'{count} cell(s) in this change are outside the allowed editing window and need your confirmation. Apply the whole change?', 1),

@@ -153,11 +153,15 @@ public sealed class PatchCellsHandler(
             .ConfigureAwait(false);
         var messages = EnsureValidationPasses(
             context, request, changes, requiredInputMessages, headerValues, registryFields);
-        await EnsureRegistryReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
+
+        // ⚠ `C7`: старі значення читаються ДО перевірки посилань, а не після:
+        // «те саме значення, що вже стоїть» пропускається без відмови, і
+        // питати про це сховище вдруге, по комірці, немає потреби.
+        var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
+        await EnsureRegistryReferencesExistAsync(context, changes, previous, ct).ConfigureAwait(false);
         await EnsureUnitReferencesExistAsync(context, changes, ct).ConfigureAwait(false);
 
         var now = clock.UtcNow;
-        var previous = await ReadPreviousValuesAsync(changes, ct).ConfigureAwait(false);
         var isLateEdit = await DetermineIsLateEditAsync(context.Instance.DocumentId, request.PeriodKey, ct)
             .ConfigureAwait(false);
 
@@ -1478,8 +1482,29 @@ public sealed class PatchCellsHandler(
     /// існування порожнього ідентифікатора немає сенсу.
     /// </remarks>
     /// <exception cref="BusinessRuleException"><c>ECR-CELL-4223</c>.</exception>
+    /// <remarks>
+    /// ⛔ <c>C7</c>: існування — не єдина умова. Сервер приймав будь-який
+    /// ІСНУЮЧИЙ запис, тобто в обхід пікера (прямий <c>PATCH</c>, вставка,
+    /// імпорт книги) у комірку лягав запис чужого довідника, вимкнений,
+    /// видалений чи нечинний на дату періоду. Тепер ЗМІНА значення на такий
+    /// запис відхиляється тим самим кодом, кожна причина — своїм ключем
+    /// тексту (<see cref="LookupRejection"/>).
+    ///
+    /// ⚠ Те саме значення, що вже стоїть у комірці, пропускається: запис
+    /// міг стати нечинним ПІСЛЯ того, як його обрали, і повтор (undo,
+    /// вставка того самого, імпорт незміненої книги) не є новим вибором.
+    /// Порівнюється з <paramref name="previous"/> — тими старими значеннями,
+    /// які обробник однаково читає для аудиту.
+    ///
+    /// ⚠ Дата чинності — ОСТАННІЙ день періоду (<see cref="PeriodBounds.PeriodEnd"/>):
+    /// та сама, що в пікері (<c>DocumentGrid.periodEndDateIso</c>), сканері
+    /// осиротілих рядків і знімку довідників розрахунку (ФВ-8.5).
+    /// </remarks>
     private async Task EnsureRegistryReferencesExistAsync(
-        RequestContext context, CellChangeLists changes, CancellationToken ct)
+        RequestContext context,
+        CellChangeLists changes,
+        IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        CancellationToken ct)
     {
         var lookups = changes.Upserts
             .Where(record => context.Snapshot.ColumnsById.TryGetValue(
@@ -1494,33 +1519,150 @@ public sealed class PatchCellsHandler(
         }
 
         var requestedIds = lookups.Select(cell => cell.EntryId!.Value).Distinct().ToList();
-        var existingIds = await registries.FindExistingEntryIdsAsync(requestedIds, ct).ConfigureAwait(false);
+        var standings = (await registries.FindEntryStandingsAsync(requestedIds, ct).ConfigureAwait(false))
+            .ToDictionary(s => s.Id);
 
         var byRowId = context.RowIds.ToDictionary(p => p.Value, p => p.Key);
+        object Describe((CellAddress Address, long? EntryId) cell) => new
+        {
+            RowKey = byRowId.GetValueOrDefault(cell.Address.TableRowId),
+            ColumnCode = context.Snapshot.ColumnsById[cell.Address.ColumnDefId].Code,
+            EntryId = cell.EntryId!.Value,
+        };
+
         var missing = lookups
-            .Where(cell => !existingIds.Contains(cell.EntryId!.Value))
-            .Select(cell => new
-            {
-                RowKey = byRowId.GetValueOrDefault(cell.Address.TableRowId),
-                ColumnCode = context.Snapshot.ColumnsById[cell.Address.ColumnDefId].Code,
-                EntryId = cell.EntryId!.Value,
-            })
+            .Where(cell => !standings.ContainsKey(cell.EntryId!.Value))
+            .Select(Describe)
             .ToList();
 
-        if (missing.Count == 0)
+        if (missing.Count > 0)
+        {
+            throw new BusinessRuleException(
+                ErrorCodes.CellRegistryEntryMissing,
+                $"Посилання на неіснуючий запис довідника: комірок — {missing.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-4223.missingEntry",
+                    ["cellCount"] = missing.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["cells"] = missing,
+                });
+        }
+
+        var changed = lookups
+            .Where(cell => !(previous.TryGetValue(cell.Address, out var stored)
+                             && stored.ValueRegistryEntryId == cell.EntryId))            .ToList();
+
+        if (changed.Count == 0)
         {
             return;
         }
 
-        throw new BusinessRuleException(
-            ErrorCodes.CellRegistryEntryMissing,
-            $"Посилання на неіснуючий запис довідника: комірок — {missing.Count}.",
-            new Dictionary<string, object?>
+        // ⚠ Межі періоду читаються лише тоді, коли є що перевіряти на дату.
+        // Немає періоду (`null`) — перевірки на дату немає; решта причин діють.
+        var bounds = await periods
+            .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
+            .ConfigureAwait(false);
+        var asOf = bounds?.PeriodEnd;
+
+        LookupRejection? Reject((CellAddress Address, long? EntryId) cell)
+        {
+            var standing = standings[cell.EntryId!.Value];
+            var column = context.Snapshot.ColumnsById[cell.Address.ColumnDefId];
+
+            if (standing.RegistryDefId != column.LookupRegistryDefId)
             {
-                ["messageKey"] = "err.ECR-CELL-4223.missingEntry",
-                ["cellCount"] = missing.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["cells"] = missing,
-            });
+                return LookupRejection.ForeignRegistry;
+            }
+
+            if (standing.IsDeleted)
+            {
+                return LookupRejection.Deleted;
+            }
+
+            if (!standing.IsActive)
+            {
+                return LookupRejection.Inactive;
+            }
+
+            return asOf is { } date && !standing.IsValidOn(date) ? LookupRejection.NotValidOnDate : null;
+        }
+
+        var rejected = changed
+            .Select(cell => (Cell: cell, Reason: Reject(cell)))
+            .Where(r => r.Reason is not null)
+            .ToList();
+
+        if (rejected.Count == 0)
+        {
+            return;
+        }
+
+        // Одна відмова — одна причина: найглибша з тих, що трапились у батчі
+        // (порядок значень переліку). Решту користувач побачить наступною
+        // спробою, якщо виправить лише цю.
+        var reason = rejected.Min(r => r.Reason!.Value);
+        var cells = rejected.Where(r => r.Reason == reason).Select(r => Describe(r.Cell)).ToList();
+        var count = cells.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        throw reason switch
+        {
+            LookupRejection.ForeignRegistry => new BusinessRuleException(
+                ErrorCodes.CellRegistryEntryMissing,
+                $"Запис належить іншому довіднику, ніж колонка: комірок — {cells.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-4223.foreignRegistry",
+                    ["cellCount"] = count,
+                    ["cells"] = cells,
+                }),
+            LookupRejection.Deleted => new BusinessRuleException(
+                ErrorCodes.CellRegistryEntryMissing,
+                $"Запис довідника видалено: комірок — {cells.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-4223.deletedEntry",
+                    ["cellCount"] = count,
+                    ["cells"] = cells,
+                }),
+            LookupRejection.Inactive => new BusinessRuleException(
+                ErrorCodes.CellRegistryEntryMissing,
+                $"Запис довідника вимкнено: комірок — {cells.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-4223.inactiveEntry",
+                    ["cellCount"] = count,
+                    ["cells"] = cells,
+                }),
+            _ => new BusinessRuleException(
+                ErrorCodes.CellRegistryEntryMissing,
+                $"Запис довідника не чинний на {asOf:yyyy-MM-dd}: комірок — {cells.Count}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CELL-4223.entryNotValidOnDate",
+                    ["cellCount"] = count,
+                    ["asOf"] = asOf?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                    ["cells"] = cells,
+                }),
+        };
+    }
+
+    /// <summary>
+    /// Чому <c>Lookup</c>-комірка не може взяти існуючий запис (<c>C7</c>).
+    /// Порядок значень — пріоритет у відмові батчу: перше — найглибша причина.
+    /// </summary>
+    private enum LookupRejection
+    {
+        /// <summary>Запис іншого довідника, ніж <c>LookupRegistryDefId</c> колонки.</summary>
+        ForeignRegistry,
+
+        /// <summary>Запис видалено логічно.</summary>
+        Deleted,
+
+        /// <summary>Запис вимкнено.</summary>
+        Inactive,
+
+        /// <summary>Запис не чинний на останній день періоду.</summary>
+        NotValidOnDate,
     }
 
     /// <summary>

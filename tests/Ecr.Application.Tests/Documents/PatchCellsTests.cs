@@ -158,8 +158,12 @@ public sealed class PatchCellsTests
         // ⛔ Директива registry-lookup, PR A2: за замовчуванням усе, про що
         // питають, «існує» — тести, які не про Lookup-посилання, не мають
         // падати на новій перевірці. Той тест, що про неї, підставляє інше.
-        _registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
-                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
+        // ⚠ `C7`: «існує» тепер означає ще й «придатний» — запис того
+        // довідника, що в колонці (`SetLookup(1)`), активний, без меж чинності.
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0)
+                       .Select(id => new RegistryEntryStanding(id, 1, true, false, null, null))
+                       .ToList());
     }
 
     /// <summary>Стан рядків таблиці так, як його віддає <c>IRowStore.GetRowsAsync</c>.</summary>
@@ -1110,8 +1114,8 @@ public sealed class PatchCellsTests
         // ⛔ Дефолт конструктора («усе, про що питають, існує») тут навмисно
         // замінений на порожню множину — жоден запит про існування не
         // повертає жодного id.
-        _registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
-                   .Returns(new HashSet<long>());
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(new List<RegistryEntryStanding>());
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Handler().HandleAsync(

@@ -91,6 +91,25 @@ public interface IRegistryStore
     public Task<IReadOnlySet<long>> FindExistingEntryIdsAsync(
         IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
 
+    /// <summary>
+    /// Стан обігу переданих записів — <b>одним запитом</b>: довідник,
+    /// активність, логічне видалення, вікно чинності.
+    /// </summary>
+    /// <param name="registryEntryIds">Записи; порожній набір — порожній результат.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>
+    /// Ті, що існують. Відсутній у результаті ідентифікатор — запису немає
+    /// (та сама відповідь, що й <see cref="FindExistingEntryIdsAsync"/>).
+    /// </returns>
+    /// <remarks>
+    /// ⛔ <c>C7</c>: шлях запису комірки <c>Lookup</c> перевіряв лише ІСНУВАННЯ
+    /// запису, тож приймав запис чужого довідника, вимкнений, видалений чи
+    /// нечинний на дату періоду — усе, чого пікер не пропонує. Рішення
+    /// «придатний» ухвалює викликач: сховище не знає ні колонки, ні періоду.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryEntryStanding>> FindEntryStandingsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
     /// <summary>Запис за кодом у межах довідника; <c>null</c> — немає.</summary>
     public Task<RegistryEntry?> FindEntryByCodeAsync(int registryDefId, string code, CancellationToken ct);
 
@@ -229,6 +248,25 @@ public interface IRegistryStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<RegistryValue>> ListValuesForEntriesAsync(
         IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+}
+
+/// <summary>Стан обігу запису довідника (<c>C7</c>).</summary>
+/// <param name="Id">Запис.</param>
+/// <param name="RegistryDefId">Довідник, до якого належить запис.</param>
+/// <param name="IsActive">Чи активний.</param>
+/// <param name="IsDeleted">Чи видалений логічно.</param>
+/// <param name="ValidFrom">Перший чинний день; <c>null</c> — від початку.</param>
+/// <param name="ValidTo">Перший НЕчинний день (виключно); <c>null</c> — без обмеження.</param>
+public sealed record RegistryEntryStanding(
+    long Id, int RegistryDefId, bool IsActive, bool IsDeleted, DateOnly? ValidFrom, DateOnly? ValidTo)
+{
+    /// <summary>Чинний на дату — те саме вікно, що <c>RegistryEntry.IsValidOn</c>.</summary>
+    /// <param name="date">Дата.</param>
+    /// <remarks>
+    /// ⛔ Умова не переписується, а береться з <see cref="Ecr.Domain.ValueObjects.ValidityWindow"/>:
+    /// друге формулювання розійшлося б із пікером на межі дня.
+    /// </remarks>
+    public bool IsValidOn(DateOnly date) => new Ecr.Domain.ValueObjects.ValidityWindow(ValidFrom, ValidTo).Contains(date);
 }
 
 /// <summary>Вид зв'язку M:N і скільки таких зв'язків у довіднику.</summary>

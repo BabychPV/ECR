@@ -237,8 +237,10 @@ public sealed class PatchCellsRegFieldRuleTests
 
         _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
-        _registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
-                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
+        _registries.FindEntryStandingsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                   .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0)
+                       .Select(id => new RegistryEntryStanding(id, RegistryDefId, true, false, null, null))
+                       .ToList());
         _cells.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>())
               .Returns(new Dictionary<long, string> { [ExistingRowId] = "0x0B" });
     }

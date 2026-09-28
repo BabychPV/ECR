@@ -134,6 +134,31 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Проєкція, а не сутності: шлях запису комірок не змінює записів
+    /// довідника, і тягнути назви (<c>DisplayL10n</c>) заради п'яти полів
+    /// немає сенсу. Темпорального фільтра в SQL немає навмисно — чинність
+    /// рахує <see cref="RegistryEntryStanding.IsValidOn"/> тим самим вікном,
+    /// що й пікер.
+    /// </remarks>
+    public async Task<IReadOnlyList<RegistryEntryStanding>> FindEntryStandingsAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        if (registryEntryIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await db.RegistryEntries
+            .AsNoTracking()
+            .Where(e => registryEntryIds.Contains(e.Id))
+            .Select(e => new RegistryEntryStanding(
+                e.Id, e.RegistryDefId, e.IsActive, e.IsDeleted, e.ValidFrom, e.ValidTo))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task<RegistryEntry?> FindEntryByCodeAsync(
         int registryDefId, string code, CancellationToken ct)
         => db.RegistryEntries
