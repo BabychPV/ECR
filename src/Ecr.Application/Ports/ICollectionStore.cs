@@ -163,6 +163,31 @@ public interface ICollectionStore
     /// </para>
     /// </remarks>
     public Task<IReadOnlyList<SourceEntityStatus>> ListSourceEntitiesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// У з'єднання вже є сутність збору з цим кодом — активна чи вимкнена
+    /// (унікальний індекс <c>UQ_SourceEntity</c> не дивиться на <c>IsActive</c>).
+    /// </summary>
+    public Task<bool> SourceEntityCodeExistsAsync(int dataSourceId, string code, CancellationToken ct);
+
+    /// <summary>Заводить сутність збору (<c>ФВ-13.11</c>) і повертає її з присвоєним <c>Id</c>.</summary>
+    public Task<SourceEntity> AddSourceEntityAsync(SourceEntity entity, CancellationToken ct);
+
+    /// <summary>
+    /// Зберігає зміни відстежуваної сутності, прочитаної через
+    /// <see cref="FindSourceEntityAsync"/>.
+    /// </summary>
+    public Task SaveSourceEntityAsync(SourceEntity entity, CancellationToken ct);
+
+    /// <summary>Довідник існує.</summary>
+    public Task<bool> RegistryDefExistsAsync(int registryDefId, CancellationToken ct);
+
+    /// <summary>Довідник, якому належить поле; <c>null</c> — поля немає.</summary>
+    /// <remarks>
+    /// ⚠ Одним запитом відповідає і на «чи є поле», і на «чиє воно» — мапінг
+    /// на поле довідника перевіряє обидва (<c>ФВ-8.11</c>).
+    /// </remarks>
+    public Task<int?> FindRegistryFieldOwnerAsync(int registryFieldDefId, CancellationToken ct);
 }
 
 /// <summary>Сутність збору разом зі станом останнього прогону.</summary>
@@ -176,6 +201,7 @@ public interface ICollectionStore
 /// <param name="OldestGap">Початок найстарішої непокритої прогалини; <c>null</c> — покриття суцільне.</param>
 /// <param name="DataSourceId">З'єднання, якому належить сутність.</param>
 /// <param name="DataSourceCode">Код цього з'єднання.</param>
+/// <param name="RegistryDefId">Довідник, до якого прив'язана сутність; <c>null</c> — не прив'язана.</param>
 public sealed record SourceEntityStatus(
     int Id,
     string Code,
@@ -186,7 +212,8 @@ public sealed record SourceEntityStatus(
     CollectionRunStatus? LastRun,
     DateTime? OldestGap,
     int DataSourceId,
-    string DataSourceCode);
+    string DataSourceCode,
+    int? RegistryDefId = null);
 
 /// <summary>Що джерело вже віддало за одним полем мапінгу (<c>BE-27</c>).</summary>
 /// <param name="Points">Скільки точок у <c>ext.RawDataPoint</c>.</param>

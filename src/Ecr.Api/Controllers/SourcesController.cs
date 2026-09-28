@@ -16,8 +16,59 @@ namespace Ecr.Api.Controllers;
 public sealed class SourcesController(
     ListSourceEntitiesHandler list,
     CollectFromSourceHandler collect,
-    Ecr.Application.Sources.PreviewMappingHandler preview) : ControllerBase
+    Ecr.Application.Sources.PreviewMappingHandler preview,
+    Ecr.Application.Sources.CreateSourceEntityHandler create,
+    Ecr.Application.Sources.BindSourceEntityRegistryHandler bindRegistry) : ControllerBase
 {
+    /// <summary>
+    /// Заводить сутність збору з позиції каталогу джерела (<c>ФВ-13.11</c>).
+    /// Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <param name="request">З'єднання й позиція каталогу.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Код уже зайнятий у цьому з'єднанні — <c>409 ECR-INT-0409</c>
+    /// (<c>err.ECR-INT-0409.sourceEntityDuplicate</c>), а не другий рядок.
+    /// </remarks>
+    [HttpPost]
+    [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> Create([FromBody] CreateSourceEntityRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var created = await create
+            .HandleAsync(
+                new Ecr.Application.Sources.CreateSourceEntityCommand(
+                    request.DataSourceId, request.Code, request.DisplayName, request.EntityPath, request.SourceKind),
+                ct)
+            .ConfigureAwait(false);
+
+        return Created(new Uri("/api/v1/sources", UriKind.Relative), created);
+    }
+
+    /// <summary>
+    /// Прив'язує сутність збору до довідника або відв'язує її (<c>ФВ-8.11</c>).
+    /// Право <c>Integration.Manage</c>.
+    /// </summary>
+    /// <param name="id">Сутність збору.</param>
+    /// <param name="request">Довідник; <c>null</c> — відв'язати.</param>
+    /// <param name="ct">Скасування.</param>
+    [HttpPut("{id:int}/registry")]
+    [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> BindRegistry(
+        int id, [FromBody] BindSourceEntityRegistryRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await bindRegistry.HandleAsync(id, request.RegistryDefId, ct).ConfigureAwait(false));
+    }
+
     /// <summary>
     /// Перелік сутностей збору. Право <c>Integration.Manage</c>.
     /// </summary>
@@ -88,3 +139,20 @@ public sealed class SourcesController(
 /// <param name="FromUtc">Початок діапазону.</param>
 /// <param name="ToUtc">Кінець діапазону.</param>
 public sealed record CollectRequest(DateTime FromUtc, DateTime ToUtc);
+
+/// <summary>Нова сутність збору — позиція каталогу джерела.</summary>
+/// <param name="DataSourceId">З'єднання.</param>
+/// <param name="Code">Код у джерелі.</param>
+/// <param name="DisplayName">Підпис із каталогу.</param>
+/// <param name="EntityPath">Шлях в ієрархії джерела.</param>
+/// <param name="SourceKind">Хто master (ФВ-8.9); <c>null</c> — <c>External</c>.</param>
+public sealed record CreateSourceEntityRequest(
+    int DataSourceId,
+    string? Code,
+    string? DisplayName,
+    string? EntityPath,
+    Ecr.Domain.Enums.RegistrySourceKind? SourceKind);
+
+/// <summary>Прив'язка сутності збору до довідника.</summary>
+/// <param name="RegistryDefId">Довідник; <c>null</c> — відв'язати.</param>
+public sealed record BindSourceEntityRegistryRequest(int? RegistryDefId);

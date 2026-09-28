@@ -371,6 +371,10 @@ public static class DependencyInjection
         // Заведення мапінгу поля джерела (Прогалина 1 директиви паритету).
         services.AddScoped<Sources.CreateEntityFieldMapHandler>();
 
+        // ФВ-13.11: сутність збору заводиться з вебу; прив'язка до довідника (ФВ-8.11).
+        services.AddScoped<Sources.CreateSourceEntityHandler>();
+        services.AddScoped<Sources.BindSourceEntityRegistryHandler>();
+
         // BE-27: дії над наявним мапінгом — пауза/відновлення, приймання зміни
         // одиниці джерела (ФВ-16.9), видалення з перевіркою наслідків.
         services.AddScoped<Sources.SetEntityFieldMapPausedHandler>();

@@ -66,7 +66,7 @@ public sealed class CreateEntityFieldMapHandler(
         // ⚠ Існування сутності джерела перевіряється ТУТ — так само, як у
         // CollectFromSourceHandler: мапінг на неіснуючу чи вимкнену сутність
         // виглядав би заведеним, а збір за ним не запустився б ніколи.
-        _ = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
+        var entity = await sources.FindSourceEntityAsync(sourceEntityId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 ErrorCodes.SourceEntityNotFound,
                 $"Сутності джерела {sourceEntityId} немає або вона вимкнена.",
@@ -76,7 +76,7 @@ public sealed class CreateEntityFieldMapHandler(
                     ["id"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
                 });
 
-        var map = await BuildTargetAsync(sourceEntityId, command, ct).ConfigureAwait(false);
+        var map = await BuildTargetAsync(sourceEntityId, entity, command, ct).ConfigureAwait(false);
 
         await ApplyUnitsAsync(map, command, ct).ConfigureAwait(false);
 
@@ -94,7 +94,7 @@ public sealed class CreateEntityFieldMapHandler(
 
     /// <summary>Будує мапінг на потрібний вид цілі, перевіривши, що вона існує.</summary>
     private async Task<EntityFieldMap> BuildTargetAsync(
-        int sourceEntityId, CreateEntityFieldMapCommand command, CancellationToken ct)
+        int sourceEntityId, SourceEntity entity, CreateEntityFieldMapCommand command, CancellationToken ct)
     {
         switch (command.TargetKind)
         {
@@ -154,14 +154,47 @@ public sealed class CreateEntityFieldMapHandler(
                             ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapRegistryFieldRequired",
                         });
 
-                if (!await sources.RegistryFieldDefExistsAsync(registryFieldDefId, ct).ConfigureAwait(false))
+                // ⛔ ФВ-8.11: рядок-адресат і згортка адресують РЯДОК ТАБЛИЦІ
+                // документа; у поля довідника рядка немає. Прийняти їх мовчки
+                // означало б мапінг, який виглядає матеріалізованим, а
+                // матеріалізувати його нікуди.
+                if (command.TargetRowKey is not null || command.Aggregation is not null)
                 {
-                    throw new NotFoundException(
+                    throw new BusinessRuleException(
+                        ErrorCodes.RequestInvalid,
+                        "Мапінг на поле реєстру не приймає targetRowKey і aggregation.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-REQ-0422.entityFieldMapRegistryFieldMaterialization",
+                        });
+                }
+
+                var owner = await sources.FindRegistryFieldOwnerAsync(registryFieldDefId, ct).ConfigureAwait(false)
+                    ?? throw new NotFoundException(
                         ErrorCodes.EntityFieldMapTargetNotFound,
                         $"Поля реєстру {registryFieldDefId} немає.",
                         new Dictionary<string, object?>
                         {
                             ["messageKey"] = "err.ECR-INT-0405.registryField",
+                            ["registryFieldDefId"] = registryFieldDefId.ToString(CultureInfo.InvariantCulture),
+                        });
+
+                // ⛔ ФВ-8.11: сутність наповнює РІВНО той довідник, до якого
+                // прив'язана. Поле сусіднього довідника (або будь-яке поле, поки
+                // сутність не прив'язана) — це синхронізація, що пише в чужі записи.
+                if (entity.RegistryDefId != owner)
+                {
+                    throw new BusinessRuleException(
+                        ErrorCodes.RequestInvalid,
+                        entity.RegistryDefId is null
+                            ? $"Сутність джерела {sourceEntityId} не прив'язана до довідника."
+                            : $"Поле реєстру {registryFieldDefId} належить іншому довіднику, ніж прив'язаний до сутності {sourceEntityId}.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = entity.RegistryDefId is null
+                                ? "err.ECR-REQ-0422.entityFieldMapRegistryNotBound"
+                                : "err.ECR-REQ-0422.entityFieldMapRegistryFieldForeign",
+                            ["sourceEntityId"] = sourceEntityId.ToString(CultureInfo.InvariantCulture),
                             ["registryFieldDefId"] = registryFieldDefId.ToString(CultureInfo.InvariantCulture),
                         });
                 }

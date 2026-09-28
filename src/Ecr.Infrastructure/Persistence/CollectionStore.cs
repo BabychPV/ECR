@@ -300,6 +300,7 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 e.EntityPath,
                 e.IsActive,
                 e.DataSourceId,
+                e.RegistryDefId,
             })
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -377,9 +378,45 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
                 run is null ? null : new CollectionRunStatus(run.FinishedAt, run.Status, run.PointsRetrieved),
                 gaps.Count == 0 ? null : gaps[0].From,
                 entity.DataSourceId,
-                codeById[entity.DataSourceId]);
+                codeById[entity.DataSourceId],
+                entity.RegistryDefId);
         });
     }
+
+    /// <inheritdoc />
+    public Task<bool> SourceEntityCodeExistsAsync(int dataSourceId, string code, CancellationToken ct)
+        => db.SourceEntities.AsNoTracking().AnyAsync(e => e.DataSourceId == dataSourceId && e.Code == code, ct);
+
+    /// <inheritdoc />
+    public async Task<SourceEntity> AddSourceEntityAsync(SourceEntity entity, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        db.SourceEntities.Add(entity);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return entity;
+    }
+
+    /// <inheritdoc />
+    public Task SaveSourceEntityAsync(SourceEntity entity, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        return db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> RegistryDefExistsAsync(int registryDefId, CancellationToken ct)
+        => db.RegistryDefs.AsNoTracking().AnyAsync(r => r.Id == registryDefId, ct);
+
+    /// <inheritdoc />
+    public Task<int?> FindRegistryFieldOwnerAsync(int registryFieldDefId, CancellationToken ct)
+        => db.RegistryFieldDefs
+            .AsNoTracking()
+            .Where(f => f.Id == registryFieldDefId)
+            .Select(f => (int?)f.RegistryDefId)
+            .FirstOrDefaultAsync(ct);
 
     /// <summary>Стеля переліку сутностей збору.</summary>
     private const int MaxSourceEntities = 5_000;

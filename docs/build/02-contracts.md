@@ -3234,7 +3234,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-INT-0422` | 422 | UOM атрибута джерела змінився — збір зупинено (ФВ-16.9); також тип запиту джерела не налаштовано (`.queryKindNotConfigured`, HSE301 §4.3) |
 | `ECR-INT-0404` | 404 | сутності зовнішнього джерела немає або вона вимкнена; **або** немає самого мапінгу поля (`messageKey` розрізняє: `sourceEntity` / `fieldMap`) |
 | `ECR-INT-0405` | 404 | ціль мапінгу поля джерела (колонка або поле реєстру) не існує (`CreateEntityFieldMapHandler`, Прогалина 1 директиви паритету) |
-| `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`) |
+| `ECR-INT-0409` | 409 | дія над мапінгом суперечить його стану (`BE-27`): повторна пауза, відновлення непризупиненого, приймання вже оголошеної одиниці, видалення мапінгу, за яким уже зібрано дані (`details.collectedPoints`); **або** сутність збору з таким кодом у з'єднанні вже є (`POST /sources`, `messageKey` `sourceEntityDuplicate`) |
 | `ECR-INT-0502` | 502 | джерело **відмовило в автентифікації**: збір зупинено, у наздоганяння НЕ йде (`H-20`) |
 | `ECR-RPT-0404` | 404 | звіту з таким кодом немає або жодну версію не опубліковано |
 | `ECR-RPT-0409` | 409 | зріз подано або версію звіту вже опубліковано: обидва іммутабельні, потрібен новий (ФВ-9.17) |
@@ -3457,6 +3457,8 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/jobs/{jobId}/restart` | `System.ViewHealth` | 5 |
 | `POST` | `/api/v1/jobs/{jobId}/cancel` | `System.ViewHealth` | 5 |
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
+| `POST` | `/api/v1/sources` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/sources/{id}/registry` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |
@@ -3578,6 +3580,20 @@ public sealed class NotFoundException(string errorCode, string message)
 > Невідомий код — порожній перелік, а не `404`, як `channelId` вище. Кожен рядок
 > несе `dataSourceId` і `dataSourceCode`; ті самі два поля має й
 > `GET /api/v1/sources`.
+
+> ✎ **2026-09-28 — сутність збору з вебу** (`ФВ-13.11`, `ФВ-8.11`).
+> `POST /sources` — тіло `{ dataSourceId, code, displayName?, entityPath?,
+> sourceKind? }` (позиція каталогу `GET /data-sources/{id}/catalog`; каталог
+> сервер НЕ перечитує), `201` з `SourceEntityDto`. Код порожній чи довший за
+> 200 — `422` (`sourceEntityInvalid`); код уже є в з'єднанні — `409
+> ECR-INT-0409` (`sourceEntityDuplicate`). `PUT /sources/{id}/registry` —
+> `{ registryDefId | null }`, `200`; довідника немає — `404 ECR-REG-0404`
+> (`registryId`). `GET /sources` несе `registryDefId`. Мапінг на поле
+> довідника (`POST /entity-field-maps`, `targetKind=RegistryField`) —
+> `422 ECR-REQ-0422`, якщо названо `targetRowKey`/`aggregation`
+> (`entityFieldMapRegistryFieldMaterialization`), сутність не прив'язана
+> (`entityFieldMapRegistryNotBound`) або поле з іншого довідника
+> (`entityFieldMapRegistryFieldForeign`).
 
 > ✎ **2026-09-20 — `settings` каналу Smtp: транспорт із налаштувань застосунку.**
 > Канал тримає рівно `recipients` (адресати) і `title` (для пошти — префікс

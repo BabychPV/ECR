@@ -28,6 +28,15 @@ public sealed class CreateEntityFieldMapTests
 {
     private const int SourceEntityId = 5;
 
+    /// <summary>Довідник, до якого прив'язана сутність у тестах мапінгу на поле реєстру.</summary>
+    private const int BoundRegistryId = 70;
+
+    /// <summary>Поле прив'язаного довідника.</summary>
+    private const int OwnFieldId = 200;
+
+    /// <summary>Поле СУСІДНЬОГО довідника.</summary>
+    private const int ForeignFieldId = 300;
+
     private readonly ICollectionStore _sources = Substitute.For<ICollectionStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
@@ -42,7 +51,8 @@ public sealed class CreateEntityFieldMapTests
             .Returns(new SourceEntity(1, "AF01", RegistrySourceKind.External));
 
         _sources.ColumnDefExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
-        _sources.RegistryFieldDefExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
+        _sources.FindRegistryFieldOwnerAsync(OwnFieldId, Arg.Any<CancellationToken>()).Returns(BoundRegistryId);
+        _sources.FindRegistryFieldOwnerAsync(ForeignFieldId, Arg.Any<CancellationToken>()).Returns(BoundRegistryId + 1);
         _sources.UnitExistsAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(true);
 
         // ⚠ Повертає той самий об'єкт: обробник читає з нього Id/поля щойно
@@ -53,6 +63,19 @@ public sealed class CreateEntityFieldMapTests
     }
 
     private CreateEntityFieldMapHandler Handler() => new(_sources, _access, _user);
+
+    /// <summary>Сутність джерела, прив'язана до <paramref name="registryDefId"/>.</summary>
+    private void EntityBoundTo(int? registryDefId)
+    {
+        var entity = new SourceEntity(1, "AF01", RegistrySourceKind.External);
+        entity.BindRegistry(registryDefId);
+
+        _sources.FindSourceEntityAsync(SourceEntityId, Arg.Any<CancellationToken>()).Returns(entity);
+    }
+
+    private static CreateEntityFieldMapCommand RegistryCommand(
+        int fieldId = OwnFieldId, string? targetRowKey = null, AggregationKind? aggregation = null)
+        => new("Permit_Limit", FieldTargetKind.RegistryField, null, fieldId, null, null, targetRowKey, aggregation);
 
     private static CreateEntityFieldMapCommand ColumnCommand(
         string sourceField = "Flare_01_CO",
@@ -89,14 +112,85 @@ public sealed class CreateEntityFieldMapTests
     [Trait("Requirement", "ФВ-8.11")]
     public async Task Мапінг_на_поле_реєстру_заводиться()
     {
-        var command = new CreateEntityFieldMapCommand(
-            "Permit_Limit", FieldTargetKind.RegistryField, null, 200, null, null, null, null);
+        EntityBoundTo(BoundRegistryId);
 
-        var dto = await Handler().HandleAsync(SourceEntityId, command, CancellationToken.None);
+        var dto = await Handler().HandleAsync(SourceEntityId, RegistryCommand(), CancellationToken.None);
 
         Assert.Equal(FieldTargetKind.RegistryField, dto.TargetKind);
-        Assert.Equal(200, dto.TargetRegistryFieldDefId);
+        Assert.Equal(OwnFieldId, dto.TargetRegistryFieldDefId);
         Assert.Null(dto.TargetColumnDefId);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    [InlineData("Permit_01", AggregationKind.Sum)]
+    [InlineData("Permit_01", null)]
+    [InlineData(null, AggregationKind.Last)]
+    public async Task Мапінг_на_поле_реєстру_з_рядком_чи_агрегацією_відхиляється(
+        string? targetRowKey, AggregationKind? aggregation)
+    {
+        // ⛔ Мутаційний доказ: прибери перевірку `TargetRowKey/Aggregation` у
+        // гілці RegistryField `CreateEntityFieldMapHandler.BuildTargetAsync` —
+        // перший і третій рядки доходять до запису (домен приймає пару для
+        // будь-якої цілі), другий падає доменним ECR-INT-0422 замість 422 REQ.
+        EntityBoundTo(BoundRegistryId);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(
+                SourceEntityId, RegistryCommand(targetRowKey: targetRowKey, aggregation: aggregation),
+                CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, ex.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.entityFieldMapRegistryFieldMaterialization", ex.Details!["messageKey"]);
+        await _sources.DidNotReceive().AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Мапінг_на_поле_чужого_довідника_відхиляється()
+    {
+        // ⛔ Мутаційний доказ: прибери порівняння `entity.RegistryDefId != owner`
+        // — мапінг на поле сусіднього довідника заводиться, і синхронізація
+        // пише в чужі записи.
+        EntityBoundTo(BoundRegistryId);
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(SourceEntityId, RegistryCommand(ForeignFieldId), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, ex.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.entityFieldMapRegistryFieldForeign", ex.Details!["messageKey"]);
+        Assert.Equal("300", ex.Details!["registryFieldDefId"]);
+        await _sources.DidNotReceive().AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Мапінг_на_поле_реєстру_з_неприв_язаної_сутності_відхиляється()
+    {
+        // Сутність за замовчуванням конструктора класу — без довідника.
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(SourceEntityId, RegistryCommand(), CancellationToken.None));
+
+        Assert.Equal(ErrorCodes.RequestInvalid, ex.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.entityFieldMapRegistryNotBound", ex.Details!["messageKey"]);
+        await _sources.DidNotReceive().AddFieldMapAsync(Arg.Any<EntityFieldMap>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Мапінг_на_колонку_не_вимагає_прив_язки_до_довідника()
+    {
+        // Контроль: нове правило стосується ЛИШЕ цілі RegistryField — колонка
+        // з рядком і агрегацією від неприв'язаної сутності заводиться як раніше.
+        var dto = await Handler().HandleAsync(
+            SourceEntityId, ColumnCommand(targetRowKey: "Flare_01", aggregation: AggregationKind.Sum),
+            CancellationToken.None);
+
+        Assert.Equal("Flare_01", dto.TargetRowKey);
     }
 
     [Fact]
@@ -192,13 +286,11 @@ public sealed class CreateEntityFieldMapTests
     [Trait("Requirement", "ECR-INT-0405")]
     public async Task Неіснуюче_поле_реєстру_ціль_відхиляється()
     {
-        _sources.RegistryFieldDefExistsAsync(200, Arg.Any<CancellationToken>()).Returns(false);
-
-        var command = new CreateEntityFieldMapCommand(
-            "Permit_Limit", FieldTargetKind.RegistryField, null, 200, null, null, null, null);
+        EntityBoundTo(BoundRegistryId);
+        _sources.FindRegistryFieldOwnerAsync(OwnFieldId, Arg.Any<CancellationToken>()).Returns((int?)null);
 
         var ex = await Assert.ThrowsAsync<NotFoundException>(
-            () => Handler().HandleAsync(SourceEntityId, command, CancellationToken.None));
+            () => Handler().HandleAsync(SourceEntityId, RegistryCommand(), CancellationToken.None));
 
         Assert.Equal(ErrorCodes.EntityFieldMapTargetNotFound, ex.ErrorCode);
         Assert.Equal("err.ECR-INT-0405.registryField", ex.Details!["messageKey"]);

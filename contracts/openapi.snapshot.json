@@ -403,6 +403,23 @@
           "Local"
         ]
       },
+      "BindSourceEntityRegistryRequest": {
+        "description": "Прив'язка сутності збору до довідника.",
+        "properties": {
+          "registryDefId": {
+            "description": "Довідник; `null` — відв'язати.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "registryDefId"
+        ],
+        "type": "object"
+      },
       "BuildSnapshotRequest": {
         "description": "Запит на побудову зрізу.",
         "properties": {
@@ -2428,6 +2445,56 @@
         "required": [
           "tableInstanceId",
           "rowKey"
+        ],
+        "type": "object"
+      },
+      "CreateSourceEntityRequest": {
+        "description": "Нова сутність збору — позиція каталогу джерела.",
+        "properties": {
+          "code": {
+            "description": "Код у джерелі.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dataSourceId": {
+            "description": "З'єднання.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "displayName": {
+            "description": "Підпис із каталогу.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entityPath": {
+            "description": "Шлях в ієрархії джерела.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sourceKind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RegistrySourceKind",
+                "description": "Хто master (ФВ-8.9); `null` — `External`."
+              }
+            ]
+          }
+        },
+        "required": [
+          "dataSourceId",
+          "code",
+          "displayName",
+          "entityPath",
+          "sourceKind"
         ],
         "type": "object"
       },
@@ -10702,6 +10769,66 @@
         ],
         "type": "object"
       },
+      "SourceEntityDto": {
+        "description": "Сутність збору у відповіді на заведення чи прив'язку.",
+        "properties": {
+          "code": {
+            "description": "Код у джерелі.",
+            "type": "string"
+          },
+          "dataSourceId": {
+            "description": "З'єднання.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "displayName": {
+            "description": "Підпис.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "entityPath": {
+            "description": "Шлях в ієрархії.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор `ext.SourceEntity`.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "isActive": {
+            "description": "Чи ввімкнено збір.",
+            "type": "boolean"
+          },
+          "registryDefId": {
+            "description": "Довідник; `null` — не прив'язана.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "sourceKind": {
+            "$ref": "#/components/schemas/RegistrySourceKind",
+            "description": "Хто master."
+          }
+        },
+        "required": [
+          "id",
+          "dataSourceId",
+          "code",
+          "displayName",
+          "entityPath",
+          "sourceKind",
+          "registryDefId",
+          "isActive"
+        ],
+        "type": "object"
+      },
       "SourceEntityStatus": {
         "description": "Сутність збору разом зі станом останнього прогону.",
         "properties": {
@@ -10758,6 +10885,14 @@
             "type": [
               "null",
               "string"
+            ]
+          },
+          "registryDefId": {
+            "description": "Довідник, до якого прив'язана сутність; `null` — не прив'язана.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
             ]
           },
           "transport": {
@@ -26378,6 +26513,136 @@
         "tags": [
           "Sources"
         ]
+      },
+      "post": {
+        "description": "⚠ Код уже зайнятий у цьому з'єднанні — `409 ECR-INT-0409`\n(`err.ECR-INT-0409.sourceEntityDuplicate`), а не другий рядок.",
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEntityRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEntityRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourceEntityRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Заводить сутність збору з позиції каталогу джерела (`ФВ-13.11`).\nПраво `Integration.Manage`.",
+        "tags": [
+          "Sources"
+        ]
       }
     },
     "/api/v1/sources/{id}/collect": {
@@ -26500,6 +26765,110 @@
           }
         },
         "summary": "Перегляд мапінгу на реальних рядках джерела (`ФВ-13.14`).\nПраво `Integration.Manage`.",
+        "tags": [
+          "Sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/registry": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindSourceEntityRegistryRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindSourceEntityRegistryRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindSourceEntityRegistryRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Прив'язує сутність збору до довідника або відв'язує її (`ФВ-8.11`).\nПраво `Integration.Manage`.",
         "tags": [
           "Sources"
         ]
