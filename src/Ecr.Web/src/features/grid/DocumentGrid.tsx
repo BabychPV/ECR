@@ -3,6 +3,7 @@ import { Alert, Badge, Button, Group, List, Modal, Stack, Text } from '@mantine/
 import { RevoGrid } from '@revolist/react-datagrid';
 import type { ColumnRegular } from '@revolist/revogrid';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, EcrApiError, type RequiredInputCell } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
@@ -218,6 +219,26 @@ function dataColumnIndexOf(gridColumnIndex: number, data: TableSliceDto): number
  * самим механізмом, що й для решти колонок.
  */
 const RowLabelColumnWidth = 260;
+
+/**
+ * `combine` для `useQueries` записів Lookup-довідників: паралельні масиви за
+ * індексом довідника. Модульна функція — стабільне посилання, тож TanStack не
+ * перераховує результат без зміни даних, а `replaceEqualDeep` лишає масиви
+ * `data`/`isPending` тими самими обʼєктами, поки їхній вміст не змінився.
+ */
+function combineLookupEntries(results: UseQueryResult<RegistryEntryDto[]>[]): {
+  data: (RegistryEntryDto[] | undefined)[];
+  isPending: boolean[];
+  error: Error | null;
+  refetch: UseQueryResult<RegistryEntryDto[]>['refetch'][];
+} {
+  return {
+    data: results.map((result) => result.data),
+    isPending: results.map((result) => result.isPending),
+    error: results.find((result) => result.error !== null)?.error ?? null,
+    refetch: results.map((result) => result.refetch),
+  };
+}
 
 /**
  * Grid-редактор документа.
@@ -821,19 +842,36 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
           apiFetch<RegistryEntryDto[]>(
             asOf === null ? baseUrl : `${baseUrl}?asOf=${asOf}`,
           ),
+
+        // ⚠ Перф: довідник — до 50 тис. записів, а міняє його адміністратор,
+        // не оператор сітки. Дефолт застосунку (`staleTime` 30 с + рефетч на
+        // фокус) перекачував УСІ Lookup-довідники на кожне повернення у
+        // вкладку. Свіжість після правки довідника тримає інвалідація
+        // `queryKeys.registries.entries(code)` (редактор/імпорт записів) —
+        // вона перезапитує активний запит незалежно від `staleTime`.
+        // Ревізії довідника в `RegistryEntryDto`/`RegistryDefDto` немає, тож
+        // у ключ її не додано.
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
       };
     }),
+
+    // ⚠ Без `combine` `useQueries` віддає НОВИЙ масив на кожен рендер — за ним
+    // нова `Map` нижче і перебудова `columns` сітки на кожен рендер.
+    // `combine` (модульна, тож стабільна функція) + структурне спільне
+    // використання TanStack лишають ці масиви тими самими, поки дані не змінились.
+    combine: combineLookupEntries,
   });
 
   const lookupEntriesByRegistryId = useMemo(() => {
     const map = new Map<number, readonly RegistryEntryDto[]>();
     lookupRegistryCodes.forEach(({ id }, index) => {
-      const entries = lookupEntriesQueries[index]?.data;
+      const entries = lookupEntriesQueries.data[index];
       if (entries !== undefined) map.set(id, entries);
     });
 
     return map;
-  }, [lookupRegistryCodes, lookupEntriesQueries]);
+  }, [lookupRegistryCodes, lookupEntriesQueries.data]);
 
   /*
    * ⚠ `X-13`: довідники, що ЩЕ ЇДУТЬ. Редактор такої колонки показує
@@ -847,11 +885,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
     }
 
     lookupRegistryCodes.forEach(({ id }, index) => {
-      if (lookupEntriesQueries[index]?.isPending === true) pendingIds.add(id);
+      if (lookupEntriesQueries.isPending[index] === true) pendingIds.add(id);
     });
 
     return pendingIds;
-  }, [lookupRegistryDefIds, lookupRegistryCodes, lookupEntriesQueries, registriesList.isPending]);
+  }, [lookupRegistryDefIds, lookupRegistryCodes, lookupEntriesQueries.isPending, registriesList.isPending]);
 
   /*
    * ⛔ `R-01`: одиниці — для колонок `Unit`. Доти комірка одиниці була
@@ -885,11 +923,11 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
    * привід забрати в оператора решту таблиці.
    */
   const lookupError =
-    registriesList.error ?? lookupEntriesQueries.find((query) => query.error !== null)?.error ?? null;
+    registriesList.error ?? lookupEntriesQueries.error;
 
   const refetchLookups = (): void => {
     void registriesList.refetch();
-    lookupEntriesQueries.forEach((query) => void query.refetch());
+    lookupEntriesQueries.refetch.forEach((refetch) => void refetch());
   };
 
   /**
