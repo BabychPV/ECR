@@ -162,15 +162,76 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
     /// результат не потрапляє — той самий контракт, що й у
     /// <c>NormalizedCellStore.ReadSlicesAsync</c>.
     /// </summary>
+    /// <remarks>
+    /// ✎ P3: ОДИН запит на весь пакет. Доти — <see cref="ReadArchivedSliceAsync"/>
+    /// у циклі: <c>SELECT TOP 1 PeriodKey FROM arc.TableInstance</c> і окремий
+    /// запит комірок на КОЖЕН екземпляр, тобто 2N звернень
+    /// (<c>ArchivedSlicesQueryCountTests</c>: 6 на 3 і 24 на 12 екземплярах).
+    /// <para>
+    /// ⚠ Результат той самий, що поштучний: період екземпляра — з
+    /// <c>arc.TableInstance</c> (<c>MIN</c> — детермінований вибір там, де
+    /// поштучний <c>TOP (1)</c> без порядку брав будь-який; <c>Id</c> береться з
+    /// послідовності, тож рядок на екземпляр один); ті самі поля й порядок
+    /// комірок; стеля <see cref="MaxCells"/> — на КОЖЕН екземпляр
+    /// (<c>ROW_NUMBER</c>), як і в поштучного.
+    /// </para>
+    /// <para>
+    /// ⚠ Перелік ідентифікаторів — одним JSON-параметром (<c>OPENJSON</c>), як у
+    /// <c>MethodologyStore.GetCalculationFreshnessAsync</c>: ліміту в 2100
+    /// параметрів немає, порціонувати нічого.
+    /// </para>
+    /// </remarks>
     public async Task<IReadOnlyDictionary<long, IReadOnlyList<CellRecord>>> ReadArchivedSlicesAsync(
         IReadOnlyList<long> tableInstanceIds, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
         var result = new Dictionary<long, IReadOnlyList<CellRecord>>();
+        if (tableInstanceIds.Count == 0)
+        {
+            return result;
+        }
 
+        var idsJson = System.Text.Json.JsonSerializer.Serialize(tableInstanceIds.Distinct());
+
+        var rows = await db.Database
+            .SqlQuery<ArchivedSliceCell>($"""
+                WITH ti AS (
+                    SELECT t.Id, MIN(t.PeriodKey) AS PeriodKey
+                    FROM arc.TableInstance t
+                    WHERE t.Id IN (SELECT CAST(j.value AS bigint) FROM OPENJSON({idsJson}) AS j)
+                    GROUP BY t.Id
+                ),
+                cells AS (
+                    SELECT ti.Id AS TableInstanceId,
+                           c.PeriodKey, c.TableRowId, c.ColumnDefId, c.TableDefId,
+                           c.ValueString, c.ValueNumeric, c.ValueDate, c.ValueBool,
+                           CAST(c.ValueRegistryEntryId AS bigint) AS ValueRegistryEntryId,
+                           c.ValueUnitId, c.IsCalculated, c.IsEmpty,
+                           ROW_NUMBER() OVER (PARTITION BY ti.Id ORDER BY c.TableRowId, c.ColumnDefId) AS Rn
+                    FROM ti
+                    JOIN arc.TableRow r
+                      ON r.TableInstanceId = ti.Id AND r.PeriodKey = ti.PeriodKey
+                    JOIN arc.CellValue c
+                      ON c.PeriodKey = r.PeriodKey AND c.TableRowId = r.Id
+                )
+                SELECT TableInstanceId, PeriodKey, TableRowId, ColumnDefId, TableDefId,
+                       ValueString, ValueNumeric, ValueDate, ValueBool,
+                       ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty
+                FROM cells
+                WHERE Rn <= {MaxCells}
+                ORDER BY TableInstanceId, TableRowId, ColumnDefId
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var byInstance = rows
+            .GroupBy(r => r.TableInstanceId)
+            .ToDictionary(g => g.Key, g => g.Select(r => Map(r.ToCell())).ToList());
+
+        // Порядок ключів — порядок запиту, як у поштучного циклу.
         foreach (var tableInstanceId in tableInstanceIds)
         {
-            var cells = await ReadArchivedSliceAsync(tableInstanceId, ct).ConfigureAwait(false);
-            if (cells.Count > 0)
+            if (byInstance.TryGetValue(tableInstanceId, out var cells) && cells.Count > 0)
             {
                 result[tableInstanceId] = cells;
             }
@@ -325,6 +386,28 @@ public sealed class ArchiveAwareCellReader(EcrDbContext db)
         int? ValueUnitId,
         bool IsCalculated,
         bool IsEmpty);
+
+    /// <summary>Комірка архівного пакета разом з екземпляром, якому належить.</summary>
+    private sealed record ArchivedSliceCell(
+        long TableInstanceId,
+        int PeriodKey,
+        long TableRowId,
+        int ColumnDefId,
+        int TableDefId,
+        string? ValueString,
+        decimal? ValueNumeric,
+        DateTime? ValueDate,
+        bool? ValueBool,
+        long? ValueRegistryEntryId,
+        int? ValueUnitId,
+        bool IsCalculated,
+        bool IsEmpty)
+    {
+        // ⚠ Метод, а не властивість: ad-hoc-тип `SqlQuery` мапить властивості.
+        public ArchivedCell ToCell() => new(
+            PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueString, ValueNumeric, ValueDate, ValueBool,
+            ValueRegistryEntryId, ValueUnitId, IsCalculated, IsEmpty);
+    }
 
     /// <summary>Ключ і ідентифікатор рядка — форма проєкції архівного <c>arc.TableRow</c>.</summary>
     private sealed record ArchivedRowIdentity(string RowKey, long Id);
