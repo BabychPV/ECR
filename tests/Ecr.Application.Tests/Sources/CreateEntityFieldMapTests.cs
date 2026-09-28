@@ -37,6 +37,9 @@ public sealed class CreateEntityFieldMapTests
     /// <summary>Поле СУСІДНЬОГО довідника.</summary>
     private const int ForeignFieldId = 300;
 
+    /// <summary>Два проєкти колонки — навмисно не за зростанням id.</summary>
+    private static readonly int[] UnorderedProjects = [42, 41];
+
     private readonly ICollectionStore _sources = Substitute.For<ICollectionStore>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly ICurrentUser _user = Substitute.For<ICurrentUser>();
@@ -119,7 +122,7 @@ public sealed class CreateEntityFieldMapTests
         // ⛔ Колонку використовують два проєкти; на 41 грант є, на 42 — лише Write.
         // Integration.Manage без Manage-гранта на КОЖЕН проєкт не дає права
         // писати збором у його документи.
-        _sources.FindProjectIdsUsingColumnAsync(100, Arg.Any<CancellationToken>()).Returns(new[] { 42, 41 });
+        _sources.FindProjectIdsUsingColumnAsync(100, Arg.Any<CancellationToken>()).Returns(UnorderedProjects);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
                 .Permission("Integration.Manage")
@@ -141,7 +144,7 @@ public sealed class CreateEntityFieldMapTests
     [Trait("Requirement", "ФВ-13.11")]
     public async Task S3_мапінг_на_колонку_з_грантом_Manage_на_всі_проєкти_заводиться()
     {
-        _sources.FindProjectIdsUsingColumnAsync(100, Arg.Any<CancellationToken>()).Returns(new[] { 41, 42 });
+        _sources.FindProjectIdsUsingColumnAsync(100, Arg.Any<CancellationToken>()).Returns(UnorderedProjects);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = 9 }
                 .Permission("Integration.Manage")
