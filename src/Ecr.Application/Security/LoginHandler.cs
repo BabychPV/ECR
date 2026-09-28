@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -45,8 +46,18 @@ public sealed partial class LoginHandler(
     /// Однакове повідомлення без однакового часу — напівзахист: PBKDF2 з
     /// 210 000 ітерацій добре видно на графіку затримок, і невідповідь у
     /// 200 мс сама каже, що імені немає.
+    ///
+    /// ⛔ S8(а): статично, раз на процес, а не полем екземпляра. Обробник —
+    /// Scoped, тобто новий на кожен запит, і поле рахувало приманку ЗАНОВО
+    /// щоразу: невідоме ім'я коштувало Hash + Verify (2× PBKDF2), наявне з
+    /// хибним паролем — лише Verify (1×). Різниця в один PBKDF2 і була тим
+    /// самим перелічувачем імен, від якого приманка мала захищати.
+    ///
+    /// ⚠ Ключ — ТИП хешера: у продукті він один (<c>PasswordHasher</c>), а в
+    /// тестах підставні хешери різних типів не мають ділити одну приманку —
+    /// рядок одного формату інший хешер відкинув би без PBKDF2.
     /// </remarks>
-    private string? _decoyHash;
+    private static readonly ConcurrentDictionary<Type, Lazy<string>> DecoyHashes = new();
 
     /// <summary>Виконує вхід.</summary>
     /// <param name="userName">Ім'я входу.</param>
@@ -87,7 +98,13 @@ public sealed partial class LoginHandler(
             throw Locked(user);
         }
 
-        if (user.PasswordHash is null || !hasher.Verify(password, user.PasswordHash))
+        // ⚠ Запис без хеша теж платить один Verify (приманкою): інакше він
+        // відповідав би швидше за будь-який інший хибний вхід.
+        var verified = user.PasswordHash is null
+            ? DecoyRejects(password)
+            : hasher.Verify(password, user.PasswordHash);
+
+        if (!verified)
         {
             var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
             var locked = user.RegisterFailedAttempt(policy.MaxFailedAttempts, policy.LockoutMinutes, now);
@@ -279,8 +296,22 @@ public sealed partial class LoginHandler(
     /// <summary>«Перевірка» пароля неіснуючого користувача — заради часу відповіді.</summary>
     private void Decoy(string password)
     {
-        _decoyHash ??= hasher.Hash("decoy-for-constant-time-comparison");
-        hasher.Verify(password ?? string.Empty, _decoyHash);
+        var decoy = DecoyHashes
+            .GetOrAdd(
+                hasher.GetType(),
+                static (_, h) => new Lazy<string>(
+                    () => h.Hash("decoy-for-constant-time-comparison"), LazyThreadSafetyMode.ExecutionAndPublication),
+                hasher)
+            .Value;
+
+        hasher.Verify(password ?? string.Empty, decoy);
+    }
+
+    /// <summary>Приманка для запису без хеша; результат — завжди «не підійшов».</summary>
+    private bool DecoyRejects(string password)
+    {
+        Decoy(password);
+        return false;
     }
 
     /// <summary>Відмова заблокованому запису: причина — лічильник спроб чи адміністратор.</summary>
