@@ -79,7 +79,9 @@ public sealed class CompareDocumentVersionsHandler(
     IDocumentVersionStore versions,
     IDocumentStore documents,
     IMetadataCache metadata,
-    IDocumentHeaderStore headers)
+    IDocumentHeaderStore headers,
+    Security.IAccessDecisionService access,
+    Common.ICurrentUser currentUser)
 {
     /// <summary>Право — те саме, що й перегляд документа.</summary>
     public const string Permission = ListDocumentsHandler.Permission;
@@ -94,6 +96,14 @@ public sealed class CompareDocumentVersionsHandler(
     public async Task<DocumentCompareDto> HandleAsync(long documentId, long from, string? to, CancellationToken ct)
     {
         await DocumentVersionAccess.RequireAsync(getDocument, documentId, ct).ConfigureAwait(false);
+
+        // ⛔ S6 (ФВ-6.6): порівняння віддає значення комірок так само, як зріз, —
+        // і так само шанує заборону на аркуш, таблицю й колонку. Профіль той
+        // самий, яким щойно вирішено видимість документа (кеш профілів).
+        var profile = await Security.PermissionCheck
+            .RequireAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
         long? toId = null;
         if (!string.IsNullOrEmpty(to) && !string.Equals(to, Current, StringComparison.OrdinalIgnoreCase))
@@ -127,7 +137,7 @@ public sealed class CompareDocumentVersionsHandler(
         }
 
         return await DiffAsync(
-            documentId, key, from, toId,
+            documentId, key, from, toId, readable,
             SubmissionPayload.Read(older.PayloadJson), newerCells,
             SubmissionPayload.ReadHeader(older.PayloadJson), newerHeader,
             ct).ConfigureAwait(false);
@@ -159,7 +169,7 @@ public sealed class CompareDocumentVersionsHandler(
     }
 
     private async Task<DocumentCompareDto> DiffAsync(
-        long documentId, PeriodKey key, long from, long? to,
+        long documentId, PeriodKey key, long from, long? to, Security.DocumentReadScope readable,
         IReadOnlyList<SubmissionPayloadCell> oldCells, IReadOnlyList<SubmissionPayloadCell> newCells,
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> oldHeader,
         IReadOnlyDictionary<string, SubmissionPayloadHeaderValue> newHeader,
@@ -170,10 +180,20 @@ public sealed class CompareDocumentVersionsHandler(
         var oldRows = oldCells.Select(c => c.Row).ToHashSet();
         var newRows = newCells.Select(c => c.Row).ToHashSet();
 
-        var added = newRows.Except(oldRows).Order().ToList();
-        var removed = oldRows.Except(newRows).Order().ToList();
+        // ⛔ S6 (ФВ-6.6). Рядок належить таблиці його комірок; рядок прихованої
+        // таблиці не з'являється ні серед доданих, ні серед видалених — його
+        // ключ і код таблиці теж її дані. Наявність рядка рахується ДО фільтра
+        // колонок: інакше рядок, у якому змінилась лише заборонена колонка,
+        // виглядав би доданим чи видаленим.
+        var rowReadable = oldCells.Concat(newCells)
+            .GroupBy(c => c.Row)
+            .ToDictionary(g => g.Key, g => g.Any(c => readable.CanReadTableOf(c.Column)));
+
+        var added = newRows.Except(oldRows).Where(r => rowReadable[r]).Order().ToList();
+        var removed = oldRows.Except(newRows).Where(r => rowReadable[r]).Order().ToList();
 
         var changed = oldMap.Keys.Union(newMap.Keys)
+            .Where(k => readable.CanReadColumn(k.ColumnDefId))
             .Where(k => oldRows.Contains(k.RowId) && newRows.Contains(k.RowId))
             .Where(k => !SameValue(oldMap.GetValueOrDefault(k), newMap.GetValueOrDefault(k)))
             .OrderBy(k => k.RowId).ThenBy(k => k.ColumnDefId)

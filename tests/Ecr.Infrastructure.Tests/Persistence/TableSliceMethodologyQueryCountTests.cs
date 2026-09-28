@@ -163,9 +163,10 @@ public sealed class TableSliceMethodologyQueryCountTests(SqlServerFixture sql)
 
         services.AddSingleton(Rows(seeded));
         services.AddSingleton(Cells());
-        services.AddSingleton(Metadata(seeded));
+        var metadata = Metadata(seeded);
+        services.AddSingleton(metadata);
         services.AddSingleton(Units());
-        services.AddSingleton(Access());
+        services.AddSingleton(Access(metadata, seeded.TemplateVersionId));
         services.AddSingleton(Periods());
         services.AddSingleton(Styles());
 
@@ -271,13 +272,16 @@ public sealed class TableSliceMethodologyQueryCountTests(SqlServerFixture sql)
         return units;
     }
 
-    private static IAccessDecisionService Access()
+    private static IAccessDecisionService Access(IMetadataCache metadata, int templateVersionId)
     {
         var access = Substitute.For<IAccessDecisionService>();
         access.CanReadDocumentAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
               .Returns(EditDecision.Allow());
         access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
               .Returns(new Dictionary<CellAddress, EditDecision>());
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+              .Returns(async _ => ReadScopes.Everything(
+                  await metadata.GetAsync(templateVersionId, CancellationToken.None).ConfigureAwait(false)));
 
         return access;
     }

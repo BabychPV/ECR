@@ -76,6 +76,8 @@ public sealed class GetTableSliceTests
 
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
 
         // ⚠ За замовчуванням жодна методологія до таблиці НЕ прив'язана —
         // предмет цих тестів вміст зрізу, а не позначку методології

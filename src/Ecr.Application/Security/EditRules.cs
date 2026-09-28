@@ -358,6 +358,34 @@ public static class EditRules
             EditDenyReason.NoGrant,
             $"Технічний запис інтеграції лише пише значення збору; {action} — дія людини.");
 
+    /// <summary>Чи бачить профіль ресурс документа (аркуш, таблицю, колонку) — S6.</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="columnDefId">Колонка; <c>0</c> — рішення про таблицю цілком.</param>
+    /// <remarks>
+    /// ⛔ S6 (enterprise-аудит безпеки, 2026-09-28). Читання дивилося лише на
+    /// рівень ПРОЄКТУ (<c>CanReadDocumentAsync</c>), і <c>IsDeny</c> на аркуш,
+    /// таблицю чи колонку лише сірив редагування: значення віддавав і зріз, і
+    /// порівняння версій. ФВ-6.6 — «<c>IsDeny</c> виграє завжди, на будь-якому
+    /// рівні» — стосується рівня доступу загалом, а не лише запису.
+    ///
+    /// ⚠ Те саме формулювання, що й для запису (<see cref="Effective"/>), лише з
+    /// порогом <see cref="GrantLevel.Read"/>: друга копія правила «заборона →
+    /// найдрібніший грант → проєкт» розійшлася б із першою на першій же правці.
+    /// Стан періоду, аркуша й колонки тут НЕ беруть участі — закрите й подане
+    /// лишаються видимими.
+    /// </remarks>
+    public static bool CanRead(AccessProfile profile, int projectId, int sheetDefId, int tableDefId, int columnDefId)
+        => Effective(profile, default(CellAccessContext) with
+        {
+            ProjectId = projectId,
+            SheetDefId = sheetDefId,
+            TableDefId = tableDefId,
+            ColumnDefId = columnDefId,
+        }) >= GrantLevel.Read;
+
     /// <summary>
     /// Ефективний рівень: найдрібніший оголошений рівень перемагає, заборона —
     /// завжди.

@@ -73,6 +73,10 @@ public sealed class SimulationAwareAccessDecisionService(
         => inner.DocumentProjectIdAsync(documentId, ct);
 
     /// <inheritdoc />
+    public Task<DocumentReadScope> ReadScopeAsync(AccessProfile profile, long documentId, CancellationToken ct)
+        => inner.ReadScopeAsync(profile, documentId, ct);
+
+    /// <inheritdoc />
     public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct)
         => inner.CanEditCellAsync(profile, documentId, address, ct);

@@ -462,6 +462,37 @@ public sealed class AccessDecisionService(
         return ReadDecision(profile, projectId);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Один запит (проєкт і версія шаблону разом) плюс знімок із кешу
+    /// метаданих; самі рішення — чиста функція <see cref="EditRules.CanRead"/>
+    /// без жодного звернення до бази.
+    /// </remarks>
+    public async Task<DocumentReadScope> ReadScopeAsync(
+        AccessProfile profile, long documentId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+
+        var scope = await db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Join(db.Projects, d => d.ProjectId, p => p.Id, (d, p) => new { d.ProjectId, p.TemplateVersionId })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false)
+            ?? throw new NotFoundException(
+                "ECR-DOC-0404",
+                $"Документ {documentId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.document",
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+
+        var snapshot = await metadata.GetAsync(scope.TemplateVersionId, ct).ConfigureAwait(false);
+
+        return DocumentReadScope.For(profile, scope.ProjectId, snapshot);
+    }
+
     /// <summary>Чи бачить профіль документи проєкту — без походу в базу.</summary>
     /// <param name="profile">Профіль прав.</param>
     /// <param name="projectId">Проєкт документа.</param>

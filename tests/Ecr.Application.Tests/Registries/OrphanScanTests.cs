@@ -107,6 +107,8 @@ public sealed class OrphanScanTests
 
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());
         _access.CanSubmitAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<int>(),
                                Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())

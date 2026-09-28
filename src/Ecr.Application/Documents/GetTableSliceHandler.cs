@@ -105,6 +105,26 @@ public sealed class GetTableSliceHandler(
                 });
         }
 
+        // ⛔ S6 (ФВ-6.6): заборона на аркуш чи таблицю діє й на ЧИТАННЯ. До
+        // цього зріз дивився лише на проєкт, і `IsDeny` на таблицю сірив
+        // редагування, а числа віддавав. Прихована таблиця — той самий 404, що
+        // й неіснуючий екземпляр (`RowStore.ResolveTableInstanceAsync`): 403
+        // «заборонено» сам розповідав би, що таблиця є (той самий принцип, що й
+        // B-08 для документа).
+        var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+
+        if (!readable.CanReadTable(instance.TableDefId))
+        {
+            throw new Errors.NotFoundException(
+                "ECR-DOC-0404",
+                $"Екземпляра таблиці {tableInstanceId} не знайдено.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-DOC-0404.tableInstance",
+                    ["tableInstanceId"] = tableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         // 1. Метадані — зі знімка, без звернення до БД (D-16).
         var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
         var table = snapshot.Sheets.SelectMany(sh => sh.Tables)
@@ -194,8 +214,12 @@ public sealed class GetTableSliceHandler(
         // сітка показувала її та давала редагувати — хоча експорт її вже
         // пропускає (`DocumentDataExporter`). Приховане не віддається тут, і
         // «видно оператору» означає одне й те саме в сітці та в книзі.
+        //
+        // ⛔ S6: колонка під забороною (ФВ-6.6) не віддається ЗОВСІМ — ні
+        // значенням, ні описом (код, заголовок, одиниця — теж її дані), так
+        // само, як прихована: сітка малює рівно ті колонки, що прийшли.
         var columns = table.Columns
-            .Where(c => !c.IsDeleted && !c.IsHidden)
+            .Where(c => !c.IsDeleted && !c.IsHidden && readable.CanReadColumn(c.Id))
             .OrderBy(c => c.Ordinal)
             .Select(c => new ColumnDto(
                 c.Id, c.Code, c.HeaderL10n.Get(language) ?? c.Code, c.DataType.ToString(),
@@ -219,7 +243,12 @@ public sealed class GetTableSliceHandler(
         // документ віддавав ПОРОЖНЮ фіксовану таблицю, у яку нема куди
         // вводити перше число. Порожнеча була не станом даних, а наслідком
         // способу побудови відповіді.
+        //
+        // ⛔ S6: значення заборонених колонок відкидаються ТУТ — після накладення
+        // чисел методологій, щоб і обчислена колонка під забороною не
+        // повернулась у відповідь.
         var cellsByRow = cells
+            .Where(c => readable.CanReadColumn(c.Address.ColumnDefId))
             .GroupBy(c => c.Address.TableRowId)
             .ToDictionary(g => g.Key, g => g.ToList());
 
@@ -265,7 +294,9 @@ public sealed class GetTableSliceHandler(
             {
                 continue;
             }
-            if (!columnCodeById.TryGetValue(address.ColumnDefId, out var code))
+            // ⚠ S6: причина відмови на заборонену колонку теж розкривала б її код.
+            if (!readable.CanReadColumn(address.ColumnDefId)
+                || !columnCodeById.TryGetValue(address.ColumnDefId, out var code))
             {
                 continue;
             }

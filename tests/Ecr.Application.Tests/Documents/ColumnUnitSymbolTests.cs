@@ -86,6 +86,8 @@ public sealed class ColumnUnitSymbolTests
 
         _access.CanEditSliceAsync(Arg.Any<AccessProfile>(), TableInstance, Arg.Any<CancellationToken>())
                .Returns(new Dictionary<CellAddress, EditDecision>());
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(async _ => ReadScopes.Everything(await _metadata.GetAsync(2, CancellationToken.None)));
 
         _units.GetAsync(Arg.Any<CancellationToken>()).Returns(new UnitCatalogSnapshot(
             new Dictionary<string, UnitRef>(StringComparer.OrdinalIgnoreCase)

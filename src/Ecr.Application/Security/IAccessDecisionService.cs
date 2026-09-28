@@ -68,6 +68,20 @@ public interface IAccessDecisionService
     /// </remarks>
     public Task<int?> DocumentProjectIdAsync(long documentId, CancellationToken ct);
 
+    /// <summary>
+    /// Що з документа профіль бачить нижче рівня проєкту — таблиці й колонки
+    /// (S6, ФВ-6.6: заборона виграє на будь-якому рівні й на читанні).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ НЕ заміна <see cref="CanReadDocumentAsync"/>: видимість документа
+    /// викликач перевіряє першою (невидимий документ — 404), а ця межа лише
+    /// звужує вже видимий.
+    /// </remarks>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<DocumentReadScope> ReadScopeAsync(AccessProfile profile, long documentId, CancellationToken ct);
+
     /// <summary>Чи може користувач редагувати конкретну комірку.</summary>
     public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct);
