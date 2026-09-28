@@ -168,7 +168,7 @@ public sealed class CollectionStoreRawPointUpsertTests(SqlServerFixture sql)
     {
         // ⛔ P6: стеля читання наявних точок (`Take(100 000)` за `Id`) була
         // ПРИВАТНОЮ константою, без параметра, тому тут справді 100 001 рядок —
-        // один set-based INSERT, ~1 с. Батч покриває весь їхній діапазон і
+        // set-based INSERT порціями, кілька секунд. Батч покриває весь їхній діапазон і
         // містить (1) точку, що збігається з ОСТАННЬОЮ заведеною (вона була за
         // стелею й не потрапляла в індекс), і (2) нову. Раніше (1) вставлялася
         // вдруге, і `UQ_RawDataPoint` відкидав увесь батч разом із (2).
@@ -186,16 +186,34 @@ public sealed class CollectionStoreRawPointUpsertTests(SqlServerFixture sql)
             var runId = await store.StartRunAsync(entityId, Now.AddDays(-5), Now, false, null, CancellationToken.None);
             var start = Now.AddDays(-4);
 
+            // ⚠ Порціями з CHECKPOINT — ті самі 100 001 рядок і ті самі мітки,
+            // що одним INSERT. Один INSERT на всі рядки — це ОДНА транзакція на
+            // ~53 МБ журналу (35 МБ записано + 18 МБ резерву під відкат), а
+            // транзакцію посередині не звільнить жодна модель відновлення: на
+            // прогоні журнал спільної бази стрибав тут 56 → 104 МБ за секунду
+            // при стелі `TestDatabaseSizeTests` 128 МБ.
             await db.Database.ExecuteSqlRawAsync(
                 """
-                INSERT INTO ext.RawDataPoint (SourceEntityId, SourcePath, [Timestamp], ValueNumeric, RetrievedAt, CollectionRunId)
-                SELECT TOP (@count) @entity, @path, DATEADD(second, n.i, @start), 1, @start, @run
-                FROM (SELECT CAST(ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS int) AS i
-                      FROM sys.all_objects a CROSS JOIN sys.all_objects b) AS n
-                ORDER BY n.i;
+                DECLARE @i int = 0, @n int;
+                WHILE @i < @count
+                BEGIN
+                    -- TOP — усередині похідної таблиці, і RECOMPILE: з TOP
+                    -- зовні над змінними план сортував увесь перехресний
+                    -- добуток, порція йшла 6–19 с, і засів падав на таймауті
+                    -- команди (30 с); так — ~0.3 с на порцію (заміряно).
+                    SET @n = IIF(@count - @i < @chunk, @count - @i, @chunk);
+                    INSERT INTO ext.RawDataPoint (SourceEntityId, SourcePath, [Timestamp], ValueNumeric, RetrievedAt, CollectionRunId)
+                    SELECT @entity, @path, DATEADD(second, @i + n.i, @start), 1, @start, @run
+                    FROM (SELECT TOP (@n) CAST(ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) - 1 AS int) AS i
+                          FROM sys.all_objects a CROSS JOIN sys.all_objects b) AS n
+                    OPTION (RECOMPILE);
+                    SET @i += @chunk;
+                    CHECKPOINT;
+                END;
                 """,
                 [
                     new SqlParameter("@count", Seeded),
+                    new SqlParameter("@chunk", Chunk),
                     new SqlParameter("@entity", entityId),
                     new SqlParameter("@path", Path),
                     new SqlParameter("@start", System.Data.SqlDbType.DateTime2) { Scale = 3, Value = start },
@@ -267,8 +285,22 @@ public sealed class CollectionStoreRawPointUpsertTests(SqlServerFixture sql)
     {
         await using var db = sql.CreateContext();
 
-        await db.RawDataPoints
-            .Where(p => p.SourceEntityId == entityId)
-            .ExecuteDeleteAsync(CancellationToken.None);
+        // ⛔ Порціями з CHECKPOINT, а не одним `ExecuteDeleteAsync`. Одна
+        // транзакція на 100 001 рядок потребує ~85 МБ журналу (32 МБ записано
+        // + 53 МБ зарезервовано під відкат, заміряно `sys.dm_tran_database_transactions`),
+        // а транзакцію посередині не звільнить жодна модель відновлення — саме
+        // це видування підняло журнал спільної бази з 40 до 104 МБ і лишило
+        // `TestDatabaseSizeTests` (стеля 128) запас у дві заливки.
+        await db.Database.ExecuteSqlAsync($"""
+            WHILE 1 = 1
+            BEGIN
+                DELETE TOP ({Chunk}) FROM ext.RawDataPoint WHERE SourceEntityId = {entityId};
+                IF @@ROWCOUNT = 0 BREAK;
+                CHECKPOINT;
+            END;
+            """);
     }
+
+    /// <summary>Порція засіву й прибирання: тримає журнал тестової бази малим.</summary>
+    private const int Chunk = 10_000;
 }
