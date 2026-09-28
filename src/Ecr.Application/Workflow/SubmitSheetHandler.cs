@@ -381,6 +381,8 @@ public sealed class SubmitSheetHandler(
             rowIdsByInstance = await rowStore.GetRowIdsBatchAsync(validateIds, key, ct).ConfigureAwait(false);
         }
 
+        var rowIdsByTable = new Dictionary<int, IReadOnlyDictionary<string, long>>();
+
         foreach (var (instance, table, requiredColumns) in toValidate)
         {
             var cells = cellsByInstance.TryGetValue(instance.TableInstanceId, out var slice)
@@ -389,6 +391,7 @@ public sealed class SubmitSheetHandler(
             var rowIds = rowIdsByInstance.TryGetValue(instance.TableInstanceId, out var ids)
                 ? ids
                 : new Dictionary<string, long>(StringComparer.Ordinal);
+            rowIdsByTable[table.Id] = rowIds;
 
             if (table.ValidationRules.Count > 0)
             {
@@ -403,6 +406,13 @@ public sealed class SubmitSheetHandler(
 
         if (blocking.Count > 0)
         {
+            // ⛔ Порядок у тілі 422 — ЯВНИЙ, як на екрані: таблиця аркуша →
+            // рядок → колонка. Доти він ішов за порядком рядків із БД без
+            // `ORDER BY` (словник рядків) і за `TableInstance.Id` (порядок
+            // створення екземплярів, а не таблиць на аркуші) — тобто міг
+            // змінитися від плану запиту на тих самих даних.
+            blocking = OrderAsOnScreen(blocking, tables, rowIdsByTable);
+
             throw new BusinessRuleException(
                 ErrorCodes.SubmitBlocked,
                 $"Подання неможливе: блокувальних помилок валідації — {blocking.Count}.",
@@ -550,7 +560,10 @@ public sealed class SubmitSheetHandler(
             .ToHashSet();
 
         var messages = new List<Validation.ValidationMessage>();
-        foreach (var (rowKey, rowId) in rowIds)
+
+        // ⚠ Порядок рядків — явний (`TableRow.Id`), а не порядок словника:
+        // той дорівнює порядку рядків із БД без `ORDER BY`. Див. `OrderAsOnScreen`.
+        foreach (var (rowKey, rowId) in rowIds.OrderBy(kv => kv.Value))
         {
             foreach (var column in requiredColumns)
             {
@@ -571,6 +584,56 @@ public sealed class SubmitSheetHandler(
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Блокувальні повідомлення в детермінованому порядку: таблиця аркуша
+    /// (<c>TableDef.Ordinal</c>, далі <c>Id</c>) → рядок → колонка
+    /// (<c>ColumnDef.Ordinal</c>) → код правила.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Повідомлення без рядка (правила рівня таблиці й документа) — після
+    /// рядкових своєї таблиці; без колонки — після колонкових свого рядка.
+    /// Сортування стабільне (<c>OrderBy</c>), тож рівні ключі зберігають
+    /// порядок, у якому їх видав двигун правил.
+    /// </remarks>
+    private static List<Validation.ValidationMessage> OrderAsOnScreen(
+        List<Validation.ValidationMessage> messages,
+        Dictionary<int, Domain.Entities.Configuration.TableDef> tables,
+        Dictionary<int, IReadOnlyDictionary<string, long>> rowIdsByTable)
+    {
+        int TablePosition(Validation.ValidationMessage m)
+            => tables.TryGetValue(m.TableDefId, out var table) ? table.Ordinal : int.MaxValue;
+
+        // ⚠ НАБЛИЖЕННЯ: ключ рядка — `TableRow.Id`, тобто порядок СТВОРЕННЯ
+        // рядків. Він розходиться з порядком на екрані (`TableRow.Ordinal`)
+        // після вставки рядка посередині чи перестановки; пакетного `Ordinal`
+        // у `IRowStore` немає ([debt]).
+        long RowPosition(Validation.ValidationMessage m)
+            => m.RowKey is { } rowKey
+               && rowIdsByTable.TryGetValue(m.TableDefId, out var rowIds)
+               && rowIds.TryGetValue(rowKey, out var rowId)
+                ? rowId
+                : long.MaxValue;
+
+        int ColumnPosition(Validation.ValidationMessage m)
+            => m.ColumnCode is { } code
+               && tables.TryGetValue(m.TableDefId, out var table)
+               && table.Columns.FirstOrDefault(c => string.Equals(c.Code, code, StringComparison.Ordinal)) is { } column
+                ? column.Ordinal
+                : int.MaxValue;
+
+        return
+        [
+            .. messages
+                .OrderBy(TablePosition)
+                .ThenBy(m => m.TableDefId)
+                .ThenBy(RowPosition)
+                .ThenBy(m => m.RowKey is null ? 1 : 0)
+                .ThenBy(m => m.RowKey, StringComparer.Ordinal)
+                .ThenBy(ColumnPosition)
+                .ThenBy(m => m.RuleCode, StringComparer.Ordinal),
+        ];
     }
 
     /// <summary>
