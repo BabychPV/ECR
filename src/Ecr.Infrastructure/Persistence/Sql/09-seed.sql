@@ -4586,6 +4586,12 @@ USING (VALUES
     -- рантайм обчислює лише формули своєї версії, тому публікація таке посилання відхиляє.
     (N'publish.problem.importedFormulaNotEvaluated', N'en', N'Formula {formula}: reference !{name} at position {position} points to a formula of imported methodology {library}, but calculations do not evaluate imported formulas, so it would always give #REF. Copy the formula into this version.', 1),
     -- HSE301:A3 ── кінець секції
+
+    -- HSE301:A7 ── SQL-джерело: мітка часу точки (аудит A7). Рядок із непрочитаною міткою
+    -- або мітки не по черзі — відмова інтервалу, а не мовчазний пропуск із повним покриттям.
+    (N'err.ECR-INT-0422.timestampUnreadable', N'en', N'The value query of source "{dataSource}" returned Ts of type {valueType} for "{sourcePath}". Only datetimeoffset or a date/time type without offset (read as UTC) can be used, so this interval is not recorded as collected.', 1),
+    (N'err.ECR-INT-0422.timestampsOutOfOrder', N'en', N'The value query of source "{dataSource}" returns rows for "{sourcePath}" out of time order ({current} after {previous}). Add ORDER BY on the timestamp to the query: without it the unread tail of a batch cannot be determined.', 1),
+    -- HSE301:A7 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,

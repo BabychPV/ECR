@@ -63,6 +63,13 @@ public sealed class SqlDataSource(
     /// <summary>Джерело відмовило в автентифікації — не те саме, що недоступність (<c>H-20</c>).</summary>
     private const string AuthenticationRefused = "ECR-INT-0502";
 
+    /// <summary>
+    /// Результат запиту значень не відповідає контракту — мітка не читається або
+    /// йде не по черзі (аудит A7). Той самий код, що «тип запиту не виконується»:
+    /// обидва — дефект налаштування, який повторенням не минає, тож не <c>0503</c>.
+    /// </summary>
+    private const string ResultRefused = IExternalDataSource.QueryRefusedCode;
+
     /// <summary>Ключ запиту каталогу.</summary>
     /// <remarks>
     /// Результат мусить мати колонки <c>Code</c>, <c>DisplayName</c>,
@@ -76,6 +83,12 @@ public sealed class SqlDataSource(
     /// Параметри — <c>@path</c>, <c>@from</c>, <c>@to</c>; межі напіввідкриті
     /// (<c>@from</c> включно, <c>@to</c> виключно). Колонки результату —
     /// <c>Ts</c>, <c>Val</c> і, за наявності, <c>Uom</c> і <c>Quality</c>.
+    /// <para>
+    /// ⛔ Рядки — <c>ORDER BY</c> за міткою (неспадно): на цьому стоїть хвіст
+    /// обрізаного батча, і адаптер порушення відхиляє (аудит A7). <c>Ts</c> —
+    /// <c>datetimeoffset</c> (конвертується в UTC) або дата-час без поясу
+    /// (вважається UTC — припущення, див. <c>Timestamp</c>).
+    /// </para>
     /// <para>
     /// ⛔ Параметри — справжні <see cref="SqlParameter"/>, а не підстановка в
     /// текст. Сусідній <c>PiSqlClientDataSource</c> змушений підставляти
@@ -201,30 +214,50 @@ public sealed class SqlDataSource(
             ct).ConfigureAwait(false);
 
         var columns = Columns(reader);
+        DateTime? previous = null;
 
         while (points.Count < request.MaxPoints && await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (Raw(reader, columns, "Ts") is not DateTime timestamp)
-            {
-                continue;
-            }
+            // ⛔ Рядок із міткою, яку не прочитано, НЕ пропускається (аудит A7).
+            // Доти `continue` мовчки відкидав, наприклад, усі рядки з колонкою
+            // `datetimeoffset`: батч виходив порожнім і необрізаним, і прогін
+            // записував покриття за весь інтервал — дірку, яку наздоганяння
+            // вже ніколи не знайде.
+            var timestamp = Timestamp(reader, columns, source.Code, request.SourcePath);
+            EnsureOrdered(previous, timestamp, source.Code, request.SourcePath);
+            previous = timestamp;
 
             var (numeric, text) = Value(Raw(reader, columns, "Val"));
 
             points.Add(new SourceDataPoint(
                 request.SourcePath,
-                DateTime.SpecifyKind(timestamp, DateTimeKind.Utc),
+                timestamp,
                 numeric,
                 text,
                 Text(reader, columns, "Uom"),
                 Text(reader, columns, "Quality") ?? "Good"));
         }
 
-        // Повний батч означає, що хвіст діапазону лишився непрочитаним — і
-        // покриття за нього писати не можна (ER-I-03).
+        // Повний батч, за яким є ще рядок, означає, що хвіст діапазону лишився
+        // непрочитаним — і покриття за нього писати не можна (ER-I-03).
         // ⚠ Порожній батч обрізаним НЕ вважається: із MaxPoints = 0 умова була
         // б істинною завжди, а points[^1] упало б на порожньому списку.
-        var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
+        // ⚠ Про обрізання питаємо НАСТУПНИЙ рядок, а не лічильник: рівно
+        // MaxPoints рядків — це прочитаний до кінця інтервал, а не хвіст.
+        var truncated = points.Count > 0
+                        && points.Count >= request.MaxPoints
+                        && await reader.ReadAsync(ct).ConfigureAwait(false);
+
+        if (truncated)
+        {
+            // ⛔ Хвіст `[остання мітка, ToUtc)` правдивий лише тоді, коли
+            // непрочитане лежить ПІЗНІШЕ за прочитане. Порядок префікса
+            // перевірено вище; перший непрочитаний рядок перевіряється тут —
+            // інакше запит, що впорядкований «майже», оголосив би хвостом
+            // інтервал, у якому пропущеної точки немає.
+            EnsureOrdered(
+                previous, Timestamp(reader, columns, source.Code, request.SourcePath), source.Code, request.SourcePath);
+        }
 
         return new CollectionResult(
             points,
@@ -507,6 +540,94 @@ public sealed class SqlDataSource(
             // збір, підставлений нуль — ні.
             _ => (null, raw.ToString()),
         };
+
+    /// <summary>Мітка часу точки в UTC.</summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><c>datetimeoffset</c> — <b>конвертується</b> в UTC через
+    /// <see cref="DateTimeOffset.UtcDateTime"/>: пояс записано в самому
+    /// значенні, і вгадувати нічого не треба.</item>
+    /// <item><c>datetime2</c>, <c>datetime</c>, <c>smalldatetime</c>, <c>date</c>
+    /// (приходять як <see cref="DateTime"/> без поясу) — <b>вважаються UTC</b>
+    /// (<see cref="DateTime.SpecifyKind"/>, переозначення, а не конвертація).
+    /// ⚠ Це ЯВНЕ ПРИПУЩЕННЯ, а не знання (аудит A7). Поля поясу в
+    /// <c>ext.DataSource</c> немає, і ні `06-integration.md` §6.5a, ні `B20` не
+    /// кажуть, у якому поясі FLERT пише <c>datetime</c>. Воно принаймні
+    /// узгоджене: межі <c>@from</c>/<c>@to</c> ідуть у запит теж як UTC
+    /// <c>datetime2</c>, тож фільтр і мітки точок живуть в одній шкалі. Якщо
+    /// джерело пише місцевий час, увесь ряд буде зсунутий на зсув поясу —
+    /// лікується полем поясу джерела або <c>AT TIME ZONE</c> у самому запиті
+    /// (тоді колонка стає <c>datetimeoffset</c> і йде першою гілкою).</item>
+    /// <item>усе інше, зокрема <c>NULL</c>, рядок, <c>time</c>, — <b>відмова</b>
+    /// <c>ECR-INT-0422</c>, а не пропуск рядка: пропущений рядок перетворював
+    /// невдалий інтервал на «зібраний повністю».</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="reader">Reader на поточному рядку.</param>
+    /// <param name="columns">Набір колонок.</param>
+    /// <param name="dataSource">Код джерела — для тексту відмови.</param>
+    /// <param name="sourcePath">Шлях сутності — для тексту відмови.</param>
+    private static DateTime Timestamp(
+        SqlDataReader reader, Dictionary<string, int> columns, string dataSource, string sourcePath)
+        => Raw(reader, columns, "Ts") switch
+        {
+            DateTimeOffset zoned => zoned.UtcDateTime,
+            DateTime unzoned => DateTime.SpecifyKind(unzoned, DateTimeKind.Utc),
+            var other => throw new BusinessRuleException(
+                ResultRefused,
+                $"Запит значень джерела {dataSource} для «{sourcePath}» повернув Ts типу "
+                + $"{other?.GetType().Name ?? "NULL"}: мітку часу прочитати не можна, інтервал не зібрано.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.timestampUnreadable",
+                    ["dataSource"] = dataSource,
+                    ["sourcePath"] = sourcePath,
+                    ["valueType"] = other?.GetType().Name ?? "NULL",
+                }),
+        };
+
+    /// <summary>Мітки йдуть неспадно — інакше відмова.</summary>
+    /// <remarks>
+    /// ⛔ Вибрано відмову, а не сортування в пам'яті (аудит A7). Сортування
+    /// лагодить лише те, що вже прочитано: при обрізаному батчі непрочитані
+    /// рядки невідомі, і хвіст <c>[остання мітка, ToUtc)</c> за невпорядкованого
+    /// запиту пропускає точки раніше за цю мітку. А відмова лише на великих
+    /// батчах зробила б дефект конфігурації випадковим. Тому контракт один:
+    /// запит значень мусить мати <c>ORDER BY</c> за міткою, і порушення видно
+    /// на першому ж прогоні з двома рядками не по черзі. Рівні мітки дозволені.
+    /// <para>
+    /// ⚠ Межа перевірки чесно: вона бачить прочитане плюс ОДИН наступний рядок.
+    /// Запит без <c>ORDER BY</c>, що випадково віддав упорядкований префікс,
+    /// пройде; гарантію дає лише <c>ORDER BY</c> у самому запиті.
+    /// </para>
+    /// </remarks>
+    /// <param name="previous">Попередня мітка; <c>null</c> — рядок перший.</param>
+    /// <param name="current">Поточна мітка.</param>
+    /// <param name="dataSource">Код джерела — для тексту відмови.</param>
+    /// <param name="sourcePath">Шлях сутності — для тексту відмови.</param>
+    private static void EnsureOrdered(DateTime? previous, DateTime current, string dataSource, string sourcePath)
+    {
+        if (previous is not { } before || current >= before)
+        {
+            return;
+        }
+
+        var earlier = before.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var later = current.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+        throw new BusinessRuleException(
+            ResultRefused,
+            $"Запит значень джерела {dataSource} для «{sourcePath}» повертає мітки не по черзі "
+            + $"({later} після {earlier}): без ORDER BY за міткою хвіст обрізаного батча хибний.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.timestampsOutOfOrder",
+                ["dataSource"] = dataSource,
+                ["sourcePath"] = sourcePath,
+                ["previous"] = earlier,
+                ["current"] = later,
+            });
+    }
 
     /// <summary>Джерела немає або воно вимкнене.</summary>
     /// <param name="dataSourceId">Ідентифікатор із запиту.</param>
