@@ -317,8 +317,18 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
         // ⚠ Конкатенація в змінну (як `ConsistencyCheckJob`): підставляються лише ІМЕНА
         // параметрів `@h0`..`@hN` і сталий хінт, не значення — аналізатор EF1003 цього статично
         // не доводить.
+        //
+        // ⛔ FORCESEEK по (RegistryKeyDefId, KeyHash) — не прикраса. Без нього оптимізатор обирав
+        // то пошук по UQ_RegistryEntryKey_Entry (усі рядки ключа), то скан кластерного індексу —
+        // залежно від статистики на мить компіляції. Дві одночасні транзакції з РІЗНИМИ планами
+        // брали діапазонні замки на різних індексах, обидві проходили перевірку, і вставки
+        // ловили взаємоблокування 1205 (граф: RangeS-U на PK_RegistryEntryKey проти RangeS-U на
+        // UQ_RegistryEntryKey_Entry, RegistryKeyRaceTests у повному прогоні після великих вставок).
+        // Пошук по IX_RegistryEntryKey_Hash блокує рівно діапазон кожного хеша — той самий для
+        // будь-якої транзакції, тож друга чекає першу, а не блокує її у відповідь.
         var sql =
-            "SELECT * FROM dic.RegistryEntryKey" + (forUpdate ? " WITH (UPDLOCK, HOLDLOCK)" : string.Empty)
+            "SELECT * FROM dic.RegistryEntryKey"
+            + (forUpdate ? " WITH (UPDLOCK, HOLDLOCK, FORCESEEK (IX_RegistryEntryKey_Hash (RegistryKeyDefId, KeyHash)))" : string.Empty)
             + " WHERE RegistryKeyDefId = @keyDefId AND IsLive = 1 AND KeyHash IN ("
             + string.Join(", ", names) + ")";
         var live = db.RegistryEntryKeys.FromSqlRaw(sql, [.. parameters]);

@@ -29,7 +29,9 @@ namespace Ecr.Infrastructure.Tests.Persistence;
 /// звернень проти 4 / 4, N=2500 — 10000 проти 16 → обидва тести числа звернень червоні;
 /// прибрати виклик <c>LockHoldersAsync</c> зі служби — 22 / 242 і 5006; прибрати <c>HOLDLOCK</c>
 /// у пакетному блокуванні сховища → вставка суперника проходить,
-/// <see cref="Пакетне_блокування_тримає_вільний_ключ_до_кінця_транзакції"/> червоний.
+/// <see cref="Пакетне_блокування_тримає_вільний_ключ_до_кінця_транзакції"/> червоний; прибрати
+/// <c>FORCESEEK</c> → план блокує всі рядки ключа, вставка іншого хеша чекає (1222),
+/// <see cref="Пакетне_блокування_не_тримає_інших_хешів_того_самого_ключа"/> червоний.
 /// </para>
 /// </remarks>
 [Collection("SqlServer")]
@@ -118,6 +120,45 @@ public sealed class RegistryKeyBatchQueryTests(SqlServerFixture sql)
         store.ForgetPreloaded();
         Assert.Empty(await store.FindLiveHoldersForUpdateAsync(setup.PrimaryKeyId, free, 0, CancellationToken.None));
         Assert.Equal(1, counter.Tally.Snapshot().Total);
+
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
+    [Trait("Finding", "P9")]
+    public async Task Пакетне_блокування_не_тримає_інших_хешів_того_самого_ключа()
+    {
+        // Діапазонний замок тримає ПРОМІЖОК індексу, а не значення: вільні L і R не розділені
+        // жодним рядком лягли б в один проміжок. Тому між ними — наявний рядок M (L < M < R у
+        // порядку binary, тобто побайтно).
+        var (low, mid, high) = OrderedHashes();
+        var setup = await ArrangeAsync();
+        await using (var db = sql.CreateContext())
+        {
+            var holder = new RegistryEntry(setup.RegistryDefId, EcrCode.Create("MID"), Text("Mid"), 0, Now);
+            db.RegistryEntries.Add(holder);
+            db.RegistryEntryKeys.Add(new RegistryEntryKey(holder, setup.PrimaryKeyId, mid.Hash, mid.Text));
+            await db.SaveChangesAsync();
+        }
+
+        await using var checker = sql.CreateContext();
+        await using var transaction = await checker.Database.BeginTransactionAsync();
+        await new RegistryKeyStore(checker).LockLiveHoldersAsync(setup.PrimaryKeyId, [low.Hash], CancellationToken.None);
+
+        await using var rival = sql.CreateContext();
+        await rival.Database.OpenConnectionAsync();
+        await rival.Database.ExecuteSqlRawAsync("SET LOCK_TIMEOUT 1000");
+        var rivalEntry = new RegistryEntry(setup.RegistryDefId, EcrCode.Create("RIVAL"), Text("Rival"), 0, Now);
+        rival.RegistryEntries.Add(rivalEntry);
+        rival.RegistryEntryKeys.Add(new RegistryEntryKey(rivalEntry, setup.PrimaryKeyId, high.Hash, high.Text));
+
+        // ⛔ Без FORCESEEK по (RegistryKeyDefId, KeyHash) план блокував усі рядки ключа
+        // (UQ_RegistryEntryKey_Entry) або кластерний індекс — і будь-який запис довідника з ключем
+        // чекав би кінця чужого пакета (1222 тут).
+        await rival.SaveChangesAsync();
 
         await transaction.RollbackAsync();
     }
@@ -309,6 +350,16 @@ public sealed class RegistryKeyBatchQueryTests(SqlServerFixture sql)
                 .UseSqlServer(sql.ConnectionString, o => o.MigrationsHistoryTable("__EFMigrationsHistory", "dbo"))
                 .AddInterceptors(counter))
             .Options);
+
+    /// <summary>Три хеші ключа з одним рядком у кожному, упорядковані побайтно (як <c>binary</c> в індексі).</summary>
+    private static ((byte[] Hash, string Text) Low, (byte[] Hash, string Text) Mid, (byte[] Hash, string Text) High) OrderedHashes()
+    {
+        var sorted = Enumerable.Range(0, 3)
+            .Select(i => (Hash: Hash($"ORD{i}"), Text: $"ORD{i}"))
+            .OrderBy(h => Convert.ToHexString(h.Hash), StringComparer.Ordinal)
+            .ToList();
+        return (sorted[0], sorted[1], sorted[2]);
+    }
 
     private static byte[] Hash(params string[] parts)
         => RegistryKeyNormalizer.Hash(RegistryKeyNormalizer.Canonical(
