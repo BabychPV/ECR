@@ -25,6 +25,64 @@ public sealed class CollectionStoreRawPointUpsertTests(SqlServerFixture sql)
 {
     private static readonly DateTime Now = new(2026, 3, 1, 12, 0, 0, DateTimeKind.Utc);
 
+    /// <summary>Дробові частини секунди на межі округлення, у тіках (100 нс), плюс контроль.</summary>
+    public static TheoryData<long> BoundaryFractions => new() { 9_995_000, 9_996_000, 9_999_000, 9_999_999, 1_234_567 };
+
+    [Theory]
+    [MemberData(nameof(BoundaryFractions))]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "B4")]
+    public async Task Точка_записана_старим_шляхом_EF_на_межі_мілісекунди_не_дублюється_новим_MERGE(long fractionTicks)
+    {
+        // ⛔ Межа «обрізання проти округлення». До виправлення сирі точки писав
+        // ЛИШЕ EF (`db.RawDataPoints.Add` + `SaveChanges`, див. історію
+        // `CollectionStore.UpsertRawPointsAsync`) — і цей тест пише саме так,
+        // тим самим кодом. Сервер, отримавши `datetime2(7)`, ОКРУГЛЮЄ
+        // (`.9996` → наступна секунда, перевірено `sqlcmd`), але EF шле
+        // параметр зі `Scale = 3` за типом колонки, і SqlClient ділить тіки
+        // націло — тобто ОБРІЗАЄ до того, як сервер щось побачить. Новий MERGE
+        // мусить дати той самий ключ, інакше повторний збір лишить дубль поруч
+        // зі старою точкою на мілісекунду раніше/пізніше.
+        // МУТАЦІЙНИЙ ДОКАЗ (прогнано): у `UpsertRawPointsAsync` слати мітку
+        // з повною точністю (`point.Timestamp.ToString(".fffffff")` замість
+        // `ToStoredPrecision(...)` + `.fff`) — тоді `OPENJSON … Ts datetime2(3)`
+        // ОКРУГЛЮЄ так, як сервер, — і для `.9995`, `.9996`, `.9999`,
+        // `.9999999` у базі два рядки (4 червоні з 5; контроль `.1234567`
+        // зелений, бо там округлення й обрізання збігаються). Тобто
+        // «округлювати як сервер» тут і є дефект, а не виправлення.
+        await using var db = sql.CreateContext();
+        var entityId = await ArrangeEntityAsync(db);
+
+        try
+        {
+            var store = new CollectionStore(db, new TestClock(Now));
+            var runId = await store.StartRunAsync(entityId, Now.AddDays(-1), Now, false, null, CancellationToken.None);
+            var ts = Now.AddHours(-3).AddTicks(fractionTicks);
+
+            // Старий шлях — дослівно те, що робив `UpsertRawPointsAsync` до зміни.
+            var legacy = new RawDataPoint(entityId, Path, ts, runId, Now);
+            legacy.SetValue(1m, null, null, "Good");
+            db.RawDataPoints.Add(legacy);
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            var legacyStored = Assert.Single(await ReadAsync(entityId)).Timestamp;
+
+            // Документує, що саме зробив старий шлях: обрізання до мс.
+            Assert.Equal(CollectionStore.ToStoredPrecision(ts), legacyStored);
+
+            await store.UpsertRawPointsAsync(runId, entityId, [Point(ts, 5m)], CancellationToken.None);
+
+            var stored = Assert.Single(await ReadAsync(entityId));
+            Assert.Equal(legacyStored, stored.Timestamp);
+            Assert.Equal(5m, stored.ValueNumeric);
+        }
+        finally
+        {
+            await CleanUpAsync(entityId);
+        }
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
