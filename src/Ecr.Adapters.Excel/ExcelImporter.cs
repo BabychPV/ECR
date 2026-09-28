@@ -64,7 +64,14 @@ public sealed class ExcelImporter(
     {
         ArgumentNullException.ThrowIfNull(file);
 
-        using var workbook = Open(file);
+        // ⛔ S10: огляд zip-каталогу потребує позиціювання. Потік без нього
+        // буферизується з тією ж стелею, що й тіло запиту, — інакше сам буфер
+        // став би обходом запобіжника.
+        var seekable = await XlsxSafetyGate.SeekableAsync(file, ct).ConfigureAwait(false)
+                       ?? throw XlsxSafetyGate.Rejection("файл більший за стелю пакета");
+        await using var buffered = ReferenceEquals(seekable, file) ? null : seekable;
+
+        using var workbook = Open(seekable);
         var map = ReadMap(workbook);
 
         // ⛔ Книга з чужого документа не імпортується в цей. Однакова
@@ -633,8 +640,16 @@ public sealed class ExcelImporter(
     }
 
     /// <summary>Відкриває книгу або каже, що це не книга.</summary>
+    /// <remarks>
+    /// ⛔ S10: спершу — <see cref="XlsxSafetyGate"/> (межі розпакованого
+    /// розміру, стиснення й кількості записів) ПОЗА <c>try</c> нижче: його
+    /// відмова вже має код і ключ, а ClosedXML не бачить непридатного пакета
+    /// взагалі.
+    /// </remarks>
     private static XLWorkbook Open(Stream file)
     {
+        XlsxSafetyGate.EnsureSafe(file);
+
         try
         {
             return new XLWorkbook(file);

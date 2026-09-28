@@ -39,6 +39,17 @@ public sealed class DocumentsController(
     GetDocumentHeaderHandler getHeader,
     PatchDocumentHeaderHandler patchHeader) : ControllerBase
 {
+    /// <summary>
+    /// Стеля тіла запиту перегляду імпорту — рівно стандартна межа Kestrel
+    /// (<c>30 000 000</c>), оголошена на ендпоінті явно (`S10`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Явно — щоб межа не залежала від налаштувань сервера: підняте колись
+    /// глобально <c>MaxRequestBodySize</c> мовчки підняло б і розмір книги, яку
+    /// приймає імпорт. Розпакований розмір стримує <c>XlsxSafetyGate</c>
+    /// (Adapters.Excel) — ця стеля лише для стиснутого файлу.
+    /// </remarks>
+    public const long MaxImportBodyBytes = 30_000_000;
     /// <summary>Перелік документів. Право <c>Document.View</c>.</summary>
     /// <remarks>
     /// Зведений стан документа <b>рахується запитом</b> із <c>wf.ApprovalState</c>,
@@ -492,6 +503,7 @@ public sealed class DocumentsController(
     /// <summary>Попередній перегляд імпорту. Право <c>Document.Import</c>.</summary>
     /// <remarks>Імпорт **завжди** через перегляд diff (ФВ-4.3): застосування — окремим викликом.</remarks>
     [HttpPost("{id:long}/import/preview")]
+    [RequestSizeLimit(MaxImportBodyBytes)]
     [ProducesResponseType<Ecr.Application.Ports.ImportPreview>(StatusCodes.Status200OK)]
     public async Task<IActionResult> ImportPreview(long id, IFormFile file, CancellationToken ct)
     {
