@@ -54,8 +54,16 @@ public sealed class ProgramDataConfigurationTests
         // Той самий порядок викликів, що Program.cs (AddProgramDataConfig,
         // потім AddEnvironmentVariables(prefix: "ECR_")) — доводить D-11
         // наживо: секрет із файлу НІКОЛИ не переможе явно заданий ECR_.
-        var root = CreateConfigFile("""{ "ConnectionStrings": { "Ecr": "from-file-must-lose" } }""");
-        const string envVar = "ECR_ConnectionStrings__Ecr";
+        //
+        // ⛔ Ключ — власний (ConnectionStrings:ProgramDataProbe), НЕ "Ecr":
+        // клас поза колекцією "SqlServer" і йде паралельно з фабриками, а ті
+        // передають справжній рядок з'єднання через ECR_ConnectionStrings__Ecr
+        // змінною ПРОЦЕСУ. Спільний ключ давав гонитву: хост фабрики стартував
+        // із "from-env-must-win" або (після finally) без рядка взагалі.
+        // Порядок шарів не залежить від імені ключа, а секція ConnectionStrings
+        // та сама — доказ не слабшає.
+        var root = CreateConfigFile("""{ "ConnectionStrings": { "ProgramDataProbe": "from-file-must-lose" } }""");
+        const string envVar = "ECR_ConnectionStrings__ProgramDataProbe";
         Environment.SetEnvironmentVariable(envVar, "from-env-must-win");
         try
         {
@@ -64,7 +72,7 @@ public sealed class ProgramDataConfigurationTests
                 .AddEnvironmentVariables(prefix: "ECR_")
                 .Build();
 
-            Assert.Equal("from-env-must-win", config.GetConnectionString("Ecr"));
+            Assert.Equal("from-env-must-win", config.GetConnectionString("ProgramDataProbe"));
         }
         finally
         {
