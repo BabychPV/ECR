@@ -1053,12 +1053,21 @@ export function DocumentGrid(props: DocumentGridProps): JSX.Element {
         columnIndex: dataColumnIndexOf(anchor.columnIndex, data),
       };
 
+      // ⛔ U1: неоднозначне число (`1,234` в en) відхиляється лише в числових
+      // колонках (`clipboard.ts`, `readNumber`); у текстовій це просто текст.
+      const numericCodes = new Set(
+        data.columns
+          .filter((column) => column.dataType === 'Decimal' || column.dataType === 'Int')
+          .map((column) => column.code),
+      );
+
       const plan = planPaste(
         parseClipboard(text),
         data.rows.map((row) => row.rowKey),
         data.columns.map((column) => column.code),
         dataAnchor,
         guardOf(data),
+        (code) => numericCodes.has(code),
       );
 
       if (plan.rejected.length > 0) {
