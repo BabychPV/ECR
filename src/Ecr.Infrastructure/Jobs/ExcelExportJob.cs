@@ -43,6 +43,15 @@ public sealed class ExcelExportJob(
 
         var task = ExportPayload.Parse(payload);
 
+        // ⛔ S6: файл кладеться під замовником, і завантажує його лише він.
+        // Завдання без замовника (поставлене до цієї правки) не будує нічого:
+        // файл без власника не віддав би ніхто, а будувати його — марна робота.
+        var ownerUserId = task.RequestedByUserId
+                          ?? throw new Ecr.Application.Errors.AccessDeniedException(
+                              "ECR-AUTH-0401",
+                              "Завдання експорту не називає замовника: побудуйте експорт заново.",
+                              new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
         await progress.ReportKeyAsync(10, "jobs.exportReadingDocument", ct).ConfigureAwait(false);
 
         byte[] content;
@@ -68,7 +77,7 @@ public sealed class ExcelExportJob(
         await progress.ReportKeyAsync(80, "jobs.exportSavingWorkbook", ct).ConfigureAwait(false);
 
         await exports
-            .SaveAsync(task.ExportId, task.DocumentId, content, Lifetime, ct)
+            .SaveAsync(task.ExportId, task.DocumentId, ownerUserId, content, Lifetime, ct)
             .ConfigureAwait(false);
 
         // ⚠ Q-326: НЕ конвертується на структурований ключ. Ключ

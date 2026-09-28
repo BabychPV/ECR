@@ -26,10 +26,15 @@ public interface IExportStore
     /// при завантаженні, і захист лишається лише непередбачуваністю
     /// <paramref name="exportId"/>.
     /// </param>
+    /// <param name="ownerUserId">
+    /// Хто замовив експорт — S6: файл побудований у ЙОГО межах читання, і
+    /// віддається лише йому, а не будь-кому з видимістю документа.
+    /// </param>
     /// <param name="content">Вміст книги.</param>
     /// <param name="lifetime">Скільки живе.</param>
     /// <param name="ct">Скасування.</param>
-    public Task SaveAsync(string exportId, long documentId, byte[] content, TimeSpan lifetime, CancellationToken ct);
+    public Task SaveAsync(
+        string exportId, long documentId, int ownerUserId, byte[] content, TimeSpan lifetime, CancellationToken ct);
 
     /// <summary>Читає книгу; <c>null</c> — її немає або строк вийшов.</summary>
     /// <param name="exportId">Ключ експорту.</param>
@@ -39,5 +44,6 @@ public interface IExportStore
 
 /// <summary>Готова книга разом із документом, з якого вона побудована.</summary>
 /// <param name="DocumentId">Документ — потрібен для перевірки гранта при завантаженні (Q-180).</param>
+/// <param name="OwnerUserId">Хто замовив — єдиний, кому книга віддається (S6).</param>
 /// <param name="Content">Вміст книги.</param>
-public sealed record ExportedBook(long DocumentId, byte[] Content);
+public sealed record ExportedBook(long DocumentId, int OwnerUserId, byte[] Content);

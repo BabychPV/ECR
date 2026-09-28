@@ -42,7 +42,8 @@ public sealed class DownloadExportHandler(
     /// <param name="exportId">Ключ експорту з прогресу задачі.</param>
     /// <param name="ct">Скасування.</param>
     /// <exception cref="NotFoundException">
-    /// Книги немає або строк її життя вийшов — <c>ECR-DOC-0404</c>.
+    /// Книги немає, строк її життя вийшов або її замовив інший користувач
+    /// (S6) — <c>ECR-DOC-0404</c>, однаково для всіх трьох.
     /// </exception>
     /// <exception cref="AccessDeniedException">
     /// Немає гранта на документ, з якого побудована книга — <c>ECR-AUTH-0403</c>.
@@ -59,16 +60,28 @@ public sealed class DownloadExportHandler(
         // нього застарілий/невідомий exportId завжди впав би на «немає
         // гранта», ховаючи справжню причину (файл прострочився чи його
         // взагалі не було) за помилковим 403.
-        var book = await exports.FindAsync(exportId, ct).ConfigureAwait(false)
-                   ?? throw new NotFoundException(
-                       "ECR-DOC-0404",
-                       "Книги немає або строк її життя вийшов: побудуйте експорт заново.",
-                       new Dictionary<string, object?>
-                       {
-                           // ⚠ Без підстановок: `exportId` — внутрішній ключ
-                           // задачі, і користувачеві він нічого не каже.
-                           ["messageKey"] = "err.ECR-DOC-0404.exportExpired",
-                       });
+        var book = await exports.FindAsync(exportId, ct).ConfigureAwait(false);
+
+        // ⛔ S6: книга побудована в межах читання ЗАМОВНИКА — без його
+        // заборонених таблиць і колонок, а з рештою. Видимість документа тут
+        // не аргумент: колега з тим самим проєктом, але з іншими заборонами,
+        // отримав би чужий зріз. Тому віддається лише замовникові, а чужий
+        // `exportId` — рівно та сама 404, що й неіснуючий: інакше відповідь
+        // сама казала б «такий експорт є, просто не твій». Винятку для
+        // адміністратора немає — права «читати чужі експорти» в системі немає.
+        var requester = currentUser.UserId ?? profile.UserId;
+        if (book is null || book.OwnerUserId != requester)
+        {
+            throw new NotFoundException(
+                "ECR-DOC-0404",
+                "Книги немає або строк її життя вийшов: побудуйте експорт заново.",
+                new Dictionary<string, object?>
+                {
+                    // ⚠ Без підстановок: `exportId` — внутрішній ключ
+                    // задачі, і користувачеві він нічого не каже.
+                    ["messageKey"] = "err.ECR-DOC-0404.exportExpired",
+                });
+        }
 
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.

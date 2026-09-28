@@ -34,7 +34,7 @@ namespace Ecr.Api.Tests.Security;
 /// усі тести з <c>reader</c>, регресійні (<c>plain</c>) лишаються зеленими.
 /// </remarks>
 [Collection("SqlServer")]
-public sealed class DenyReadTests(SqlServerFixture sql)
+public sealed partial class DenyReadTests(SqlServerFixture sql)
 {
     private const string Password = "Api-Deny-Read-2026!";
 

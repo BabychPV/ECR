@@ -31,12 +31,14 @@ public sealed class ExportStoreTests(SqlServerFixture sql)
         var exportId = Guid.NewGuid().ToString("N");
         var content = new byte[] { 1, 2, 3, 4, 5 };
 
-        await writer.SaveAsync(exportId, documentId: 700, content, TimeSpan.FromMinutes(5), CancellationToken.None);
+        await writer.SaveAsync(
+            exportId, documentId: 700, ownerUserId: 42, content, TimeSpan.FromMinutes(5), CancellationToken.None);
 
         var found = await reader.FindAsync(exportId, CancellationToken.None);
 
         Assert.NotNull(found);
         Assert.Equal(700, found.DocumentId);
+        Assert.Equal(42, found.OwnerUserId);
         Assert.Equal(content, found.Content);
     }
 

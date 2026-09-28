@@ -77,9 +77,14 @@ public sealed class ExportDocumentHandler(
         // ⚠ `createdByUserId` — щоб автор прочитав стан ВЛАСНОЇ задачі без
         // System.ViewHealth (Q-156). CSV/JSON ідуть ТІЄЮ САМОЮ задачею, що й
         // xlsx: той самий прогрес, `exportId` і завантаження.
+        // ⛔ S6: замовник їде й у завданні — задача кладе файл під ним, і
+        // завантажити його може лише він (`DownloadExportHandler`): межі
+        // читання в файлі — ЙОГО межі, а не того, хто дізнався `exportId`.
+        var requestedBy = currentUser.UserId ?? profile.UserId;
+
         return await jobs
             .EnqueueAsync<IExcelExportJob>(
-                new ExcelExportTask(documentId, options, exportId, normalized), ct, currentUser.UserId)
+                new ExcelExportTask(documentId, options, exportId, normalized, requestedBy), ct, currentUser.UserId)
             .ConfigureAwait(false);
     }
 }
@@ -89,8 +94,15 @@ public sealed class ExportDocumentHandler(
 /// <param name="Options">Режим експорту разом із періодом.</param>
 /// <param name="ExportId">Ключ, під яким задача покладе готову книгу.</param>
 /// <param name="Format">Формат; <c>null</c> у завданнях, поставлених до ФВ-4.2, — це xlsx.</param>
+/// <param name="RequestedByUserId">
+/// Хто замовив експорт — S6: лише він і завантажить готовий файл
+/// (<see cref="DownloadExportHandler"/>). <c>null</c> лише в завданні,
+/// поставленому до цієї правки; така задача відмовляє, а не кладе файл,
+/// який не має власника.
+/// </param>
 public sealed record ExcelExportTask(
-    long DocumentId, ExcelExportOptions Options, string ExportId, string? Format = DocumentExportFormat.Xlsx);
+    long DocumentId, ExcelExportOptions Options, string ExportId, string? Format = DocumentExportFormat.Xlsx,
+    int? RequestedByUserId = null);
 
 /// <summary>
 /// Попередній перегляд імпорту. Право <c>Document.Import</c>.
