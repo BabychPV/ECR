@@ -67,7 +67,16 @@ public sealed class JobsHealthCheck(
                 var stopped = await Text(
                     "health.jobs.stopped", "The scheduler is stopped: no background job will run.",
                     cancellationToken).ConfigureAwait(false);
-                return HealthCheckResult.Unhealthy(stopped, data: Data(0, 0));
+
+                // ⛔ U7: лише Degraded — той самий принцип, що й для завислих
+                // задач нижче: тло не виводить інстанс із ротації. Перевірка
+                // має тег `ready`, і Unhealthy дав би `/health/ready` 503 —
+                // балансувальник зняв би API, який обслуговує запити, через
+                // стан планувальника. Тяжкість показують текст
+                // (`health.jobs.stopped`) і `schedulerStopped = true`.
+                var data = Data(0, 0);
+                data["schedulerStopped"] = true;
+                return HealthCheckResult.Degraded(stopped, data: data);
             }
 
             var jobs = await scheduler

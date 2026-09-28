@@ -53,11 +53,13 @@ public sealed class HealthRedStateTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
-    public async Task Задачі_червоніють_коли_планувальник_зупинений()
+    public async Task Задачі_жовтіють_з_ознакою_коли_планувальник_зупинений()
     {
-        // ⛔ Зупинений планувальник — найгірший стан із можливих: процес живий,
+        // ⛔ Зупинений планувальник — найгірший стан тла: процес живий,
         // API відповідає, а стани періодів не оновлюються, партиції не
-        // додаються і сповіщення не йдуть. Ззовні все гаразд.
+        // додаються і сповіщення не йдуть. Він мусить бути видимим — але
+        // Degraded, не Unhealthy (U7): тло не виводить інстанс із ротації.
+        // Тяжкість — у `schedulerStopped`, а не в коді відповіді.
         var scheduler = Substitute.For<IScheduler>();
         scheduler.IsStarted.Returns(false);
 
@@ -66,7 +68,8 @@ public sealed class HealthRedStateTests
 
         var result = await Jobs(factory).CheckHealthAsync(Context, CancellationToken.None);
 
-        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+        Assert.Equal(HealthStatus.Degraded, result.Status);
+        Assert.Equal(true, result.Data["schedulerStopped"]);
     }
 
     [Fact]

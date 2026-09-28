@@ -5,6 +5,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Ports;
 using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -122,6 +123,41 @@ public sealed class JobsHealthStaleTests(SqlServerFixture sql)
             await using var db = sql.CreateContext();
             await new JobProgressStore(db).FinishAsync(jobId, "Failed", "test", now, CancellationToken.None);
         }
+    }
+
+    /// <remarks>
+    /// ⛔ U7 (погоджено з «Аудитом»): зупинений планувальник — той самий принцип,
+    /// що й зависле тло: інстанс, який обслуговує запити, не виводиться з
+    /// ротації через стан фонових задач. Планувальник підмінено заглушкою
+    /// «не запущено» в контейнері справжнього хоста — ламається саме те, що
+    /// бачить <c>/health/ready</c>, а не окремий об'єкт перевірки.
+    /// Мутація: повернути <c>Unhealthy</c> для «планувальник зупинено» → 503, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Зупинений_планувальник_не_робить_health_ready_503_а_jobs_показує_жовтий()
+    {
+        var stopped = Substitute.For<IScheduler>();
+        stopped.IsStarted.Returns(false);
+        stopped.IsShutdown.Returns(true);
+        var factory = Substitute.For<ISchedulerFactory>();
+        factory.GetScheduler(Arg.Any<CancellationToken>()).Returns(stopped);
+        factory.GetScheduler(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(stopped);
+
+        using var host = new EcrApiFactory(sql);
+        using var app = host.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton(factory)));
+        using var client = app.CreateClient();
+
+        var response = await client.GetAsync(new Uri("/health/ready", UriKind.Relative));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode != System.Net.HttpStatusCode.ServiceUnavailable, body);
+
+        var jobs = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("checks")
+            .EnumerateArray()
+            .Single(c => string.Equals(c.GetProperty("name").GetString(), "jobs", StringComparison.Ordinal));
+        Assert.Equal("Degraded", jobs.GetProperty("status").GetString());
     }
 
     private async Task<Infrastructure.Jobs.SweepOutcome> SweepAtAsync(DateTime at)
