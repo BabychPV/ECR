@@ -885,6 +885,32 @@ CREATE INDEX IX_RegistryUse_Registry ON cfg.RegistryUse (RegistryDefId)
 CREATE INDEX IX_RegistryUse_Source ON cfg.RegistryUse (SourceKind, SourceId);
 GO
 
+-- Профілі імпорту довідника (FEATURE-REGISTRY-TABLES §4.6, §8.6, міграція
+-- RK05RegistryImportProfile; D-170): збережена RegistryImportSpec — аркуш,
+-- орієнтація, рядки заголовка, цілі й відображення, — щоб наступна ревізія
+-- HMB імпортувалась у два кліки. Вибір авторитетного стовпця-дубля (D-196,
+-- "duplicateSources": {"CO": "Carbon_Monoxide"}) — частина SpecJson.
+-- Код і довідник після створення не змінюються. RowVersion — If-Match для
+-- зміни й видалення профілю (409 profileChanged, RT-18c).
+CREATE TABLE cfg.RegistryImportProfile
+(
+    Id              int           IDENTITY(1,1) NOT NULL,
+    RegistryDefId   int           NOT NULL,
+    Code            nvarchar(64)  NOT NULL,
+    NameL10n        nvarchar(max) NOT NULL,
+    SpecJson        nvarchar(max) NOT NULL,   -- RegistryImportSpec, JSON-об'єкт
+    UpdatedAt       datetime2(3)  NOT NULL,
+    UpdatedByUserId int           NOT NULL,
+    RowVersion      rowversion    NOT NULL,
+    CONSTRAINT PK_RegistryImportProfile PRIMARY KEY (Id),
+    CONSTRAINT UQ_RegistryImportProfile UNIQUE (RegistryDefId, Code),
+    -- Синтаксис тримає й база: профіль, вставлений повз домен зі зламаним
+    -- JSON, зламав би майстер імпорту тому, хто відкриє його наступним.
+    CONSTRAINT CK_RegImpProfile_Json CHECK (ISJSON(SpecJson) = 1),
+    CONSTRAINT FK_RegImpProfile_Def FOREIGN KEY (RegistryDefId) REFERENCES cfg.RegistryDef (Id)
+);
+GO
+
 -- Результат методології → колонка документа. Значення НЕ копіюється
 -- у doc.CellValue: воно читається за посиланням (D-69, П-33).
 CREATE TABLE cfg.CalculationBinding

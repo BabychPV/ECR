@@ -52,6 +52,9 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
 
     /// <summary>Хто використовує довідник: формули й правила (FEATURE-REGISTRY-TABLES, RT-05).</summary>
     public DbSet<RegistryUse> RegistryUses => Set<RegistryUse>();
+
+    /// <summary>Профілі імпорту довідників (FEATURE-REGISTRY-TABLES, RT-06).</summary>
+    public DbSet<RegistryImportProfile> RegistryImportProfiles => Set<RegistryImportProfile>();
     public DbSet<CalculationBinding> CalculationBindings => Set<CalculationBinding>();
 
     // uom
