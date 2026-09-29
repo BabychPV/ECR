@@ -59,7 +59,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             SELECT TOP (1) q.*
             FROM itg.JobProgress AS q WITH (ROWLOCK, READPAST, UPDLOCK)
             WHERE q.Lane = @lane AND q.Lane IS NOT NULL
-              AND q.[State] = 'Running' AND q.LeaseUntil < SYSUTCDATETIME()
+              AND q.[State] = 'Running' AND q.LeaseUntil < CAST(SYSUTCDATETIME() AS datetime2(3))
               AND q.CancelRequestedAt IS NULL
               AND ISNULL(q.ReclaimCount, 0) < @maxReclaims
             ORDER BY q.AvailableAt, q.JobId)
@@ -73,13 +73,20 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// READPAST (правка А): <c>Running</c> під чужим локом читається останньою
     /// закоміченою версією (RCSI), а не пропускається.
     /// </summary>
+    /// <remarks>
+    /// ⛔ «Зараз» — <c>CAST(SYSUTCDATETIME() AS datetime2(3))</c>, не голий
+    /// <c>SYSUTCDATETIME()</c>: <c>AvailableAt</c> пишеться як <c>datetime2(3)</c>, а
+    /// перетворення ОКРУГЛЮЄ (до 0,5 мс угору). Без CAST задача, поставлена в ту
+    /// саму мілісекунду, що й claim, лежала «в майбутньому» і claim повертав null.
+    /// Те саме для <c>LeaseUntil</c> у переклеймі й <see cref="ExpireAsync"/>.
+    /// </remarks>
     internal const string ClaimQueuedSql = """
         /* ecr:jobqueue-claim */
         WITH candidate AS (
             SELECT TOP (1) q.*
             FROM itg.JobProgress AS q WITH (ROWLOCK, READPAST, UPDLOCK)
             WHERE q.Lane = @lane AND q.Lane IS NOT NULL
-              AND q.[State] = 'Queued' AND q.AvailableAt <= SYSUTCDATETIME()
+              AND q.[State] = 'Queued' AND q.AvailableAt <= CAST(SYSUTCDATETIME() AS datetime2(3))
               AND NOT EXISTS (
                   SELECT 1 FROM itg.JobProgress AS r
                   WHERE r.TargetKey = q.TargetKey AND r.TargetKey IS NOT NULL AND r.[State] = 'Running')
@@ -512,12 +519,12 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             DECLARE @n int;
             UPDATE itg.JobProgress WITH (ROWLOCK, READPAST)
             SET [State] = 'Failed', [Message] = @poisoned, LeaseUntil = NULL, UpdatedAt = @shown
-            WHERE Lane IS NOT NULL AND [State] = 'Running' AND LeaseUntil < SYSUTCDATETIME()
+            WHERE Lane IS NOT NULL AND [State] = 'Running' AND LeaseUntil < CAST(SYSUTCDATETIME() AS datetime2(3))
               AND CancelRequestedAt IS NULL AND ISNULL(ReclaimCount, 0) >= @max;
             SET @n = @@ROWCOUNT;
             UPDATE itg.JobProgress WITH (ROWLOCK, READPAST)
             SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown
-            WHERE Lane IS NOT NULL AND [State] = 'Running' AND LeaseUntil < SYSUTCDATETIME()
+            WHERE Lane IS NOT NULL AND [State] = 'Running' AND LeaseUntil < CAST(SYSUTCDATETIME() AS datetime2(3))
               AND CancelRequestedAt IS NOT NULL;
             SELECT @n + @@ROWCOUNT;
             """,
