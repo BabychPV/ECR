@@ -11,7 +11,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Quartz;
-using Quartz.Impl;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -36,7 +35,12 @@ namespace Ecr.Api.Tests;
 /// виклик <c>InterruptRunningJobsAsync</c> → задача не отримує скасування і
 /// тримається свої 30 с, тест червоний (прогнано).
 /// </para>
+/// <para>
+/// Колекція <c>SqlServer</c> — не заради бази, а щоб жоден тестовий хост не
+/// перев'язав статичний журнал Quartz посеред тесту (див. <see cref="StandaloneQuartz"/>).
+/// </para>
 /// </remarks>
+[Collection("SqlServer")]
 public sealed class StoppingInterruptsJobsTests
 {
     private const string RunKey = "test.runId";
@@ -75,11 +79,7 @@ public sealed class StoppingInterruptsJobsTests
     [Trait("Requirement", "U8")]
     public async Task Зупинка_застосунку_надсилає_скасування_задачі_що_виконується()
     {
-        var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
-        {
-            ["quartz.scheduler.instanceName"] = $"ecr-stopping-{Guid.NewGuid():N}",
-            ["quartz.threadPool.threadCount"] = "1",
-        });
+        var factory = StandaloneQuartz.Factory("ecr-stopping");
         var quartz = await factory.GetScheduler();
 
         var runId = Guid.NewGuid().ToString("N");

@@ -10,7 +10,6 @@ using Ecr.Infrastructure.Persistence;
 using Ecr.TestKit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Quartz.Impl;
 using Xunit;
 
 namespace Ecr.Api.Tests;
@@ -138,11 +137,7 @@ public sealed class CollectionScheduleStateSaveTests(SqlServerFixture sql)
         RecordingLogger<RecurringScheduleService> logger,
         IReadOnlySet<int> localSourceEntityIds)
     {
-        var jobs = new QuartzJobScheduler(new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
-        {
-            ["quartz.scheduler.instanceName"] = $"ecr-tests-{Guid.NewGuid():N}",
-            ["quartz.threadPool.threadCount"] = "1",
-        }));
+        var jobs = new QuartzJobScheduler(StandaloneQuartz.Factory("ecr-tests"));
 
         return RecurringScheduleService.ApplyCollectionSchedulesAsync(
             schedules, localSourceEntityIds, jobs, new CollectionScheduleApplier(jobs), logger, Now,

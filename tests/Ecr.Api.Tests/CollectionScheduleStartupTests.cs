@@ -6,7 +6,6 @@ using Ecr.Infrastructure.Jobs;
 using Ecr.TestKit;
 using Microsoft.Extensions.Logging;
 using Quartz;
-using Quartz.Impl;
 using Quartz.Impl.Matchers;
 using Xunit;
 
@@ -19,7 +18,10 @@ namespace Ecr.Api.Tests;
 /// <remarks>
 /// ⚠ Планувальник — справжній Quartz у пам'яті, не запущений; бази не треба:
 /// <c>ApplyCollectionSchedulesAsync</c> приймає вже прочитані розклади.
+/// Колекція <c>SqlServer</c> — не заради бази, а щоб жоден тестовий хост не
+/// перев'язав статичний журнал Quartz посеред тесту (див. <see cref="StandaloneQuartz"/>).
 /// </remarks>
+[Collection("SqlServer")]
 public sealed class CollectionScheduleStartupTests
 {
     private const string Hourly = "0 5 * * * ?";
@@ -30,11 +32,7 @@ public sealed class CollectionScheduleStartupTests
 
     private static async Task<(QuartzJobScheduler Jobs, IScheduler Quartz)> SchedulerAsync()
     {
-        var factory = new StdSchedulerFactory(new System.Collections.Specialized.NameValueCollection
-        {
-            ["quartz.scheduler.instanceName"] = $"ecr-tests-{Guid.NewGuid():N}",
-            ["quartz.threadPool.threadCount"] = "1",
-        });
+        var factory = StandaloneQuartz.Factory("ecr-tests");
 
         return (new QuartzJobScheduler(factory), await factory.GetScheduler().ConfigureAwait(false));
     }
