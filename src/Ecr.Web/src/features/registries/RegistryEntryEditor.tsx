@@ -18,6 +18,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { LocalizedInput, hasAnyText, type LocalizedValue } from '@/shared/ui/LocalizedInput';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { t } from '@/shared/i18n';
+import { RegistryExternalKeysPanel } from './RegistryExternalKeysPanel';
 
 type RegistryEntryDetailDto = components['schemas']['RegistryEntryDetailDto'];
 
@@ -176,7 +177,13 @@ function ExistingEntry({
     return <Skeleton height={160} radius="sm" data-registry-entry="pending" />;
   }
 
-  return <EntryForm registry={registry} entry={entry} initial={entryFormOf(detail.data)} onClose={onClose} />;
+  return (
+    <>
+      <EntryForm registry={registry} entry={entry} initial={entryFormOf(detail.data)} onClose={onClose} />
+      {/* S2: зв'язки лише у ЗАВЕДЕНОГО запису — у нового ще немає Id. */}
+      <RegistryExternalKeysPanel registryCode={registry.code} entryId={entry.id} />
+    </>
+  );
 }
 
 function EntryForm({
