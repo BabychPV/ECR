@@ -143,7 +143,7 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     /// <param name="purge">Чи виконувати ретенцію завершених записів прогресу.</param>
     /// <param name="ct">Скасування.</param>
     /// <param name="startingInstance">
-    /// Лише на СТАРТІ: процес, що стартує (<c>JobProgressStore.CurrentMachineName</c>,
+    /// Лише на СТАРТІ: процес, що стартує (<c>JobProgressStore.CurrentHostName</c> — повне ім'я,
     /// <c>JobProgressStore.CurrentRole</c>, <c>JobProgressStore.CurrentInstanceId</c>).
     /// Тоді активні рядки попередніх процесів цієї машини Й ЦІЄЇ РОЛІ
     /// закриваються НЕЗАЛЕЖНО від биття.

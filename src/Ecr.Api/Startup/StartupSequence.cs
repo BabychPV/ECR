@@ -145,7 +145,7 @@ public static partial class StartupSequence
                     clock.UtcNow,
                     purge: false,
                     CancellationToken.None,
-                    (Infrastructure.Persistence.JobProgressStore.CurrentMachineName,
+                    (Infrastructure.Persistence.JobProgressStore.CurrentHostName,
                      Infrastructure.Persistence.JobProgressStore.CurrentRole,
                      Infrastructure.Persistence.JobProgressStore.CurrentInstanceId))
                 .ConfigureAwait(false);

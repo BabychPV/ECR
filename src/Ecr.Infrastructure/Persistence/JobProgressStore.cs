@@ -27,9 +27,16 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// 27 + «/» + 3 (роль) + «/» + 32 (GUID «N») = 64 — рівно межа стовпця
     /// (<c>nvarchar(64)</c>, <see cref="JobProgress.MaxInstanceIdLength"/>). ⚠ Було 31
     /// до ролі (P3, ФВ-9.8): чотири символи віддано ролі й роздільнику. NetBIOS-ім'я
-    /// Windows — до 15 символів, тож обрізання зачіпає хіба довгі DNS-імена Linux.
+    /// Windows — до 15 символів, тож скорочення зачіпає хіба довгі DNS-імена Linux.
     /// </remarks>
     private const int MaxMachineNameLength = 27;
+
+    /// <summary>Скільки перших символів довгого імені лишається перед «~» і хешем.</summary>
+    /// <remarks>18 + «~» + 8 hex = 27 = <see cref="MaxMachineNameLength"/>.</remarks>
+    private const int HashedNameHeadLength = 18;
+
+    /// <summary>Скільки hex-символів хешу повного імені йде в скорочене ім'я.</summary>
+    private const int HashedNameHashLength = 8;
 
     /// <summary>Межа імені машини в рядках СТАРОГО формату <c>{машина}/{GUID}</c> (до P3).</summary>
     private const int LegacyMaxMachineNameLength = 31;
@@ -37,8 +44,11 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// <summary>Довжина GUID у форматі «N».</summary>
     private const int GuidLength = 32;
 
+    /// <summary>Повне ім'я цієї машини (як його повертає ОС) — для <see cref="FailPreviousInstanceAsync"/>.</summary>
+    public static string CurrentHostName { get; } = Environment.MachineName;
+
     /// <summary>Ім'я цієї машини в тому вигляді, в якому воно стоїть в <see cref="JobProgress.InstanceId"/>.</summary>
-    public static string CurrentMachineName { get; } = MachineNameOf(Environment.MachineName);
+    public static string CurrentMachineName { get; } = MachineNameOf(CurrentHostName);
 
     /// <summary>GUID цього процесу — генерується раз на старті.</summary>
     /// <remarks>
@@ -112,12 +122,40 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         }
     }
 
-    /// <summary>Ім'я машини, обрізане до межі.</summary>
-    /// <param name="machineName">Сире ім'я.</param>
+    /// <summary>
+    /// Ім'я машини для <see cref="JobProgress.InstanceId"/>: до 27 символів — як є;
+    /// довше — перші 18 символів, «~» і 8 hex SHA-256 ПОВНОГО імені (разом 27).
+    /// </summary>
+    /// <param name="machineName">Повне ім'я.</param>
+    /// <remarks>
+    /// ⛔ Не просте обрізання: хости ферми з довгими FQDN (<c>…-node-01</c>,
+    /// <c>…-node-02</c>) мають спільні перші 27 символів, і обрізане ім'я
+    /// збігалося б — старт одного закривав би задачі іншого як «попереднього
+    /// процесу цієї машини». Хеш — SHA-256 (детермінований між процесами й
+    /// перезапусками), а не <c>string.GetHashCode</c>, рандомізований на процес.
+    /// Функція ідемпотентна: нормалізоване ім'я не довше 27 і повертається як є.
+    /// </remarks>
     public static string MachineNameOf(string machineName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(machineName);
-        return machineName.Length <= MaxMachineNameLength ? machineName : machineName[..MaxMachineNameLength];
+
+        if (machineName.Length <= MaxMachineNameLength)
+        {
+            return machineName;
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(machineName));
+        var hex = Convert.ToHexStringLower(hash)[..HashedNameHashLength];
+
+        return $"{machineName[..HashedNameHeadLength]}~{hex}";
+    }
+
+    /// <summary>Ім'я машини в рядках старого формату (до P3): перші 31 символ повного імені.</summary>
+    /// <param name="machineName">Повне ім'я.</param>
+    public static string LegacyMachineNameOf(string machineName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(machineName);
+        return machineName.Length <= LegacyMaxMachineNameLength ? machineName : machineName[..LegacyMaxMachineNameLength];
     }
 
     /// <summary>Ідентифікатор процесу: <c>{машина}/{роль}/{GUID N}</c>.</summary>
@@ -499,13 +537,19 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         ArgumentException.ThrowIfNullOrWhiteSpace(currentInstanceId);
         EnsureKnownRole(role);
 
+        // ⚠ `machineName` — ПОВНЕ ім'я хоста (`CurrentHostName`); нормалізація
+        // (`MachineNameOf`) ідемпотентна, тож уже нормалізоване ім'я теж годиться —
+        // тоді лише рядки старого формату довгого імені не впізнаються (їх
+        // закриє `FailStaleAsync` за віком биття — безпечний бік).
+        var normalized = MachineNameOf(machineName);
+
         // ⛔ Префікс — машина І роль (P3). Без ролі старт Api на хості воркера
         // закривав би живі задачі воркер-процесів (вони теж «цієї машини»).
-        var prefix = $"{machineName}/{role}/";
+        var prefix = $"{normalized}/{role}/";
         if (!currentInstanceId.StartsWith(prefix, StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                $"Ідентифікатор «{currentInstanceId}» не належить машині «{machineName}» і ролі «{role}».",
+                $"Ідентифікатор «{currentInstanceId}» не належить машині «{normalized}» і ролі «{role}».",
                 nameof(currentInstanceId));
         }
 
@@ -525,16 +569,22 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         if (string.Equals(role, RoleApi, StringComparison.Ordinal))
         {
             // ⚠ Зворотна сумісність: рядки СТАРОГО формату `{машина}/{GUID}` (до
-            // P3) писав лише Api — воркера тоді не існувало. Старий формат має
-            // рівно один «/» (`NOT LIKE '%/%/%'`); ім'я машини в ньому обрізалося
-            // до 31, а не до 27, тож для обрізаного імені префікс — без «/».
-            var legacyPrefix = machineName.Length < MaxMachineNameLength ? machineName + "/" : machineName;
-            const int legacyMaxLength = LegacyMaxMachineNameLength + 1 + GuidLength;
+            // P3) писав лише Api — воркера тоді не існувало. Старий формат —
+            // рівно `{перші 31 символ повного імені}/{GUID N}`: точний префікс і
+            // точна довжина, один «/» (`NOT LIKE '%/%/%'`).
+            //
+            // ⚠ Колізія старого формату ЛИШАЄТЬСЯ: два хости зі спільними першими
+            // 31 символом мають однаковий старий префікс, і перший старт нової Api
+            // на одному закриє рядки старого формату іншого. Вона одноразова —
+            // рядки старого формату пишуть лише процеси ДО оновлення, після
+            // першого перезапуску нових таких рядків не виникає.
+            var legacyPrefix = LegacyMachineNameOf(machineName) + "/";
+            var legacyLength = legacyPrefix.Length + GuidLength;
 
             query = query.Where(p => p.InstanceId!.StartsWith(prefix)
                                      || (p.InstanceId!.StartsWith(legacyPrefix)
                                          && !EF.Functions.Like(p.InstanceId!, "%/%/%")
-                                         && p.InstanceId!.Length <= legacyMaxLength));
+                                         && p.InstanceId!.Length == legacyLength));
         }
         else
         {

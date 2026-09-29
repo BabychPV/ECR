@@ -73,8 +73,9 @@ public sealed class JobInstanceRoleTests(SqlServerFixture sql)
     }
 
     /// <remarks>
-    /// ⚠ Старий формат обрізав ім'я машини до 31, новий — до 27. Для довгого імені
-    /// рядок старого Api (31 символ) мусить закритися стартом нового Api (27).
+    /// ⚠ Старий формат обрізав ім'я машини до 31, новий скорочує до 27 з хешем.
+    /// Для довгого імені рядок старого Api (перші 31 символ) мусить закритися
+    /// стартом нового Api — за ПОВНИМ іменем хоста.
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -94,7 +95,7 @@ public sealed class JobInstanceRoleTests(SqlServerFixture sql)
         {
             await using var db = sql.CreateContext();
             await new JobProgressStore(db).FailPreviousInstanceAsync(
-                machine, JobProgressStore.RoleApi, current, Reason, At, CancellationToken.None);
+                longName, JobProgressStore.RoleApi, current, Reason, At, CancellationToken.None);
 
             Assert.Equal(["Failed", "Running"], await StatesAsync([legacy, worker]));
         }
@@ -102,6 +103,62 @@ public sealed class JobInstanceRoleTests(SqlServerFixture sql)
         {
             await DeleteAsync([legacy, worker]);
         }
+    }
+
+    /// <remarks>
+    /// ⛔ Ферма з довгими FQDN: спільні перші 27 символів. Просте обрізання дало б
+    /// однакове ім'я, і старт одного хоста закрив би Running іншого. Мутація
+    /// «обрізання без хешу» → червоний (прогнано, див. опис коміту).
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Два_хости_зі_спільним_27_символьним_префіксом_не_закривають_задачі_один_одного()
+    {
+        var farm = $"f{Guid.NewGuid():N}"[..12] + "-app-prod-node-"; // 27 символів спільного
+        var hostA = farm + "01.corp.example.test";
+        var hostB = farm + "02.corp.example.test";
+        Assert.Equal(hostA[..27], hostB[..27]);
+
+        var machineA = JobProgressStore.MachineNameOf(hostA);
+        var machineB = JobProgressStore.MachineNameOf(hostB);
+        Assert.NotEqual(machineA, machineB);
+        Assert.Equal((27, 27), (machineA.Length, machineB.Length));
+        Assert.StartsWith(hostA[..18] + "~", machineA, StringComparison.Ordinal);
+
+        // Детермінований між процесами: той самий вхід — те саме ім'я (SHA-256, не GetHashCode).
+        Assert.Equal(machineA, JobProgressStore.MachineNameOf(new string(hostA.ToCharArray())));
+        Assert.Equal(machineA, JobProgressStore.MachineNameOf(machineA));
+
+        var currentA = JobProgressStore.InstanceIdOf(machineA, JobProgressStore.RoleApi, Guid.NewGuid());
+        var previousA = await InsertAsync(
+            JobProgressStore.InstanceIdOf(machineA, JobProgressStore.RoleApi, Guid.NewGuid()), At.AddSeconds(-30));
+        var runningB = await InsertAsync(
+            JobProgressStore.InstanceIdOf(machineB, JobProgressStore.RoleApi, Guid.NewGuid()), At.AddSeconds(-30));
+
+        try
+        {
+            await using var db = sql.CreateContext();
+            await new JobProgressStore(db).FailPreviousInstanceAsync(
+                hostA, JobProgressStore.RoleApi, currentA, Reason, At, CancellationToken.None);
+
+            Assert.Equal(["Failed", "Running"], await StatesAsync([previousA, runningB]));
+        }
+        finally
+        {
+            await DeleteAsync([previousA, runningB]);
+        }
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [InlineData("ECR-APP-01")]
+    [InlineData("exactly-twenty-seven-chars1")]
+    public void Коротке_ім_я_машини_лишається_без_змін(string host)
+    {
+        Assert.True(host.Length <= 27);
+        Assert.Equal(host, JobProgressStore.MachineNameOf(host));
+        Assert.Equal(host, JobProgressStore.LegacyMachineNameOf(host));
     }
 
     [Fact]
