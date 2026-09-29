@@ -414,6 +414,34 @@
           "Local"
         ]
       },
+      "BindRegistryExternalKeyCommand": {
+        "description": "Тіло прив'язки.",
+        "properties": {
+          "dataSourceId": {
+            "description": "Джерело (`ext.DataSource`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "entryId": {
+            "description": "Запис довідника.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "externalId": {
+            "description": "Ідентифікатор у джерелі (WebId/GUID); до 200 символів.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "entryId",
+          "dataSourceId",
+          "externalId"
+        ],
+        "type": "object"
+      },
       "BindSourceEntityRegistryRequest": {
         "description": "Прив'язка сутності збору до довідника.",
         "properties": {
@@ -6389,6 +6417,39 @@
         ],
         "type": "object"
       },
+      "PagedResultOfRegistryExternalKeyView": {
+        "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
+        "properties": {
+          "items": {
+            "description": "Елементи сторінки.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryExternalKeyView"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Курсор наступної сторінки; `null` — кінець.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "totalCount": {
+            "description": "Загальна кількість; `null`, якщо підрахунок дорогий.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totalCount"
+        ],
+        "type": "object"
+      },
       "PagedResultOfRegistryRowDto": {
         "description": "Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —\nперевіряється архітектурним тестом.",
         "properties": {
@@ -8252,6 +8313,64 @@
           "display",
           "parentEntryId",
           "values"
+        ],
+        "type": "object"
+      },
+      "RegistryExternalKeyView": {
+        "description": "Зв'язок запису довідника з елементом зовнішнього джерела.",
+        "properties": {
+          "dataSourceCode": {
+            "description": "Код джерела.",
+            "type": "string"
+          },
+          "dataSourceId": {
+            "description": "Джерело (`ext.DataSource`).",
+            "format": "int32",
+            "type": "integer"
+          },
+          "entryCode": {
+            "description": "Код запису.",
+            "type": "string"
+          },
+          "externalId": {
+            "description": "Ідентифікатор у джерелі (WebId/GUID).",
+            "type": "string"
+          },
+          "externalPath": {
+            "description": "Шлях у джерелі; ставить синк (`MarkSynced`).",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Ідентифікатор зв'язку.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "lastSyncedAt": {
+            "description": "Коли востаннє зіставлено з джерелом (UTC).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "registryEntryId": {
+            "description": "Запис довідника.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "registryEntryId",
+          "entryCode",
+          "dataSourceId",
+          "dataSourceCode",
+          "externalId",
+          "externalPath",
+          "lastSyncedAt"
         ],
         "type": "object"
       },
@@ -26329,6 +26448,359 @@
         ]
       }
     },
+    "/api/v1/registries/{code}/external-keys": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише зв'язки цього запису.",
+            "in": "query",
+            "name": "entryId",
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Лише зв'язки цього джерела.",
+            "in": "query",
+            "name": "dataSourceId",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Курсор наступної сторінки.",
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Розмір сторінки 1..200; `0` — типове 50.",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "int32",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryExternalKeyView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryExternalKeyView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedResultOfRegistryExternalKeyView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Зв'язки записів довідника, за зростанням `id`. Право `Registry.View`\nабо грант `Read` на довідник.",
+        "tags": [
+          "RegistryExternalKeys"
+        ]
+      },
+      "post": {
+        "description": "⛔ Пара «джерело + ідентифікатор» уже прив'язана (до будь-якого запису) —\n`409 ECR-REG-0409` (`externalKeyTaken`), а не другий рядок: той самий\nелемент джерела не може вказувати на два записи. Запис чужого довідника або\nвидалений — `404`.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRegistryExternalKeyCommand"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRegistryExternalKeyCommand"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRegistryExternalKeyCommand"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryExternalKeyView"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryExternalKeyView"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryExternalKeyView"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Прив'язує запис до елемента джерела. Право `Registry.EditData` або грант\n`Write` на довідник.",
+        "tags": [
+          "RegistryExternalKeys"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/external-keys/{id}": {
+      "delete": {
+        "description": "Зв'язок запису іншого довідника — `404`, а не видалення «бо id збігся».",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Зв'язок.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Відв'язує. Право `Registry.EditData` або грант `Write` на довідник.",
+        "tags": [
+          "RegistryExternalKeys"
+        ]
+      }
+    },
     "/api/v1/registries/{code}/history": {
       "get": {
         "description": "⚠ Історія ОПИСУ, а не записів: зміни записів живуть у журналі комірок і\nв самих вікнах чинності. Питання, на яке відповідає цей маршрут, —\n«чому тут з'явилося це поле».",
@@ -34381,6 +34853,9 @@
     },
     {
       "name": "RegistryDefinitionTools"
+    },
+    {
+      "name": "RegistryExternalKeys"
     },
     {
       "name": "RegistryRows"

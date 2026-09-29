@@ -3639,6 +3639,9 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
 | `GET` | `/api/v1/search` | — (кожен тип під правом свого переліку й грантами проєкту) | 8 |
+| `GET` | `/api/v1/registries/{code}/external-keys?entryId=&dataSourceId=&cursor=&limit=` | `Registry.View` | 8 |
+| `POST` | `/api/v1/registries/{code}/external-keys` | `Registry.EditData` | 8 |
+| `DELETE` | `/api/v1/registries/{code}/external-keys/{id}` | `Registry.EditData` | 8 |
 
 > ✎ 2026-09-29 (RT-13): `GET /registries/{code}/rows` — `PagedResult<RegistryRowDto>`, курсор за
 > `Id`, `limit` 1…500 (інакше `422 pageSizeOutOfRange`). `asOf` — бізнес-дата чинності
@@ -3763,6 +3766,21 @@ public sealed class NotFoundException(string errorCode, string message)
 > (`entityFieldMapRegistryFieldMaterialization`), сутність не прив'язана
 > (`entityFieldMapRegistryNotBound`) або поле з іншого довідника
 > (`entityFieldMapRegistryFieldForeign`).
+
+> ✎ **2026-09-29 — зовнішні ідентифікатори запису довідника** (`ФВ-8.10`,
+> FEATURE-REGISTRY-SYNC S2; порт `IRegistryExternalKeyStore`). `GET
+> /registries/{code}/external-keys` — `PagedResult<RegistryExternalKeyView>` за
+> зростанням `id`, `limit` 1…200 (`0` = 50; інше — `422 pageSizeOutOfRange`),
+> фільтри `entryId`, `dataSourceId`. `POST` — `{ entryId, dataSourceId, externalId }`,
+> `201`; запис відсутній, видалений або з іншого довідника — `404 ECR-REG-0404`
+> (`registryEntry`); джерела немає — `404 ECR-INT-0404` (`dataSource`); `externalId`
+> порожній чи довший за 200 — `422 ECR-REQ-0422` (`externalKeyInvalid`); пара
+> `(dataSourceId, externalId)` уже прив'язана — `409 ECR-REG-0409` (`externalKeyTaken`;
+> одночасна вставка — `externalKeyTakenConcurrently`). `DELETE …/{id}` — `204`;
+> зв'язок запису іншого довідника — `404 ECR-REG-0404` (`externalKey`). Довідника зі
+> шляху немає — `404` (`registry`). Право — на дані довідника: `Registry.EditData`
+> або грант `Write` (перелік — `Registry.View` або грант `Read`), без
+> `Integration.Manage`.
 
 > ✎ **2026-09-20 — `settings` каналу Smtp: транспорт із налаштувань застосунку.**
 > Канал тримає рівно `recipients` (адресати) і `title` (для пошти — префікс

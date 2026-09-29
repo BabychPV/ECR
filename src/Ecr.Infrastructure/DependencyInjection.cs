@@ -104,6 +104,7 @@ public static class DependencyInjection
         services.AddScoped<IProjectStore, ProjectStore>();
         services.AddScoped<IRegistryStore, RegistryStore>();
         services.AddScoped<IRegistryDraftStore, RegistryDraftStore>();
+        services.AddScoped<IRegistryExternalKeyStore, RegistryExternalKeyStore>(); // FEATURE-REGISTRY-SYNC S2
         services.AddScoped<IUnitCatalog, UnitCatalog>();
         services.AddScoped<IUnitStore, UnitStore>();
         services.AddScoped<IWhereUsedStore, WhereUsedStore>();

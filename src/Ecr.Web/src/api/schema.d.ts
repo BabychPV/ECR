@@ -9056,6 +9056,237 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/external-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Зв'язки записів довідника, за зростанням `id`. Право `Registry.View`
+         *     або грант `Read` на довідник. */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Лише зв'язки цього запису. */
+                    entryId?: number;
+                    /** @description Лише зв'язки цього джерела. */
+                    dataSourceId?: number;
+                    /** @description Курсор наступної сторінки. */
+                    cursor?: string;
+                    /** @description Розмір сторінки 1..200; `0` — типове 50. */
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResultOfRegistryExternalKeyView"];
+                        "text/json": components["schemas"]["PagedResultOfRegistryExternalKeyView"];
+                        "text/plain": components["schemas"]["PagedResultOfRegistryExternalKeyView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Прив'язує запис до елемента джерела. Право `Registry.EditData` або грант
+         *     `Write` на довідник.
+         * @description ⛔ Пара «джерело + ідентифікатор» уже прив'язана (до будь-якого запису) —
+         *     `409 ECR-REG-0409` (`externalKeyTaken`), а не другий рядок: той самий
+         *     елемент джерела не може вказувати на два записи. Запис чужого довідника або
+         *     видалений — `404`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["BindRegistryExternalKeyCommand"];
+                    "application/json": components["schemas"]["BindRegistryExternalKeyCommand"];
+                    "text/json": components["schemas"]["BindRegistryExternalKeyCommand"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryExternalKeyView"];
+                        "text/json": components["schemas"]["RegistryExternalKeyView"];
+                        "text/plain": components["schemas"]["RegistryExternalKeyView"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/registries/{code}/external-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Відв'язує. Право `Registry.EditData` або грант `Write` на довідник.
+         * @description Зв'язок запису іншого довідника — `404`, а не видалення «бо id збігся».
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                    /** @description Зв'язок. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/history": {
         parameters: {
             query?: never;
@@ -15298,6 +15529,21 @@ export interface components {
          * @enum {unknown}
          */
         AuthProvider: "Windows" | "Local";
+        /** @description Тіло прив'язки. */
+        BindRegistryExternalKeyCommand: {
+            /**
+             * Format: int32
+             * @description Джерело (`ext.DataSource`).
+             */
+            dataSourceId: number;
+            /**
+             * Format: int64
+             * @description Запис довідника.
+             */
+            entryId: number;
+            /** @description Ідентифікатор у джерелі (WebId/GUID); до 200 символів. */
+            externalId: null | string;
+        };
         /** @description Прив'язка сутності збору до довідника. */
         BindSourceEntityRegistryRequest: {
             /**
@@ -18084,6 +18330,19 @@ export interface components {
         };
         /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
          *     перевіряється архітектурним тестом. */
+        PagedResultOfRegistryExternalKeyView: {
+            /** @description Елементи сторінки. */
+            items: components["schemas"]["RegistryExternalKeyView"][];
+            /** @description Курсор наступної сторінки; `null` — кінець. */
+            nextCursor: null | string;
+            /**
+             * Format: int32
+             * @description Загальна кількість; `null`, якщо підрахунок дорогий.
+             */
+            totalCount: null | number;
+        };
+        /** @description Сторінка результатів. Ендпоінтів, що повертають «усе», не існує —
+         *     перевіряється архітектурним тестом. */
         PagedResultOfRegistryRowDto: {
             /** @description Елементи сторінки. */
             items: components["schemas"]["RegistryRowDto"][];
@@ -18997,6 +19256,37 @@ export interface components {
             values: {
                 [key: string]: unknown;
             };
+        };
+        /** @description Зв'язок запису довідника з елементом зовнішнього джерела. */
+        RegistryExternalKeyView: {
+            /** @description Код джерела. */
+            dataSourceCode: string;
+            /**
+             * Format: int32
+             * @description Джерело (`ext.DataSource`).
+             */
+            dataSourceId: number;
+            /** @description Код запису. */
+            entryCode: string;
+            /** @description Ідентифікатор у джерелі (WebId/GUID). */
+            externalId: string;
+            /** @description Шлях у джерелі; ставить синк (`MarkSynced`). */
+            externalPath: null | string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор зв'язку.
+             */
+            id: number;
+            /**
+             * Format: date-time
+             * @description Коли востаннє зіставлено з джерелом (UTC).
+             */
+            lastSyncedAt: null | string;
+            /**
+             * Format: int64
+             * @description Запис довідника.
+             */
+            registryEntryId: number;
         };
         /** @description Поле довідника. */
         RegistryFieldDto: {
