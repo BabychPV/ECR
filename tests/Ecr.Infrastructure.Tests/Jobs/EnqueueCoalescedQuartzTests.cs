@@ -17,8 +17,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <remarks>
 /// Мутація: тіло методу делегує в <c>EnqueueExclusiveAsync</c> — червоніють
 /// «виконувана не перервана» (задача отримує скасування) і «Queued не
-/// дублюється» (інший jobId). Мутація: прибрати пошук наявної — червоні обидва
-/// тести злиття.
+/// дублюється» (інший jobId). Мутація: слухач не перепоставляє брудну задачу —
+/// червоний тест «перепоставляє один раз з останнім payload» (2 ключі очікувано,
+/// є 1); позначка тримає ПЕРШИЙ payload (TryAdd) — той самий тест, payload n=1.
 /// </remarks>
 public sealed class EnqueueCoalescedQuartzTests : IAsyncLifetime
 {
@@ -86,6 +87,102 @@ public sealed class EnqueueCoalescedQuartzTests : IAsyncLifetime
         {
             probe.Release.TrySetResult();
             BlockingJob.Probes.TryRemove(runningId, out _);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Злиття_з_виконуваною_перепоставляє_один_раз_з_останнім_payload_після_завершення()
+    {
+        var (jobs, quartz) = await SchedulerAsync();
+        await quartz.Start();
+
+        var runningId = Prefix + Guid.NewGuid().ToString("N");
+        var probe = BlockingJob.Register(runningId);
+
+        try
+        {
+            await quartz.ScheduleJob(
+                JobBuilder.Create<BlockingJob>().WithIdentity(runningId).StoreDurably().Build(),
+                TriggerBuilder.Create().WithIdentity(runningId + "-trigger").StartNow().Build());
+            await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(runningId, await jobs.EnqueueCoalescedAsync<IRecalculationJob>(Target, new { n = 1 }, CancellationToken.None));
+            Assert.Equal(runningId, await jobs.EnqueueCoalescedAsync<IRecalculationJob>(Target, new { n = 2 }, CancellationToken.None));
+            Assert.False(probe.Token.IsCancellationRequested, "виконувана задача отримала скасування");
+            Assert.Equal([runningId], await KeysAsync(quartz));
+
+            // Перепоставлена задача має лишитися в черзі для перевірки, а не піти виконуватись.
+            await quartz.Standby();
+            probe.Release.TrySetResult();
+
+            await WaitForKeysAsync(quartz, count: 2);
+            await Task.Delay(300);
+
+            // ⛔ Регресія: без перепостановки свіжі дані, що прийшли під час прогону,
+            // лишалися б непорахованими до випадкової наступної постановки.
+            var keys = await KeysAsync(quartz);
+            Assert.Equal(2, keys.Count);
+            var newId = Assert.Single(keys, k => k != runningId);
+            Assert.StartsWith(Prefix, newId, StringComparison.Ordinal);
+
+            var detail = await quartz.GetJobDetail(new JobKey(newId));
+            Assert.Equal("{\"n\":2}", detail?.JobDataMap.GetString(QuartzJobScheduler.PayloadKey));
+        }
+        finally
+        {
+            probe.Release.TrySetResult();
+            BlockingJob.Probes.TryRemove(runningId, out _);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Без_злиття_після_завершення_повторної_постановки_немає()
+    {
+        var (jobs, quartz) = await SchedulerAsync();
+
+        // Слухач реєструє постановка (на іншу ціль, одразу знята) — до старту задачі.
+        var other = await jobs.EnqueueCoalescedAsync<IRecalculationJob>("doc700-p202699", new { n = 0 }, CancellationToken.None);
+        await quartz.DeleteJob(new JobKey(other));
+        await quartz.Start();
+
+        var runningId = Prefix + Guid.NewGuid().ToString("N");
+        var probe = BlockingJob.Register(runningId);
+
+        try
+        {
+            await quartz.ScheduleJob(
+                JobBuilder.Create<BlockingJob>().WithIdentity(runningId).StoreDurably().Build(),
+                TriggerBuilder.Create().WithIdentity(runningId + "-trigger").StartNow().Build());
+            await probe.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            probe.Release.TrySetResult();
+            await WaitIdleAsync(quartz);
+            await Task.Delay(300);
+
+            Assert.Equal([runningId], await KeysAsync(quartz));
+        }
+        finally
+        {
+            probe.Release.TrySetResult();
+            BlockingJob.Probes.TryRemove(runningId, out _);
+        }
+    }
+
+    private static async Task WaitForKeysAsync(IScheduler quartz, int count)
+    {
+        for (var i = 0; i < 100 && (await KeysAsync(quartz)).Count < count; i++)
+        {
+            await Task.Delay(100);
+        }
+    }
+
+    private static async Task WaitIdleAsync(IScheduler quartz)
+    {
+        for (var i = 0; i < 100 && (await quartz.GetCurrentlyExecutingJobs()).Count > 0; i++)
+        {
+            await Task.Delay(100);
         }
     }
 

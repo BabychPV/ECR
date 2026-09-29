@@ -210,6 +210,10 @@ public sealed class QuartzJobScheduler(
                 .ConfigureAwait(false);
         }
 
+        // ⚠ Слухач злиття — ДО постановки: він має побачити старт кожної разової задачі,
+        // інакше злиття з нею під час виконання не знало б, що вона жива.
+        CoalescedRequeueListener.Of(instance);
+
         await instance.ScheduleJob(detail, trigger, ct).ConfigureAwait(false);
 
         return jobId;
@@ -280,9 +284,13 @@ public sealed class QuartzJobScheduler(
     /// постановка з тим самим ключем, що в <see cref="EnqueueExclusiveAsync{TJob}"/>,
     /// але без витіснення.
     /// <para>
-    /// ⚠ Злиття з ВИКОНУВАНОЮ задачею означає: якщо вона вже прочитала дані до
-    /// нової зміни, та зміна дочекається наступної постановки. Для автоперерахунку
-    /// після матеріалізації це прийнятно; хто не може чекати — кличе Exclusive.
+    /// ⛔ Злиття з ВИКОНУВАНОЮ задачею позначає її «брудною»
+    /// (<see cref="CoalescedRequeueListener"/>): вона могла прочитати дані ДО нової
+    /// зміни, тож коли завершиться будь-як (успіх, провал, скасування), задача на
+    /// ціль ставиться ще раз — один раз на скільки завгодно злиттів, з payload
+    /// ОСТАННЬОЇ постановки. Без цього свіжі дані матеріалізації лишалися б
+    /// непорахованими до випадкової наступної постановки, а Quartz — типовий режим.
+    /// Перед ретраєм позначка лишається: вона діє на завершення ретраю.
     /// </para>
     /// <para>
     /// ⚠ Дурабельна деталь задачі, що впала остаточно (без триґера й не
@@ -302,7 +310,19 @@ public sealed class QuartzJobScheduler(
 
         var scheduler = Scheduler(typeof(TJob).Name);
         var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
-        var prefix = TargetPrefixOf<TJob>(targetKey);
+
+        return await CoalesceAsync<TJob>(
+                instance, TargetPrefixOf<TJob>(targetKey), payload, createdByUserId, finishedJobId: null, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Злиття на ціль; <paramref name="finishedJobId"/> — задача, що щойно завершилась (не рахується).</summary>
+    private async Task<string> CoalesceAsync<TJob>(
+        IScheduler instance, string prefix, object? payload, int? createdByUserId, string? finishedJobId,
+        CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        var listener = CoalescedRequeueListener.Of(instance);
 
         var executing = new HashSet<string>(StringComparer.Ordinal);
         foreach (var context in await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
@@ -314,7 +334,8 @@ public sealed class QuartzJobScheduler(
 
         foreach (var key in await instance.GetJobKeys(GroupMatcher<JobKey>.AnyGroup(), ct).ConfigureAwait(false))
         {
-            if (!key.Name.StartsWith(prefix, StringComparison.Ordinal))
+            if (!key.Name.StartsWith(prefix, StringComparison.Ordinal)
+                || string.Equals(key.Name, finishedJobId, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -330,12 +351,157 @@ public sealed class QuartzJobScheduler(
         }
 
         // ⚠ Виконувана, чий ключ уже зник зі сховища (не-дурабельна), теж рахується.
-        running ??= executing.FirstOrDefault(name => name.StartsWith(prefix, StringComparison.Ordinal));
+        running ??= executing.FirstOrDefault(name => name.StartsWith(prefix, StringComparison.Ordinal)
+                                                     && !string.Equals(name, finishedJobId, StringComparison.Ordinal));
 
-        return running
-               ?? await EnqueueCoreAsync<TJob>(
-                       instance, prefix + Guid.NewGuid().ToString("N"), payload, ct, createdByUserId)
-                   .ConfigureAwait(false);
+        if (running is null)
+        {
+            return await EnqueueCoreAsync<TJob>(
+                    instance, prefix + Guid.NewGuid().ToString("N"), payload, ct, createdByUserId)
+                .ConfigureAwait(false);
+        }
+
+        Task<string> Requeue(string finished, CancellationToken token)
+            => CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, finished, token);
+
+        // ⚠ Слухач бачить лише задачі, що стартували ПІСЛЯ його реєстрації (а реєструється
+        // він на кожній постановці). «Не жива» при виконуваній — стартувала раніше: беремо
+        // під нагляд, якщо вона ще виконується; інакше вона вже завершилась, і позначку
+        // ніхто б не зняв — ставимо самі.
+        if (listener.MarkDirty(running, Requeue, adoptRunning: false))
+        {
+            return running;
+        }
+
+        var stillExecuting = (await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
+            .Any(c => string.Equals(c.JobDetail.Key.Name, running, StringComparison.Ordinal));
+
+        return stillExecuting && listener.MarkDirty(running, Requeue, adoptRunning: true)
+            ? running
+            : await CoalesceAsync<TJob>(instance, prefix, payload, createdByUserId, running, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Слухач Quartz, що перепоставляє задачу на ціль після завершення «брудної»
+    /// виконуваної — див. <see cref="EnqueueCoalescedAsync{TJob}"/>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Слухач, а не <see cref="QuartzJobAdapter"/>: адаптер створюється фабрикою задач
+    /// і не бачить стану планувальника без нової DI-реєстрації, а слухач живе рівно
+    /// там, де й черга, — у пам'яті цього <see cref="IScheduler"/>. І він чує
+    /// завершення будь-якої гілки адаптера (успіх, провал, скасування), бо Quartz кличе
+    /// <see cref="JobWasExecuted"/> після кожного прогону.
+    /// </remarks>
+    private sealed class CoalescedRequeueListener : IJobListener
+    {
+        private const string ListenerName = "ecr.coalesced-requeue";
+
+        private static readonly Lock Registration = new();
+
+        private readonly Lock gate = new();
+
+        /// <summary>Задачі, що виконуються зараз (від старту до завершення прогону).</summary>
+        private readonly HashSet<string> live = new(StringComparer.Ordinal);
+
+        /// <summary>«Брудні» виконувані: перепостановка з payload останнього злиття.</summary>
+        private readonly Dictionary<string, Func<string, CancellationToken, Task<string>>> dirty =
+            new(StringComparer.Ordinal);
+
+        public string Name => ListenerName;
+
+        /// <summary>Слухач цього планувальника — один на екземпляр, реєструється за першої потреби.</summary>
+        public static CoalescedRequeueListener Of(IScheduler instance)
+        {
+            lock (Registration)
+            {
+                // ⚠ GetJobListener(name) на відсутньому кидає KeyNotFoundException — шукаємо в переліку.
+                if (instance.ListenerManager.GetJobListeners()
+                        .OfType<CoalescedRequeueListener>()
+                        .FirstOrDefault() is { } existing)
+                {
+                    return existing;
+                }
+
+                var created = new CoalescedRequeueListener();
+                instance.ListenerManager.AddJobListener(created, EverythingMatcher<JobKey>.AllJobs());
+
+                return created;
+            }
+        }
+
+        /// <summary>Позначає виконувану задачу брудною; <c>false</c> — слухач її не бачить живою.</summary>
+        public bool MarkDirty(string jobId, Func<string, CancellationToken, Task<string>> requeue, bool adoptRunning)
+        {
+            lock (gate)
+            {
+                if (!live.Contains(jobId))
+                {
+                    if (!adoptRunning)
+                    {
+                        return false;
+                    }
+
+                    live.Add(jobId);
+                }
+
+                // Кілька злиттів за прогін — одна перепостановка, з останнім payload.
+                dirty[jobId] = requeue;
+                return true;
+            }
+        }
+
+        public Task JobToBeExecuted(IJobExecutionContext context, CancellationToken cancellationToken = default)
+        {
+            lock (gate)
+            {
+                live.Add(context.JobDetail.Key.Name);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task JobExecutionVetoed(IJobExecutionContext context, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public async Task JobWasExecuted(
+            IJobExecutionContext context, JobExecutionException? jobException, CancellationToken cancellationToken = default)
+        {
+            var jobId = context.JobDetail.Key.Name;
+
+            try
+            {
+                // ⚠ Ретрай (новий триґер тієї самої задачі) — ще не завершення: позначка
+                // лишається до кінця ретраю, а в паузі ретраю злиття бере саму задачу як ту, що чекає.
+                var retryPending = (await context.Scheduler
+                        .GetTriggersOfJob(context.JobDetail.Key, CancellationToken.None)
+                        .ConfigureAwait(false))
+                    .Any(t => !t.Key.Equals(context.Trigger.Key));
+
+                Func<string, CancellationToken, Task<string>>? requeue = null;
+
+                lock (gate)
+                {
+                    live.Remove(jobId);
+
+                    if (!retryPending && dirty.Remove(jobId, out var pending))
+                    {
+                        requeue = pending;
+                    }
+                }
+
+                if (requeue is not null)
+                {
+                    await requeue(jobId, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+#pragma warning disable CA1031 // ⛔ Виняток зі слухача Quartz зриває закриття триґера задачі.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                System.Diagnostics.Trace.TraceError(
+                    "Перепостановка після злиття для задачі {0} не вдалася: {1}", jobId, ex.Message);
+            }
+        }
     }
 
     /// <summary>
