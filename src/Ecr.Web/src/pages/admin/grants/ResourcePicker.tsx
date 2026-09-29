@@ -4,12 +4,12 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
 import type {
+  GrantableProject,
   RegistryDefDto,
   TemplatePage,
   TemplateStructureDto,
   TemplateVersionPage,
 } from '@/api/types';
-import { fetchAllProjects } from '@/features/projects/allProjects';
 import { t } from '@/shared/i18n';
 import { localized } from '@/shared/i18n/localized';
 import type { ResourceKind } from './grantLabels';
@@ -28,9 +28,9 @@ import type { ResourceKind } from './grantLabels';
  * гранта `Write` на сам проєкт — адміністратор безпеки його зазвичай не має.
  *
  * ⚠ Ключі кешу — ті самі, що й на інших екранах, і з тією самою формою
- * відповіді (`['projects']` + `fetchAllProjects`, `queryKeys.templates.*`,
- * `queryKeys.registries.list()`): розбіжні ключі кешу для тих самих даних —
- * відомий клас дефекту.
+ * відповіді (`queryKeys.templates.*`, `queryKeys.registries.list()`):
+ * розбіжні ключі кешу для тих самих даних — відомий клас дефекту. Проєкти —
+ * окремий довідник зі своїм ключем (див. нижче, D-207 п.2).
  */
 
 /** Проміжні рівні каскаду — стан рядка чернетки, на сервер не йде. */
@@ -84,10 +84,22 @@ export function ResourcePicker({ index, kind, resourceId, path, onChange }: Reso
   const inTemplate = depth > 0;
   const n = index + 1;
 
+  /*
+   * ⛔ D-207 п.2 (рішення людини 2026-09-29, варіант B): довідник проєктів для
+   * гранта — `GET /security/projects` (код і назва ВСІХ проєктів, право
+   * `Security.ManageRoles`), а не `GET /projects`. Той фільтрує за грантами й
+   * вимагає `Document.View`, тож адміністратор безпеки без грантів бачив тут
+   * порожній вибір і не міг видати грант на проєкт нікому. Панель грантів
+   * існує лише під `Security.ManageRoles` (без нього сервер не віддає й самих
+   * грантів), тому окремої гілки «без права» тут немає.
+   *
+   * ⚠ Ключ кешу — власний, не `['projects']`: інша форма відповіді (масив
+   * `{id, code, nameL10n}`, а не сторінка `ProjectSummary`), і спільний ключ
+   * для різних форм — відомий клас дефекту.
+   */
   const projects = useQuery({
-    queryKey: ['projects'],
-    // ⛔ `X-07`: усі сторінки, а не перші 200 мовчки.
-    queryFn: fetchAllProjects,
+    queryKey: ['security', 'projects'],
+    queryFn: () => apiFetch<GrantableProject[]>('/api/v1/security/projects'),
     enabled: kind === 'Project',
   });
 
@@ -131,13 +143,13 @@ export function ResourcePicker({ index, kind, resourceId, path, onChange }: Reso
   });
 
   if (kind === 'Project') {
-    const items = projects.data?.items ?? [];
+    const items = projects.data ?? [];
 
     return (
       <Select
         {...common(t('grants.pickerProject'), Boolean(projects.error))}
         aria-label={aria(t('grants.pickerProject'))}
-        data={items.map((p) => ({ value: String(p.id), label: p.code }))}
+        data={items.map((p) => ({ value: String(p.id), label: nameWithCode(localized(p.nameL10n), p.code) }))}
         value={selected(resourceId)}
         onChange={(value) => {
           const id = idOrNull(value);

@@ -30,6 +30,17 @@ public sealed record ResourceGrantDto(
     ResourceKind ResourceKind, int ResourceId, GrantLevel Level, bool IsDeny,
     string? ResourceName = null);
 
+/// <summary>Проєкт у довіднику для видачі грантів: лише ідентичність.</summary>
+/// <param name="Id">Ідентифікатор — те, що йде в <c>resourceId</c> гранта.</param>
+/// <param name="Code">Код проєкту.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <remarks>
+/// ⛔ Рішення людини 2026-09-29 (D-207 п.2, варіант B): адміністратор безпеки
+/// без грантів на проєкти бачить КОД і НАЗВУ всіх проєктів — і нічого більше.
+/// Стан, пояс, поточний період, власник — поза цим записом навмисно.
+/// </remarks>
+public sealed record GrantableProject(int Id, string Code, Ecr.Domain.ValueObjects.LocalizedText NameL10n);
+
 /// <summary>Версія набору грантів ролі — для <c>ETag</c> / <c>If-Match</c>.</summary>
 /// <remarks>
 /// ⚠ Хеш НАБОРУ, а не лічильник: токена конкурентності в <c>sec.Role</c> і
@@ -127,6 +138,29 @@ public sealed class ListResourceGrantsHandler(
         {
             ResourceName = names.GetValueOrDefault((g.ResourceKind, g.ResourceId)),
         })];
+    }
+
+    /// <summary>
+    /// Код і назва всіх проєктів — для вибору ресурсу гранта. Право
+    /// <c>Security.ManageRoles</c> (глобальне, <c>PermissionScopes.Global</c>).
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ D-207 п.2, варіант B. Доти адміністратор безпеки без грантів на
+    /// проєкти бачив ПОРОЖНІЙ вибір проєкту (<c>GET /projects</c> фільтрує за
+    /// грантами й вимагає <c>Document.View</c>) — і не міг видати грант на
+    /// проєкт нікому, включно з собою. Перелік НЕ відкриває даних: зріз,
+    /// документи й перелік документів проєкту лишаються за грантами.
+    ///
+    /// ⚠ Метод цього обробника, а не окремий обробник: той самий порт
+    /// (<see cref="IResourceNameResolver"/>), те саме право і той самий екран —
+    /// вибір ресурсу гранта.
+    /// </remarks>
+    public async Task<IReadOnlyList<GrantableProject>> ListProjectsAsync(CancellationToken ct)
+    {
+        await RequireAsync(access, currentUser, ct).ConfigureAwait(false);
+
+        return await nameResolver.ListProjectsAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Перевіряє право поточного користувача.</summary>

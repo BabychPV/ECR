@@ -3882,6 +3882,30 @@
           "Manage"
         ]
       },
+      "GrantableProject": {
+        "description": "Проєкт у довіднику для видачі грантів: лише ідентичність.",
+        "properties": {
+          "code": {
+            "description": "Код проєкту.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ідентифікатор — те, що йде в `resourceId` гранта.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "nameL10n": {
+            "$ref": "#/components/schemas/LocalizedText",
+            "description": "Назва мовами каталогу."
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "nameL10n"
+        ],
+        "type": "object"
+      },
       "GroupAssignmentView": {
         "description": "Групове призначення, яке існує в системі.",
         "properties": {
@@ -27974,6 +27998,66 @@
           }
         },
         "summary": "Звідки взялися (або не взялися) ролі ВЛАСНОГО запису. Права не потребує.",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/security/projects": {
+      "get": {
+        "description": "⛔ D-207 п.2 (рішення людини 2026-09-29, варіант B): адміністратор\nбезпеки без грантів на проєкти не бачив жодного проєкту і не міг видати\nна нього грант. Тут — лише `id`, `code`, `nameL10n`:\nжодних станів, періодів чи документів; дані проєкту лишаються за грантами.\nПраво глобальне — роль з областю дії (ФВ-6.14) його не дає.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableProject"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableProject"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrantableProject"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Код і назва всіх проєктів — для видачі грантів. Право `Security.ManageRoles`.",
         "tags": [
           "Security"
         ]

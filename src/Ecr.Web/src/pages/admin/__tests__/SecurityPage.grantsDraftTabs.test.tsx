@@ -74,6 +74,10 @@ beforeEach(async () => {
       if (url.includes('/grants')) return json([]);
       if (url.includes('/permissions')) return json([{ code: 'Document.View', isDangerous: false }]);
       if (url.includes('/roles')) return json(Roles);
+      // D-207 п.2: пікер гранта бере проєкти з довідника `/security/projects`.
+      if (url.includes('/security/projects')) {
+        return json(Projects.items.map((p) => ({ id: p.id, code: p.code, nameL10n: { values: {} } })));
+      }
       if (url.includes('/projects')) return json(Projects);
 
       return json([]);

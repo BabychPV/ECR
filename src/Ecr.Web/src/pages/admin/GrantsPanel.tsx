@@ -211,9 +211,12 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
         )}
       </Group>
 
+      {/* ⚠ D-207 п.2: вибір проєкту показує ВСІ проєкти (код і назву), а не
+          лише доступні — колишня підказка `grants.projectsScopeHint` про
+          «лише доступні» стала неправдою. */}
       {roleId !== null && (
         <Text size="xs" c="dimmed" mb="xs">
-          {t('grants.projectsScopeHint')}
+          {t('grants.projectsCatalogHint')}
         </Text>
       )}
 

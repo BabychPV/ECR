@@ -28,6 +28,9 @@ namespace Ecr.Infrastructure.Security;
 /// </remarks>
 public sealed class ResourceNameResolver(EcrDbContext db) : IResourceNameResolver
 {
+    /// <summary>Межа довідника проєктів для видачі грантів.</summary>
+    public const int MaxProjects = 10_000;
+
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<(ResourceKind Kind, int Id), string>> ResolveAsync(
         IReadOnlyCollection<(ResourceKind Kind, int Id)> resources, CancellationToken ct)
@@ -112,6 +115,28 @@ public sealed class ResourceNameResolver(EcrDbContext db) : IResourceNameResolve
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Проєкція рівно з трьох колонок (<c>Id</c>, <c>Code</c>, <c>NameL10n</c>):
+    /// перелік існує для адміністратора безпеки БЕЗ грантів на проєкти, і все,
+    /// що понад ідентичність проєкту (стан, пояс, періоди), тут було б витоком.
+    ///
+    /// ⚠ Межа <see cref="MaxProjects"/> (правило 6: без межі — «віддати весь
+    /// реєстр»): проєкт — це майданчик підприємства, їх десятки чи сотні, і
+    /// межа на порядки вища за реальний обсяг, а не тихе обрізання списку.
+    /// </remarks>
+    public async Task<IReadOnlyList<Ecr.Application.Security.GrantableProject>> ListProjectsAsync(CancellationToken ct)
+    {
+        var rows = await db.Projects.AsNoTracking()
+            .OrderBy(p => p.Code)
+            .Take(MaxProjects)
+            .Select(p => new { p.Id, p.Code, p.NameL10n })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows.ConvertAll(p => new Ecr.Application.Security.GrantableProject(p.Id, p.Code, p.NameL10n));
     }
 
     private static List<int> IdsOf(

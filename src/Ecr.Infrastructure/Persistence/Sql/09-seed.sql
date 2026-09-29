@@ -4816,6 +4816,8 @@ USING (VALUES
     (N'err.ECR-SUB-4221.hiddenIssues',         N'en', N'There are issues outside your visibility — submission is blocked. Contact the project owner.', 1),
     -- Рішення людини 2026-09-29: вміст регуляторного зрізу — окреме право (секція `SEC:RPT` вище).
     (N'permission.Report.ViewSnapshot',        N'en', N'View the contents of regulatory report snapshots', 1),
+    -- D-207 п.2: вибір проєкту в гранті — усі проєкти (код і назва), `GET /security/projects`.
+    (N'grants.projectsCatalogHint',            N'en', N'All projects are listed by code and name. A grant opens the project to the role; it does not show you its data. Sheets, tables and columns are picked in the template version they belong to.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).

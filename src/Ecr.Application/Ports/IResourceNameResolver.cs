@@ -29,4 +29,11 @@ public interface IResourceNameResolver
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyDictionary<(ResourceKind Kind, int Id), string>> ResolveAsync(
         IReadOnlyCollection<(ResourceKind Kind, int Id)> resources, CancellationToken ct);
+
+    /// <summary>
+    /// Код і назва КОЖНОГО проєкту — довідник для вибору ресурсу гранта
+    /// (D-207 п.2, варіант B). Жодних інших полів проєкту.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Security.GrantableProject>> ListProjectsAsync(CancellationToken ct);
 }

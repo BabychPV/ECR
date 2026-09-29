@@ -518,6 +518,9 @@ export type ReplaceGrantsRequest = Schemas['ReplaceGrantsRequest'];
 /** Ресурсний грант ролі. */
 export type ResourceGrantDto = Schemas['ResourceGrantDto'];
 
+/** Проєкт у довіднику видачі грантів: лише id, код і назва (D-207 п.2). */
+export type GrantableProject = Schemas['GrantableProject'];
+
 /** Публікація версії методології. */
 export type PublishMethodologyRequest = Schemas['PublishMethodologyRequest'];
 

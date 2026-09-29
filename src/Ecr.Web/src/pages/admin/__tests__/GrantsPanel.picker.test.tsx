@@ -43,7 +43,7 @@ const Strings: Record<string, string> = {
   'grants.pickerColumn': 'Column',
   'grants.pickerNothingFound': 'Nothing found',
   'grants.pickerLoadFailed': 'Load failed',
-  'grants.projectsScopeHint': 'Scope hint',
+  'grants.projectsCatalogHint': 'All projects hint',
   'grants.unsaved': 'Unsaved changes',
   'grants.pickResourceFirst': 'Pick a resource first',
   'grants.discardTitle': 'Discard changes of {role}?',
@@ -69,14 +69,18 @@ const Roles: RoleView[] = [
   { id: 11, code: 'Operator', isActive: true, isBuiltIn: false, permissions: [], dangerousPermissions: [] },
 ];
 
-const Projects = {
-  items: [
-    { id: 41, code: 'PRJ-A', status: 'Active', timeZoneId: 'UTC', periodKind: 'Month', currentPeriodId: null, periodCount: 0 },
-    { id: 42, code: 'PRJ-B', status: 'Active', timeZoneId: 'UTC', periodKind: 'Month', currentPeriodId: null, periodCount: 0 },
-  ],
-  nextCursor: null,
-  totalCount: 2,
-};
+/**
+ * ⛔ D-207 п.2: проєкти для гранта — з `GET /security/projects` (код і назва
+ * ВСІХ проєктів). `GET /projects` тут навмисно відмовляє `403`, як і
+ * адміністратору безпеки без `Document.View`: якби пікер досі брав перелік
+ * звідти, опцій не було б зовсім.
+ */
+const GrantableProjects = [
+  { id: 41, code: 'PRJ-A', nameL10n: { values: { en: 'Alpha field' } } },
+  { id: 42, code: 'PRJ-B', nameL10n: { values: { en: 'Bravo field' } } },
+];
+
+let securityProjectGets: number;
 
 const Structure = {
   templateVersionId: 70,
@@ -111,6 +115,7 @@ beforeEach(() => {
   serverGrants = { 10: [], 11: [] };
   puts = [];
   grantGets = 0;
+  securityProjectGets = 0;
 
   vi.stubGlobal(
     'fetch',
@@ -131,7 +136,16 @@ beforeEach(() => {
         grantGets += 1;
         return json(serverGrants[roleId] ?? []);
       }
-      if (url.includes('/api/v1/projects')) return json(Projects);
+      if (url.includes('/api/v1/security/projects')) {
+        securityProjectGets += 1;
+        return json(GrantableProjects);
+      }
+      if (url.includes('/api/v1/projects')) {
+        return new Response(
+          JSON.stringify({ title: 'Forbidden', status: 403, errorCode: 'ECR-AUTH-0403', correlationId: 'c' }),
+          { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+        );
+      }
       if (url.includes('/api/v1/templates/7/versions')) {
         return json({ items: [{ id: 70, version: '1.0', status: 'Published', publishedAt: null, clonedFromVersionId: null, presentationRevision: 1 }], nextCursor: null, totalCount: 1 });
       }
@@ -180,7 +194,7 @@ describe('GrantsPanel: вибір ресурсу за назвою (U6)', () => 
     await openRole('Auditor');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
-    await choose('Project 1', 'PRJ-B');
+    await choose('Project 1', 'Bravo field (PRJ-B)');
 
     // Назва видна одразу, до збереження.
     expect(await screen.findByText('PRJ-B')).not.toBeNull();
@@ -192,6 +206,19 @@ describe('GrantsPanel: вибір ресурсу за назвою (U6)', () => 
     expect(puts[0]?.body.grants).toEqual([
       expect.objectContaining({ resourceKind: 'Project', resourceId: 42, level: 'Read', isDeny: false }),
     ]);
+  });
+
+  it('проєкти — з довідника /security/projects (код і назва всіх), а не з /projects за грантами (D-207)', async () => {
+    await renderPanel();
+    await openRole('Auditor');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
+    fireEvent.click(await screen.findByRole('textbox', { name: 'Project 1' }));
+
+    const options = (await screen.findAllByRole('option')).map((o) => o.textContent);
+    expect(options).toEqual(['Alpha field (PRJ-A)', 'Bravo field (PRJ-B)']);
+    expect(securityProjectGets).toBeGreaterThan(0);
+    expect(screen.getByText('All projects hint')).not.toBeNull();
   });
 
   it('колонка обирається каскадом шаблон → версія → аркуш → таблиця → колонка', async () => {
@@ -231,7 +258,7 @@ describe('GrantsPanel: незбережена чернетка (U6)', () => {
     await openRole('Auditor');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
-    await choose('Project 1', 'PRJ-A');
+    await choose('Project 1', 'Alpha field (PRJ-A)');
     expect(hasUnsavedChanges()).toBe(true);
 
     await choose('Role', 'Operator');
@@ -251,7 +278,7 @@ describe('GrantsPanel: незбережена чернетка (U6)', () => {
     await openRole('Auditor');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
-    await choose('Project 1', 'PRJ-B');
+    await choose('Project 1', 'Bravo field (PRJ-B)');
     await choose('Role', 'Operator');
 
     const dialog = await screen.findByRole('dialog', { name: 'Discard changes of Auditor?' });
@@ -267,7 +294,7 @@ describe('GrantsPanel: незбережена чернетка (U6)', () => {
     await openRole('Auditor');
 
     fireEvent.click(screen.getByRole('button', { name: 'Add grant' }));
-    await choose('Project 1', 'PRJ-B');
+    await choose('Project 1', 'Bravo field (PRJ-B)');
 
     // Хтось інший тим часом змінив гранти ролі; фоновий перезапит їх приносить.
     serverGrants[10] = [{ resourceKind: 'Project', resourceId: 41, level: 'Manage', isDeny: false, resourceName: 'PRJ-A' }];

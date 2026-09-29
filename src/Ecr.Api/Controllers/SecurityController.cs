@@ -196,6 +196,23 @@ public sealed class SecurityController(
     }
 
     /// <summary>
+    /// Код і назва всіх проєктів — для видачі грантів. Право <c>Security.ManageRoles</c>.
+    /// </summary>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ D-207 п.2 (рішення людини 2026-09-29, варіант B): адміністратор
+    /// безпеки без грантів на проєкти не бачив жодного проєкту і не міг видати
+    /// на нього грант. Тут — лише <c>id</c>, <c>code</c>, <c>nameL10n</c>:
+    /// жодних станів, періодів чи документів; дані проєкту лишаються за грантами.
+    /// Право глобальне — роль з областю дії (ФВ-6.14) його не дає.
+    /// </remarks>
+    [HttpGet("security/projects")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.GrantableProject>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GrantableProjects(CancellationToken ct)
+        => Ok(await listGrants.ListProjectsAsync(ct).ConfigureAwait(false));
+
+    /// <summary>
     /// Замінює набір грантів ролі цілком. Право <c>Security.ManageRoles</c>.
     /// </summary>
     /// <remarks>

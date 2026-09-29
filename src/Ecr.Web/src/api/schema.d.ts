@@ -10526,6 +10526,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/security/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Код і назва всіх проєктів — для видачі грантів. Право `Security.ManageRoles`.
+         * @description ⛔ D-207 п.2 (рішення людини 2026-09-29, варіант B): адміністратор
+         *     безпеки без грантів на проєкти не бачив жодного проєкту і не міг видати
+         *     на нього грант. Тут — лише `id`, `code`, `nameL10n`:
+         *     жодних станів, періодів чи документів; дані проєкту лишаються за грантами.
+         *     Право глобальне — роль з областю дії (ФВ-6.14) його не дає.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GrantableProject"][];
+                        "text/json": components["schemas"]["GrantableProject"][];
+                        "text/plain": components["schemas"]["GrantableProject"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/security/simulation": {
         parameters: {
             query?: never;
@@ -16755,6 +16811,18 @@ export interface components {
          * @enum {unknown}
          */
         GrantLevel: "None" | "Read" | "Write" | "Submit" | "Approve" | "Manage";
+        /** @description Проєкт у довіднику для видачі грантів: лише ідентичність. */
+        GrantableProject: {
+            /** @description Код проєкту. */
+            code: string;
+            /**
+             * Format: int32
+             * @description Ідентифікатор — те, що йде в `resourceId` гранта.
+             */
+            id: number;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
         /** @description Групове призначення, яке існує в системі. */
         GroupAssignmentView: {
             /** @description Ролі, які отримує член цієї групи. */
