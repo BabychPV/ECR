@@ -1,5 +1,6 @@
 // tests/Ecr.Infrastructure.Tests/Jobs/RegistrySyncJobTests.cs
 using Ecr.Application.Common;
+using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
@@ -46,6 +47,16 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <c>TargetKind == Column</c> → <see cref="GetFieldMapsAsync_не_повертає_мапінгів_на_поле_довідника"/>
 /// червоний.</item>
 /// </list>
+/// <para>
+/// D-212 PR-1 (2026-09-29): <see cref="PiSqlClient_елемент_є_в_джерелі_не_зниклий_і_читається_за_іменем"/> і
+/// <see cref="Нуль_елементів_при_наявних_зв_язках_не_дає_зниклих"/> (обидва транспорти) були ЧЕРВОНІ на коді
+/// до фіксу (<c>Assert.DoesNotContain() Failure: Filter matched in collection</c> — хибний
+/// <c>RegistrySourceMissing</c>). Мутації: М4 — прибрати запобіжник → червоні обидва випадки
+/// «нуль елементів»; М5 — запобіжник лише для PiSqlClient → червоний випадок PiWebApi; М6 — брати
+/// елементи з <c>DiscoverAsync</c> з <c>DataType == "Element"</c> → червоний PiSqlClient-тест; М7 — адреса
+/// читання <c>Path</c> замість <c>ReadAddress</c> → червоний PiSqlClient-тест; М8 — проковтнути відмову
+/// переліку порожнім знімком → червоний <see cref="Відмова_переліку_валить_прогін_з_її_кодом_і_не_пише_зниклих"/>.
+/// </para>
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class RegistrySyncJobTests(SqlServerFixture sql)
@@ -131,6 +142,112 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
             Assert.Contains(events, e => e.Status == CollectionCoverage.RegistryValueRejected
                                          && e.Details!.Contains("ECR-INT-0404", StringComparison.Ordinal)
                                          && e.Details.Contains(stand.UnlinkedGuid, StringComparison.Ordinal));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task PiSqlClient_елемент_є_в_джерелі_не_зниклий_і_читається_за_іменем()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.Local, ExternalTransport.PiSqlClient);
+
+        try
+        {
+            var source = new FakeSource(stand.Values, transport: ExternalTransport.PiSqlClient);
+
+            await using (var db = Context())
+            {
+                await Job(db, source, stand, new JobActorScope()).ExecuteAsync(stand.EntityId, CancellationToken.None);
+            }
+
+            var events = await EventsAsync(stand.EntityId);
+
+            // ⛔ D-212 §0: g1 у джерелі Є — «зниклим» він бути не може.
+            Assert.DoesNotContain(events, e => e.Status == CollectionCoverage.RegistrySourceMissing
+                                               && e.Details!.Contains(stand.Linked1Guid, StringComparison.Ordinal));
+
+            // Значення прочитано за адресою «ім'я|атрибут» → розбіжність CAP 10 ≠ 12.5.
+            Assert.Contains(events, e => e.Status == CollectionCoverage.RegistryDiverged
+                                         && e.Details!.Contains("source=12.5", StringComparison.Ordinal));
+
+            // g2 справді немає, знімок повний → зниклий пишеться, як і для PI Web API.
+            Assert.Contains(events, e => e.Status == CollectionCoverage.RegistrySourceMissing
+                                         && e.Details!.Contains(stand.MissingGuid, StringComparison.Ordinal));
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Theory]
+    [InlineData(ExternalTransport.PiWebApi)]
+    [InlineData(ExternalTransport.PiSqlClient)]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.10")]
+    public async Task Нуль_елементів_при_наявних_зв_язках_не_дає_зниклих(ExternalTransport transport)
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.Local, transport);
+
+        try
+        {
+            // Джерело «повністю» віддало порожній перелік — а зв'язки g1, g2 є.
+            var empty = stand with { Children = [], Elements = [] };
+            var source = new FakeSource(stand.Values, transport: transport);
+
+            await using (var db = Context())
+            {
+                await Job(db, source, empty, new JobActorScope()).ExecuteAsync(stand.EntityId, CancellationToken.None);
+            }
+
+            // ⛔ Запобіжник: порожній перелік при наявних зв'язках — не доказ, що зникли ВСІ.
+            Assert.DoesNotContain(
+                await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistrySourceMissing);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.10")]
+    public async Task Відмова_переліку_валить_прогін_з_її_кодом_і_не_пише_зниклих()
+    {
+        var stand = await ArrangeAsync(RegistrySourceKind.Local, ExternalTransport.PiSqlClient);
+
+        try
+        {
+            var refusal = new BusinessRuleException(
+                "ECR-INT-0422",
+                "Запит типу ElementList для PI SQL Client не налаштовано.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-INT-0422.queryKindNotConfigured",
+                    ["queryKind"] = "ElementList",
+                    ["configKey"] = "PiSqlClient:ElementListQuery",
+                });
+            var source = new FakeSource(stand.Values, transport: ExternalTransport.PiSqlClient) { ElementsFailure = refusal };
+
+            await using (var db = Context())
+            {
+                // ⛔ Прогін падає з конвертом адаптера (Failed у черзі), а не мовчки пише «порожній повний знімок».
+                var error = await Assert.ThrowsAsync<BusinessRuleException>(
+                    () => Job(db, source, stand, new JobActorScope()).ExecuteAsync(stand.EntityId, CancellationToken.None));
+                Assert.Equal("ECR-INT-0422", error.ErrorCode);
+                Assert.Equal("err.ECR-INT-0422.queryKindNotConfigured", error.Details!["messageKey"]);
+            }
+
+            Assert.Empty(await EventsAsync(stand.EntityId));
         }
         finally
         {
@@ -243,11 +360,12 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
     /// збережений шлях застарів), E2 ↔ g2 (у джерелі немає), E3 без зв'язку;
     /// у джерелі ще g9 без зв'язку.
     /// </summary>
-    private async Task<Stand> ArrangeAsync(RegistrySourceKind kind)
+    private async Task<Stand> ArrangeAsync(
+        RegistrySourceKind kind, ExternalTransport transport = ExternalTransport.PiWebApi)
     {
         var registryId = await RegistryAsync(kind);
         var parent = $@"\\AF\Db\Plant_{_tag}";
-        var entityId = await EntityAsync(registryId, parent);
+        var entityId = await EntityAsync(registryId, parent, transport: transport);
 
         await using var db = Context();
 
@@ -287,21 +405,43 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
             EntityFieldMap.ToRegistryField(entityId, "Name", fields["NAME"].Id));
         await db.SaveChangesAsync();
 
-        var children = new List<SourceEntityDescriptor>
-        {
-            new("Stack1", null, $@"{parent}\Stack1", null, "Element", g1),
-            new("Stack9", null, $@"{parent}\Stack9", null, "Element", g9),
-        };
+        // ⚠ PI SQL Client (RTQP) адресує елемент ІМЕНЕМ (`WHERE e.Name = ?`), а не шляхом;
+        // його каталог (`DiscoverAsync`) — рядки-АТРИБУТИ: Code = елемент|атрибут,
+        // EntityPath = ім'я елемента, DataType = ValueType, ExternalId = GUID елемента.
+        var rtqp = transport == ExternalTransport.PiSqlClient;
+        var a1 = rtqp ? "Stack1" : $@"{parent}\Stack1";
+        var a9 = rtqp ? "Stack9" : $@"{parent}\Stack9";
+
+        List<SourceEntityDescriptor> children = rtqp
+            ?
+            [
+                new("Stack1|Capacity", "Capacity", "Stack1", null, "Double", g1),
+                new("Stack1|Name", "Name", "Stack1", null, "String", g1),
+                new("Stack9|Capacity", "Capacity", "Stack9", null, "Double", g9),
+                new("Stack9|Name", "Name", "Stack9", null, "String", g9),
+            ]
+            :
+            [
+                new("Stack1", null, a1, null, "Element", g1),
+                new("Stack9", null, a9, null, "Element", g9),
+            ];
+
+        // Що дає DiscoverElementsAsync: RTQP — без шляху, адреса = ім'я; Web API — адреса = шлях.
+        List<SourceElement> elements =
+        [
+            new(g1, "Stack1", rtqp ? null : a1, a1),
+            new(g9, "Stack9", rtqp ? null : a9, a9),
+        ];
 
         var values = new Dictionary<string, SourceDataPoint>(StringComparer.OrdinalIgnoreCase)
         {
-            [$@"{parent}\Stack1|Capacity"] = new($@"{parent}\Stack1|Capacity", Now, 12.5m, null, null, "Good"),
-            [$@"{parent}\Stack1|Name"] = new($@"{parent}\Stack1|Name", Now, null, "Stack 1", null, "Good"),
-            [$@"{parent}\Stack9|Capacity"] = new($@"{parent}\Stack9|Capacity", Now, 3m, null, null, "Good"),
-            [$@"{parent}\Stack9|Name"] = new($@"{parent}\Stack9|Name", Now, null, "Stack 9", null, "Good"),
+            [$"{a1}|Capacity"] = new($"{a1}|Capacity", Now, 12.5m, null, null, "Good"),
+            [$"{a1}|Name"] = new($"{a1}|Name", Now, null, "Stack 1", null, "Good"),
+            [$"{a9}|Capacity"] = new($"{a9}|Capacity", Now, 3m, null, null, "Good"),
+            [$"{a9}|Name"] = new($"{a9}|Name", Now, null, "Stack 9", null, "Good"),
         };
 
-        return new Stand(entityId, registryId, parent, [e1.Id, e2.Id, e3.Id], children, values, g2, g9);
+        return new Stand(entityId, registryId, parent, [e1.Id, e2.Id, e3.Id], children, elements, values, g2, g9, g1);
     }
 
     private async Task<int> RegistryAsync(RegistrySourceKind kind)
@@ -321,12 +461,16 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
         return registry.Id;
     }
 
-    private async Task<int> EntityAsync(int? registryDefId, string? path = null, bool active = true)
+    private async Task<int> EntityAsync(
+        int? registryDefId,
+        string? path = null,
+        bool active = true,
+        ExternalTransport transport = ExternalTransport.PiWebApi)
     {
         await using var db = Context();
 
         var dataSource = new DataSource(
-            EcrCode.Create($"RS{Guid.NewGuid().ToString("N")[..8]}"), Text("PI AF"), ExternalTransport.PiWebApi,
+            EcrCode.Create($"RS{Guid.NewGuid().ToString("N")[..8]}"), Text("PI AF"), transport,
             "https://af.test", "secret");
         db.DataSources.Add(dataSource);
         await db.SaveChangesAsync();
@@ -363,10 +507,13 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
     /// через writer. Покликав би — підробка повернула б порожній scope і тест упав би.
     /// Запис (<c>External</c>/<c>Hybrid</c>) — <c>RegistrySyncApplyTests</c>, зі справжнім контейнером.
     /// </remarks>
-    private RegistrySyncJob Job(EcrDbContext db, FakeSource source, Stand stand, JobActorScope scope)
-        => new(
-            db, [source], new FakeCatalog(stand.Children), new IntegrationActor(db, scope), new TestClock(Now),
-            Substitute.For<IServiceScopeFactory>());
+    private static RegistrySyncJob Job(EcrDbContext db, FakeSource source, Stand stand, JobActorScope scope)
+    {
+        source.Catalog = stand.Children;
+        source.Elements = stand.Elements;
+
+        return new(db, [source], new IntegrationActor(db, scope), new TestClock(Now), Substitute.For<IServiceScopeFactory>());
+    }
 
     private async Task<List<CollectionCoverage>> EventsAsync(int entityId)
     {
@@ -439,25 +586,21 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
         string ParentPath,
         long[] EntryIds,
         IReadOnlyList<SourceEntityDescriptor> Children,
+        IReadOnlyList<SourceElement> Elements,
         IReadOnlyDictionary<string, SourceDataPoint> Values,
         string MissingGuid,
-        string UnlinkedGuid);
+        string UnlinkedGuid,
+        string Linked1Guid);
 
-    /// <summary>Каталог: діти елемента сутності.</summary>
-    private sealed class FakeCatalog(IReadOnlyList<SourceEntityDescriptor> children) : ISourceCatalogReader
-    {
-        public Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(
-            int dataSourceId, string? parentPath, CancellationToken ct)
-            => Task.FromResult(children);
-
-        public Task<IReadOnlyList<SourceEntityDescriptor>> AttributesAsync(
-            int dataSourceId, string elementPath, CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<SourceEntityDescriptor>>([]);
-    }
-
-    /// <summary>Джерело з поточними значеннями; <paramref name="failPath"/> — відмова шляху.</summary>
+    /// <summary>
+    /// Джерело з переліком елементів і поточними значеннями; <paramref name="failPath"/> — відмова шляху.
+    /// <see cref="Catalog"/> — каталог конфігуратора у формі транспорту (для RTQP — рядки-атрибути):
+    /// синк його читати не мусить, він тут, щоб мутація «повернути каталожний шлях» червоніла.
+    /// </summary>
     private sealed class FakeSource(
-        IReadOnlyDictionary<string, SourceDataPoint> values, string? failPath = null) : IExternalDataSource
+        IReadOnlyDictionary<string, SourceDataPoint> values,
+        string? failPath = null,
+        ExternalTransport transport = ExternalTransport.PiWebApi) : IExternalDataSource
     {
         public JobActorScope? Scope { get; set; }
 
@@ -465,10 +608,22 @@ public sealed class RegistrySyncJobTests(SqlServerFixture sql)
 
         public bool SeenIntegration { get; private set; }
 
-        public ExternalTransport Transport => ExternalTransport.PiWebApi;
+        public ExternalTransport Transport => transport;
+
+        public IReadOnlyList<SourceEntityDescriptor> Catalog { get; set; } = [];
+
+        public IReadOnlyList<SourceElement> Elements { get; set; } = [];
+
+        /// <summary>Відмова переліку; <c>null</c> — перелік віддається.</summary>
+        public Exception? ElementsFailure { get; init; }
 
         public Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<SourceEntityDescriptor>>([]);
+            => Task.FromResult(Catalog);
+
+        public Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
+            => ElementsFailure is { } failure
+                ? Task.FromException<SourceElementsResult>(failure)
+                : Task.FromResult(new SourceElementsResult(Elements, IsComplete: true));
 
         public Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct)
             => throw new InvalidOperationException("Синк довідника не читає часових рядів.");

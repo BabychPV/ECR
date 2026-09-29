@@ -72,6 +72,39 @@ public interface IExternalDataSource
                 ["transport"] = Transport.ToString(),
             }));
 
+    /// <summary>
+    /// Перелік ЕЛЕМЕНТІВ під коренем для синку довідника (FEATURE-REGISTRY-SYNC §4, <c>D-212</c>):
+    /// GUID, ім'я, шлях і адреса, за якою <see cref="ReadCurrentAsync"/> читає атрибути
+    /// (<c>ReadAddress|атрибут</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не каталог конфігуратора: <see cref="DiscoverAsync"/> у PI SQL Client дає рядки-атрибути,
+    /// і знімок із нього був порожнім і «повним» (хибний <c>RegistrySourceMissing</c> на всі зв'язки).
+    /// <see cref="SourceElementsResult.IsComplete"/> = <c>false</c>, коли перелік міг бути обрізаний
+    /// або елемент без GUID — тоді про зникнення не судять (<c>D-187</c>).
+    /// <para>
+    /// ⚠ Типова реалізація — <b>відмова</b> <c>ECR-INT-0422</c> (<c>.queryKindNotSupported</c>,
+    /// <c>queryKind = ElementList</c>): транспорт без переліку мусить сказати це, а не повернути
+    /// порожній повний знімок.
+    /// </para>
+    /// </remarks>
+    /// <param name="dataSourceId">Джерело.</param>
+    /// <param name="root">Корінь: шлях (PI Web API) або те, що розуміє текст запиту (PI SQL Client).</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
+        => Task.FromException<SourceElementsResult>(new BusinessRuleException(
+            QueryRefusedCode,
+            $"Транспорт {Transport} не дає переліку елементів.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.queryKindNotSupported",
+                ["queryKind"] = ElementListQueryKind,
+                ["transport"] = Transport.ToString(),
+            }));
+
+    /// <summary>Ім'я виду запиту «перелік елементів» у деталях відмови.</summary>
+    public const string ElementListQueryKind = "ElementList";
+
     /// <summary>Код відмови «тип читання не налаштовано або транспорт його не виконує».</summary>
     public const string QueryRefusedCode = "ECR-INT-0422";
 
@@ -253,6 +286,21 @@ public sealed record SourceEventTemplate(
 public sealed record CurrentValuesResult(
     IReadOnlyList<SourceDataPoint> Values,
     IReadOnlyList<CurrentValueFailure> Failures);
+
+/// <summary>Перелік елементів — результат <see cref="IExternalDataSource.DiscoverElementsAsync"/>.</summary>
+/// <param name="Elements">Елементи під коренем.</param>
+/// <param name="IsComplete">Перелік не обрізано і кожен елемент має GUID — можна судити про зникнення.</param>
+public sealed record SourceElementsResult(IReadOnlyList<SourceElement> Elements, bool IsComplete);
+
+/// <summary>Елемент джерела для синку довідника.</summary>
+/// <param name="ExternalId">GUID елемента AF (<c>dic.RegistryExternalKey.ExternalId</c>); порожній — не зіставити.</param>
+/// <param name="Name">Ім'я елемента.</param>
+/// <param name="Path">Шлях в ієрархії; <c>null</c> — джерело його не дає.</param>
+/// <param name="ReadAddress">
+/// Що стоїть перед <c>|атрибут</c> у шляху для <see cref="IExternalDataSource.ReadCurrentAsync"/>:
+/// PI Web API — шлях, PI SQL Client — ім'я (RTQP шукає елемент <c>WHERE e.Name = ?</c>).
+/// </param>
+public sealed record SourceElement(string ExternalId, string Name, string? Path, string ReadAddress);
 
 /// <summary>Шлях, поточне значення якого не прочитано.</summary>
 /// <param name="SourcePath">Шлях атрибута.</param>

@@ -723,6 +723,83 @@ public sealed class PiSqlClientDataSource(
             _ => Convert.ToString(raw, CultureInfo.InvariantCulture),
         };
 
+    /// <summary>Ключ запиту переліку елементів під коренем (синк довідника, <c>D-212</c>). Типового тексту немає.</summary>
+    /// <remarks>
+    /// ⛔ Типового тексту немає (V-3, як <see cref="CurrentValueQueryKey"/>): як RTQP адресує
+    /// «корінь» (шлях, шаблон, категорія) — рішення конкретної бази AF, і вигаданий дефолт
+    /// виглядав би робочим налаштуванням.
+    /// <para>
+    /// Контракт тексту: один параметр <c>?</c> — корінь (<c>EntityPath</c> сутності, інакше її код).
+    /// Колонки: <c>ElementId</c> (GUID), <c>ElementName</c>, необов'язкова <c>ElementPath</c>.
+    /// Адреса читання — <c>ElementName</c>: саме за ним <see cref="ReadCurrentAsync"/> шукає
+    /// елемент (<c>WHERE e.Name = ?</c>). Повний — менше ніж <see cref="MaxCatalogRows"/>
+    /// рядків і кожен має <c>ElementId</c>.
+    /// </para>
+    /// </remarks>
+    public const string ElementListQueryKey = "PiSqlClient:ElementListQuery";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Без <see cref="ElementListQueryKey"/> — відмова <c>ECR-INT-0422</c>
+    /// <c>.queryKindNotConfigured</c> ДО з'єднання.
+    /// </remarks>
+    public async Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
+    {
+        var queryText = ConfiguredOrRefuse(ElementListQueryKey, IExternalDataSource.ElementListQueryKind);
+
+        var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
+
+        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = queryText;
+        command.Parameters.Add(new OdbcParameter("root", OdbcType.NVarChar) { Value = root });
+
+        using var reader = await RetryAsync(
+            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+            IsTransientOdbcFailure,
+            ct).ConfigureAwait(false);
+
+        return await ReadElementsAsync(reader, MaxCatalogRows, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Елементи з результату <see cref="ElementListQueryKey"/>: <c>ElementId</c>, <c>ElementName</c>,
+    /// необов'язкова <c>ElementPath</c>; адреса читання — ім'я.
+    /// </summary>
+    /// <remarks>Публічний для тестів: <c>OdbcDataReader</c> ззовні не зробиш.</remarks>
+    /// <param name="reader">Відкритий результат запиту.</param>
+    /// <param name="ceiling">Стеля рядків; дійшли до неї — перелік неповний.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<SourceElementsResult> ReadElementsAsync(
+        DbDataReader reader, int ceiling, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        var elements = new List<SourceElement>();
+        var rows = 0;
+        var complete = true;
+
+        while (rows < ceiling && await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows++;
+            var row = Row(reader);
+            var id = Column(row, "ElementId") is { } raw ? Convert.ToString(raw, CultureInfo.InvariantCulture) : null;
+            var name = Column(row, "ElementName") as string;
+
+            // Без GUID чи імені елемент не зіставити й не прочитати: перелік неповний, а не падіння.
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+            {
+                complete = false;
+                continue;
+            }
+
+            elements.Add(new SourceElement(id, name, Column(row, "ElementPath") as string, name));
+        }
+
+        return new SourceElementsResult(elements, complete && rows < ceiling);
+    }
+
     /// <summary>Текст summary-запиту з підставленими літералами.</summary>
     /// <param name="configured">Текст із <see cref="SummaryQueryKey"/>.</param>
     /// <param name="template">Шаблон елемента.</param>
@@ -1211,6 +1288,11 @@ public sealed class PiSqlClientDataSource(
             short number => (number, null),
             bool flag => (null, flag ? "true" : "false"),
             string text => (null, text),
+
+            // ⚠ Дата — ISO 8601 ("O"), а не ToString() за культурою потоку: той самий
+            // атрибут давав би різний текст на різних серверах (і вічну «розбіжність»).
+            DateTime date => (null, date.ToString("O", CultureInfo.InvariantCulture)),
+            DateTimeOffset date => (null, date.ToString("O", CultureInfo.InvariantCulture)),
 
             // Незнайомий тип не вгадується: текстове подання видно у звіті про
             // збір, підставлений нуль — ні.

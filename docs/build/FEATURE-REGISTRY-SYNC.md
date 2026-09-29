@@ -214,6 +214,31 @@ HSE301).
   відкат і контрольний прогін): прибрати перевірку права → червоні; прибрати звірку «запис
   належить довіднику шляху» → червоний; прибрати перевірку дубля → червоний.
 
+### 5.4 D-212 PR-1 — перелік елементів для знімка (2026-09-29)
+
+- **Дефект:** знімок брав елементи з каталогу конфігуратора (`ISourceCatalogReader.BrowseAsync`) і
+  лишав `DataType == "Element"`. Каталог PI SQL Client (`DiscoverAsync`) — рядки-АТРИБУТИ
+  (`Code = елемент|атрибут`, `EntityPath` = ім'я елемента, `DataType` = `ValueType`), тож для RTQP
+  знімок був порожнім і «повним» → хибний `RegistrySourceMissing` на всі зв'язки. До того ж адреса
+  читання будувалась зі шляху, а RTQP шукає елемент за ІМ'ЯМ (`WHERE e.Name = ?`).
+- **Порт:** `IExternalDataSource.DiscoverElementsAsync(dataSourceId, root)` →
+  `SourceElementsResult(Elements: SourceElement(ExternalId, Name, Path?, ReadAddress), IsComplete)`.
+  Типова реалізація — відмова `ECR-INT-0422` `.queryKindNotSupported` (`queryKind = ElementList`).
+  Задача читає атрибути за `ReadAddress|атрибут`; `ISourceCatalogReader` у задачі більше немає.
+- **PI Web API:** прямі діти кореня (`BrowseAsync`), `ReadAddress` = шлях; повний — менше ніж
+  `MaxItemsPerLevel` і кожен має `Id` і `Path`.
+- **PI SQL Client — ключ `PiSqlClient:ElementListQuery`, типового тексту НЕМАЄ** (V-3, як
+  `CurrentValueQuery`): немає ключа → `ECR-INT-0422` `.queryKindNotConfigured` ДО з'єднання.
+  Контракт тексту: один параметр `?` — корінь (`EntityPath` сутності, інакше її код); колонки
+  `ElementId` (GUID), `ElementName`, необов'язкова `ElementPath`. `ReadAddress` = `ElementName`.
+  Повний — менше ніж `MaxCatalogRows` (20 000) рядків і кожен має `ElementId` та `ElementName`.
+  ⚠ Ключа на рівні джерела (`PiSqlClient:{code}:…`) у коді немає — ключ спільний для всіх
+  RTQP-джерел, як і решта `PiSqlClient:*`.
+- **Запобіжник (обидва транспорти):** 0 елементів при наявних зв'язках → знімок НЕповний, жодного
+  `RegistrySourceMissing`: порожню відповідь не відрізнити від хибного кореня чи тексту запиту.
+  Відмова переліку — виняток адаптера: прогін `Failed` з його кодом і `messageKey`, подій не пише.
+- `Value()` у PI SQL Client: дата — ISO 8601 (`"O"`), не `ToString()` за культурою потоку.
+
 ## 6. Журнал покриття
 
 | Вимога | Що покриває | Стан |

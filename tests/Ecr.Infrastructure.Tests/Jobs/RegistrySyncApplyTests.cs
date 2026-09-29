@@ -678,8 +678,7 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         var scope = new JobActorScope();
         var job = new RegistrySyncJob(
             db,
-            [new FakeSource(stand.Values)],
-            new FakeCatalog(stand.Children),
+            [new FakeSource(stand.Values, stand.Children)],
             new IntegrationActor(db, scope),
             new TestClock(Now),
             provider.GetRequiredService<IServiceScopeFactory>());
@@ -940,25 +939,23 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         public void ForgetPreloaded() => inner.ForgetPreloaded();
     }
 
-    /// <summary>Каталог: діти елемента сутності.</summary>
-    private sealed class FakeCatalog(IReadOnlyList<SourceEntityDescriptor> children) : ISourceCatalogReader
-    {
-        public Task<IReadOnlyList<SourceEntityDescriptor>> BrowseAsync(
-            int dataSourceId, string? parentPath, CancellationToken ct)
-            => Task.FromResult(children);
-
-        public Task<IReadOnlyList<SourceEntityDescriptor>> AttributesAsync(
-            int dataSourceId, string elementPath, CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<SourceEntityDescriptor>>([]);
-    }
-
-    /// <summary>Джерело з поточними значеннями (словник живий — тест міняє значення між прогонами).</summary>
-    private sealed class FakeSource(IReadOnlyDictionary<string, SourceDataPoint> values) : IExternalDataSource
+    /// <summary>
+    /// PI Web API: діти елемента сутності (адреса читання — шлях) і поточні значення
+    /// (словник живий — тест міняє значення між прогонами).
+    /// </summary>
+    private sealed class FakeSource(
+        IReadOnlyDictionary<string, SourceDataPoint> values, IReadOnlyList<SourceEntityDescriptor> children)
+        : IExternalDataSource
     {
         public ExternalTransport Transport => ExternalTransport.PiWebApi;
 
         public Task<IReadOnlyList<SourceEntityDescriptor>> DiscoverAsync(int dataSourceId, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<SourceEntityDescriptor>>([]);
+
+        public Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
+            => Task.FromResult(new SourceElementsResult(
+                [.. children.Select(c => new SourceElement(c.ExternalId!, c.Code, c.EntityPath, c.EntityPath!))],
+                IsComplete: true));
 
         public Task<CollectionResult> ReadAsync(CollectionRequest request, CancellationToken ct)
             => throw new InvalidOperationException("Синк довідника не читає часових рядів.");

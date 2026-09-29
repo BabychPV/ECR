@@ -78,17 +78,10 @@ public interface IRegistrySyncJob
 public sealed class RegistrySyncJob(
     EcrDbContext db,
     IEnumerable<IExternalDataSource> sources,
-    ISourceCatalogReader catalog,
     IntegrationActor actor,
     IClock clock,
     IServiceScopeFactory scopes) : IRegistrySyncJob
 {
-    /// <summary>
-    /// Скільки елементів одного рівня віддає каталог; рівно стільки — знімок,
-    /// можливо, обрізано (<c>PiAfCatalogReader.MaxNodesPerLevel</c>).
-    /// </summary>
-    public const int CatalogCeiling = 1_000;
-
     /// <summary>Префікс ключа дедупу в <c>Details</c> події.</summary>
     public const string DedupKeyPrefix = "; key=";
 
@@ -144,9 +137,10 @@ public sealed class RegistrySyncJob(
 
         var mappings = await MappingsAsync(entity.Id, registry.Fields.ToDictionary(f => f.Id), ct).ConfigureAwait(false);
 
-        var snapshot = await SnapshotAsync(adapter, dataSource.Id, entity, mappings, ct).ConfigureAwait(false);
-
         var links = await LinksAsync(dataSource.Id, registryDefId, ct).ConfigureAwait(false);
+
+        var snapshot = await SnapshotAsync(adapter, dataSource.Id, entity, mappings, links.Count > 0, ct).ConfigureAwait(false);
+
         var entries = await EntriesAsync(links, mappings, ct).ConfigureAwait(false);
 
         var plan = RegistrySyncPlanner.Plan(new RegistrySyncInput(
@@ -410,35 +404,42 @@ public sealed class RegistrySyncJob(
             })];
     }
 
-    /// <summary>Знімок джерела: діти елемента сутності й поточні значення змаплених атрибутів.</summary>
+    /// <summary>Знімок джерела: елементи під коренем сутності й поточні значення змаплених атрибутів.</summary>
     /// <remarks>
-    /// ⛔ Повний знімок (<c>D-187</c>) — лише коли каталог не обрізано, кожен елемент
-    /// має GUID і <c>ReadCurrentAsync</c> не повернув жодної відмови шляху. Інакше
-    /// відсутність елемента нічого не каже, і <c>RegistrySourceMissing</c> не пишеться.
-    /// Відмова всього джерела — виняток адаптера; задача стає <c>Failed</c>, а не
-    /// пише знімок, якого немає.
+    /// ⛔ Елементи — з <see cref="IExternalDataSource.DiscoverElementsAsync"/>, а не з каталогу
+    /// конфігуратора (<c>D-212</c> §0): каталог PI SQL Client дає рядки-атрибути, і знімок із
+    /// нього був порожнім і «повним» — хибний <c>RegistrySourceMissing</c> на всі зв'язки.
+    /// <para>
+    /// ⛔ Повний знімок (<c>D-187</c>) — лише коли перелік повний, GUID не дублюються,
+    /// <c>ReadCurrentAsync</c> не повернув жодної відмови шляху і — ЗАПОБІЖНИК — перелік не
+    /// порожній при наявних зв'язках (для будь-якого транспорту): «зникли всі» від порожньої
+    /// відповіді не відрізнити від хибного кореня чи тексту запиту. Відмова переліку чи всього
+    /// джерела — виняток адаптера; задача стає <c>Failed</c> з його кодом, а не пише знімок,
+    /// якого немає.
+    /// </para>
     /// </remarks>
-    private async Task<Snapshot> SnapshotAsync(
+    private static async Task<Snapshot> SnapshotAsync(
         IExternalDataSource adapter,
         int dataSourceId,
         SourceEntity entity,
         IReadOnlyList<RegistrySyncFieldMapping> mappings,
+        bool hasLinks,
         CancellationToken ct)
     {
         // ⚠ Той самий запасний шлях, що в CollectionRunner.Paths: сутність без
         // шляху адресується своїм кодом.
-        var parent = entity.EntityPath ?? entity.Code;
+        var root = entity.EntityPath ?? entity.Code;
 
-        var children = await catalog.BrowseAsync(dataSourceId, parent, ct).ConfigureAwait(false);
-        var complete = children.Count < CatalogCeiling;
+        var listed = await adapter.DiscoverElementsAsync(dataSourceId, root, ct).ConfigureAwait(false);
+        var complete = listed.IsComplete && (listed.Elements.Count > 0 || !hasLinks);
 
-        var elements = new Dictionary<string, SourceEntityDescriptor>(StringComparer.OrdinalIgnoreCase);
+        var elements = new Dictionary<string, SourceElement>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var child in children.Where(c => string.Equals(c.DataType, "Element", StringComparison.OrdinalIgnoreCase)))
+        foreach (var element in listed.Elements)
         {
             // Без GUID елемент не зіставити, а дубль GUID — порушення контракту
-            // каталогу: і те, і те робить знімок неповним, а не падінням задачі.
-            if (string.IsNullOrWhiteSpace(child.ExternalId) || !elements.TryAdd(child.ExternalId, child))
+            // переліку: і те, і те робить знімок неповним, а не падінням задачі.
+            if (string.IsNullOrWhiteSpace(element.ExternalId) || !elements.TryAdd(element.ExternalId, element))
             {
                 complete = false;
             }
@@ -452,11 +453,11 @@ public sealed class RegistrySyncJob(
         // Шлях атрибута → (елемент, атрибут).
         var addresses = new Dictionary<string, (string ExternalId, string Attribute)>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var element in elements.Values.Where(e => !string.IsNullOrWhiteSpace(e.EntityPath)))
+        foreach (var element in elements.Values.Where(e => !string.IsNullOrWhiteSpace(e.ReadAddress)))
         {
             foreach (var attribute in attributes)
             {
-                addresses.TryAdd($"{element.EntityPath}{AttributeSeparator}{attribute}", (element.ExternalId!, attribute));
+                addresses.TryAdd($"{element.ReadAddress}{AttributeSeparator}{attribute}", (element.ExternalId, attribute));
             }
         }
 
@@ -494,9 +495,9 @@ public sealed class RegistrySyncJob(
 
         var snapshot = elements.Values
             .Select(e => new RegistrySyncSourceElement(
-                e.ExternalId!,
-                e.EntityPath,
-                values.TryGetValue(e.ExternalId!, out var byAttribute)
+                e.ExternalId,
+                e.Path,
+                values.TryGetValue(e.ExternalId, out var byAttribute)
                     ? byAttribute
                     : new Dictionary<string, object?>(StringComparer.Ordinal)))
             .ToList();

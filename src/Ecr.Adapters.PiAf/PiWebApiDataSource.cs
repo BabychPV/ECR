@@ -85,6 +85,33 @@ public sealed partial class PiWebApiDataSource(
 
     /// <inheritdoc />
     /// <remarks>
+    /// Прямі діти <paramref name="root"/> через <see cref="BrowseAsync"/>; адреса читання — шлях
+    /// (<c>attributes?path=шлях|атрибут</c>). Повний — лише якщо не дійшли до
+    /// <see cref="MaxItemsPerLevel"/> і кожен елемент має <c>Id</c>.
+    /// </remarks>
+    public async Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
+    {
+        var children = await BrowseAsync(dataSourceId, root, ct).ConfigureAwait(false);
+
+        var complete = children.Count < MaxItemsPerLevel;
+        var elements = new List<SourceElement>(children.Count);
+
+        foreach (var child in children)
+        {
+            if (string.IsNullOrWhiteSpace(child.ExternalId) || string.IsNullOrWhiteSpace(child.EntityPath))
+            {
+                complete = false;
+                continue;
+            }
+
+            elements.Add(new SourceElement(child.ExternalId, child.Code, child.EntityPath, child.EntityPath));
+        }
+
+        return new SourceElementsResult(elements, complete);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// <c>elements/{webId}/attributes</c>: <c>EntityPath</c> — повний шлях
     /// атрибута (саме його потім читає <see cref="ReadAsync"/>), одиниця —
     /// <c>DefaultUnitsName</c>, тип — <c>Type</c>.
