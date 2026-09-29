@@ -608,6 +608,7 @@ public sealed class ImportRegistryEntriesHandler(
         CancellationToken ct)
     {
         var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var numberCulture = NumberCulture.ForLanguage(currentUser.Language);
 
         foreach (var (idx, field) in columns)
         {
@@ -619,16 +620,33 @@ public sealed class ImportRegistryEntriesHandler(
                     continue;
                 }
 
+                // ✎ 2026-09-29 (рішення людини): число в CSV — текст ЛЮДИНИ, і
+                // читається за культурою її мови, а не `Convert.ToDecimal(…,
+                // Invariant)` у `RegistryValue.Set`: той бере `NumberStyles.Number`,
+                // і «12,5» мовчки ставало 125 (клас `C1`). Далі їде вже `decimal`
+                // — проба, ключі й запис бачать те саме число.
+                object parsed = raw;
+                if (field.DataType is CellDataType.Int or CellDataType.Decimal)
+                {
+                    var reading = CultureNumberReader.Read(raw, numberCulture);
+                    if (reading.Kind != NumberTextKind.Number)
+                    {
+                        return (values, field.Code, "err.ECR-REG-0422.valueNotNumber");
+                    }
+
+                    parsed = reading.Value;
+                }
+
                 try
                 {
-                    new RegistryValue(0L, field.Id).Set(field.DataType, raw, field.UnitId);
+                    new RegistryValue(0L, field.Id).Set(field.DataType, parsed, field.UnitId);
                 }
                 catch (DomainException ex)
                 {
                     return (values, field.Code, RegistryEntryWriter.MessageKeyOf(ex));
                 }
 
-                values[field.Code] = raw;
+                values[field.Code] = parsed;
                 continue;
             }
 

@@ -133,7 +133,7 @@ public sealed partial class PatchCellsHandler(
         // (<see cref="PlaceholderRowId"/>), і вся валідація нижче йде по них.
         // Справжні `TableRow.Id` з'являються лише всередині транзакції запису
         // (<see cref="MaterializeNewRowsAsync"/>).
-        var changes = BuildCellChanges(context);
+        var changes = BuildCellChanges(context, Localization.NumberCulture.ForLanguage(currentUser.Language));
         var requiredInputMessages = await EnforceRequiredInputsAsync(context, changes, ct).ConfigureAwait(false);
 
         // ⛔ Шапка документа читається РЕАЛЬНО (раніше HDR.X у правилах
@@ -1100,7 +1100,12 @@ public sealed partial class PatchCellsHandler(
     /// Від'ємні — бо <c>doc.TableRowSeq</c> видає лише додатні, і сплутати
     /// тимчасову адресу зі справжньою неможливо.
     /// </remarks>
-    private static CellChangeLists BuildCellChanges(RequestContext context)
+    /// <param name="context">Контекст запиту.</param>
+    /// <param name="culture">
+    /// Культура розбору числа, що прийшло текстом, — за мовою користувача
+    /// (рішення 2026-09-29, <c>NumberCulture</c>).
+    /// </param>
+    private static CellChangeLists BuildCellChanges(RequestContext context, System.Globalization.CultureInfo culture)
     {
         var upserts = new List<CellRecord>();
         var deletes = new List<CellAddress>();
@@ -1127,7 +1132,7 @@ public sealed partial class PatchCellsHandler(
         // спершу нові рядки, потім наявні — тож і перша відмова батчу та сама.
         if (context.Creations.Count > 0)
         {
-            EnsureCreationValuesReadable(context.Creations, context.ColumnDefs);
+            EnsureCreationValuesReadable(context.Creations, context.ColumnDefs, culture);
 
             for (var i = 0; i < context.Creations.Count; i++)
             {
@@ -1135,7 +1140,7 @@ public sealed partial class PatchCellsHandler(
                 var id = PlaceholderRowId(i);
                 touched.Add(id);
                 rowKeyById[id] = row.RowKey;
-                Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes);
+                Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes, culture);
             }
         }
 
@@ -1151,7 +1156,7 @@ public sealed partial class PatchCellsHandler(
             // це рівно ті рядки, які `LoadContextAsync` відібрав за
             // `BaseVersion is not null` (null означає намір СТВОРИТИ, R-B2).
             expectedRowVersions[id] = row.BaseVersion!;
-            Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes);
+            Distribute(row, id, context.PeriodKey, context.ColumnDefs, context.Instance.TableDefId, upserts, deletes, culture);
         }
 
         return new CellChangeLists(upserts, deletes, touched, rowKeyById, expectedRowVersions);
@@ -2600,7 +2605,7 @@ public sealed partial class PatchCellsHandler(
     /// що й у <see cref="Distribute"/>, тож відмова однакова, лише раніше.
     /// </remarks>
     private static void EnsureCreationValuesReadable(
-        IReadOnlyList<PatchRow> creations, IReadOnlyDictionary<string, ColumnDef> columnDefs)
+        IReadOnlyList<PatchRow> creations, IReadOnlyDictionary<string, ColumnDef> columnDefs, System.Globalization.CultureInfo culture)
     {
         foreach (var row in creations)
         {
@@ -2610,7 +2615,7 @@ public sealed partial class PatchCellsHandler(
 
                 if (!cell.IsEmpty)
                 {
-                    _ = CellValueReader.Read(cell.Value, column);
+                    _ = CellValueReader.Read(cell.Value, column, culture);
                 }
             }
         }
@@ -2623,7 +2628,8 @@ public sealed partial class PatchCellsHandler(
         IReadOnlyDictionary<string, ColumnDef> columnDefs,
         int tableDefId,
         List<CellRecord> upserts,
-        List<CellAddress> deletes)
+        List<CellAddress> deletes,
+        System.Globalization.CultureInfo culture)
     {
         foreach (var cell in row.Cells)
         {
@@ -2640,7 +2646,7 @@ public sealed partial class PatchCellsHandler(
             // читач повертає null, а не порожнє значення: «стерти» і «явна
             // порожнеча» — різні наміри, і зводити їх в один означає втратити
             // відмінність, яку користувач висловив свідомо.
-            var data = CellValueReader.Read(cell.Value, column);
+            var data = CellValueReader.Read(cell.Value, column, culture);
 
             if (data is null)
             {

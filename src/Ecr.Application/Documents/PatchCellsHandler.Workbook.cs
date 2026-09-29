@@ -173,9 +173,11 @@ public sealed partial class PatchCellsHandler
 
         await EnsureWorkbookAccessAsync(active, ct).ConfigureAwait(false);
 
+        var numberCulture = Localization.NumberCulture.ForLanguage(currentUser.Language);
+
         foreach (var item in active)
         {
-            item.Planned = Blamed(item.Id, () => BuildCellChanges(item.Context));
+            item.Planned = Blamed(item.Id, () => BuildCellChanges(item.Context, numberCulture));
         }
 
         // ⚠ Межі періоду — одні на книгу (документ × період) і лише тоді, коли

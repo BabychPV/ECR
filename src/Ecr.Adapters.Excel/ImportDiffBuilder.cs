@@ -1,6 +1,7 @@
 using System.Globalization;
 using ClosedXML.Excel;
 using Ecr.Application.Documents;
+using Ecr.Application.Localization;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.Configuration;
@@ -44,6 +45,11 @@ public sealed class ImportDiffBuilder
     /// Чи бачить той, хто імпортує, колонку (<c>DocumentReadScope.CanReadColumn</c>, S6);
     /// <c>null</c> — бачить усі.
     /// </param>
+    /// <param name="culture">
+    /// Культура користувача для числа, набраного в книзі ТЕКСТОМ (рішення
+    /// 2026-09-29, <see cref="NumberCulture"/>); <c>null</c> — Invariant.
+    /// Числові комірки Excel читаються числом і від культури не залежать.
+    /// </param>
     /// <remarks>
     /// ⛔ Q-168 (аудит фази 2, продуктивність). Метод БІЛЬШЕ НЕ ходить у базу
     /// сам — <paramref name="rowIds"/>, <paramref name="versions"/> і
@@ -62,9 +68,12 @@ public sealed class ImportDiffBuilder
         IReadOnlyDictionary<string, long> rowIds,
         IReadOnlyDictionary<string, string> versions,
         IReadOnlyList<CellRecord> current,
-        Func<int, bool>? canReadColumn = null)
+        Func<int, bool>? canReadColumn = null,
+        CultureInfo? culture = null)
     {
         ArgumentNullException.ThrowIfNull(worksheet);
+
+        culture ??= CultureInfo.InvariantCulture;
         ArgumentNullException.ThrowIfNull(block);
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decisions);
@@ -134,7 +143,7 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
-                var incoming = Read(cell, definition, lookups);
+                var incoming = Read(cell, definition, lookups, culture);
                 var existing = values.GetValueOrDefault((row.RowKey, column.ColumnDefId))?.Value;
 
                 // ⛔ `V-10`. Обчислювані й read-only комірки порівнюються з
@@ -222,15 +231,14 @@ public sealed class ImportDiffBuilder
                 // книгу, вже після того, як людина погодилася на перегляд.
                 //
                 // ⛔ `C1`: рядок у числовій колонці — це те, що `ReadNumber`
-                // свідомо НЕ прочитав числом (напр. неоднозначне «1,234» чи
-                // «1,23,4»). `CellValueReader` тепер теж відхиляє будь-яку кому
-                // (`NumberStyles.Float`), але причину — неоднозначний
-                // роздільник — знає лише правило коми цього файлу, тому відмова
-                // з діагностикою ставиться тут, тим самим ключем. Прийняте
-                // число (напр. «1,234.5») іде далі вже `decimal`, без коми.
+                // свідомо НЕ прочитав числом (напр. «1,234» у en-US чи
+                // «1,23,4»). Відмова з діагностикою ставиться тут, тим самим
+                // ключем; прийняте число (напр. «1,234.5» у en-US, «1 234,5» у
+                // ru) іде далі вже `decimal`, тож застосування (зокрема у фоновій
+                // задачі) культури не потребує.
                 if (incoming is string raw && IsNumeric(definition))
                 {
-                    _ = WithoutComma(raw, out var ambiguous);
+                    var ambiguous = CultureNumberReader.Read(raw, culture).Kind == NumberTextKind.Ambiguous;
 
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch,
@@ -242,7 +250,7 @@ public sealed class ImportDiffBuilder
                     continue;
                 }
 
-                if (TypeMismatch(incoming, definition) is { } mismatch)
+                if (TypeMismatch(incoming, definition, culture) is { } mismatch)
                 {
                     rejected.Add(new ImportRejection(
                         row.RowKey, column.Code, CellValueReader.TypeMismatch, mismatch.Message,
@@ -268,11 +276,12 @@ public sealed class ImportDiffBuilder
     /// ключ читача несе в тексті «Column "{columnCode}"», а рядок переліку
     /// перегляду вже має колонку окремим стовпцем і підстановок не передає.
     /// </remarks>
-    private static (string Message, string? MessageKey)? TypeMismatch(object? incoming, ColumnDef definition)
+    private static (string Message, string? MessageKey)? TypeMismatch(
+        object? incoming, ColumnDef definition, CultureInfo culture)
     {
         try
         {
-            _ = CellValueReader.Read(incoming, definition);
+            _ = CellValueReader.Read(incoming, definition, culture);
 
             return null;
         }
@@ -295,7 +304,8 @@ public sealed class ImportDiffBuilder
     private static object? Read(
         IXLCell cell,
         ColumnDef definition,
-        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> lookups)
+        IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>> lookups,
+        CultureInfo culture)
     {
         if (cell.IsEmpty())
         {
@@ -306,10 +316,17 @@ public sealed class ImportDiffBuilder
 
         switch (definition.DataType)
         {
+            // ✎ 2026-09-29: ціле, набране текстом із розрядами («1 234»,
+            // «1,234» у en-US), — за культурою користувача, і далі вже `int`:
+            // застосування (можливо, у фоновій задачі) культури не потребує.
             case CellDataType.Int:
                 return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer)
                     ? integer
-                    : text;
+                    : CultureNumberReader.Read(text, culture) is { Kind: NumberTextKind.Number, Value: var whole }
+                      && decimal.Truncate(whole) == whole
+                      && whole is >= int.MinValue and <= int.MaxValue
+                        ? (int)whole
+                        : text;
 
             // ⛔ `V-10`: обчислювані колонки (`Formula`, `Calculated`) тримають
             // ЧИСЛО (`ValueNumeric`) і експортуються числом — і читаються так
@@ -329,7 +346,7 @@ public sealed class ImportDiffBuilder
                 // (його порушення лишається відмовою). Округлене значення
                 // видно в прев'ю як «нове», і воно ж — те, що буде записано й
                 // потрапить у журнал.
-                return ReadNumber(cell, text) is { } number
+                return ReadNumber(cell, text, culture) is { } number
                     ? decimal.Round(number, CellValueReader.StorageScale, MidpointRounding.AwayFromZero)
                     : text;
 
@@ -362,11 +379,18 @@ public sealed class ImportDiffBuilder
                 // моменту експорту, що випадково збігся з ІНШИМ довідником у
                 // знімку, тихо резолвив введений користувачем код у сутність
                 // ЧУЖОГО довідника — без помилки, з неправильними даними в базі.
+                //
+                // ⛔ `C1`: код, що в книзі лежить ЧИСЛОМ (1.5), береться
+                // інваріантним записом, а не `GetString()`: той форматує
+                // `double` поточною культурою СЕРВЕРА, і на uk-UA «1.5» ставало
+                // «1,5» — коду, якого в довіднику немає.
+                var code = LookupCode(cell, text);
+
                 return definition.LookupRegistryDefId is { } registryId
                        && lookups.TryGetValue(registryId, out var entries)
-                       && entries.TryGetValue(text, out var entryId)
+                       && entries.TryGetValue(code, out var entryId)
                     ? entryId
-                    : text;
+                    : code;
 
             case CellDataType.Unit:
                 // ⛔ Явна гілка Unit (аудит 2026-09-16, §8.3). Unit-значення
@@ -402,7 +426,7 @@ public sealed class ImportDiffBuilder
     /// <c>NumberStyles.Number</c> додано <c>AllowExponent</c>: «1E-05», набране
     /// текстом, — однозначне число, а відмова на ньому — хибна.
     /// </remarks>
-    private static decimal? ReadNumber(IXLCell cell, string text)
+    private static decimal? ReadNumber(IXLCell cell, string text, CultureInfo culture)
     {
         if (cell.DataType == XLDataType.Number)
         {
@@ -416,87 +440,26 @@ public sealed class ImportDiffBuilder
                 : null;
         }
 
-        return WithoutComma(text, out _) is { } invariant
-               && decimal.TryParse(
-                   invariant, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var parsed)
+        // ✎ 2026-09-29 (рішення людини): текстова комірка читається за
+        // культурою КОРИСТУВАЧА, а не за правилом «у книзі немає локалі» —
+        // «1,234» у ru — це 1.234, у en-US — неоднозначно (відмова);
+        // «1.234,5» у en-US — відмова. Правила — `CultureNumberReader`.
+        return CultureNumberReader.Read(text, culture) is { Kind: NumberTextKind.Number, Value: var parsed }
             ? parsed
             : null;
     }
 
-    /// <summary>
-    /// Текст числа без коми — у формі Invariant; <c>null</c> — кому не можна
-    /// прочитати однозначно (<paramref name="ambiguous"/> — саме через
-    /// неоднозначний роздільник).
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Аудит `C1`, текстовий бік. <c>AllowThousands</c> під Invariant просто
-    /// викидає кожну кому, тож «12,5», набране людиною з десятковою комою,
-    /// мовчки ставало 125. У книзі немає локалі, тож роздільник не вгадується
-    /// в жоден бік (рішення інтегратора):
-    /// <list type="number">
-    /// <item>без коми — як є: «7.25» → 7.25;</item>
-    /// <item>одна кома без крапки: 1–3 цифри, кома, рівно 3 цифри — «1,234» —
-    /// НЕОДНОЗНАЧНО (1234 чи 1.234), відмова; інакше кома десяткова: «12,5» →
-    /// 12.5, «1234,567» → 1234.567;</item>
-    /// <item>кілька ком або кома з крапкою — лише правильне групування тисяч
-    /// (1–3 цифри, далі групи рівно по 3, дріб — через крапку): «1,234,567» →
-    /// 1234567, «1,234.5» → 1234.5;</item>
-    /// <item>усе інше з комою — відмова: «1,23,4», «1.234,5», «12,5.3».</item>
-    /// </list>
-    /// Мінус (чи плюс) на початку допустимий скрізь. Експонента разом із комою
-    /// не приймається.
-    /// </remarks>
-    private static string? WithoutComma(string text, out bool ambiguous)
+    /// <summary>Код запису довідника з комірки: число — інваріантним записом, текст — як є.</summary>
+    private static string LookupCode(IXLCell cell, string text)
     {
-        ambiguous = false;
-
-        if (!text.Contains(',', StringComparison.Ordinal))
+        if (cell.DataType != XLDataType.Number)
         {
             return text;
         }
 
-        var sign = text.Length > 0 && text[0] is '+' or '-' ? text[..1] : string.Empty;
-        var body = text[sign.Length..];
-        var groups = body.Split(',');
+        var raw = cell.GetDouble();
 
-        if (groups.Length == 2 && !body.Contains('.', StringComparison.Ordinal))
-        {
-            if (!IsDigits(groups[0]) || !IsDigits(groups[1]))
-            {
-                return null;
-            }
-
-            if (groups[0].Length <= 3 && groups[1].Length == 3)
-            {
-                ambiguous = true;
-
-                return null;
-            }
-
-            return $"{sign}{groups[0]}.{groups[1]}";
-        }
-
-        var dot = body.IndexOf('.', StringComparison.Ordinal);
-        var integer = dot >= 0 ? body[..dot] : body;
-        var fraction = dot >= 0 ? body[(dot + 1)..] : null;
-
-        if (fraction is not null && !IsDigits(fraction))
-        {
-            return null;
-        }
-
-        var integerGroups = integer.Split(',');
-
-        var grouped = integerGroups[0].Length is >= 1 and <= 3
-                      && integerGroups.All(IsDigits)
-                      && integerGroups.Skip(1).All(group => group.Length == 3);
-
-        return grouped
-            ? $"{sign}{string.Concat(integerGroups)}{(fraction is null ? string.Empty : "." + fraction)}"
-            : null;
-
-        static bool IsDigits(string part)
-            => part.Length > 0 && part.All(c => c is >= '0' and <= '9');
+        return double.IsFinite(raw) ? raw.ToString("R", CultureInfo.InvariantCulture) : text;
     }
 
     /// <summary>Колонка тримає число (<c>ValueNumeric</c>).</summary>

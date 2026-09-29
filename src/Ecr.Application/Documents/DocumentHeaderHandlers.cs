@@ -245,6 +245,10 @@ public sealed class PatchDocumentHeaderHandler(
         var fieldsByCode = snapshot.HeaderFields.ToDictionary(f => f.Code, StringComparer.Ordinal);
 
         var toSave = new Dictionary<int, Domain.ValueObjects.DocumentHeaderValueData>();
+
+        // ✎ 2026-09-29: число текстом читається за мовою користувача.
+        var culture = Localization.NumberCulture.ForLanguage(currentUser.Language);
+
         foreach (var change in request.Fields)
         {
             if (!fieldsByCode.TryGetValue(change.Code, out var field))
@@ -262,7 +266,7 @@ public sealed class PatchDocumentHeaderHandler(
 
             var data = change.IsEmpty
                 ? Domain.ValueObjects.DocumentHeaderValueData.Empty
-                : HeaderValueReader.Read(change.Value, field) ?? Domain.ValueObjects.DocumentHeaderValueData.Empty;
+                : HeaderValueReader.Read(change.Value, field, culture) ?? Domain.ValueObjects.DocumentHeaderValueData.Empty;
 
             if (field.ValidateValue(data) is { } errorCode)
             {

@@ -303,10 +303,16 @@ public sealed class CompareDocumentVersionsHandler(
         return SameUntyped(av, bv);
     }
 
+    /// <remarks>
+    /// ⛔ `C1`: <c>Float</c>, не <c>Number</c>. Значення зрізу — МАШИННИЙ запис
+    /// (Invariant, без розрядів), культура користувача тут ні до чого; а
+    /// <c>AllowThousands</c> під Invariant викидав кому, і «12,5» дорівнювало 125 —
+    /// порівняння версій мовчало про зміну.
+    /// </remarks>
     private static bool SameUntyped(string a, string b)
     {
-        return decimal.TryParse(a, NumberStyles.Number, CultureInfo.InvariantCulture, out var x)
-               && decimal.TryParse(b, NumberStyles.Number, CultureInfo.InvariantCulture, out var y)
+        return decimal.TryParse(a, NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
+               && decimal.TryParse(b, NumberStyles.Float, CultureInfo.InvariantCulture, out var y)
             ? x == y
             : string.Equals(a, b, StringComparison.Ordinal);
     }

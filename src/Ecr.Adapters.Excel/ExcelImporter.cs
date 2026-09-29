@@ -247,7 +247,8 @@ public sealed class ExcelImporter(
 
             var diff = diffBuilder.Build(
                 worksheet, block, map.PeriodKey, table, decisions, lookups, rowIds, versions, current,
-                readable.CanReadColumn);
+                readable.CanReadColumn,
+                Ecr.Application.Localization.NumberCulture.ForLanguage(currentUser.Language));
 
             diffs.Add(diff);
             changes.AddRange(diff.Changes);
