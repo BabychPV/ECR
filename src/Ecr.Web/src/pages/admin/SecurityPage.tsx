@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useState, type JSX } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState, type JSX } from 'react';
 import {
   Badge,
   Button,
@@ -114,6 +114,18 @@ export function SecurityPage(): JSX.Element {
   // ⚠ «Діалог доступу вже відкривали». Назад у `false` не вертається навмисно —
   // див. коментар біля `UserAccessEditor` вище.
   const [accessUsed, setAccessUsed] = useState(false);
+
+  // ⛔ Аудит U6: вкладка «Гранти», раз відкрита, лишається змонтованою (лише
+  // ховається). Вкладка живе в адресі (`?tab=`), а `UnsavedGuard` блокує лише
+  // зміну ШЛЯХУ — тож перехід на «Ролі» розмонтовував `GrantsPanel` і мовчки
+  // губив незбережену чернетку грантів. Змонтована панель тримає і чернетку,
+  // і свою реєстрацію в `UnsavedGuard` (вихід зі сторінки питає далі).
+  // ⚠ Назад у `false` не вертається — той самий взірець, що й `accessUsed`.
+  const [grantsUsed, setGrantsUsed] = useState(tab === 'grants');
+  useEffect(() => {
+    if (tab === 'grants') setGrantsUsed(true);
+  }, [tab]);
+  const grantsMounted = grantsUsed || tab === 'grants';
 
   // ⛔ Адресати алертів — ДАНІ, а не конфігурація (`D-125`). Перелік у змінних
   // оточення довелося б міняти розгортанням щоразу, коли хтось іде у
@@ -264,10 +276,12 @@ export function SecurityPage(): JSX.Element {
           `GET /roles` на інших вкладках давала порожні випадні списки мовчки. */}
       {tab !== 'roles' && <ErrorAlert error={roles.error} onRetry={retryReferences} />}
 
-      {tab === 'grants' && (
-        <Suspense fallback={null}>
-          <GrantsPanel roles={roles.data ?? []} />
-        </Suspense>
+      {grantsMounted && (
+        <div hidden={tab !== 'grants'} data-testid="grants-tab">
+          <Suspense fallback={null}>
+            <GrantsPanel roles={roles.data ?? []} />
+          </Suspense>
+        </div>
       )}
 
       {tab === 'users' && can(session.data, 'Security.ManageUsers') && (
