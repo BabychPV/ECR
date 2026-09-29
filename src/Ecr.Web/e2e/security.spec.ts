@@ -48,8 +48,16 @@ import { expect, test, type Page } from '@playwright/test';
 const Admin = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
 const Operator = { user: 'e2e-operator', password: 'E2E-Operator-Work-2026!' };
 
-/** Роль оператора, заведена стендом (`tools/e2e-stand.ps1`, крок «роль оператора»). */
-const OperatorRole = 'E2EOperator';
+/**
+ * Роль оператора, заведена стендом (`tools/e2e-stand.ps1`, крок «роль
+ * оператора»: код `E2EOperator`, `nameL10n.en = 'E2E operator'`).
+ *
+ * ⚠ Вибираємо за НАЗВОЮ, яку бачить людина, а не за кодом: опція селектора
+ * ролі в `GrantsPanel.tsx` підписана `roleLabel()` — назвою з `GET /roles`,
+ * а код лише запасний, коли назви немає. Регулярка з прив'язкою до країв —
+ * щоб не зачепити «E2E operator …» чи іншу роль із таким підрядком.
+ */
+const OperatorRole = /^E2E operator$/i;
 
 /** Проєкт і документ приходять зі стенда: зашите число ламалося б у січні. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';
@@ -216,7 +224,7 @@ async function signOut(page: Page, userName: string): Promise<void> {
 }
 
 /** Відкриває вкладку «Grants» і обирає роль у випадаючому списку. */
-async function openGrantsFor(page: Page, roleCode: string): Promise<void> {
+async function openGrantsFor(page: Page, roleName: RegExp): Promise<void> {
   // ⚠ Вкладка — в адресі (`useUrlState('tab')`, `SecurityPage.tsx`): пряме
   // відкриття URL — той самий шлях, що й клік у `SegmentedControl`, лише без
   // зайвого проміжного кліку, який тут нічого не доводить.
@@ -231,7 +239,8 @@ async function openGrantsFor(page: Page, roleCode: string): Promise<void> {
     timeout: 30_000,
   });
   await roleSelect.click();
-  await page.getByRole('option', { name: roleCode, exact: true }).click();
+  // Опція ролі — це назва (`roleLabel()`), не код; див. `OperatorRole`.
+  await page.getByRole('option', { name: roleName }).click();
 
   // ⚠ Панель гранта завантажилась: або є рядок «Remove», або порожній стан
   // «This role has no grants». Обидва — ознака того, що запит на гранти
