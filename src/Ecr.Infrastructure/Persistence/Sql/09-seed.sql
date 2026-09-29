@@ -4637,6 +4637,8 @@ USING (VALUES
     (N'err.ECR-REG-0422.compositionChildTemporal', N'en', N'Registry "{registryCode}" is part of another registry and cannot have its own validity dates: its entries are visible exactly when their parent is.', 1),
     (N'err.ECR-REG-0422.compositionCycle', N'en', N'Composition forms a cycle: {chain}. A registry cannot be part of itself, even through other registries.', 1),
     (N'err.ECR-REG-0422.entryCodeAutomatic', N'en', N'Entry codes of this registry are assigned automatically: leave the code empty for a new entry.', 1),
+    -- RT-13 (FEATURE-REGISTRY-TABLES §7.1): фільтр поля в GET …/rows.
+    (N'err.ECR-REQ-0422.registryRowsFilter', N'en', N'Cannot filter registry "{registryCode}" by {field} = "{value}": the field does not exist or the value does not match its type.', 1),
 
     -- RT: expressions
     -- RT-21 (FEATURE-REGISTRY-TABLES §5.5, `02b` §12, перевірки 15–19 і попередження 21а): статичні перевірки функцій довідників.

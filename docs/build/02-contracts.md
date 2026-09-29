@@ -2653,6 +2653,23 @@ public interface IRegistryKeyStore
 }
 ```
 
+#### `IRegistryRowsQuery`
+
+Рядки довідника для редактора даних (RT-13, FEATURE-REGISTRY-TABLES §7.1): записи, значення полів,
+версії й цілі `Lookup` — поточні або `FOR SYSTEM_TIME AS OF` моменту (`null` — поточні). Відбір
+видимих робить обробник правилом `RegistryResolver`; порт лише читає.
+
+```csharp
+public interface IRegistryRowsQuery
+{
+    public Task<IReadOnlyList<RegistryEntry>> ListEntriesAsync(int registryDefId, DateTime? asOfUtc, CancellationToken ct);
+    public Task<IReadOnlyList<RegistryRowValue>> ListFieldValuesAsync(
+        IReadOnlyCollection<int> registryFieldDefIds, DateTime? asOfUtc, CancellationToken ct);
+    public Task<RegistryRowsSlice> ReadRowsAsync(
+        IReadOnlyCollection<long> registryEntryIds, DateTime? asOfUtc, CancellationToken ct);
+}
+```
+
 #### `IRegistrySnapshotLoader`
 
 Знімок довідників для обчислення (RT-22, FEATURE-REGISTRY-TABLES §5.7, D-158, D-162):
@@ -3571,11 +3588,22 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |
+| `GET` | `/api/v1/registries/{code}/rows?asOf=&asOfUtc=&parentEntryId=&q=&cursor=&limit=` | `Registry.View` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions/{vid}/publish` | `Report.EditDefinition` | 5 |
 | `GET` | `/api/v1/search` | — (кожен тип під правом свого переліку й грантами проєкту) | 8 |
+
+> ✎ 2026-09-29 (RT-13): `GET /registries/{code}/rows` — `PagedResult<RegistryRowDto>`, курсор за
+> `Id`, `limit` 1…500 (інакше `422 pageSizeOutOfRange`). `asOf` — бізнес-дата чинності
+> (обов'язкова для темпорального довідника чи частини темпорального батька — `422 asOfRequired`);
+> `asOfUtc` — системний момент (`FOR SYSTEM_TIME AS OF`), без нього — поточні дані. Видимість — правило
+> пікера (`RegistryResolver`, частини невидимого батька приховано). `parentEntryId` — батько
+> композиції (для частини) або каскаду. Фільтри полів — `field.<КОД>=значення` у поданні `value`
+> (невідоме поле чи значення не того типу — `422 registryRowsFilter`). `values.<КОД>.value` — рядком
+> (`decimal` без втрати знаків), `version` — жетон конкуренції (`D-166`: найпізніший `PeriodStart`
+> запису та значень).
 
 > ✎ 2026-09-21: `GET /sources/{id}/mapping/preview` — `fields[].isActive`
 > (обов'язкове; `false` — мапінг призупинений, `BE-27`, і його точки адрес не

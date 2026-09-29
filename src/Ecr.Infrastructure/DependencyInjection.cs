@@ -386,6 +386,7 @@ public static class DependencyInjection
         services.AddScoped<IRegistryKeyStore, RegistryKeyStore>(); // RT-10a
 
         // RT: data
+        services.AddScoped<IRegistryRowsQuery, RegistryRowsQuery>(); // RT-13
 
         // RT: expressions
         services.AddScoped<IRegistrySnapshotLoader, RegistrySnapshotLoader>(); // RT-22
