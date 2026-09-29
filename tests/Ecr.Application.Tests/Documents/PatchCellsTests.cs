@@ -1024,8 +1024,8 @@ public sealed class PatchCellsTests
             // ⚠ `BE-05`: третій аргумент — `createdByUserId`. Без `Arg.Any<int?>()`
             // збіг вимагав би саме `null`, тобто перевірка мовчки перестала б
             // бачити виклик, щойно обробник почав називати автора правки.
-            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+            _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
     }
 
@@ -1317,7 +1317,9 @@ public sealed class PatchCellsTests
         // `ProjectId`/`DocumentId`, а надсилався `TableInstanceId`. Розбір
         // давав нулі, і задача не робила нічого — а цей тест був зелений, бо
         // питав лише «чи поставили в чергу» (`A7-63`).
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
+        // ⚠ O1: злиттям за документо-періодом і автором — `doc{id}-p{period}-formula-u{user}`.
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Is<string>(t => t.EndsWith("-formula-u9", StringComparison.Ordinal)),
             Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
 
         await _jobs.DidNotReceive().EnqueueAsync<IRecalculationJob>(
@@ -1327,13 +1329,14 @@ public sealed class PatchCellsTests
         // перерахунок був би повним на кожну правку, і граф залежностей
         // коштував би, не даючи нічого.
         var payload = _jobs.ReceivedCalls()
-            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync))
-            .Select(c => c.GetArguments()[0])
+            .Where(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .Select(c => c.GetArguments()[1])
             .Last();
 
         var json = System.Text.Json.JsonSerializer.Serialize(payload);
         Assert.Contains("\"Cells\"", json, StringComparison.Ordinal);
         Assert.Contains("\"TableInstanceId\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"DocumentId\"", json, StringComparison.Ordinal);
 
         // ⚠ Черга — ПІСЛЯ commit і поза транзакцією: воркер інакше почав би
         // читати рядки, яких ще не видно, і отримав би або старі значення,
@@ -1341,8 +1344,8 @@ public sealed class PatchCellsTests
         Received.InOrder(() =>
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
-            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+            _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
     }
 
@@ -1374,8 +1377,8 @@ public sealed class PatchCellsTests
                 await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
                 inTransaction = false;
             });
-        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+        _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                 Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
              .Returns(_ =>
              {
                  enqueuedInTransaction = inTransaction;
@@ -1393,8 +1396,8 @@ public sealed class PatchCellsTests
         Received.InOrder(() =>
         {
             _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
-            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+            _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
         });
     }
 
@@ -1421,8 +1424,8 @@ public sealed class PatchCellsTests
     {
         const string JobId = "IFormulaRecalculationJob#77";
 
-        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+        _jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                 Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
              .Returns(JobId);
 
         var response = await Handler().HandleAsync(
@@ -1434,8 +1437,8 @@ public sealed class PatchCellsTests
         // ⛔ Саме `9` — `_user.UserId` цього набору. `Arg.Any<int?>()` тут
         // пропустив би `null`, тобто системну задачу без автора: рівно те, що
         // повертає редактору `403` на власний перерахунок.
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>(), 9);
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), 9);
     }
 
     [Fact]

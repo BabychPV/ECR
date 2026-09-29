@@ -148,7 +148,7 @@ public sealed partial class PatchCellsHandler(
         // рядків: тимчасові від'ємні адреси вказували б у нікуди.
         async Task EnqueueAsync(CellChangeLists applied, CancellationToken token)
             => recalculationJobId = await EnqueueRecalculationAsync(
-                    request, BuildRecalculationSeeds(applied), context.UserId, token)
+                    request, context.Instance.DocumentId, BuildRecalculationSeeds(applied), context.UserId, token)
                 .ConfigureAwait(false);
 
         // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції запису,
@@ -2386,14 +2386,21 @@ public sealed partial class PatchCellsHandler(
     /// редактор отримував би <c>403</c> на першому ж опитуванні
     /// ідентифікатора, який сервер щойно сам йому й віддав — рівно дефект
     /// <c>S-28</c>, лише для перерахунку замість експорту.
+    /// <para>
+    /// ⛔ O1 (I2 ФВ-9.8): злиття за документо-періодом і автором
+    /// (<see cref="Ports.FormulaRecalculationTarget"/>) — масив <c>Cells</c> дописується
+    /// в задачу, що ще чекає, замість окремої задачі на кожен PATCH.
+    /// </para>
     /// </remarks>
     private async Task<string> EnqueueRecalculationAsync(
         PatchCellsRequest request,
+        long documentId,
         IReadOnlyList<RecalculationSeed> seeds,
         int editorUserId,
         CancellationToken ct)
-        => await jobs.EnqueueAsync<Ports.IFormulaRecalculationJob>(
-            new { request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct,
+        => await jobs.EnqueueCoalescedAsync<Ports.IFormulaRecalculationJob>(
+            Ports.FormulaRecalculationTarget.Of(documentId, request.PeriodKey, editorUserId),
+            new { DocumentId = documentId, request.TableInstanceId, request.PeriodKey, Cells = seeds }, ct,
             createdByUserId: editorUserId)
             .ConfigureAwait(false);
 

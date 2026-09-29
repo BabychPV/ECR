@@ -219,7 +219,7 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
 
         // ⛔ PATCH завершився, поки лок документа досі тримає повний перерахунок.
         Assert.True(await DocumentLockGrantedAsync(doc.DocumentId), "PATCH мав пройти, поки лок документа зайнятий.");
-        Assert.Contains(jobs.ReceivedCalls(), call => call.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync));
+        Assert.Contains(jobs.ReceivedCalls(), call => call.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync));
 
         // Каскадна задача цього PATCH — у черзі за локом.
         var incrementalJob = IncrementalJob(incrementalDb, doc);
@@ -259,7 +259,7 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
     /// Задача через DI-активатор: тест не залежить від форми конструктора й
     /// компілюється і до, і після фіксу.
     /// </summary>
-    private static FormulaRecalculationJob IncrementalJob(EcrDbContext db, TestDocument doc)
+    internal static FormulaRecalculationJob IncrementalJob(EcrDbContext db, TestDocument doc)
     {
         var services = new ServiceCollection();
         services.AddSingleton(db);
@@ -314,7 +314,7 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
     }
 
     /// <summary>Справжній <c>PatchCellsHandler</c> на реальних сховищах і справжньому шлюзі аркуша.</summary>
-    private static Ecr.Application.Documents.PatchCellsHandler PatchHandler(
+    internal static Ecr.Application.Documents.PatchCellsHandler PatchHandler(
         EcrDbContext db, TestDocument doc, IBackgroundJobScheduler jobs)
     {
         var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);

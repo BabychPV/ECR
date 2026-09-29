@@ -30,6 +30,13 @@ public interface IJobQueue
     /// поглинає постановку (<see cref="JobEnqueueOutcome.CoalescedIntoQueued"/>):
     /// той самий <c>JobId</c>, payload НЕ оновлюється, <c>AvailableAt</c> — MIN.
     /// Інваріант: payload задачі з ціллю визначається самою ціллю.
+    /// <para>
+    /// ⚠ Виняток (O1): код задачі з масивом злиття (<c>IFormulaRecalculationJob</c>,
+    /// <see cref="FormulaRecalculationTarget.MergedArrayPath"/>) — масив нового
+    /// payload дописується в наявну; не вміщається в <see cref="JobQueueLimits.MaxPayloadLength"/>
+    /// — наявна відчіпляється від цілі (лишається в черзі як є), нова стає на ціль.
+    /// Те саме злиття — в <see cref="RequeueAsync"/>, коли повернуту поглинає задача позаду.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentException">Лейн не з <see cref="JobLanes.All"/>.</exception>
     public Task<JobEnqueueResult> EnqueueAsync(JobEnqueueRequest request, CancellationToken ct);

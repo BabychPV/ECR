@@ -356,9 +356,12 @@ public sealed class ExcelImporter(
         {
             if (seeds.Count > 0)
             {
+                // O1: злиття за документо-періодом (системна постановка — ціль без автора).
                 await jobs
-                    .EnqueueAsync<IFormulaRecalculationJob>(
-                        new { TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds }, token)
+                    .EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                        FormulaRecalculationTarget.Of(documentId, plan.PeriodKey, createdByUserId: null),
+                        new { DocumentId = documentId, TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds },
+                        token)
                     .ConfigureAwait(false);
             }
         }

@@ -402,10 +402,11 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         // Ідентифікатор — null: відповіді книги його не несуть (одна задача на
         // книгу — в `ExcelImporter`), і порівнюються тут лише записані дані.
         var jobs = Substitute.For<IBackgroundJobScheduler>();
-        jobs.EnqueueAsync<IFormulaRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+        jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns(call =>
             {
-                var payload = call.ArgAt<object>(0);
+                var payload = call.ArgAt<object>(1);
                 seeds.AddRange((IEnumerable<RecalculationSeed>)payload.GetType().GetProperty("Cells")!.GetValue(payload)!);
                 return (string)null!;
             });

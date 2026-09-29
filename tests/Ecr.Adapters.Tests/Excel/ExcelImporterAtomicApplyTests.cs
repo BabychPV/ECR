@@ -170,7 +170,8 @@ public sealed class ExcelImporterAtomicApplyTests
         _cells.When(c => c.ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>()))
               .Do(call => _trace.Add($"write:{call.ArgAt<CellChangeSet>(0).TableInstanceId}"));
 
-        _jobs.When(j => j.EnqueueAsync<IFormulaRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>()))
+        _jobs.When(j => j.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                 Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>()))
              .Do(_ => _trace.Add("enqueue"));
 
         _previews.FindAsync(Token, Arg.Any<CancellationToken>()).Returns(Plan());
@@ -253,8 +254,8 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.Single(_trace, e => string.Equals(e, "tx:open", StringComparison.Ordinal));
 
         // ⛔ ОДНА задача перерахунку на документ, а не три.
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
 
         // ⚠ І саме ПІСЛЯ коміту: поставлена всередині, вона стартувала б у
         // воркері раніше, ніж записане стане видимим під RCSI.
@@ -266,8 +267,8 @@ public sealed class ExcelImporterAtomicApplyTests
         // останньої таблиці виглядала б так само «одна», а перерахунок двох
         // інших не стався б ніколи.
         var payload = _jobs.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync))
-            .GetArguments()[0];
+            .Single(c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync))
+            .GetArguments()[1];
 
         var json = JsonSerializer.Serialize(payload, Options);
         Assert.Contains("\"rowId\":1001", json, StringComparison.Ordinal);
@@ -302,8 +303,8 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.Equal(
             ["tx:open", "write:501", "write:502", "write:503", "audit", "save", "enqueue", "tx:commit"],
             _trace);
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+        await _jobs.Received(1).EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -334,8 +335,8 @@ public sealed class ExcelImporterAtomicApplyTests
         Assert.Equal("err.ECR-CELL-0409.batchStale", error.Details["messageKey"]);
 
         // ⛔ Нуль задач перерахунку: жодної на вже записану першу таблицю.
-        await _jobs.DidNotReceive().EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
 
         // ⛔ Відмова стається ВСЕРЕДИНІ транзакції — саме це й відкочує запис
         // першої таблиці. «tx:commit» у журналі означав би, що перша таблиця

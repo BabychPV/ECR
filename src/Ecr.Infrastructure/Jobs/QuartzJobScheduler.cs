@@ -315,9 +315,46 @@ public sealed class QuartzJobScheduler(
         var scheduler = Scheduler(typeof(TJob).Name);
         var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
 
+        if (JobPayloadMerge.ArrayPathOf(typeof(TJob).FullName) is { } mergePath)
+        {
+            return await MergeAsync<TJob>(instance, TargetPrefixOf<TJob>(targetKey), mergePath, payload, createdByUserId, ct)
+                .ConfigureAwait(false);
+        }
+
         return await CoalesceAsync<TJob>(
                 instance, TargetPrefixOf<TJob>(targetKey), payload, createdByUserId, finishedJobId: null, ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Злиття з об'єднанням масиву payload (O1, <see cref="JobPayloadMerge"/>).</summary>
+    /// <remarks>
+    /// ⚠ Масив дописується в задачу, що ЧЕКАЄ (ще не взяла payload у
+    /// <see cref="QuartzJobAdapter"/>, <see cref="QuartzPayloadMerges.Take"/>); та, що
+    /// вже виконується, злиття не приймає — поруч ставиться нова. Паралельно з
+    /// виконуваною вона однаково не рахує: лок документа (<see cref="RecalculationDocumentLock"/>).
+    /// </remarks>
+    private async Task<string> MergeAsync<TJob>(
+        IScheduler instance, string prefix, string mergePath, object? payload, int? createdByUserId, CancellationToken ct)
+        where TJob : IBackgroundJob
+    {
+        var json = JsonSerializer.Serialize(payload, PayloadOptions);
+        var (jobId, created) = QuartzPayloadMerges.MergeOrOpen(
+            instance.SchedulerName, prefix, mergePath, json, prefix + Guid.NewGuid().ToString("N"));
+
+        if (!created)
+        {
+            return jobId;
+        }
+
+        try
+        {
+            return await EnqueueCoreAsync<TJob>(instance, jobId, payload, ct, createdByUserId).ConfigureAwait(false);
+        }
+        catch
+        {
+            QuartzPayloadMerges.Forget(jobId);
+            throw;
+        }
     }
 
     /// <summary>Злиття на ціль; <paramref name="finishedJobId"/> — задача, що щойно завершилась (не рахується).</summary>
@@ -678,6 +715,12 @@ public sealed class QuartzJobScheduler(
         if (!IsRecurring(await instance.GetJobDetail(jobKey, ct).ConfigureAwait(false)))
         {
             await instance.DeleteJob(jobKey, ct).ConfigureAwait(false);
+
+            // Знята з черги задача злиття більше не приймає масивів — наступна постановка стане новою.
+            if (!executingHere)
+            {
+                QuartzPayloadMerges.Forget(jobId);
+            }
         }
 
         // ⛔ U3: стан пишеться ТУТ, а не лише адаптером. Адаптер ставить
@@ -894,4 +937,114 @@ public sealed class QuartzJobScheduler(
                    ["messageKey"] = "err.ECR-SYS-0503.schedulerNotConfigured",
                    ["job"] = what,
                });
+}
+
+/// <summary>
+/// Payload задач злиття Quartz (O1, <see cref="JobPayloadMerge"/>): актуальне тіло
+/// задачі живе тут, а не в <c>JobDataMap</c>, доки задачу не взяв адаптер.
+/// </summary>
+/// <remarks>
+/// ⛔ Межа злиття — <see cref="Take"/> під тим самим замком, що й злиття: або масив
+/// потрапив у тіло ДО старту задачі (і вона його порахує), або задача вже стартувала
+/// й відчеплена від цілі — і нова постановка стає новою задачею. Перевірка «чи є в
+/// задачі триґер» такої межі не дає: триґер спрацьовує незалежно від неї.
+/// <para>
+/// ⚠ Статичне сховище, ключ — ім'я планувальника й ціль: <c>JobId</c> із GUID
+/// унікальний між планувальниками, а черга Quartz однаково в пам'яті процесу.
+/// </para>
+/// </remarks>
+internal static class QuartzPayloadMerges
+{
+    private static readonly Lock Gate = new();
+
+    private static readonly Dictionary<string, Entry> ByJob = new(StringComparer.Ordinal);
+
+    /// <summary>Ціль → задача, що приймає злиття (щонайбільше одна).</summary>
+    private static readonly Dictionary<string, string> OpenByTarget = new(StringComparer.Ordinal);
+
+    /// <summary>Зливає масив у задачу цілі, що чекає, або реєструє <paramref name="newJobId"/>.</summary>
+    /// <returns>Задача, що виконає роботу; <c>Created</c> — її треба поставити в Quartz.</returns>
+    public static (string JobId, bool Created) MergeOrOpen(
+        string scope, string prefix, string path, string json, string newJobId)
+    {
+        var target = $"{scope}|{prefix}";
+
+        lock (Gate)
+        {
+            if (OpenByTarget.TryGetValue(target, out var openId)
+                && ByJob.TryGetValue(openId, out var open)
+                && !open.Taken)
+            {
+                if (JobPayloadMerge.Merge(open.Payload, json, path) is { } merged)
+                {
+                    open.Payload = merged;
+                    return (openId, false);
+                }
+
+                // Не вміщається — наявна лишається як є, ціль переходить до нової.
+                OpenByTarget.Remove(target);
+            }
+
+            ByJob[newJobId] = new Entry(target) { Payload = json };
+            OpenByTarget[target] = newJobId;
+            return (newJobId, true);
+        }
+    }
+
+    /// <summary>Адаптер бере тіло задачі на старті; далі злиття в неї не йде.</summary>
+    /// <returns><c>null</c> — задача не злиття (тіло — у <c>JobDataMap</c>).</returns>
+    public static string? Take(string jobId)
+    {
+        lock (Gate)
+        {
+            if (!ByJob.TryGetValue(jobId, out var entry))
+            {
+                return null;
+            }
+
+            entry.Taken = true;
+            if (OpenByTarget.TryGetValue(entry.Target, out var open) && string.Equals(open, jobId, StringComparison.Ordinal))
+            {
+                OpenByTarget.Remove(entry.Target);
+            }
+
+            return entry.Payload;
+        }
+    }
+
+    /// <summary>Задача знову чекає (відкладення, ретрай): приймає злиття, якщо ціль вільна.</summary>
+    public static void Reopen(string jobId)
+    {
+        lock (Gate)
+        {
+            if (ByJob.TryGetValue(jobId, out var entry) && !OpenByTarget.ContainsKey(entry.Target))
+            {
+                entry.Taken = false;
+                OpenByTarget[entry.Target] = jobId;
+            }
+        }
+    }
+
+    /// <summary>Задача завершилась або знята — тіло більше не потрібне.</summary>
+    public static void Forget(string jobId)
+    {
+        lock (Gate)
+        {
+            if (ByJob.Remove(jobId, out var entry)
+                && OpenByTarget.TryGetValue(entry.Target, out var open)
+                && string.Equals(open, jobId, StringComparison.Ordinal))
+            {
+                OpenByTarget.Remove(entry.Target);
+            }
+        }
+    }
+
+    private sealed class Entry(string target)
+    {
+        public string Target { get; } = target;
+
+        public required string Payload { get; set; }
+
+        public bool Taken { get; set; }
+    }
 }

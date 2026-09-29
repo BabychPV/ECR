@@ -46,7 +46,10 @@ public sealed partial class QuartzJobAdapter(
 
         var jobId = context.JobDetail.Key.Name;
         var typeName = context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.JobCodeKey);
-        var payload = context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.PayloadKey);
+        // ⚠ O1: задача злиття (IFormulaRecalculationJob) несе актуальне тіло в
+        // QuartzPayloadMerges — з масивами постановок, злитих, поки вона чекала.
+        var payload = QuartzPayloadMerges.Take(jobId)
+                      ?? context.JobDetail.JobDataMap.GetString(QuartzJobScheduler.PayloadKey);
 
         using var scope = services.CreateScope();
         var provider = scope.ServiceProvider;
@@ -120,6 +123,7 @@ public sealed partial class QuartzJobAdapter(
         {
             LogJobSkippedCancelled(logger, jobId, typeName ?? "—");
             await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None).ConfigureAwait(false);
+            QuartzPayloadMerges.Forget(jobId);
             return;
         }
 
@@ -165,6 +169,7 @@ public sealed partial class QuartzJobAdapter(
             {
                 await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
                     .ConfigureAwait(false);
+                QuartzPayloadMerges.Forget(jobId);
             }
         }
         catch (OperationCanceledException)
@@ -179,6 +184,7 @@ public sealed partial class QuartzJobAdapter(
             {
                 await context.Scheduler.DeleteJob(context.JobDetail.Key, CancellationToken.None)
                     .ConfigureAwait(false);
+                QuartzPayloadMerges.Forget(jobId);
             }
 
             throw;
@@ -194,6 +200,9 @@ public sealed partial class QuartzJobAdapter(
                 // який за кілька секунд сам собою стає «виконується» знову.
                 LogJobRetrying(logger, jobId, typeName ?? "—", ex);
                 await ScheduleRetryAsync(context, attempt, correlationId, progress, clock, ex).ConfigureAwait(false);
+
+                // У паузі ретраю задача знову чекає — злиття йде в неї (O1).
+                QuartzPayloadMerges.Reopen(jobId);
                 return;
             }
 

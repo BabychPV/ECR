@@ -96,6 +96,42 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             CancelRequestedAt = NULL, StartedAt = @shown, [Percent] = 0, [Message] = NULL, Error = NULL, ErrorCode = NULL,
         """ + "\n" + ClaimSet + "\n" + ClaimOutput + ";";
 
+    /// <summary>Змінні злиття масиву payload (<see cref="MergeArraysSql"/>).</summary>
+    private const string MergeDeclarations = """
+        DECLARE @basePayload nvarchar(max) = NULL, @addPayload nvarchar(max) = NULL, @merged nvarchar(max) = NULL;
+        DECLARE @oldArray nvarchar(max), @addArray nvarchar(max), @oldBody nvarchar(max), @addBody nvarchar(max);
+        """;
+
+    /// <summary>
+    /// <c>@merged</c> = <c>@basePayload</c>, у якого масив <c>@mergePath</c> доповнено
+    /// елементами того самого масиву з <c>@addPayload</c>; <c>NULL</c> — не зливається.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Склейкою тексту двох масивів, а не <c>JSON_MODIFY 'append'</c> поелементно:
+    /// append копіює весь рядок на кожен елемент, і батч зі ста комірок у payload на
+    /// сотні КБ коштував би десятки МБ копіювання в транзакції PATCH. Результат
+    /// перевіряється <c>ISJSON</c>; не JSON, немає масиву в одному з payload або понад
+    /// <c>@maxPayload</c> — <c>NULL</c>, і викликач не зливає (O1).
+    /// </remarks>
+    private const string MergeArraysSql = """
+            SET @merged = NULL;
+            IF ISJSON(@basePayload) = 1 AND ISJSON(@addPayload) = 1
+            BEGIN
+                SET @oldArray = JSON_QUERY(@basePayload, @mergePath);
+                SET @addArray = JSON_QUERY(@addPayload, @mergePath);
+                IF LEFT(@oldArray, 1) = N'[' AND LEFT(@addArray, 1) = N'['
+                BEGIN
+                    SET @oldBody = SUBSTRING(@oldArray, 2, LEN(@oldArray) - 2);
+                    SET @addBody = SUBSTRING(@addArray, 2, LEN(@addArray) - 2);
+                    SET @merged = JSON_MODIFY(@basePayload, @mergePath, JSON_QUERY(
+                        N'[' + @oldBody + CASE WHEN @oldBody <> N'' AND @addBody <> N'' THEN N',' ELSE N'' END
+                        + @addBody + N']'));
+                    IF ISJSON(@merged) <> 1 OR LEN(@merged) > @maxPayload
+                        SET @merged = NULL;
+                END
+            END
+        """;
+
     /// <summary>
     /// Постановка з коалесценцією: UPDLOCK+HOLDLOCK тримає слот цілі в
     /// <c>UX_JobProgress_Target_Queued</c> до кінця транзакції.
@@ -113,10 +149,24 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         BEGIN TRANSACTION;
         DECLARE @jobId nvarchar(100) = NULL, @outcome int = 0;
         DECLARE @available datetime2(3) = DATEADD(millisecond, @delayMs, SYSUTCDATETIME());
+        """ + "\n" + MergeDeclarations + "\n" + """
         IF @target IS NOT NULL
-            SELECT @jobId = q.JobId
+            SELECT @jobId = q.JobId, @basePayload = q.Payload
             FROM itg.JobProgress AS q WITH (UPDLOCK, HOLDLOCK, INDEX(UX_JobProgress_Target_Queued))
             WHERE q.TargetKey = @target AND q.TargetKey IS NOT NULL AND q.[State] = 'Queued';
+        IF @jobId IS NOT NULL AND @mergePath IS NOT NULL
+        BEGIN
+            SET @addPayload = @payload;
+        """ + "\n" + MergeArraysSql + "\n" + """
+            IF @merged IS NOT NULL
+                UPDATE itg.JobProgress SET Payload = @merged WHERE JobId = @jobId;
+            ELSE
+            BEGIN
+                -- Не зливається (межа payload, чужа форма) — наявна лишається в черзі як є, без цілі.
+                UPDATE itg.JobProgress SET TargetKey = NULL WHERE JobId = @jobId;
+                SET @jobId = NULL;
+            END
+        END
         IF @jobId IS NOT NULL
         BEGIN
             UPDATE itg.JobProgress
@@ -194,6 +244,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                     p.Add("@document", SqlDbType.BigInt).Value = Db(request.DocumentId);
                     p.Add("@delayMs", SqlDbType.Int).Value = checked((int)delay.TotalMilliseconds);
                     p.Add("@supersede", SqlDbType.Bit).Value = request.SupersedeRunning;
+                    BindMerge(p, JobPayloadMerge.ArrayPathOf(request.JobCode));
                     AddShown(p);
                 }, async r =>
                 {
@@ -362,14 +413,29 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         return RunAsync(
             $"""
             BEGIN TRANSACTION;
-            DECLARE @target nvarchar(200), @behind nvarchar(100), @ok int = 0;
+            DECLARE @target nvarchar(200), @behind nvarchar(100), @ok int = 0, @code nvarchar(64), @absorb int = 0;
             DECLARE @available datetime2(3) = DATEADD(millisecond, @delayMs, SYSUTCDATETIME());
-            SELECT @target = TargetKey, @ok = 1 FROM itg.JobProgress WITH (UPDLOCK) {OwnedBy};
+            {MergeDeclarations}
+            SELECT @target = TargetKey, @ok = 1, @code = JobCode, @addPayload = Payload
+            FROM itg.JobProgress WITH (UPDLOCK) {OwnedBy};
             IF @ok = 1 AND @target IS NOT NULL
-                SELECT @behind = JobId
+                SELECT @behind = JobId, @basePayload = Payload
                 FROM itg.JobProgress WITH (UPDLOCK, HOLDLOCK, INDEX(UX_JobProgress_Target_Queued))
                 WHERE TargetKey = @target AND TargetKey IS NOT NULL AND [State] = 'Queued';
             IF @ok = 1 AND @behind IS NOT NULL
+            BEGIN
+                SET @absorb = 1;
+                -- O1: масив злиття повернутої — у задачу позаду; не зливається — не поглинаємо.
+                IF @mergePath IS NOT NULL AND @code = @mergeCode
+                BEGIN
+            {MergeArraysSql}
+                    IF @merged IS NOT NULL
+                        UPDATE itg.JobProgress SET Payload = @merged WHERE JobId = @behind;
+                    ELSE
+                        SET @absorb = 0;
+                END
+            END
+            IF @absorb = 1
             BEGIN
                 UPDATE itg.JobProgress
                 SET [State] = 'Cancelled', LeaseUntil = NULL, UpdatedAt = @shown,
@@ -382,7 +448,9 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             ELSE IF @ok = 1
                 UPDATE itg.JobProgress
                 SET [State] = 'Queued', AvailableAt = @available, ClaimToken = NULL, LeaseUntil = NULL,
-                    UpdatedAt = @shown, HeartbeatAt = @shown
+                    UpdatedAt = @shown, HeartbeatAt = @shown,
+                    -- Позаду на ціль уже стоїть інша Queued: дві Queued на ціль не пускає UX_JobProgress_Target_Queued.
+                    TargetKey = CASE WHEN @behind IS NULL THEN TargetKey ELSE NULL END
                 {OwnedBy};
             COMMIT TRANSACTION;
             SELECT @ok;
@@ -390,6 +458,8 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
             p =>
             {
                 BindClaim(p, claim);
+                BindMerge(p, JobPayloadMerge.ArrayPathOf(JobPayloadMerge.MergeableJobCode));
+                p.Add("@mergeCode", SqlDbType.NVarChar, 64).Value = JobPayloadMerge.MergeableJobCode;
                 p.Add("@delayMs", SqlDbType.Int).Value = checked((int)delay.TotalMilliseconds);
                 p.Add("@absorbed", SqlDbType.NVarChar, JobProgressMessageCodec.MaxEncodedLength).Value = absorbed;
                 AddShown(p);
@@ -651,6 +721,13 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     private void AddShown(SqlParameterCollection p)
         => p.Add("@shown", SqlDbType.DateTime2).Value = clock.UtcNow;
 
+    /// <summary>Параметри <see cref="MergeArraysSql"/>; <paramref name="path"/> <c>null</c> — злиття немає.</summary>
+    private static void BindMerge(SqlParameterCollection p, string? path)
+    {
+        p.Add("@mergePath", SqlDbType.NVarChar, 100).Value = Db(path);
+        p.Add("@maxPayload", SqlDbType.Int).Value = JobQueueLimits.MaxPayloadLength;
+    }
+
     private static void BindClaim(SqlParameterCollection p, JobClaimToken claim)
     {
         p.Add("@id", SqlDbType.NVarChar, 100).Value = claim.JobId;
@@ -667,5 +744,70 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         var name = jobCode[(jobCode.LastIndexOf('.') + 1)..];
         var clean = new string(name.Where(char.IsAsciiLetterOrDigit).Take(60).ToArray());
         return clean.Length == 0 ? "job" : clean;
+    }
+}
+
+/// <summary>
+/// Задачі, чиє злиття на ціль ОБ'ЄДНУЄ масив payload, а не відкидає нову постановку
+/// (O1, I2 ФВ-9.8) — спільне правило черги в базі (<see cref="DbJobQueue"/>) і Quartz
+/// (<see cref="QuartzJobScheduler"/>).
+/// </summary>
+/// <remarks>
+/// ⛔ Інкрементна задача формул несе НАСІННЯ каскаду — змінені комірки. Звичайне
+/// злиття (payload визначається ціллю, нова постановка поглинається) загубило б
+/// комірки другої правки, і формули від них не перерахувалися б. Повний прогін
+/// документо-періоду на кожне злиття — теж ні: він пише всі обчислені комірки
+/// (I2: 66 % ЦП SQL на такому записі), а на гарячому документі злиття —
+/// постійний стан. Тому масив <c>cells</c> об'єднується; дублікати нешкідливі —
+/// задача складає їх у множину (<c>DirtySet</c>).
+/// </remarks>
+internal static class JobPayloadMerge
+{
+    /// <summary>Код задачі з масивом злиття (поки що одна).</summary>
+    public static readonly string MergeableJobCode =
+        typeof(IFormulaRecalculationJob).FullName ?? nameof(IFormulaRecalculationJob);
+
+    /// <summary>JSON-шлях масиву злиття для коду задачі; <c>null</c> — звичайне злиття.</summary>
+    public static string? ArrayPathOf(string? jobCode)
+        => string.Equals(jobCode, MergeableJobCode, StringComparison.Ordinal)
+            ? FormulaRecalculationTarget.MergedArrayPath
+            : null;
+
+    /// <summary>
+    /// Те саме злиття, що <c>DbJobQueue.MergeArraysSql</c>, у пам'яті (Quartz):
+    /// масив <paramref name="path"/> (<c>$.властивість</c> кореня) доповнюється елементами
+    /// з <paramref name="addJson"/>.
+    /// </summary>
+    /// <returns><c>null</c> — не зливається (немає масиву, чужа форма, понад межу payload).</returns>
+    public static string? Merge(string baseJson, string addJson, string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        var property = path.StartsWith("$.", StringComparison.Ordinal) ? path[2..] : path;
+
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(baseJson) is not System.Text.Json.Nodes.JsonObject target
+                || target[property] is not System.Text.Json.Nodes.JsonArray into
+                || System.Text.Json.Nodes.JsonNode.Parse(addJson) is not System.Text.Json.Nodes.JsonObject source
+                || source[property] is not System.Text.Json.Nodes.JsonArray from)
+            {
+                return null;
+            }
+
+            foreach (var item in from.ToList())
+            {
+                from.Remove(item);
+                into.Add(item);
+            }
+
+            var merged = target.ToJsonString();
+
+            return merged.Length > JobQueueLimits.MaxPayloadLength ? null : merged;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 }

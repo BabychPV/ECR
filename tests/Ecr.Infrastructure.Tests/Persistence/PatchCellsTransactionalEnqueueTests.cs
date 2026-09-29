@@ -190,7 +190,8 @@ public sealed class PatchCellsTransactionalEnqueueTests(SqlServerFixture sql, IT
     {
         var jobs = Substitute.For<IBackgroundJobScheduler>();
         jobs.EnlistsInCallerTransaction.Returns(false);
-        jobs.EnqueueAsync<IFormulaRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+        jobs.EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+                Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
             .Returns(_ =>
             {
                 trace.Add($"enqueue:tx={db.Database.CurrentTransaction is not null}");

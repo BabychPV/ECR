@@ -239,7 +239,7 @@ public sealed class YearGraceSystemReopenWiringTests(SqlServerFixture sql) : IDi
             // Перерахунок поставлено — як для відкритого періоду.
             Assert.Contains(
                 jobs.ReceivedCalls(),
-                c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync)
+                c => c.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync)
                      && c.GetMethodInfo().IsGenericMethod
                      && c.GetMethodInfo().GetGenericArguments()[0] == typeof(IFormulaRecalculationJob));
 

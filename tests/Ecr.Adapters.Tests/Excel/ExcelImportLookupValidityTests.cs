@@ -166,8 +166,8 @@ public sealed class ExcelImportLookupValidityTests
         Assert.Equal("err.ECR-CELL-4223.inactiveEntry", error.Details!["messageKey"]);
 
         await _cells.DidNotReceive().ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
-        await _jobs.DidNotReceive().EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>());
+        await _jobs.DidNotReceive().EnqueueCoalescedAsync<IFormulaRecalculationJob>(
+            Arg.Any<string>(), Arg.Any<object>(), Arg.Any<CancellationToken>());
         await _previews.DidNotReceive().RemoveAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 

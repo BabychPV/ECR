@@ -99,6 +99,12 @@ public interface IBackgroundJobScheduler
     /// з ВИКОНУВАНОЮ позначає її, і після завершення задача ставиться ще раз
     /// (один раз, з payload останньої постановки).
     /// </para>
+    /// <para>
+    /// ⚠ Виняток — задачі з масивом злиття (<see cref="IFormulaRecalculationJob"/>,
+    /// <see cref="FormulaRecalculationTarget.MergedArrayPath"/>): payload не
+    /// відкидається, а його масив дописується в задачу, що чекає; у Quartz задача,
+    /// що вже виконується, злиття не приймає — поруч ставиться нова.
+    /// </para>
     /// </remarks>
     public Task<string> EnqueueCoalescedAsync<TJob>(
         string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
@@ -333,8 +339,48 @@ public interface IRecalculationJob : IBackgroundJob;
 /// методологій — у <c>calc.CalculationResult</c> (<c>D-69</c>). До появи цього
 /// маркера правка комірки ставила в чергу задачу МЕТОДОЛОГІЙ із тілом, якого
 /// та не розуміє: розбір давав нулі, і задача не робила нічого (<c>A7-63</c>).
+/// <para>
+/// ⛔ O1 (I2 ФВ-9.8): ставиться через <see cref="IBackgroundJobScheduler.EnqueueCoalescedAsync{TJob}"/>
+/// на ціль <see cref="FormulaRecalculationTarget.Of"/>, і злиття цієї задачі —
+/// ОСОБЛИВЕ: масив <c>cells</c> payload нової постановки ДОПИСУЄТЬСЯ в задачу, що
+/// чекає (<see cref="FormulaRecalculationTarget.MergedArrayPath"/>), а не
+/// відкидається. Змінені комірки — насіння каскаду; загублена комірка означала б
+/// непораховану формулу.
+/// </para>
 /// </remarks>
 public interface IFormulaRecalculationJob : IBackgroundJob;
+
+/// <summary>Ціль злиття інкрементних задач формул (O1, I2 ФВ-9.8).</summary>
+public static class FormulaRecalculationTarget
+{
+    /// <summary>Масив payload, який злиття об'єднує, а не відкидає.</summary>
+    public const string MergedArrayPath = "$.cells";
+
+    /// <summary>Ціль «документ × період × автор».</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="periodKey">Період.</param>
+    /// <param name="createdByUserId">Автор постановки; <c>null</c> — системна (імпорт).</param>
+    /// <returns>Ключ цілі.</returns>
+    /// <remarks>
+    /// ⚠ Префікс — той самий, що в <c>RecalculateDocumentHandler.TargetOf</c>
+    /// (<c>doc{id}-p{period}</c>), із суфіксом <c>-formula</c>: тип задачі однаково
+    /// входить у <c>TargetKey</c>, суфікс лише робить ціль читабельною в журналі.
+    /// <para>
+    /// ⛔ Автор — у цілі, і це межа доступу, а не косметика. PATCH віддає клієнтові
+    /// <c>JobId</c> задачі, яку той опитує; стан ЧУЖОЇ задачі
+    /// <c>GetJobStatusHandler</c> без <c>System.ViewHealth</c> не показує (Q-156).
+    /// Злиття правок двох людей в одну задачу дало б другому <c>403</c> на його ж
+    /// збереженні. Двоє редакторів одного документо-періоду — дві задачі, і лок
+    /// документа серіалізує їх так само, як і раніше.
+    /// </para>
+    /// </remarks>
+    public static string Of(long documentId, int periodKey, int? createdByUserId)
+        => createdByUserId is { } user
+            ? string.Create(
+                System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-p{periodKey}-formula-u{user}")
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture, $"doc{documentId}-p{periodKey}-formula");
+}
 
 /// <summary>Маркер задачі експорту документа у <c>.xlsx</c>.</summary>
 /// <remarks>
