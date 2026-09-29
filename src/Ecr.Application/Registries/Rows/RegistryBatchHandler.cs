@@ -43,7 +43,7 @@ public sealed partial class RegistryBatchHandler(
     DeleteRegistryEntryHandler deleter,
     IAccessDecisionService access,
     ICurrentUser currentUser,
-    Rules.RegistryRuleEngine rules)
+    Rules.IRegistryRuleEngine rules)
 {
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
@@ -108,10 +108,11 @@ public sealed partial class RegistryBatchHandler(
                     // відкочується); у dryRun — перелік у звіті, щоб сітка показала Σ до збереження.
                     if (states.TrueForAll(s => s.Errors.Count == 0))
                     {
-                        ruleCheck = await rules.CheckAsync(
+                        ruleCheck = await rules.EvaluateAsync(
                             definition,
                             [.. written.Where(w => w.IsNew || w.IsChanged).Select(w => w.Entry.Id)],
                             [.. states.Where(s => s.Deleted).Select(s => s.Entry!.Id)],
+                            businessDate: null,
                             token).ConfigureAwait(false);
 
                         if (!dryRun)

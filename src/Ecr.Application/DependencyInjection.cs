@@ -255,7 +255,7 @@ public static class DependencyInjection
         services.AddScoped<Registries.Rows.GetRegistryRowsHandler>(); // RT-13
         services.AddScoped<Registries.Rows.RegistryBatchHandler>(); // RT-14
         services.AddScoped<Registries.Rules.RegistryRuleCompiler>(); // RT-17a
-        services.AddScoped<Registries.Rules.RegistryRuleEngine>(); // RT-17a
+        services.AddScoped<Registries.Rules.IRegistryRuleEngine, Registries.Rules.RegistryRuleEngine>(); // RT-17a
 
         // RT: expressions
 

@@ -293,6 +293,24 @@ public interface IRegistryStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<RegistryValue>> ListValuesForEntriesAsync(
         IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
+    /// <summary>
+    /// Переписує ребра <c>cfg.RegistryUse</c> правил довідника (<c>SourceKind = 2</c>, RT-17a): ребра
+    /// ВСІХ правил довідника <paramref name="ruleRegistryDefId"/> (і вимкнених теж) прибираються,
+    /// <paramref name="uses"/> ставляться в чергу вставки.
+    /// </summary>
+    /// <param name="ruleRegistryDefId">Довідник, якому належать правила.</param>
+    /// <param name="uses">
+    /// Нові ребра — лише <see cref="Domain.Entities.Configuration.RegistryUse.ForRegistryRule"/>
+    /// правил цього довідника (id правил уже відомі).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Зберігає викликач (<c>SaveChanges</c> у транзакції збереження опису): видалення й вставка
+    /// лягають одним збереженням, тож проміжного стану «ребер немає» ніхто не бачить.
+    /// </remarks>
+    public Task ReplaceRuleUsesAsync(
+        int ruleRegistryDefId, IReadOnlyCollection<Domain.Entities.Configuration.RegistryUse> uses, CancellationToken ct);
 }
 
 /// <summary>Стан обігу запису довідника (<c>C7</c>).</summary>

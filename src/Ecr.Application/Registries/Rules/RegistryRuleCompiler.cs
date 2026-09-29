@@ -123,6 +123,97 @@ public sealed class RegistryRuleCompiler(Parser parser)
     }
 
     /// <summary>
+    /// Що читає правило — ребра <c>cfg.RegistryUse</c> з <c>SourceKind = 2</c> (RT-17a, §6 «Момент»):
+    /// довідники функцій довідників (<c>null</c>-шлях — довідник цілком), поля <c>ROW.a.b</c> в області
+    /// агрегату чи самого правила, поле з параметрів (<c>RequiredWhen</c>, <c>CrossRegistry</c>) і ціль
+    /// <c>CrossRegistry</c>.
+    /// </summary>
+    /// <param name="rule">Правило (збережене — з Id).</param>
+    /// <param name="ownerCode">Код довідника правила: <c>THIS</c> і <c>ROW.</c> верхнього рівня — його.</param>
+    /// <returns>Пари «код довідника, шлях поля» без повторів; правило, що не розбирається, — порожньо.</returns>
+    internal IReadOnlyList<(string RegistryCode, string? FieldPath)> UsesOf(RegistryRuleDef rule, string ownerCode)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        var uses = new List<(string RegistryCode, string? FieldPath)>();
+        void Add(string code, string? path)
+        {
+            if (!uses.Exists(u => string.Equals(u.RegistryCode, code, StringComparison.OrdinalIgnoreCase)
+                                  && string.Equals(u.FieldPath, path, StringComparison.OrdinalIgnoreCase)))
+            {
+                uses.Add((code, path));
+            }
+        }
+
+        var compiled = Compile(rule);
+        if (compiled.Condition is null)
+        {
+            return uses;
+        }
+
+        var pending = new Stack<(AstNode Node, string? Row)>();
+        pending.Push((compiled.Condition, ownerCode));
+        while (pending.Count > 0)
+        {
+            var (node, row) = pending.Pop();
+            switch (node)
+            {
+                case RowFieldNode field when row is not null:
+                    Add(row, string.Join('.', field.Path));
+                    break;
+
+                case UnaryNode unary:
+                    pending.Push((unary.Operand, row));
+                    break;
+
+                case BinaryNode binary:
+                    pending.Push((binary.Right, row));
+                    pending.Push((binary.Left, row));
+                    break;
+
+                case ConditionalNode conditional:
+                    pending.Push((conditional.WhenFalse, row));
+                    pending.Push((conditional.WhenTrue, row));
+                    pending.Push((conditional.Condition, row));
+                    break;
+
+                case FunctionNode function:
+                    var code = RegistryFunctions.Contains(function.Name)
+                               && function.Arguments.Count > 0
+                               && function.Arguments[0] is LiteralNode { Type: ExpressionValueType.Text, Value: string literal }
+                               && !string.IsNullOrWhiteSpace(literal)
+                        ? literal
+                        : null;
+                    if (code is not null)
+                    {
+                        Add(code, null);
+                    }
+
+                    // Агрегат і REGONE відкривають область ROW свого довідника для аргументів з другого.
+                    var opensRow = RegistryForms.RowScopeNames.Contains(function.Name);
+                    for (var i = function.Arguments.Count - 1; i >= 0; i--)
+                    {
+                        pending.Push((function.Arguments[i], opensRow && i > 0 ? code : row));
+                    }
+
+                    break;
+            }
+        }
+
+        if (compiled.Field is not null)
+        {
+            Add(ownerCode, compiled.Field);
+        }
+
+        if (compiled.TargetRegistry is not null)
+        {
+            Add(compiled.TargetRegistry, null);
+        }
+
+        return uses;
+    }
+
+    /// <summary>
     /// Готує правила опису до збереження: розгортає шаблони, розбирає й перевіряє нові та змінені
     /// правила. Помилка — відмова всього збереження.
     /// </summary>

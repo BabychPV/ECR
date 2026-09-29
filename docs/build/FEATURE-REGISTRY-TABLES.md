@@ -723,8 +723,10 @@ W_SOUND = 91.5 * Sqrt(1.3 * (273 + REGFIELD(!CASE, 'T_C')) / !MU)
 
 **Шаблон «Сума дочірніх»** — це правило виду `Expression` з параметрами
 `{"template":"childSum","child":"GAS_COMPOSITION","field":"MOL_PCT","target":100,"tolerance":0.5}`,
-з яких генерується вираз `ABS(REGSUM(child, ROW.<compositionField> = THIS, ROW.field) - target) <= tolerance`.
-Сітка читає ці параметри для живого індикатора Σ (§8.4). Вираз правила **не розбирається на клієнті**.
+з яких генерується вираз `ABS(REGSUM(child, ROW.<compositionField> = THIS, ROW.field) - target) <= tolerance OR REGCOUNT(child, ROW.<compositionField> = THIS) = 0`.
+✎ RT-17a: хвіст `OR REGCOUNT(…) = 0` — бо пакет пише один довідник і батько записується раніше за
+своїх дітей, тож без нього правило рівня `Error` не дало б створити жодного батька; наслідок — порожній
+склад (дітей ще немає або всіх видалено) теж проходить. Сітка читає ці параметри для живого індикатора Σ (§8.4). Вираз правила **не розбирається на клієнті**.
 
 | Аспект | Рішення |
 |---|---|

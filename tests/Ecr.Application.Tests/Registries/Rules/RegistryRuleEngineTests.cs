@@ -99,7 +99,7 @@ public sealed class RegistryRuleEngineTests
         // Σ складу кейсу 4411 = 60 + 30 = 90 ≠ 100 ± 0.5. Змінено РЯДОК СКЛАДУ, правило — на кейсі.
         _caseRules.Add(SumRule(ValidationSeverity.Error));
 
-        var check = await Engine().CheckAsync(_composition, [9002], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9002], [], null, default);
 
         var error = Assert.Single(check.Errors);
         Assert.Equal(CaseEntry, error.EntryId);
@@ -128,7 +128,7 @@ public sealed class RegistryRuleEngineTests
         _compositionRules.Add(Rule(CompositionId, "ALWAYS", RegistryRuleKind.Expression, "FALSE", ValidationSeverity.Error));
         _snapshot.AddEntry("GAS_COMPOSITION", 9007, "C7", Row(10m), ordinal: 7, visible: false);
 
-        var check = await Engine().CheckAsync(_composition, [], [9007], default);
+        var check = await Engine().EvaluateAsync(_composition, [], [9007], null, default);
 
         Assert.Equal(CaseEntry, Assert.Single(check.Errors).EntryId);
     }
@@ -141,7 +141,7 @@ public sealed class RegistryRuleEngineTests
         _caseRules.Add(SumRule(ValidationSeverity.Error));
         _snapshot.AddEntry("GAS_COMPOSITION", 9003, "C3", Row(10.3m), ordinal: 3);
 
-        var check = await Engine().CheckAsync(_composition, [9003], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9003], [], null, default);
 
         Assert.Empty(check.Violations);
         check.ThrowIfErrors();
@@ -157,13 +157,36 @@ public sealed class RegistryRuleEngineTests
         _caseRules.Add(SumRule(ValidationSeverity.Error));
         _snapshot.AddEntry("STREAM_CASE", 4412, "E4412");
 
-        var check = await Engine().CheckAsync(_case, [4412], [], default);
+        var check = await Engine().EvaluateAsync(_case, [4412], [], null, default);
 
         Assert.Empty(check.Violations);
 
         // Власне правило кейсу виконується й на ЙОГО зміні — кейс із неповним складом відхиляється.
-        var own = await Engine().CheckAsync(_case, [CaseEntry], [], default);
+        var own = await Engine().EvaluateAsync(_case, [CaseEntry], [], null, default);
         Assert.Equal(CaseEntry, Assert.Single(own.Errors).EntryId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.18")]
+    public async Task Оцінка_без_відмови_повертає_Error_і_не_кидає()
+    {
+        // Режим для синку («Аналіз»): джерело — правда, порушення лише фіксуються. Той самий метод
+        // кличуть ручні шляхи; 4221 — окремий крок над ним (ThrowIfErrors), не всередині.
+        _caseRules.Add(SumRule(ValidationSeverity.Error));
+#pragma warning disable CA1859 // Навмисно через інтерфейс: саме його отримає синк («Аналіз»).
+        IRegistryRuleEngine engine = Engine();
+#pragma warning restore CA1859
+        var date = new DateOnly(2026, 6, 30);
+
+        var check = await engine.EvaluateAsync(_composition, [9002], [], date, default);
+
+        var violation = Assert.Single(check.Violations);
+        Assert.Equal("Error", violation.Severity);
+        Assert.Equal(CaseEntry, violation.EntryId);
+        Assert.Equal("E4411", violation.EntryCode);
+        Assert.Equal("SUM_100", violation.Rule);
+        await _loader.Received().LoadAsync(Arg.Any<IReadOnlyCollection<int>>(), date, null, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -173,7 +196,7 @@ public sealed class RegistryRuleEngineTests
     {
         _caseRules.Add(SumRule(ValidationSeverity.Warning));
 
-        var check = await Engine().CheckAsync(_composition, [9001], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9001], [], null, default);
 
         Assert.Empty(check.Errors);
         var warning = Assert.Single(check.Warnings);
@@ -189,7 +212,7 @@ public sealed class RegistryRuleEngineTests
         // Правило кейсу про його власне поле — зміна складу його результату не змінює.
         _caseRules.Add(Rule(CaseId, "NAME_SET", RegistryRuleKind.Expression, "ROW.NAME = 'nothing'", ValidationSeverity.Error));
 
-        var check = await Engine().CheckAsync(_composition, [9001], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9001], [], null, default);
 
         Assert.Empty(check.Violations);
         await _loader.DidNotReceive().LoadAsync(
@@ -206,7 +229,7 @@ public sealed class RegistryRuleEngineTests
         _compositionRules.Add(Rule(CompositionId, "PCT_DIVIDE", RegistryRuleKind.Expression, "100 / (ROW.MOL_PCT - 60) > 0", ValidationSeverity.Warning));
         _snapshot.AddEntry("GAS_COMPOSITION", 9004, "C4", new() { ["CASE"] = ExpressionValue.Number(CaseEntry) }, ordinal: 4);
 
-        var check = await Engine().CheckAsync(_composition, [9001, 9004], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9001, 9004], [], null, default);
 
         // 9004: MOL_PCT порожнє → `ROW.MOL_PCT > 0` дає null, і це НЕ порушення. Ділення: 9001 —
         // на нуль (60 − 60), 9004 — на порожнє (граматика шаблону, як Excel) — обидва #DIV/0,
@@ -226,7 +249,7 @@ public sealed class RegistryRuleEngineTests
             CompositionId, "COMPONENT_WHEN_PCT", RegistryRuleKind.RequiredWhen, "ROW.MOL_PCT > 50",
             ValidationSeverity.Error, """{"field":"COMPONENT"}"""));
 
-        var check = await Engine().CheckAsync(_composition, [9001, 9002], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9001, 9002], [], null, default);
 
         // 9001 (60 %) без компонента — порушення; 9002 (30 %) — умова хибна.
         var violation = Assert.Single(check.Errors);
@@ -246,7 +269,7 @@ public sealed class RegistryRuleEngineTests
             .AddEntry("GAS_COMPOSITION", 9005, "C5", new() { ["CASE"] = ExpressionValue.Number(CaseEntry), ["COMPONENT"] = ExpressionValue.Text("CH4") }, ordinal: 5)
             .AddEntry("GAS_COMPOSITION", 9006, "C6", new() { ["CASE"] = ExpressionValue.Number(CaseEntry), ["COMPONENT"] = ExpressionValue.Text("XX9") }, ordinal: 6);
 
-        var check = await Engine().CheckAsync(_composition, [9001, 9005, 9006], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9001, 9005, 9006], [], null, default);
 
         // 9001: поле порожнє — не порушення; 9005: CH4 є; 9006: XX9 немає → #N/A.
         var violation = Assert.Single(check.Errors);
@@ -262,7 +285,7 @@ public sealed class RegistryRuleEngineTests
         // Д-4: правило, якого рушій не може виконати, мусить бути видно, а не «виглядати налаштованим».
         _compositionRules.Add(Rule(CompositionId, "BROKEN", RegistryRuleKind.Expression, "ROW.MOL_PCT >", ValidationSeverity.Error));
 
-        var check = await Engine().CheckAsync(_composition, [9001], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9001], [], null, default);
 
         var violation = Assert.Single(check.Errors);
         Assert.Equal(RegistryRuleEngine.InvalidKey, violation.MessageKey);
@@ -279,7 +302,7 @@ public sealed class RegistryRuleEngineTests
         off.SetActive(false);
         _compositionRules.Add(off);
 
-        var check = await Engine().CheckAsync(_composition, [9001], [], default);
+        var check = await Engine().EvaluateAsync(_composition, [9001], [], null, default);
 
         Assert.Empty(check.Violations);
     }

@@ -611,6 +611,26 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
         return found;
     }
 
+    /// <inheritdoc />
+    public async Task ReplaceRuleUsesAsync(
+        int ruleRegistryDefId, IReadOnlyCollection<RegistryUse> uses, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(uses);
+
+        // ⚠ Ребра шукаються за ПРАВИЛАМИ довідника, а не за RegistryDefId ребра: правило читає й
+        // ІНШІ довідники (склад кейсу, ціль CrossRegistry), і їхні ребра — теж цього правила.
+        var ruleIds = db.RegistryRuleDefs
+            .Where(r => r.RegistryDefId == ruleRegistryDefId)
+            .Select(r => r.Id);
+        var stale = await db.RegistryUses
+            .Where(u => u.SourceKind == RegistryUse.RegistryRuleSource && ruleIds.Contains(u.SourceId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        db.RegistryUses.RemoveRange(stale);
+        db.RegistryUses.AddRange(uses);
+    }
+
     /// <summary>Проміжний рядок пошуку посилань на визначення довідника.</summary>
     private sealed record UsageHit(int Id, string Label, string? Route);
 }

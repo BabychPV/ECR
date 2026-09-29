@@ -70,7 +70,7 @@ public sealed class ImportRegistryEntriesHandler(
     IClock clock,
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
-    Rules.RegistryRuleEngine? rules = null)
+    Rules.IRegistryRuleEngine? rules = null)
 {
     // ⚠ `uow` і `rules` (RT-17a) необов'язкові лише для тестів, що будують обробник руками: контейнер
     // підставляє обидва, і файл проходить ті самі правила, що й ручний upsert і пакет.
@@ -491,7 +491,7 @@ public sealed class ImportRegistryEntriesHandler(
             async token =>
             {
                 await SaveAsync(token).ConfigureAwait(false);
-                check = await rules.CheckAsync(definition, [.. touched.Select(e => e.Id)], [], token).ConfigureAwait(false);
+                check = await rules.EvaluateAsync(definition, [.. touched.Select(e => e.Id)], [], businessDate: null, token).ConfigureAwait(false);
                 check.ThrowIfErrors();
             },
             ct).ConfigureAwait(false);

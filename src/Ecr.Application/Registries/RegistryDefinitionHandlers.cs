@@ -383,12 +383,15 @@ public sealed class SaveRegistryDefinitionHandler(
         // шаблон «Сума дочірніх» розгортається у вираз з параметрів. Неправильний вираз —
         // 422 `ruleExpressionInvalid` з діагностикою, а не правило, що «виглядає налаштованим».
         var wantedRules = dto.Rules;
-        if (ruleCompiler is not null && wantedRules is { Count: > 0 })
+        if (ruleCompiler is not null)
         {
             graph = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
-            wantedRules = await ruleCompiler
-                .PrepareAsync(definition, rules, wantedRules, graph, keys, ct)
-                .ConfigureAwait(false);
+            if (wantedRules is { Count: > 0 })
+            {
+                wantedRules = await ruleCompiler
+                    .PrepareAsync(definition, rules, wantedRules, graph, keys, ct)
+                    .ConfigureAwait(false);
+            }
         }
 
         var applied = ApplyRules(definition, rules, wantedRules);
@@ -468,9 +471,54 @@ public sealed class SaveRegistryDefinitionHandler(
             {
                 await PublishKeysAsync(definition, keyPlan, userId, innerCt).ConfigureAwait(false);
             }
+
+            // ⛔ RT-17a (§3.2, §6 «Момент»): ребра cfg.RegistryUse правил (SourceKind = 2) переписуються
+            // цілком — ПІСЛЯ збереження правил (id нових відомі лише тепер) і в тій самій транзакції.
+            // Змінене чи вимкнене правило не лишає застарілого ребра; «Де використано» (RT-19)
+            // читає готові ребра.
+            if (ruleCompiler is not null && graph is not null)
+            {
+                await registries
+                    .ReplaceRuleUsesAsync(definition.Id, RuleUses(ruleCompiler, definition, applied, graph), innerCt)
+                    .ConfigureAwait(false);
+                await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
         return definition.DefinitionVersion;
+    }
+
+    /// <summary>
+    /// Ребра <c>cfg.RegistryUse</c> активних правил довідника (<c>SourceKind = 2</c>): що кожне читає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Вимкнене правило й <c>UniqueWithin</c> (не виконується, R-5) ребер не мають: вони нічого не
+    /// читають. Код довідника, якого немає серед описів, ребра не дає — ключа на нього не буде.
+    /// </remarks>
+    private static List<RegistryUse> RuleUses(
+        Rules.RegistryRuleCompiler compiler, RegistryDef definition, IReadOnlyList<RegistryRuleDef> rules, IReadOnlyList<RegistryDef> graph)
+    {
+        var idsByCode = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var registry in graph)
+        {
+            idsByCode[registry.Code] = registry.Id;
+        }
+
+        idsByCode[definition.Code] = definition.Id;
+
+        var uses = new List<RegistryUse>();
+        foreach (var rule in rules.Where(r => r.IsActive && r.RuleKind != RegistryRuleKind.UniqueWithin && r.Id > 0))
+        {
+            foreach (var (code, path) in compiler.UsesOf(rule, definition.Code))
+            {
+                if (idsByCode.TryGetValue(code, out var registryDefId) && registryDefId > 0)
+                {
+                    uses.Add(RegistryUse.ForRegistryRule(rule.Id, registryDefId, path));
+                }
+            }
+        }
+
+        return uses;
     }
 
     /// <summary>

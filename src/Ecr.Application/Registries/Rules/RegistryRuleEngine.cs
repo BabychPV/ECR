@@ -19,8 +19,9 @@ namespace Ecr.Application.Registries.Rules;
 /// <para>
 /// ⛔ Викликається ПІСЛЯ <c>SaveChanges</c>, але ДО коміту — у тій самій транзакції, що й запис
 /// (upsert, пакет, CSV). Знімок довідників (<see cref="IRegistrySnapshotLoader"/>) читає той самий
-/// контекст БД, тож бачить стан ПІСЛЯ запису; порушення рівня <c>Error</c> — виняток, який
-/// відкочує транзакцію (<see cref="RegistryRuleCheck.ThrowIfErrors"/>). Так агрегатне правило
+/// контекст БД, тож бачить стан ПІСЛЯ запису. Рушій лише оцінює (<see cref="IRegistryRuleEngine"/>):
+/// порушення рівня <c>Error</c> ручні шляхи окремим кроком перетворюють на виняток, який відкочує
+/// транзакцію (<see cref="RegistryRuleCheck.ThrowIfErrors"/>), а синк — на подію. Так агрегатне правило
 /// (Σ складу = 100) перевіряє стан після всього пакета, а не після кожного рядка (§6, ⚠).
 /// </para>
 /// <para>
@@ -54,7 +55,7 @@ public sealed class RegistryRuleEngine(
     RegistryRuleCompiler compiler,
     Evaluator evaluator,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock) : IRegistryRuleEngine
 {
     /// <summary>Ключ порушення: правило не виконалося (§7.1).</summary>
     public const string ViolatedKey = "registries.rules.violated";
@@ -68,16 +69,12 @@ public sealed class RegistryRuleEngine(
     /// <summary>Скільки рівнів композиції вгору перевіряється — запобіжник від кола в даних.</summary>
     private const int MaxDepth = 16;
 
-    /// <summary>Перевіряє правила записаних записів і їхніх батьків композиції.</summary>
-    /// <param name="definition">Довідник, записи якого змінено.</param>
-    /// <param name="changed">Записані (створені чи змінені) записи довідника.</param>
-    /// <param name="removed">Видалені записи — їхні власні правила не перевіряються, батьківські — так.</param>
-    /// <param name="ct">Токен скасування.</param>
-    /// <returns>Усі порушення; відмову за рівнем <c>Error</c> робить викликач.</returns>
-    public async Task<RegistryRuleCheck> CheckAsync(
+    /// <inheritdoc />
+    public async Task<RegistryRuleCheck> EvaluateAsync(
         RegistryDef definition,
         IReadOnlyCollection<long> changed,
         IReadOnlyCollection<long> removed,
+        DateOnly? businessDate,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -114,7 +111,7 @@ public sealed class RegistryRuleEngine(
                 .ConfigureAwait(false))
             .ToDictionary(s => s.Id);
 
-        var today = DateOnly.FromDateTime(clock.UtcNow);
+        var today = businessDate ?? DateOnly.FromDateTime(clock.UtcNow);
         var loaded = new Dictionary<DateOnly, (IRegistrySnapshot Snapshot, RegistryRuleContext Context, Dictionary<string, HashSet<long>> Visible)>();
         var found = new List<(CompiledRegistryRule Rule, long EntryId, Dictionary<string, string?> Params, string MessageKey)>();
 

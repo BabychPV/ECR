@@ -27,7 +27,7 @@ public sealed class UpsertRegistryEntryHandler(
     ICurrentUser currentUser,
     RegistryEntryWriter writer,
     IUnitOfWork? uow = null,
-    Rules.RegistryRuleEngine? rules = null)
+    Rules.IRegistryRuleEngine? rules = null)
 {
     // ⚠ `uow` і `rules` необов'язкові лише для тестів, що будують обробник руками (довідники без
     // правил) — той самий прийом, що `keys` у RegistryEntryWriter. Контейнер підставляє обидва
@@ -155,7 +155,7 @@ public sealed class UpsertRegistryEntryHandler(
             async token =>
             {
                 await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);
-                check = await rules.CheckAsync(definition, [entry.Id], [], token).ConfigureAwait(false);
+                check = await rules.EvaluateAsync(definition, [entry.Id], [], businessDate: null, token).ConfigureAwait(false);
                 check.ThrowIfErrors();
             },
             ct).ConfigureAwait(false);
