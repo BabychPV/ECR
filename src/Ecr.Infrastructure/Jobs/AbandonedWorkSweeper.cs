@@ -34,7 +34,23 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     public const string AbandonedJobReason =
         "Задачу покинуто: процес, що її виконував або тримав у черзі, зупинився — биття серця застигло.";
 
-    /// <summary>Причина для прогонів збору й обслуговування, які ніхто не закрив.</summary>
+    /// <summary>Ключ каталогу причини покинутого прогону збору (аудит U12).</summary>
+    public const string AbandonedCollectionRunKey = "jobs.collectionAbandoned";
+
+    /// <summary>
+    /// Причина для прогону збору, який ніхто не закрив, — конверт
+    /// (<see cref="JobProgressMessageEnvelope"/>, <c>Q-326</c>), а не речення (U12):
+    /// <c>itg.CollectionRun.ErrorMessage</c> читають мовою читача.
+    /// </summary>
+    public static readonly string AbandonedCollectionRunReason =
+        JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(AbandonedCollectionRunKey));
+
+    /// <summary>Причина для прогонів обслуговування, які ніхто не закрив.</summary>
+    /// <remarks>
+    /// ⚠ Лишається текстом: <c>DetailsJson</c> прогону обслуговування йде в лист
+    /// зведення сирим (гілка обслуговування <c>NotificationJob</c> не резолвить
+    /// конвертів), тож конверт тут дав би JSON у листі.
+    /// </remarks>
     public const string AbandonedRunReason =
         "Прогін не закрито: задачу скасовано або процес зупинився до того, як прогін записав результат.";
 
@@ -188,7 +204,7 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
                 s => s
                     .SetProperty(r => r.Status, CollectionFailure.FailedStatus)
                     .SetProperty(r => r.FinishedAt, utcNow)
-                    .SetProperty(r => r.ErrorMessage, AbandonedRunReason),
+                    .SetProperty(r => r.ErrorMessage, AbandonedCollectionRunReason),
                 ct)
             .ConfigureAwait(false);
     }

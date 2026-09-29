@@ -140,7 +140,12 @@ public sealed class AbandonedWorkSweeperTests(SqlServerFixture sql)
             var run = await check.CollectionRuns.AsNoTracking().SingleAsync(r => r.Id == collection.Id);
             Assert.Equal("Failed", run.Status);
             Assert.Equal(at, run.FinishedAt);
-            Assert.Equal(AbandonedWorkSweeper.AbandonedRunReason, run.ErrorMessage);
+            // U12: причина прогону збору — конверт із ключем, не українське речення.
+            // Мутація «повернути AbandonedRunReason у SetProperty» → червоний.
+            Assert.True(
+                JobProgressMessageCodec.TryDecode(run.ErrorMessage, out var reason),
+                run.ErrorMessage);
+            Assert.Equal(AbandonedWorkSweeper.AbandonedCollectionRunKey, reason.Key);
 
             var orphan = await check.MaintenanceRuns.AsNoTracking().SingleAsync(r => r.Id == orphanMaintenance.Id);
             Assert.Equal("Failed", orphan.Status);

@@ -36,7 +36,8 @@ public sealed class CollectionRunnerMessageEnvelopeTests
         "jobs.collectionRunReason", "jobs.collectionSourceUnavailable", "jobs.collectionSourceError",
         "jobs.collectionSameTimestamp", "jobs.collectionPageLimit", "jobs.collectionUnitChanged",
         "jobs.collectionTimeout", "jobs.collectionCancelled", "jobs.collectionRuleFailed",
-        "jobs.collectionRunFailed", "jobs.collectionCloseFailed",
+        "jobs.collectionRunFailed", "jobs.collectionCloseFailed", "jobs.collectionAuthRefused",
+        "jobs.collectionAbandoned",
     ];
 
     [Fact]

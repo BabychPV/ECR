@@ -90,6 +90,10 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('jobs.collectionRunFailed', params);
     case 'jobs.collectionCloseFailed':
       return t('jobs.collectionCloseFailed', params);
+    case 'jobs.collectionAuthRefused':
+      return t('jobs.collectionAuthRefused', params);
+    case 'jobs.collectionAbandoned':
+      return t('jobs.collectionAbandoned', params);
     default:
       return null;
   }

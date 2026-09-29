@@ -677,9 +677,16 @@ public sealed partial class CollectionRunner(
             .WriteCoverageAsync(runId, sourceEntityId, covered, CancellationToken.None)
             .ConfigureAwait(false);
 
+        // ⚠ U12: у журнал прогону — конверт (ключ `jobs.collectionAuthRefused`),
+        // його розпізнає CollectionFailure.IsAuthenticationRefusal за ключем.
         await store
             .FinishRunAsync(
-                runId, CollectionFailure.FailedStatus, retrieved, message, CancellationToken.None)
+                runId,
+                CollectionFailure.FailedStatus,
+                retrieved,
+                CollectionFailure.AuthenticationRefusedReason(
+                    sourceCode, string.IsNullOrWhiteSpace(detail) ? null : Trim(detail)),
+                CancellationToken.None)
             .ConfigureAwait(false);
 
         return new SourceAuthenticationException(
@@ -687,10 +694,9 @@ public sealed partial class CollectionRunner(
             message,
             new Dictionary<string, object?>
             {
-                // ⚠ Лише Details несе ключ — саме `message` (вище) лишається
-                // МАРКЕРНИМ текстом: CollectionFailure.IsAuthenticationRefusal
-                // читає його з itg.CollectionRun.ErrorMessage за підрядком
-                // AuthenticationMarker, і messageKey впливає лише на Detail
+                // ⚠ Лише Details несе ключ — `message` (вище) лишається текстом:
+                // він іде в негайний алерт (`CollectionJob.AlertAuthenticationAsync`)
+                // і в журнал задачі, а messageKey впливає лише на Detail
                 // http-відповіді (ResolveGenericMessageAsync), не на ex.Message.
                 ["messageKey"] = "err.ECR-INT-0502.authenticationRefused",
                 ["sourceEntityId"] = sourceEntityId.ToString(System.Globalization.CultureInfo.InvariantCulture),

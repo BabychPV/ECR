@@ -19,6 +19,17 @@ describe('collectionRunErrorText', () => {
     );
   });
 
+  it('відмова в автентифікації і покинутий прогін — теж через каталог', () => {
+    expect(
+      collectionRunErrorText(
+        JSON.stringify({ k: 'jobs.collectionAuthRefused', p: { sourceCode: 'STACK-1', detail: '' } }),
+      ),
+    ).toBe('⟦jobs.collectionAuthRefused (sourceCode=STACK-1, detail=)⟧');
+    expect(collectionRunErrorText(JSON.stringify({ k: 'jobs.collectionAbandoned' }))).toBe(
+      '⟦jobs.collectionAbandoned ()⟧',
+    );
+  });
+
   it('старий рядок (сирий текст до U12) — як є', () => {
     expect(collectionRunErrorText('ECR-INT-0503: джерело недоступне')).toBe(
       'ECR-INT-0503: джерело недоступне',

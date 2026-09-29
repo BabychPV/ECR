@@ -218,7 +218,9 @@ public sealed class CollectionRunnerTests
             Arg.Any<int>(),
             Arg.Is<string?>(m => m != null
                                  && m.Contains("STACK-1", StringComparison.Ordinal)
-                                 && CollectionFailure.IsAuthenticationRefusal(m)),
+                                 && CollectionFailure.IsAuthenticationRefusal(m)
+                                 && CollectionRunnerMessageEnvelopeTests.IsReason(
+                                     m, CollectionFailure.AuthenticationRefusedKey, null)),
             Arg.Any<CancellationToken>());
 
         Assert.Contains("STACK-1", error.Message, StringComparison.Ordinal);

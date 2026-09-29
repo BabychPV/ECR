@@ -1,4 +1,5 @@
 // src/Ecr.Application/Integration/CollectionFailure.cs
+using Ecr.Application.Ports;
 
 namespace Ecr.Application.Integration;
 
@@ -53,12 +54,61 @@ public static class CollectionFailure
         => $"Джерело {sourceCode} {AuthenticationMarker}: повторний запит із тими самими "
            + "обліковими даними нічого не змінить, потрібне втручання адміністратора.";
 
+    /// <summary>Ключ каталогу причини «джерело відмовило в автентифікації» (аудит U12).</summary>
+    public const string AuthenticationRefusedKey = "jobs.collectionAuthRefused";
+
+    /// <summary>
+    /// Причина для <c>itg.CollectionRun.ErrorMessage</c> — конверт
+    /// (<see cref="JobProgressMessageEnvelope"/>, <c>Q-326</c>), а не речення (U12).
+    /// </summary>
+    /// <param name="sourceCode">Код сутності джерела.</param>
+    /// <param name="detail">Текст відмови від адаптера (дані джерела, як є); <c>null</c> — немає.</param>
+    /// <returns>Закодований конверт.</returns>
+    /// <remarks>
+    /// ⚠ Журнал прогону читають мовою ЧИТАЧА (шухляда прогону, зведення), а мова
+    /// в момент запису невідома. Сам виняток і негайний алерт і далі несуть
+    /// <see cref="AuthenticationRefused"/> — текстом.
+    /// </remarks>
+    public static string AuthenticationRefusedReason(string sourceCode, string? detail)
+        => JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+            AuthenticationRefusedKey,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["sourceCode"] = sourceCode,
+                ["detail"] = detail ?? string.Empty,
+            }));
+
     /// <summary>Чи це відмова в автентифікації.</summary>
     /// <param name="errorMessage">Текст із <c>itg.CollectionRun.ErrorMessage</c>.</param>
     /// <returns><c>true</c> — джерело відмовило в автентифікації.</returns>
+    /// <remarks>
+    /// ⛔ Два формати, і обидва живі: з U12 — конверт із ключем
+    /// <see cref="AuthenticationRefusedKey"/>; ДО U12 — речення з
+    /// <see cref="AuthenticationMarker"/>. Старі рядки лишаються в
+    /// <c>itg.CollectionRun</c> і мусять і далі давати власний рядок зведення.
+    /// </remarks>
     public static bool IsAuthenticationRefusal(string? errorMessage)
-        => errorMessage is not null
-           && errorMessage.Contains(AuthenticationMarker, StringComparison.Ordinal);
+    {
+        if (errorMessage is null)
+        {
+            return false;
+        }
+
+        if (JobProgressMessageCodec.TryDecode(errorMessage, out var envelope))
+        {
+            for (var level = envelope; level is not null; level = level.Inner)
+            {
+                if (string.Equals(level.Key, AuthenticationRefusedKey, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return errorMessage.Contains(AuthenticationMarker, StringComparison.Ordinal);
+    }
 
     /// <summary>Тема негайного алерта про відмову в автентифікації (<c>D-125</c>).</summary>
     /// <param name="sourceCode">Код сутності джерела.</param>

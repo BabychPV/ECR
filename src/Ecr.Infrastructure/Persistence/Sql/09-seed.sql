@@ -4119,6 +4119,11 @@ USING (VALUES
     (N'jobs.collectionRuleFailed',                N'en', N'{code}: the collection run was stopped by a rule. {error}', 1),
     (N'jobs.collectionRunFailed',                 N'en', N'The collection run failed. {error}', 1),
     (N'jobs.collectionCloseFailed',               N'en', N'The collection run could not be closed. {error}', 1),
+    -- `CollectionFailure.AuthenticationRefusedReason` (H-20): ключ розпізнає зведення
+    -- (`IsAuthenticationRefusal`); `{detail}` — текст відмови адаптера, може бути порожнім.
+    (N'jobs.collectionAuthRefused',               N'en', N'Source {sourceCode} refused authentication: repeating the request with the same credentials changes nothing, an administrator must intervene. {detail}', 1),
+    -- `AbandonedWorkSweeper.AbandonedCollectionRunReason`: прогін, який ніхто не закрив.
+    (N'jobs.collectionAbandoned',                 N'en', N'The run was not closed: the job was cancelled or the process stopped before the run recorded its result.', 1),
     -- COLL:collector-msg ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
