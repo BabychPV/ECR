@@ -21,7 +21,7 @@ namespace Ecr.Application.Documents;
 /// весь батч. «Перезаписати мовчки» не є опцією — користувач має побачити
 /// розбіжність (B04 §2.3).
 /// </remarks>
-public sealed class PatchCellsHandler(
+public sealed partial class PatchCellsHandler(
     ICellStore cellStore,
     IRowStore rowStore,
     IDocumentStore documents,
@@ -274,8 +274,49 @@ public sealed class PatchCellsHandler(
     private async Task<RequestContext> LoadContextAsync(
         PatchCellsRequest request, TableInstanceRef? resolvedInstance, CancellationToken ct)
     {
-        var periodKey = new PeriodKey(request.PeriodKey);
+        var userId = ResolveUserId();
 
+        // 1. Структура зі знімка метаданих — без звернення до БД (D-16).
+        //    Потрібна, щоб резолвити коди колонок у ColumnDefId; вигадувати
+        //    їх не можна, це частина первинного ключа комірки.
+        //
+        // ⚠ `WR-04` п. 2: контролер уже розв'язав екземпляр (перевіряючи його
+        // належність документу з URL) і передає його сюди — другий такий самий
+        // запит був зайвим. Викликачі поза HTTP (`ExcelImporter`) передають
+        // `null`, і тоді екземпляр розв'язується тут, як і раніше.
+        //
+        // ⛔ Переданий екземпляр мусить бути ТИМ, про який запит: інакше права
+        // й структура рахувалися б для одного екземпляра, а запис ішов би в
+        // інший. Розбіжність — помилка викликача, не користувача.
+        if (resolvedInstance is not null && resolvedInstance.TableInstanceId != request.TableInstanceId)
+        {
+            throw new ArgumentException(
+                $"Розв'язаний екземпляр {resolvedInstance.TableInstanceId} не збігається із запитом {request.TableInstanceId}.",
+                nameof(resolvedInstance));
+        }
+
+        var instance = resolvedInstance
+                       ?? await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
+
+        var profile = await EnsureDocumentReadableAsync(userId, instance.DocumentId, ct).ConfigureAwait(false);
+        EnsurePeriodMatches(request, instance);
+
+        var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+
+        // 2. Поточний стан рядків — ОДИН запит на батч, не на рядок.
+        //
+        // ⚠ `WR-04` п. 3: версії й ідентифікатори — одним читанням. Доти це
+        // були два запити з однаковим предикатом (`GetRowVersionsAsync` +
+        // `GetRowIdsAsync`).
+        var rows = await rowStore.GetRowsAsync(request.TableInstanceId, new PeriodKey(request.PeriodKey), ct)
+            .ConfigureAwait(false);
+
+        return BuildContext(request, userId, profile, instance, snapshot, rows);
+    }
+
+    /// <summary>Автор запису; анонім — відмова.</summary>
+    private int ResolveUserId()
+    {
         // ⛔ Кожна відмова цього обробника несе `messageKey` — ключ каталогу
         // `sys_ecr.UiString`, який резолвить
         // `ExceptionHandlingMiddleware.ResolveGenericMessageAsync` мовою
@@ -303,28 +344,12 @@ public sealed class PatchCellsHandler(
                              ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite",
                          });
 
-        // 1. Структура зі знімка метаданих — без звернення до БД (D-16).
-        //    Потрібна, щоб резолвити коди колонок у ColumnDefId; вигадувати
-        //    їх не можна, це частина первинного ключа комірки.
-        //
-        // ⚠ `WR-04` п. 2: контролер уже розв'язав екземпляр (перевіряючи його
-        // належність документу з URL) і передає його сюди — другий такий самий
-        // запит був зайвим. Викликачі поза HTTP (`ExcelImporter`) передають
-        // `null`, і тоді екземпляр розв'язується тут, як і раніше.
-        //
-        // ⛔ Переданий екземпляр мусить бути ТИМ, про який запит: інакше права
-        // й структура рахувалися б для одного екземпляра, а запис ішов би в
-        // інший. Розбіжність — помилка викликача, не користувача.
-        if (resolvedInstance is not null && resolvedInstance.TableInstanceId != request.TableInstanceId)
-        {
-            throw new ArgumentException(
-                $"Розв'язаний екземпляр {resolvedInstance.TableInstanceId} не збігається із запитом {request.TableInstanceId}.",
-                nameof(resolvedInstance));
-        }
+        return userId;
+    }
 
-        var instance = resolvedInstance
-                       ?? await rowStore.ResolveTableInstanceAsync(request.TableInstanceId, ct).ConfigureAwait(false);
-
+    /// <summary>Профіль прав автора; документ, якого він не бачить, — «не знайдено».</summary>
+    private async Task<AccessProfile> EnsureDocumentReadableAsync(int userId, long documentId, CancellationToken ct)
+    {
         // ⛔ Видимість документа — ПЕРШОЮ, до будь-якої відмови, що щось
         // розповідає про таблицю (V-02). Далі по шляху відмови називають ключі
         // наявних рядків (`ECR-ROW-0409`), версії й чужі значення
@@ -336,19 +361,25 @@ public sealed class PatchCellsHandler(
         // а не 403. Різниця між «заборонено» і «не знайдено» сама була б
         // відомістю про те, що документ існує.
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        var read = await access.CanReadDocumentAsync(profile, instance.DocumentId, ct).ConfigureAwait(false);
+        var read = await access.CanReadDocumentAsync(profile, documentId, ct).ConfigureAwait(false);
         if (!read.IsAllowed)
         {
             throw new NotFoundException(
                 "ECR-DOC-0404",
-                $"Документ {instance.DocumentId} не знайдено.",
+                $"Документ {documentId} не знайдено.",
                 new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["messageKey"] = "err.ECR-DOC-0404.document",
-                    ["documentId"] = instance.DocumentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["documentId"] = documentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
 
+        return profile;
+    }
+
+    /// <summary>Період тіла запиту мусить бути періодом екземпляра.</summary>
+    private static void EnsurePeriodMatches(PatchCellsRequest request, TableInstanceRef instance)
+    {
         // ⛔ Період із ТІЛА звіряється з періодом екземпляра таблиці
         // (`DIRECTIVE-14-ARCH.md`, `DAT-04`). Не звірявся ніде: розбіжність
         // доїжджала до порушення зовнішнього ключа, і назовні виходив голий
@@ -376,8 +407,21 @@ public sealed class PatchCellsHandler(
                     ["tableInstanceId"] = request.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
+    }
 
-        var snapshot = await metadata.GetAsync(instance.TemplateVersionId, ct).ConfigureAwait(false);
+    /// <summary>
+    /// Контекст запиту з уже прочитаних особи, екземпляра, знімка метаданих і
+    /// живих рядків — без звернень до бази.
+    /// </summary>
+    private static RequestContext BuildContext(
+        PatchCellsRequest request,
+        int userId,
+        AccessProfile profile,
+        TableInstanceRef instance,
+        TemplateVersionSnapshot snapshot,
+        IReadOnlyList<RowState> rows)
+    {
+        var periodKey = new PeriodKey(request.PeriodKey);
 
         var table = snapshot.Sheets
             .SelectMany(sh => sh.Tables)
@@ -427,12 +471,6 @@ public sealed class PatchCellsHandler(
 
         var columns = columnDefs.ToDictionary(p => p.Key, p => p.Value.Id, StringComparer.Ordinal);
 
-        // 2. Поточний стан рядків — ОДИН запит на батч, не на рядок.
-        //
-        // ⚠ `WR-04` п. 3: версії й ідентифікатори — одним читанням. Доти це
-        // були два запити з однаковим предикатом (`GetRowVersionsAsync` +
-        // `GetRowIdsAsync`).
-        var rows = await rowStore.GetRowsAsync(request.TableInstanceId, periodKey, ct).ConfigureAwait(false);
         var versions = rows.ToDictionary(r => r.RowKey, r => r.RowVersion, StringComparer.Ordinal);
         var rowIds = rows.ToDictionary(r => r.RowKey, r => r.Id, StringComparer.Ordinal);
 
@@ -808,15 +846,31 @@ public sealed class PatchCellsHandler(
     /// </remarks>
     private async Task EnsureAccessAsync(PatchCellsRequest request, RequestContext context, CancellationToken ct)
     {
-        var profile = context.Profile;
-        var denied = new List<EditDecision>();
+        var addresses = AccessAddresses(context);
 
-        // ⛔ `ФВ-2.16`, `AllowWithConfirmation`: дозволені комірки, правку яких
-        // людина мусить підтвердити. Доти підтвердження жило ЛИШЕ в діалозі
-        // клієнта (`DocumentGrid.onBeforeEdit`), а сервер про нього не питав —
-        // вставка, протягування чи прямий `PATCH` писали такі комірки мовчки.
-        var needsConfirmation = 0;
+        // ⛔ `DIRECTIVE-14-ARCH.md`, `WR-03`. `CanEditSliceAsync` рахує
+        // рішення на ВЕСЬ зріз (rows × columns), а тут потрібні лише
+        // адреси батчу — `CanEditCellsAsync` фільтрує рядки за
+        // `PeriodKey` і `Id IN (…)` і рахує рішення лише на них.
+        var decisions = addresses.Count == 0
+            ? null
+            : await access
+                .CanEditCellsAsync(context.Profile, request.TableInstanceId, context.PeriodKey, addresses, ct)
+                .ConfigureAwait(false);
 
+        var newRows = context.Creations.Count == 0
+            ? null
+            : await access
+                .CanCreateRowsAsync(
+                    context.Profile, request.TableInstanceId, context.Creations.Select(r => r.RowKey).ToList(), ct)
+                .ConfigureAwait(false);
+
+        CheckAccess(request, context, addresses, decisions, newRows);
+    }
+
+    /// <summary>Адреси наявних рядків батчу, на які питаються права.</summary>
+    private static List<CellAddress> AccessAddresses(RequestContext context)
+    {
         var addresses = new List<CellAddress>();
         foreach (var row in context.Updates)
         {
@@ -830,15 +884,31 @@ public sealed class PatchCellsHandler(
             }
         }
 
+        return addresses;
+    }
+
+    /// <summary>
+    /// Рішення про права на батч — однакове для поштучного й книжкового шляху;
+    /// відсутнє рішення — відмова.
+    /// </summary>
+    private static void CheckAccess(
+        PatchCellsRequest request,
+        RequestContext context,
+        List<CellAddress> addresses,
+        IReadOnlyDictionary<CellAddress, EditDecision>? decisions,
+        IReadOnlyDictionary<string, NewRowAccess>? newRows)
+    {
+        var denied = new List<EditDecision>();
+
+        // ⛔ `ФВ-2.16`, `AllowWithConfirmation`: дозволені комірки, правку яких
+        // людина мусить підтвердити. Доти підтвердження жило ЛИШЕ в діалозі
+        // клієнта (`DocumentGrid.onBeforeEdit`), а сервер про нього не питав —
+        // вставка, протягування чи прямий `PATCH` писали такі комірки мовчки.
+        var needsConfirmation = 0;
+
         if (addresses.Count > 0)
         {
-            // ⛔ `DIRECTIVE-14-ARCH.md`, `WR-03`. `CanEditSliceAsync` рахує
-            // рішення на ВЕСЬ зріз (rows × columns), а тут потрібні лише
-            // адреси батчу — `CanEditCellsAsync` фільтрує рядки за
-            // `PeriodKey` і `Id IN (…)` і рахує рішення лише на них.
-            var decisions = await access
-                .CanEditCellsAsync(profile, request.TableInstanceId, context.PeriodKey, addresses, ct)
-                .ConfigureAwait(false);
+            decisions ??= new Dictionary<CellAddress, EditDecision>();
 
             // Перевіряємо лише ті адреси, які справді змінюються: рішення
             // приходять лише на них, але явний цикл (а не голе "усе allowed")
@@ -877,9 +947,7 @@ public sealed class PatchCellsHandler(
 
         if (context.Creations.Count > 0)
         {
-            var newRows = await access
-                .CanCreateRowsAsync(profile, request.TableInstanceId, context.Creations.Select(r => r.RowKey).ToList(), ct)
-                .ConfigureAwait(false);
+            newRows ??= new Dictionary<string, NewRowAccess>();
 
             foreach (var row in context.Creations)
             {
@@ -1117,6 +1185,13 @@ public sealed class PatchCellsHandler(
                 [.. context.Creations.Select(row => RowKey.Create(row.RowKey))], ordinal: 0, ct)
             .ConfigureAwait(false);
 
+        return WithRealRowIds(context, planned, newIds);
+    }
+
+    /// <summary>Зміни, у яких тимчасові адреси нових рядків замінено справжніми.</summary>
+    private static CellChangeLists WithRealRowIds(
+        RequestContext context, CellChangeLists planned, IReadOnlyList<long> newIds)
+    {
         var realIds = new Dictionary<long, long>(context.Creations.Count);
         for (var i = 0; i < context.Creations.Count; i++)
         {
@@ -1211,27 +1286,55 @@ public sealed class PatchCellsHandler(
             return messages;
         }
 
-        // Колонки для зіставлення правил (MatchJson) і перевірки вимог, разом
-        // — щоб прочитати їх ОДНИМ пакетним запитом на всі рядки батчу.
-        var neededColumnIds = applicable
+        var addresses = RequiredInputAddresses(context, changes, applicable);
+
+        var baseline = addresses.Count == 0
+            ? new Dictionary<CellAddress, CellValueData>()
+            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+
+        return EvaluateRequiredInputs(context, changes, applicable, baseline);
+    }
+
+    /// <summary>
+    /// Колонки для зіставлення правил (<c>MatchJson</c>) і перевірки вимог,
+    /// разом — щоб прочитати їх ОДНИМ пакетним запитом на всі рядки батчу.
+    /// </summary>
+    private static List<int> RequiredInputColumnIds(IReadOnlyList<ApplicableMethodology> applicable)
+        => applicable
             .SelectMany(a => a.RequiredInputs.Select(r => r.ColumnDefId))
             .Concat(applicable.SelectMany(a => a.Rules.SelectMany(r => MatchJsonColumnIds(r.MatchJson))))
             .Distinct()
             .ToList();
 
+    /// <summary>Збережені комірки, без яких не видно, чи заповнено вхід методології.</summary>
+    private static List<CellAddress> RequiredInputAddresses(
+        RequestContext context, CellChangeLists changes, IReadOnlyList<ApplicableMethodology> applicable)
+    {
+        var neededColumnIds = RequiredInputColumnIds(applicable);
+
         // ⚠ Нові рядки (тимчасові від'ємні адреси, `DAT-04` п. 1) у базі ще не
         // існують — питати про них сховище нема сенсу: їхній стан — це рівно
         // те, що несе сам батч.
-        var addresses = (
+        return (
             from rowId in changes.Touched
             where !IsPlaceholder(rowId)
             from columnId in neededColumnIds
             select new CellAddress(context.PeriodKey, rowId, columnId))
             .ToList();
+    }
 
-        var baseline = addresses.Count == 0
-            ? new Dictionary<CellAddress, CellValueData>()
-            : await cellStore.ReadCellsAsync(addresses, ct).ConfigureAwait(false);
+    /// <summary>
+    /// Вимоги методологій до рядків батчу над UNION бази й поточної правки —
+    /// без звернень до бази.
+    /// </summary>
+    private static List<Validation.ValidationMessage> EvaluateRequiredInputs(
+        RequestContext context,
+        CellChangeLists changes,
+        IReadOnlyList<ApplicableMethodology> applicable,
+        IReadOnlyDictionary<CellAddress, CellValueData> baseline)
+    {
+        var messages = new List<Validation.ValidationMessage>();
+        var neededColumnIds = RequiredInputColumnIds(applicable);
 
         var patchByRow = changes.Upserts
             .GroupBy(u => u.Address.TableRowId)
@@ -1517,12 +1620,7 @@ public sealed class PatchCellsHandler(
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
         CancellationToken ct)
     {
-        var lookups = changes.Upserts
-            .Where(record => context.Snapshot.ColumnsById.TryGetValue(
-                record.Address.ColumnDefId, out var column) && column.DataType == CellDataType.Lookup)
-            .Select(record => (record.Address, EntryId: record.Value.ValueRegistryEntryId))
-            .Where(cell => cell.EntryId is not null)
-            .ToList();
+        var lookups = LookupCells(context, changes);
 
         if (lookups.Count == 0)
         {
@@ -1533,17 +1631,63 @@ public sealed class PatchCellsHandler(
         var standings = (await registries.FindEntryStandingsAsync(requestedIds, ct).ConfigureAwait(false))
             .ToDictionary(s => s.Id);
 
-        var byRowId = context.RowIds.ToDictionary(p => p.Value, p => p.Key);
-        object Describe((CellAddress Address, long? EntryId) cell) => new
-        {
-            RowKey = byRowId.GetValueOrDefault(cell.Address.TableRowId),
-            ColumnCode = context.Snapshot.ColumnsById[cell.Address.ColumnDefId].Code,
-            EntryId = cell.EntryId!.Value,
-        };
+        CheckLookupsExist(context, lookups, standings);
 
+        var changed = ChangedLookups(lookups, previous);
+
+        if (changed.Count == 0)
+        {
+            return;
+        }
+
+        // ⚠ Межі періоду читаються лише тоді, коли є що перевіряти на дату.
+        // Немає періоду (`null`) — перевірки на дату немає; решта причин діють.
+        var bounds = await periods
+            .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
+            .ConfigureAwait(false);
+
+        CheckLookupStandings(context, changed, standings, bounds);
+    }
+
+    /// <summary><c>Lookup</c>-комірки батчу з непорожнім посиланням.</summary>
+    private static List<(CellAddress Address, long? EntryId)> LookupCells(
+        RequestContext context, CellChangeLists changes)
+        => changes.Upserts
+            .Where(record => context.Snapshot.ColumnsById.TryGetValue(
+                record.Address.ColumnDefId, out var column) && column.DataType == CellDataType.Lookup)
+            .Select(record => (record.Address, EntryId: record.Value.ValueRegistryEntryId))
+            .Where(cell => cell.EntryId is not null)
+            .ToList();
+
+    /// <summary>
+    /// Посилання, що ЗМІНЮЮТЬ значення комірки: те саме, що вже стоїть, не є
+    /// новим вибором (<c>C7</c>).
+    /// </summary>
+    private static List<(CellAddress Address, long? EntryId)> ChangedLookups(
+        List<(CellAddress Address, long? EntryId)> lookups,
+        IReadOnlyDictionary<CellAddress, CellValueData> previous)
+        => lookups
+            .Where(cell => !(previous.TryGetValue(cell.Address, out var stored)
+                             && stored.ValueRegistryEntryId == cell.EntryId))
+            .ToList();
+
+    /// <summary>Опис <c>Lookup</c>-комірки у відмові.</summary>
+    private static object DescribeLookup(RequestContext context, (CellAddress Address, long? EntryId) cell) => new
+    {
+        RowKey = context.RowIds.FirstOrDefault(p => p.Value == cell.Address.TableRowId).Key,
+        ColumnCode = context.Snapshot.ColumnsById[cell.Address.ColumnDefId].Code,
+        EntryId = cell.EntryId!.Value,
+    };
+
+    /// <summary>Посилання на неіснуючий запис довідника — відмова.</summary>
+    private static void CheckLookupsExist(
+        RequestContext context,
+        List<(CellAddress Address, long? EntryId)> lookups,
+        Dictionary<long, RegistryEntryStanding> standings)
+    {
         var missing = lookups
             .Where(cell => !standings.ContainsKey(cell.EntryId!.Value))
-            .Select(Describe)
+            .Select(cell => DescribeLookup(context, cell))
             .ToList();
 
         if (missing.Count > 0)
@@ -1558,21 +1702,18 @@ public sealed class PatchCellsHandler(
                     ["cells"] = missing,
                 });
         }
+    }
 
-        var changed = lookups
-            .Where(cell => !(previous.TryGetValue(cell.Address, out var stored)
-                             && stored.ValueRegistryEntryId == cell.EntryId))            .ToList();
-
-        if (changed.Count == 0)
-        {
-            return;
-        }
-
-        // ⚠ Межі періоду читаються лише тоді, коли є що перевіряти на дату.
-        // Немає періоду (`null`) — перевірки на дату немає; решта причин діють.
-        var bounds = await periods
-            .FindPeriodBoundsAsync(context.Instance.DocumentId, context.PeriodKey.Value, ct)
-            .ConfigureAwait(false);
+    /// <summary>
+    /// Змінені посилання на чужий, видалений, вимкнений чи нечинний на кінець
+    /// періоду запис — відмова з найглибшою причиною (<c>C7</c>).
+    /// </summary>
+    private static void CheckLookupStandings(
+        RequestContext context,
+        List<(CellAddress Address, long? EntryId)> changed,
+        Dictionary<long, RegistryEntryStanding> standings,
+        PeriodBounds? bounds)
+    {
         // Дата чинності — останній день періоду: D-158 (10-decisions.md), як пікер сітки, OrphanScanner і знімок розрахунку.
         var asOf = bounds?.PeriodEnd;
 
@@ -1613,7 +1754,7 @@ public sealed class PatchCellsHandler(
         // (порядок значень переліку). Решту користувач побачить наступною
         // спробою, якщо виправить лише цю.
         var reason = rejected.Min(r => r.Reason!.Value);
-        var cells = rejected.Where(r => r.Reason == reason).Select(r => Describe(r.Cell)).ToList();
+        var cells = rejected.Where(r => r.Reason == reason).Select(r => DescribeLookup(context, r.Cell)).ToList();
         var count = cells.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         throw reason switch
@@ -1697,11 +1838,7 @@ public sealed class PatchCellsHandler(
     private async Task EnsureUnitReferencesExistAsync(
         RequestContext context, CellChangeLists changes, CancellationToken ct)
     {
-        var unitCells = changes.Upserts
-            .Where(record => context.Snapshot.ColumnsById.TryGetValue(
-                record.Address.ColumnDefId, out var column) && column.DataType == CellDataType.Unit)
-            .Where(record => record.Value.ValueUnitId is not null)
-            .ToList();
+        var unitCells = UnitCells(context, changes);
 
         if (unitCells.Count == 0)
         {
@@ -1709,8 +1846,20 @@ public sealed class PatchCellsHandler(
         }
 
         var catalog = await units.GetAsync(ct).ConfigureAwait(false);
-        var known = catalog.Units.Values.Select(u => u.Id).ToHashSet();
+        CheckUnitsExist(context, unitCells, catalog.Units.Values.Select(u => u.Id).ToHashSet());
+    }
 
+    /// <summary><c>Unit</c>-комірки батчу з непорожнім посиланням.</summary>
+    private static List<CellRecord> UnitCells(RequestContext context, CellChangeLists changes)
+        => changes.Upserts
+            .Where(record => context.Snapshot.ColumnsById.TryGetValue(
+                record.Address.ColumnDefId, out var column) && column.DataType == CellDataType.Unit)
+            .Where(record => record.Value.ValueUnitId is not null)
+            .ToList();
+
+    /// <summary>Посилання на одиницю, якої немає в довіднику, — відмова.</summary>
+    private static void CheckUnitsExist(RequestContext context, List<CellRecord> unitCells, HashSet<int> known)
+    {
         var byRowId = context.RowIds.ToDictionary(p => p.Value, p => p.Key);
         var missing = unitCells
             .Where(record => !known.Contains(record.Value.ValueUnitId!.Value))
@@ -1751,17 +1900,23 @@ public sealed class PatchCellsHandler(
     private async Task<IReadOnlyDictionary<CellAddress, CellValueData>> ReadPreviousValuesAsync(
         CellChangeLists changes, CancellationToken ct)
     {
-        // ⚠ Комірки нових рядків (тимчасові адреси, `DAT-04` п. 1) пропускаються:
-        // рядка ще немає, отже й попереднього значення немає — так само, як і
-        // тоді, коли рядок створювався до цього читання.
-        var addressesToWrite = changes.Upserts.Select(u => u.Address).Concat(changes.Deletes)
-            .Where(a => !IsPlaceholder(a.TableRowId))
-            .ToList();
+        var addressesToWrite = AddressesToWrite(changes);
         return addressesToWrite.Count == 0
             ? new Dictionary<CellAddress, CellValueData>()
             : (IReadOnlyDictionary<CellAddress, CellValueData>)await cellStore
                 .ReadCellsAsync(addressesToWrite, ct).ConfigureAwait(false);
     }
+
+    /// <summary>Наявні комірки, чиє старе значення потрібне аудиту й <c>C7</c>.</summary>
+    /// <remarks>
+    /// ⚠ Комірки нових рядків (тимчасові адреси, `DAT-04` п. 1) пропускаються:
+    /// рядка ще немає, отже й попереднього значення немає — так само, як і
+    /// тоді, коли рядок створювався до цього читання.
+    /// </remarks>
+    private static List<CellAddress> AddressesToWrite(CellChangeLists changes)
+        => changes.Upserts.Select(u => u.Address).Concat(changes.Deletes)
+            .Where(a => !IsPlaceholder(a.TableRowId))
+            .ToList();
 
     /// <summary>
     /// ⛔ <c>IsLateEdit</c> ОБЧИСЛЮЄТЬСЯ (`D-70`, директива №09 `W8` п.6). Тут
@@ -1870,48 +2025,58 @@ public sealed class PatchCellsHandler(
         }
         catch (ConcurrencyConflictException ex) when (StaleRowIds(ex) is { Count: > 0 } staleRowIds)
         {
-            // ⛔ Не проковтування: батч уже відкочено сховищем, і тут лише
-            // перекладається АДРЕСАЦІЯ відмови. Сховище знає `TableRow.Id`,
-            // клієнт — `RowKey`, і без цього перекладу гонка доїжджала б
-            // клієнтові з тим самим `ECR-CELL-0409`, але з порожнім
-            // `conflicts` — тобто сітка показала б «конфлікт», не сказавши, у
-            // якому рядку.
-            throw new ConcurrencyConflictException(
-                ErrorCodes.CellConflict,
-                $"Батч відхилено: рядків із розбіжністю версії — {staleRowIds.Count}.",
-                new Dictionary<string, object?>
-                {
-                    // ⚠ Той самий ключ, що й у швидкому шляху
-                    // (`EnsureNoVersionConflicts`): для користувача це та сама
-                    // відмова, і два тексти на неї означали б, що та сама
-                    // причина читається по-різному залежно від того, чия правка
-                    // встигла раніше.
-                    ["messageKey"] = "err.ECR-CELL-0409.batchStale",
-                    ["rowCount"] = staleRowIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["conflicts"] = staleRowIds
-                        .Select(id => new CellConflictDto(
-                            changes.RowKeyById.GetValueOrDefault(id, string.Empty),
-                            // ⚠ `*` — той самий маркер «розійшовся весь рядок»,
-                            // що й у `EnsureNoVersionConflictsAsync`: чия саме
-                            // правка виграла, звідси не видно, і вигадувати
-                            // колонку означало б назвати клієнтові неправду.
-                            "*",
-                            YourValue: null,
-                            TheirValue: null,
-
-                            // ⛔ `null`, а не `clock.UtcNow`. Колонки тут немає,
-                            // отже немає й адреси, за якою питати журнал, — а
-                            // поточний час сервера в полі «коли змінили» це не
-                            // «приблизно», це неправда (`BE-06`). Дочитати
-                            // подробиці цієї гілки можна лише разом із колонками
-                            // батчу — окремим кроком, не тут.
-                            TheirUser: null,
-                            TheirOrigin: null,
-                            TheirChangedAt: null,
-                            CurrentVersion: string.Empty))
-                        .ToList(),
-                });
+            throw StaleRowsConflict(changes, staleRowIds);
         }
+    }
+
+    /// <summary>
+    /// Конфлікт версії зі сховища, переадресований з <c>TableRow.Id</c> на
+    /// <c>RowKey</c>.
+    /// </summary>
+    private static ConcurrencyConflictException StaleRowsConflict(
+        CellChangeLists changes, IReadOnlyList<long> staleRowIds)
+    {
+        // ⛔ Не проковтування: батч уже відкочено сховищем, і тут лише
+        // перекладається АДРЕСАЦІЯ відмови. Сховище знає `TableRow.Id`,
+        // клієнт — `RowKey`, і без цього перекладу гонка доїжджала б
+        // клієнтові з тим самим `ECR-CELL-0409`, але з порожнім
+        // `conflicts` — тобто сітка показала б «конфлікт», не сказавши, у
+        // якому рядку.
+        return new ConcurrencyConflictException(
+            ErrorCodes.CellConflict,
+            $"Батч відхилено: рядків із розбіжністю версії — {staleRowIds.Count}.",
+            new Dictionary<string, object?>
+            {
+                // ⚠ Той самий ключ, що й у швидкому шляху
+                // (`EnsureNoVersionConflicts`): для користувача це та сама
+                // відмова, і два тексти на неї означали б, що та сама
+                // причина читається по-різному залежно від того, чия правка
+                // встигла раніше.
+                ["messageKey"] = "err.ECR-CELL-0409.batchStale",
+                ["rowCount"] = staleRowIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["conflicts"] = staleRowIds
+                    .Select(id => new CellConflictDto(
+                        changes.RowKeyById.GetValueOrDefault(id, string.Empty),
+                        // ⚠ `*` — той самий маркер «розійшовся весь рядок»,
+                        // що й у `EnsureNoVersionConflictsAsync`: чия саме
+                        // правка виграла, звідси не видно, і вигадувати
+                        // колонку означало б назвати клієнтові неправду.
+                        "*",
+                        YourValue: null,
+                        TheirValue: null,
+
+                        // ⛔ `null`, а не `clock.UtcNow`. Колонки тут немає,
+                        // отже немає й адреси, за якою питати журнал, — а
+                        // поточний час сервера в полі «коли змінили» це не
+                        // «приблизно», це неправда (`BE-06`). Дочитати
+                        // подробиці цієї гілки можна лише разом із колонками
+                        // батчу — окремим кроком, не тут.
+                        TheirUser: null,
+                        TheirOrigin: null,
+                        TheirChangedAt: null,
+                        CurrentVersion: string.Empty))
+                    .ToList(),
+            });
     }
 
     /// <summary>
@@ -2031,6 +2196,12 @@ public sealed class PatchCellsHandler(
             .EnterEditAsync(context.Instance.DocumentId, context.Table.SheetDefId, context.PeriodKey, ct)
             .ConfigureAwait(false);
 
+        CheckSheetStatus(status, changes);
+    }
+
+    /// <summary>Аркуш, поданий чи затверджений під блокуванням, — відмова.</summary>
+    private static void CheckSheetStatus(DocumentStatus status, CellChangeLists changes)
+    {
         var reason = status switch
         {
             DocumentStatus.Submitted => (EditDenyReason?)EditDenyReason.DocumentSubmitted,
@@ -2073,8 +2244,7 @@ public sealed class PatchCellsHandler(
     private async Task EnsureRowLimitUnderLockAsync(
         PatchCellsRequest request, RequestContext context, CancellationToken ct)
     {
-        var table = context.Table;
-        if (!CreatesRowsUnderCeiling(context) || table.MaxDynamicRows is not { } maxRows)
+        if (!CreatesRowsUnderCeiling(context))
         {
             return;
         }
@@ -2083,9 +2253,15 @@ public sealed class PatchCellsHandler(
             .GetRowIdsAsync(request.TableInstanceId, context.PeriodKey, ct)
             .ConfigureAwait(false);
 
-        if (existing.Count + context.Creations.Count > maxRows)
+        CheckRowLimit(context, existing.Count);
+    }
+
+    /// <summary>Стеля <c>MaxDynamicRows</c> за числом рядків, прочитаним під блокуванням.</summary>
+    private static void CheckRowLimit(RequestContext context, int existing)
+    {
+        if (context.Table.MaxDynamicRows is { } maxRows && existing + context.Creations.Count > maxRows)
         {
-            throw DynamicRowLimitExceeded(table, existing.Count, context.Creations.Count, maxRows);
+            throw DynamicRowLimitExceeded(context.Table, existing, context.Creations.Count, maxRows);
         }
     }
 
@@ -2200,27 +2376,43 @@ public sealed class PatchCellsHandler(
         string? recalculationJobId,
         CancellationToken ct)
     {
-        IReadOnlyDictionary<string, string> newVersions;
+        var newVersions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(context, changes)
+                          ?? await rowStore.GetRowVersionsAsync(request.TableInstanceId, context.PeriodKey, ct)
+                              .ConfigureAwait(false);
 
-        if (changes.NewRowVersions is { } written && changes.Touched.TrueForAll(written.ContainsKey))
+        return ToResponse(changes, messages, recalculationJobId, newVersions);
+    }
+
+    /// <summary>
+    /// Версії рядків на початок запиту поверх тих, що повернув запис;
+    /// <c>null</c> — сховище не назвало версію хоч одного «торкнутого» рядка.
+    /// </summary>
+    private static Dictionary<string, string>? MergedRowVersions(RequestContext context, CellChangeLists changes)
+    {
+        if (changes.NewRowVersions is not { } written || !changes.Touched.TrueForAll(written.ContainsKey))
         {
-            var merged = new Dictionary<string, string>(context.Versions, StringComparer.Ordinal);
-            foreach (var id in changes.Touched)
+            return null;
+        }
+
+        var merged = new Dictionary<string, string>(context.Versions, StringComparer.Ordinal);
+        foreach (var id in changes.Touched)
+        {
+            if (changes.RowKeyById.TryGetValue(id, out var rowKey))
             {
-                if (changes.RowKeyById.TryGetValue(id, out var rowKey))
-                {
-                    merged[rowKey] = written[id];
-                }
+                merged[rowKey] = written[id];
             }
-
-            newVersions = merged;
-        }
-        else
-        {
-            newVersions = await rowStore.GetRowVersionsAsync(request.TableInstanceId, context.PeriodKey, ct)
-                                        .ConfigureAwait(false);
         }
 
+        return merged;
+    }
+
+    /// <summary>Відповідь на батч одного екземпляра.</summary>
+    private static PatchCellsResponse ToResponse(
+        CellChangeLists changes,
+        List<Validation.ValidationMessage> messages,
+        string? recalculationJobId,
+        IReadOnlyDictionary<string, string> newVersions)
+    {
         return new PatchCellsResponse(
             AppliedCells: changes.Upserts.Count + changes.Deletes.Count,
             RowVersions: newVersions,
