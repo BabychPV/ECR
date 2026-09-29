@@ -4858,3 +4858,42 @@ ON t.ReportDefId = s.ReportDefId AND t.[Version] = s.[Version]
 WHEN NOT MATCHED THEN INSERT (ReportDefId, [Version], Status, ColumnsJson, RulesJson, CreatedAt)
      VALUES (s.ReportDefId, s.[Version], 1, s.ColumnsJson, s.RulesJson, SYSUTCDATETIME());
 GO
+
+-- COLL:period0-supersede ── Старі річні прогони нічного перерахунку (період 0) ──
+-- ⛔ Одноразове виправлення ДАНИХ, ідемпотентне. До фіксу 44c952c1 прогін «на
+-- весь рік» (`PeriodKey = NULL`, нічний розклад) писав результати методологій у
+-- `calc.CalculationResult.PeriodKey = 0` (`run.PeriodKey ?? 0` у
+-- `CalculationResultStore`). Жодного реального періоду там немає, але прогін
+-- лишався `Current` — і річний зріз `rpt.*` (`ReportSnapshotBuilder`,
+-- `periodKey = NULL`) підхоплював ці числа поруч із поперіодними.
+--
+-- ⚠ Рішення HSE301: НЕ видаляти, а зняти актуальність (`Superseded` — той самий
+-- стан, що ставить `SwitchCurrentRunAsync`): історія й аудит лишаються, читачі
+-- актуального їх більше не бачать. Змінюється лише `calc.CalculationRun.Status`.
+--
+-- ⚠ Лише прогони, що МАЮТЬ результати в періоді 0 (`EXISTS`). Річний прогін
+-- без результатів — законний слід задачі після фіксу («рік без періодів у
+-- скоупі»): він нічого не показує, і знімати з нього актуальність на кожному
+-- старті (seed виконується щоразу, `StartupSequence`) означало б, що скрипт
+-- змінює дані не один раз, а постійно. Після фіксу нових рядків у періоді 0 не
+-- з'являється, тож другий і кожен наступний запуск змінює 0 рядків.
+--
+-- ⚠ SET-опції явно: `UX_CalculationRun_Current` — фільтрований індекс, а
+-- `sqlcmd` за замовчуванням має `QUOTED_IDENTIFIER OFF`.
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+GO
+
+UPDATE run
+SET    run.Status = N'Superseded'
+FROM   calc.CalculationRun AS run
+WHERE  run.PeriodKey IS NULL
+  AND  run.Status = N'Current'
+  AND  EXISTS (SELECT 1
+               FROM   calc.CalculationResult AS r
+               WHERE  r.PeriodKey = 0
+                 AND  r.CalculationRunId = run.Id);
+
+PRINT CONCAT(N'period0-supersede: ', @@ROWCOUNT, N' rows');
+GO
+-- COLL:period0-supersede ── кінець секції ─────────────────────────────────────
