@@ -957,6 +957,25 @@ public sealed class ListCalculationBindingsHandler(
 /// <c>TableDefId</c> у запиті НЕМАЄ — він виводиться з колонки: два поля, що
 /// описують те саме, розходяться мовчки, а прив'язка з чужою таблицею просто не
 /// спрацьовує.
+///
+/// ⛔ HSE301 C5b: запис іде ОДНІЄЮ транзакцією, і перша її дія — блок рядка
+/// версії шаблону, якій належить колонка-приймач
+/// (<see cref="ITemplateVersionStore.LockVersionForUpdateAsync"/>, той самий
+/// блок, що бере публікація шаблону). Публікація читає активні прив'язки
+/// (<c>ListBoundColumnIdsAsync</c>, перевірка <c>ECR-TMPL-4226</c>) під цим
+/// блоком; без нього прив'язка чи відв'язка, закомічена між цим читанням і
+/// комітом публікації, проскакувала повз перевірку.
+///
+/// ⚠ Лише блок, БЕЗ заборони для опублікованої версії — на відміну від
+/// структурних правок (<c>DraftVersionLock.EnsureDraftUnderLockAsync</c>).
+/// Прив'язка до колонки ОПУБЛІКОВАНОЇ версії — штатний порядок ролей, а не
+/// обхід: джерело <c>Calculated</c>-колонки заводить методолог уже після
+/// публікації структури (<c>PublishChecks.CheckComputedColumns</c>,
+/// <c>ConsistencyCheckJob.UnboundCalculatedColumnsAsync</c>,
+/// <c>CalculationOrchestratorConcurrencyScenarios</c>: публікує версію, потім
+/// прив'язує). Блок тут лише впорядковує: правка, що прийшла під час
+/// публікації, чекає її коміту — так само, як презентаційний патч
+/// (<c>PatchPresentationHandler</c>).
 /// </remarks>
 public sealed class SaveCalculationBindingHandler(
     ICalculationBindingStore bindings,
@@ -966,7 +985,10 @@ public sealed class SaveCalculationBindingHandler(
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IAuditWriter audit,
-    Domain.Abstractions.IClock clock)
+    Domain.Abstractions.IClock clock,
+    ITemplateVersionStore templateVersions,
+    IRepository<TableDef, int> tables,
+    IRepository<SheetDef, int> sheets)
 {
     /// <summary>Право на редагування правил прив'язки (`02-contracts.md` §9).</summary>
     /// <remarks>
@@ -1005,6 +1027,65 @@ public sealed class SaveCalculationBindingHandler(
 
         var code = EcrCode.Create(outputCode);
 
+        // ⚠ Адреса колонки (колонка → таблиця → аркуш → версія) читається ДО
+        // блоку, бо без неї не знати, ЯКИЙ рядок блокувати. Це не перевірка
+        // застарілого стану: ідентичність колонки незмінна, а всі перевірки й
+        // запис нижче йдуть уже під блоком.
+        var templateVersionId = await TemplateVersionOfColumnAsync(columnDefId, ct).ConfigureAwait(false);
+
+        CalculationBindingDto? saved = null;
+
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            // ⛔ C5b: блок рядка версії ПЕРШОЮ дією транзакції — до читання
+            // методології, колонки й наявної прив'язки. Порядок блокувань той
+            // самий, що в публікації й структурних обробниках: версія першою.
+            // ⚠ Колонки немає — блокувати нічого; відмову `ECR-TMPL-0404` дає
+            // перевірка колонки нижче, у звичному порядку відмов.
+            if (templateVersionId is { } versionId)
+            {
+                await templateVersions.LockVersionForUpdateAsync(versionId, innerCt).ConfigureAwait(false);
+            }
+
+            saved = await SaveLockedAsync(
+                methodologyId, columnDefId, code, matchJson, isActive, userId, innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return saved!;
+    }
+
+    /// <summary>Версія шаблону, якій належить колонка; <c>null</c> — колонки немає.</summary>
+    /// <param name="columnDefId">Колонка-приймач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Ідентифікатор версії або <c>null</c>.</returns>
+    /// <remarks>
+    /// ⚠ <c>cfg.CalculationBinding</c> і <see cref="BoundColumnRef"/> власного
+    /// <c>TemplateVersionId</c> не мають: версія дістається через
+    /// <c>ColumnDef → TableDef → SheetDef</c>, як і в <c>ListBoundColumnIdsAsync</c>.
+    /// Таблицю й аркуш тримають зовнішні ключі, тож <c>null</c> на них означає
+    /// лише «колонки немає».
+    /// </remarks>
+    private async Task<int?> TemplateVersionOfColumnAsync(int columnDefId, CancellationToken ct)
+    {
+        if (await bindings.FindColumnAsync(columnDefId, ct).ConfigureAwait(false) is not { } column
+            || await tables.FindAsync(column.TableDefId, ct).ConfigureAwait(false) is not { } table)
+        {
+            return null;
+        }
+
+        return (await sheets.FindAsync(table.SheetDefId, ct).ConfigureAwait(false))?.TemplateVersionId;
+    }
+
+    /// <summary>Перевірки й запис прив'язки — під блоком версії, у транзакції викликача.</summary>
+    private async Task<CalculationBindingDto> SaveLockedAsync(
+        int methodologyId,
+        int columnDefId,
+        EcrCode code,
+        string matchJson,
+        bool isActive,
+        int userId,
+        CancellationToken ct)
+    {
         var methodology = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
             ?? throw new NotFoundException(
                 "ECR-CALC-0404",
@@ -1089,41 +1170,40 @@ public sealed class SaveCalculationBindingHandler(
         // живі числа.
         var published = methodology.Versions.Any(v => v.Status == TemplateVersionStatus.Published);
 
-        await uow.ExecuteInTransactionAsync(async innerCt =>
-        {
-            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        // ⚠ Запис і журнал — у транзакції викликача (`HandleAsync`), тій самій,
+        // що тримає блок версії: окрема транзакція тут відпустила б його раніше.
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
-            await audit.WriteStructureChangeAsync(
-                new StructureChangeRecord(
-                    ChangedAt: clock.UtcNow,
+        await audit.WriteStructureChangeAsync(
+            new StructureChangeRecord(
+                ChangedAt: clock.UtcNow,
 
-                    // ⚠ Нуль, як і для довідників: прив'язка — властивість
-                    // методології, а не однієї версії шаблону; таблиця й колонка — у JSON.
-                    TemplateVersionId: 0,
-                    EntityType: "cfg.CalculationBinding",
-                    EntityId: binding.Id,
-                    ChangeClass: ChangeClass.Guarded,
-                    Operation: existing is null ? "Create" : "Update",
-                    OldJson: before is null ? null : JsonSerializer.Serialize(new
-                    {
-                        matchJson = before.MatchJson,
-                        isActive = before.IsActive,
-                    }),
-                    NewJson: JsonSerializer.Serialize(new
-                    {
-                        methodologyId,
-                        tableDefId = binding.TableDefId,
-                        columnDefId,
-                        outputCode = binding.OutputCode,
-                        matchJson = binding.MatchJson,
-                        isActive = binding.IsActive,
-                        publishedMethodology = published,
-                    }),
-                    ChangeReason: null,
-                    ChangedByUserId: userId,
-                    CorrelationId: currentUser.CorrelationId),
-                innerCt).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+                // ⚠ Нуль, як і для довідників: прив'язка — властивість
+                // методології, а не однієї версії шаблону; таблиця й колонка — у JSON.
+                TemplateVersionId: 0,
+                EntityType: "cfg.CalculationBinding",
+                EntityId: binding.Id,
+                ChangeClass: ChangeClass.Guarded,
+                Operation: existing is null ? "Create" : "Update",
+                OldJson: before is null ? null : JsonSerializer.Serialize(new
+                {
+                    matchJson = before.MatchJson,
+                    isActive = before.IsActive,
+                }),
+                NewJson: JsonSerializer.Serialize(new
+                {
+                    methodologyId,
+                    tableDefId = binding.TableDefId,
+                    columnDefId,
+                    outputCode = binding.OutputCode,
+                    matchJson = binding.MatchJson,
+                    isActive = binding.IsActive,
+                    publishedMethodology = published,
+                }),
+                ChangeReason: null,
+                ChangedByUserId: userId,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
 
         return MethodologyAuthoringMap.Binding(binding);
     }

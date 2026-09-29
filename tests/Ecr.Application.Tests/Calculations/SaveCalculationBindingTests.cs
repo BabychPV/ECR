@@ -82,7 +82,11 @@ public sealed class SaveCalculationBindingTests
             .Returns((IReadOnlyList<MethodologyOutput>)[new MethodologyOutput(70, EcrCode.Create("OUT1"), 5)]);
     }
 
-    private SaveCalculationBindingHandler Handler() => new(_bindings, _drafts, _methodologies, _uow, _access, _user, _audit, _clock);
+    private SaveCalculationBindingHandler Handler() => new(
+        _bindings, _drafts, _methodologies, _uow, _access, _user, _audit, _clock,
+        Substitute.For<ITemplateVersionStore>(),
+        Substitute.For<IRepository<TableDef, int>>(),
+        Substitute.For<IRepository<SheetDef, int>>());
 
     /// <remarks>
     /// F-09 (четвертий раунд UX): <c>"not json"</c> зберігався з <c>200</c>, а
