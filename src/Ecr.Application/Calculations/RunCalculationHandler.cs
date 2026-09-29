@@ -210,7 +210,14 @@ public sealed class RunCalculationHandler(
 
         if (lease?.Current is not { } claim || queue is null)
         {
-            await SwitchAsync(calculationRunId, profile, ct).ConfigureAwait(false);
+            // ⛔ Транзакція й без оренди: сховище знімає актуальність зі старих
+            // прогонів ОКРЕМИМ UPDATE до того, як зробити актуальним цей
+            // (`SwitchCurrentRunAsync` — порядок явний, не на порядку UPDATE EF).
+            // Без спільної транзакції між двома кроками був би коміт, після якого
+            // актуальних прогонів нуль (ФВ-9.11).
+            await uow.ExecuteInTransactionAsync(
+                    token => SwitchAsync(calculationRunId, profile, token), ct)
+                .ConfigureAwait(false);
             return;
         }
 

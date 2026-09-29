@@ -4229,6 +4229,10 @@ USING (VALUES
     -- COLL:p4-fanout ── Перерахунок проєкту розкладено на документні задачі (P4 ФВ-9.8, `RecalculationJob.FanOutAsync`) ──
     (N'jobs.recalcFannedOut',                   N'en', N'Queued document recalculation tasks: {count}.', 1),
     -- COLL:p4-fanout ── кінець секції ──
+    -- COLL:calcrun-order ── Старіший прогін не перекриває новіший (борг P4, `CalculationResultStore.SwitchCurrentRunAsync`) ──
+    -- Причина в `calc.CalculationRun.ErrorMessage` прогону, що завершився після новішого тієї ж області: `{runId}` — новіший, актуальний.
+    (N'jobs.calculationRunSupersededByNewer',   N'en', N'The run finished after a newer run {runId} of the same scope and did not replace its results: those are more recent.', 1),
+    -- COLL:calcrun-order ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
@@ -11111,7 +11115,11 @@ SELECT v.[Key], v.Lang, v.Val
     (N'recalcApprovals.stateConfirmed', N'kz', N'Растаған: {name}'),
     (N'recalcApprovals.expires', N'kz', N'Жарамдылық мерзімі'),
     (N'recalcApprovals.confirm', N'kz', N'Растау'),
-    (N'recalcApprovals.confirmedDone', N'kz', N'Қайта есептеу келісімі расталды.')
+    (N'recalcApprovals.confirmedDone', N'kz', N'Қайта есептеу келісімі расталды.'),
+    -- COLL:calcrun-order ── переклади ──
+    (N'jobs.calculationRunSupersededByNewer', N'ru', N'Прогон завершился после более нового прогона {runId} той же области и не заменил его результаты: они свежее.'),
+    (N'jobs.calculationRunSupersededByNewer', N'kz', N'Прогон сол аумақтағы жаңарақ {runId} прогонынан кейін аяқталды және оның нәтижелерін алмастырмады: олар жаңарақ.')
+    -- COLL:calcrun-order ── кінець секції ──
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO

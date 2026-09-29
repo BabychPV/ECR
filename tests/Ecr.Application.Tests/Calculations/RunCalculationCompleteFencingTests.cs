@@ -30,7 +30,7 @@ public sealed class RunCalculationCompleteFencingTests
             .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
 
     [Fact]
-    public async Task Без_оренди_перемикає_як_раніше_без_транзакції_черги()
+    public async Task Без_оренди_перемикає_без_fencing_черги()
     {
         lease.Current.Returns((JobClaimToken?)null);
 
@@ -38,7 +38,10 @@ public sealed class RunCalculationCompleteFencingTests
 
         await results.Received(1).SwitchCurrentRunAsync(7, Arg.Any<string>(), Arg.Any<CancellationToken>());
         await queue.DidNotReceiveWithAnyArgs().FenceAsync(default!, default);
-        await uow.DidNotReceiveWithAnyArgs().ExecuteInTransactionAsync(default!, default);
+
+        // ⚠ Транзакція є й тут (борг P4): сховище знімає актуальність зі старих
+        // окремим UPDATE до SaveChanges, і обидва кроки мусять комітитися разом.
+        await uow.Received(1).ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

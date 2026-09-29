@@ -41,6 +41,10 @@ public sealed class CalculationOrchestratorTests
 
     public CalculationOrchestratorTests()
     {
+        // Завершення прогону йде в транзакції (`RunCalculationHandler.CompleteAsync`):
+        // підставна одиниця роботи виконує операцію, як справжня.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.Arg<Func<CancellationToken, Task>>()(CancellationToken.None));
         _clock.UtcNow.Returns(Now);
         _user.UserId.Returns(Runner);
 

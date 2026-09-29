@@ -352,8 +352,8 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             .ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
 
-        // ⚠ Обидві половини — в одному наборі змін, який коміт застосує разом
-        // (ФВ-9.11). Між зняттям актуальності зі старого прогону і
+        // ⚠ Обидві половини — в одній транзакції (ФВ-9.11; відкриває її
+        // `RunCalculationHandler.CompleteAsync`). Між зняттям актуальності зі старого прогону і
         // встановленням новому існує стан, у якому актуальних прогонів нуль
         // або два; звіт, побудований у цю мить, не має правильної відповіді.
         //
@@ -387,30 +387,60 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             previousQuery = previousQuery.Where(r => r.DocumentId == documentId);
         }
 
-        var previous = await previousQuery
-            .OrderBy(r => r.Id)
-            .Take(MaxSupersededRuns)
-            .ToListAsync(ct)
+        // ⛔ СТАРІШИЙ прогін не перекриває НОВІШИЙ (борг P4). «Новіший» — більший
+        // `Id`: його видає база при створенні прогону, він унікальний і монотонний,
+        // а `StartedAt` двох прогонів може збігтися. Прогін, що стартував раніше,
+        // рахував зі старіших входів; зробити його актуальним після новішого
+        // означало б тихо повернути старі числа. Тому — відмова станом
+        // `Superseded` із причиною-конвертом, а не виняток бази: доти тут
+        // летів `DbUpdateException` на `UX_CalculationRun_Current` (EF шле UPDATE
+        // за зростанням ключа: «свій → Current» раніше за «новіший → Superseded»),
+        // і задача позначала `Failed` усі свої прогони. Область відмови —
+        // прогони ТІЄЇ Ж осі (`DocumentId` той самий, зокрема обидва `null`):
+        // новіший прогін документа не відміняє старішого прогону проєкту, той
+        // рахує й інші документи (`RunCalculationOutOfOrderCompletionTests`).
+        var newer = await previousQuery
+            .Where(r => r.Id > calculationRunId && r.DocumentId == run.DocumentId)
+            .OrderByDescending(r => r.Id)
+            .Select(r => (long?)r.Id)
+            .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        foreach (var stale in previous)
+        if (newer is { } newerRunId)
         {
-            stale.Supersede();
+            run.Complete(
+                CalculationRun.SupersededStatus,
+                clock.UtcNow,
+                modulesProfileJson,
+                errorMessage: JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                    SupersededByNewerKey,
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["runId"] = newerRunId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    })));
+            return;
         }
+
+        // ⛔ Порядок ЯВНИЙ: спершу зняти актуальність зі старіших — окремим
+        // UPDATE, що виконується одразу (у транзакції викликача,
+        // `RunCalculationHandler.CompleteAsync`), — і лише потім зробити свій
+        // прогін актуальним наступним `SaveChanges`. Доти обидві половини йшли
+        // одним `SaveChanges`, і правильність трималася на випадковому порядку
+        // UPDATE за ключем. Лише СТАРІШІ (`Id <` свого): новіші прогони іншої
+        // осі (документні — для прогону проєкту) лишаються актуальними, бо
+        // рахують свій документ пізніше.
+        await previousQuery
+            .Where(r => r.Id < calculationRunId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(r => r.Status, CalculationRun.SupersededStatus), ct)
+            .ConfigureAwait(false);
 
         run.Complete(CalculationRun.CurrentStatus, clock.UtcNow, modulesProfileJson, errorMessage: null);
         run.MakeCurrent();
     }
 
-    /// <summary>
-    /// Стеля на кількість прогонів, з яких знімається актуальність.
-    /// </summary>
-    /// <remarks>
-    /// Актуальний прогін мусить бути рівно один; більший список означає
-    /// зіпсовані дані. Межа тут не оптимізація, а те, що не дає такій
-    /// зіпсованості перетворитися на довгу транзакцію.
-    /// </remarks>
-    private const int MaxSupersededRuns = 100;
+    /// <summary>Ключ каталогу причини: прогін не став актуальним, бо новіший уже актуальний.</summary>
+    public const string SupersededByNewerKey = "jobs.calculationRunSupersededByNewer";
 
     /// <summary>Стеля вибірки результатів на один документ і період.</summary>
     /// <remarks>
