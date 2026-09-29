@@ -180,11 +180,43 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
         Assert.False(probe.SupportsOnlineIndexRebuild);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "D-101")]
+    public async Task Рівень_сумісності_нижче_130_зупиняє_старт_до_міграцій()
+    {
+        // ⛔ OPENJSON існує лише за COMPATIBILITY_LEVEL ≥ 130 — навіть на
+        // сервері 2019+. База зі старого бекапу чи з `model` на 120 інакше
+        // стартувала б і падала на першому пошуку чи зборі.
+        var connectionString = await CreateBareDatabaseAsync("_Compat120", compatibilityLevel: 120);
+        await using var db = CreateContext(connectionString);
+        var validator = new SchemaValidator(db, Capabilities(), Clock);
+
+        // Migrate, а не Validate: без перевірки саме тут валідатор пішов би
+        // накочувати міграції на непридатну базу.
+        var error = await Assert.ThrowsAsync<SchemaIncompatibleException>(
+            () => validator.ValidateAsync("Migrate", CancellationToken.None));
+
+        Assert.Contains("COMPATIBILITY_LEVEL = 130", error.Message, StringComparison.Ordinal);
+        Assert.Contains("120", error.Message, StringComparison.Ordinal);
+        Assert.StartsWith("ECR-SYS-5031: ", error.Message, StringComparison.Ordinal);
+
+        // Зупинка ДО міграцій: історії міграцій на базі не з'явилось.
+        await using var connection = new SqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sys.tables WHERE name = N'__EFMigrationsHistory'";
+        Assert.Equal(0, (int)(await command.ExecuteScalarAsync())!);
+    }
+
     /// <summary>Порожня база: є, але без файлових груп і схем партиціонування.</summary>
-    private async Task<string> CreateBareDatabaseAsync()
+    /// <param name="suffix">Суфікс імені: різні тести — різні бази.</param>
+    /// <param name="compatibilityLevel">Рівень сумісності; <see langword="null"/> — типовий інстансу.</param>
+    private async Task<string> CreateBareDatabaseAsync(string suffix = "_Bare", int? compatibilityLevel = null)
     {
         var builder = new SqlConnectionStringBuilder(sql.ConnectionString);
-        var bare = builder.InitialCatalog + "_Bare";
+        var bare = builder.InitialCatalog + suffix;
 
         await using var connection = new SqlConnection(
             new SqlConnectionStringBuilder(sql.ConnectionString) { InitialCatalog = "master" }.ConnectionString);
@@ -198,6 +230,11 @@ public sealed class SchemaValidatorTests(SqlServerFixture sql)
             END
             CREATE DATABASE [{bare}];
             """;
+        if (compatibilityLevel is { } level)
+        {
+            command.CommandText += $"\nALTER DATABASE [{bare}] SET COMPATIBILITY_LEVEL = {level};";
+        }
+
         await command.ExecuteNonQueryAsync();
 
         builder.InitialCatalog = bare;

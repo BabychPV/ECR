@@ -51,7 +51,8 @@ public sealed class SchemaIncompatibleException : InvalidOperationException
 /// </summary>
 /// <remarks>
 /// Класифікація: помилка (зупинка старту, <see cref="SchemaIncompatibleException"/>)
-/// — непідтримувана редакція/версія, незастосовані міграції в Validate, база
+/// — непідтримувана редакція/версія, рівень сумісності бази нижче 130,
+/// незастосовані міграції в Validate, база
 /// новіша за збірку, немає файлових груп, функцій чи схем партиціонування.
 /// Попередження (<see cref="Warnings"/>) — вимкнений RCSI, чутливе до регістру
 /// зіставлення, запас партицій менше двох: це виправляє DBA, не застосунок.
@@ -70,6 +71,21 @@ public sealed class SchemaValidator(
     /// старт зупиняється, а не деградує.
     /// </remarks>
     private const int MinimumMajorVersion = 13;
+
+    /// <summary>
+    /// Найнижчий рівень сумісності бази (130 = SQL Server 2016).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>OPENJSON</c> (пошук, збір, зведення кампаній, читання архіву,
+    /// методологія — <c>Persistence/*Store.cs</c>) існує лише за
+    /// <c>COMPATIBILITY_LEVEL ≥ 130</c> — навіть на сервері 2019: база,
+    /// відновлена зі старого бекапу чи створена з <c>model</c> на 120, лишає
+    /// рівень старим. Без цієї перевірки застосунок стартує, а падає на першому
+    /// записі з «Invalid object name 'OPENJSON'». Перевірка тут, а не в
+    /// <c>01-filegroups.sql</c>: рівень може змінити DBA ПІСЛЯ розгортання, а
+    /// старт — єдине місце, яке бачить базу щоразу.
+    /// </remarks>
+    private const int MinimumCompatibilityLevel = 130;
 
     /// <summary>Файлові групи, без яких фізична модель не існує.</summary>
     private static readonly string[] RequiredFilegroups =
@@ -99,6 +115,10 @@ public sealed class SchemaValidator(
         _warnings.Clear();
 
         await ValidateEditionAsync().ConfigureAwait(false);
+
+        // ⚠ ДО міграцій: у режимі Migrate вони самі використовують OPENJSON і
+        // на рівні 120 падали б посеред DDL із текстом, що не каже, як виправити.
+        await ValidateCompatibilityLevelAsync(ct).ConfigureAwait(false);
         await ValidateMigrationsAsync(startupMode, ct).ConfigureAwait(false);
         await ValidatePhysicalModelAsync(ct).ConfigureAwait(false);
         await ValidateRuntimeOptionsAsync(ct).ConfigureAwait(false);
@@ -118,6 +138,24 @@ public sealed class SchemaValidator(
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>Рівень сумісності бази: нижче 130 немає <c>OPENJSON</c>.</summary>
+    private async Task ValidateCompatibilityLevelAsync(CancellationToken ct)
+    {
+        var levels = await db.Database
+            .SqlQueryRaw<int>(
+                "SELECT CAST(compatibility_level AS int) AS Value FROM sys.databases WHERE name = DB_NAME()")
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        if (levels.Count > 0 && levels[0] < MinimumCompatibilityLevel)
+        {
+            throw Incompatible(
+                $"Рівень сумісності бази {levels[0]} нижчий за {MinimumCompatibilityLevel}: " +
+                "без нього немає OPENJSON, і пошук, збір та читання даних не працюватимуть. Виконайте (DBA): " +
+                $"ALTER DATABASE CURRENT SET COMPATIBILITY_LEVEL = {MinimumCompatibilityLevel}; " +
+                "або вище, до рівня версії сервера.");
+        }
     }
 
     /// <summary>Стан міграцій.</summary>
