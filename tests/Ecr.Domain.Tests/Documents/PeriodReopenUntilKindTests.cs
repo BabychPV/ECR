@@ -80,4 +80,55 @@ public sealed class PeriodReopenUntilKindTests
         Assert.Equal(sent, period.ReopenedUntil);
         Assert.Equal(DateTimeKind.Utc, period.ReopenedUntil!.Value.Kind);
     }
+
+    /// <remarks>
+    /// Аудит B6, друга половина: дедлайн у минулому або рівно «зараз» давав
+    /// <c>Grace</c> і аудит «відкрито», а <c>Effective()</c> одразу рахував
+    /// <c>Closed</c>. Мутація: прибрати перевірку <c>deadline &lt;= utcNow</c> у
+    /// <c>Period.Reopen</c> → обидва випадки червоні.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    [InlineData(-3600)]
+    [InlineData(0)]
+    public void Дедлайн_не_в_майбутньому_відмова_і_період_лишається_закритим(int secondsFromNow)
+    {
+        var period = ClosedJanuary();
+
+        var error = Assert.Throws<Ecr.Domain.Abstractions.DomainException>(
+            () => period.Reopen(ClosedAt.AddSeconds(secondsFromNow), "уточнення за листом №17", ClosedAt));
+
+        Assert.Equal("ECR-PRD-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-PRD-0422.reopenUntilInPast", error.Details!["messageKey"]);
+        Assert.Equal(PeriodState.Closed, period.State);
+        Assert.Null(period.ReopenedUntil);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public void Дедлайн_у_минулому_після_приведення_Local_до_UTC_теж_відмова()
+    {
+        // 01.03 04:00+05:00 = 28.02 23:00Z — раніше за ClosedAt (01.03 00:00Z).
+        var local = new DateTimeOffset(2026, 3, 1, 4, 0, 0, TimeSpan.FromHours(5)).LocalDateTime;
+        var period = ClosedJanuary();
+
+        Assert.Throws<Ecr.Domain.Abstractions.DomainException>(
+            () => period.Reopen(local, "уточнення за листом №17", ClosedAt));
+        Assert.Equal(PeriodState.Closed, period.State);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait("Requirement", "ФВ-1.10")]
+    public void Дедлайн_на_секунду_в_майбутньому_відкриває()
+    {
+        var period = ClosedJanuary();
+
+        period.Reopen(ClosedAt.AddSeconds(1), "уточнення за листом №17", ClosedAt);
+
+        Assert.Equal(PeriodState.Grace, period.State);
+        Assert.Equal(ClosedAt.AddSeconds(1), period.ReopenedUntil);
+    }
 }

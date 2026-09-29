@@ -4092,6 +4092,10 @@ USING (VALUES
     (N'err.ECR-CALC-4222',                      N'en', N'Calculation input is too large', 1),
     (N'err.ECR-CALC-4222.inputCellsOverBudget', N'en', N'Methodology {code} bound to table {tableInstanceId} has {cells} input cells, more than the limit of {limit} per binding. Check the data and the binding rule, or raise Calculations:MaxInputCellsPerBinding.', 1),
     -- COLL:calc-limits ── кінець секції ──
+    -- COLL:periods ── Відкриття періоду з дедлайном не в майбутньому (аудит B6, `Period.Reopen`) ──
+    -- Такий дедлайн давав «відкрито» в журналі, а період одразу був закритим.
+    (N'err.ECR-PRD-0422.reopenUntilInPast',     N'en', N'The reopen deadline {until} has already passed: a period reopened until then would be closed straight away. Choose a later moment.', 1),
+    -- COLL:periods ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),

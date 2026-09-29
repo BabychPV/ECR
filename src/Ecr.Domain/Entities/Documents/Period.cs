@@ -197,7 +197,7 @@ public sealed class Period : Entity<int>
     /// <param name="until">До якого моменту діє тимчасове відкриття.</param>
     /// <param name="reason">Причина; зберігається і потрапляє в аудит.</param>
     /// <param name="utcNow">Момент операції.</param>
-    /// <exception cref="DomainException">Період не закритий або причина порожня.</exception>
+    /// <exception cref="DomainException">Період не закритий, причина порожня або дедлайн не в майбутньому.</exception>
     public void Reopen(DateTime until, string reason, DateTime utcNow)
     {
         if (State != PeriodState.Closed)
@@ -222,8 +222,26 @@ public sealed class Period : Entity<int>
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PRD-0422.reopenReasonRequired" });
         }
 
+        // ⛔ Аудит 2026-09-28, B6. Дедлайн у минулому (або рівно «зараз») давав
+        // стан `Grace` і запис аудиту «відкрито», а `Effective()` одразу рахував
+        // `Closed` і запис відмовляв: журнал казав «відкрито», а фактично ні.
+        // Порівняння — ПІСЛЯ приведення до UTC: інакше `Kind=Local` порівнювався
+        // б із UTC за самими тиками.
+        var deadline = AsUtc(until);
+        if (deadline <= utcNow)
+        {
+            throw new DomainException(
+                "ECR-PRD-0422",
+                $"Дедлайн відкриття {deadline:O} не пізніший за поточний момент {utcNow:O}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-PRD-0422.reopenUntilInPast",
+                    ["until"] = deadline.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         State = PeriodState.Grace;
-        ReopenedUntil = AsUtc(until);
+        ReopenedUntil = deadline;
         ReopenReason = reason;
         StateChangedAt = utcNow;
     }
