@@ -223,8 +223,25 @@ public sealed class Period : Entity<int>
         }
 
         State = PeriodState.Grace;
-        ReopenedUntil = until;
+        ReopenedUntil = AsUtc(until);
         ReopenReason = reason;
         StateChangedAt = utcNow;
     }
+
+    /// <summary>Приводить момент до UTC за його <see cref="DateTime.Kind"/>.</summary>
+    /// <remarks>
+    /// ⛔ Аудит 2026-09-28, B6. <c>"…T18:00:00+05:00"</c> з API десеріалізується
+    /// як <c>Kind=Local</c> (перераховане в пояс СЕРВЕРА) і записувалось як є, а
+    /// читається з <c>datetime2</c> як UTC — дедлайн зсувався на зміщення
+    /// сервера. <c>Local</c> переводиться в UTC; <c>Unspecified</c> читається як
+    /// UTC — так само, як його віддає журнал і як нормалізує
+    /// <c>CollectionRunsController</c>. Тут, у домені, а не в обробнику: той самий
+    /// метод кличе й системний Reopen (<c>PeriodStateJob</c>, D-204).
+    /// </remarks>
+    private static DateTime AsUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
 }

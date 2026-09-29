@@ -175,7 +175,9 @@ public sealed partial class ReopenPeriodHandler(
                     ChangeClass: ChangeClass.Guarded,
                     Operation: "Reopen",
                     OldJson: JsonSerializer.Serialize(new { state = nameof(PeriodState.Closed) }),
-                    NewJson: JsonSerializer.Serialize(new { state = period.State.ToString(), until = deadline }),
+                    // ⚠ Нормалізований доменом момент (UTC), а не сирий із запиту:
+                    // журнал має казати те, що збережено (аудит B6).
+                    NewJson: JsonSerializer.Serialize(new { state = period.State.ToString(), until = period.ReopenedUntil }),
                     ChangeReason: reason,
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
