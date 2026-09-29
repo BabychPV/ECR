@@ -15,10 +15,15 @@ namespace Ecr.Application.Integration.RegistrySync;
 /// чіпається; атрибут є зі значенням <c>null</c> — джерело каже «порожньо».
 /// Одиниці вже приведені до одиниці поля на межі (<c>D-173</c>) — планувальник їх не конвертує.
 /// </param>
+/// <param name="Name">
+/// Ім'я елемента в джерелі: назва (і в <c>CodeMode = Manual</c> — код) автоствореного
+/// запису (<c>D-212</c> Q4). <c>null</c> — джерело не дало імені, автостворення немає.
+/// </param>
 public sealed record RegistrySyncSourceElement(
     string ExternalId,
     string? ExternalPath,
-    IReadOnlyDictionary<string, object?> Attributes);
+    IReadOnlyDictionary<string, object?> Attributes,
+    string? Name = null);
 
 /// <summary>
 /// Наявний зв'язок «елемент джерела → запис довідника»: рядок
@@ -103,6 +108,10 @@ public sealed record RegistrySyncLookupCode(int RegistryDefId, string Code);
 /// <see cref="RegistrySyncEventKind.ValueRejected"/> з <c>err.ECR-REG-0422.entryRefNotFound</c>.
 /// Порівняння кодів — компаратором словника (задача ставить той, що й у базі).
 /// </param>
+/// <param name="CodeMode">
+/// Звідки код автоствореного запису (<c>D-212</c> Q4): <c>Auto</c> — видасть writer
+/// із послідовності, <c>Manual</c> — ім'я елемента.
+/// </param>
 public sealed record RegistrySyncInput(
     int RegistryDefId,
     RegistrySourceKind SourceKind,
@@ -111,7 +120,8 @@ public sealed record RegistrySyncInput(
     IReadOnlyList<RegistrySyncLink> Links,
     IReadOnlyList<RegistrySyncEntryState> Entries,
     IReadOnlyList<RegistrySyncFieldMapping> Mappings,
-    IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>? LookupCodes = null);
+    IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>? LookupCodes = null,
+    RegistryCodeMode CodeMode = RegistryCodeMode.Manual);
 
 /// <summary>Одна зміна поля, яку синк має записати через <c>RegistryEntryWriter</c>.</summary>
 /// <param name="RegistryEntryId">Запис довідника.</param>
@@ -137,6 +147,30 @@ public sealed record RegistrySyncPathChange(
     string? OldPath,
     string NewPath);
 
+/// <summary>Значення поля нового запису.</summary>
+/// <param name="RegistryFieldDefId">Поле.</param>
+/// <param name="FieldCode">Код поля (адресація writer'а).</param>
+/// <param name="Value">Типізоване значення з джерела (не <c>null</c>).</param>
+public sealed record RegistrySyncFieldValue(int RegistryFieldDefId, string FieldCode, object Value);
+
+/// <summary>
+/// <c>External</c>: новий елемент повного знімка — створити запис і зв'язок
+/// <c>dic.RegistryExternalKey</c> (<c>D-212</c> (1), Q4). Виконує задача (PR-6) через
+/// writer у режимі «лише створювати»; подію <see cref="RegistrySyncEventKind.AutoCreated"/>
+/// пише вона ж — після успіху, з <c>Id</c> нового запису.
+/// </summary>
+/// <param name="ExternalId">Елемент джерела.</param>
+/// <param name="ExternalPath">Шлях елемента — у зв'язок.</param>
+/// <param name="Code">Код запису; <c>null</c> — <c>CodeMode = Auto</c>, код видасть writer із послідовності.</param>
+/// <param name="DisplayName">Назва запису — ім'я елемента.</param>
+/// <param name="Values">Значення змаплених полів, що привелися до типу (відмови — події, поля тут немає).</param>
+public sealed record RegistrySyncCreate(
+    string ExternalId,
+    string? ExternalPath,
+    string? Code,
+    string DisplayName,
+    IReadOnlyList<RegistrySyncFieldValue> Values);
+
 /// <summary>Вид події синхронізації.</summary>
 public enum RegistrySyncEventKind
 {
@@ -153,7 +187,11 @@ public enum RegistrySyncEventKind
     /// <summary>Прив'язаного елемента немає в повному знімку джерела. Запис не видаляється.</summary>
     SourceMissing,
 
-    /// <summary>Елемент джерела не має зв'язку з жодним записом. Запис не створюється автоматично.</summary>
+    /// <summary>
+    /// Елемент джерела не має зв'язку з жодним записом, і запис не створюється:
+    /// <c>Hybrid</c>/<c>Local</c> (лише сповіщення, <c>D-212</c> (2)), неповний знімок
+    /// або елемент без імені.
+    /// </summary>
     ElementUnlinked,
 
     /// <summary>Значення джерела не приводиться до типу поля.</summary>
@@ -203,6 +241,10 @@ public sealed record RegistrySyncPlan(
     IReadOnlyList<RegistrySyncPathChange> PathChanges,
     IReadOnlyList<RegistrySyncEvent> Events)
 {
+    /// <summary>Автостворення записів (<c>External</c>, повний знімок).</summary>
+    public IReadOnlyList<RegistrySyncCreate> Creates { get; init; } = [];
+
     /// <summary>Нічого писати й нічого повідомляти — ідемпотентний прогін.</summary>
-    public bool IsEmpty => Updates.Count == 0 && PathChanges.Count == 0 && Events.Count == 0;
+    public bool IsEmpty => Updates.Count == 0 && PathChanges.Count == 0 && Events.Count == 0
+                           && Creates.Count == 0;
 }

@@ -36,8 +36,9 @@ namespace Ecr.Application.Integration.RegistrySync;
 /// якщо останнім поле записала людина, а джерело каже інше —
 /// <see cref="RegistrySyncEventKind.ConflictKeptManual"/>, без запису. У
 /// <c>External</c> ручного запису немає (<c>D-211</c>) — синк перезаписує.
-/// Зниклий елемент — лише подія (запис не видаляється), новий елемент без
-/// зв'язку — лише подія (запис не створюється).
+/// Зниклий елемент — лише подія (запис не видаляється). Новий елемент без
+/// зв'язку: <c>External</c> на повному знімку — автостворення
+/// (<see cref="RegistrySyncPlan.Creates"/>, <c>D-212</c> (1), Q4), інакше — лише подія.
 /// </para>
 /// <para>
 /// ⚠ Поле <c>Lookup</c> з <see cref="RegistrySyncFieldMapping.RefRegistryDefId"/>
@@ -110,12 +111,26 @@ public static class RegistrySyncPlanner
         var updates = new List<RegistrySyncUpdate>();
         var paths = new List<RegistrySyncPathChange>();
         var events = new List<RegistrySyncEvent>();
+        var creates = new List<RegistrySyncCreate>();
 
         foreach (var element in elements.Values.OrderBy(e => e.ExternalId, StringComparer.Ordinal))
         {
             if (!links.TryGetValue(element.ExternalId, out var link))
             {
-                events.Add(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null));
+                // D-212 (1): External на ПОВНОМУ знімку створює запис. Неповний знімок
+                // автостворення не дає: елемент, чий старий GUID не прочитався, став би
+                // дублем уже наявного запису.
+                if (input.SourceKind == RegistrySourceKind.External
+                    && input.IsCompleteSnapshot
+                    && PlanCreate(input, element, mappings, events) is { } create)
+                {
+                    creates.Add(create);
+                }
+                else
+                {
+                    events.Add(new RegistrySyncEvent(RegistrySyncEventKind.ElementUnlinked, element.ExternalId, null));
+                }
+
                 continue;
             }
 
@@ -149,7 +164,54 @@ public static class RegistrySyncPlanner
             }
         }
 
-        return new RegistrySyncPlan(updates, paths, events);
+        return new RegistrySyncPlan(updates, paths, events) { Creates = creates };
+    }
+
+    /// <summary>
+    /// Новий запис <c>External</c> (<c>D-212</c> Q4): код — за <c>CodeMode</c>, назва — ім'я
+    /// елемента, значення — активні мапінги, що привелися до типу.
+    /// </summary>
+    /// <returns><c>null</c> — елемент без імені: створювати нема з чого (лишається подія).</returns>
+    private static RegistrySyncCreate? PlanCreate(
+        RegistrySyncInput input,
+        RegistrySyncSourceElement element,
+        IReadOnlyList<RegistrySyncFieldMapping> mappings,
+        List<RegistrySyncEvent> events)
+    {
+        if (string.IsNullOrWhiteSpace(element.Name))
+        {
+            return null;
+        }
+
+        var name = element.Name.Trim();
+        var values = new List<RegistrySyncFieldValue>();
+
+        foreach (var mapping in mappings)
+        {
+            // Вимкнений мапінг не пише й під час створення; атрибута немає — поле порожнє.
+            if (!mapping.IsActive || !element.Attributes.TryGetValue(mapping.SourceAttribute, out var raw))
+            {
+                continue;
+            }
+
+            if (!TryIncoming(input, mapping, raw, out var typed, out var errorCode, out var messageKey))
+            {
+                // Запис створюється без цього поля: одне погане значення не має
+                // лишати довідник без елемента, а відмова видна подією.
+                events.Add(new RegistrySyncEvent(
+                    RegistrySyncEventKind.ValueRejected, element.ExternalId, null, mapping.FieldCode,
+                    SourceValue: raw, ErrorCode: errorCode, MessageKey: messageKey));
+                continue;
+            }
+
+            if (typed is not null)
+            {
+                values.Add(new RegistrySyncFieldValue(mapping.RegistryFieldDefId, mapping.FieldCode, typed));
+            }
+        }
+
+        var code = input.CodeMode == RegistryCodeMode.Auto ? null : name;
+        return new RegistrySyncCreate(element.ExternalId, element.ExternalPath, code, name, values);
     }
 
     private static void PlanField(
