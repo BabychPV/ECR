@@ -1,6 +1,7 @@
 // src/Ecr.Api/Observability/TelemetrySetup.cs
 
 using System.Globalization;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 
@@ -33,6 +34,9 @@ public static class TelemetrySetup
 
     /// <summary>Ключ інтервалу експорту, секунди.</summary>
     public const string ExportIntervalKey = "Telemetry:ExportIntervalSeconds";
+
+    /// <summary>Ключ протоколу OTLP: <c>Grpc</c> (дефолт) або <c>HttpProtobuf</c>.</summary>
+    public const string ProtocolKey = "Telemetry:OtlpProtocol";
 
     /// <summary>Інтервал експорту за замовчуванням, секунди.</summary>
     public const int DefaultExportIntervalSeconds = 60;
@@ -79,6 +83,26 @@ public static class TelemetrySetup
             ? Math.Max(parsed, MinExportIntervalSeconds)
             : DefaultExportIntervalSeconds;
 
+        var protocol = Enum.TryParse<OtlpExportProtocol>(
+            configuration["Telemetry:OtlpProtocol"]?.Trim(), ignoreCase: true, out var chosen)
+            && Enum.IsDefined(chosen)
+            ? chosen
+            : OtlpExportProtocol.Grpc;
+
+        // ⚠ Через Options, а не лямбдою AddOtlpExporter((e, r) => …): експортер
+        // сам бере OtlpExporterOptions/MetricReaderOptions з іменем за
+        // замовчуванням, тож налаштування видно в контейнері й перевіряється
+        // тестом рівно там, звідки його читає бібліотека. Делегат виконується
+        // при побудові MeterProvider — на старті хоста, ПІСЛЯ перевірки
+        // конфігурації, яка недійсну адресу вже відхилила.
+        services.Configure<OtlpExporterOptions>(exporter =>
+        {
+            exporter.Protocol = protocol;
+            exporter.Endpoint = ExporterEndpoint(endpoint!, protocol);
+        });
+        services.Configure<MetricReaderOptions>(reader =>
+            reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = intervalSeconds * 1000);
+
         services.AddOpenTelemetry()
             .ConfigureResource(resource => resource.AddService(
                 string.IsNullOrWhiteSpace(serviceName) ? "ecr-api" : serviceName.Trim()))
@@ -89,16 +113,24 @@ public static class TelemetrySetup
                     metrics.AddMeter(name);
                 }
 
-                metrics.AddOtlpExporter((exporter, reader) =>
-                {
-                    // ⚠ Лямбда виконується при побудові MeterProvider, тобто на
-                    // старті хоста — ПІСЛЯ перевірки конфігурації, яка недійсну
-                    // адресу вже відхилила.
-                    exporter.Endpoint = new Uri(endpoint!.Trim(), UriKind.Absolute);
-                    reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = intervalSeconds * 1000;
-                });
+                metrics.AddOtlpExporter();
             });
 
         return services;
+    }
+
+    /// <summary>Адреса експортера з урахуванням протоколу.</summary>
+    /// <remarks>
+    /// ⚠ Адресу, задану кодом, бібліотека бере як є. Для <c>HttpProtobuf</c> це
+    /// означає, що <c>http://collector:4318</c> без шляху слав би метрики в
+    /// корінь колектора, а не в <c>/v1/metrics</c>. Тому шлях дописується, коли
+    /// адміністратор дав лише хост і порт; заданий шлях не чіпаємо.
+    /// </remarks>
+    private static Uri ExporterEndpoint(string endpoint, OtlpExportProtocol protocol)
+    {
+        var uri = new Uri(endpoint.Trim(), UriKind.Absolute);
+        return protocol == OtlpExportProtocol.HttpProtobuf && uri.AbsolutePath == "/"
+            ? new Uri(uri, "v1/metrics")
+            : uri;
     }
 }

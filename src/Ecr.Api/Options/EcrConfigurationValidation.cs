@@ -88,6 +88,7 @@ public static partial class EcrConfigurationValidation
         // MI-02 (F1c): «Databse» інакше мовчки лишав би Quartz.
         (Infrastructure.Jobs.DbBackgroundJobScheduler.ModeKey, Enum.GetNames<Infrastructure.Jobs.JobQueueMode>()),
         (Infrastructure.Jobs.JobLaneMap.ExecutorKey, Enum.GetNames<Infrastructure.Jobs.RecalculationExecutor>()),
+        (Ecr.Api.Observability.TelemetrySetup.ProtocolKey, Enum.GetNames<OpenTelemetry.Exporter.OtlpExportProtocol>()),
     ];
 
     /// <summary>Ключ адреси OTLP-колектора.</summary>

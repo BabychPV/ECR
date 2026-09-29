@@ -178,6 +178,8 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("Telemetry:Enabled", "yes")]
     [InlineData("Telemetry:ExportIntervalSeconds", "4")]
     [InlineData("Telemetry:ExportIntervalSeconds", "1m")]
+    [InlineData("Telemetry:OtlpProtocol", "Http")]
+    [InlineData("Telemetry:OtlpProtocol", "1")]
     public void Недійсний_ключ_телеметрії_називає_ключ(string key, string value)
     {
         var problem = Assert.Single(EcrConfigurationValidation.Validate(Config((key, value))));

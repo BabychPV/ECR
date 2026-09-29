@@ -105,7 +105,8 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
 | `Telemetry:Enabled` | `false` | експорт метрик по OTLP (п. 3.4). Вимкнено — не реєструється нічого з OpenTelemetry, навантаження нуль. Вмикається лише рядком `true` |
-| `Telemetry:OtlpEndpoint` | порожньо | адреса OTLP-колектора, gRPC, напр. `http://collector:4317`. **Обов'язкова**, коли `Telemetry:Enabled=true`: без неї або з недійсною адресою служба не стартує. Задана при вимкненому експорті — ігнорується, старт пише попередження |
+| `Telemetry:OtlpEndpoint` | порожньо | адреса OTLP-колектора, напр. `http://collector:4317` (gRPC) чи `http://collector:4318` (HTTP). **Обов'язкова**, коли `Telemetry:Enabled=true`: без неї або з недійсною адресою служба не стартує. Задана при вимкненому експорті — ігнорується, старт пише попередження |
+| `Telemetry:OtlpProtocol` | `Grpc` | `Grpc` (порт колектора 4317) або `HttpProtobuf` (4318). Інше значення зупиняє старт |
 | `Telemetry:ExportIntervalSeconds` | 60 | як часто відсилати метрики, с. Не менше 5 |
 | `Telemetry:ServiceName` | `ecr-api` | `service.name` у ресурсі OTLP — під цим іменем служба видна в колекторі |
 | `Logging:LogLevel:*` | `Information`, `Microsoft.AspNetCore` = `Warning` | рівні логування |
@@ -229,6 +230,7 @@ OpenTelemetry Collector). За замовчуванням **вимкнено**: 
   "Telemetry": {
     "Enabled": true,
     "OtlpEndpoint": "http://collector:4317",
+    "OtlpProtocol": "Grpc",
     "ExportIntervalSeconds": 60
   }
 }
@@ -237,7 +239,10 @@ OpenTelemetry Collector). За замовчуванням **вимкнено**: 
 або змінними оточення служби `ECR_Telemetry__Enabled=true`,
 `ECR_Telemetry__OtlpEndpoint=http://collector:4317`, далі `Restart-Service EcrApi`.
 
-- Протокол — **gRPC** (типовий порт колектора 4317). Експортуються лише метрики
+- Протокол — `Telemetry:OtlpProtocol`: **`Grpc`** за замовчуванням (порт колектора
+  4317) або `HttpProtobuf` (4318). Для `HttpProtobuf` адреса без шляху
+  (`http://collector:4318`) доповнюється до `…/v1/metrics`; адреса зі шляхом
+  береться як є. Експортуються лише метрики
   `Meter "Ecr"`; трас, логів і метрик ASP.NET/HTTP/рантайму через OTLP немає.
 - `Enabled=true` без `OtlpEndpoint` або з адресою не `http://`/`https://` —
   служба **не стартує**, причина з назвою ключа — у журналі подій `ECR` і в

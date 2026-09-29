@@ -82,18 +82,14 @@ public sealed partial class ConfigurationKeysTests
     /// ⛔ Перелік має бути ПОРОЖНІМ у здоровому стані. Кожен рядок — борг із
     /// причиною й датою, а не спосіб замовчати знахідку.
     ///
-    /// • <c>Telemetry:ServiceName</c> — 2026-09-19, чекає на `D14-09`:
-    ///   експортера OTLP ще немає (`S-12`), підключити — завести пакет
-    ///   `OpenTelemetry.Extensions.Hosting`, тобто foundation-PR через
-    ///   `Directory.Packages.props`. Знімається разом із `D14-09`.
+    /// • ~~<c>Telemetry:ServiceName</c> — 2026-09-19, чекає на `D14-09`:
+    ///   експортера OTLP ще немає (`S-12`)~~. ✎ 2026-09-29 (`U17`): знято —
+    ///   експорт є, ключ читає <c>TelemetrySetup.AddEcrTelemetry</c>
+    ///   (<c>service.name</c> ресурсу OTLP). Перелік знову порожній.
     ///   ✎ 2026-09-28 (`U17`): <c>Telemetry:OtlpEndpoint</c> звідси знято — його
-    ///   читає перевірка старту (<c>EcrConfigurationValidation.Warnings</c>) і
-    ///   попереджає, що непорожнє значення нічого не вмикає.
+    ///   читає перевірка старту (<c>EcrConfigurationValidation</c>).
     /// </remarks>
-    private static readonly string[] KeysWithoutReaderByDesign =
-    [
-        "Telemetry:ServiceName",
-    ];
+    private static readonly string[] KeysWithoutReaderByDesign = [];
 
     /// <summary>
     /// Ключі, які код читає, а файл навмисно НЕ оголошує.
@@ -173,6 +169,18 @@ public sealed partial class ConfigurationKeysTests
             + "\"<ключ>\" має зустрітися в коді), або прибери його з файлу, або "
             + "— якщо це свідомий борг — внеси в KeysWithoutReaderByDesign "
             + "разом із причиною й датою.");
+
+        // ⛔ Звільнення, що пережило свою причину, — теж брехня: ключ уже
+        // читають, а перелік досі каже «без читача», і наступний сирота з тим
+        // самим іменем пройде непоміченим. (2026-09-29: `Telemetry:ServiceName`
+        // лишався тут після того, як його почав читати TelemetrySetup.)
+        var stale = KeysWithoutReaderByDesign
+            .Where(k => sources.Contains($"\"{k}\"", StringComparison.Ordinal))
+            .ToList();
+        Assert.True(
+            stale.Count == 0,
+            "KeysWithoutReaderByDesign містить ключі, які код уже читає — прибери їх звідти: "
+            + string.Join(", ", stale));
     }
 
     [Fact]

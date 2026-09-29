@@ -5,6 +5,8 @@ using Ecr.TestKit;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
 using Xunit;
 
@@ -71,6 +73,46 @@ public sealed class TelemetrySetupTests
 
         using var provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetService<MeterProvider>());
+    }
+
+    /// <remarks>
+    /// Опції читаються тим самим шляхом, що й бібліотека в <c>AddOtlpExporter()</c>:
+    /// <c>IOptionsFactory&lt;OtlpExporterOptions&gt;.Create(Options.DefaultName)</c>
+    /// і <c>IOptionsMonitor&lt;MetricReaderOptions&gt;.Get(Options.DefaultName)</c>.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "U17")]
+    [InlineData(null, "http://collector:4317", OtlpExportProtocol.Grpc, "http://collector:4317/")]
+    [InlineData("Grpc", "http://collector:4317", OtlpExportProtocol.Grpc, "http://collector:4317/")]
+    [InlineData("HttpProtobuf", "http://collector:4318", OtlpExportProtocol.HttpProtobuf, "http://collector:4318/v1/metrics")]
+    [InlineData("httpprotobuf", "https://collector:4318/custom/metrics", OtlpExportProtocol.HttpProtobuf, "https://collector:4318/custom/metrics")]
+    public void Протокол_адреса_й_інтервал_доходять_до_опцій_експортера(
+        string? protocol, string endpoint, OtlpExportProtocol expectedProtocol, string expectedEndpoint)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        var values = new List<(string Key, string Value)>
+        {
+            ("Telemetry:Enabled", "true"),
+            ("Telemetry:OtlpEndpoint", endpoint),
+            ("Telemetry:ExportIntervalSeconds", "30"),
+        };
+        if (protocol is not null)
+        {
+            values.Add(("Telemetry:OtlpProtocol", protocol));
+        }
+
+        services.AddEcrTelemetry(Config([.. values]));
+
+        using var provider = services.BuildServiceProvider();
+        var exporter = provider.GetRequiredService<IOptionsFactory<OtlpExporterOptions>>().Create(Microsoft.Extensions.Options.Options.DefaultName);
+        var reader = provider.GetRequiredService<IOptionsMonitor<MetricReaderOptions>>().Get(Microsoft.Extensions.Options.Options.DefaultName);
+
+        Assert.Equal(expectedProtocol, exporter.Protocol);
+        Assert.Equal(new Uri(expectedEndpoint), exporter.Endpoint);
+        Assert.Equal(30_000, reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds);
     }
 
     [Fact]
