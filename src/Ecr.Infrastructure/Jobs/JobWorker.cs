@@ -14,6 +14,9 @@ namespace Ecr.Infrastructure.Jobs;
 /// <summary>Налаштування <see cref="JobWorker"/>.</summary>
 public sealed record JobWorkerOptions
 {
+    /// <summary>Ключ каталогу причини «перевищено найдовшу тривалість» (<see cref="MaxDuration"/>).</summary>
+    public const string MaxDurationKey = "jobs.maxDurationExceeded";
+
     /// <summary>Лейни, які опитує воркер (<see cref="JobLaneMap.ApiLanes"/> для Api).</summary>
     public required IReadOnlyList<string> Lanes { get; init; }
 
@@ -46,6 +49,13 @@ public sealed record JobWorkerOptions
 
     /// <summary>Затримка перед ретраєм N (від 1); лише тести підміняють.</summary>
     public Func<int, TimeSpan> RetryDelay { get; init; } = JobRetryPolicy.DelayBefore;
+
+    /// <summary>
+    /// Найдовше виконання однієї задачі (<c>Jobs:Workers:MaxDuration</c>, I1);
+    /// <c>null</c> — без межі (Api). Задача, що перевищила межу, скасовується і
+    /// закривається <c>Failed</c> з конвертом <see cref="MaxDurationKey"/>.
+    /// </summary>
+    public TimeSpan? MaxDuration { get; init; }
 }
 
 /// <summary>
@@ -291,6 +301,20 @@ public sealed partial class JobWorker(
         using var renewStop = new CancellationTokenSource();
         var renew = RenewLoopAsync(claim, lease, jobCancel, renewStop.Token);
 
+        // ⛔ I1: межа тривалості — скасуванням токена задачі, як і запит скасування.
+        // Процес живе далі й бере наступну задачу; оренда без межі подовжувалася б
+        // вічно, і зависла задача тримала б місце пулу назавжди.
+        using var overtime = new CancellationTokenSource();
+        using var overtimeHook = overtime.Token.Register(() =>
+        {
+            lease.TimedOut = true;
+            jobCancel.Cancel();
+        });
+        if (options.MaxDuration is { } maxDuration)
+        {
+            overtime.CancelAfter(maxDuration);
+        }
+
         Exception? failure = null;
         var cancelled = false;
 
@@ -321,6 +345,15 @@ public sealed partial class JobWorker(
         if (lease.Lost || failure is JobLeaseLostException)
         {
             LogLeaseLost(logger, claim.JobId);
+            return;
+        }
+
+        // ⚠ Скасована посеред запиту до бази задача може впасти не OCE, а винятком
+        // драйвера («Operation cancelled by user») — межа однаково її причина.
+        if (lease.TimedOut && !lease.CancelRequested && !stopping.IsCancellationRequested
+            && (cancelled || failure is not null))
+        {
+            await FailOvertimeAsync(job, clock).ConfigureAwait(false);
             return;
         }
 
@@ -406,6 +439,40 @@ public sealed partial class JobWorker(
         }
     }
 
+    /// <summary>
+    /// Задача перевищила <see cref="JobWorkerOptions.MaxDuration"/>: <c>Failed</c> без
+    /// ретраю, причина — конверт <see cref="JobWorkerOptions.MaxDurationKey"/> у
+    /// <c>Message</c> (як у отруйної задачі), текст для журналу — в <c>Error</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Без ретраю: та сама задача на тих самих даних упреться в ту саму межу, і
+    /// повтор лише втричі довше тримав би місце пулу.
+    /// </remarks>
+    private async Task FailOvertimeAsync(ClaimedJob job, IClock clock)
+    {
+        var claim = job.Claim;
+        var limit = options.MaxDuration!.Value.ToString("c", System.Globalization.CultureInfo.InvariantCulture);
+        LogJobOvertime(logger, claim.JobId, job.JobCode, limit);
+
+        var envelope = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+            JobWorkerOptions.MaxDurationKey,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["limit"] = limit }));
+
+        await WriteProgressAsync(claim.JobId, async store =>
+            {
+                // Відсоток лишається тим, до якого задача дійшла: видно, де її зупинили.
+                var percent = (await store.FindAsync(claim.JobId, CancellationToken.None).ConfigureAwait(false))?.Percent ?? 0;
+                await store.ReportAsync(claim.JobId, percent, envelope, clock.UtcNow, CancellationToken.None)
+                    .ConfigureAwait(false);
+            })
+            .ConfigureAwait(false);
+
+        await SettleAsync(claim.JobId, q => q.FailAsync(
+                claim, $"The job ran longer than the limit of {limit} (Jobs:Workers:MaxDuration) and was stopped.",
+                errorCode: null, CancellationToken.None))
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Завершальна дія власника оренди у власному scope; <c>false</c> — оренду вже втрачено.</summary>
     private async Task SettleAsync(string jobId, Func<IJobQueue, Task<bool>> action)
     {
@@ -441,11 +508,20 @@ public sealed partial class JobWorker(
     {
         private volatile bool lost;
         private volatile bool cancelRequested;
+        private volatile bool timedOut;
 
         public bool Lost { get => lost; set => lost = value; }
 
         public bool CancelRequested { get => cancelRequested; set => cancelRequested = value; }
+
+        /// <summary>Спрацювала межа <see cref="JobWorkerOptions.MaxDuration"/>.</summary>
+        public bool TimedOut { get => timedOut; set => timedOut = value; }
     }
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "Задача {JobId} ({TypeName}) перевищила найдовшу тривалість {Limit}; скасовано, стан Failed.")]
+    private static partial void LogJobOvertime(ILogger logger, string jobId, string typeName, string limit);
 
     [LoggerMessage(
         Level = LogLevel.Critical,

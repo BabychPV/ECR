@@ -4195,6 +4195,8 @@ USING (VALUES
     (N'jobs.absorbedBy',                        N'en', N'Superseded by job {jobId}, queued for the same target.', 1),
     -- Отруйна задача: оренду втрачено {reclaims} разів поспіль — процес-виконавець щоразу зникав.
     (N'jobs.leaseLostTooOften',                 N'en', N'Stopped: the worker lost this job {reclaims} times in a row (its process stopped each time). Restart the job after checking the logs.', 1),
+    -- Задача перевищила Jobs:Workers:MaxDuration (I1, `JobWorker`): скасовано, без ретраю.
+    (N'jobs.maxDurationExceeded',               N'en', N'Stopped: the job ran longer than the limit of {limit}. Check the logs, then restart the job or raise the limit.', 1),
     -- COLL:jobqueue ── кінець секції ──
     -- COLL:calcrun-sweep ── Покинутий прогін розрахунку (P3, ФВ-9.8, `AbandonedWorkSweeper`) ──
     -- `AbandonedWorkSweeper.AbandonedCalculationRunReason`: `calc.CalculationRun` у `Running`, який ніхто не закрив.

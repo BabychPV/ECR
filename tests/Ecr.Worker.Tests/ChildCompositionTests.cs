@@ -38,6 +38,7 @@ public sealed class ChildCompositionTests
         Assert.Equal([JobLanes.Recalc], options.Lanes);
         Assert.Equal(JobProgressStore.RoleWorker, options.Role);
         Assert.Equal(1, options.MaxConcurrency);
+        Assert.Equal(TimeSpan.FromMinutes(7), options.MaxDuration);
     }
 
     [Theory]

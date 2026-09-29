@@ -47,6 +47,7 @@ internal static class ChildComposition
             Lanes = [JobLanes.Recalc],
             Role = JobProgressStore.RoleWorker,
             MaxConcurrency = 1,
+            MaxDuration = pool.MaxDuration,
         };
     }
 
