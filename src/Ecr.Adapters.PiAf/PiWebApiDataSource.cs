@@ -15,8 +15,9 @@ namespace Ecr.Adapters.PiAf;
 /// Використовується для того, чого не вміє RTQP. **Методів запису тут немає
 /// навмисно** (`D-44`): Web API їх підтримує, але система в AF не пише нічого.
 /// </remarks>
-public sealed class PiWebApiDataSource(
-    HttpClient http, ICollectionStore store, ISecretProvider secrets) : IExternalDataSource, IHierarchicalCatalogSource
+public sealed partial class PiWebApiDataSource(
+    HttpClient http, ICollectionStore store, ISecretProvider secrets)
+    : IExternalDataSource, IHierarchicalCatalogSource, IBatchCollectionSource
 {
     /// <summary>Скільки разів повторювати запит, який відмовив через 5xx або таймаут.</summary>
     /// <remarks>
@@ -204,57 +205,56 @@ public sealed class PiWebApiDataSource(
 
         var source = await SourceAsync(request.DataSourceId, ct).ConfigureAwait(false);
 
-        JsonDocument? attribute = null;
-        JsonDocument? recorded = null;
+        // P7: WebId — із кешу екземпляра; повторний пошук того самого шляху
+        // на кожен інтервал був половиною всіх запитів наздоганяння.
+        var attribute = await AttributeAsync(source, request.SourcePath, ct).ConfigureAwait(false);
 
-        try
+        if (attribute.NotFound is { } missing)
         {
-            attribute = await GetAsync(
-                source.Endpoint,
-                $"attributes?path={Uri.EscapeDataString(request.SourcePath)}",
-                source.SecretName,
-                ct).ConfigureAwait(false);
+            throw missing;
+        }
 
-            var webId = Text(attribute.RootElement, "WebId");
-            var defaultUnits = Text(attribute.RootElement, "DefaultUnitsName");
+        if (string.IsNullOrWhiteSpace(attribute.WebId))
+        {
+            return Unresolved(request);
+        }
 
-            if (string.IsNullOrWhiteSpace(webId))
-            {
-                // Атрибута за таким шляхом немає. Це не «нуль точок»: нуль
-                // означав би, що джерело відповіло порожнім періодом, і
-                // покриття за нього записалося б як повне.
-                return new CollectionResult(
-                    [], [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
-            }
+        using var recorded = await GetAsync(
+            source.Endpoint,
+            $"streams/{Uri.EscapeDataString(attribute.WebId)}/recorded"
+            + $"?startTime={Iso(request.FromUtc)}&endTime={Iso(request.ToUtc)}"
+            + $"&maxCount={request.MaxPoints.ToString(CultureInfo.InvariantCulture)}",
+            source.SecretName,
+            ct).ConfigureAwait(false);
 
-            recorded = await GetAsync(
-                source.Endpoint,
-                $"streams/{Uri.EscapeDataString(webId)}/recorded"
-                + $"?startTime={Iso(request.FromUtc)}&endTime={Iso(request.ToUtc)}"
-                + $"&maxCount={request.MaxPoints.ToString(CultureInfo.InvariantCulture)}",
-                source.SecretName,
-                ct).ConfigureAwait(false);
+        return Batch(Points(recorded.RootElement, request.SourcePath, attribute.DefaultUnits), request);
+    }
 
-            var points = Points(recorded.RootElement, request.SourcePath, defaultUnits);
+    /// <summary>Атрибута за шляхом немає — увесь інтервал у відмову.</summary>
+    /// <remarks>
+    /// Це не «нуль точок»: нуль означав би, що джерело відповіло порожнім
+    /// періодом, і покриття за нього записалося б як повне.
+    /// </remarks>
+    private static CollectionResult Unresolved(CollectionRequest request)
+        => new([], [new TimeInterval(request.FromUtc, request.ToUtc)], SourceUnavailable);
 
-            // ⚠ Повний батч означає, що джерело віддало рівно стелю — і хвіст
-            // діапазону лишився непрочитаним. Мовчазне «зібрано» тут дало б
-            // дірку, позначену як покриття.
-            // ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
-        // «набрали стелю» була б істинною завжди, і points[^1] упало б на
-        // порожньому списку — на діапазоні, у якому просто немає даних.
+    /// <summary>Точки одного атрибута як результат запиту — з хвостом, якщо батч повний.</summary>
+    /// <remarks>
+    /// ⚠ Повний батч означає, що джерело віддало рівно стелю — і хвіст
+    /// діапазону лишився непрочитаним. Мовчазне «зібрано» тут дало б
+    /// дірку, позначену як покриття.
+    /// ⚠ Порожній батч НЕ вважається обрізаним: із MaxPoints = 0 умова
+    /// «набрали стелю» була б істинною завжди, і points[^1] упало б на
+    /// порожньому списку — на діапазоні, у якому просто немає даних.
+    /// </remarks>
+    private static CollectionResult Batch(List<SourceDataPoint> points, CollectionRequest request)
+    {
         var truncated = points.Count > 0 && points.Count >= request.MaxPoints;
 
-            return new CollectionResult(
-                points,
-                truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
-                null);
-        }
-        finally
-        {
-            attribute?.Dispose();
-            recorded?.Dispose();
-        }
+        return new CollectionResult(
+            points,
+            truncated ? [new TimeInterval(points[^1].Timestamp, request.ToUtc)] : [],
+            null);
     }
 
     /// <inheritdoc />
