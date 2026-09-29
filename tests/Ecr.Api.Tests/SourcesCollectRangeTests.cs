@@ -32,9 +32,10 @@ namespace Ecr.Api.Tests;
 /// конвеєр, а не вигаданим у тесті.
 /// </para>
 /// <para>
-/// Мутація: у <c>SourcesController.Collect</c> передавати в обробник
-/// <c>request.FromUtc</c>/<c>request.ToUtc</c> без нормалізації і прибрати
-/// перевірку <c>from &gt;= to</c> → червоні всі три тести.
+/// Нормалізація й перевірка живуть у <see cref="CollectFromSourceHandler"/>
+/// (після перевірки права); контролер лише прокидає межі — тест іде крізь обидва.
+/// Мутація: в обробнику ставити в задачу сирі межі й прибрати перевірку
+/// <c>from &gt;= to</c> → червоні тести нормалізації й порожнього проміжку.
 /// </para>
 /// </remarks>
 public sealed class SourcesCollectRangeTests
@@ -95,6 +96,30 @@ public sealed class SourcesCollectRangeTests
         Assert.Empty(jobs.ReceivedCalls());
     }
 
+    /// <remarks>
+    /// Відмова за правом — раніше за відмову за змістом: той, хто збирати не
+    /// може, отримує 403, а не підказку про формат проміжку. Мутація: у
+    /// <c>CollectFromSourceHandler</c> поставити перевірку проміжку ПЕРЕД
+    /// <c>RequireAsync</c> → тут 422 замість 403, червоний.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-11.3")]
+    public async Task Без_права_Integration_Manage_перевернутий_проміжок_дає_403_а_не_422()
+    {
+        var jobs = Jobs();
+        var controller = Controller(jobs, permission: "Integration.View");
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => controller.Collect(
+                EntityId,
+                Parse("""{ "fromUtc": "2026-08-02T00:00:00Z", "toUtc": "2026-08-01T00:00:00Z" }"""),
+                CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
+        Assert.Empty(jobs.ReceivedCalls());
+    }
+
     private static CollectRequest Parse(string json)
         => JsonSerializer.Deserialize<CollectRequest>(json, Web)!;
 
@@ -118,7 +143,8 @@ public sealed class SourcesCollectRangeTests
     }
 
     /// <summary>Справжній <see cref="CollectFromSourceHandler"/>; підмінено сховище, чергу й доступ.</summary>
-    private static SourcesController Controller(IBackgroundJobScheduler jobs)
+    private static SourcesController Controller(
+        IBackgroundJobScheduler jobs, string permission = CollectFromSourceHandler.Permission)
     {
         var store = Substitute.For<ICollectionStore>();
         store.FindSourceEntityAsync(EntityId, Arg.Any<CancellationToken>())
@@ -129,7 +155,7 @@ public sealed class SourcesCollectRangeTests
 
         var access = Substitute.For<IAccessDecisionService>();
         access.BuildProfileAsync(7, Arg.Any<CancellationToken>())
-              .Returns(new AccessBuilder { UserId = 7 }.Permission(CollectFromSourceHandler.Permission).Build());
+              .Returns(new AccessBuilder { UserId = 7 }.Permission(permission).Build());
 
         return new SourcesController(
             list: null!,

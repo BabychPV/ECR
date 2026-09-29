@@ -106,47 +106,18 @@ public sealed class SourcesController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // ⛔ Аудит 2026-09-28, B7. Час без зони (`Unspecified`) і час зі
-        // зміщенням (`Local`, у поясі СЕРВЕРА) ішли в задачу як є: Web API
-        // перераховував їх у UTC за поясом сервера (`ToUniversalTime`), а
-        // покриття писалося за сирими значеннями як UTC — «покрито» те, що не
-        // прочитано, і наздоганяння цієї дірки вже не бачить. PiSqlClient
-        // узагалі передавав без конверсії, тобто транспорти розходились.
-        // Нормалізація — тут, на вході, так само, як у `CollectionRunsController`.
-        var from = ToUtc(request.FromUtc);
-        var to = ToUtc(request.ToUtc);
-
-        // Перевернутий або порожній проміжок не «виправляється» обміном меж: той,
-        // хто його надіслав, помилився в одному з полів.
-        if (from >= to)
-        {
-            throw new Ecr.Application.Errors.BusinessRuleException(
-                Ecr.Domain.Errors.ErrorCodes.RequestInvalid,
-                $"Проміжок збору порожній: початок {from:O} не раніший за кінець {to:O}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-REQ-0422.collectionRunRange",
-                    ["from"] = from.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-                    ["to"] = to.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
+        // ⚠ Межі йдуть як є: приведення до UTC і відмову на порожньому
+        // проміжку (422) робить обробник — ПІСЛЯ перевірки права (аудит B7).
 
         // ⚠ 202 з jobId, а не 200 з даними: збір ходить по мережі до чужої
         // системи, і його тривалість визначає не наш код. Синхронна відповідь
         // тут — це таймаут проксі рівно тоді, коли джерело повільне.
         var jobId = await collect
-            .HandleAsync(id, from, to, ct)
+            .HandleAsync(id, request.FromUtc, request.ToUtc, ct)
             .ConfigureAwait(false);
 
         return Accepted(new Contracts.JobAcceptedResponse(jobId));
     }
-
-    /// <summary>Час без зони читається як UTC; зі зміщенням — переводиться в UTC.</summary>
-    private static DateTime ToUtc(DateTime value) => value.Kind switch
-    {
-        DateTimeKind.Unspecified => DateTime.SpecifyKind(value, DateTimeKind.Utc),
-        _ => value.ToUniversalTime(),
-    };
 
     /// <summary>
     /// Перегляд мапінгу на реальних рядках джерела (<c>ФВ-13.14</c>).
