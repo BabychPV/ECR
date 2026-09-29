@@ -1,5 +1,18 @@
 import { useState, type JSX } from 'react';
-import { Alert, Button, Code, Group, Select, Skeleton, Stack, Table, Text, TextInput, Title } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Code,
+  Group,
+  MultiSelect,
+  Select,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { components } from '@/api/schema';
@@ -10,6 +23,7 @@ import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import { Timestamp } from '@/shared/ui/Timestamp';
 import { t } from '@/shared/i18n';
+import { ScopeGlobalWarning, ScopeSummary, projectOptions, useGrantableProjects } from './roleScope';
 
 type Assignment = components['schemas']['GroupRoleAssignmentView'];
 type AssignRequest = components['schemas']['AssignGroupRoleRequest'];
@@ -58,6 +72,12 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
   const [validFrom, setValidFrom] = useState<Date | null>(null);
   const [validTo, setValidTo] = useState<Date | null>(null);
 
+  // ФВ-6.14: область дії; порожньо — усі проєкти (поле `scope` не шлеться).
+  // ⚠ Змінити область наявного призначення можна лише «відкликати й
+  // призначити знову» — так і на сервері, окремого редагування немає.
+  const [scopeProjects, setScopeProjects] = useState<number[]>([]);
+  const { projects } = useGrantableProjects(true);
+
   // ⛔ R-06/X-01: відкликання ролі в групи йшло одним натисканням — а це
   // права ВСІХ членів групи каталогу одразу.
   const [revoking, setRevoking] = useState<Assignment | null>(null);
@@ -84,6 +104,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           // Незадана межа не шлеться взагалі: для сервера це те саме, що `null`.
           ...(from !== null && { validFrom: from }),
           ...(to !== null && { validTo: to }),
+          ...(scopeProjects.length > 0 && { scope: { projects: scopeProjects } }),
         } satisfies AssignRequest),
       }),
     onSuccess: async (result) => {
@@ -91,6 +112,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
       setPrincipal('');
       setValidFrom(null);
       setValidTo(null);
+      setScopeProjects([]);
       showDone(t(result.effectiveAfterNextSignIn ? 'groupRoles.assignedNextSignIn' : 'groupRoles.assigned'));
     },
     onError: (error) => {
@@ -141,6 +163,7 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
             <Table.Th>{t('security.role')}</Table.Th>
             <Table.Th>{t('groupRoles.validFrom')}</Table.Th>
             <Table.Th>{t('groupRoles.validTo')}</Table.Th>
+            <Table.Th>{t('groupRoles.scope')}</Table.Th>
             <Table.Th />
           </Table.Tr>
         </Table.Thead>
@@ -157,6 +180,9 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
               </Table.Td>
               <Table.Td>
                 <Timestamp value={row.validTo} dateOnly fallback={Unbounded} />
+              </Table.Td>
+              <Table.Td data-column="scope">
+                <ScopeSummary projectIds={row.scope?.projects} projects={projects} />
               </Table.Td>
               <Table.Td>
                 <Button
@@ -207,6 +233,17 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           onChange={setValidTo}
           error={orderBroken ? t('groupRoles.validityOrder') : undefined}
         />
+        <MultiSelect
+          label={t('security.scopeProjects')}
+          description={t('groupRoles.scopeChangeHint')}
+          placeholder={scopeProjects.length === 0 ? t('security.scopeAllProjects') : undefined}
+          data={projectOptions(projects, scopeProjects)}
+          value={scopeProjects.map(String)}
+          onChange={(values) => setScopeProjects(values.map(Number))}
+          searchable
+          clearable
+          miw={200}
+        />
         <Button
           disabled={
             roleId === null ||
@@ -222,6 +259,8 @@ export function GroupAssignmentsPanel({ roles }: { roles: RoleView[] }): JSX.Ele
           {t('groupRoles.assign')}
         </Button>
       </Group>
+
+      {scopeProjects.length > 0 && <ScopeGlobalWarning />}
 
       {dangerous !== null && (
         <Alert color="statusError" title={t('groupRoles.dangerousTitle')}>

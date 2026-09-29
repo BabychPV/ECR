@@ -4822,6 +4822,13 @@ USING (VALUES
     (N'grants.conflict',                       N'en', N'Someone else saved grants for this role after you opened them. Your changes are kept; saving now replaces their version. Discard your changes to see what is saved now.', 1),
     -- Гранти ролі: PUT без If-Match — 422 (`ReplaceResourceGrantsHandler`), як unitIfMatch/dataSourceIfMatch.
     (N'err.ECR-REQ-0422.roleGrantsIfMatch',    N'en', N'This request needs an If-Match header carrying the ETag of the role grants you read.', 1),
+    -- ФВ-6.14: область дії призначення ролі за проєктами — форма ролей користувача й групові призначення.
+    (N'security.scopeProjects',                N'en', N'Projects', 1),
+    (N'security.scopeAllProjects',             N'en', N'All projects', 1),
+    (N'security.scopeNowhere',                 N'en', N'No project: the stored scope cannot be read', 1),
+    (N'security.scopeGlobalWarning',           N'en', N'A role limited to projects gives no system-wide rights (Security.*, Template.*, Registry.* and the like). The user may also need a role without a project scope.', 1),
+    (N'groupRoles.scope',                      N'en', N'Scope', 1),
+    (N'groupRoles.scopeChangeHint',            N'en', N'Leave empty for all projects. To change the scope later, revoke and assign again.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
