@@ -219,6 +219,12 @@ public static class DependencyInjection
         services.AddScoped<Application.Ports.ICoverageJournal, Integration.CoverageJournal>();
         services.AddScoped<Application.Ports.IMaterializeCollectedDataJob, Jobs.MaterializeCollectedDataJob>();
 
+        // HSE301:A4 — автоперерахунок після запису без людини (V-5 → D-174).
+        // Без цього рядка `MaterializeCollectedDataJob` отримав би `null` у
+        // необов'язковому параметрі й мовчки не ставив би перерахунку.
+        services.AddScoped<Application.Ports.ICalculationTrigger, Application.Calculations.CalculationTrigger>();
+        // HSE301:A4 — кінець
+
         // ⛔ P0: технічний автор задач інтеграції (`svc-integration`). Сам
         // `JobActorScope` реєструє `Program.cs` разом з обгорткою
         // `ICurrentUser` — обидва мусять бути ОДНИМ екземпляром на scope.
