@@ -4796,6 +4796,11 @@ USING (VALUES
     (N'err.ECR-UOM-0422.integralSourceNotRate', N'en', N'A time integral needs a rate unit (quantity per time) at the source; "{code}" is not one.', 1),
     (N'err.ECR-UOM-0422.boundaryConversionFailed', N'en', N'{count} mapped values could not be converted to their target unit and were not written: {fields}', 1),
     -- HSE301:F3 ── кінець секції
+
+    -- HSE301:L ── резолвінг бібліотечних формул (!Code в імпортовану методологію):
+    -- публікація називає посилання, що не веде нікуди (ФВ-9.14, FORMULA_NOT_FOUND).
+    (N'publish.problem.formulaNotFound', N'en', N'Formula {formula}: reference !{name} at position {position} does not match a formula of this version or of any imported methodology, so it would always give #REF.', 1),
+    -- HSE301:L ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,

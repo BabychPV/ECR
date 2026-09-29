@@ -193,6 +193,40 @@ public sealed class ImportedFormulaReferencePublishTests
         Assert.All(_edgeWrites, Assert.Empty);
     }
 
+    /// <remarks>
+    /// ⛔ ФВ-9.14: <c>FORMULA_NOT_FOUND</c> виявляється ПРИ ПУБЛІКАЦІЇ. До виправлення
+    /// посилання, що не резолвилося ні у свою версію, ні в імпорт, мовчки
+    /// пропускалося (<c>default: break</c>), версія публікувалася, а кожен прогін
+    /// давав <c>#REF</c> і не писав вихід.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.14")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Посилання_що_не_веде_нікуди_відхиляє_публікацію_з_позицією(bool withImport)
+    {
+        Formulas([Formula(101, "Local", "1"), Formula(103, "Total", "!Local + !Missing * 2")]);
+        Imports(withImport ? [new MethodologyLibrary(CommonId, "Common", 910, [Shared])] : []);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.publishChecksFailed", error.Details!["messageKey"]);
+
+        var problem = Assert.Single(Assert.IsType<List<PublishProblem>>(error.Details["problems"]));
+        Assert.Equal("publish.problem.formulaNotFound", problem.MessageKey);
+        Assert.Equal("Total", problem.Args["formula"]);
+        Assert.Equal("Missing", problem.Args["name"]);
+
+        // Позиція знака `!` другого посилання: «!Local + » — дев'ять символів.
+        Assert.Equal("9", problem.Args["position"]);
+
+        Assert.False(_version.IsPublished);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
 
     private PublishMethodologyHandler Handler()

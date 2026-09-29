@@ -862,6 +862,13 @@ public sealed class PublishMethodologyHandler(
                         ("candidates", string.Join(", ", reference.Candidates))));
                     break;
 
+                // ⛔ ФВ-9.14: `FORMULA_NOT_FOUND` виявляється ПРИ ПУБЛІКАЦІЇ, а не в
+                // прогоні. Тут стояв мовчазний пропуск (`default: break`): версія
+                // публікувалася, а кожен прогін давав `#REF` і не писав вихід.
+                case MethodologyReferenceOutcome.NotFound:
+                    problems.Add(FormulaNotFound(formula.Code, code, parsed.Expression.Root));
+                    break;
+
                 default:
                     break;
             }
@@ -892,10 +899,7 @@ public sealed class PublishMethodologyHandler(
         int methodologyId)
     {
         var library = imports.First(l => l.MethodologyId == methodologyId).MethodologyCode;
-        var position = FormulaReferences(root)
-            .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
-            ?.Position ?? 0;
-        var at = position.ToString(CultureInfo.InvariantCulture);
+        var at = PositionOf(root, name);
 
         return PublishProblem.Of(
             "publish.problem.importedFormulaNotEvaluated",
@@ -907,6 +911,37 @@ public sealed class PublishMethodologyHandler(
             ("position", at),
             ("library", library));
     }
+
+    /// <summary>
+    /// Проблема «посилання <c>!Name</c> не веде ні у формулу цієї версії, ні в
+    /// імпорт» (ФВ-9.14, <c>FORMULA_NOT_FOUND</c>).
+    /// </summary>
+    /// <param name="formulaCode">Формула, що посилається.</param>
+    /// <param name="name">Ім'я після <c>!</c>.</param>
+    /// <param name="root">Корінь розібраного виразу — звідти береться позиція.</param>
+    private static PublishProblem FormulaNotFound(
+        string formulaCode, string name, Ecr.Expressions.Ast.AstNode root)
+    {
+        var at = PositionOf(root, name);
+
+        return PublishProblem.Of(
+            "publish.problem.formulaNotFound",
+            $"Формула «{formulaCode}»: посилання «!{name}» (позиція {at}) не веде ні у формулу цієї "
+            + "версії, ні у формулу імпортованої методології — у розрахунку щоразу був би #REF.",
+            ("formula", formulaCode),
+            ("name", name),
+            ("position", at));
+    }
+
+    /// <summary>
+    /// Позиція першого входження <c>!name</c> у виразі (позиція знака <c>!</c>,
+    /// як у діагностиках парсера); кілька входжень — одна проблема.
+    /// </summary>
+    private static string PositionOf(Ecr.Expressions.Ast.AstNode root, string name)
+        => (FormulaReferences(root)
+                .FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase))
+                ?.Position ?? 0)
+            .ToString(CultureInfo.InvariantCulture);
 
     /// <summary>Усі посилання <c>!Name</c> у дереві, у порядку обходу.</summary>
     private static IEnumerable<Ecr.Expressions.Ast.SymbolReferenceNode> FormulaReferences(
