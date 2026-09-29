@@ -2,6 +2,7 @@
 using System.Globalization;
 using Ecr.Application.Calculations;
 using Ecr.Application.Common;
+using Ecr.Application.Documents.Dto;
 using Ecr.Application.Ports;
 using Ecr.Application.Recalculation;
 using Ecr.Domain.Abstractions;
@@ -145,6 +146,116 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// PATCH того самого документа, поки повний перерахунок тримає лок документа,
+    /// лока не чекає; а PATCH ∥ інкрементний ∥ повний доходять до кінця за
+    /// обмежений час і дають число з останнього входу.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Навіщо (вимога «Аудиту»). Лок — сесійний applock на ОКРЕМОМУ з'єднанні:
+    /// взаємне очікування «applock ↔ рядкові блокування» SQL Server дедлоком не
+    /// бачить, воно висіло б до таймауту. Безпечно, доки лок чекають лише задачі
+    /// перерахунку й лише поза транзакцією (<c>RecalculationDocumentLock.AcquireAsync</c>),
+    /// а транзакції запису (PATCH) його не беруть зовсім. Цей тест тримає другу
+    /// половину: якби PATCH став чекати лок документа, він висів би тут до
+    /// таймауту тесту (30 с), бо лок звільняється лише після PATCH.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.4")]
+    public async Task PATCH_не_чекає_лока_документа_і_PATCH_інкрементний_повний_не_висять()
+    {
+        var bounded = TimeSpan.FromSeconds(30);
+
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(columnCount: 3, rowCount: 1, rowMode: TableRowMode.Dynamic);
+        var inColumn = doc.ColumnDefIds[1];
+
+        await ExecuteAsync(
+            "INSERT INTO doc.CellValue (PeriodKey, TableRowId, ColumnDefId, TableDefId, ValueNumeric, IsCalculated, IsEmpty) VALUES " +
+            $"({doc.PeriodKey.Value}, {doc.RowIds[0]}, {inColumn}, {doc.TableDefId}, {Num(InputBefore)}, 0, 0), " +
+            $"({doc.PeriodKey.Value}, {doc.RowIds[0]}, {doc.ColumnDefIds[2]}, {doc.TableDefId}, {Num(StaleOutput)}, 1, 0);");
+
+        await using var fullDb = builder.CreateContext();
+        await using var patchDb = builder.CreateContext();
+        await using var incrementalDb = builder.CreateContext();
+
+        var fullComputed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFull = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var clock = new TestClock(Now);
+        var fullJob = new RecalculationJob(
+            fullDb,
+            new NoOpRunner(),
+            RunHandler(fullDb, clock),
+            Formulas(fullDb, doc, async () =>
+            {
+                fullComputed.TrySetResult();
+                await releaseFull.Task.WaitAsync(Patience).ConfigureAwait(false);
+            }),
+            clock);
+
+        var fullTask = Task.Run(() => fullJob.ExecuteAsync(
+            new RecalculationRequest(doc.ProjectId, doc.DocumentId, doc.PeriodKey.Value, TriggeredByUserId: 7),
+            NoOpProgress.Instance,
+            CancellationToken.None));
+
+        await fullComputed.Task.WaitAsync(bounded);
+        Assert.True(await DocumentLockGrantedAsync(doc.DocumentId), "Повний перерахунок мав тримати лок документа.");
+
+        // PATCH входу через справжній обробник і справжню транзакцію запису.
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        var patch = PatchHandler(patchDb, doc, jobs);
+        var rowKey = await ScalarAsync<string>(
+            $"SELECT RowKey FROM doc.TableRow WHERE TableInstanceId = {doc.TableInstanceId} AND Id = {doc.RowIds[0]}");
+        var baseVersion = Convert.ToBase64String(await ScalarAsync<byte[]>(
+            $"SELECT RowVersion FROM doc.TableRow WHERE TableInstanceId = {doc.TableInstanceId} AND Id = {doc.RowIds[0]}"));
+
+        await patch.HandleAsync(
+                new PatchCellsRequest(doc.TableInstanceId, doc.PeriodKey.Value, "UserEdit",
+                    [new PatchRow(rowKey, baseVersion, [new PatchCell("IN", InputAfter)])]),
+                CancellationToken.None)
+            .WaitAsync(bounded);
+
+        // ⛔ PATCH завершився, поки лок документа досі тримає повний перерахунок.
+        Assert.True(await DocumentLockGrantedAsync(doc.DocumentId), "PATCH мав пройти, поки лок документа зайнятий.");
+        Assert.Contains(jobs.ReceivedCalls(), call => call.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueAsync));
+
+        // Каскадна задача цього PATCH — у черзі за локом.
+        var incrementalJob = IncrementalJob(incrementalDb, doc);
+        var incrementalTask = Task.Run(() => incrementalJob.ExecuteAsync(
+            new FormulaRecalculationRequest(doc.TableInstanceId, doc.PeriodKey.Value, [new DirtyCell(doc.RowIds[0], inColumn)]),
+            NoOpProgress.Instance,
+            CancellationToken.None));
+
+        using var stopWatch = new CancellationTokenSource();
+        var waiting = WaitUntilSomeoneWaitsOnDocumentLockAsync(doc.DocumentId, stopWatch.Token);
+        Assert.Same(waiting, await Task.WhenAny(incrementalTask, waiting).WaitAsync(bounded));
+
+        releaseFull.TrySetResult();
+        await fullTask.WaitAsync(bounded);
+        await incrementalTask.WaitAsync(bounded);
+
+        Assert.Equal(InputAfter * 2, await LiveOutputAsync(doc));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Лок_документа_всередині_транзакції_не_береться()
+    {
+        var builder = new TestDocumentBuilder(sql.ConnectionString);
+        var doc = await builder.BuildAsync(rowCount: 1);
+
+        await using var db = builder.CreateContext();
+        await using var transaction = await db.Database.BeginTransactionAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => RecalculationDocumentLock.AcquireAsync(
+            db, doc.DocumentId, TimeSpan.FromSeconds(1), CancellationToken.None));
+        Assert.False(await DocumentLockGrantedAsync(doc.DocumentId));
+    }
+
+    /// <summary>
     /// Задача через DI-активатор: тест не залежить від форми конструктора й
     /// компілюється і до, і після фіксу.
     /// </summary>
@@ -184,6 +295,88 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
 
             await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
         }
+    }
+
+    /// <summary>Чи тримає якась сесія лок документа просто зараз.</summary>
+    private async Task<bool> DocumentLockGrantedAsync(long documentId)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT COUNT(*) FROM sys.dm_tran_locks
+            WHERE resource_type = 'APPLICATION'
+              AND request_status = 'GRANT'
+              AND resource_description LIKE '%' + @resource + '%'
+            """;
+        command.Parameters.AddWithValue("@resource", FormattableString.Invariant($"ecr:recalc:doc:{documentId}"));
+        return (int)(await command.ExecuteScalarAsync())! > 0;
+    }
+
+    /// <summary>Справжній <c>PatchCellsHandler</c> на реальних сховищах і справжньому шлюзі аркуша.</summary>
+    private static Ecr.Application.Documents.PatchCellsHandler PatchHandler(
+        EcrDbContext db, TestDocument doc, IBackgroundJobScheduler jobs)
+    {
+        var bulk = new BulkCellLoader(db.Database.GetConnectionString()!, 1000);
+        var clock = new TestClock(Now);
+
+        var periods = Substitute.For<IPeriodStore>();
+        periods.FindPeriodStateAsync(doc.DocumentId, doc.PeriodKey.Value, Arg.Any<CancellationToken>())
+               .Returns((PeriodState?)PeriodState.Open);
+
+        var profile = new Ecr.Application.Security.AccessProfile
+        {
+            CacheKey = "p", UserId = 1, SecurityStamp = "s",
+            Permissions = new HashSet<string>(), Grants = new Dictionary<string, GrantLevel>(),
+            Denies = new HashSet<string>(), RoleIds = new HashSet<int>(),
+        };
+        var access = Substitute.For<Ecr.Application.Security.IAccessDecisionService>();
+        access.BuildProfileAsync(1, Arg.Any<CancellationToken>()).Returns(profile);
+        access.CanReadDocumentAsync(Arg.Any<Ecr.Application.Security.AccessProfile>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
+              .Returns(Ecr.Application.Security.EditDecision.Allow());
+        access.CanEditCellsAsync(
+                  Arg.Any<Ecr.Application.Security.AccessProfile>(), doc.TableInstanceId, Arg.Any<PeriodKey>(),
+                  Arg.Any<IReadOnlyCollection<CellAddress>>(), Arg.Any<CancellationToken>())
+              .Returns(doc.RowIds
+                  .SelectMany(rowId => doc.ColumnDefIds.Select(columnId => new CellAddress(doc.PeriodKey, rowId, columnId)))
+                  .ToDictionary(address => address, _ => Ecr.Application.Security.EditDecision.Allow()));
+        access.CanCreateRowsAsync(
+                  Arg.Any<Ecr.Application.Security.AccessProfile>(), doc.TableInstanceId,
+                  Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+              .Returns(new Dictionary<string, Ecr.Application.Security.NewRowAccess>());
+
+        var methodologies = Substitute.For<IMethodologyStore>();
+        methodologies.GetMethodologyIdsBoundToTableAsync(doc.TableDefId, Arg.Any<CancellationToken>())
+                     .Returns(Task.FromResult<IReadOnlyList<int>>([]));
+
+        var registries = Substitute.For<IRegistryStore>();
+        registries.FindExistingEntryIdsAsync(Arg.Any<IReadOnlyCollection<long>>(), Arg.Any<CancellationToken>())
+                  .Returns(call => call.ArgAt<IReadOnlyCollection<long>>(0).ToHashSet());
+
+        var headers = Substitute.For<IDocumentHeaderStore>();
+        headers.GetExpressionValuesAsync(Arg.Any<long>(), Arg.Any<CancellationToken>())
+               .Returns(new Dictionary<string, ExpressionValue>());
+
+        var units = Substitute.For<IUnitCatalog>();
+        units.GetAsync(Arg.Any<CancellationToken>()).Returns(UnitCatalogSnapshot.Empty);
+
+        var user = Substitute.For<ICurrentUser>();
+        user.UserId.Returns(1);
+
+        return new Ecr.Application.Documents.PatchCellsHandler(
+            new NormalizedCellStore(db), new RowStore(db, bulk, clock), new DocumentStore(db), periods, Metadata(doc), access,
+            new Ecr.Application.Validation.ValidationEngine(new RealFormulaEngine()),
+            methodologies, registries, headers, new AuditWriter(db), Substitute.For<IAuditReader>(),
+            jobs, new UnitOfWork(db), user, clock, new SheetEditGate(db), units);
+    }
+
+    private async Task<T> ScalarAsync<T>(string query)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = query;
+        return (T)(await command.ExecuteScalarAsync())!;
     }
 
     /// <summary>Перерахунок формул на реальних сховищах; <paramref name="beforeWrite"/> — точка перемикання.</summary>

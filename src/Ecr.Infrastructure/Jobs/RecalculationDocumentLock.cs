@@ -47,6 +47,20 @@ public static class RecalculationDocumentLock
             return null;
         }
 
+        // ⛔ Лише ПОЗА транзакцією — лок «зовнішній», береться першим. Він живе на
+        // ОКРЕМОМУ з'єднанні, тож очікування «applock ↔ рядкові блокування»
+        // SQL Server дедлоком не бачить: сесія, що вже тримає блокування даних
+        // документа й стала в чергу за цим локом, поки власник лока на робочому
+        // з'єднанні чекає ті самі рядки, висіла б до таймауту (15 хв). Тому брати
+        // його дозволено лише до першої транзакції задачі; PATCH, імпорт,
+        // подання й публікація версії шаблону його не беруть узагалі
+        // (`RecalculationDocumentLockCallersTests`, `FormulaRecalculationDocumentLockTests`).
+        if (db.Database.CurrentTransaction is not null || System.Transactions.Transaction.Current is not null)
+        {
+            throw new InvalidOperationException(
+                "Лок перерахунку документа береться лише поза транзакцією: усередині вона могла б тримати блокування, яких чекає власник лока.");
+        }
+
         var connectionString = db.Database.GetConnectionString()
             ?? throw new InvalidOperationException("Немає рядка з'єднання для лока документа.");
 

@@ -75,9 +75,8 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
         // PATCH: там лише постановка в чергу.
         var documentId = await DocumentOfAsync(request, ct).ConfigureAwait(false);
 
-        await using var documentLock = await RecalculationDocumentLock
-            .AcquireAsync(db, documentId, DocumentLockTimeout, ct)
-            .ConfigureAwait(false);
+        await using var documentLock =
+            await RecalculationDocumentLock.AcquireAsync(db, documentId, DocumentLockTimeout, ct).ConfigureAwait(false);
 
         var written = await recalculation
             .RecalculateAsync(request.TableInstanceId, dirty, ct)
