@@ -1481,6 +1481,17 @@ public interface IBackgroundJobScheduler
 
     /// <summary>Стан виконання для UI прогресу.</summary>
     public Task<JobStatus> GetStatusAsync(string jobId, CancellationToken ct);
+
+    /// <summary>
+    /// «Виконати ПІСЛЯ» на ціль без витіснення (HSE301 A4): ключ цілі той самий, що в
+    /// EnqueueExclusiveAsync, але Running не переривається. Database — Queued позаду
+    /// Running, наявна Queued поглинає постановку; Quartz — наявна задача на ціль у
+    /// цьому планувальнику (у черзі чи виконується) повертається, нова не ставиться.
+    /// Повертає JobId задачі, що виконає роботу.
+    /// </summary>
+    public Task<string> EnqueueCoalescedAsync<TJob>(
+        string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob;
 }
 
 /// <summary>Фонова задача.</summary>

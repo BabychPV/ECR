@@ -56,6 +56,39 @@ public interface IBackgroundJobScheduler
         string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
         where TJob : IBackgroundJob;
 
+    /// <summary>
+    /// Ставить задачу «виконати ПІСЛЯ» на ціль БЕЗ витіснення: незавершена
+    /// задача того самого типу й цілі не переривається, а постановка
+    /// зливається з тією, що вже чекає.
+    /// </summary>
+    /// <typeparam name="TJob">Маркер задачі.</typeparam>
+    /// <param name="targetKey">
+    /// Ціль — той самий сенс і той самий ключ, що в
+    /// <see cref="EnqueueExclusiveAsync{TJob}"/>: обидва методи бачать задачі одне одного.
+    /// </param>
+    /// <param name="payload">Завдання.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <param name="createdByUserId">Хто поставив задачу; <c>null</c> — системна (Q-156).</param>
+    /// <returns>
+    /// Ідентифікатор задачі, яка виконає роботу: наявної (злиття) або нової.
+    /// </returns>
+    /// <remarks>
+    /// ⛔ Для автоматичних постановок, що йдуть сплесками (автоперерахунок після
+    /// матеріалізації PI, HSE301 A4): три сутності, що пишуть в один документ,
+    /// дають три постановки, і з <see cref="EnqueueExclusiveAsync{TJob}"/>
+    /// кожна переривала б попередній перерахунок — на «гарячому» документі він
+    /// не доходив би до кінця ніколи.
+    /// <para>
+    /// ⚠ Семантика «після» залежить від реалізації: черга в базі ставить
+    /// <c>Queued</c> ПОЗАДУ <c>Running</c> (claim не бере її, доки ціль зайнята);
+    /// Quartz у пам'яті такого бар'єра не має, тож за наявної задачі на ціль —
+    /// у черзі чи виконуваної — нову не ставить узагалі й повертає наявну.
+    /// </para>
+    /// </remarks>
+    public Task<string> EnqueueCoalescedAsync<TJob>(
+        string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob;
+
     /// <summary>Планує задачу за cron-виразом.</summary>
     /// <remarks>
     /// Ключ періодичної задачі — тип плюс payload; cron у нього НЕ входить, тож

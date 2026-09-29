@@ -250,6 +250,11 @@ public sealed class RecalculationJobIdTests
             where TJob : IBackgroundJob
             => EnqueueAsync<TJob>(payload, ct, createdByUserId);
 
+        public Task<string> EnqueueCoalescedAsync<TJob>(
+            string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+            where TJob : IBackgroundJob
+            => EnqueueAsync<TJob>(payload, ct, createdByUserId);
+
         public Task ScheduleAsync<TJob>(string cronExpression, object? payload, CancellationToken ct)
             where TJob : IBackgroundJob
             => Task.CompletedTask;

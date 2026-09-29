@@ -76,13 +76,28 @@ public sealed class DbBackgroundJobScheduler(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
 
-        return EnqueueCoreAsync<TJob>(
-            payload,
-            $"{typeof(TJob).Name}{TargetSeparator}{targetKey.Replace(TargetSeparator, '_')}",
-            supersede: true,
-            createdByUserId,
-            ct);
+        return EnqueueCoreAsync<TJob>(payload, TargetKeyOf<TJob>(targetKey), supersede: true, createdByUserId, ct);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий <c>TargetKey</c>, що й у <see cref="EnqueueExclusiveAsync{TJob}"/>, але
+    /// <see cref="JobEnqueueRequest.SupersedeRunning"/> = <c>false</c>: <c>Running</c> на
+    /// ціль не отримує запиту скасування, нова задача стає <c>Queued</c> позаду неї, а
+    /// наявна <c>Queued</c> поглинає постановку (повертається її <c>JobId</c>).
+    /// </remarks>
+    public Task<string> EnqueueCoalescedAsync<TJob>(
+        string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        return EnqueueCoreAsync<TJob>(payload, TargetKeyOf<TJob>(targetKey), supersede: false, createdByUserId, ct);
+    }
+
+    /// <summary><c>{TypeName}~{target}</c> — одне визначення на обидві постановки з ціллю.</summary>
+    private static string TargetKeyOf<TJob>(string targetKey)
+        => $"{typeof(TJob).Name}{TargetSeparator}{targetKey.Replace(TargetSeparator, '_')}";
 
     private async Task<string> EnqueueCoreAsync<TJob>(
         object? payload, string? targetKey, bool supersede, int? createdByUserId, CancellationToken ct)

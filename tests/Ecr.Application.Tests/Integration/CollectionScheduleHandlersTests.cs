@@ -531,6 +531,10 @@ public sealed class CollectionScheduleHandlersTests
             string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
             where TJob : IBackgroundJob => throw new NotSupportedException();
 
+        public Task<string> EnqueueCoalescedAsync<TJob>(
+            string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+            where TJob : IBackgroundJob => throw new NotSupportedException();
+
         public Task CancelAsync(string jobId, CancellationToken ct) => throw new NotSupportedException();
 
         public Task<bool> RestartAsync(string jobId, CancellationToken ct) => throw new NotSupportedException();

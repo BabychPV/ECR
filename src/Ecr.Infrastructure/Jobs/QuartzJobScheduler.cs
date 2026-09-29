@@ -248,7 +248,7 @@ public sealed class QuartzJobScheduler(
         // лишається унікальним (хвіст із GUID): якби ключ був сталим, запис
         // прогресу нової задачі затер би стан скасованої, і в журналі не
         // лишилося б сліду, що вона взагалі була.
-        var prefix = $"{typeof(TJob).Name}{TargetSeparator}{Sanitize(targetKey)}{TargetSeparator}";
+        var prefix = TargetPrefixOf<TJob>(targetKey);
 
         // ⛔ Витіснення ПЕРЕД постановкою. У зворотному порядку між двома
         // прогонами існував би проміжок, у якому працюють обидва, — а вони
@@ -269,6 +269,82 @@ public sealed class QuartzJobScheduler(
             instance, prefix + Guid.NewGuid().ToString("N"), payload, ct, createdByUserId)
             .ConfigureAwait(false);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Quartz у пам'яті не має бар'єра «Queued позаду Running», як черга в базі:
+    /// поставлена поруч задача пішла б ПАРАЛЕЛЬНО з виконуваною й писала б в ті самі
+    /// результати. Тому: є на ціль задача, що чекає (має триґер) або виконується в
+    /// ЦЬОМУ планувальнику, — нічого не ставимо й нікого не перериваємо, повертаємо
+    /// її ідентифікатор (задача, що чекає, має перевагу над виконуваною). Інакше —
+    /// постановка з тим самим ключем, що в <see cref="EnqueueExclusiveAsync{TJob}"/>,
+    /// але без витіснення.
+    /// <para>
+    /// ⚠ Злиття з ВИКОНУВАНОЮ задачею означає: якщо вона вже прочитала дані до
+    /// нової зміни, та зміна дочекається наступної постановки. Для автоперерахунку
+    /// після матеріалізації це прийнятно; хто не може чекати — кличе Exclusive.
+    /// </para>
+    /// <para>
+    /// ⚠ Дурабельна деталь задачі, що впала остаточно (без триґера й не
+    /// виконується), злиттю не заважає — її вже ніхто не виконає.
+    /// </para>
+    /// <para>
+    /// ⛔ Між інстансами застосунку дедупу немає — як і для Exclusive: черга кожного
+    /// інстанса в його пам'яті, і задачу на ту саму ціль в іншому інстансі звідси
+    /// не видно. Міжінстансова коалесценція — лише в режимі <c>Database</c>.
+    /// </para>
+    /// </remarks>
+    public async Task<string> EnqueueCoalescedAsync<TJob>(
+        string targetKey, object? payload, CancellationToken ct, int? createdByUserId = null)
+        where TJob : IBackgroundJob
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        var scheduler = Scheduler(typeof(TJob).Name);
+        var instance = await scheduler.GetScheduler(ct).ConfigureAwait(false);
+        var prefix = TargetPrefixOf<TJob>(targetKey);
+
+        var executing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var context in await instance.GetCurrentlyExecutingJobs(ct).ConfigureAwait(false))
+        {
+            executing.Add(context.JobDetail.Key.Name);
+        }
+
+        string? running = null;
+
+        foreach (var key in await instance.GetJobKeys(GroupMatcher<JobKey>.AnyGroup(), ct).ConfigureAwait(false))
+        {
+            if (!key.Name.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (executing.Contains(key.Name))
+            {
+                running ??= key.Name;
+            }
+            else if ((await instance.GetTriggersOfJob(key, ct).ConfigureAwait(false)).Count > 0)
+            {
+                return key.Name;
+            }
+        }
+
+        // ⚠ Виконувана, чий ключ уже зник зі сховища (не-дурабельна), теж рахується.
+        running ??= executing.FirstOrDefault(name => name.StartsWith(prefix, StringComparison.Ordinal));
+
+        return running
+               ?? await EnqueueCoreAsync<TJob>(
+                       instance, prefix + Guid.NewGuid().ToString("N"), payload, ct, createdByUserId)
+                   .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Префікс ідентифікатора задачі на ціль — ОДИН для Exclusive і Coalesced,
+    /// інакше вони не бачили б задач одне одного.
+    /// </summary>
+    private static string TargetPrefixOf<TJob>(string targetKey)
+        where TJob : IBackgroundJob
+        => $"{typeof(TJob).Name}{TargetSeparator}{Sanitize(targetKey)}{TargetSeparator}";
 
     /// <summary>Роздільник між типом задачі, ціллю і хвостом ідентифікатора.</summary>
     /// <remarks>
