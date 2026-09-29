@@ -128,6 +128,35 @@ public sealed partial class LoginHandler(
             user.Id, user.UserName, user.DisplayName, user.SecurityStamp, user.MustChangePassword, GroupSids: []);
     }
 
+    /// <summary>
+    /// Вихід: прокручує <c>SecurityStamp</c>, щоб cookie цього входу — і будь-яка
+    /// її копія — перестала бути дійсною на сервері, а не лише в браузері (S21).
+    /// </summary>
+    /// <param name="userId">Хто виходить (з cookie, не з симуляції).</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ До S21 вихід лише стирав cookie в браузері. Скопійована cookie
+    /// (перехоплена, лишена в чужому профілі) жила далі до кінця ковзного строку:
+    /// сервер не мав чим відрізнити «вийшов» від «не заходив з цього браузера».
+    ///
+    /// ⚠ Наслідок, свідомо прийнятий: серверного переліку сесій немає, одиниця
+    /// відкликання — штамп КОРИСТУВАЧА, тож вихід завершує ВСІ його сесії (інші
+    /// браузери й пристрої) — ту саму дію вже роблять зміна пароля, ролей і
+    /// блокування (ФВ-6.7). Вікно — не більше за кеш штампа
+    /// (<c>Auth:StampCacheSeconds</c>, 5 с) на кожному вузлі.
+    /// </remarks>
+    public async Task SignOutAsync(int userId, CancellationToken ct)
+    {
+        var user = await users.FindByIdAsync(userId, ct).ConfigureAwait(false);
+        if (user is null)
+        {
+            return; // запису вже немає — відкликати нічого
+        }
+
+        user.RefreshSecurityStamp();
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>Знаходить або заводить доменного користувача за SID (ФВ-6.2).</summary>
     /// <param name="sid">SID із токена Windows.</param>
     /// <param name="userName">Ім'я входу.</param>

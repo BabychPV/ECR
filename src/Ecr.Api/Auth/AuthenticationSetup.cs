@@ -1,6 +1,9 @@
+using System.Globalization;
+using System.Security.Claims;
 using System.Security.Cryptography.X509Certificates;
 using Ecr.Api.Health;
 using Ecr.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.DataProtection;
@@ -48,6 +51,28 @@ public static partial class AuthenticationSetup
     /// Ставиться на початку сеансу, знімається завершенням; вихід закриває сеанс.
     /// </remarks>
     public const string SimulationSessionClaim = "ecr:sim";
+
+    /// <summary>Claim із моментом ВХОДУ (Unix-секунди, UTC) — для абсолютної межі сесії (S21).</summary>
+    /// <remarks>
+    /// ⚠ Не <c>AuthenticationProperties.IssuedUtc</c>: за ковзного строку той
+    /// оновлюється на кожному продовженні cookie і входу вже не пам'ятає.
+    /// Claim ставиться один раз на вході (<c>OnSigningIn</c>) і переноситься
+    /// перевиданнями cookie (штамп, симуляція), бо ті копіюють усі заявки.
+    /// </remarks>
+    public const string AuthTimeClaim = "ecr:authtime";
+
+    /// <summary>
+    /// Абсолютна межа сесії від входу, незалежно від активності (S21).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ковзний строк (<c>Auth:SlidingHours</c>) сам по собі продовжує
+    /// сесію безкінечно, доки нею користуються: викрадена cookie, яку
+    /// «підтримують» запитами, не вмирала ніколи. Дванадцять годин — робоча
+    /// зміна з запасом: людина входить раз на день, а сесія довша за добу вже
+    /// не є «тією самою людиною за тим самим столом». Константа, а не
+    /// конфігурація, навмисно: межа безпеки не має тихо вимикатися ключем.
+    /// </remarks>
+    public static readonly TimeSpan AbsoluteSessionLifetime = TimeSpan.FromHours(12);
 
     /// <summary>
     /// Відбиток сертифіката, яким шифруються ключі кільця (`MI-01`, `D14-08`).
@@ -100,6 +125,10 @@ public static partial class AuthenticationSetup
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return Task.CompletedTask;
                 };
+
+                // S21: момент входу — у cookie, абсолютна межа — на кожному запиті.
+                options.Events.OnSigningIn = StampAuthTime;
+                options.Events.OnValidatePrincipal = RejectIfPastAbsoluteLifetimeAsync;
             });
 
         // ⚠ Negotiate реєструється УМОВНО, і це не зручність для тестів.
@@ -117,6 +146,45 @@ public static partial class AuthenticationSetup
 
         services.AddAuthorization();
         return services;
+    }
+
+    /// <summary>Ставить момент входу, якщо його ще немає (перший вхід, не перевидання).</summary>
+    /// <param name="context">Контекст підпису cookie.</param>
+    private static Task StampAuthTime(CookieSigningInContext context)
+    {
+        if (context.Principal?.Identity is ClaimsIdentity identity && !identity.HasClaim(c => c.Type == AuthTimeClaim))
+        {
+            var now = (context.Options.TimeProvider ?? TimeProvider.System).GetUtcNow();
+            identity.AddClaim(new Claim(
+                AuthTimeClaim, now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)));
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Відкидає cookie, чий вхід старший за <see cref="AbsoluteSessionLifetime"/>.</summary>
+    /// <param name="context">Контекст перевірки cookie.</param>
+    /// <remarks>
+    /// ⚠ Cookie без моменту входу теж відкидається: інакше cookie, видана до
+    /// появи межі, жила б за ковзним строком безкінечно. Ціна одноразова —
+    /// після розгортання кожен увійде заново.
+    /// </remarks>
+    private static async Task RejectIfPastAbsoluteLifetimeAsync(CookieValidatePrincipalContext context)
+    {
+        var raw = context.Principal?.FindFirst(AuthTimeClaim)?.Value;
+        var now = (context.Options.TimeProvider ?? TimeProvider.System).GetUtcNow();
+
+        if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds)
+            && now - DateTimeOffset.FromUnixTimeSeconds(seconds) < AbsoluteSessionLifetime)
+        {
+            return;
+        }
+
+        // Принципал знятий — запит іде далі анонімним і на [Authorize] отримує
+        // 401 (`OnRedirectToLogin`); мертва cookie стирається тією ж відповіддю.
+        context.RejectPrincipal();
+        await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)
+                     .ConfigureAwait(false);
     }
 
     /// <summary>

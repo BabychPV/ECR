@@ -94,6 +94,14 @@ public sealed class AuthController(
             await simulation.EndAsync(sessionId, ct).ConfigureAwait(false);
         }
 
+        // ⛔ S21: не лише стерти cookie в браузері, а й зробити її (і копії)
+        // недійсною на сервері — ротацією штампа. Наслідок і його ціна — у
+        // `LoginHandler.SignOutAsync`: завершуються всі сесії користувача.
+        if (currentUser.UserId is { } userId)
+        {
+            await login.SignOutAsync(userId, ct).ConfigureAwait(false);
+        }
+
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme)
                          .ConfigureAwait(false);
         return NoContent();
