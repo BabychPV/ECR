@@ -37,13 +37,27 @@ namespace Ecr.Infrastructure.Jobs;
 /// контрольною сумою від застарілих чисел. Неправильне число без жодної
 /// ознаки неправильності (директива №10 `W10.1`).
 /// </para>
+/// <para>
+/// ⛔ P4 ФВ-9.8 (D-206, CAL-01): перерахунок ПРОЄКТУ (<c>DocumentId &lt;= 0</c> —
+/// нічний розклад, <c>RunCalculationHandler</c>) більше НЕ рахує сам, а лише
+/// розкладає роботу на ДОКУМЕНТНІ задачі — по одній на документ, через
+/// <see cref="IBackgroundJobScheduler.EnqueueCoalescedAsync{TJob}"/>. Доти
+/// документи йшли послідовно в одній задачі, і річний перерахунок 300 документів
+/// не вкладався в 10 хвилин ПРД-13 за жодної кількості воркерів. Документна задача
+/// рахує лише свій документ (усі періоди скоупу по порядку) і створює прогін
+/// «документ × період», тож паралельні документи не витісняють актуальність один
+/// одного (<c>UX_CalculationRun_Current</c> уже містить <c>DocumentId</c>).
+/// Без планувальника (<paramref name="jobs"/> <c>null</c> — тести, утиліти) —
+/// колишній послідовний шлях у цій самій задачі.
+/// </para>
 /// </remarks>
 public sealed class RecalculationJob(
     EcrDbContext db,
     ICalculationRunner orchestrator,
     RunCalculationHandler runs,
     RecalculationService formulas,
-    Domain.Abstractions.IClock clock) : IRecalculationJob
+    Domain.Abstractions.IClock clock,
+    IBackgroundJobScheduler? jobs = null) : IRecalculationJob
 {
     /// <summary>Стеля прив'язок на прогін: методологій у системі — десятки.</summary>
     private const int MaxBindings = 5_000;
@@ -88,6 +102,13 @@ public sealed class RecalculationJob(
                 .Select(d => d.ProjectId)
                 .FirstOrDefaultAsync(ct)
                 .ConfigureAwait(false);
+
+        // ⛔ P4 ФВ-9.8: проєкт — лише розклад на документні задачі, без прогону тут.
+        if (request.DocumentId <= 0 && jobs is not null)
+        {
+            await FanOutAsync(jobs, request with { ProjectId = projectId }, progress, ct).ConfigureAwait(false);
+            return;
+        }
 
         // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
         // хвиля UX-PASS R4): прогін ОДНОГО документа (`request.DocumentId > 0`,
@@ -406,6 +427,68 @@ public sealed class RecalculationJob(
         }
     }
 
+    /// <summary>
+    /// Розкладає перерахунок проєкту на документні задачі (P4 ФВ-9.8) і
+    /// завершується, не чекаючи їх.
+    /// </summary>
+    /// <param name="scheduler">Планувальник.</param>
+    /// <param name="request">Завдання проєкту з уже визначеним <c>ProjectId</c>.</param>
+    /// <param name="progress">Канал прогресу батьківської задачі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Дочірня задача несе ВСЕ завдання батька, крім <c>DocumentId</c>: період,
+    /// автора й погодження (<c>ApprovedBy</c>, <c>ApprovalId</c>,
+    /// <c>ApprovalReason</c>, аудит S1). Погодження використане ОДИН раз —
+    /// обробником, до постановки батька; дочірні лише несуть його факт, інакше
+    /// гейт стану періоду (<see cref="RefusedPeriodsAsync"/>) відмовив би кожному
+    /// документу законно погодженого перерахунку закритого періоду.
+    /// <para>
+    /// ⚠ Злиття, а не витіснення: повторний нічний запуск, поки документна задача
+    /// ще в черзі, не ставить другу (<c>EnqueueCoalescedAsync</c>), і не перериває
+    /// ту, що вже рахує. Ціль названого періоду — та сама, що в кнопки документа
+    /// (<see cref="Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf"/>):
+    /// нічний і ручний перерахунок того самого документа й періоду — одна робота.
+    /// </para>
+    /// <para>
+    /// ⚠ Батько не чекає дочірніх: задача, що тримає слот пулу в очікуванні задач
+    /// того самого пулу, за малого пулу (черга в базі — 4 слоти) блокує саме тих,
+    /// кого чекає. Стан кожного документа видно окремим рядком черги.
+    /// </para>
+    /// </remarks>
+    private async Task FanOutAsync(
+        IBackgroundJobScheduler scheduler,
+        RecalculationRequest request,
+        IJobProgress progress,
+        CancellationToken ct)
+    {
+        var documentIds = await ProjectDocumentIdsAsync(request.ProjectId, ct).ConfigureAwait(false);
+
+        foreach (var documentId in documentIds)
+        {
+            var child = request with { DocumentId = documentId };
+
+            var target = child.PeriodKey is { } period
+                ? Ecr.Application.Documents.RecalculateDocumentHandler.TargetOf(documentId, new PeriodKey(period))
+                : Ecr.Application.Documents.RecalculateDocumentHandler.YearTargetOf(documentId);
+
+            await scheduler
+                .EnqueueCoalescedAsync<IRecalculationJob>(target, child, ct, child.TriggeredByUserId)
+                .ConfigureAwait(false);
+        }
+
+        await progress
+            .ReportAsync(
+                100,
+                JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                    "jobs.recalcFannedOut",
+                    new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["count"] = documentIds.Count.ToString(CultureInfo.InvariantCulture),
+                    })),
+                ct)
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Повний перерахунок формул шаблону для документа й періодів завдання.</summary>
     /// <returns>Скільки комірок перераховано.</returns>
     /// <remarks>
@@ -693,6 +776,7 @@ public sealed class RecalculationJob(
         => await db.Documents
             .AsNoTracking()
             .Where(d => d.ProjectId == projectId)
+            .OrderBy(d => d.Id)
             .Select(d => d.Id)
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -833,10 +917,19 @@ public sealed class RecalculationJob(
 /// звузити читання означало б порахувати з частково застарілих входів —
 /// тихо неправильне число замість «кнопка ширша за назву» (Q-327).
 /// </param>
+/// <param name="ApprovalId">
+/// Використане погодження (<c>calc.RecalculationApproval</c>); кладе
+/// <c>RunCalculationHandler</c>. ⚠ P4 ФВ-9.8: поле існує, щоб дочірні документні
+/// задачі несли слід погодження разом з <paramref name="ApprovedBy"/>, а не
+/// губили його при розборі.
+/// </param>
+/// <param name="ApprovalReason">Причина погодження — той самий слід, що й <paramref name="ApprovalId"/>.</param>
 public sealed record RecalculationRequest(
     int ProjectId,
     long DocumentId,
     int? PeriodKey,
     int? TriggeredByUserId,
     int? SheetDefId = null,
-    int? ApprovedBy = null);
+    int? ApprovedBy = null,
+    long? ApprovalId = null,
+    string? ApprovalReason = null);

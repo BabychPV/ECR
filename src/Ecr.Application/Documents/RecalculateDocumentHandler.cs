@@ -191,4 +191,18 @@ public sealed class RecalculateDocumentHandler(
         => string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
             $"doc{documentId}-p{periodKey.Value}");
+
+    /// <summary>Ціль перерахунку документа за ВЕСЬ рік (нічний розклад, P4 ФВ-9.8).</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Ключ цілі для злиття постановок.</returns>
+    /// <remarks>
+    /// ⚠ Окрема від <see cref="TargetOf"/>: річна задача рахує всі періоди документа
+    /// по черзі (<c>[Period:-1]</c>), і розкласти її на пари «документ + період»
+    /// означало б втратити порядок. Два нічні запуски, поки перший ще в черзі,
+    /// зливаються саме за цим ключем.
+    /// </remarks>
+    public static string YearTargetOf(long documentId)
+        => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"doc{documentId}-year");
 }

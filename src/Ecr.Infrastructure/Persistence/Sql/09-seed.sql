@@ -4224,6 +4224,9 @@ USING (VALUES
     (N'status.coverage.SourceDataRefused',      N'en', N'Source refused the data', 1),
     (N'coverageEvents.sourceDataRefused',       N'en', N'Attribute "{path}", interval [{from}, {to}) was not collected: {message}. The interval stays a gap; catch-up retries it on every run until the source data is fixed.', 1),
     -- COLL:coverage-refusal ── кінець секції ──
+    -- COLL:p4-fanout ── Перерахунок проєкту розкладено на документні задачі (P4 ФВ-9.8, `RecalculationJob.FanOutAsync`) ──
+    (N'jobs.recalcFannedOut',                   N'en', N'Queued document recalculation tasks: {count}.', 1),
+    -- COLL:p4-fanout ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
