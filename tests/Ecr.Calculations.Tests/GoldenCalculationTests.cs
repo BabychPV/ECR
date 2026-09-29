@@ -169,7 +169,7 @@ public sealed class GoldenCalculationTests
     }
 
     [Fact] [Trait(TestCategories.Stage, TestCategories.Stage4)]
-    [Trait("Requirement", "ФВ-9.8")]
+    [Trait("Requirement", "ФВ-9.12")]
     public async Task Результати_пишуться_в_calc_а_не_в_doc_CellValue()
     {
         var cells = Substitute.For<ICellStore>();

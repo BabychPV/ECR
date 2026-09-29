@@ -38,6 +38,27 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
         Assert.Contains("ECR_" + key.Replace(":", "__", StringComparison.Ordinal), problem, StringComparison.Ordinal);
     }
 
+    /// <remarks>
+    /// ⛔ ФВ-9.8 (D-205): нуль чи від'ємний ліміт перерахунку не «вимикає» межу, а
+    /// зупиняє старт. <c>-1</c> у <c>MaxDegreeOfParallelism</c> означав би «без межі»
+    /// — рівно те, від чого ліміт існує. Одиниця — найменше допустиме, і вона проходить.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-9.8")]
+    [InlineData("Calculations:MaxParallelism", "0")]
+    [InlineData("Calculations:MaxParallelism", "-1")]
+    [InlineData("Calculations:MaxParallelism", "4 потоки")]
+    [InlineData("Calculations:MaxInputCellsPerBinding", "0")]
+    [InlineData("Calculations:MaxInputCellsPerBinding", "300k")]
+    public void Недійсний_ліміт_перерахунку_зупиняє_старт(string key, string value)
+    {
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(Config((key, value))));
+        Assert.StartsWith(key + " = «" + value + "»", problem, StringComparison.Ordinal);
+
+        Assert.Empty(EcrConfigurationValidation.Validate(Config((key, "1"))));
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "U19")]
