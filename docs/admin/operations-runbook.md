@@ -104,8 +104,10 @@ Api й воркер на **одному** хості — різні ролі й 
 | `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
-| `Telemetry:ServiceName` | `ecr-api` | зарезервовано під експорт телеметрії; зараз не діє |
-| `Telemetry:OtlpEndpoint` | порожньо | ⚠ **Експорту OTLP у цій версії немає** (потрібен окремий пакет, `S-12`). Непорожнє значення нічого не вмикає — старт пише про це попередження. Метрики `Meter "Ecr"` — лише `dotnet-counters monitor --counters Ecr -n Ecr.Api` на сервері |
+| `Telemetry:Enabled` | `false` | експорт метрик по OTLP (п. 3.4). Вимкнено — не реєструється нічого з OpenTelemetry, навантаження нуль. Вмикається лише рядком `true` |
+| `Telemetry:OtlpEndpoint` | порожньо | адреса OTLP-колектора, gRPC, напр. `http://collector:4317`. **Обов'язкова**, коли `Telemetry:Enabled=true`: без неї або з недійсною адресою служба не стартує. Задана при вимкненому експорті — ігнорується, старт пише попередження |
+| `Telemetry:ExportIntervalSeconds` | 60 | як часто відсилати метрики, с. Не менше 5 |
+| `Telemetry:ServiceName` | `ecr-api` | `service.name` у ресурсі OTLP — під цим іменем служба видна в колекторі |
 | `Logging:LogLevel:*` | `Information`, `Microsoft.AspNetCore` = `Warning` | рівні логування |
 | `Logging:File:Directory` | `%ProgramData%\ECR\logs` | тека логів. Порожньо — без файлового логу |
 | `Logging:File:RetainedFiles` | 30 | скільки файлів зберігати |
@@ -118,7 +120,7 @@ Api й воркер на **одному** хості — різні ролі й 
 службу з назвою ключа (п. 5), а не мовчки замінюється дефолтом. Порожнє
 значення — «не задано», тобто дефолт.
 
-⚠ **потрібне рішення замовника:** SMTP, OTLP-колектор, сертифікат для Data
+⚠ **потрібне рішення замовника:** SMTP, OTLP-колектор (і чи вмикати експорт метрик), сертифікат для Data
 Protection і HTTPS, адреси джерел PI. Дефолти коду — «вимкнено» або порожньо.
 
 ### 2.2. SQL-джерело: місцевий час у колонці `Ts` без поясу
@@ -202,6 +204,53 @@ Select-String -Path "$env:ProgramData\ECR\logs\ecr-*.log" -Pattern '<correlation
 Фонова задача: стан і помилку можна отримати через `GET /api/v1/jobs/{jobId}`
 (`#` кодується як `%23`) або з таблиці `itg.JobProgress`. Далі шукайте
 `jobId` у лозі.
+
+### 3.4. Метрики
+
+Служба пише власні метрики в лічильник `Meter "Ecr"` (`ecr.cells.read`,
+`ecr.cells.write`, `ecr.formula.evaluate`, `ecr.job.duration`,
+`ecr.job.start_latency`, `ecr.conflict.count`, `ecr.consistency.issues`,
+`ecr.budget.count` тощо — перелік у `EcrMetrics.cs`). Прочитати їх можна двома
+способами.
+
+**На сервері, без налаштувань** — `dotnet-counters`:
+
+```powershell
+dotnet-counters monitor --counters Ecr -n Ecr.Api
+```
+
+**Експорт по OTLP у колектор** (Prometheus, Grafana, Azure Monitor — через
+OpenTelemetry Collector). За замовчуванням **вимкнено**: вимкнений експорт не
+реєструє нічого з OpenTelemetry й не навантажує сервер. Увімкнути — у
+`%ProgramData%\ECR\config\appsettings.Production.json`:
+
+```json
+{
+  "Telemetry": {
+    "Enabled": true,
+    "OtlpEndpoint": "http://collector:4317",
+    "ExportIntervalSeconds": 60
+  }
+}
+```
+
+або змінними оточення служби `ECR_Telemetry__Enabled=true`,
+`ECR_Telemetry__OtlpEndpoint=http://collector:4317`, далі `Restart-Service EcrApi`.
+
+- Протокол — **gRPC** (типовий порт колектора 4317). Експортуються лише метрики
+  `Meter "Ecr"`; трас, логів і метрик ASP.NET/HTTP/рантайму через OTLP немає.
+- `Enabled=true` без `OtlpEndpoint` або з адресою не `http://`/`https://` —
+  служба **не стартує**, причина з назвою ключа — у журналі подій `ECR` і в
+  `ecr-*.log` (п. 3.2, п. 5).
+- `OtlpEndpoint` заданий, а `Enabled` ≠ `true` — служба стартує, у журналі
+  попередження «експорт метрик OTLP вимкнено, значення ігнорується».
+
+**Як перевірити, що дійшло:** через `ExportIntervalSeconds` після старту в
+колекторі з'являються метрики `ecr.*` з ресурсом `service.name` =
+`Telemetry:ServiceName` (типово `ecr-api`). Для колектора з
+`debug`-експортером — рядки `ecr.` у його виводі. Колектор недоступний —
+служба працює далі, експорт за цей інтервал може загубитися (на диск служба
+метрики не накопичує).
 
 ## 4. Розклади
 

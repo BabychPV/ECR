@@ -658,3 +658,8 @@ Restart-Service EcrApi
 інший файл `appsettings*.json` (D-11, `docs/build/04-environment.md`
 §6) — лише в реєстр служби, як вище. Цей JSON-файл — ЛИШЕ для
 несекретних налаштувань майданчика (наприклад, `Telemetry:OtlpEndpoint`).
+
+Експорт метрик по OTLP за замовчуванням **вимкнено**. Увімкнути — у тому ж
+файлі `"Telemetry": { "Enabled": true, "OtlpEndpoint": "http://<колектор>:4317" }`
+і `Restart-Service EcrApi`; без адреси служба не стартує. Подробиці й перевірка —
+`docs/admin/operations-runbook.md` §3.4.

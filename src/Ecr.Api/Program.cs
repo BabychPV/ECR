@@ -86,6 +86,7 @@ builder.Services.AddSingleton<Ecr.Application.Ports.ICorrelationIdAccessor,
 // треба не забути дописати, рано чи пізно не дописується. До цього
 // `EcrMetrics` існував і не викликався жодного разу (аудит Етапу 5).
 builder.Services.AddSingleton<Ecr.Api.Observability.EcrMetrics>();
+builder.Services.AddEcrTelemetry(builder.Configuration);
 // ⚠ ConsistencyCheckJob живе в Ecr.Infrastructure, яка Ecr.Api не бачить:
 // адаптер закриває EcrMetrics портом IConsistencyMetrics, щоб задача могла
 // викликати метрику, не порушуючи напрямок залежностей (директива №11, T10

@@ -63,6 +63,9 @@ public static partial class EcrConfigurationValidation
         // зняв би межу зовсім.
         ("Calculations:MaxParallelism", 1),
         ("Calculations:MaxInputCellsPerBinding", 1),
+
+        // U17: частіше за 5 с експорт лише навантажує сервер і колектор.
+        (Ecr.Api.Observability.TelemetrySetup.ExportIntervalKey, Ecr.Api.Observability.TelemetrySetup.MinExportIntervalSeconds),
     ];
 
     /// <summary>Булеві ключі: лише <c>true</c> або <c>false</c>.</summary>
@@ -73,6 +76,7 @@ public static partial class EcrConfigurationValidation
         "Security:RateLimit:TrustForwardedFor",
         "Jobs:NightlyRecalculation:Enabled",
         "Logging:File:Json",
+        Ecr.Api.Observability.TelemetrySetup.EnabledKey,
     ];
 
     /// <summary>Ключі з переліком допустимих значень (без урахування регістру).</summary>
@@ -132,26 +136,43 @@ public static partial class EcrConfigurationValidation
             }
         }
 
+        // ⛔ U17: увімкнений експорт без адреси колектора — не «експорт кудись за
+        // замовчуванням» (localhost:4317 бібліотеки), а помилка адміністратора.
+        if (Ecr.Api.Observability.TelemetrySetup.IsEnabled(configuration))
+        {
+            var endpoint = Value(configuration, OtlpEndpointKey);
+            if (endpoint is null)
+            {
+                problems.Add(
+                    $"{OtlpEndpointKey} = «»: обов'язковий, коли {Ecr.Api.Observability.TelemetrySetup.EnabledKey} = true — "
+                    + "адреса OTLP-колектора (gRPC), напр. http://collector:4317; або вимкніть експорт "
+                    + $"(змінна оточення ECR_{OtlpEndpointKey.Replace(":", "__", StringComparison.Ordinal)}).");
+            }
+            else if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
+                     || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                problems.Add(Describe(OtlpEndpointKey, endpoint, "очікується абсолютна адреса http:// або https://, напр. http://collector:4317"));
+            }
+        }
+
         return problems;
     }
 
     /// <summary>Попередження, які старт не зупиняють.</summary>
     /// <param name="configuration">Зведена конфігурація застосунку.</param>
     /// <remarks>
-    /// ⛔ <c>U17</c> (<c>S-12</c>): експортера OTLP у цій версії НЕМАЄ — він потребує
-    /// пакета <c>OpenTelemetry.Extensions.Hosting</c>, тобто окремого рішення про
-    /// залежність. Доти непорожній <c>Telemetry:OtlpEndpoint</c> — це налаштування,
-    /// яке нічого не робить, і адміністратор, що задав колектор, має дізнатися про
-    /// це з журналу старту, а не з порожнього дашборда. Метрики <c>Meter "Ecr"</c>
-    /// пишуться й доступні через <c>dotnet-counters</c>.
+    /// ⚠ <c>U17</c>: адреса колектора задана, а експорт вимкнено — значення нічого
+    /// не робить. Адміністратор, що задав колектор, має дізнатися про це з журналу
+    /// старту, а не з порожнього дашборда.
     /// </remarks>
     public static IReadOnlyList<string> Warnings(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
         return Value(configuration, OtlpEndpointKey) is { } endpoint
-            ? [$"{OtlpEndpointKey} = «{endpoint}», але експорту OTLP у цій версії немає — значення ігнорується. "
-               + "Метрики Meter «Ecr» доступні лише через dotnet-counters на сервері (runbook §3)."]
+               && !Ecr.Api.Observability.TelemetrySetup.IsEnabled(configuration)
+            ? [$"{OtlpEndpointKey} = «{endpoint}», але {Ecr.Api.Observability.TelemetrySetup.EnabledKey} ≠ true — "
+               + "експорт метрик OTLP вимкнено, значення ігнорується (runbook §3.4)."]
             : [];
     }
 

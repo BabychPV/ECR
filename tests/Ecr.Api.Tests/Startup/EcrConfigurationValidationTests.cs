@@ -133,14 +133,70 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "U17")]
-    public void Непорожній_OtlpEndpoint_попереджає_що_експорту_немає()
+    public void OtlpEndpoint_при_вимкненому_експорті_попереджає_що_ігнорується()
     {
         Assert.Empty(EcrConfigurationValidation.Warnings(Config(("Telemetry:OtlpEndpoint", ""))));
 
         var warning = Assert.Single(EcrConfigurationValidation.Warnings(
             Config(("Telemetry:OtlpEndpoint", "http://collector:4317"))));
         Assert.Contains("Telemetry:OtlpEndpoint", warning, StringComparison.Ordinal);
+        Assert.Contains("Telemetry:Enabled", warning, StringComparison.Ordinal);
         Assert.Contains("ігнорується", warning, StringComparison.Ordinal);
+
+        // Увімкнено й адреса є — попереджати нема про що.
+        Assert.Empty(EcrConfigurationValidation.Warnings(
+            Config(("Telemetry:Enabled", "true"), ("Telemetry:OtlpEndpoint", "http://collector:4317"))));
+    }
+
+    /// <remarks>
+    /// ⛔ U17: увімкнений експорт без адреси не має тихо слати на localhost:4317
+    /// (дефолт бібліотеки) — старт зупиняється з поясненням, що задати.
+    /// </remarks>
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "U17")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Увімкнений_експорт_без_адреси_зупиняє_старт(string endpoint)
+    {
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(
+            Config(("Telemetry:Enabled", "true"), ("Telemetry:OtlpEndpoint", endpoint))));
+
+        Assert.StartsWith("Telemetry:OtlpEndpoint = «»", problem, StringComparison.Ordinal);
+        Assert.Contains("обов'язковий", problem, StringComparison.Ordinal);
+        Assert.Contains("Telemetry:Enabled = true", problem, StringComparison.Ordinal);
+        Assert.Contains("ECR_Telemetry__OtlpEndpoint", problem, StringComparison.Ordinal);
+
+        // Вимкнено — адреса не потрібна.
+        Assert.Empty(EcrConfigurationValidation.Validate(
+            Config(("Telemetry:Enabled", "false"), ("Telemetry:OtlpEndpoint", endpoint))));
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "U17")]
+    [InlineData("Telemetry:Enabled", "yes")]
+    [InlineData("Telemetry:ExportIntervalSeconds", "4")]
+    [InlineData("Telemetry:ExportIntervalSeconds", "1m")]
+    public void Недійсний_ключ_телеметрії_називає_ключ(string key, string value)
+    {
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(Config((key, value))));
+        Assert.StartsWith(key + " = «" + value + "»", problem, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "U17")]
+    [InlineData("collector:4317")]
+    [InlineData("ftp://collector:4317")]
+    public void Увімкнений_експорт_з_недійсною_адресою_зупиняє_старт(string endpoint)
+    {
+        var problem = Assert.Single(EcrConfigurationValidation.Validate(
+            Config(("Telemetry:Enabled", "true"), ("Telemetry:OtlpEndpoint", endpoint))));
+        Assert.StartsWith("Telemetry:OtlpEndpoint = «" + endpoint + "»", problem, StringComparison.Ordinal);
+
+        Assert.Empty(EcrConfigurationValidation.Validate(
+            Config(("Telemetry:Enabled", "true"), ("Telemetry:OtlpEndpoint", "https://collector:4317"), ("Telemetry:ExportIntervalSeconds", "5"))));
     }
 
     [Fact]
