@@ -18,21 +18,22 @@ using Xunit;
 namespace Ecr.Application.Tests.Calculations;
 
 /// <summary>
-/// Аудит A3: посилання <c>!Code</c> у формулу імпортованої методології
-/// публікація відхиляє — рантайм його не обчислює.
+/// Публікація посилань <c>!Code</c> у формулу імпортованої методології (HSE301 L; до нього —
+/// заборона аудиту A3).
 /// </summary>
 /// <remarks>
-/// ⛔ До виправлення така версія публікувалася (резолвінг у бібліотеку є), а
-/// кожен прогін давав <c>#REF</c>: <c>MethodologyEvaluationContext.
-/// GetFormulaResult</c> бачить лише формули своєї версії. Вихід мовчки не
-/// писався, помилки публікації не було.
+/// ✎ HSE301 L: модуль обчислює формулу бібліотеки в контексті рядка викликача, тож
+/// посилання публікується — з ребром <c>calc.MethodologyDependency</c> для інвалідації. Ребро
+/// більше не означає «читає записаний результат іншої методології»: результат бібліотеки не
+/// читається, тому порожні залежності плану <c>CalculationOrchestrator</c> на число не
+/// впливають.
 /// <para>
-/// ⛔ Другий предмет — план прогону. <c>CalculationOrchestrator</c> будує
-/// пакети з ПОРОЖНІМИ залежностями між методологіями. Це правильно рівно доти,
-/// доки жодна опублікована версія не пише ребра <c>calc.MethodologyDependency</c>,
-/// а єдине джерело ребра — саме імпортоване <c>!Code</c>. Тест нижче тримає цей
-/// інваріант: прийнята публікація пише порожню множину ребер, відхилена —
-/// не пише нічого.
+/// Замість заборони — перевірки того самого замикання, яке рахуватиме прогін. Мутаційні
+/// докази (кожну перевірку прибрано окремо → свій тест червоний, після відкату — зелений):
+/// <c>ImportCycleAsync</c> → <see cref="Цикл_імпортів_до_власної_методології_відхиляє_публікацію"/>;
+/// режими в <c>LibraryProblems</c> → <see cref="Інші_режими_бібліотеки_відхиляють_публікацію"/>;
+/// область у <c>LibraryProblems</c> → <see cref="Row_формула_з_посиланням_на_формулу_речовини_бібліотеки_відхиляється"/>;
+/// <c>LibraryFormulas</c> у перевірці колонок → <see cref="Аргумент_формули_бібліотеки_звіряється_з_колонками_викликача"/>.
 /// </para>
 /// </remarks>
 public sealed class ImportedFormulaReferencePublishTests
@@ -42,6 +43,7 @@ public sealed class ImportedFormulaReferencePublishTests
     private const int VersionId = 61;
     private const int OwnerId = 5;
     private const int CommonId = 900;
+    private const int CommonVersionId = 910;
 
     private const string Shared = "Common_WtCi_Methane";
 
@@ -86,6 +88,8 @@ public sealed class ImportedFormulaReferencePublishTests
               .Returns(new List<MethodologyOutput>());
         _store.GetRulesAsync(VersionId, Arg.Any<CancellationToken>())
               .Returns(new List<MethodologyRule>());
+        _store.ResolveImportsAsync(CommonVersionId, From, Arg.Any<CancellationToken>())
+              .Returns(new List<MethodologyLibrary>());
         _bindings.ListAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
                  .Returns(new List<CalculationBinding>());
 
@@ -124,73 +128,44 @@ public sealed class ImportedFormulaReferencePublishTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.4")]
-    public async Task Посилання_у_формулу_імпортованої_методології_відхиляє_публікацію_з_позицією()
+    public async Task Посилання_у_формулу_бібліотеки_публікується_з_ребром_між_методологіями()
     {
-        // ⛔ Червоний на коді до A3: публікація проходила, і `HSE400` щоразу
-        // отримувала `#REF` замість `!Common_WtCi_Methane`.
+        // ⛔ До HSE301 L тут була відмова `importedFormulaNotEvaluated`: рантайм бібліотечних
+        // формул не обчислював. Тепер обчислює — і ребро пишеться для інвалідації.
         Formulas([Formula(103, "Total", $"1 + !{Shared} * 2")]);
-        Imports([new MethodologyLibrary(CommonId, "Common", 910, [Shared])]);
+        Library(Formula(301, Shared, "@Flow * 2", CommonVersionId));
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
 
-        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-CALC-0422.publishChecksFailed", error.Details!["messageKey"]);
-
-        var problem = Assert.Single(Assert.IsType<List<PublishProblem>>(error.Details["problems"]));
-        Assert.Equal("publish.problem.importedFormulaNotEvaluated", problem.MessageKey);
-        Assert.Equal("Total", problem.Args["formula"]);
-        Assert.Equal(Shared, problem.Args["name"]);
-
-        // Позиція знака `!` у виразі — як у діагностиках парсера.
-        Assert.Equal("4", problem.Args["position"]);
-
-        // Посилання резолвилося саме в бібліотеку, а не «не знайдено».
-        Assert.Equal("Common", problem.Args["library"]);
-
-        Assert.False(_version.IsPublished);
-        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+        Assert.True(_version.IsPublished);
+        Assert.Equal([CommonId], Assert.Single(_edgeWrites));
     }
 
     [Theory]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     [Trait("Requirement", "ФВ-9.4")]
-    [InlineData("2 * 3", true)]
-    [InlineData("!Local * 2", true)]
-    [InlineData($"!{Shared} * 2", true)] // своя формула перекриває бібліотечну
-    [InlineData("!Other * 2", false)]
-    [InlineData("!Local + !Other", false)]
-    public async Task Прийнята_публікація_не_пише_ребер_між_методологіями(string expression, bool accepted)
+    [InlineData("2 * 3", false)]
+    [InlineData("!Local * 2", false)]
+    [InlineData($"!{Shared} * 2", false)] // своя формула перекриває бібліотечну
+    [InlineData("!Other * 2", true)]
+    [InlineData("!Local + !Other", true)]
+    public async Task Ребро_між_методологіями_пишеться_рівно_тоді_коли_посилання_веде_в_бібліотеку(
+        string expression, bool edge)
     {
-        // ⛔ Інваріант, на якому стоїть порожній план `CalculationOrchestrator`:
-        // жодна опублікована версія не залежить від іншої методології. Зніміть
-        // заборону A3 — і рядки з `!Other` опублікуються з ребром {900}, а
-        // оркестратор далі ставитиме обидві методології в один паралельний пакет.
         Formulas(
         [
             Formula(101, "Local", "1"),
             Formula(102, Shared, "5"),
             Formula(103, "Total", expression),
         ]);
-        Imports([new MethodologyLibrary(CommonId, "Common", 910, [Shared, "Other"])]);
+        Library(Formula(301, Shared, "7", CommonVersionId), Formula(302, "Other", "3", CommonVersionId));
 
-        var publish = () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
+        await Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None);
 
-        if (accepted)
-        {
-            await publish();
-            Assert.True(_version.IsPublished);
+        Assert.True(_version.IsPublished);
 
-            // Не порожньо за відсутністю виклику: ребра справді записано — нуль.
-            Assert.NotEmpty(_edgeWrites);
-        }
-        else
-        {
-            await Assert.ThrowsAsync<BusinessRuleException>(publish);
-            Assert.False(_version.IsPublished);
-        }
-
-        Assert.All(_edgeWrites, Assert.Empty);
+        int[] expected = edge ? [CommonId] : [];
+        Assert.Equal(expected, Assert.Single(_edgeWrites));
     }
 
     /// <remarks>
@@ -207,27 +182,113 @@ public sealed class ImportedFormulaReferencePublishTests
     public async Task Посилання_що_не_веде_нікуди_відхиляє_публікацію_з_позицією(bool withImport)
     {
         Formulas([Formula(101, "Local", "1"), Formula(103, "Total", "!Local + !Missing * 2")]);
-        Imports(withImport ? [new MethodologyLibrary(CommonId, "Common", 910, [Shared])] : []);
+        if (withImport)
+        {
+            Library(Formula(301, Shared, "7", CommonVersionId));
+        }
+        else
+        {
+            Imports([]);
+        }
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
-
-        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-CALC-0422.publishChecksFailed", error.Details!["messageKey"]);
-
-        var problem = Assert.Single(Assert.IsType<List<PublishProblem>>(error.Details["problems"]));
+        var problem = Assert.Single(await ProblemsAsync());
         Assert.Equal("publish.problem.formulaNotFound", problem.MessageKey);
         Assert.Equal("Total", problem.Args["formula"]);
         Assert.Equal("Missing", problem.Args["name"]);
 
         // Позиція знака `!` другого посилання: «!Local + » — дев'ять символів.
         Assert.Equal("9", problem.Args["position"]);
+    }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Цикл_імпортів_до_власної_методології_відхиляє_публікацію()
+    {
+        // Common імпортує Base, Base імпортує саму HSE400.
+        Formulas([Formula(103, "Total", $"!{Shared} * 2")]);
+        Library(Formula(301, Shared, "7", CommonVersionId));
+        _store.ResolveImportsAsync(CommonVersionId, From, Arg.Any<CancellationToken>())
+              .Returns(new List<MethodologyLibrary> { new(901, "Base", 920, ["Base_K"]) });
+        _store.ResolveImportsAsync(920, From, Arg.Any<CancellationToken>())
+              .Returns(new List<MethodologyLibrary> { new(OwnerId, "HSE400", VersionId, ["Total"]) });
+
+        var problem = Assert.Single(await ProblemsAsync());
+        Assert.Equal("publish.problem.importCycle", problem.MessageKey);
+        Assert.Equal("HSE400 → Common → Base → HSE400", problem.Args["chain"]);
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [InlineData(NumericMode.Strict, CalendarMode.Actual)]
+    [InlineData(NumericMode.Legacy, CalendarMode.Fixed365)]
+    public async Task Інші_режими_бібліотеки_відхиляють_публікацію(NumericMode numeric, CalendarMode calendar)
+    {
+        // Версія — Legacy/Actual (типові); бібліотека рахує інакше хоч в одному режимі.
+        Formulas([Formula(103, "Total", $"!{Shared} * 2")]);
+        Library(numeric, calendar, Formula(301, Shared, "7", CommonVersionId));
+
+        var problem = Assert.Single(await ProblemsAsync());
+        Assert.Equal("publish.problem.importModeMismatch", problem.MessageKey);
+        Assert.Equal("Common", problem.Args["library"]);
+        Assert.Equal(numeric.ToString(), problem.Args["libraryNumeric"]);
+        Assert.Equal(calendar.ToString(), problem.Args["libraryCalendar"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Row_формула_з_посиланням_на_формулу_речовини_бібліотеки_відхиляється()
+    {
+        var total = Formula(103, "Total", $"!{Shared} * 2");
+        total.SetScope(MethodologyFormulaScope.Row);
+        Formulas([total]);
+
+        var shared = Formula(301, Shared, "7", CommonVersionId);
+        shared.SetScope(MethodologyFormulaScope.Substance);
+        Library(shared);
+
+        var problem = Assert.Single(await ProblemsAsync());
+        Assert.Equal("publish.problem.rowScopeReferencesLibrarySubstance", problem.MessageKey);
+        Assert.Equal("Total", problem.Args["formula"]);
+        Assert.Equal(Shared, problem.Args["name"]);
+        Assert.Equal("Common", problem.Args["library"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Аргумент_формули_бібліотеки_звіряється_з_колонками_викликача()
+    {
+        // Формула бібліотеки читає @Flow з рядка ВИКЛИКАЧА; колонки Flow у його таблиці немає —
+        // у рантаймі це був би #ARG.
+        Formulas([Formula(103, "Total", $"!{Shared} * 2")]);
+        Library(Formula(301, Shared, "@Flow * 2", CommonVersionId));
+
+        _bindings.ListAsync(OwnerId, Arg.Any<CancellationToken>())
+                 .Returns(new List<CalculationBinding> { new(44, 4401, OwnerId, "Total", "{}") });
+        _bindings.ListColumnCodesAsync(Arg.Any<IReadOnlyCollection<int>>(), Arg.Any<CancellationToken>())
+                 .Returns(new Dictionary<int, IReadOnlyList<string>> { [44] = ["Volume"] });
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0438", error.ErrorCode);
+        Assert.Contains("@Flow", error.Message, StringComparison.Ordinal);
         Assert.False(_version.IsPublished);
-        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+
+    private async Task<List<PublishProblem>> ProblemsAsync()
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(VersionId, "Уточнення", From, CancellationToken.None));
+
+        Assert.Equal("ECR-CALC-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-CALC-0422.publishChecksFailed", error.Details!["messageKey"]);
+        Assert.False(_version.IsPublished);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        return Assert.IsType<List<PublishProblem>>(error.Details["problems"]);
+    }
 
     private PublishMethodologyHandler Handler()
         => new(_module, _store, _formulas, _bindings, _uow, _audit, _access, _user, _clock);
@@ -238,9 +299,24 @@ public sealed class ImportedFormulaReferencePublishTests
     private void Imports(List<MethodologyLibrary> libraries)
         => _store.ResolveImportsAsync(VersionId, From, Arg.Any<CancellationToken>()).Returns(libraries);
 
-    private static MethodologyFormula Formula(int id, string code, string expression)
+    /// <summary><c>Common</c> v910 у тих самих режимах, що й версія (Legacy/Actual).</summary>
+    private void Library(params MethodologyFormula[] formulas)
+        => Library(NumericMode.Legacy, CalendarMode.Actual, formulas);
+
+    private void Library(NumericMode numeric, CalendarMode calendar, params MethodologyFormula[] formulas)
     {
-        var formula = new MethodologyFormula(VersionId, EcrCode.Create(code), expression);
+        var library = new MethodologyLibrary(CommonId, "Common", CommonVersionId, [.. formulas.Select(f => f.Code)]);
+        Imports([library]);
+        _store.GetLibraryContentsAsync(VersionId, From, Arg.Any<CancellationToken>())
+              .Returns(new List<MethodologyLibraryContent>
+              {
+                  new(library, numeric, calendar, formulas, []),
+              });
+    }
+
+    private static MethodologyFormula Formula(int id, string code, string expression, int versionId = VersionId)
+    {
+        var formula = new MethodologyFormula(versionId, EcrCode.Create(code), expression);
         SetId(formula, id);
         return formula;
     }

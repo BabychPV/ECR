@@ -94,8 +94,11 @@ internal sealed class LibraryStand
                 .Returns(new List<MethodologyLibraryContent>(contents));
 
     public Task<CalculationOutput> RunAsync(TraceLevel trace = TraceLevel.Full)
-    {
-        var module = new GenericCalculationModule(
+        => Module().ExecuteAsync(Input(trace), CancellationToken.None);
+
+    /// <summary>Справжній модуль над сховищем стенда.</summary>
+    public GenericCalculationModule Module()
+        => new(
             new RealFormulaEngine(),
             Store,
             new ConstantResolver(Substitute.For<IConstantStore>()),
@@ -104,18 +107,17 @@ internal sealed class LibraryStand
             Periods(),
             Bindings());
 
-        return module.ExecuteAsync(
-            new CalculationInput(
-                new MethodologyDescriptor(
-                    CallerId, CallerVersionId, "HSE400", "1.0", CalculationLevel.Configuration,
-                    NumericMode.Strict, CalendarMode.Actual, trace),
-                DocumentId: 700,
-                TableInstanceId: 500,
-                PeriodKey: new PeriodKey(202601),
-                SourceRowKey: "E-2026-01-001",
-                Arguments: [new CalculationArgument("Volume", Volume, null, null)]),
-            CancellationToken.None);
-    }
+    /// <summary>Рядок стенда: Volume = 100.</summary>
+    public static CalculationInput Input(TraceLevel trace)
+        => new(
+            new MethodologyDescriptor(
+                CallerId, CallerVersionId, "HSE400", "1.0", CalculationLevel.Configuration,
+                NumericMode.Strict, CalendarMode.Actual, trace),
+            DocumentId: 700,
+            TableInstanceId: 500,
+            PeriodKey: new PeriodKey(202601),
+            SourceRowKey: "E-2026-01-001",
+            Arguments: [new CalculationArgument("Volume", Volume, null, null)]);
 
     public static MethodologyFormula Formula(
         int versionId, string code, string expression, int order, MethodologyFormulaScope scope, bool visible = false)

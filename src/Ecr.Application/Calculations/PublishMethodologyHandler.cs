@@ -253,6 +253,19 @@ public sealed class PublishMethodologyHandler(
                 resolution.Edges));
         }
 
+        // ⛔ HSE301 L: посилання в бібліотеку ОБЧИСЛЮЄТЬСЯ — модуль рахує формулу бібліотеки в
+        // контексті рядка викликача. Тож перевіряється те саме замикання, яке рахуватиме
+        // прогін (`MethodologyLibraryClosure`), на дату чинності: цикл імпортів, режими,
+        // область, аргументи.
+        var libraries = dependencies.Count == 0
+            ? null
+            : await MethodologyLibraryClosure
+                .LoadAsync(methodologies, formulaEngine, methodology.Id, methodologyVersionId, formulas, effectiveFrom, ct)
+                .ConfigureAwait(false);
+
+        problems.AddRange(await ImportCycleAsync(methodology, imports, effectiveFrom, ct).ConfigureAwait(false));
+        problems.AddRange(LibraryProblems(version, formulas, [.. parsed.Select(p => p.Root)], byCode, libraries));
+
         var constants = await methodologies
             .GetConstantsAsync(methodologyVersionId, ct).ConfigureAwait(false);
         var outputs = await methodologies
@@ -269,7 +282,10 @@ public sealed class PublishMethodologyHandler(
         // вживає, мусить відповідати колонці таблиці, до якої прив'язана
         // методологія — інакше збірка (`CalculationInputBuilder`) не знайде
         // звідки його взяти, і розрахунок «успішно» порахує порожньо.
-        await CheckArgumentColumnsAsync(methodology.Id, parsed, ct).ConfigureAwait(false);
+        // ⛔ HSE301 L: разом з аргументами формул бібліотеки із замикання — вони читають
+        // рядок ВИКЛИКАЧА, і колонки там бракуватиме так само (у рантаймі — #ARG).
+        await CheckArgumentColumnsAsync(methodology.Id, [.. parsed, .. LibraryFormulas(libraries)], ct)
+            .ConfigureAwait(false);
 
         // ⚠ Попередження НЕ валять публікацію (№05 §7): «оголошено,
         // не вжито» чинна система допускала, і ламати через це міграцію не можна.
@@ -828,23 +844,17 @@ public sealed class PublishMethodologyHandler(
 
                 // ⛔ Перехресне посилання дає ребро МІЖ МЕТОДОЛОГІЯМИ, а не між
                 // формулами: формули бібліотеки не входять у топологічний
-                // порядок цієї версії — вони рахуються своєю. Без цього ребра
-                // порядок перерахунку неповний, і `HSE400` читає торішній
-                // результат `Common` без жодної помилки в журналі.
+                // порядок цієї версії. Ребро — для інвалідації: зміна `Common`
+                // тягне перерахунок `HSE400`.
                 //
-                // ⛔ A3 (аудит 2026-09-28): і водночас — відмова публікації.
-                // Резолвінг тут є, а в рантаймі немає: контекст обчислення
-                // (`MethodologyEvaluationContext.GetFormulaResult`) бачить лише
-                // формули СВОЄЇ версії, і модуль бібліотечних не підкладає. Тож
-                // таке посилання публікувалося, а кожен прогін давав `#REF` і
-                // мовчки не писав вихід. Жодна опублікована чи сідова методологія
-                // його не вживає (розвідка A3), тому заборона нічого не ламає; її
-                // знімають разом із резолвінгом у модулі, а не окремо. Ребро
-                // лишається, щоб зняття заборони було одним рядком.
+                // ✎ HSE301 L: заборону аудиту A3 (`importedFormulaNotEvaluated`)
+                // знято — модуль обчислює формулу бібліотеки в контексті рядка
+                // викликача (`GenericCalculationModule`, `LibraryRun`), а не
+                // читає записаний результат бібліотеки, тож порядок прогону між
+                // методологіями на число не впливає. Замикання перевіряється
+                // нижче (`LibraryProblems`, `ImportCycleAsync`).
                 case MethodologyReferenceOutcome.Imported:
                     dependencies.Add(reference.MethodologyId!.Value);
-                    problems.Add(ImportedFormulaNotEvaluated(
-                        formula.Code, code, parsed.Expression.Root, imports, reference.MethodologyId.Value));
                     break;
 
                 // ⛔ Неоднозначність між двома бібліотеками — відмова, а не
@@ -878,39 +888,156 @@ public sealed class PublishMethodologyHandler(
     }
 
     /// <summary>
-    /// Проблема «посилання на формулу імпортованої методології рантайм не
-    /// обчислює» — з позицією посилання у виразі (аудит A3).
+    /// Цикл імпортів: транзитивний обхід оголошених імпортів дійшов до власної методології
+    /// (HSE301 L, <c>importCycle</c>).
     /// </summary>
-    /// <param name="formulaCode">Формула, що посилається.</param>
-    /// <param name="name">Ім'я після <c>!</c>, як його віддав обхід залежностей.</param>
-    /// <param name="root">Корінь розібраного виразу — звідти береться позиція.</param>
-    /// <param name="imports">Імпорти на дату чинності.</param>
-    /// <param name="methodologyId">Методологія, у яку резолвилося посилання.</param>
+    /// <param name="methodology">Методологія, що публікується.</param>
+    /// <param name="imports">Її імпорти на дату чинності.</param>
+    /// <param name="onDate">Дата чинності — версії бібліотек добираються на неї.</param>
+    /// <param name="ct">Токен скасування.</param>
     /// <remarks>
-    /// ⚠ Позиція — перше входження <c>!name</c> у виразі (позиція знака
-    /// <c>!</c>, як у діагностиках парсера). Кілька входжень того самого імені —
-    /// одна проблема: виправлення в усіх однакове.
+    /// ⚠ Обхід — усіх оголошених імпортів, а не лише тих, на які посилаються формули: цикл
+    /// в оголошеннях — дефект конфігурації сам по собі, і перше ж нове посилання замкнуло б
+    /// його і в графі залежностей. Рантайм має власний захист (<c>#CYCLE</c>), бо бібліотеку
+    /// можуть перевидати вже після цієї публікації.
     /// </remarks>
-    private static PublishProblem ImportedFormulaNotEvaluated(
-        string formulaCode,
-        string name,
-        Ecr.Expressions.Ast.AstNode root,
-        IReadOnlyList<MethodologyLibrary> imports,
-        int methodologyId)
+    private async Task<IEnumerable<PublishProblem>> ImportCycleAsync(
+        Methodology methodology, IReadOnlyList<MethodologyLibrary> imports, DateOnly onDate, CancellationToken ct)
     {
-        var library = imports.First(l => l.MethodologyId == methodologyId).MethodologyCode;
-        var at = PositionOf(root, name);
+        var parents = new Dictionary<int, (int From, string Code)>();
+        var visited = new HashSet<int>();
+        var pending = new Queue<(MethodologyLibrary Library, int From)>(imports.Select(i => (i, methodology.Id)));
 
-        return PublishProblem.Of(
-            "publish.problem.importedFormulaNotEvaluated",
-            $"Формула «{formulaCode}»: посилання «!{name}» (позиція {at}) веде у формулу імпортованої "
-            + $"методології «{library}», а розрахунок імпортованих формул не обчислює — щоразу був би #REF. "
-            + "Перенесіть формулу в цю версію.",
-            ("formula", formulaCode),
-            ("name", name),
-            ("position", at),
-            ("library", library));
+        while (pending.TryDequeue(out var item))
+        {
+            var (library, from) = item;
+
+            if (library.MethodologyId == methodology.Id)
+            {
+                var chain = new List<string>();
+                for (var id = from; id != methodology.Id; id = parents[id].From)
+                {
+                    chain.Add(parents[id].Code);
+                }
+
+                chain.Reverse();
+                var path = string.Join(" → ", [methodology.Code, .. chain, methodology.Code]);
+
+                return [PublishProblem.Of(
+                    "publish.problem.importCycle",
+                    $"Імпорти методологій утворюють цикл: {path}. Методологія не може брати власні "
+                    + "формули через імпорти — розрахунок дав би #CYCLE.",
+                    ("chain", path))];
+            }
+
+            if (library.MethodologyVersionId is not { } versionId || !visited.Add(versionId))
+            {
+                continue;
+            }
+
+            parents.TryAdd(library.MethodologyId, (from, library.MethodologyCode));
+
+            foreach (var next in await methodologies.ResolveImportsAsync(versionId, onDate, ct).ConfigureAwait(false))
+            {
+                pending.Enqueue((next, library.MethodologyId));
+            }
+        }
+
+        return [];
     }
+
+    /// <summary>
+    /// Проблеми замикання бібліотечних формул (HSE301 L): режими бібліотеки і область
+    /// посилання з Row-формули.
+    /// </summary>
+    /// <param name="version">Версія, що публікується.</param>
+    /// <param name="formulas">Її формули.</param>
+    /// <param name="roots">Корені розібраних виразів у тому самому порядку.</param>
+    /// <param name="byCode">Код своєї формули → ідентифікатор.</param>
+    /// <param name="libraries">Замикання; <c>null</c> — посилань за межу версії немає.</param>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><c>importModeMismatch</c>: формула бібліотеки рахується в арифметиці й календарі
+    /// ВИКЛИКАЧА. Інший режим бібліотеки означав би, що та сама формула дає тут інше число,
+    /// ніж у самій бібліотеці, — і жоден тест бібліотеки цього не бачив.</item>
+    /// <item><c>rowScopeReferencesLibrarySubstance</c>: Row-формула рахується раз на рядок,
+    /// без речовини, а формула речовини бібліотеки має значення лише для речовини — те
+    /// саме правило, що <c>rowScopeReferencesSubstance</c> для своїх формул.</item>
+    /// </list>
+    /// </remarks>
+    private static IEnumerable<PublishProblem> LibraryProblems(
+        MethodologyVersion version,
+        IReadOnlyList<MethodologyFormula> formulas,
+        IReadOnlyList<Ecr.Expressions.Ast.AstNode?> roots,
+        Dictionary<string, int> byCode,
+        CalculationLibraries? libraries)
+    {
+        if (libraries is null)
+        {
+            yield break;
+        }
+
+        foreach (var library in libraries.Versions.Where(
+                     l => l.NumericMode != version.NumericMode || l.CalendarMode != version.CalendarMode))
+        {
+            yield return PublishProblem.Of(
+                "publish.problem.importModeMismatch",
+                $"Імпортована методологія «{library.MethodologyCode}» рахує в режимах "
+                + $"{library.NumericMode}/{library.CalendarMode}, а ця версія — {version.NumericMode}/"
+                + $"{version.CalendarMode}: її формули дали б тут інші числа, ніж у самій бібліотеці.",
+                ("library", library.MethodologyCode),
+                ("libraryNumeric", library.NumericMode.ToString()),
+                ("libraryCalendar", library.CalendarMode.ToString()),
+                ("numeric", version.NumericMode.ToString()),
+                ("calendar", version.CalendarMode.ToString()));
+        }
+
+        var versions = libraries.Versions.ToDictionary(v => v.MethodologyVersionId);
+
+        for (var i = 0; i < formulas.Count; i++)
+        {
+            if (formulas[i].Scope != MethodologyFormulaScope.Row || roots[i] is not { } root)
+            {
+                continue;
+            }
+
+            var names = FormulaReferences(root)
+                .Select(r => r.Name)
+                .Where(name => !byCode.ContainsKey(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var name in names)
+            {
+                if (!libraries.Imports.TryGetValue(name, out var link)
+                    || link.IsCycle
+                    || !versions.TryGetValue(link.MethodologyVersionId, out var library)
+                    || library.Formulas.FirstOrDefault(
+                           f => string.Equals(f.Code, name, StringComparison.OrdinalIgnoreCase)) is not { } target
+                    || target.Scope == MethodologyFormulaScope.Row)
+                {
+                    continue;
+                }
+
+                yield return PublishProblem.Of(
+                    "publish.problem.rowScopeReferencesLibrarySubstance",
+                    $"Формула «{formulas[i].Code}» рахується раз на рядок, але «!{name}» методології "
+                    + $"«{library.MethodologyCode}» має значення лише для речовини.",
+                    ("formula", formulas[i].Code),
+                    ("name", name),
+                    ("library", library.MethodologyCode));
+            }
+        }
+    }
+
+    /// <summary>Формули замикання бібліотек як вхід перевірки аргументів.</summary>
+    private IEnumerable<ParsedFormula> LibraryFormulas(CalculationLibraries? libraries)
+        => libraries?.Versions
+               .SelectMany(v => v.Formulas)
+               .Select(f => new ParsedFormula(
+                   f.Code,
+                   f.ResultType,
+                   formulaEngine.Parse(f.Expression, ExpressionDialect.Methodology).Expression?.Root))
+           ?? [];
 
     /// <summary>
     /// Проблема «посилання <c>!Name</c> не веде ні у формулу цієї версії, ні в

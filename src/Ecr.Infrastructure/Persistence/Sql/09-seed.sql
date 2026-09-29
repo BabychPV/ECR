@@ -668,7 +668,9 @@ DELETE t
     (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value). Saving will clear them unless you already edited this column in this session.'),
     (N'columns.partialDataWarning',                N'en', N'This column carries fields not shown here (precision, lookup, unit, default value, style). Saving will clear them unless you already edited this column in this session.'),
     -- X-32: «ще не перевіряли» — `200` з `validated: false`, а не відмова `404`.
-    (N'err.ECR-DOC-0404.notValidated',             N'en', N'Document {documentId} has not been validated for period {periodKey} yet.')
+    (N'err.ECR-DOC-0404.notValidated',             N'en', N'Document {documentId} has not been validated for period {periodKey} yet.'),
+    -- HSE301 L: формулу імпортованої методології розрахунок тепер обчислює — заборону A3 знято.
+    (N'publish.problem.importedFormulaNotEvaluated', N'en', N'Formula {formula}: reference !{name} at position {position} points to a formula of imported methodology {library}, but calculations do not evaluate imported formulas, so it would always give #REF. Copy the formula into this version.')
   ) AS s ([Key], Lang, OldVal)
     ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
  WHERE t.Value = s.OldVal COLLATE Latin1_General_BIN2;
@@ -4760,11 +4762,6 @@ USING (VALUES
     (N'err.ECR-CALC-0422.constantsOverCap', N'en', N'Methodology version {methodologyVersionId} has more than {cap} constants: they cannot all be read, and a constant left out would silently evaluate to #REF.', 1),
     -- HSE301:A1P1 ── кінець секції
 
-    -- HSE301:A3 ── посилання !Code у формулу імпортованої методології (аудит A3):
-    -- рантайм обчислює лише формули своєї версії, тому публікація таке посилання відхиляє.
-    (N'publish.problem.importedFormulaNotEvaluated', N'en', N'Formula {formula}: reference !{name} at position {position} points to a formula of imported methodology {library}, but calculations do not evaluate imported formulas, so it would always give #REF. Copy the formula into this version.', 1),
-    -- HSE301:A3 ── кінець секції
-
     -- HSE301:A7 ── SQL-джерело: мітка часу точки (аудит A7). Рядок із непрочитаною міткою
     -- або мітки не по черзі — відмова інтервалу, а не мовчазний пропуск із повним покриттям.
     (N'err.ECR-INT-0422.timestampUnreadable', N'en', N'The value query of source "{dataSource}" returned Ts of type {valueType} for "{sourcePath}". Only datetimeoffset or a date/time type without offset (read as UTC) can be used, so this interval is not recorded as collected.', 1),
@@ -4800,6 +4797,12 @@ USING (VALUES
     -- HSE301:L ── резолвінг бібліотечних формул (!Code в імпортовану методологію):
     -- публікація називає посилання, що не веде нікуди (ФВ-9.14, FORMULA_NOT_FOUND).
     (N'publish.problem.formulaNotFound', N'en', N'Formula {formula}: reference !{name} at position {position} does not match a formula of this version or of any imported methodology, so it would always give #REF.', 1),
+    -- Формула бібліотеки рахується в контексті рядка викликача: цикл імпортів, інші режими
+    -- і формула речовини бібліотеки з Row-формули — відмови публікації. Ключ A3
+    -- importedFormulaNotEvaluated прибрано (секція «Прибрані ключі»).
+    (N'publish.problem.importCycle', N'en', N'Imported methodologies form a cycle: {chain}. A methodology cannot use its own formulas through its imports; the calculation would give #CYCLE.', 1),
+    (N'publish.problem.importModeMismatch', N'en', N'Imported methodology {library} calculates in {libraryNumeric}/{libraryCalendar} mode, but this version uses {numeric}/{calendar}: its formulas would give different numbers here than in the library itself.', 1),
+    (N'publish.problem.rowScopeReferencesLibrarySubstance', N'en', N'Formula {formula} is calculated once per row, but !{name} of imported methodology {library} has a value only for a substance. Make {formula} a per-substance formula or remove the reference.', 1),
     -- HSE301:L ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
