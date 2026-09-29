@@ -29,17 +29,25 @@ public sealed class GrantableProjectsApiTests(SqlServerFixture sql)
 {
     private const string Password = "Grantable-Projects-2026!";
 
-    [Fact]
+    /// <remarks>
+    /// ✎ 2026-09-29 (рішення координатора): довідник відкритий і під
+    /// <c>Security.ManageUsers</c> — форма ролей користувача вибирає з нього
+    /// область дії (ФВ-6.14). ⛔ МУТАЦІЯ: прибрати друге право з перевірки —
+    /// випадок <c>Security.ManageUsers</c> червоніє.
+    /// </remarks>
+    [Theory]
+    [InlineData("Security.ManageRoles")]
+    [InlineData("Security.ManageUsers")]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-207")]
-    public async Task Адмін_безпеки_без_грантів_бачить_код_і_назву_проєкту_і_нічого_більше()
+    public async Task Адмін_безпеки_без_грантів_бачить_код_і_назву_проєкту_і_нічого_більше(string permission)
     {
         var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(true);
         var (code, name) = await ProjectAsync(b.ProjectId).ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
-        using var admin = await SignedInAsync(app, scope: null, "Security.ManageRoles").ConfigureAwait(true);
+        using var admin = await SignedInAsync(app, scope: null, permission).ConfigureAwait(true);
 
         using var response = await admin.GetAsync(Uri("/api/v1/security/projects")).ConfigureAwait(true);
         var body = await response.Content.ReadAsStringAsync().ConfigureAwait(true);
@@ -79,13 +87,13 @@ public sealed class GrantableProjectsApiTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "D-207")]
-    public async Task Без_Security_ManageRoles_перелік_закритий_навіть_із_грантом_на_проєкт()
+    public async Task Без_обох_прав_безпеки_перелік_закритий_навіть_із_грантом_на_проєкт()
     {
         var b = await new TestDocumentBuilder(sql.ConnectionString).BuildAsync().ConfigureAwait(true);
 
         using var app = new EcrApiFactory(sql);
         using var viewer = await SignedInAsync(
-            app, scope: null, grant: b.ProjectId, "Document.View", "Security.ManageUsers").ConfigureAwait(true);
+            app, scope: null, grant: b.ProjectId, "Document.View", "Security.Simulate").ConfigureAwait(true);
 
         await AssertForbiddenAsync(viewer, app).ConfigureAwait(true);
     }

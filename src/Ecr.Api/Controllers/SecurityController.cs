@@ -196,7 +196,8 @@ public sealed class SecurityController(
     }
 
     /// <summary>
-    /// Код і назва всіх проєктів — для видачі грантів. Право <c>Security.ManageRoles</c>.
+    /// Код і назва всіх проєктів — для видачі грантів і області призначення
+    /// ролі (ФВ-6.14). Право <c>Security.ManageRoles</c> або <c>Security.ManageUsers</c>.
     /// </summary>
     /// <param name="ct">Токен скасування.</param>
     /// <remarks>
@@ -205,6 +206,8 @@ public sealed class SecurityController(
     /// на нього грант. Тут — лише <c>id</c>, <c>code</c>, <c>nameL10n</c>:
     /// жодних станів, періодів чи документів; дані проєкту лишаються за грантами.
     /// Право глобальне — роль з областю дії (ФВ-6.14) його не дає.
+    /// ✎ 2026-09-29: досить і <c>Security.ManageUsers</c> — форма ролей
+    /// користувача вибирає з цього довідника область дії.
     /// </remarks>
     [HttpGet("security/projects")]
     [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.GrantableProject>>(StatusCodes.Status200OK)]

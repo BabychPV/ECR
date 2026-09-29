@@ -157,10 +157,32 @@ public sealed class ListResourceGrantsHandler(
     /// </remarks>
     public async Task<IReadOnlyList<GrantableProject>> ListProjectsAsync(CancellationToken ct)
     {
-        await RequireAsync(access, currentUser, ct).ConfigureAwait(false);
+        // ✎ Рішення координатора 2026-09-29: той самий довідник потрібен формі
+        // ролей користувача для області дії (ФВ-6.14), а вона живе під
+        // `Security.ManageUsers`. Досить ОДНОГО з двох прав; даних проєкту
+        // перелік однаково не відкриває.
+        var userId = currentUser.UserId
+            ?? throw new AccessDeniedException(
+                "ECR-AUTH-0401", "Потрібна автентифікація.",
+                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
+
+        var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
+        if (!profile.Has(Permission) && !profile.Has(ProjectCatalogAltPermission))
+        {
+            throw new AccessDeniedException(
+                "ECR-AUTH-0403", $"Потрібне право {Permission} або {ProjectCatalogAltPermission}.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                    ["permission"] = Permission,
+                });
+        }
 
         return await nameResolver.ListProjectsAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>Друге право, що відкриває довідник проєктів: область призначення ролі (ФВ-6.14).</summary>
+    public const string ProjectCatalogAltPermission = "Security.ManageUsers";
 
     /// <summary>Перевіряє право поточного користувача.</summary>
     /// <param name="access">Служба рішень доступу.</param>
