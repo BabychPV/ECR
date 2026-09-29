@@ -59,11 +59,23 @@ public sealed class JobWorkerStartupTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => worker.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5)));
         await worker.StopAsync(CancellationToken.None);
         await queue.DidNotReceiveWithAnyArgs().ClaimAsync(default!, default!, default, default);
+        queue.ClearReceivedCalls();
 
         // Та сама роль, що вже зафіксована, — claim іде від імені ЦЬОГО процесу.
+        // ⚠ Чекаємо сам claim, а не фіксовані 200 мс: у .NET 10 ExecuteAsync стартує
+        // через пул потоків, і під навантаженням CI (run 36609214718) StopAsync
+        // встигав скасувати цикл раніше за перший claim — «received no matching calls».
+        var claimed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        queue.ClaimAsync(default!, default!, default, default)
+            .ReturnsForAnyArgs(_ =>
+            {
+                claimed.TrySetResult();
+                return Task.FromResult<ClaimedJob?>(null);
+            });
+
         var same = Worker(queue, new RecordingLogger<JobWorker>(), JobProgressStore.CurrentRole, TimeSpan.FromMinutes(1));
         await same.StartAsync(CancellationToken.None);
-        await Task.Delay(200);
+        await claimed.Task.WaitAsync(TimeSpan.FromSeconds(30));
         await same.StopAsync(CancellationToken.None);
 
         await queue.Received().ClaimAsync(
