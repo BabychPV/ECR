@@ -34,6 +34,11 @@ internal static class DeployArguments
             // немає, замість вимагати окремого кроку адміністратора БД
             // заздалегідь (`docs/build/11-install-guide.md` §0, оновлено).
             new("CreateDatabaseIfMissing", null),
+
+            // ⛔ S11: без сертифіката служба в Production не стартує, і
+            // deploy-ecr.ps1 зупиняється на кроці 1. Відбиток уже перевірено
+            // майстром (крок сертифіката й «Огляд»), скрипт перевіряє ще раз.
+            new("DataProtectionThumbprint", state.DataProtectionThumbprint),
         };
 
         if (state.Mode == WizardMode.FirstDeployment)

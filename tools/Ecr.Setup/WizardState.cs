@@ -54,4 +54,25 @@ internal sealed class WizardState
 
     // Крок 4 — пароль адміністратора (лише для FirstDeployment).
     public SecureString? BootstrapPassword { get; set; }
+
+    // Крок «Сертифікат Data Protection» (S11): відбиток із Cert:\LocalMachine\My.
+    // Не секрет — хеш публічного сертифіката; тому звичайний рядок.
+    private string? _dataProtectionThumbprint;
+
+    public string? DataProtectionThumbprint
+    {
+        get => _dataProtectionThumbprint;
+        set
+        {
+            var normalized = DataProtectionCertificateRules.Normalize(value);
+            _dataProtectionThumbprint = normalized.Length == 0 ? null : normalized;
+        }
+    }
+
+    /// <summary>
+    /// Чи годиться збережений відбиток зараз (S11) — перед стартом
+    /// розгортання, а не лише при виборі на кроці.
+    /// </summary>
+    public bool TryValidateDataProtection(ICertificateSource source, DateTime now, out string error)
+        => DataProtectionCertificateRules.TryValidate(DataProtectionThumbprint, source, now, out error);
 }

@@ -28,14 +28,16 @@
   </ItemGroup>
 
   <!--
-    Чиста логіка майстра встановлення (tools/Ecr.Setup) — стан, параметри
-    deploy-ecr.ps1. Посиланням на файли, а не ProjectReference: Ecr.Setup —
-    net10.0-windows з WinForms і Microsoft.PowerShell.SDK, його не зібрати на
-    Linux-раннері CI і не підключити до net10.0-проєкту. Підключені файли не
-    залежать ні від WinForms, ні від PowerShell — саме для цього їх і винесено.
+    S11: чиста логіка майстра встановлення (tools/Ecr.Setup) — стан,
+    правила вибору сертифіката Data Protection, параметри deploy-ecr.ps1.
+    Посиланням на файли, а не ProjectReference: Ecr.Setup — net10.0-windows
+    з WinForms і Microsoft.PowerShell.SDK, його не зібрати на Linux-раннері CI
+    і не підключити до net10.0-проєкту. Ці три файли не залежать ні від
+    WinForms, ні від PowerShell — саме для цього їх і винесено.
   -->
   <ItemGroup>
     <Compile Include="..\..\tools\Ecr.Setup\WizardState.cs" Link="Setup\Linked\WizardState.cs" />
+    <Compile Include="..\..\tools\Ecr.Setup\DataProtectionCertificates.cs" Link="Setup\Linked\DataProtectionCertificates.cs" />
     <Compile Include="..\..\tools\Ecr.Setup\DeployArguments.cs" Link="Setup\Linked\DeployArguments.cs" />
   </ItemGroup>
 
