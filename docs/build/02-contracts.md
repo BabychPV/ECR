@@ -2414,6 +2414,42 @@ public interface IJobProgressStore
 }
 ```
 
+#### `IJobQueue`
+
+Черга фонових задач у базі (`MI-02`, `D-208`): рядки `itg.JobProgress` з
+`Lane IS NOT NULL`; `Lane IS NULL` — дзеркало Quartz, черга його не чіпає.
+Лейни — лише константи `JobLanes` (`default`, `recalc`; сторож
+`JobLaneTests`). Моменти (`AvailableAt`, `LeaseUntil`) — годинник СУБД.
+Постановка — у поточній транзакції `EcrDbContext`; наявна `Queued` на той
+самий `TargetKey` поглинає постановку. Claim: прострочені `Running` першими,
+`Queued` — лише без `Running` на ціль; 2601/2627 = «нічого не взяв».
+Оренда — `JobClaimToken` (fencing), переклейми рахує `ReclaimCount`
+(межа `JobQueueLimits.MaxReclaims`). `IJobLeaseContext.Current` — оренда
+задачі поточного scope. Реалізації — F1b (`DbJobQueue`), F1c (воркер).
+
+```csharp
+public interface IJobQueue
+{
+    public Task<JobEnqueueResult> EnqueueAsync(JobEnqueueRequest request, CancellationToken ct);
+    public Task<ClaimedJob?> ClaimAsync(IReadOnlyCollection<string> lanes, string owner, TimeSpan lease, CancellationToken ct);
+    public Task<LeaseState> RenewAsync(JobClaimToken claim, TimeSpan lease, CancellationToken ct);
+    public Task<bool> FenceAsync(JobClaimToken claim, CancellationToken ct);
+    public Task<bool> CompleteAsync(JobClaimToken claim, CancellationToken ct);
+    public Task<bool> FailAsync(JobClaimToken claim, string reason, string? errorCode, CancellationToken ct);
+    public Task<bool> RequeueAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct);
+    public Task<bool> AcknowledgeCancelAsync(JobClaimToken claim, CancellationToken ct);
+    public Task<CancelOutcome> RequestCancelAsync(string jobId, CancellationToken ct);
+    public Task<bool> IsCancelRequestedAsync(string jobId, CancellationToken ct);
+    public Task<bool> RestartAsync(string jobId, CancellationToken ct);
+    public Task<int> ExpireAsync(int maxReclaims, CancellationToken ct);
+}
+
+public interface IJobLeaseContext
+{
+    public JobClaimToken? Current { get; }
+}
+```
+
 #### `ICorrelationIdAccessor`
 
 Кореляція поточного HTTP-запиту (`X-Correlation-Id`, та сама, що в лозі) для

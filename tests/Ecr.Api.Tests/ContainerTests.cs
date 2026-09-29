@@ -164,9 +164,14 @@ public sealed class ContainerTests(SqlServerFixture sql)
         // ЗМЕНШУВАТИСЯ: порт, який уже реалізували, але забули прибрати
         // звідси, знову робить пропуск невидимим.
         //
-        // ⚠ Список ПОРОЖНІЙ: етапів попереду більше немає, і кожен порт
-        // застосунку має реалізацію.
-        string[] deferred = [];
+        // ⚠ Порти черги MI-02 (D-208) — F1b/F1c: F1a завів порт разом зі
+        // схемою; DbJobQueue — F1b, JobLeaseContext — F1c. Прибрати з появою
+        // реалізацій.
+        string[] deferred =
+        [
+            nameof(Ecr.Application.Ports.IJobQueue),
+            nameof(Ecr.Application.Ports.IJobLeaseContext),
+        ];
 
         // ⚠ Збірки підвантажуються ЯВНО. `AppDomain.GetAssemblies()` бачить
         // лише те, що вже завантажив CLR, а завантажує він ліниво — на першу
