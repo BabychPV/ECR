@@ -53,6 +53,15 @@
                              попередження, не провал; будь-яка інша Unhealthy
                              після тайм-ауту — провал розгортання.
 
+    ФВ-9.8 / D-206 (P2) додали до кроків:
+      1. редакція й версія SQL Server (SERVERPROPERTY): друкується; нижче
+         2016 SP1 — зупинка; Express — зупинка без -AllowExpress;
+      3. WORKER_ENABLED=1|0 у msiexec за -EnableWorker (служба EcrWorker);
+      4. рядок підключення — ще й у Services\EcrWorker\Environment;
+      5. Database:EditionMode — визначене значення в Environment служб, якщо
+         оператор не задав його явно (-EditionMode, файл майданчика, Environment);
+      6. перезапуск EcrWorker і перевірка, що він не впав одразу.
+
     Крок схеми виконується під `-SqlLogin`/інтегрованими обліковими даними
     ВИКОНАВЦЯ скрипта (DBA), НІКОЛИ під `-ServiceAccount`: сервісний
     обліковий запис застосунку не має DDL-прав у PROD (`D-66`,
@@ -181,6 +190,31 @@
     Скільки секунд кроку 7 чекати, поки /health/ready стане Healthy або
     Degraded (після того, як /health/live уже відповів). За замовчуванням 180.
 
+.PARAMETER EnableWorker
+    Встановити й запустити службу EcrWorker — наглядач пулу воркерів
+    перерахунку (ФВ-9.8, D-206; `installer/Ecr.Installer/Worker.wxs`).
+    Передається в msiexec як WORKER_ENABLED=1; без прапорця — WORKER_ENABLED=0,
+    тобто стан командного рядка = бажаний стан: оновлення БЕЗ -EnableWorker
+    прибирає раніше встановлену службу воркера (крок 3 про це попереджає).
+    Секрети — той самий рядок підключення, у
+    `HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`; обліковий
+    запис — той самий -ServiceAccount.
+
+.PARAMETER EditionMode
+    Явний `Database:EditionMode` (Auto | Standard | Enterprise) — пишеться в
+    Environment служб як ECR_Database__EditionMode і перекриває все.
+    Без параметра скрипт визначає редакцію SQL Server сам (крок 1) і пише
+    визначене значення, ЛИШЕ якщо оператор не задав його раніше: ні в
+    `%ProgramData%\ECR\config\appsettings.Production.json` (Database:EditionMode),
+    ні в Environment служби EcrApi. Змінна оточення перекриває файл, тому
+    запис поверх явного значення у файлі тихо його скасував би — цього скрипт
+    не робить ніколи.
+
+.PARAMETER AllowExpress
+    Дозволити SQL Server Express — лише для dev/стенда. Без прапорця Express
+    зупиняє розгортання на кроці 1: SQL Server Agent там немає (регламентні
+    завдання 14-agent-jobs.sql не створюються), межа — 10 ГБ на базу.
+
 .EXAMPLE
     # Побачити повний план, нічого не роблячи в системі
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
@@ -225,7 +259,10 @@ param(
     [switch] $SkipSchema,
     [switch] $FirstDeployment,
     [switch] $CreateDatabaseIfMissing,
-    [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180
+    [ValidateRange(10, 3600)] [int] $ReadyTimeoutSeconds = 180,
+    [switch] $EnableWorker,
+    [ValidateSet('Auto', 'Standard', 'Enterprise')] [string] $EditionMode,
+    [switch] $AllowExpress
 )
 
 $ErrorActionPreference = 'Stop'
@@ -389,6 +426,133 @@ function Test-ConfigIsPlaceholder {
     }
 }
 
+# ⚠ Чиста функція (D-134): рішення про редакцію SQL Server без мережі —
+# перевіряється на готових значеннях SERVERPROPERTY, а не лише на живому
+# інстансі (Standard/Express/2014 на машині розробника немає).
+# Вхід — EngineEdition, ProductVersion, Edition (рядок). Вихід:
+#   Name  — людська назва (Standard / Enterprise / Developer / Evaluation / Express),
+#   Mode  — значення Database:EditionMode для запису, або $null (не записувати),
+#   Stop  — причина зупинки розгортання, або $null,
+#   Note  — пояснення вибору для друку.
+#
+# ⛔ Developer і Evaluation мають EngineEdition = 3, як Enterprise (04-environment.md
+# §6), але відрізняються рядком Edition. Для них — Standard: це стенди, а
+# ліцензія продуктиву, під яку їх наближають, невідома; Standard — базова
+# редакція, бюджет має витримуватися на ній (D-103). Enterprise пишеться лише
+# за справжнього «Enterprise Edition».
+function Resolve-SqlEdition {
+    param(
+        [Parameter(Mandatory)] [int] $EngineEdition,
+        [Parameter(Mandatory)] [string] $ProductVersion,
+        [string] $Edition = '',
+        [switch] $AllowExpress
+    )
+
+    $parts = $ProductVersion.Split('.')
+    $major = 0
+    $build = 0
+    [void] [int]::TryParse($parts[0], [ref] $major)
+    if ($parts.Count -gt 2) { [void] [int]::TryParse($parts[2], [ref] $build) }
+
+    $name = switch ($EngineEdition) {
+        2 { 'Standard' }
+        3 {
+            if ($Edition -match 'Developer') { 'Developer' }
+            elseif ($Edition -match 'Evaluation') { 'Evaluation' }
+            else { 'Enterprise' }
+        }
+        4 { 'Express' }
+        default { "EngineEdition $EngineEdition" }
+    }
+
+    $result = [pscustomobject]@{ Name = $name; Major = $major; Mode = $null; Stop = $null; Note = '' }
+
+    # ⛔ Підлога — 2016 SP1 (13.0.4001): до SP1 партиціонування, columnstore і
+    # компресія лише в Enterprise, OPENJSON і CREATE OR ALTER — з 2016 SP1.
+    if ($major -lt 13 -or ($major -eq 13 -and $build -lt 4001)) {
+        $result.Stop = "SQL Server $ProductVersion ($name) нижче мінімальної версії 2016 SP1 (13.0.4001): " +
+            "модель архівації (партиціонування, columnstore, компресія) і OPENJSON там недоступні."
+        return $result
+    }
+
+    switch ($name) {
+        'Standard'   { $result.Mode = 'Standard' }
+        'Enterprise' { $result.Mode = 'Enterprise' }
+        'Developer'  { $result.Mode = 'Standard'; $result.Note = 'Developer = Enterprise за можливостями, але це стенд: режим Standard (D-103).' }
+        'Evaluation' { $result.Mode = 'Standard'; $result.Note = 'Evaluation = Enterprise на 180 днів: режим Standard, щоб не залежати від тимчасової ліцензії.' }
+        'Express' {
+            if ($AllowExpress) {
+                $result.Mode = 'Standard'
+                $result.Note = 'Express дозволено -AllowExpress (dev): завдань SQL Agent не буде, межа 10 ГБ на базу.'
+            }
+            else {
+                $result.Stop = "SQL Server Express непридатний для розгортання: немає SQL Server Agent " +
+                    "(регламентні завдання 14-agent-jobs.sql не створюються), межа 10 ГБ на базу. " +
+                    "Для dev-стенда — явний дозвіл -AllowExpress."
+            }
+        }
+        default {
+            $result.Note = "Невідома редакція ($name) — Database:EditionMode не записується, застосунок визначить сам (Auto)."
+        }
+    }
+
+    return $result
+}
+
+# ⚠ Чиста функція (D-134): чи писати ECR_Database__EditionMode і яке значення.
+# Порядок пріоритету — явне завжди сильніше за визначене:
+#   1. -EditionMode              → писати його;
+#   2. значення у файлі майданчика → НЕ писати (змінна оточення перекрила б
+#      файл, ProgramDataConfiguration.cs);
+#   3. значення вже в Environment → НЕ писати (оператор чи попереднє розгортання);
+#   4. визначена редакція         → писати її;
+#   5. інакше                     → не писати (застосунок — Auto).
+function Resolve-EditionModeWrite {
+    param(
+        [string] $Explicit,
+        [string] $Detected,
+        [string] $FileValue,
+        [string] $EnvironmentValue
+    )
+
+    if ($Explicit) { return [pscustomobject]@{ Write = $true; Value = $Explicit; Reason = "явно, -EditionMode $Explicit" } }
+    if ($FileValue) { return [pscustomobject]@{ Write = $false; Value = $FileValue; Reason = "задано у appsettings.Production.json ($FileValue) — не перезаписую" } }
+    if ($EnvironmentValue) { return [pscustomobject]@{ Write = $false; Value = $EnvironmentValue; Reason = "уже в Environment служби ($EnvironmentValue) — не перезаписую" } }
+    if ($Detected) { return [pscustomobject]@{ Write = $true; Value = $Detected; Reason = "визначено за редакцією SQL Server" } }
+    return [pscustomobject]@{ Write = $false; Value = $null; Reason = 'редакцію не визначено — застосунок визначить сам (Auto)' }
+}
+
+# Database:EditionMode з файлу майданчика або $null. Файл, що не парситься, —
+# теж $null: крок 5 уже попередив про нього, вгадувати не беремося.
+function Get-ConfiguredEditionMode {
+    param([string] $Path)
+
+    if (-not (Test-Path $Path)) { return $null }
+    try { $json = Get-Content $Path -Raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { return $null }
+    if (-not $json -or -not $json.PSObject.Properties['Database']) { return $null }
+    $database = $json.Database
+    if (-not $database -or -not $database.PSObject.Properties['EditionMode']) { return $null }
+    $value = [string] $database.EditionMode
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    return $value
+}
+
+# Значення змінної з Environment служби або $null (служби ще немає — теж $null).
+function Get-ServiceEnvironmentValue {
+    param(
+        [Parameter(Mandatory)] [string] $ServiceName,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $keyPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+    $prop = Get-ItemProperty -Path $keyPath -Name Environment -ErrorAction SilentlyContinue
+    if (-not $prop) { return $null }
+    $entry = @($prop.Environment) | Where-Object { $_ -like "$Name=*" } | Select-Object -First 1
+    if (-not $entry) { return $null }
+    return $entry.Substring($Name.Length + 1)
+}
+
 # ⚠ ПЕРЕДУМОВИ — до будь-якої зміни системи (дешевша відмова тут, ніж на
 # кроці 3 з наполовину встановленою службою).
 Write-Step "Крок 1/7: передумови"
@@ -534,6 +698,34 @@ function Invoke-DeploySql {
     }
 }
 
+# Запит із результатом (рядки виводу sqlcmd без заголовків, стовпці через '|').
+# Під ShouldProcess, як і Invoke-DeploySql: -WhatIf — жодного sqlcmd. $null,
+# якщо не виконувався.
+function Invoke-DeployQuery {
+    param(
+        [Parameter(Mandatory)] [string] $TargetDb,
+        [Parameter(Mandatory)] [string] $Query
+    )
+
+    $arguments = @('-S', $SqlInstance) + $sqlAuth + @('-C', '-b', '-I', '-h', '-1', '-W', '-s', '|', '-d', $TargetDb, '-Q', $Query)
+    if (-not $PSCmdlet.ShouldProcess("$SqlInstance / $TargetDb", "sqlcmd -Q $Query")) { return $null }
+
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & sqlcmd @arguments
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "sqlcmd повернув $LASTEXITCODE на запиті: $Query`n$($output -join "`n")"
+    }
+    return , @($output | Where-Object { $_ -and $_.Trim() })
+}
+
+$detectedEdition = $null
+
 try {
     # ⛔ Q-232: пароль виставляється ПЕРЕД першим-ліпшим викликом sqlcmd,
     # не після. Перевірка з'єднання нижче так само потребує автентифікації,
@@ -544,6 +736,29 @@ try {
     # Перевірка з'єднання — читає, нічого не змінює, але й вона під ShouldProcess:
     # контракт -WhatIf каже прямо «жодного sqlcmd», без винятків для читання.
     Invoke-DeploySql -TargetDb 'master' -Query 'SELECT 1;'
+
+    # ── Редакція і версія SQL Server (D-206: система підлаштовується під
+    # Standard або Enterprise, визначається під час інсталяції). До будь-якої
+    # зміни: непридатний сервер зупиняє розгортання тут, а не на 01-filegroups.
+    $editionRows = Invoke-DeployQuery -TargetDb 'master' -Query (
+        "SET NOCOUNT ON; SELECT CAST(SERVERPROPERTY('EngineEdition') AS int), " +
+        "CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128)), " +
+        "CAST(SERVERPROPERTY('ProductMajorVersion') AS nvarchar(16)), " +
+        "CAST(SERVERPROPERTY('Edition') AS nvarchar(128));")
+    if ($null -eq $editionRows) {
+        Write-Host "  Редакцію SQL Server буде визначено запитом SERVERPROPERTY (-WhatIf: не виконується)." -ForegroundColor DarkGray
+    }
+    else {
+        $fields = ([string] $editionRows[0]).Split('|')
+        if ($fields.Count -lt 4) { throw "Неочікувана відповідь на запит редакції: $($editionRows -join ' / ')" }
+        $detectedEdition = Resolve-SqlEdition -EngineEdition ([int] $fields[0].Trim()) `
+            -ProductVersion $fields[1].Trim() -Edition $fields[3].Trim() -AllowExpress:$AllowExpress
+
+        Write-Host ("  SQL Server: $($detectedEdition.Name), версія $($fields[1].Trim()) " +
+            "(ProductMajorVersion $($fields[2].Trim()), EngineEdition $($fields[0].Trim()), «$($fields[3].Trim())»).")
+        if ($detectedEdition.Note) { Write-Host "  $($detectedEdition.Note)" -ForegroundColor Yellow }
+        if ($detectedEdition.Stop) { throw $detectedEdition.Stop }
+    }
 
     if ($CreateDatabaseIfMissing) {
         # ⛔ Q-232 (директива людини, 2026-09-11): раніше відсутня база
@@ -643,6 +858,17 @@ if ($ServiceAccount) {
 }
 $msiArgs      += "APP_PORT=$AppPort"
 $msiArgsShown += "APP_PORT=$AppPort"
+
+# ⚠ WORKER_ENABLED передається ЗАВЖДИ, і 0 теж: MSI не пам'ятає властивість між
+# установками (Worker.wxs), тож стан командного рядка = бажаний стан. Оновлення
+# без -EnableWorker прибирає раніше встановлену службу воркера — кажемо вголос.
+$workerFlag = if ($EnableWorker) { '1' } else { '0' }
+$msiArgs      += "WORKER_ENABLED=$workerFlag"
+$msiArgsShown += "WORKER_ENABLED=$workerFlag"
+if (-not $EnableWorker -and (Get-Service -Name EcrWorker -ErrorAction SilentlyContinue)) {
+    Write-Warning ("Служба EcrWorker зараз встановлена, а -EnableWorker не задано: MSI її ПРИБЕРЕ. " +
+        "Щоб лишити воркер — повтори з -EnableWorker.")
+}
 if ($ServicePassword) {
     $msiArgs      += "SERVICE_PASSWORD=$(ConvertFrom-SecureStringPlain $ServicePassword)"
     $msiArgsShown += 'SERVICE_PASSWORD=***'   # ніколи не в плані/логу, лише в реальному виклику
@@ -660,11 +886,22 @@ if (-not $ConnectionString) {
     Write-Host ("ECR_ConnectionStrings__Ecr не записано (-ConnectionString не задано) — " +
         "служба впаде при старті, поки значення не буде додано вручну.") -ForegroundColor Yellow
 }
-elseif ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
-        'записати ECR_ConnectionStrings__Ecr')) {
-    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr' `
-        -Value (ConvertFrom-SecureStringPlain $ConnectionString)
-    Write-Host "Рядок підключення записано." -ForegroundColor Green
+else {
+    if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+            'записати ECR_ConnectionStrings__Ecr')) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_ConnectionStrings__Ecr' `
+            -Value (ConvertFrom-SecureStringPlain $ConnectionString)
+        Write-Host "Рядок підключення записано." -ForegroundColor Green
+    }
+
+    # Воркер ходить у ту саму базу тим самим рядком (Worker.wxs: той самий
+    # обліковий запис) — той самий канал, окремий ключ служби.
+    if ($EnableWorker -and $PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment',
+            'записати ECR_ConnectionStrings__Ecr')) {
+        Set-ServiceEnvironmentVariable -ServiceName 'EcrWorker' -Name 'ECR_ConnectionStrings__Ecr' `
+            -Value (ConvertFrom-SecureStringPlain $ConnectionString)
+        Write-Host "Рядок підключення записано й для EcrWorker." -ForegroundColor Green
+    }
 }
 
 # ⛔ Q-221: без цього Kestrel слухає лише вбудований дефолт ASP.NET Core —
@@ -720,6 +957,29 @@ else {
     }
 }
 
+# ── Режим редакції (Database:EditionMode). ПІСЛЯ запису файлу вище: значення
+# з -ConfigValues теж явне, і його має бути видно рішенню нижче.
+# ⚠ -WhatIf: файл не записано — рішення показує стан ДО розгортання.
+$editionDecision = Resolve-EditionModeWrite -Explicit $EditionMode `
+    -Detected $(if ($detectedEdition) { $detectedEdition.Mode } else { $null }) `
+    -FileValue (Get-ConfiguredEditionMode -Path $configPath) `
+    -EnvironmentValue (Get-ServiceEnvironmentValue -ServiceName 'EcrApi' -Name 'ECR_Database__EditionMode')
+
+if (-not $editionDecision.Write) {
+    Write-Host "Database:EditionMode: $($editionDecision.Reason)." -ForegroundColor DarkGray
+}
+else {
+    $editionServices = @('EcrApi') + $(if ($EnableWorker) { @('EcrWorker') } else { @() })
+    foreach ($serviceName in $editionServices) {
+        if ($PSCmdlet.ShouldProcess("HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName\Environment",
+                "записати ECR_Database__EditionMode=$($editionDecision.Value)")) {
+            Set-ServiceEnvironmentVariable -ServiceName $serviceName -Name 'ECR_Database__EditionMode' `
+                -Value $editionDecision.Value
+        }
+    }
+    Write-Host "Database:EditionMode = $($editionDecision.Value) ($($editionDecision.Reason))." -ForegroundColor Green
+}
+
 # ---------------------------------------------------------------------
 Write-Step "Крок 6/7: старт служби"
 
@@ -737,6 +997,25 @@ else {
     }
     elseif (-not $svc -and $PSCmdlet.ShouldProcess('EcrApi', 'Start-Service')) {
         Start-Service -Name EcrApi
+    }
+
+    # Воркер — з тієї ж причини безумовний перезапуск: MSI міг підняти його
+    # до того, як крок 4 записав рядок підключення.
+    if ($EnableWorker -and $PSCmdlet.ShouldProcess('EcrWorker', 'Restart-Service')) {
+        $worker = Get-Service -Name EcrWorker -ErrorAction SilentlyContinue
+        if (-not $worker) { throw 'Служби EcrWorker немає після msiexec з WORKER_ENABLED=1 — див. ecr-install.log.' }
+        Restart-Service -Name EcrWorker -Force
+
+        # Наглядач не має HTTP — «здоров'я» тут лише те, що процес не впав
+        # одразу: недійсна конфігурація Jobs:Workers:* дає код 3 за секунди.
+        Start-Sleep -Seconds 5
+        $worker.Refresh()
+        if ($worker.Status -ne 'Running') {
+            throw ("EcrWorker не працює (стан $($worker.Status)) через 5 с після старту. " +
+                "Причина — журнал подій Application (Get-WinEvent) або ручний запуск " +
+                "`"Ecr.Worker.exe --supervisor`" з теки застосунку; вимкнути воркер — docs/admin/operations-runbook.md §10.")
+        }
+        Write-Host "EcrWorker працює." -ForegroundColor Green
     }
 }
 
