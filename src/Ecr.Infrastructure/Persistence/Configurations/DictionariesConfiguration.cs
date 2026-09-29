@@ -216,6 +216,7 @@ public sealed class RegistryExternalKeyConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.ExternalId).HasMaxLength(200).IsRequired();
         builder.Property(x => x.ExternalPath).HasMaxLength(400);
         builder.Property(x => x.LastSyncedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.MissingInSourceSince).HasColumnType("datetime2(3)");
 
         // Унікальність за (джерело, зовнішній Id), а не за записом: один запис
         // довідника легально має ключі в кількох системах, але той самий GUID

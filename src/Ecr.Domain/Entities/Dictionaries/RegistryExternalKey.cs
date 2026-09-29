@@ -65,4 +65,40 @@ public sealed class RegistryExternalKey : Entity<long>
 
         LastSyncedAt = utcNow;
     }
+
+    /// <summary>Стеля зовнішнього ідентифікатора — ширина колонки <c>ExternalId</c>.</summary>
+    public const int MaxExternalIdLength = 200;
+
+    /// <summary>
+    /// З якого моменту (UTC) елемента немає в джерелі; <c>null</c> — є або не
+    /// перевірялося (<c>D-212</c>).
+    /// </summary>
+    public DateTime? MissingInSourceSince { get; private set; }
+
+    /// <summary>Фіксує, що синк не знайшов елемент у джерелі.</summary>
+    /// <param name="utcNow">Час прогону синку в UTC.</param>
+    /// <remarks>
+    /// ⚠ Повторний виклик НЕ зсуває момент: поле відповідає на «відколи», і
+    /// кожен нічний прогін, що переписує його на «сьогодні», стер би саме ту
+    /// відповідь, заради якої воно є.
+    /// </remarks>
+    public void MarkMissing(DateTime utcNow) => MissingInSourceSince ??= utcNow;
+
+    /// <summary>Знімає позначку зникнення: елемент знову знайдено в джерелі.</summary>
+    public void ClearMissing() => MissingInSourceSince = null;
+
+    /// <summary>
+    /// Перев'язує запис на інший елемент джерела (елемент AF перестворено з
+    /// новим GUID). Знімає позначку зникнення.
+    /// </summary>
+    /// <param name="newExternalId">Новий ідентифікатор у тому самому джерелі.</param>
+    /// <exception cref="ArgumentException">Порожній або довший за <see cref="MaxExternalIdLength"/>.</exception>
+    public void Relink(string newExternalId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newExternalId);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(newExternalId.Length, MaxExternalIdLength, nameof(newExternalId));
+
+        ExternalId = newExternalId;
+        MissingInSourceSince = null;
+    }
 }

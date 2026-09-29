@@ -4233,6 +4233,10 @@ USING (VALUES
     -- Причина в `calc.CalculationRun.ErrorMessage` прогону, що завершився після новішого тієї ж області: `{runId}` — новіший, актуальний.
     (N'jobs.calculationRunSupersededByNewer',   N'en', N'The run finished after a newer run {runId} of the same scope and did not replace its results: those are more recent.', 1),
     -- COLL:calcrun-order ── кінець секції ──
+    -- COLL:d212-policy ── Політика синку довідника з AF (D-212 PR-2, `SourceEntity.ConfigureRegistrySync`, PUT /sources/{id}/registry/policy) ──
+    (N'err.ECR-REQ-0422.registrySyncPolicyInvalid', N'en', N'Sync policy: unknown value, or an attribute name is empty or longer than {max} characters; an inclusive end requires an end attribute.', 1),
+    -- ru/kz — окремою порцією `COLL:d212-policy` у блоці I18N нижче.
+    -- COLL:d212-policy ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
@@ -11123,6 +11127,17 @@ SELECT v.[Key], v.Lang, v.Val
        ) AS v ([Key], Lang, Val)
 OPTION (RECOMPILE);
 GO
+
+-- COLL:d212-policy ── ru/kz політики синку довідника (D-212 PR-2); власна порція ──
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
+    (N'err.ECR-REQ-0422.registrySyncPolicyInvalid', N'ru', N'Политика синхронизации: неизвестное значение, либо имя атрибута пустое или длиннее {max} символов; включительная граница требует атрибута окончания.'),
+    (N'err.ECR-REQ-0422.registrySyncPolicyInvalid', N'kz', N'Синхрондау саясаты: белгісіз мән немесе атрибут атауы бос не {max} таңбадан ұзын; қоса алынатын шекара аяқталу атрибутын талап етеді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+-- COLL:d212-policy ── кінець секції ──
 
 -- Лише відсутні пари (ключ, мова); область — з en-рядка.
 MERGE sys_ecr.UiString AS t

@@ -203,6 +203,27 @@ public sealed class RegistryEntry : Entity<long>
         DeletedAt = utcNow;
     }
 
+    /// <summary>
+    /// Вимикає запис без видалення: він лишається в історії й у комірках, але
+    /// не пропонується до вибору (<c>D-212</c>, політика <c>Deactivate</c>).
+    /// </summary>
+    public void Deactivate() => IsActive = false;
+
+    /// <summary>Вмикає вимкнений запис.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// Запис видалено: повернення видаленого — <see cref="Restore"/>, з його
+    /// окремим сенсом і слідом, а не побічний ефект увімкнення.
+    /// </exception>
+    public void Activate()
+    {
+        if (IsDeleted)
+        {
+            throw new InvalidOperationException($"Запис {Id} видалено: його повертає Restore, а не Activate.");
+        }
+
+        IsActive = true;
+    }
+
     /// <summary>Повертає видалений запис у обіг.</summary>
     /// <remarks>
     /// Потрібно тому, що видалення тут логічне: помилкове «видалення» має

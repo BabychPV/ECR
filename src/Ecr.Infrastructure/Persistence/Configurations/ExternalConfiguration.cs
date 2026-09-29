@@ -51,6 +51,16 @@ public sealed class SourceEntityConfiguration : IEntityTypeConfiguration<SourceE
         builder.Property(x => x.SourceKind).HasDefaultValue(Domain.Enums.RegistrySourceKind.External);
         builder.Property(x => x.IsActive).HasDefaultValue(true);
 
+        // D-212: політика синку довідника. ⚠ Без HasDefaultValue у моделі:
+        // умовчання (0 / false) дорівнює CLR-умовчанню, і EF кладе DEFAULT у
+        // AddColumn сам — для наявних рядків цього досить, а модель не
+        // отримує sentinel-пастки «значення 0 не відправляється».
+        builder.Property(x => x.OnMissingInSource).HasColumnType("tinyint");
+        builder.Property(x => x.ValidFromAttribute).HasMaxLength(SourceEntity.MaxValidityAttributeLength);
+        builder.Property(x => x.ValidToAttribute).HasMaxLength(SourceEntity.MaxValidityAttributeLength);
+        builder.ToTable("SourceEntity", "ext", t => t.HasCheckConstraint(
+            "CK_SE_OnMissingInSource", "[OnMissingInSource] IN (0, 1, 2)"));
+
         builder.HasIndex(x => new { x.DataSourceId, x.Code })
                .IsUnique().HasDatabaseName("UQ_SourceEntity");
 
