@@ -106,6 +106,61 @@ public sealed class SimulationTargetCeilingApiTests(SqlServerFixture sql)
         Assert.Equal(0, await DeniedEventsAsync(s.AdminId, s.SubjectId).ConfigureAwait(true));
     }
 
+    /// <summary>
+    /// Стеля діє й ПІСЛЯ старту: ціль отримала небезпечне право посеред сеансу — наступний
+    /// запит під cookie симуляції вже не бачить прав цілі, сеанс закрито, спроба в журналі.
+    /// </summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Небезпечне_право_видане_цілі_після_старту_закриває_сеанс_на_наступному_запиті()
+    {
+        var s = await ArrangeAsync(new Target(null, false, Validity.Permanent)).ConfigureAwait(true);
+        using var app = new EcrApiFactory(sql);
+        var client = await SignInAsync(app).ConfigureAwait(true);
+
+        var start = await StartAsync(client, s.SubjectId).ConfigureAwait(true);
+        Assert.True(start.StatusCode == HttpStatusCode.Created, $"{start.StatusCode}\n{app.ErrorsText}");
+        Assert.True((await MeAsync(client).ConfigureAwait(true)).GetProperty("isSimulation").GetBoolean());
+
+        await GrantDangerousRoleAsync(s.SubjectId, "Security.ManageRoles").ConfigureAwait(true);
+
+        var me = await MeAsync(client).ConfigureAwait(true);
+
+        // ⛔ Права цілі більше не видно: запит іде з профілем актора, як після завершення.
+        Assert.False(me.GetProperty("isSimulation").GetBoolean());
+        var permissions = me.GetProperty("permissions").EnumerateArray().Select(p => p.GetString()).ToList();
+        Assert.DoesNotContain("Security.ManageRoles", permissions);
+        Assert.DoesNotContain("Document.View", permissions);
+        Assert.Contains("Security.Simulate", permissions);
+
+        Assert.Equal(0, await OpenSessionsAsync(s.AdminId, s.SubjectId).ConfigureAwait(true));
+        Assert.Equal(1, await ScalarAsync(
+            $"SELECT COUNT(*) FROM aud.SecurityEvent WHERE EventType = N'{DeniedEvent}' "
+            + "AND ChangedByUserId = @actor AND TargetUserId = @subject "
+            + "AND DetailsJson LIKE N'%dangerousTargetAfterStart%';",
+            s.AdminId, s.SubjectId).ConfigureAwait(true));
+    }
+
+    private async Task GrantDangerousRoleAsync(int subjectId, string permission)
+    {
+        await using var db = new TestDocumentBuilder(sql.ConnectionString).CreateContext();
+
+        var role = NewRole($"SCLL_{_tag}");
+        db.Roles.Add(role);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RolePermissions.Add(new RolePermission(role.Id, permission));
+        db.RoleAssignments.Add(new RoleAssignment(role.Id, subjectId, null));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+    }
+
+    private async Task<int> OpenSessionsAsync(int actorId, int subjectId)
+        => await ScalarAsync(
+            "SELECT COUNT(*) FROM aud.SimulationSession WHERE ActorUserId = @actor AND SubjectUserId = @subject "
+            + "AND EndedAt IS NULL;",
+            actorId, subjectId).ConfigureAwait(false);
+
     private static async Task AssertDeniedAsync(HttpResponseMessage start, string messageKey, EcrApiFactory app)
     {
         var body = await start.Content.ReadAsStringAsync().ConfigureAwait(false);

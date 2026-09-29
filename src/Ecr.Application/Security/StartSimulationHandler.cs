@@ -115,23 +115,17 @@ public sealed class StartSimulationHandler(
             .GetSimulationTargetPrivilegesAsync(subjectUserId, now, ct)
             .ConfigureAwait(false);
 
-        var (reason, message, messageKey) = target switch
-        {
-            { IsBootstrapAdmin: true } => (
-                "bootstrapTarget",
-                "Дивитися очима запису первинного налаштування заборонено (D-210).",
-                "err.ECR-SIM-4031.bootstrapTarget"),
-            { DangerousPermissions.Count: > 0 } => (
-                "dangerousTarget",
-                "Дивитися очима власника небезпечних прав заборонено (D-210).",
-                "err.ECR-SIM-4031.dangerousTarget"),
-            _ => (null, null, null),
-        };
-
+        var reason = target.DenyReason;
         if (reason is null)
         {
             return;
         }
+
+        var (message, messageKey) = reason == "bootstrapTarget"
+            ? ("Дивитися очима запису первинного налаштування заборонено (D-210).",
+               "err.ECR-SIM-4031.bootstrapTarget")
+            : ("Дивитися очима власника небезпечних прав заборонено (D-210).",
+               "err.ECR-SIM-4031.dangerousTarget");
 
         await audit.WriteIndependentSecurityEventAsync(
             new SecurityEventRecord(
@@ -146,7 +140,7 @@ public sealed class StartSimulationHandler(
 
         throw new BusinessRuleException(
             ErrorCodes.SimulationTargetForbidden,
-            message!,
+            message,
             new Dictionary<string, object?> { ["messageKey"] = messageKey });
     }
 

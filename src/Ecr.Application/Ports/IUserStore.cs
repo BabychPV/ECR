@@ -347,4 +347,18 @@ public readonly record struct FailedAttemptOutcome(int FailedAttempts, DateTime?
 /// <summary>Привілеї цілі «View as», що забороняють симуляцію (<c>D-210</c>).</summary>
 /// <param name="IsBootstrapAdmin">Прапорець запису або роль <c>BootstrapAdministrator</c>.</param>
 /// <param name="DangerousPermissions">Небезпечні права з особистих призначень; порожньо — немає.</param>
-public sealed record SimulationTargetPrivileges(bool IsBootstrapAdmin, IReadOnlyList<string> DangerousPermissions);
+public sealed record SimulationTargetPrivileges(bool IsBootstrapAdmin, IReadOnlyList<string> DangerousPermissions)
+{
+    /// <summary>
+    /// Причина відмови (<c>bootstrapTarget</c>, <c>dangerousTarget</c>); <c>null</c> — ціль дозволена.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Одне місце рішення для старту сеансу (<c>StartSimulationHandler</c>) і для кожного
+    /// запиту під ним (<c>SimulationService.BuildProfileAsync</c>): два формулювання однієї
+    /// стелі розійшлися б тихо.
+    /// </remarks>
+    public string? DenyReason
+        => IsBootstrapAdmin ? "bootstrapTarget"
+            : DangerousPermissions.Count > 0 ? "dangerousTarget"
+            : null;
+}

@@ -14,10 +14,31 @@ namespace Ecr.Infrastructure.Security;
 /// append-only, і обліковий запис застосунку має на ньому лише <c>INSERT</c> і
 /// <c>SELECT</c>. Виняток — <c>EndedAt</c>, який дозволено оновити (це єдине
 /// поле, що змінюється після вставки).
+///
+/// ⚠ Три останні параметри необов'язкові свідомо: реєстрація в <c>DependencyInjection.cs</c>
+/// (фабрика з двома аргументами) лишається як є. <c>UserStore</c> і <c>AuditWriter</c> не
+/// мають стану поза <see cref="EcrDbContext"/>, тож над тим самим scoped-контекстом вони —
+/// рівно те, що дав би контейнер.
 /// </remarks>
+/// <param name="db">Контекст бази.</param>
+/// <param name="access">САМА служба рішень (не обгортка симуляції — інакше коло залежностей).</param>
+/// <param name="users">Сховище для стелі D-210; <c>null</c> — над тим самим <paramref name="db"/>.</param>
+/// <param name="audit">Журнал для події-спроби; <c>null</c> — над тим самим <paramref name="db"/>.</param>
+/// <param name="clock">Годинник; <c>null</c> — системний.</param>
 public sealed class SimulationService(
-    EcrDbContext db, IAccessDecisionService access) : ISimulationService
+    EcrDbContext db,
+    IAccessDecisionService access,
+    IUserStore? users = null,
+    IAuditWriter? audit = null,
+    Domain.Abstractions.IClock? clock = null) : ISimulationService
 {
+    /// <summary>Суфікс причини: стелю D-210 порушено вже ПІСЛЯ старту сеансу.</summary>
+    private const string AfterStartSuffix = "AfterStart";
+
+    private readonly IUserStore _users = users ?? new UserStore(db);
+    private readonly IAuditWriter _audit = audit ?? new AuditWriter(db);
+    private readonly Domain.Abstractions.IClock _clock = clock ?? new SystemClock();
+
     /// <inheritdoc />
     public async Task<long> StartAsync(
         int actorUserId, int subjectUserId, string reason, CancellationToken ct)
@@ -85,6 +106,8 @@ public sealed class SimulationService(
     {
         var (actorUserId, subjectUserId) = await ReadPrincipalsAsync(sessionId, ct).ConfigureAwait(false);
 
+        await EnsureCeilingStillHoldsAsync(sessionId, actorUserId, subjectUserId, ct).ConfigureAwait(false);
+
         // ⚠ Профіль будується ЗАНОВО і НЕ кладеться в кеш (ФВ-6.16a п. 4).
         // AccessProfileCache відмовляється кешувати профілі з IsSimulation, але
         // покладатися лише на це не можна: побудова тут іде повз кеш узагалі.
@@ -118,6 +141,53 @@ public sealed class SimulationService(
             // стояти людина, а не роль, яку вона приміряла.
             SimulationActorUserId = actorUserId,
         };
+    }
+
+    /// <summary>
+    /// Стеля «View as» (D-210) на КОЖЕН запит під сеансом, а не лише на старті.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Ціль, що посеред сеансу стала bootstrap чи отримала небезпечне право, інакше
+    /// показувала б ці права актору до кінця сеансу: профіль сеансу будується заново на
+    /// кожен запит (V-06), і нова роль у нього потрапляє.
+    ///
+    /// ⚠ Реакція — ЗАВЕРШИТИ сеанс (<c>EndedAt</c>) і відповісти як про закритий
+    /// (<see cref="Application.Errors.NotFoundException"/>): обгортка
+    /// <c>SimulationAwareAccessDecisionService</c> тоді віддає профіль самого актора — той
+    /// самий шлях, що й сеанс, закритий в іншій вкладці. Не <c>403</c> на кожен запит: cookie
+    /// з номером сеансу живе й далі, і актор застряг би у відмовах до явного виходу, а сеанс
+    /// лишався б відкритим. Закритий сеанс не відкривається знову.
+    ///
+    /// ⚠ Ціна — один запит до бази (призначення × ролі × небезпечні права; прапорець
+    /// bootstrap — ще один) на запит під сеансом. Кеш профілів тут не допоміг би: глобальні
+    /// права ролей з областю він відкидає, а пряма зміна призначень штампа цілі не крутить.
+    /// </remarks>
+    private async Task EnsureCeilingStillHoldsAsync(
+        long sessionId, int actorUserId, int subjectUserId, CancellationToken ct)
+    {
+        var now = _clock.UtcNow;
+        var target = await _users.GetSimulationTargetPrivilegesAsync(subjectUserId, now, ct).ConfigureAwait(false);
+        if (target.DenyReason is not { } reason)
+        {
+            return;
+        }
+
+        await EndAsync(sessionId, ct).ConfigureAwait(false);
+
+        await _audit.WriteIndependentSecurityEventAsync(
+            new SecurityEventRecord(
+                now,
+                StartSimulationHandler.DeniedEvent,
+                TargetUserId: subjectUserId,
+                TargetRoleId: null,
+                DetailsJson: $$"""{"reason":"{{reason}}{{AfterStartSuffix}}"}""",
+                ChangedByUserId: actorUserId,
+                CorrelationId: null),
+            ct).ConfigureAwait(false);
+
+        throw new Application.Errors.NotFoundException(
+            "ECR-SIM-0422", $"Сеанс симуляції {sessionId} завершено: ціль порушила стелю D-210.",
+            new Dictionary<string, object?> { ["messageKey"] = "err.ECR-SIM-0422.noSession" });
     }
 
     private async Task<(int Actor, int Subject)> ReadPrincipalsAsync(long sessionId, CancellationToken ct)
