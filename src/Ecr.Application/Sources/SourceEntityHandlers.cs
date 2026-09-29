@@ -4,6 +4,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
+using Ecr.Application.Registries;
 using Ecr.Application.Security;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Enums;
@@ -106,7 +107,8 @@ public sealed class CreateSourceEntityHandler(
 
 /// <summary>
 /// Прив'язує сутність збору до довідника або відв'язує її (<c>ФВ-8.11</c>).
-/// Право <c>Integration.Manage</c>.
+/// Право <c>Integration.Manage</c> і право редагувати дані довідника
+/// (<c>Registry.EditData</c> або грант <c>Write</c>) — цільового й поточного.
 /// </summary>
 /// <remarks>
 /// ⚠ Прив'язка — передумова мапінгу на поле довідника: саме за нею
@@ -123,6 +125,9 @@ public sealed class BindSourceEntityRegistryHandler(
     /// <param name="registryDefId">Довідник; <c>null</c> — відв'язати.</param>
     /// <param name="ct">Скасування.</param>
     /// <exception cref="NotFoundException">Сутності чи довідника немає.</exception>
+    /// <exception cref="AccessDeniedException">
+    /// Немає <c>Integration.Manage</c> або права на дані цільового чи поточного довідника.
+    /// </exception>
     public async Task<SourceEntityDto> HandleAsync(int sourceEntityId, int? registryDefId, CancellationToken ct)
     {
         await PermissionCheck
@@ -150,6 +155,29 @@ public sealed class BindSourceEntityRegistryHandler(
                     ["messageKey"] = "err.ECR-REG-0404.registryId",
                     ["registryDefId"] = id.ToString(CultureInfo.InvariantCulture),
                 });
+        }
+
+        // ⛔ Одного Integration.Manage мало: після прив'язки синк пише в дані
+        // довідника від імені svc-integration (FEATURE-REGISTRY-SYNC §3), тобто
+        // прив'язка — це делегування права редагувати дані довідника. Тому
+        // вимагається те саме, що й для запису даних цього довідника
+        // (UpsertRegistryEntryHandler): Registry.EditData АБО грант Write на
+        // RegistryDefId. Відв'язка й переприв'язка знімають синк із ПОТОЧНОГО
+        // довідника — та сама вимога щодо нього. Судження розробки (D-202,
+        // доповнення 2026-09-29), на підтвердження людиною.
+        // Після 404 на неіснуючий довідник — порядок відмов лишається тим самим.
+        if (registryDefId is { } target)
+        {
+            await RegistryAccess
+                .RequireAsync(access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write, target, ct)
+                .ConfigureAwait(false);
+        }
+
+        if (entity.RegistryDefId is { } current && current != registryDefId)
+        {
+            await RegistryAccess
+                .RequireAsync(access, currentUser, UpsertRegistryEntryHandler.Permission, GrantLevel.Write, current, ct)
+                .ConfigureAwait(false);
         }
 
         entity.BindRegistry(registryDefId);

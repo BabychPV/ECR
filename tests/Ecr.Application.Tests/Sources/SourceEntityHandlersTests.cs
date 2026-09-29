@@ -37,8 +37,10 @@ public sealed class SourceEntityHandlersTests
     public SourceEntityHandlersTests()
     {
         _user.UserId.Returns(9);
+        // ⚠ Registry.EditData — бо прив'язка вимагає права на дані довідника
+        // (D-202, доповнення 2026-09-29); без нього перевіряють окремі тести нижче.
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Integration.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }.Permission("Integration.Manage").Permission("Registry.EditData").Build());
 
         _dataSources.FindAsync(DataSourceId, Arg.Any<CancellationToken>())
             .Returns(new DataSource(
@@ -231,5 +233,73 @@ public sealed class SourceEntityHandlersTests
 
         Assert.Null(_entity.RegistryDefId);
         await _sources.DidNotReceive().SaveSourceEntityAsync(Arg.Any<SourceEntity>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-8.11")]
+    [InlineData(null)]
+    [InlineData(GrantLevel.Read)]
+    public async Task Прив_язка_без_права_на_дані_довідника_відмовляє_і_не_пише(GrantLevel? grant)
+    {
+        // D-202 (доповнення 2026-09-29): синк пише в довідник від svc-integration,
+        // тож одного Integration.Manage мало. Грант Read — не Write.
+        Profile(grant is { } level ? b => b.Grant(ResourceKind.Registry, RegistryId, level) : _ => { });
+
+        var ex = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None));
+
+        Assert.Equal("Registry.EditData", ex.Details!["permission"]);
+        Assert.Null(_entity.RegistryDefId);
+        await _sources.DidNotReceive().SaveSourceEntityAsync(Arg.Any<SourceEntity>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Грант_Write_на_цільовий_довідник_достатній_для_прив_язки()
+    {
+        Profile(b => b.Grant(ResourceKind.Registry, RegistryId, GrantLevel.Write));
+
+        var bound = await Bind().HandleAsync(EntityId, RegistryId, CancellationToken.None);
+
+        Assert.Equal(RegistryId, bound.RegistryDefId);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage7)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public async Task Відв_язка_і_переприв_язка_вимагають_права_на_поточний_довідник()
+    {
+        const int Other = RegistryId + 5;
+        _sources.RegistryDefExistsAsync(Other, Arg.Any<CancellationToken>()).Returns(true);
+        _entity.BindRegistry(RegistryId);
+
+        // Право є лише на НОВИЙ довідник — поточний (RegistryId) не дозволено зняти.
+        Profile(b => b.Grant(ResourceKind.Registry, Other, GrantLevel.Write));
+
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Bind().HandleAsync(EntityId, null, CancellationToken.None));
+        await Assert.ThrowsAsync<AccessDeniedException>(
+            () => Bind().HandleAsync(EntityId, Other, CancellationToken.None));
+
+        Assert.Equal(RegistryId, _entity.RegistryDefId);
+        await _sources.DidNotReceive().SaveSourceEntityAsync(Arg.Any<SourceEntity>(), Arg.Any<CancellationToken>());
+
+        // Контроль: з правом на обидва переприв'язка проходить.
+        Profile(b => b.Grant(ResourceKind.Registry, Other, GrantLevel.Write)
+            .Grant(ResourceKind.Registry, RegistryId, GrantLevel.Write));
+
+        var moved = await Bind().HandleAsync(EntityId, Other, CancellationToken.None);
+
+        Assert.Equal(Other, moved.RegistryDefId);
+    }
+
+    /// <summary>Профіль з Integration.Manage, але без глобального Registry.EditData.</summary>
+    private void Profile(Action<AccessBuilder> configure)
+    {
+        var builder = new AccessBuilder { UserId = 9 }.Permission("Integration.Manage");
+        configure(builder);
+        _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(builder.Build());
     }
 }

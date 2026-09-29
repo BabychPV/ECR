@@ -112,8 +112,11 @@ public sealed class SourceEntitiesApiTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-8.11")]
     public async Task Прив_язка_до_довідника_обмежує_мапінг_полями_саме_цього_довідника()
     {
+        // ⚠ Registry.EditData — прив'язка вимагає права на дані довідника
+        // (D-202, доповнення 2026-09-29; відмова без нього —
+        // SourceBindRegistryPermissionTests).
         using var app = new EcrApiFactory(sql);
-        using var client = await SignedInAsync(app, Manage).ConfigureAwait(true);
+        using var client = await SignedInAsync(app, Manage, "Registry.EditData").ConfigureAwait(true);
         var dataSourceId = await DataSourceAsync().ConfigureAwait(true);
         var stand = await StandAsync(dataSourceId).ConfigureAwait(true);
         var registryUri = new Uri($"/api/v1/sources/{stand.EntityId}/registry", UriKind.Relative);
