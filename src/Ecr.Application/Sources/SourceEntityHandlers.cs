@@ -209,6 +209,10 @@ public sealed record CreateSourceEntityCommand(
 /// <param name="SourceKind">Хто master.</param>
 /// <param name="RegistryDefId">Довідник; <c>null</c> — не прив'язана.</param>
 /// <param name="IsActive">Чи ввімкнено збір.</param>
+/// <param name="OnMissingInSource">Політика синку: зникнення елемента в джерелі (<c>D-212</c>).</param>
+/// <param name="ValidFromAttribute">Атрибут початку чинності; <c>null</c> — не синхронізується.</param>
+/// <param name="ValidToAttribute">Атрибут кінця чинності; <c>null</c> — не синхронізується.</param>
+/// <param name="ValidToInclusive">Кінець у джерелі — останній чинний день.</param>
 public sealed record SourceEntityDto(
     int Id,
     int DataSourceId,
@@ -217,7 +221,11 @@ public sealed record SourceEntityDto(
     string? EntityPath,
     RegistrySourceKind SourceKind,
     int? RegistryDefId,
-    bool IsActive)
+    bool IsActive,
+    RegistryMissingPolicy OnMissingInSource,
+    string? ValidFromAttribute,
+    string? ValidToAttribute,
+    bool ValidToInclusive)
 {
     /// <summary>DTO з сутності.</summary>
     /// <param name="entity">Сутність.</param>
@@ -227,6 +235,7 @@ public sealed record SourceEntityDto(
 
         return new(
             entity.Id, entity.DataSourceId, entity.Code, entity.DisplayName, entity.EntityPath,
-            entity.SourceKind, entity.RegistryDefId, entity.IsActive);
+            entity.SourceKind, entity.RegistryDefId, entity.IsActive,
+            entity.OnMissingInSource, entity.ValidFromAttribute, entity.ValidToAttribute, entity.ValidToInclusive);
     }
 }

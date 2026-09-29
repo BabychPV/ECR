@@ -113,10 +113,13 @@ public sealed class RegistryExternalKeyStore(EcrDbContext db) : IRegistryExterna
                ExternalId = key.ExternalId,
                ExternalPath = key.ExternalPath,
                LastSyncedAt = key.LastSyncedAt,
+               MissingInSourceSince = key.MissingInSourceSince,
            };
 
     private static RegistryExternalKeyView ToView(Row r)
-        => new(r.Id, r.RegistryEntryId, r.EntryCode, r.DataSourceId, r.DataSourceCode, r.ExternalId, r.ExternalPath, r.LastSyncedAt);
+        => new(
+            r.Id, r.RegistryEntryId, r.EntryCode, r.DataSourceId, r.DataSourceCode, r.ExternalId, r.ExternalPath,
+            r.LastSyncedAt, r.MissingInSourceSince);
 
     /// <summary>Проєкція рядка: іменований тип, щоб умови й сортування йшли в SQL.</summary>
     private sealed class Row
@@ -138,5 +141,7 @@ public sealed class RegistryExternalKeyStore(EcrDbContext db) : IRegistryExterna
         public string? ExternalPath { get; init; }
 
         public DateTime? LastSyncedAt { get; init; }
+
+        public DateTime? MissingInSourceSince { get; init; }
     }
 }

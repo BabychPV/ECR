@@ -3589,6 +3589,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/sources` | `Integration.Manage` | 5 |
 | `POST` | `/api/v1/sources` | `Integration.Manage` | 7 |
 | `PUT` | `/api/v1/sources/{id}/registry` | `Integration.Manage` | 7 |
+| `PUT` | `/api/v1/sources/{id}/registry/policy` | `Integration.Manage` | 7 |
 | `POST` | `/api/v1/sources/{id}/collect` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/sources/{id}/mapping/preview` | `Integration.Manage` | 5 |
 | `GET` | `/api/v1/collection-schedules` | `Integration.EditSchedule` | 7 |

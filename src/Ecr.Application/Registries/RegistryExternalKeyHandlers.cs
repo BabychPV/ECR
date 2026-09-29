@@ -162,7 +162,8 @@ public sealed class BindRegistryExternalKeyHandler(
         }, ct).ConfigureAwait(false);
 
         return new RegistryExternalKeyView(
-            key.Id, entry.Id, entry.Code, dataSource.Id, dataSource.Code, key.ExternalId, key.ExternalPath, key.LastSyncedAt);
+            key.Id, entry.Id, entry.Code, dataSource.Id, dataSource.Code, key.ExternalId, key.ExternalPath, key.LastSyncedAt,
+            key.MissingInSourceSince);
     }
 }
 

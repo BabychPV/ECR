@@ -17,9 +17,16 @@ public enum RegistryMissingPolicy : byte
     /// </summary>
     MarkOrphaned = 0,
 
-    /// <summary>Позначити зв'язок і вимкнути запис (<c>IsActive = 0</c>).</summary>
+    /// <summary>
+    /// Позначити зв'язок і вимкнути запис (<c>IsActive = 0</c>). Повернення
+    /// елемента (<c>D-212</c> Q6): <c>External</c> — запис вмикається сам із
+    /// подією <c>RegistryReactivated</c>; <c>Hybrid</c> — вмикає людина.
+    /// </summary>
     Deactivate = 1,
 
-    /// <summary>Нічого не робити: зникнення не фіксується.</summary>
+    /// <summary>
+    /// Запис не чіпається; синк пише подію <c>RegistrySourceMissing</c>
+    /// (<c>D-212</c> Q5).
+    /// </summary>
     Ignore = 2,
 }

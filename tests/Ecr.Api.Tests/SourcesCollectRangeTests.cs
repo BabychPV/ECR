@@ -162,6 +162,7 @@ public sealed class SourcesCollectRangeTests
             new CollectFromSourceHandler(store, jobs, access, user),
             preview: null!,
             create: null!,
-            bindRegistry: null!);
+            bindRegistry: null!,
+            registryPolicy: null!);
     }
 }

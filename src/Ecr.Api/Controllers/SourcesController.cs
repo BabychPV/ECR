@@ -18,8 +18,41 @@ public sealed class SourcesController(
     CollectFromSourceHandler collect,
     Ecr.Application.Sources.PreviewMappingHandler preview,
     Ecr.Application.Sources.CreateSourceEntityHandler create,
-    Ecr.Application.Sources.BindSourceEntityRegistryHandler bindRegistry) : ControllerBase
+    Ecr.Application.Sources.BindSourceEntityRegistryHandler bindRegistry,
+    Ecr.Application.Sources.SetSourceEntityRegistryPolicyHandler registryPolicy) : ControllerBase
 {
+    /// <summary>
+    /// Замінює політику синку довідника з цієї сутності збору (<c>D-212</c>).
+    /// Право <c>Integration.Manage</c> і право на дані прив'язаного довідника —
+    /// <c>Registry.EditData</c> або грант <c>Write</c>.
+    /// </summary>
+    /// <param name="id">Сутність збору.</param>
+    /// <param name="request">Політика цілком.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Сутність не прив'язана до довідника — <c>422 ECR-REQ-0422</c>
+    /// (<c>registrySyncPolicyNotBound</c>); невалідне тіло — <c>422 ECR-REQ-0422</c>
+    /// (<c>registrySyncPolicyInvalid</c>). Зміна пишеться в журнал структурних змін.
+    /// </remarks>
+    [HttpPut("{id:int}/registry/policy")]
+    [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> SetRegistryPolicy(
+        int id, [FromBody] SetRegistrySyncPolicyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Ok(await registryPolicy
+            .HandleAsync(
+                id,
+                new Ecr.Application.Sources.SetRegistrySyncPolicyCommand(
+                    request.OnMissingInSource, request.ValidFromAttribute, request.ValidToAttribute, request.ValidToInclusive),
+                ct)
+            .ConfigureAwait(false));
+    }
+
     /// <summary>
     /// Заводить сутність збору з позиції каталогу джерела (<c>ФВ-13.11</c>).
     /// Право <c>Integration.Manage</c>.
@@ -168,3 +201,14 @@ public sealed record CreateSourceEntityRequest(
 /// <summary>Прив'язка сутності збору до довідника.</summary>
 /// <param name="RegistryDefId">Довідник; <c>null</c> — відв'язати.</param>
 public sealed record BindSourceEntityRegistryRequest(int? RegistryDefId);
+
+/// <summary>Політика синку довідника з AF (<c>D-212</c>).</summary>
+/// <param name="OnMissingInSource">Що робити з записом, чий елемент зник у джерелі.</param>
+/// <param name="ValidFromAttribute">Атрибут початку чинності; <c>null</c> — не синхронізувати.</param>
+/// <param name="ValidToAttribute">Атрибут кінця чинності; <c>null</c> — не синхронізувати.</param>
+/// <param name="ValidToInclusive">Кінець у джерелі — останній чинний день.</param>
+public sealed record SetRegistrySyncPolicyRequest(
+    Ecr.Domain.Enums.RegistryMissingPolicy OnMissingInSource,
+    string? ValidFromAttribute,
+    string? ValidToAttribute,
+    bool ValidToInclusive);

@@ -383,6 +383,7 @@ public static class DependencyInjection
         // ФВ-13.11: сутність збору заводиться з вебу; прив'язка до довідника (ФВ-8.11).
         services.AddScoped<Sources.CreateSourceEntityHandler>();
         services.AddScoped<Sources.BindSourceEntityRegistryHandler>();
+        services.AddScoped<Sources.SetSourceEntityRegistryPolicyHandler>(); // D-212: політика синку довідника
 
         // BE-27: дії над наявним мапінгом — пауза/відновлення, приймання зміни
         // одиниці джерела (ФВ-16.9), видалення з перевіркою наслідків.

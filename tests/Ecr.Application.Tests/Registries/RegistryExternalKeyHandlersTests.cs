@@ -124,7 +124,7 @@ public sealed class RegistryExternalKeyHandlersTests
     {
         // Мутація «прибрати перевірку FindByExternalIdAsync» → червоний (перевірено 2026-09-29).
         _keys.FindByExternalIdAsync(SourceId, "GUID-1", Arg.Any<CancellationToken>())
-            .Returns(new RegistryExternalKeyView(1, 77, "FL77", SourceId, "PI_MAIN", "GUID-1", null, null));
+            .Returns(new RegistryExternalKeyView(1, 77, "FL77", SourceId, "PI_MAIN", "GUID-1", null, null, null));
 
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(
             () => Bind().HandleAsync("Flares", Command(), CancellationToken.None));

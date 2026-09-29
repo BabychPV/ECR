@@ -64,6 +64,9 @@ public sealed record RegistryExternalKeyFilter(int RegistryDefId, long? Registry
 /// <param name="ExternalId">Ідентифікатор у джерелі (WebId/GUID).</param>
 /// <param name="ExternalPath">Шлях у джерелі; ставить синк (<c>MarkSynced</c>).</param>
 /// <param name="LastSyncedAt">Коли востаннє зіставлено з джерелом (UTC).</param>
+/// <param name="MissingInSourceSince">
+/// Відколи (UTC) елемента немає в джерелі; <c>null</c> — є (<c>D-212</c>).
+/// </param>
 public sealed record RegistryExternalKeyView(
     long Id,
     long RegistryEntryId,
@@ -72,4 +75,5 @@ public sealed record RegistryExternalKeyView(
     string DataSourceCode,
     string ExternalId,
     string? ExternalPath,
-    DateTime? LastSyncedAt);
+    DateTime? LastSyncedAt,
+    DateTime? MissingInSourceSince);

@@ -8356,6 +8356,14 @@
               "string"
             ]
           },
+          "missingInSourceSince": {
+            "description": "Відколи (UTC) елемента немає в джерелі; `null` — є (`D-212`).",
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "registryEntryId": {
             "description": "Запис довідника.",
             "format": "int64",
@@ -8370,7 +8378,8 @@
           "dataSourceCode",
           "externalId",
           "externalPath",
-          "lastSyncedAt"
+          "lastSyncedAt",
+          "missingInSourceSince"
         ],
         "type": "object"
       },
@@ -8816,6 +8825,14 @@
           "isActive"
         ],
         "type": "object"
+      },
+      "RegistryMissingPolicy": {
+        "description": "Що робить синк довідника з записом, чий елемент зник із джерела\n(`D-212`). Колонка `ext.SourceEntity.OnMissingInSource`.",
+        "enum": [
+          "MarkOrphaned",
+          "Deactivate",
+          "Ignore"
+        ]
       },
       "RegistryRelationDto": {
         "description": "Зв'язок довідника з іншим довідником (`ФВ-8.4`).",
@@ -11353,6 +11370,40 @@
         ],
         "type": "object"
       },
+      "SetRegistrySyncPolicyRequest": {
+        "description": "Політика синку довідника з AF (`D-212`).",
+        "properties": {
+          "onMissingInSource": {
+            "$ref": "#/components/schemas/RegistryMissingPolicy",
+            "description": "Що робити з записом, чий елемент зник у джерелі."
+          },
+          "validFromAttribute": {
+            "description": "Атрибут початку чинності; `null` — не синхронізувати.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToAttribute": {
+            "description": "Атрибут кінця чинності; `null` — не синхронізувати.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToInclusive": {
+            "description": "Кінець у джерелі — останній чинний день.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "onMissingInSource",
+          "validFromAttribute",
+          "validToAttribute",
+          "validToInclusive"
+        ],
+        "type": "object"
+      },
       "SetUiStringRequest": {
         "description": "Запит на зміну рядка каталогу.",
         "properties": {
@@ -11899,6 +11950,10 @@
             "description": "Чи ввімкнено збір.",
             "type": "boolean"
           },
+          "onMissingInSource": {
+            "$ref": "#/components/schemas/RegistryMissingPolicy",
+            "description": "Політика синку: зникнення елемента в джерелі (`D-212`)."
+          },
           "registryDefId": {
             "description": "Довідник; `null` — не прив'язана.",
             "format": "int32",
@@ -11910,6 +11965,24 @@
           "sourceKind": {
             "$ref": "#/components/schemas/RegistrySourceKind",
             "description": "Хто master."
+          },
+          "validFromAttribute": {
+            "description": "Атрибут початку чинності; `null` — не синхронізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToAttribute": {
+            "description": "Атрибут кінця чинності; `null` — не синхронізується.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validToInclusive": {
+            "description": "Кінець у джерелі — останній чинний день.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -11920,7 +11993,11 @@
           "entityPath",
           "sourceKind",
           "registryDefId",
-          "isActive"
+          "isActive",
+          "onMissingInSource",
+          "validFromAttribute",
+          "validToAttribute",
+          "validToInclusive"
         ],
         "type": "object"
       },
@@ -29553,6 +29630,131 @@
           }
         },
         "summary": "Прив'язує сутність збору до довідника або відв'язує її (`ФВ-8.11`).\nПраво `Integration.Manage` і, крім того, право редагувати дані\nдовідника — `Registry.EditData` або грант `Write` на цей довідник.",
+        "tags": [
+          "Sources"
+        ]
+      }
+    },
+    "/api/v1/sources/{id}/registry/policy": {
+      "put": {
+        "description": "⚠ Сутність не прив'язана до довідника — `422 ECR-REQ-0422`\n(`registrySyncPolicyNotBound`); невалідне тіло — `422 ECR-REQ-0422`\n(`registrySyncPolicyInvalid`). Зміна пишеться в журнал структурних змін.",
+        "parameters": [
+          {
+            "description": "Сутність збору.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRegistrySyncPolicyRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRegistrySyncPolicyRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRegistrySyncPolicyRequest"
+              }
+            }
+          },
+          "description": "Скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceEntityDto"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Замінює політику синку довідника з цієї сутності збору (`D-212`).\nПраво `Integration.Manage` і право на дані прив'язаного довідника —\n`Registry.EditData` або грант `Write`.",
         "tags": [
           "Sources"
         ]

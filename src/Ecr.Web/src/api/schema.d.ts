@@ -11451,6 +11451,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sources/{id}/registry/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Замінює політику синку довідника з цієї сутності збору (`D-212`).
+         *     Право `Integration.Manage` і право на дані прив'язаного довідника —
+         *     `Registry.EditData` або грант `Write`.
+         * @description ⚠ Сутність не прив'язана до довідника — `422 ECR-REQ-0422`
+         *     (`registrySyncPolicyNotBound`); невалідне тіло — `422 ECR-REQ-0422`
+         *     (`registrySyncPolicyInvalid`). Зміна пишеться в журнал структурних змін.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Сутність збору. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            /** @description Скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["SetRegistrySyncPolicyRequest"];
+                    "application/json": components["schemas"]["SetRegistrySyncPolicyRequest"];
+                    "text/json": components["schemas"]["SetRegistrySyncPolicyRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SourceEntityDto"];
+                        "text/json": components["schemas"]["SourceEntityDto"];
+                        "text/plain": components["schemas"]["SourceEntityDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/template-versions/{id}/access-matrix": {
         parameters: {
             query?: never;
@@ -19393,6 +19481,11 @@ export interface components {
              */
             lastSyncedAt: null | string;
             /**
+             * Format: date-time
+             * @description Відколи (UTC) елемента немає в джерелі; `null` — є (`D-212`).
+             */
+            missingInSourceSince: null | string;
+            /**
              * Format: int64
              * @description Запис довідника.
              */
@@ -19589,6 +19682,12 @@ export interface components {
             /** @description Згортання точок періоду; `null` — не згортається. */
             transformCode: null | string;
         };
+        /**
+         * @description Що робить синк довідника з записом, чий елемент зник із джерела
+         *     (`D-212`). Колонка `ext.SourceEntity.OnMissingInSource`.
+         * @enum {unknown}
+         */
+        RegistryMissingPolicy: "MarkOrphaned" | "Deactivate" | "Ignore";
         /** @description Зв'язок довідника з іншим довідником (`ФВ-8.4`). */
         RegistryRelationDto: {
             /** @description Поле-посилання; `null` для M:N — там поля немає. */
@@ -20716,6 +20815,17 @@ export interface components {
             /** @description Обсяг журналу обчислення (ФВ-9.13). */
             traceLevel: components["schemas"]["TraceLevel"];
         };
+        /** @description Політика синку довідника з AF (`D-212`). */
+        SetRegistrySyncPolicyRequest: {
+            /** @description Що робити з записом, чий елемент зник у джерелі. */
+            onMissingInSource: components["schemas"]["RegistryMissingPolicy"];
+            /** @description Атрибут початку чинності; `null` — не синхронізувати. */
+            validFromAttribute: null | string;
+            /** @description Атрибут кінця чинності; `null` — не синхронізувати. */
+            validToAttribute: null | string;
+            /** @description Кінець у джерелі — останній чинний день. */
+            validToInclusive: boolean;
+        };
         /** @description Запит на зміну рядка каталогу. */
         SetUiStringRequest: {
             /** @description Область: 0 — публічна, 1 — приватна (`D-114`). */
@@ -20964,6 +21074,8 @@ export interface components {
             id: number;
             /** @description Чи ввімкнено збір. */
             isActive: boolean;
+            /** @description Політика синку: зникнення елемента в джерелі (`D-212`). */
+            onMissingInSource: components["schemas"]["RegistryMissingPolicy"];
             /**
              * Format: int32
              * @description Довідник; `null` — не прив'язана.
@@ -20971,6 +21083,12 @@ export interface components {
             registryDefId: null | number;
             /** @description Хто master. */
             sourceKind: components["schemas"]["RegistrySourceKind"];
+            /** @description Атрибут початку чинності; `null` — не синхронізується. */
+            validFromAttribute: null | string;
+            /** @description Атрибут кінця чинності; `null` — не синхронізується. */
+            validToAttribute: null | string;
+            /** @description Кінець у джерелі — останній чинний день. */
+            validToInclusive: boolean;
         };
         /** @description Сутність збору разом зі станом останнього прогону. */
         SourceEntityStatus: {
