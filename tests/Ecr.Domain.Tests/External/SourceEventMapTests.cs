@@ -57,6 +57,7 @@ public sealed class SourceEventMapTests
         Assert.Equal(
             (4, SourceEventAttributeScope.PrimaryElement, SourceEventValueKind.LookupByCode),
             (category.TargetColumnDefId, category.AttributeScope, category.ValueKind));
+        Assert.Null(map.FilterAttribute);
     }
 
     [Theory]
@@ -188,6 +189,74 @@ public sealed class SourceEventMapTests
             new(Column("VOLUME", CellDataType.Decimal, id: 5), "VolumeCorrected")));
 
         AssertKey(error, "ECR-INT-0409", "err.ECR-INT-0409.eventMapColumnTaken");
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-F9")]
+    public void Явна_відповідність_лише_для_ValueMap_і_без_дублів()
+    {
+        var map = Create();
+        var byCode = map.AddField(new(Column("CATEGORY", CellDataType.Lookup, id: 4), "Category",
+            SourceEventAttributeScope.Event, SourceEventValueKind.LookupByCode));
+        var season = map.AddField(new(Column("SEASON", CellDataType.Lookup, id: 6), "Season",
+            SourceEventAttributeScope.PrimaryElement, SourceEventValueKind.ValueMap));
+
+        // На полі «за кодом» відповідність не діяла б ніколи.
+        AssertKey(
+            Assert.Throws<DomainException>(() => byCode.AddValue("V6", 100)),
+            "ECR-INT-0422", "err.ECR-INT-0422.eventMapValueMapNotAllowed");
+
+        var winter = season.AddValue("  зима ", 200);
+        Assert.Equal(("зима", 200L), (winter.SourceValue, winter.RegistryEntryId));
+
+        // Без регістру — як UQ_SEVM_Value у базі (_CI_).
+        AssertKey(
+            Assert.Throws<DomainException>(() => season.AddValue("ЗИМА", 201)),
+            "ECR-INT-0409", "err.ECR-INT-0409.eventMapSourceValueTaken");
+        Assert.Single(season.Values);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-F9")]
+    public void Звуження_задається_трьома_значеннями_разом()
+    {
+        var map = Create();
+
+        map.SetFilter(" Flare ", SourceEventAttributeScope.PrimaryElement, " FL-370 ");
+        Assert.Equal(
+            ("Flare", (SourceEventAttributeScope?)SourceEventAttributeScope.PrimaryElement, "FL-370"),
+            (map.FilterAttribute, map.FilterScope, map.FilterValue));
+
+        AssertKey(
+            Assert.Throws<DomainException>(() => map.SetFilter("Flare", null, "FL-370")),
+            "ECR-INT-0422", "err.ECR-INT-0422.eventMapFilterIncomplete");
+        AssertKey(
+            Assert.Throws<DomainException>(() => map.SetFilter("Flare", SourceEventAttributeScope.Event, " ")),
+            "ECR-INT-0422", "err.ECR-INT-0422.eventMapFilterIncomplete");
+
+        // Відмова не зачепила чинного звуження; порожнє — знімає його.
+        Assert.Equal("FL-370", map.FilterValue);
+        map.SetFilter(null, null, null);
+        Assert.Equal(((string?)null, (SourceEventAttributeScope?)null, (string?)null),
+            (map.FilterAttribute, map.FilterScope, map.FilterValue));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-F9")]
+    public void Режим_об_єму_й_активність_перемикаються_даними()
+    {
+        var map = Create();
+
+        map.SetVolumeMode(SourceEventVolumeMode.EventAttribute);
+        map.Deactivate();
+        Assert.Equal((SourceEventVolumeMode.EventAttribute, false), (map.VolumeMode, map.IsActive));
+
+        map.Activate();
+        Assert.True(map.IsActive);
+        Assert.Throws<ArgumentOutOfRangeException>(() => map.SetVolumeMode((SourceEventVolumeMode)9));
     }
 
     private static SourceEventMap Create()
