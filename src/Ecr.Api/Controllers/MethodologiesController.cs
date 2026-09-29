@@ -535,6 +535,7 @@ public sealed class MethodologiesController(
     [HttpPut("{id:int}/bindings/{columnDefId:int}/{outputCode}")]
     [ProducesResponseType<CalculationBindingDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<CalculationBindingDto>> SaveBinding(
         int id, int columnDefId, string outputCode,

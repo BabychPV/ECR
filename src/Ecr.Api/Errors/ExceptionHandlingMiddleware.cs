@@ -504,6 +504,13 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.SimulationTargetForbidden =>
             (StatusCodes.Status403Forbidden, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ HSE301 C5b (D-215): відв'язка останнього джерела `Formula`-колонки опублікованої
+        // версії — конфлікт зі СТАНОМ версії, а не невірні дані: треба спершу прив'язати нове
+        // джерело. ⚠ Правило суфікса вище цей код теж ловить (`-4091`), тож арм — явна назва,
+        // як у `RegistryKeyConflict`, а не єдина опора.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.LastSourceOfPublishedColumn =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 

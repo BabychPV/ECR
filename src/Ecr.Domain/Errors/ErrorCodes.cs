@@ -761,4 +761,19 @@ public static class ErrorCodes
     /// <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
     /// </remarks>
     public const string SimulationTargetForbidden = "ECR-SIM-4031";
+
+    /// <summary>
+    /// Відв'язка забрала б у колонки типу <c>Formula</c> ОПУБЛІКОВАНОЇ версії шаблону
+    /// останнє джерело значення (<c>ECR-TMPL-4091</c>, HSE301 C5b, <c>D-215</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Дзеркало до <see cref="CalculatedWithoutSource"/> (<c>4226</c>): публікація не
+    /// пропускає <c>Formula</c>-колонку без формули шаблону й без активної прив'язки, але
+    /// після публікації той самий стан досягався однією відв'язкою — і структурно
+    /// незмінна версія жила з колонкою, якої ніхто не рахує.
+    ///
+    /// ⚠ 409, а не 422: запит правильний, суперечить він СТАНУ версії. Джерела
+    /// рахуються ПІСЛЯ зміни, тож заміна «прив'язати нове → відв'язати старе» проходить.
+    /// </remarks>
+    public const string LastSourceOfPublishedColumn = "ECR-TMPL-4091";
 }

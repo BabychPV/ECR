@@ -4843,6 +4843,12 @@ USING (VALUES
     (N'publish.problem.importModeMismatch', N'en', N'Imported methodology {library} calculates in {libraryNumeric}/{libraryCalendar} mode, but this version uses {numeric}/{calendar}: its formulas would give different numbers here than in the library itself.', 1),
     (N'publish.problem.rowScopeReferencesLibrarySubstance', N'en', N'Formula {formula} is calculated once per row, but !{name} of imported methodology {library} has a value only for a substance. Make {formula} a per-substance formula or remove the reference.', 1),
     -- HSE301:L ── кінець секції
+
+    -- HSE301:C5b ── відв'язка останнього джерела Formula-колонки опублікованої версії (D-215):
+    -- 409 замість версії з колонкою, якої ніхто не рахує; джерела рахуються після зміни.
+    (N'err.ECR-TMPL-4091', N'en', N'Column would lose its last source', 1),
+    (N'err.ECR-TMPL-4091.lastSourceOfPublishedColumn', N'en', N'Column "{columnCode}" of published template version {templateVersion} would be left without a source: it has no template formula and no other active methodology binding. Bind the new source first, then deactivate this one.', 1),
+    -- HSE301:C5b ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
