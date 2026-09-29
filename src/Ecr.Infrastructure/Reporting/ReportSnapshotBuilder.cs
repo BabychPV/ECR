@@ -690,6 +690,12 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
             where document.ProjectId == projectId
                   && (periodKey == null || result.PeriodKey == periodKey.Value.Value)
 
+                  // ⛔ HSE301 A3a (D-175, V-6): лише ВИХОДИ. Проміжні значення видимих
+                  // формул лежать у тій самій таблиці, але в зріз не йдуть: інакше
+                  // поява прапорця «видима» в методології змінила б вміст і
+                  // `ContentHash` уже поданих зрізів (D-53).
+                  && result.Kind == CalculationResultKind.Output
+
                   // ⚠ Лише АКТУАЛЬНИЙ прогін. Без цієї умови зріз склав би
                   // результати всіх прогонів разом — числа виросли б кратно
                   // кількості перерахунків і лишилися б правдоподібними.

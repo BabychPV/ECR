@@ -341,15 +341,22 @@ public sealed record CalculationOutput(
 /// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число.</param>
 /// <param name="SubstanceEntryId">Речовина; <c>null</c> для виходів без речовини.</param>
-/// <param name="OutputCode">Код виходу з <c>calc.MethodologyOutput</c>.</param>
+/// <param name="OutputCode">
+/// Код виходу з <c>calc.MethodologyOutput</c>; для проміжного значення — код видимої формули.
+/// </param>
 /// <param name="Value">Значення. <c>float</c> заборонений (D-30).</param>
 /// <param name="UnitId">Одиниця результату — обов'язкова (ФВ-16.6).</param>
+/// <param name="Kind">
+/// Вихід чи значення видимої формули (<c>D-175</c>, V-6). ⚠ Типове — вихід: модуль, що
+/// про проміжні нічого не знає, пише рівно те, що писав до кроку A3a.
+/// </param>
 public sealed record CalculationOutputValue(
     int MethodologyVersionId,
     int? SubstanceEntryId,
     string OutputCode,
     decimal Value,
-    int UnitId);
+    int UnitId,
+    CalculationResultKind Kind = CalculationResultKind.Output);
 
 /// <summary>Крок трейсу — рядок <c>calc.CalculationStep</c>.</summary>
 /// <remarks>

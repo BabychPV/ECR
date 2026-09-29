@@ -118,7 +118,11 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
                 output.SourceRowKey,
                 value.OutputCode,
                 value.Value,
-                value.UnitId);
+                value.UnitId,
+
+                // ⛔ HSE301 A3a (D-175): вид іде з модуля як є. Без нього проміжне
+                // значення лягло б як вихід і потрапило б у зріз `rpt.*`.
+                value.Kind);
 
             typeof(Domain.Abstractions.Entity<long>)
                 .GetProperty(nameof(Domain.Abstractions.Entity<long>.Id))!

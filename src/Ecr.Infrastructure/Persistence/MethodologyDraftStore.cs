@@ -299,6 +299,13 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
             // тобто саме там, де описку в імені токена ще можна виправити.
             clone.SetArguments(source.ArgumentsCsv);
 
+            // ⛔ HSE301 A3a (борг F6): область і видимість — теж вміст формули. Клон
+            // без них повертав би Row-формулу до типового `Substance` — `M_t` знову
+            // лягав би N разів, по разу на речовину, — і мовчки ховав би проміжні
+            // значення, які методолог свідомо показав.
+            clone.SetScope(source.Scope);
+            clone.SetVisible(source.IsVisible);
+
             // ⚠ `EvaluationOrder` НЕ переноситься: він топологічний і
             // рахується при публікації (ФВ-9.4). Скопійований, він виглядав би
             // як уже порахований для складу формул, якого ще ніхто не перевіряв.
@@ -361,8 +368,14 @@ public sealed class MethodologyDraftStore(EcrDbContext db) : IMethodologyDraftSt
                      db.MethodologyOutputs.Where(o => o.MethodologyVersionId == sourceVersionId), ct)
                      .ConfigureAwait(false))
         {
-            db.MethodologyOutputs.Add(new MethodologyOutput(
-                targetVersionId, EcrCode.Create(source.Code), source.UnitId, source.Ordinal));
+            var clone = new MethodologyOutput(
+                targetVersionId, EcrCode.Create(source.Code), source.UnitId, source.Ordinal);
+
+            // ⛔ HSE301 A3a (борг F6): типове `true` у конструкторі — поведінка до
+            // D-176; вихід «раз на рядок» мусить лишитися таким і в клоні.
+            clone.SetPerSubstance(source.IsPerSubstance);
+
+            db.MethodologyOutputs.Add(clone);
         }
 
         foreach (var source in await ChildrenAsync(

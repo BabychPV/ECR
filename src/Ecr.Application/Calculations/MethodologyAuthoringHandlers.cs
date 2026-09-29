@@ -1171,11 +1171,20 @@ public sealed class SaveCalculationBindingHandler(
         }
     }
 
-    /// <summary>Вихід оголошено хоч однією версією методології.</summary>
+    /// <summary>
+    /// Вихід або видиму формулу оголошено хоч однією версією методології.
+    /// </summary>
     /// <param name="methodologyId">Методологія.</param>
-    /// <param name="outputCode">Код виходу.</param>
+    /// <param name="outputCode">Код виходу або видимої формули.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="BusinessRuleException"><c>ECR-CALC-0422</c>, <c>bindingUnknownOutput</c>.</exception>
+    /// <remarks>
+    /// ⛔ HSE301 A3a (D-175, V-6): колонку можна прив'язати й до ВИДИМОЇ формули —
+    /// її значення лягає в <c>calc.CalculationResult</c> з <c>Kind = Intermediate</c> і
+    /// кодом формули, і сітка читає його тим самим шляхом, що й вихід (<c>M_t</c> у
+    /// сітці 301). ⚠ Невидима — ні: її значення не пишеться, і колонка чекала б числа,
+    /// якого ніхто не запише.
+    /// </remarks>
     private async Task RequireDeclaredOutputAsync(int methodologyId, string outputCode, CancellationToken ct)
     {
         var versions = await drafts.GetAllVersionsAsync(methodologyId, ct).ConfigureAwait(false);
@@ -1184,6 +1193,12 @@ public sealed class SaveCalculationBindingHandler(
         {
             var outputs = await methodologies.GetOutputsAsync(version.Id, ct).ConfigureAwait(false);
             if (outputs.Any(o => string.Equals(o.Code, outputCode, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            var formulas = await methodologies.GetFormulasAsync(version.Id, ct).ConfigureAwait(false);
+            if (formulas.Any(f => f.IsVisible && string.Equals(f.Code, outputCode, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }

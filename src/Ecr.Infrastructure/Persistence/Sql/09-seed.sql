@@ -4615,6 +4615,14 @@ USING (VALUES
     (N'err.ECR-TMPL-0422.unknownUnit', N'en', N'Column "{columnCode}": unit {unitId} does not exist in the unit catalog.', 1),
     (N'err.ECR-REG-0422.unknownUnit', N'en', N'Field "{fieldCode}": unit {unitId} does not exist in the unit catalog.', 1),
     -- HSE301:U1 ── кінець секції
+
+    -- HSE301:A3a ── область формули, проміжні результати (FEATURE-HSE301-VIEW §6.1, §7.1; D-175, D-176):
+    -- публікація відхиляє видиму формулу без одиниці, Row-формулу з посиланням «лише для речовини»
+    -- і вихід «раз на рядок» із формули речовини.
+    (N'err.ECR-CALC-0422.visibleFormulaNoUnit', N'en', N'Formula "{formula}" is shown as an intermediate result but has no result unit. A result without a unit cannot be stored: set the unit or clear "visible".', 1),
+    (N'err.ECR-CALC-0422.rowScopeReferencesSubstance', N'en', N'Formula "{formula}" is calculated once per row, but it uses {reference}, which has a value only for a substance. Make "{formula}" a per-substance formula or remove the reference.', 1),
+    (N'err.ECR-CALC-0422.rowOutputFromSubstanceFormula', N'en', N'Output "{output}" is written once per row, but its formula is calculated for every substance, so it is unclear which value belongs to the row. Make the formula per-row or write the output per substance.', 1),
+    -- HSE301:A3a ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,

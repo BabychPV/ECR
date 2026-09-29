@@ -260,6 +260,11 @@ public sealed class PublishMethodologyHandler(
 
         RejectExtensionFunctions(parsed, version.NumericMode);
 
+        // ⛔ HSE301 A3a (D-175, D-176): область, видимість і «вихід раз на рядок».
+        // Рушій на такій версії не впав би, а мовчки дав би коефіцієнт без речовини
+        // як число рядка — тому це відмова публікації, а не помилка прогону.
+        RejectScopeViolations(formulas, [.. parsed.Select(p => p.Root)], constants, outputs);
+
         // ⛔ Лінія 1 захисту від мовчазного null: аргумент, який формула
         // вживає, мусить відповідати колонці таблиці, до якої прив'язана
         // методологія — інакше збірка (`CalculationInputBuilder`) не знайде
@@ -388,6 +393,140 @@ public sealed class PublishMethodologyHandler(
                 ["messageKey"] = "err.ECR-CALC-0433.legacyExtensionFunction",
                 ["functionCount"] = found.Count.ToString(CultureInfo.InvariantCulture),
             });
+    }
+
+    /// <summary>
+    /// Перевірки області формул і видимості (HSE301 A3a, <c>D-175</c>, <c>D-176</c>).
+    /// </summary>
+    /// <param name="formulas">Формули версії.</param>
+    /// <param name="roots">Корені розібраних виразів у тому самому порядку; <c>null</c> — не розібралася.</param>
+    /// <param name="constants">Константи версії — усі кандидати.</param>
+    /// <param name="outputs">Оголошені виходи версії.</param>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-CALC-0422</c>: <c>visibleFormulaNoUnit</c>, <c>rowScopeReferencesSubstance</c>,
+    /// <c>rowOutputFromSubstanceFormula</c>.
+    /// </exception>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>Видима формула мусить мати одиницю: вона пишеться рядком
+    /// <c>calc.CalculationResult</c>, а результат без одиниці заборонений (ФВ-16.6).
+    /// Текстова формула одиниці мати не може (<c>textFormulaUnit</c>), тож видимою бути
+    /// теж не може — одна перевірка закриває обидва випадки.</item>
+    /// <item>Row-формула не посилається на Substance-формулу своєї версії, на константу,
+    /// задану хоч одним кандидатом по речовині, і не кличе <c>SUBSTANCE(…)</c>
+    /// (FEATURE-HSE301-VIEW §6.1). Рушій рахує її один раз, БЕЗ речовини: такі посилання
+    /// дали б <c>#REF</c> або коефіцієнт «ні для кого». ⚠ Транзитивність — наслідок,
+    /// а не окремий обхід: кожна Row-формула сама посилається лише на Row-формули.</item>
+    /// <item>Вихід «раз на рядок» (<c>IsPerSubstance = false</c>) мусить іти з Row-формули:
+    /// у Substance-формули N значень, і яке з них — «число рядка», сказати нема як.</item>
+    /// </list>
+    /// ⚠ Поіменна відмова з першою знахідкою, а не рядок у переліку проблем — за зразком
+    /// <c>CheckUnknownConstants</c>: ключ каталогу названо в §6.1, і клієнт показує його як є.
+    /// </remarks>
+    private static void RejectScopeViolations(
+        IReadOnlyList<MethodologyFormula> formulas,
+        IReadOnlyList<Ecr.Expressions.Ast.AstNode?> roots,
+        IReadOnlyList<MethodologyConstant> constants,
+        IReadOnlyList<MethodologyOutput> outputs)
+    {
+        foreach (var formula in formulas.Where(f => f.IsVisible && f.OutputUnitId is null))
+        {
+            throw new BusinessRuleException(
+                "ECR-CALC-0422",
+                $"Формула «{formula.Code}» позначена видимою, але не має одиниці результату: "
+                + "проміжне значення пишеться результатом, а результат без одиниці заборонений (ФВ-16.6).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-0422.visibleFormulaNoUnit",
+                    ["formula"] = formula.Code,
+                });
+        }
+
+        var scopes = formulas.ToDictionary(f => f.Code, f => f.Scope, StringComparer.OrdinalIgnoreCase);
+        var perSubstanceConstants = constants
+            .Where(c => c.SubstanceEntryId is not null)
+            .Select(c => c.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < formulas.Count; i++)
+        {
+            if (formulas[i].Scope != MethodologyFormulaScope.Row || roots[i] is not { } root)
+            {
+                continue;
+            }
+
+            if (SubstanceReference(root, scopes, perSubstanceConstants) is { } reference)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0422",
+                    $"Формула «{formulas[i].Code}» рахується раз на рядок (Scope = Row), але посилається на "
+                    + $"«{reference}», що має значення лише для речовини. Зробіть «{formulas[i].Code}» "
+                    + "формулою речовини або приберіть посилання.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.rowScopeReferencesSubstance",
+                        ["formula"] = formulas[i].Code,
+                        ["reference"] = reference,
+                    });
+            }
+        }
+
+        foreach (var output in outputs.Where(o => !o.IsPerSubstance))
+        {
+            if (scopes.TryGetValue(output.Code, out var scope) && scope != MethodologyFormulaScope.Row)
+            {
+                throw new BusinessRuleException(
+                    "ECR-CALC-0422",
+                    $"Вихід «{output.Code}» пишеться раз на рядок, але його формула рахується для кожної "
+                    + "речовини: котре з її значень є числом рядка, невідомо. Зробіть формулу Row або "
+                    + "пишіть вихід на кожну речовину.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-CALC-0422.rowOutputFromSubstanceFormula",
+                        ["output"] = output.Code,
+                    });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Перше посилання виразу, що має значення лише для речовини; <c>null</c> — таких немає.
+    /// </summary>
+    /// <param name="node">Вузол виразу Row-формули.</param>
+    /// <param name="scopes">Області формул версії за кодом.</param>
+    /// <param name="perSubstanceConstants">Коди констант, заданих хоч одним кандидатом по речовині.</param>
+    private static string? SubstanceReference(
+        Ecr.Expressions.Ast.AstNode node,
+        Dictionary<string, MethodologyFormulaScope> scopes,
+        HashSet<string> perSubstanceConstants)
+    {
+        switch (node)
+        {
+            case Ecr.Expressions.Ast.SymbolReferenceNode { Kind: Ecr.Expressions.Ast.SymbolKind.Formula } formula
+                when scopes.TryGetValue(formula.Name, out var scope) && scope != MethodologyFormulaScope.Row:
+                return "!" + formula.Name;
+
+            case Ecr.Expressions.Ast.SymbolReferenceNode { Kind: Ecr.Expressions.Ast.SymbolKind.Constant } constant
+                when perSubstanceConstants.Contains(constant.Name):
+                return "CST." + constant.Name;
+
+            case Ecr.Expressions.Ast.FunctionNode function
+                when string.Equals(function.Name, "SUBSTANCE", StringComparison.OrdinalIgnoreCase):
+                return "SUBSTANCE()";
+
+            default:
+                break;
+        }
+
+        foreach (var child in Children(node))
+        {
+            if (SubstanceReference(child, scopes, perSubstanceConstants) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -896,10 +1035,14 @@ public sealed class PublishMethodologyHandler(
                 var before = await RunTestAsync(testCase, Descriptor(methodology, previous), ct)
                     .ConfigureAwait(false);
 
-                foreach (var value in after.Values)
+                // ⚠ HSE301 A3a: diff — про ВИХОДИ (`MethodologyResultDelta.OutputCode`).
+                // Проміжні значення видимих формул у журнал публікації не йдуть: інакше
+                // прапорець «видима» сам по собі виглядав би як зміна чисел.
+                foreach (var value in after.Values.Where(v => v.Kind == CalculationResultKind.Output))
                 {
                     var old = before.Values.FirstOrDefault(
-                        v => v.OutputCode == value.OutputCode
+                        v => v.Kind == CalculationResultKind.Output
+                             && v.OutputCode == value.OutputCode
                              && v.SubstanceEntryId == value.SubstanceEntryId);
 
                     if (old is null || old.Value != value.Value)

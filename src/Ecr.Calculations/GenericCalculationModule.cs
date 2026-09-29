@@ -279,6 +279,47 @@ public sealed class GenericCalculationModule(
             a => a.ArgumentCode, ToValue, StringComparer.OrdinalIgnoreCase);
 
         var values = new List<CalculationOutputValue>();
+        var units = await UnitsAsync(ct).ConfigureAwait(false);
+
+        // ⛔ HSE301 A3a (D-176, V-7): Row-формули — ОДИН раз на рядок, до циклу
+        // речовин; у циклі вони видимі як `!Code`. Порядок усередині кожної групи —
+        // `EvaluationOrder`, а Row-формула за перевіркою публікації не посилається на
+        // Substance-формулу (`rowScopeReferencesSubstance`), тож обчислити всі Row
+        // першими — це той самий топологічний порядок.
+        // ⚠ Типова область — `Substance`: для версії без жодної Row-формули група
+        // порожня, і цикл нижче робить побітно те саме, що робив до кроку.
+        var rowFormulas = ordered.Where(f => f.Scope == MethodologyFormulaScope.Row).ToList();
+        var substanceFormulas = ordered.Where(f => f.Scope != MethodologyFormulaScope.Row).ToList();
+        var outputCodes = outputs
+            .Select(o => o.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // ⛔ Константи Row-формул резолвляться БЕЗ речовини: константа, задана по
+        // речовинах, у Row-формулі — відмова публікації, а не «коефіцієнт першої».
+        var rowContext = new MethodologyEvaluationContext(
+            period,
+            arguments,
+            ResolveConstants(version, rowFormulas, substanceEntryId: null, period, binding.Constants),
+            units,
+            binding.Registries);
+
+        foreach (var formula in rowFormulas)
+        {
+            rowContext.SetFormulaResult(formula.Code, Evaluate(formula, rowContext, numeric, trace));
+        }
+
+        // Рівень рядка: виходи «раз на рядок» і проміжні значення видимих Row-формул.
+        foreach (var output in outputs.Where(o => !o.IsPerSubstance))
+        {
+            Emit(values, version, binding, numeric, trace, output.Code, rowContext.GetFormulaResult(output.Code),
+                 output.UnitId, substance: null, CalculationResultKind.Output);
+        }
+
+        foreach (var formula in VisibleIntermediates(rowFormulas, outputCodes))
+        {
+            Emit(values, version, binding, numeric, trace, formula.Code, rowContext.GetFormulaResult(formula.Code),
+                 formula.OutputUnitId!.Value, substance: null, CalculationResultKind.Intermediate);
+        }
 
         // ⛔ Для КОЖНОЇ речовини — власний прогін. Константи резолвляться за
         // речовиною, тому спільний контекст дав би всім речовинам коефіцієнт
@@ -298,80 +339,38 @@ public sealed class GenericCalculationModule(
             targets.Add(null);
         }
 
+        var perSubstanceOutputs = outputs.Where(o => o.IsPerSubstance).ToList();
+        var substanceIntermediates = VisibleIntermediates(substanceFormulas, outputCodes);
+
         foreach (var substance in targets)
         {
             var resolved = ResolveConstants(
-                version, ordered, substance?.SubstanceEntryId, period, binding.Constants);
+                version, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants);
 
-            var units = await UnitsAsync(ct).ConfigureAwait(false);
             var context = new MethodologyEvaluationContext(period, arguments, resolved, units, binding.Registries);
 
-            foreach (var formula in ordered)
+            // Row-результати — готові, не перераховуються: саме заради цього D-176.
+            foreach (var formula in rowFormulas)
+            {
+                context.SetFormulaResult(formula.Code, rowContext.GetFormulaResult(formula.Code));
+            }
+
+            foreach (var formula in substanceFormulas)
             {
                 var value = Evaluate(formula, context, numeric, trace);
                 context.SetFormulaResult(formula.Code, value);
             }
 
-            foreach (var output in outputs)
+            foreach (var output in perSubstanceOutputs)
             {
-                var value = context.GetFormulaResult(output.Code);
-                var masked = MaskedZero.Prepare(value, version.NumericMode);
+                Emit(values, version, binding, numeric, trace, output.Code, context.GetFormulaResult(output.Code),
+                     output.UnitId, substance, CalculationResultKind.Output);
+            }
 
-                if (masked.Value is not { } number)
-                {
-                    // ⚠ У `Strict` сюди потрапляє і замаскований випадок:
-                    // значення там `null`, а не нуль (`ФВ-9.14`). Причина
-                    // однаково має бути названа, тому запис іде окремим
-                    // кроком, а не загальним «#NULL».
-                    if (masked.Reason != MaskedZeroReason.None)
-                    {
-                        trace.Masked(output.Code, null, null, masked.Reason);
-                        continue;
-                    }
-
-                    // Вихід без числа не пишеться: нуль тут виглядав би як
-                    // порахований результат. Причина вже в трейсі.
-                    //
-                    // ⚠ Аудит A2: ЧИСЛО без `decimal`-подання — це `Legacy`
-                    // `double` за межею ≈7.9e28 (`Pow(10, 30)`). Колонка
-                    // результату його не вмістить, а «#NULL» збрехав би, що
-                    // значення не було; тому `#VALUE`, як у `Strict`.
-                    trace.Failed(
-                        output.Code,
-                        null,
-                        value.ErrorCode
-                            ?? (value.Type == Expressions.Ast.ExpressionValueType.Number
-                                ? Expressions.ExpressionErrors.BadValue
-                                : "#NULL"));
-                    continue;
-                }
-
-                // ⛔ Замаскований нуль пишеться в трейс ЗАВЖДИ, коли він
-                // стався. Число при цьому те саме, що дала б чинна система, —
-                // саме тому знайти ці випадки можна лише за записом, і саме
-                // вони обіцяні як найцінніший побічний результат міграції.
-                if (masked.Reason != MaskedZeroReason.None)
-                {
-                    trace.Masked(output.Code, null, number, masked.Reason);
-                }
-
-                // ⛔ Скільки знаків несе результат — КОНФІГУРАЦІЯ КОЛОНКИ, у
-                // яку він потрапляє (рішення людини 2026-09-20), а не спільна
-                // константа рушія. Колонка мовчить — беруться всі шістнадцять
-                // (`NumericPolicy.DefaultOutputScale`), бо саме стільки несе
-                // конвеєр чинної системи; обрізати до шести «на всяк випадок»
-                // означало б змінити число у звіті там, де ніхто про це не
-                // просив.
-                var scale = binding.OutputScales.TryGetValue(output.Code, out var declared)
-                    ? declared
-                    : null;
-
-                values.Add(new CalculationOutputValue(
-                    version.MethodologyVersionId,
-                    substance is null ? null : checked((int)substance.SubstanceEntryId),
-                    output.Code,
-                    numeric.RoundOutput(number, scale),
-                    output.UnitId));
+            foreach (var formula in substanceIntermediates)
+            {
+                Emit(values, version, binding, numeric, trace, formula.Code, context.GetFormulaResult(formula.Code),
+                     formula.OutputUnitId!.Value, substance, CalculationResultKind.Intermediate);
             }
         }
 
@@ -386,6 +385,114 @@ public sealed class GenericCalculationModule(
                 .Select(s => new CalculationTraceStep(
                     s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked))
                 .ToList());
+    }
+
+    /// <summary>
+    /// Видимі формули групи, які пишуться як проміжні значення (<c>D-175</c>, V-6).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Формула, чий код — оголошений вихід, проміжним НЕ пишеться: вихід уже лягає
+    /// рядком з тим самим <c>OutputCode</c>, і другий рядок (<c>Intermediate</c>)
+    /// подвоїв би число в сітці, яка сумує рядки за кодом (<c>CalculatedCellOverlay</c>).
+    /// Так <c>M_t</c> — «видимий і вихід» (§6.3) — лягає рівно один раз.
+    ///
+    /// ⚠ Формула без одиниці не пишеться: результат без одиниці заборонений (ФВ-16.6),
+    /// а видиму формулу без одиниці не пропускає публікація (<c>visibleFormulaNoUnit</c>).
+    /// Сюди така доходить лише з чернетки — у симуляції.
+    /// </remarks>
+    private static List<MethodologyFormula> VisibleIntermediates(
+        IReadOnlyList<MethodologyFormula> formulas, HashSet<string> outputCodes)
+        => [.. formulas.Where(f => f.IsVisible && f.OutputUnitId is not null && !outputCodes.Contains(f.Code))];
+
+    /// <summary>Пише одне значення — вихід або проміжне — у результати рядка.</summary>
+    /// <param name="values">Куди пишеться.</param>
+    /// <param name="version">Версія рядка — режим арифметики й ідентифікатор.</param>
+    /// <param name="binding">Контекст прив'язки — масштаби колонок-приймачів.</param>
+    /// <param name="numeric">Числова політика версії.</param>
+    /// <param name="trace">Трейс рядка.</param>
+    /// <param name="code">Код виходу або видимої формули.</param>
+    /// <param name="value">Значення з контексту обчислення.</param>
+    /// <param name="unitId">Одиниця результату.</param>
+    /// <param name="substance">Речовина; <c>null</c> — значення рівня рядка.</param>
+    /// <param name="kind">Вихід чи проміжне.</param>
+    private static void Emit(
+        List<CalculationOutputValue> values,
+        MethodologyDescriptor version,
+        CalculationBindingContext binding,
+        NumericPolicy numeric,
+        TraceRecorder trace,
+        string code,
+        ExpressionValue value,
+        int unitId,
+        MethodologySubstance? substance,
+        CalculationResultKind kind)
+    {
+        var masked = MaskedZero.Prepare(value, version.NumericMode);
+
+        if (masked.Value is not { } number)
+        {
+            // ⚠ У `Strict` сюди потрапляє і замаскований випадок:
+            // значення там `null`, а не нуль (`ФВ-9.14`). Причина
+            // однаково має бути названа, тому запис іде окремим
+            // кроком, а не загальним «#NULL».
+            if (masked.Reason != MaskedZeroReason.None)
+            {
+                trace.Masked(code, null, null, masked.Reason);
+                return;
+            }
+
+            // ⚠ Проміжне без числа — лише пропуск: крок формули з причиною вже
+            // записав `Evaluate`, а другий такий самий запис нічого б не додав.
+            if (kind == CalculationResultKind.Intermediate)
+            {
+                return;
+            }
+
+            // Вихід без числа не пишеться: нуль тут виглядав би як
+            // порахований результат. Причина вже в трейсі.
+            //
+            // ⚠ Аудит A2: ЧИСЛО без `decimal`-подання — це `Legacy`
+            // `double` за межею ≈7.9e28 (`Pow(10, 30)`). Колонка
+            // результату його не вмістить, а «#NULL» збрехав би, що
+            // значення не було; тому `#VALUE`, як у `Strict`.
+            trace.Failed(
+                code,
+                null,
+                value.ErrorCode
+                    ?? (value.Type == Expressions.Ast.ExpressionValueType.Number
+                        ? Expressions.ExpressionErrors.BadValue
+                        : "#NULL"));
+            return;
+        }
+
+        // ⛔ Замаскований нуль пишеться в трейс ЗАВЖДИ, коли він
+        // стався. Число при цьому те саме, що дала б чинна система, —
+        // саме тому знайти ці випадки можна лише за записом, і саме
+        // вони обіцяні як найцінніший побічний результат міграції.
+        if (masked.Reason != MaskedZeroReason.None)
+        {
+            trace.Masked(code, null, number, masked.Reason);
+        }
+
+        // ⛔ Скільки знаків несе результат — КОНФІГУРАЦІЯ КОЛОНКИ, у
+        // яку він потрапляє (рішення людини 2026-09-20), а не спільна
+        // константа рушія. Колонка мовчить — беруться всі шістнадцять
+        // (`NumericPolicy.DefaultOutputScale`), бо саме стільки несе
+        // конвеєр чинної системи; обрізати до шести «на всяк випадок»
+        // означало б змінити число у звіті там, де ніхто про це не
+        // просив. Проміжне, прив'язане до колонки (`M_t` у сітці), бере
+        // масштаб тієї самої колонки тим самим кодом.
+        var scale = binding.OutputScales.TryGetValue(code, out var declared)
+            ? declared
+            : null;
+
+        values.Add(new CalculationOutputValue(
+            version.MethodologyVersionId,
+            substance is null ? null : checked((int)substance.SubstanceEntryId),
+            code,
+            numeric.RoundOutput(number, scale),
+            unitId,
+            kind));
     }
 
     /// <summary>Довідник одиниць, прочитаний раз на прогін.</summary>

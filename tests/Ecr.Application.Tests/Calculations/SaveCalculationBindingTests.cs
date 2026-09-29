@@ -128,6 +128,45 @@ public sealed class SaveCalculationBindingTests
         _bindings.DidNotReceiveWithAnyArgs().Add(null!);
     }
 
+    /// <remarks>
+    /// HSE301 A3a (D-175, V-6): колонку можна прив'язати до ВИДИМОЇ формули — її значення
+    /// лягає проміжним результатом із кодом формули (<c>M_t</c> у сітці 301). Невидима —
+    /// відмова: її значення не пишеться, і колонка чекала б числа, якого ніхто не запише.
+    /// Мутація: прибрати перевірку формул у <c>RequireDeclaredOutputAsync</c> — видима
+    /// відхиляється як «невідомий вихід».
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.13")]
+    public async Task Колонка_прив_язується_до_видимої_формули_але_не_до_невидимої(bool visible)
+    {
+        Column(CellDataType.Calculated);
+
+        var formula = new MethodologyFormula(70, EcrCode.Create("M_t"), "!V * 2");
+        formula.SetVisible(visible);
+        _methodologies.GetFormulasAsync(70, Arg.Any<CancellationToken>())
+            .Returns((IReadOnlyList<MethodologyFormula>)[formula]);
+        _bindings.FindAsync(ColumnDefId, MethodologyId, "M_t", Arg.Any<CancellationToken>())
+            .Returns((CalculationBinding?)null);
+
+        var save = () => Handler().HandleAsync(
+            MethodologyId, ColumnDefId, "M_t", "{}", isActive: true, CancellationToken.None);
+
+        if (visible)
+        {
+            Assert.Equal("M_t", (await save()).OutputCode);
+            _bindings.ReceivedWithAnyArgs(1).Add(null!);
+        }
+        else
+        {
+            var error = await Assert.ThrowsAsync<BusinessRuleException>(save);
+            Assert.Equal("err.ECR-CALC-0422.bindingUnknownOutput", error.Details!["messageKey"]);
+            _bindings.DidNotReceiveWithAnyArgs().Add(null!);
+        }
+    }
+
     private void Column(CellDataType dataType)
         => _bindings.FindColumnAsync(ColumnDefId, Arg.Any<CancellationToken>())
             .Returns(new BoundColumnRef(TableDefId, "Manual", dataType));
