@@ -30,7 +30,8 @@ public sealed partial class CollectionRunner(
     ICollectionStore store,
     TimeSpan? maxRunDuration = null,
     ILogger<CollectionRunner>? logger = null,
-    int? maxPagesPerRead = null) : ICollectionRunner
+    int? maxPagesPerRead = null,
+    int? maxParallelReads = null) : ICollectionRunner
 {
     /// <summary>Лог збоїв прогону; без реєстрації (тести) — порожній.</summary>
     private readonly ILogger log = (ILogger?)logger ?? NullLogger.Instance;
@@ -182,17 +183,198 @@ public sealed partial class CollectionRunner(
         watchdog.CancelAfter(runDuration);
         var runToken = watchdog.Token;
 
+        // P7: адаптер, що читає атрибути пакетом, отримує один запит на
+        // інтервал замість одного на атрибут, а наступні інтервали читаються
+        // наперед (не більше ParallelReads одночасно). Адаптер без цієї
+        // здатності (PiSqlClient) читається, як і раніше, послідовно.
+        var batch = adapter as IBatchCollectionSource;
+
+        // Одна прочитана сторінка одного атрибута: зберегти прочитане й
+        // вирішити, чи читати далі (true — є хвіст, курсор просунуто).
+        // Спільна для послідовного й пакетного читання — B3 живе в одному місці.
+        async Task<bool> ApplyPageAsync(PathCursor state, ReadOutcome outcome, TimeInterval interval)
+        {
+            if (outcome.Collected is not { } result)
+            {
+                failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
+                failureMessage ??= outcome.Message;
+                return false;
+            }
+
+            accepted = true;
+
+            // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
+            // відмові батча: викинути прочитане через те, що хвіст
+            // діапазону не дався, означало б читати його вдруге —
+            // і так до наступної відмови.
+            var saved = await SaveAsync(
+                    runId, sourceEntityId, Fresh(result.Points, state.Carried), maps, units, pausedPaths, ct)
+                .ConfigureAwait(false);
+            retrieved += saved.Written;
+            state.Pages++;
+
+            if (saved.UnitChange is { } change)
+            {
+                failureCode ??= SourceUnitConverter.UnitChangedCode;
+                failureMessage ??= change;
+                return false;
+            }
+
+            if (result.ErrorCode is not null)
+            {
+                failureCode ??= result.ErrorCode;
+                return false;
+            }
+
+            if (result.FailedIntervals.Count == 0)
+            {
+                state.Cursor = interval.ToUtc;
+                return false;
+            }
+
+            // Батч обрізано стелею: наступна сторінка — з першого
+            // непрочитаного моменту. Адаптери віддають хвіст як
+            // [мітка ОСТАННЬОЇ точки, кінець) — тобто межу ВКЛЮЧНО
+            // (≥): точки з тією самою міткою, що не влізли в батч,
+            // інакше загубилися б. Уже прочитані з цією міткою
+            // наступна сторінка поверне вдруге — їх відкидає Fresh.
+            var next = result.FailedIntervals.Min(i => i.FromUtc);
+
+            if (next <= state.Cursor)
+            {
+                // Уся сторінка — одна мітка: ≥ не просуває курсора,
+                // а > загубив би точки. Далі цей атрибут у цьому
+                // інтервалі прочитати неможливо — так і пишемо.
+                failureCode ??= SourceUnavailable;
+                failureMessage ??=
+                    $"Атрибут «{state.Path}»: понад {MaxPointsPerRequest} точок мають однакову мітку "
+                    + $"{state.Cursor:O}; сторінкування за часом далі не просувається, "
+                    + $"[{state.Cursor:O}, {interval.ToUtc:O}) не дочитано.";
+                return false;
+            }
+
+            state.Carried = Carried(result.Points, next);
+            state.Cursor = next;
+
+            if (state.Pages >= maxPages)
+            {
+                failureCode ??= SourceUnavailable;
+                failureMessage ??=
+                    $"Атрибут «{state.Path}»: прочитано {state.Pages} сторінок по {MaxPointsPerRequest} точок "
+                    + $"до {state.Cursor:O} — ліміт сторінок на прогін. Покриття записано за прочитане; "
+                    + $"[{state.Cursor:O}, {interval.ToUtc:O}) дочитає наздоганяння з цього місця.";
+                return false;
+            }
+
+            return true;
+        }
+
+        // Пакетне читання інтервалу: раунд — одна сторінка кожного ще не
+        // дочитаного атрибута; перший раунд уже запущено наперед. Повертає
+        // межу, до якої інтервал прочитали ВСІ атрибути.
+        async Task<DateTime> ReadBatchedAsync(
+            TimeInterval interval, (List<PathCursor> Cursors, Task<IReadOnlyList<ReadOutcome>> Round) first)
+        {
+            // Атрибут на паузі (зокрема поставлений на неї вже ПІСЛЯ запуску
+            // читання наперед) у цьому інтервалі не читається й тримає його
+            // непокритим — як і в послідовному читанні.
+            var floor = paths.Any(pausedPaths.Contains) ? interval.FromUtc : interval.ToUtc;
+            var open = first.Cursors;
+            var round = first.Round;
+
+            DateTime Reached()
+                => first.Cursors.Count == 0 ? floor : Min(floor, first.Cursors.Min(c => c.Cursor));
+
+            while (open.Count > 0)
+            {
+                var outcomes = await round.ConfigureAwait(false);
+
+                if (outcomes.Any(o => o.Unauthorized))
+                {
+                    // Та сама єдина друга спроба на прогін, що й у послідовному
+                    // читанні (квиток міг протухнути), — для відмовлених атрибутів.
+                    if ((accepted || outcomes.Any(o => o.Collected is not null)) && !reacquired)
+                    {
+                        reacquired = true;
+
+                        var refused = Enumerable.Range(0, open.Count).Where(i => outcomes[i].Unauthorized).ToList();
+                        var again = await ReadRoundAsync(
+                                batch!, dataSource, sourceEntityId, [.. refused.Select(i => open[i])], interval.ToUtc, runToken)
+                            .ConfigureAwait(false);
+
+                        var merged = outcomes.ToArray();
+
+                        for (var k = 0; k < refused.Count; k++)
+                        {
+                            merged[refused[k]] = again[k];
+                        }
+
+                        outcomes = merged;
+                    }
+
+                    if (outcomes.FirstOrDefault(o => o.Unauthorized) is { } denied)
+                    {
+                        throw await FailAuthenticationAsync(
+                                runId, sourceEntityId, entity.Code, CoveredWithInFlight(), retrieved, denied.Message)
+                            .ConfigureAwait(false);
+                    }
+                }
+
+                var unfinished = new List<PathCursor>();
+
+                for (var i = 0; i < open.Count; i++)
+                {
+                    if (!pausedPaths.Contains(open[i].Path)
+                        && await ApplyPageAsync(open[i], outcomes[i], interval).ConfigureAwait(false))
+                    {
+                        unfinished.Add(open[i]);
+                    }
+                }
+
+                inFlightReached = Reached();
+                open = unfinished;
+
+                if (open.Count > 0)
+                {
+                    round = ReadRoundAsync(batch!, dataSource, sourceEntityId, open, interval.ToUtc, runToken);
+                }
+            }
+
+            return Reached();
+        }
+
         try
         {
+            await using var ahead = batch is null
+                ? null
+                : new ReadAhead(
+                    work.Count,
+                    ParallelReads,
+                    (index, token) =>
+                    {
+                        List<PathCursor> cursors =
+                        [
+                            .. paths.Where(p => !pausedPaths.Contains(p))
+                                .Select(p => new PathCursor(p, work[index].FromUtc)),
+                        ];
+
+                        return (cursors, ReadRoundAsync(
+                            batch!, dataSource, sourceEntityId, cursors, work[index].ToUtc, token));
+                    },
+                    runToken);
+
             foreach (var interval in work)
             {
                 inFlight = interval;
                 inFlightReached = interval.FromUtc;
 
                 // Межа, до якої інтервал прочитали ВСІ вже пройдені атрибути.
-                var reachedAll = interval.ToUtc;
+                // `step` — порядковий номер цього інтервалу в `work`.
+                var reachedAll = ahead is null
+                    ? interval.ToUtc
+                    : await ReadBatchedAsync(interval, ahead.Take(step)).ConfigureAwait(false);
 
-                for (var index = 0; index < paths.Count; index++)
+                for (var index = 0; ahead is null && index < paths.Count; index++)
                 {
                     var path = paths[index];
                     var lastPath = index == paths.Count - 1;
@@ -212,13 +394,11 @@ public sealed partial class CollectionRunner(
                     // перечитував ті самі перші 5000 точок — решта не
                     // збиралася НІКОЛИ, а прогін ставав «Degraded» з
                     // неправдивим «джерело недоступне».
-                    var cursor = interval.FromUtc;
-                    var carried = new Dictionary<DateTime, int>();
-                    var pages = 0;
+                    var state = new PathCursor(path, interval.FromUtc);
 
                     while (true)
                     {
-                        var page = new TimeInterval(cursor, interval.ToUtc);
+                        var page = new TimeInterval(state.Cursor, interval.ToUtc);
 
                         var outcome = await ReadAsync(
                             adapter, dataSource.Id, sourceEntityId, path, page, runToken).ConfigureAwait(false);
@@ -252,85 +432,20 @@ public sealed partial class CollectionRunner(
                             }
                         }
 
-                        if (outcome.Collected is not { } result)
-                        {
-                            failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
-                            failureMessage ??= outcome.Message;
-                            break;
-                        }
-
-                        accepted = true;
-
-                        // ⚠ Успішні точки зберігаються НАВІТЬ при частковій
-                        // відмові батча: викинути прочитане через те, що хвіст
-                        // діапазону не дався, означало б читати його вдруге —
-                        // і так до наступної відмови.
-                        var saved = await SaveAsync(
-                                runId, sourceEntityId, Fresh(result.Points, carried), maps, units, pausedPaths, ct)
-                            .ConfigureAwait(false);
-                        retrieved += saved.Written;
-                        pages++;
-
-                        if (saved.UnitChange is { } change)
-                        {
-                            failureCode ??= SourceUnitConverter.UnitChangedCode;
-                            failureMessage ??= change;
-                            break;
-                        }
-
-                        if (result.ErrorCode is not null)
-                        {
-                            failureCode ??= result.ErrorCode;
-                            break;
-                        }
-
-                        if (result.FailedIntervals.Count == 0)
-                        {
-                            cursor = interval.ToUtc;
-                            break;
-                        }
-
-                        // Батч обрізано стелею: наступна сторінка — з першого
-                        // непрочитаного моменту. Адаптери віддають хвіст як
-                        // [мітка ОСТАННЬОЇ точки, кінець) — тобто межу ВКЛЮЧНО
-                        // (≥): точки з тією самою міткою, що не влізли в батч,
-                        // інакше загубилися б. Уже прочитані з цією міткою
-                        // наступна сторінка поверне вдруге — їх відкидає Fresh.
-                        var next = result.FailedIntervals.Min(i => i.FromUtc);
-
-                        if (next <= cursor)
-                        {
-                            // Уся сторінка — одна мітка: ≥ не просуває курсора,
-                            // а > загубив би точки. Далі цей атрибут у цьому
-                            // інтервалі прочитати неможливо — так і пишемо.
-                            failureCode ??= SourceUnavailable;
-                            failureMessage ??=
-                                $"Атрибут «{path}»: понад {MaxPointsPerRequest} точок мають однакову мітку "
-                                + $"{cursor:O}; сторінкування за часом далі не просувається, "
-                                + $"[{cursor:O}, {interval.ToUtc:O}) не дочитано.";
-                            break;
-                        }
-
-                        carried = Carried(result.Points, next);
-                        cursor = next;
+                        var more = await ApplyPageAsync(state, outcome, interval).ConfigureAwait(false);
 
                         if (lastPath)
                         {
-                            inFlightReached = Min(reachedAll, cursor);
+                            inFlightReached = Min(reachedAll, state.Cursor);
                         }
 
-                        if (pages >= maxPages)
+                        if (!more)
                         {
-                            failureCode ??= SourceUnavailable;
-                            failureMessage ??=
-                                $"Атрибут «{path}»: прочитано {pages} сторінок по {MaxPointsPerRequest} точок "
-                                + $"до {cursor:O} — ліміт сторінок на прогін. Покриття записано за прочитане; "
-                                + $"[{cursor:O}, {interval.ToUtc:O}) дочитає наздоганяння з цього місця.";
                             break;
                         }
                     }
 
-                    reachedAll = Min(reachedAll, cursor);
+                    reachedAll = Min(reachedAll, state.Cursor);
 
                     if (lastPath)
                     {
