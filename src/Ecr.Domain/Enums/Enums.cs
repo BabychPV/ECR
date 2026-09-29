@@ -730,3 +730,59 @@ public enum CalculationResultKind : byte
     /// <summary>Значення видимої формули — проміжний результат.</summary>
     Intermediate = 1,
 }
+
+/// <summary>
+/// Де лежить атрибут події джерела (FEATURE-HSE301-VIEW §4.7.1, §4.7.3; HQ-18).
+/// </summary>
+/// <remarks>
+/// ⚠ Перелік один на домен і порт подій F4e (<c>SourceEventAttributeRef</c>): його
+/// зберігає <c>ext.SourceEventFieldMap.AttributeScope</c> (<c>tinyint</c>), а домен
+/// на Application посилатися не може, тому власного переліку в порту немає.
+/// Текстове представлення області в запиті подій (E / P) розбирає адаптер.
+/// </remarks>
+public enum SourceEventAttributeScope : byte
+{
+    /// <summary>Атрибут самої події (Event Frame).</summary>
+    Event = 0,
+
+    /// <summary>Атрибут первинного елемента події, значення на момент її початку.</summary>
+    PrimaryElement = 1,
+}
+
+/// <summary>
+/// Звідки береться об'єм події (<c>ext.SourceEventMap.VolumeMode</c>,
+/// FEATURE-HSE301-VIEW §4.7.5, V-19 → <c>D-188</c>).
+/// </summary>
+/// <remarks>
+/// ⚠ Режим — дані, не код: перемикання між ними не потребує релізу.
+/// </remarks>
+public enum SourceEventVolumeMode : byte
+{
+    /// <summary>Об'єм уводиться руками — перехідний стан.</summary>
+    None = 0,
+
+    /// <summary>Атрибут події → колонка об'єму через мапінг поля з конверсією одиниць.</summary>
+    EventAttribute = 1,
+
+    /// <summary>Total витрати за вікном рядка (<c>ext.RowWindowMap</c>, §4.4).</summary>
+    RowWindow = 2,
+}
+
+/// <summary>
+/// Як значення атрибута події лягає в колонку
+/// (<c>ext.SourceEventFieldMap.ValueKind</c>, FEATURE-HSE301-VIEW §4.7.3).
+/// </summary>
+public enum SourceEventValueKind : byte
+{
+    /// <summary>Значення як є (дата, число, текст).</summary>
+    Direct = 0,
+
+    /// <summary>Запис довідника Lookup-колонки — за кодом.</summary>
+    LookupByCode = 1,
+
+    /// <summary>Запис довідника — за назвою, без регістру й з обрізкою пробілів.</summary>
+    LookupByName = 2,
+
+    /// <summary>Запис довідника — за явною таблицею <c>ext.SourceEventValueMap</c>.</summary>
+    ValueMap = 3,
+}

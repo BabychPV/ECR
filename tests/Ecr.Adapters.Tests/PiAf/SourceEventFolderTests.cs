@@ -1,5 +1,6 @@
 using Ecr.Adapters.PiAf;
 using Ecr.Application.Ports;
+using Ecr.Domain.Enums;
 using Ecr.TestKit;
 using Xunit;
 

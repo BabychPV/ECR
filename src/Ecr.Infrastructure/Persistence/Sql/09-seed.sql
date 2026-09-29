@@ -4938,6 +4938,15 @@ USING (VALUES
     (N'err.ECR-INT-0422.eventTimestampUnreadable', N'en', N'The event query of source "{dataSource}" returned {field} of type {valueType} for event "{eventId}". Only datetimeoffset or a date/time type without offset (read as UTC) can be used, so the events of this window are not read.', 1),
     (N'err.ECR-INT-0422.eventIdMissing', N'en', N'The event query of source "{dataSource}" returned a row without EventId. Without it an event cannot be matched to a document row, so the events of this window are not read: fix the event query in the environment settings.', 1),
     -- HSE301:F4e ── кінець секції
+
+    -- HSE301:F9 ── мапінг подій джерела і стан зв'язку подія ↔ рядок: доменні відмови
+    -- (FEATURE-HSE301-VIEW §4.7.3–4.7.4, D-186). ⚠ Заведено ТУТ, а не в F8: кидає їх уже домен F9.
+    -- F8 їх не дублює — повтор ключа ламає MERGE.
+    (N'err.ECR-INT-0422.eventMapStartEndRequired', N'en', N'An event mapping must put the event start ($start) and end ($end) into Date columns; "{attribute}" is not mapped.', 1),
+    (N'err.ECR-INT-0422.eventMapTargetNotDynamic', N'en', N'Events can only be written to a dynamic table; table "{tableCode}" has row mode {rowMode}.', 1),
+    (N'err.ECR-INT-0422.eventMapColumnNotInTable', N'en', N'Column "{targetColumn}" belongs to a different table than the event mapping.', 1),
+    (N'err.ECR-INT-0409.eventMapColumnTaken', N'en', N'Column "{targetColumn}" already has a field in this event mapping.', 1),
+    -- HSE301:F9 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
