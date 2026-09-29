@@ -125,6 +125,23 @@ public sealed class TraceJsonTests
         Assert.Empty(output.Trace);
     }
 
+    /// <remarks>
+    /// ⚠ Речовина — частина адреси кроку (§7.1): без неї одинадцять кроків <c>tons</c> рядка
+    /// не відрізнити, і сховище прив'язало б їх усі до одного результату.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Крок_несе_речовину_а_Row_крок_без_неї()
+    {
+        var output = await new ScopeStand().RunAsync(TraceLevel.Full);
+
+        Assert.Null(Assert.Single(output.Trace, s => s.StepCode == "M_t").SubstanceEntryId);
+        Assert.Equal(
+            ScopeStand.SubstanceIds,
+            output.Trace.Where(s => s.StepCode == "tons").Select(s => s.SubstanceEntryId!.Value));
+        Assert.All(output.Trace.Where(s => s.StepCode == "tons"), s => Assert.Equal(s.SubstanceEntryId, Substance(s)));
+    }
+
     private static long? Substance(CalculationTraceStep step)
     {
         using var json = JsonDocument.Parse(step.Detail!);

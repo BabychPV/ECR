@@ -147,7 +147,7 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             return;
         }
 
-        var steps = outputs.SelectMany(o => o.Trace).ToList();
+        var steps = outputs.SelectMany(o => o.Trace.Select(s => (Output: o, Step: s))).ToList();
         if (steps.Count == 0)
         {
             return;
@@ -161,19 +161,77 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
 
         var periodKey = run.PeriodKey ?? 0;
         var nextId = await ReserveStepIdRangeAsync(steps.Count, ct).ConfigureAwait(false);
+        var results = PendingResults(calculationRunId);
 
-        foreach (var step in steps)
+        foreach (var (output, step) in steps)
         {
             var entity = new CalculationStep(calculationRunId, periodKey, step.StepOrder, step.StepCode);
             typeof(Domain.Abstractions.Entity<long>)
                 .GetProperty(nameof(Domain.Abstractions.Entity<long>.Id))!
                 .SetValue(entity, nextId++);
 
-            // HSE301 A3b: у колонку — `TraceJson` v1 (§7.2), коли модуль його дав; інакше
-            // голий код помилки, як до кроку.
-            entity.Describe(step.Expression, step.Value, step.Detail ?? step.TraceJson, resultId: null, step.Masked);
+            // ⛔ HSE301 A3b (Д-5): адреса кроку — документ, рядок і речовина, як у його
+            // результату. Без неї трейс знаходили лише за прогоном, тобто ніяк із комірки.
+            entity.SetAddress(output.DocumentId, output.SourceRowKey, step.SubstanceEntryId);
+
+            // У колонку — `TraceJson` v1 (§7.2), коли модуль його дав; інакше голий код
+            // помилки, як до кроку.
+            entity.Describe(
+                step.Expression, step.Value, step.Detail ?? step.TraceJson, ResultIdOf(results, output, step), step.Masked);
             db.CalculationSteps.Add(entity);
         }
+    }
+
+    /// <summary>
+    /// Результати прогону, які <see cref="WriteResultsAsync"/> уже поставив у цей контекст:
+    /// ключ результату → його Id.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Id результату відомий ДО <c>SaveChanges</c> — його резервує послідовність, — тому
+    /// крок прив'язується в тому самому наборі змін, без повторного читання бази.
+    /// <c>CalculationOutputWriter</c> кличе запис результатів раніше за трейс саме для цього.
+    /// </remarks>
+    private Dictionary<(long, string?, int, string, long?), long> PendingResults(long calculationRunId)
+    {
+        var found = new Dictionary<(long, string?, int, string, long?), long>();
+
+        foreach (var entry in db.ChangeTracker.Entries<CalculationResult>())
+        {
+            var result = entry.Entity;
+            if (result.CalculationRunId == calculationRunId)
+            {
+                found.TryAdd(
+                    (result.DocumentId, result.SourceRowKey, result.MethodologyVersionId,
+                     result.OutputCode.ToUpperInvariant(), result.SubstanceEntryId),
+                    result.Id);
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>Результат, який дав крок: той самий рядок, код і речовина.</summary>
+    /// <remarks>
+    /// Версію методології крок не несе — її дає значення рядка з тим самим кодом і
+    /// речовиною. Кроку без такого значення (проміжна невидима формула, вихід, що не
+    /// порахувався) результату немає, і <c>ResultId</c> лишається <c>null</c>.
+    /// </remarks>
+    private static long? ResultIdOf(
+        Dictionary<(long, string?, int, string, long?), long> results,
+        CalculationOutput output,
+        CalculationTraceStep step)
+    {
+        var value = output.Values.FirstOrDefault(v =>
+            string.Equals(v.OutputCode, step.StepCode, StringComparison.OrdinalIgnoreCase)
+            && v.SubstanceEntryId == step.SubstanceEntryId);
+
+        return value is not null
+               && results.TryGetValue(
+                   (output.DocumentId, output.SourceRowKey, value.MethodologyVersionId,
+                    value.OutputCode.ToUpperInvariant(), value.SubstanceEntryId),
+                   out var id)
+            ? id
+            : null;
     }
 
     /// <inheritdoc />

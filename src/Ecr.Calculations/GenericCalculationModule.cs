@@ -364,6 +364,9 @@ public sealed class GenericCalculationModule(
             var context = new MethodologyEvaluationContext(period, arguments, resolved, units, binding.Registries);
             var scope = new TraceScope(input, formulasByCode, constantUnits, substance?.SubstanceEntryId);
 
+            // Кроки цієї речовини — з її адресою: за нею крок знаходить свій результат.
+            trace.EnterSubstance(substance?.SubstanceEntryId);
+
             // Row-результати — готові, не перераховуються: саме заради цього D-176.
             foreach (var formula in rowFormulas)
             {
@@ -398,7 +401,7 @@ public sealed class GenericCalculationModule(
             values,
             trace.Steps
                 .Select(s => new CalculationTraceStep(
-                    s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked, Detail: s.ToJson()))
+                    s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked, s.ToJson(), s.SubstanceEntryId))
                 .ToList());
     }
 

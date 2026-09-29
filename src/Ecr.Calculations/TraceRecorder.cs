@@ -24,9 +24,18 @@ namespace Ecr.Calculations;
 public sealed class TraceRecorder(TraceLevel level)
 {
     private readonly List<TraceStep> _steps = [];
+    private long? _substance;
 
     /// <summary>Рівень деталізації.</summary>
     public TraceLevel Level { get; } = level;
+
+    /// <summary>Речовина, до якої належать наступні кроки; <c>null</c> — рівень рядка.</summary>
+    /// <param name="substanceEntryId">Речовина прогону.</param>
+    /// <remarks>
+    /// ⚠ Речовина — частина адреси кроку (FEATURE-HSE301-VIEW §7.1): за нею крок
+    /// <c>tons[SO2]</c> знаходить свій результат, а не результат першої речовини рядка.
+    /// </remarks>
+    public void EnterSubstance(long? substanceEntryId) => _substance = substanceEntryId;
 
     /// <summary>Чи буде записано успішний крок формули з такою видимістю.</summary>
     /// <param name="visible">Формула видима (<c>IsVisible</c>).</param>
@@ -57,7 +66,7 @@ public sealed class TraceRecorder(TraceLevel level)
             return;
         }
 
-        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, value, null, Detail: detail));
+        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, value, null, Detail: detail, SubstanceEntryId: _substance));
     }
 
     /// <summary>Записує крок, що завершився помилкою.</summary>
@@ -77,7 +86,7 @@ public sealed class TraceRecorder(TraceLevel level)
             return;
         }
 
-        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, null, error, Detail: detail));
+        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, null, error, Detail: detail, SubstanceEntryId: _substance));
     }
 
     /// <summary>Записує крок, значення якого замасковане в нуль.</summary>
@@ -99,7 +108,7 @@ public sealed class TraceRecorder(TraceLevel level)
             return;
         }
 
-        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, value, null, reason));
+        _steps.Add(new TraceStep(_steps.Count + 1, code, expression, value, null, reason, SubstanceEntryId: _substance));
     }
 
     /// <summary>Зібрані кроки.</summary>
@@ -114,6 +123,7 @@ public sealed class TraceRecorder(TraceLevel level)
 /// <param name="Error">Код помилки-значення.</param>
 /// <param name="Masked">Чому значення стало нулем (<c>H-24d-1</c>).</param>
 /// <param name="Detail">Одиниця й входи кроку; <c>null</c> — крок без виразу (маскування виходу).</param>
+/// <param name="SubstanceEntryId">Речовина кроку; <c>null</c> — рівень рядка.</param>
 public sealed record TraceStep(
     int Order,
     string Code,
@@ -121,7 +131,8 @@ public sealed record TraceStep(
     decimal? Value,
     string? Error,
     MaskedZeroReason Masked = MaskedZeroReason.None,
-    TraceDetail? Detail = null)
+    TraceDetail? Detail = null,
+    long? SubstanceEntryId = null)
 {
     /// <summary>Крок у схемі <c>TraceJson</c> v1 (FEATURE-HSE301-VIEW §7.2).</summary>
     public string ToJson() => TraceJson.Write(this);

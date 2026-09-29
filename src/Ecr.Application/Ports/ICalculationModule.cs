@@ -382,6 +382,11 @@ public sealed record CalculationOutputValue(
 /// одиниця, помилка й входи. Саме він лягає в <c>calc.CalculationStep.TraceJson</c>;
 /// <c>null</c> — модуль схеми не знає, і пишеться <paramref name="TraceJson"/>, як до кроку.
 /// </param>
+/// <param name="SubstanceEntryId">
+/// Речовина кроку; <c>null</c> — рівень рядка. Разом із документом і рядком
+/// <see cref="CalculationOutput"/> це адреса кроку (<c>calc.CalculationStep</c>, HSE301 A3b),
+/// за якою він знаходить свій результат.
+/// </param>
 public sealed record CalculationTraceStep(
     int StepOrder,
     string StepCode,
@@ -389,4 +394,5 @@ public sealed record CalculationTraceStep(
     decimal? Value,
     string? TraceJson,
     Domain.Enums.MaskedZeroReason Masked = Domain.Enums.MaskedZeroReason.None,
-    string? Detail = null);
+    string? Detail = null,
+    long? SubstanceEntryId = null);
