@@ -452,6 +452,47 @@ public sealed class JobProgressConfiguration : IEntityTypeConfiguration<JobProgr
         builder.HasIndex(x => new { x.CreatedByUserId, x.UpdatedAt }, "IX_JobProgress_CreatedBy_UpdatedAt")
                .IsDescending(false, true)
                .IncludeProperties(x => new { x.State, x.JobCode });
+
+        ConfigureQueue(builder);
+    }
+
+    /// <summary>Колонки й індекси черги в базі (MI-02, D-208).</summary>
+    /// <remarks>
+    /// ⚠ Усі фільтровані індекси вимагають <c>SET QUOTED_IDENTIFIER ON</c> і
+    /// <c>ANSI_NULLS ON</c> у сесії, що пише в таблицю: SqlClient має їх
+    /// типово, <c>sqlcmd</c> — лише з <c>-I</c> (так і йде розгортання,
+    /// <c>setup-dev-db.ps1</c>, <c>verify-sql-scripts.ps1</c>).
+    /// </remarks>
+    private static void ConfigureQueue(EntityTypeBuilder<JobProgress> builder)
+    {
+        // Рядок черги (Lane NOT NULL) без AvailableAt ніхто б ніколи не взяв:
+        // claim фільтрує `AvailableAt <= SYSUTCDATETIME()`, а NULL не проходить.
+        builder.ToTable(t => t.HasCheckConstraint(
+            "CK_JobProgress_QueueShape", "[Lane] IS NULL OR [AvailableAt] IS NOT NULL"));
+
+        builder.Property(x => x.Lane).HasMaxLength(JobProgress.MaxLaneLength).IsUnicode(false);
+        builder.Property(x => x.Payload).HasColumnType("nvarchar(max)");
+        builder.Property(x => x.AvailableAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.LeaseUntil).HasColumnType("datetime2(3)");
+        builder.Property(x => x.CancelRequestedAt).HasColumnType("datetime2(3)");
+        builder.Property(x => x.TargetKey).HasMaxLength(JobProgress.MaxTargetKeyLength);
+
+        // ⛔ Два індекси, а не один на (TargetKey) за активним станом: на ціль
+        // дозволено рівно «1 Running + 1 Queued позаду». Running-індекс — справжній
+        // запобіжник claim (правка А «Аудиту»): NOT EXISTS іде без READPAST, а
+        // гонитву, яку він пропустить, база відбиває 2601/2627.
+        builder.HasIndex(x => x.TargetKey, "UX_JobProgress_Target_Queued")
+               .IsUnique()
+               .HasFilter("[State] = 'Queued' AND [TargetKey] IS NOT NULL");
+        builder.HasIndex(x => x.TargetKey, "UX_JobProgress_Target_Running")
+               .IsUnique()
+               .HasFilter("[State] = 'Running' AND [TargetKey] IS NOT NULL");
+
+        // Claim: WHERE Lane IN (…) AND State = … AND AvailableAt <= now ORDER BY
+        // AvailableAt, JobId. Фільтр відсікає історію задач і дзеркало Quartz.
+        builder.HasIndex(x => new { x.Lane, x.State, x.AvailableAt }, "IX_JobProgress_Claim")
+               .IncludeProperties(x => new { x.TargetKey, x.LeaseUntil, x.Attempt, x.ReclaimCount })
+               .HasFilter("[Lane] IS NOT NULL AND [State] IN ('Queued', 'Running')");
     }
 }
 

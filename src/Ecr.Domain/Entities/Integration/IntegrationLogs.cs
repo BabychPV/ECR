@@ -718,6 +718,51 @@ public sealed class JobProgress
         InstanceId = instanceId;
     }
 
+    /// <summary>Межа стовпця <see cref="Lane"/> (<c>varchar(32)</c>).</summary>
+    public const int MaxLaneLength = 32;
+
+    /// <summary>Межа стовпця <see cref="TargetKey"/>.</summary>
+    public const int MaxTargetKeyLength = 200;
+
+    // ── Черга в базі (MI-02, D-208). Пише й читає лише IJobQueue сирим SQL,
+    // тому доменних методів немає; усі колонки nullable, без backfill.
+
+    /// <summary>
+    /// Лейн черги; <c>null</c> — рядок-дзеркало Quartz (старий світ), черга
+    /// його не бере, прибирання на старті — навпаки, лише такі.
+    /// </summary>
+    public string? Lane { get; private set; }
+
+    /// <summary>Аргументи задачі, JSON; <c>null</c> — дзеркало Quartz.</summary>
+    public string? Payload { get; private set; }
+
+    /// <summary>
+    /// Коли задачу можна брати (годинник СУБД). Для рядка черги обов'язковий —
+    /// <c>CK_JobProgress_QueueShape</c>.
+    /// </summary>
+    public DateTime? AvailableAt { get; private set; }
+
+    /// <summary>Кінець оренди <c>Running</c>; прострочена — підлягає переклейму.</summary>
+    public DateTime? LeaseUntil { get; private set; }
+
+    /// <summary>Токен поточної оренди: кожне захоплення видає новий (fencing).</summary>
+    public Guid? ClaimToken { get; private set; }
+
+    /// <summary>
+    /// Ціль <c>{ТипМаркера}~{ціль}</c>: щонайбільше одна <c>Queued</c> і одна
+    /// <c>Running</c> на ціль (<c>UX_JobProgress_Target_*</c>).
+    /// </summary>
+    public string? TargetKey { get; private set; }
+
+    /// <summary>Коли попросили скасувати <c>Running</c>; <c>null</c> — не просили.</summary>
+    public DateTime? CancelRequestedAt { get; private set; }
+
+    /// <summary>
+    /// Скільки разів задачу переклеймили після втраченої оренди — окремо від
+    /// <see cref="Attempt"/> (ретраї виконавця); <c>null</c> — жодного.
+    /// </summary>
+    public int? ReclaimCount { get; private set; }
+
     /// <summary>
     /// Підтверджує, що задача досі виконується.
     /// </summary>
