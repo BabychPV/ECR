@@ -9484,7 +9484,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Вивантажує зріз у `.xlsx`. Право `Report.Export`.
+         * Вивантажує зріз у `.xlsx`. Права `Report.Export` і
+         *     `Report.ViewSnapshot` у проєкті зрізу.
          * @description ⚠ Файл у відповіді ОДРАЗУ, без `202` і фонової задачі, на відміну
          *     від експорту документа: там книга на 500×60×12 не вкладається в жоден
          *     таймаут, тут стеля — `ExportSnapshotHandler.MaxRows` рядків одного
@@ -9551,7 +9552,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Рядки зрізу сторінками, у широкому вигляді. Право `Report.ViewRegulatory`.
+         * Рядки зрізу сторінками, у широкому вигляді. Права `Report.ViewRegulatory`
+         *     і `Report.ViewSnapshot` у проєкті зрізу.
          * @description D-52a: другий споживач `rpt.*` поруч із SSRS. Колонки — з опису
          *     версії, за якою зріз побудовано; чужий зріз — той самий 404, що й неіснуючий.
          */

@@ -140,8 +140,26 @@ public sealed class ReportDefinitionDrivesBuildTests
         Assert.Equal("Мөлшері", Assert.Single(page.Columns).Name);
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Рядки_зрізу_без_права_на_вміст_дають_403_і_не_читаються()
+    {
+        // ⛔ Рішення людини 2026-09-29: грант Read і `Report.ViewRegulatory`
+        // (перелік) уже НЕ відкривають вмісту — потрібне `Report.ViewSnapshot`.
+        var (handler, snapshots) = RowsHandler(
+            new() { [$"{ResourceKind.Project}:4"] = GrantLevel.Read },
+            permissions: [ListReportSnapshotsHandler.Permission]);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => handler.HandleAsync(77, null, null, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
+        Assert.Equal(GetSnapshotRowsHandler.ContentPermission, error.Details!["permission"]);
+        await snapshots.DidNotReceive().RowsAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     private static (GetSnapshotRowsHandler Handler, IReportSnapshotBuilder Snapshots) RowsHandler(
-        Dictionary<string, GrantLevel> grants, string language = "en")
+        Dictionary<string, GrantLevel> grants, string language = "en", string[]? permissions = null)
     {
         var snapshots = Substitute.For<IReportSnapshotBuilder>();
         var access = Substitute.For<IAccessDecisionService>();
@@ -155,7 +173,9 @@ public sealed class ReportDefinitionDrivesBuildTests
             CacheKey = "p",
             UserId = 9,
             SecurityStamp = "s",
-            Permissions = new HashSet<string>([ListReportSnapshotsHandler.Permission], StringComparer.Ordinal),
+            Permissions = new HashSet<string>(
+                permissions ?? [ListReportSnapshotsHandler.Permission, GetSnapshotRowsHandler.ContentPermission],
+                StringComparer.Ordinal),
             Grants = grants,
             Denies = new HashSet<string>(),
             RoleIds = new HashSet<int>(),

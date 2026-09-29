@@ -146,7 +146,8 @@ public sealed class ReportsController(
         => Ok(await verify.HandleAsync(id, ct).ConfigureAwait(false));
 
     /// <summary>
-    /// Рядки зрізу сторінками, у широкому вигляді. Право <c>Report.ViewRegulatory</c>.
+    /// Рядки зрізу сторінками, у широкому вигляді. Права <c>Report.ViewRegulatory</c>
+    /// і <c>Report.ViewSnapshot</c> у проєкті зрізу.
     /// </summary>
     /// <param name="id">Зріз.</param>
     /// <param name="cursor">Останній уже отриманий <c>rowNo</c>; без нього — з початку.</param>
@@ -164,7 +165,8 @@ public sealed class ReportsController(
         => Ok(await rows.HandleAsync(id, cursor, limit, ct).ConfigureAwait(false));
 
     /// <summary>
-    /// Вивантажує зріз у <c>.xlsx</c>. Право <c>Report.Export</c>.
+    /// Вивантажує зріз у <c>.xlsx</c>. Права <c>Report.Export</c> і
+    /// <c>Report.ViewSnapshot</c> у проєкті зрізу.
     /// </summary>
     /// <param name="id">Зріз.</param>
     /// <param name="ct">Токен скасування.</param>

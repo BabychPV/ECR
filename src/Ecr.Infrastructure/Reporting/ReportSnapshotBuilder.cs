@@ -379,8 +379,9 @@ public sealed class ReportSnapshotBuilder(EcrDbContext db, IClock clock, IMemory
     /// <summary>Зріз, розкладений макетом: з кешу або прочитаний і розкладений зараз.</summary>
     /// <remarks>
     /// ⛔ <b>Безпека.</b> Сюди доходить лише той, кого вже пропустив обробник
-    /// (право <c>Report.ViewRegulatory</c>/<c>Report.Export</c> і грант на
-    /// проєкт зрізу — <c>GetSnapshotRowsHandler</c>, <c>ExportSnapshotHandler</c>),
+    /// (право <c>Report.ViewRegulatory</c>/<c>Report.Export</c>, право на вміст
+    /// <c>Report.ViewSnapshot</c> і грант на проєкт зрізу —
+    /// <c>GetSnapshotRowsHandler</c>, <c>ExportSnapshotHandler</c>),
     /// а існування зрізу щойно перевірив <see cref="VersionOfAsync"/>: видалений
     /// зріз дає <c>null</c> ДО кешу, хоч би що в ньому лишалося. Доступу нижче
     /// рівня проєкту (колонки, рядки) у зрізу немає — тож кешований вміст від

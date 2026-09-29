@@ -301,13 +301,26 @@ public sealed class VerifyReportSnapshotHandler(
 
 /// <summary>
 /// Рядки зрізу сторінками (D-52a): другий споживач <c>rpt.*</c> поруч із SSRS.
-/// Право <c>Report.ViewRegulatory</c> і грант на проєкт зрізу — як у перевірки.
+/// Право <c>Report.ViewRegulatory</c> і грант на проєкт зрізу — як у перевірки,
+/// плюс <see cref="ContentPermission"/> у проєкті зрізу.
 /// </summary>
+/// <remarks>
+/// ⛔ Рішення людини 2026-09-29 («ні, додай роль» на питання «регуляторний звіт і
+/// далі бачать усі з доступом до проєкту?»). <c>Report.ViewRegulatory</c> сід
+/// роздає ролям <c>Viewer</c> і <c>Auditor</c>, <c>Report.Export</c> — ще й
+/// <c>DataEntry</c>: вміст регуляторного зрізу бачив практично кожен, хто мав
+/// бодай читання проєкту. Тепер ВМІСТ (рядки й книга) — за окремим правом у
+/// проєкті зрізу; перелік, контрольна сума й перевірка незмінності лишаються
+/// за <c>Report.ViewRegulatory</c> — вони нічого з рядків не віддають.
+/// </remarks>
 public sealed class GetSnapshotRowsHandler(
     IReportSnapshotBuilder snapshots,
     IAccessDecisionService access,
     ICurrentUser currentUser)
 {
+    /// <summary>Право на вміст регуляторного зрізу — рядки й вивантаження (рішення людини 2026-09-29).</summary>
+    public const string ContentPermission = "Report.ViewSnapshot";
+
     /// <summary>Рядків на сторінці, якщо клієнт не сказав.</summary>
     public const int DefaultLimit = 100;
 
@@ -337,6 +350,14 @@ public sealed class GetSnapshotRowsHandler(
         {
             throw NotFound(snapshotId);
         }
+
+        // ⛔ Рішення людини 2026-09-29: вміст зрізу — окреме право в ЦЬОМУ
+        // проєкті. Тут уже 403, а не 404: зріз цьому користувачеві видно в
+        // переліку (`Report.ViewRegulatory` + грант), тож приховувати нічого.
+        // ⚠ Перевірка стоїть ДО читання рядків, тобто й до кешу P4
+        // (`ReportSnapshotBuilder.LaidOutAsync`): прогрітий іншим кешований
+        // зріз сюди без права не дістається.
+        PermissionCheck.RequireIn(profile, ContentPermission, project);
 
         // ⚠ Мова — та сама, якою відповідають решта ендпоінтів
         // (`ICurrentUser.Language`: профіль → `Accept-Language` → `en`).

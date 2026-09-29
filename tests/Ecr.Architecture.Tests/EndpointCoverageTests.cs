@@ -563,7 +563,7 @@ public sealed partial class EndpointCoverageTests
         "nav.notifications", "nav.health", "nav.myGroups", "documents.title",
     ];
 
-    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 41 право каталогу <c>sec.Permission</c>.</summary>
+    /// <summary>Назви прав <c>permission.&lt;Code&gt;</c> — 42 права каталогу <c>sec.Permission</c>.</summary>
     private static string[] PermissionLabelKeys =>
     [
         "permission.Template.View",
@@ -593,6 +593,7 @@ public sealed partial class EndpointCoverageTests
         "permission.Report.ViewRegulatory",
         "permission.Report.BuildSnapshot",
         "permission.Report.Export",
+        "permission.Report.ViewSnapshot",
         "permission.Report.EditDefinition",
         "permission.Report.ViewCampaign",
         "permission.Integration.View",

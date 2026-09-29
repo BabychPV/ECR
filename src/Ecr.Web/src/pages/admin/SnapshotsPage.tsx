@@ -254,6 +254,9 @@ export function SnapshotsPage(): JSX.Element {
   // D-52a: рядки зрізу в застосунку — другий споживач `rpt.*` поруч із SSRS.
   const [viewing, setViewing] = useState<number | null>(null);
 
+  // Рішення людини 2026-09-29: вміст зрізу (рядки й книга) — окреме право.
+  const canViewContent = can(session.data, 'Report.ViewSnapshot');
+
   const verify = useMutation({
     mutationFn: (snapshotId: number) =>
       apiFetch<SnapshotVerifyResponse>(`/api/v1/reports/snapshots/${snapshotId}/verify`, {
@@ -401,13 +404,22 @@ export function SnapshotsPage(): JSX.Element {
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">
                       {snapshot.rowCount}
-                      <Button
-                        size="compact-xs"
-                        variant="default"
-                        onClick={() => setViewing(snapshot.id)}
-                      >
-                        {t('snapshots.viewRows')}
-                      </Button>
+                      {/*
+                        ⛔ Рішення людини 2026-09-29: вміст регуляторного зрізу
+                        (рядки й книга) — за окремим правом `Report.ViewSnapshot`.
+                        Без нього сервер відповідає 403, тож дії не показуються
+                        зовсім: перелік, кількість рядків і перевірка суми
+                        лишаються (їм досить `Report.ViewRegulatory`).
+                      */}
+                      {canViewContent && (
+                        <Button
+                          size="compact-xs"
+                          variant="default"
+                          onClick={() => setViewing(snapshot.id)}
+                        >
+                          {t('snapshots.viewRows')}
+                        </Button>
+                      )}
 
                       {/*
                         ⛔ Посилання, а не `fetch` із кнопки: вивантаження
@@ -433,7 +445,7 @@ export function SnapshotsPage(): JSX.Element {
                         (`aria-describedby`) і показано на фокусі — кнопка «i»
                         поруч додала б другу зупинку заради того самого тексту.
                       */}
-                      {can(session.data, 'Report.Export') && (
+                      {canViewContent && can(session.data, 'Report.Export') && (
                         <Hint label={t('snapshots.exportHint')}>
                           <Anchor size="xs" href={snapshotExportUrl(snapshot.id)} download>
                             {t('snapshots.export')}

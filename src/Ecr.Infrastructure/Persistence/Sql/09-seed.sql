@@ -65,6 +65,13 @@ USING (VALUES
   (N'Calculation.Recalculate',  N'Calculation', 0), (N'Calculation.ManageRequiredInputs', N'Calculation', 0),
   (N'Report.ViewRegulatory',    N'Report',      0), (N'Report.BuildSnapshot', N'Report',      0),
   (N'Report.Export',            N'Report',      0),
+  -- SEC: рішення людини 2026-09-29 — вміст регуляторного зрізу (рядки й книга)
+  -- за окремим проєктним правом; роль «Переглядач звітів» — секція `SEC:RPT`
+  -- нижче. Рядок стоїть ТУТ, а не в секції: цей MERGE — єдиний каталог прав,
+  -- його читають сторожі (`UncheckedPermissionTests`, `EndpointCoverageTests`),
+  -- і він виконується ДО шаблонних роздач, тож `Approver` (`Report.%`) і
+  -- `SystemAdministrator` (`%`) отримують право тим самим MERGE і на наявній базі.
+  (N'Report.ViewSnapshot',      N'Report',      0),
   -- ⚠ НЕБЕЗПЕЧНЕ (1) навмисно, і не через ризик втратити дані. Причина в
   -- фільтрі нижче: `Approver` має шаблон `Report.%`, виданий тоді, коли всі
   -- права цієї родини були «дивитися, будувати, подавати, вивантажувати».
@@ -427,6 +434,42 @@ USING (
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
 GO
+
+-- SEC:RPT ── Переглядач звітів (рішення людини 2026-09-29) ─────────────────
+-- ✎ Питання: «Регуляторний звіт і далі бачать усі з доступом до проєкту?» —
+-- відповідь: «ні, додай роль». Вміст зрізу (`GET …/snapshots/{id}/rows`,
+-- `…/export.xlsx`) вимагає `Report.ViewSnapshot` у проєкті зрізу плюс грант
+-- Read на проєкт. `Viewer`, `Auditor` і `DataEntry` цього права НЕ отримують:
+-- перелік зрізів і перевірка суми їм лишаються (`Report.ViewRegulatory`),
+-- вміст — ні. `Approver` і `SystemAdministrator` отримують право шаблонами
+-- `Report.%` / `%` вище (право безпечне, рядок каталогу — у MERGE прав).
+--
+-- ⚠ Роль — лише те, без чого зріз не переглянути: сторінка зрізів і перелік
+-- (`Report.ViewRegulatory`), вміст (`Report.ViewSnapshot`) і книга
+-- (`Report.Export`). Проєкти ролі задає адміністратор грантом Read і, за
+-- потреби, областю призначення — роль без гранта не бачить нічого.
+--
+-- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує роль і її права на
+-- наступному старті (`SeedRunner`), і правку адміністратора не перезаписує.
+MERGE sec.Role AS t
+USING (VALUES (N'ReportViewer', N'{"en":"Report viewer"}')) AS s (Code, NameL10n)
+ON t.Code = s.Code
+WHEN NOT MATCHED THEN INSERT (Code, NameL10n, IsBuiltIn)
+     VALUES (s.Code, s.NameL10n, 1);
+GO
+
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM (VALUES (N'Report.ViewRegulatory'), (N'Report.ViewSnapshot'), (N'Report.Export')) AS m (Code)
+    JOIN sec.Permission AS p ON p.Code = m.Code AND p.IsDangerous = 0
+    CROSS JOIN sec.Role AS r
+    WHERE r.Code = N'ReportViewer'
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+-- SEC:RPT ── кінець секції ───────────────────────────────────────────────────
 -- Політика періодів ECR
 MERGE doc.PeriodPolicy AS t USING (VALUES (N'ECR-Standard', 0, 15, 45, 45))
       AS s (Code, O, G, H, Y) ON t.Code = s.Code
@@ -4771,6 +4814,8 @@ USING (VALUES
     -- ru/kz — робота термінолога. Текст для uk: «Є зауваження поза вашою видимістю — подання
     -- заблоковане. Зверніться до відповідального за проєкт.»
     (N'err.ECR-SUB-4221.hiddenIssues',         N'en', N'There are issues outside your visibility — submission is blocked. Contact the project owner.', 1),
+    -- Рішення людини 2026-09-29: вміст регуляторного зрізу — окреме право (секція `SEC:RPT` вище).
+    (N'permission.Report.ViewSnapshot',        N'en', N'View the contents of regulatory report snapshots', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).

@@ -131,6 +131,16 @@ public sealed class ReportSnapshotLayoutCacheTests(SqlServerFixture sql)
         Assert.IsType<NotFoundException>(denied.Error);
         Assert.Equal(0, denied.Seen[ReadCells]);
 
+        // ⛔ Рішення людини 2026-09-29: грант Read і перелік (`Report.ViewRegulatory`)
+        // без права на вміст — 403, і прогрітий кеш вмісту не віддає: перевірка
+        // права стоїть в обробнику ДО будівника.
+        var noContent = await HandledAsync(
+            memory, userId: 12, "ru", granted, snapshotId, [ListReportSnapshotsHandler.Permission]);
+        var refused = Assert.IsType<AccessDeniedException>(noContent.Error);
+        Assert.Equal(GetSnapshotRowsHandler.ContentPermission, refused.Details!["permission"]);
+        Assert.Null(noContent.Page);
+        Assert.Equal(0, noContent.Seen[ReadCells]);
+
         // Інший користувач із грантом отримує вміст із кешу, але СВОЄЮ мовою:
         // мова й сторінка застосовуються на кожен запит, поза кешем.
         var other = await HandledAsync(memory, userId: 11, "en", granted, snapshotId);
@@ -150,7 +160,8 @@ public sealed class ReportSnapshotLayoutCacheTests(SqlServerFixture sql)
     }
 
     private async Task<(SnapshotRowsPage? Page, Exception? Error, CommandTallySnapshot Seen)> HandledAsync(
-        IMemoryCache memory, int userId, string language, Dictionary<string, GrantLevel> grants, long snapshotId)
+        IMemoryCache memory, int userId, string language, Dictionary<string, GrantLevel> grants, long snapshotId,
+        string[]? permissions = null)
     {
         var counter = new DbCommandCounter();
         await using var db = Counted(counter);
@@ -165,7 +176,9 @@ public sealed class ReportSnapshotLayoutCacheTests(SqlServerFixture sql)
             CacheKey = $"u{userId}",
             UserId = userId,
             SecurityStamp = "s",
-            Permissions = new HashSet<string>([ListReportSnapshotsHandler.Permission], StringComparer.Ordinal),
+            Permissions = new HashSet<string>(
+                permissions ?? [ListReportSnapshotsHandler.Permission, GetSnapshotRowsHandler.ContentPermission],
+                StringComparer.Ordinal),
             Grants = grants,
             Denies = new HashSet<string>(),
             RoleIds = new HashSet<int>(),
@@ -178,6 +191,10 @@ public sealed class ReportSnapshotLayoutCacheTests(SqlServerFixture sql)
             return (await handler.HandleAsync(snapshotId, null, null, CancellationToken.None), null, counter.Tally.Snapshot());
         }
         catch (NotFoundException error)
+        {
+            return (null, error, counter.Tally.Snapshot());
+        }
+        catch (AccessDeniedException error)
         {
             return (null, error, counter.Tally.Snapshot());
         }

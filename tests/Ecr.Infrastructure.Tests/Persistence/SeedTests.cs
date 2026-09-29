@@ -17,7 +17,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     /// сюди, тест впаде — і це правильно. Право, якого немає в цьому списку,
     /// ніхто не перевіряв.
     /// </remarks>
-    private const int ExpectedPermissions = 41;
+    private const int ExpectedPermissions = 42;
 
     private const int ExpectedDangerous = 11;
 
@@ -182,7 +182,79 @@ public sealed class SeedTests(SqlServerFixture sql)
                 $"SELECT COUNT(*) FROM sec.Permission WHERE Code = N'{code}'"));
         }
 
-        Assert.Equal(41, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
+        Assert.Equal(ExpectedPermissions, await ScalarAsync("SELECT COUNT(*) FROM sec.Permission"));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Вміст_регуляторного_зрізу_має_лише_переглядач_звітів_погоджувач_і_адміністратор()
+    {
+        // ⛔ Рішення людини 2026-09-29 («ні, додай роль»): вміст зрізу —
+        // окреме право `Report.ViewSnapshot`, безпечне (шаблони його беруть).
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.ViewSnapshot' AND IsDangerous = 0"));
+
+        // Роль «Переглядач звітів» — вбудована, і рівно з тим, що треба для
+        // перегляду: сторінка й перелік, вміст, книга.
+        Assert.Equal(
+            "Report.Export,Report.ViewRegulatory,Report.ViewSnapshot",
+            await StringAsync("""
+                SELECT STRING_AGG(rp.PermissionCode, N',') WITHIN GROUP (ORDER BY rp.PermissionCode)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId
+                WHERE r.Code = N'ReportViewer' AND r.IsBuiltIn = 1
+                """));
+
+        // ⛔ Хто будує й погоджує звіти — має (шаблони `Report.%` і `%`); хто
+        // лише читає чи вводить дані — НІ, хоч `Report.ViewRegulatory` /
+        // `Report.Export` у них лишились.
+        Assert.Equal(
+            "Approver,ReportViewer,SystemAdministrator",
+            await StringAsync("""
+                SELECT STRING_AGG(r.Code, N',') WITHIN GROUP (ORDER BY r.Code)
+                FROM sec.RolePermission AS rp
+                JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
+                WHERE rp.PermissionCode = N'Report.ViewSnapshot'
+                """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.12")]
+    public async Task Розгорнута_база_без_права_на_вміст_зрізу_отримує_його_повторним_seed()
+    {
+        // ⚠ Стара база: ні права, ні ролі, ні роздач. `SeedRunner` на наступному
+        // старті мусить завести все сам — без окремого скрипта оновлення.
+        await ExecuteAsync("""
+            DELETE FROM sec.RolePermission WHERE PermissionCode = N'Report.ViewSnapshot';
+            DELETE rp FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId WHERE r.Code = N'ReportViewer';
+            DELETE FROM sec.Permission WHERE Code = N'Report.ViewSnapshot';
+            """);
+
+        await using (var db = CreateContext())
+        {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(1, await ScalarAsync(
+            "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.ViewSnapshot'"));
+        Assert.Equal(3, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE rp.PermissionCode = N'Report.ViewSnapshot'
+              AND r.Code IN (N'Approver', N'SystemAdministrator', N'ReportViewer')
+            """));
+        Assert.Equal(3, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'ReportViewer'
+            """));
     }
 
     [Fact]
@@ -267,7 +339,8 @@ public sealed class SeedTests(SqlServerFixture sql)
         // ⚠ І водночас ролі НЕ порожні: роль без жодного права виглядає
         // як робоча конфігурація і мовчки не працює — це той самий клас
         // дефекту, що й «робота, якої ніхто не робить».
-        Assert.Equal(8, await ScalarAsync("""
+        // ✎ 2026-09-29: дев'ята — `ReportViewer` (рішення людини, секція `SEC:RPT`).
+        Assert.Equal(9, await ScalarAsync("""
             SELECT COUNT(DISTINCT rp.RoleId)
             FROM sec.RolePermission AS rp
             JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
@@ -537,6 +610,15 @@ public sealed class SeedTests(SqlServerFixture sql)
         await using var command = connection.CreateCommand();
         command.CommandText = query;
         return (decimal)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
+    }
+
+    private async Task<string?> StringAsync(string query)
+    {
+        await using var connection = new SqlConnection(sql.ConnectionString);
+        await connection.OpenAsync().ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = query;
+        return await command.ExecuteScalarAsync().ConfigureAwait(false) as string;
     }
 
     private async Task ExecuteAsync(string query)

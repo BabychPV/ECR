@@ -218,12 +218,14 @@ try {
         # Вивантаження зрізу вимагає саме `Report.Export`, окремо від
         # `Report.ViewRegulatory`: книга ВИХОДИТЬ ІЗ СИСТЕМИ (`R7`), і сценарій
         # мусить іти тим самим шляхом, що й оператор, а не в обхід права.
+        # ✎ 2026-09-29: плюс `Report.ViewSnapshot` — вміст зрізу (рядки й книга)
+        # за окремим правом, рішення людини.
         permissionCodes = @(
             'Template.View', 'Template.Edit', 'Template.Publish',
             'Document.View', 'Document.Create', 'Document.Export',
             'Project.Manage', 'Period.Configure',
             'Calculation.View', 'Calculation.Publish', 'Calculation.Recalculate',
-            'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.Export',
+            'Report.ViewRegulatory', 'Report.BuildSnapshot', 'Report.Export', 'Report.ViewSnapshot',
             'Security.ManageUsers', 'Security.ManageRoles', 'System.ViewHealth')
     } | Out-Null
 

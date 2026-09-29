@@ -26726,7 +26726,7 @@
             "description": "Unprocessable Entity"
           }
         },
-        "summary": "Вивантажує зріз у `.xlsx`. Право `Report.Export`.",
+        "summary": "Вивантажує зріз у `.xlsx`. Права `Report.Export` і\n`Report.ViewSnapshot` у проєкті зрізу.",
         "tags": [
           "Reports"
         ]
@@ -26808,7 +26808,7 @@
             "description": "Not Found"
           }
         },
-        "summary": "Рядки зрізу сторінками, у широкому вигляді. Право `Report.ViewRegulatory`.",
+        "summary": "Рядки зрізу сторінками, у широкому вигляді. Права `Report.ViewRegulatory`\nі `Report.ViewSnapshot` у проєкті зрізу.",
         "tags": [
           "Reports"
         ]

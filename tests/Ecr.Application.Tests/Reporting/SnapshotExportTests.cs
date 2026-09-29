@@ -122,9 +122,31 @@ public sealed class SnapshotExportTests
             .WriteAsync(Arg.Any<SnapshotWorkbook>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Без_права_на_вміст_зрізу_книга_не_будується_і_рядки_не_читаються()
+    {
+        // ⛔ Рішення людини 2026-09-29: `Report.Export` + грант Read уже НЕ
+        // досить — його сід роздає `DataEntry` і `Viewer`, тобто майже кожному з
+        // читанням проєкту. Вміст зрізу — окреме право в проєкті зрізу.
+        var world = new World(
+            permissions: [ExportSnapshotHandler.Permission, ListReportSnapshotsHandler.Permission],
+            grants: new() { [$"{ResourceKind.Project}:{ProjectId}"] = GrantLevel.Read });
+        world.Pages(rowCount: 3);
+
+        var error = await Assert.ThrowsAsync<AccessDeniedException>(
+            () => world.Handler.HandleAsync(SnapshotId, CancellationToken.None));
+
+        Assert.Equal("ECR-AUTH-0403", error.ErrorCode);
+        Assert.Equal(GetSnapshotRowsHandler.ContentPermission, error.Details!["permission"]);
+        await world.Snapshots.DidNotReceive().RowsAsync(
+            Arg.Any<long>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await world.Workbooks.DidNotReceive()
+            .WriteAsync(Arg.Any<SnapshotWorkbook>(), Arg.Any<CancellationToken>());
+    }
+
     private static World Allowed()
         => new(
-            permissions: [ExportSnapshotHandler.Permission],
+            permissions: [ExportSnapshotHandler.Permission, GetSnapshotRowsHandler.ContentPermission],
             grants: new() { [$"{ResourceKind.Project}:{ProjectId}"] = GrantLevel.Read });
 
     /// <summary>Обробник із заглушками порту зрізів і порту книги.</summary>
