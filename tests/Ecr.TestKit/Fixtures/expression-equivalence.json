@@ -1,5 +1,10 @@
 {
   "$comment": [
+    "КЛІЄНТСЬКА ПІДКАЗКА — НАБЛИЖЕННЯ. Сервер — джерело істини: шаблони й звіти рахують",
+    "і порівнюють у decimal, клієнт (evaluate.ts) — у JS number (IEEE double). На літералах",
+    "із 16+ значущими цифрами вони законно розходяться; такі вирази — лише в розділі",
+    "clientApproximation нижче, а не в cases (сторож — ClientServerEquivalenceTests).",
+    "",
     "Спільний набір для тесту еквівалентності клієнт/сервер (06e).",
     "Читають ДВОЄ: Ecr.Expressions.Tests.ClientServerEquivalenceTests і vitest на клієнті.",
     "Клієнтський обчислювач — лише підказка під час введення; збережене значення завжди",
@@ -52,6 +57,29 @@
     "chars": 2000,
     "kind": "number",
     "expected": "998"
+  },
+  "clientApproximation": {
+    "$comment": [
+      "ЯВНІ ВИНЯТКИ з еквівалентності: клієнтська підказка тут — наближення.",
+      "",
+      "Літерал із 16+ значущими цифрами double не подає точно: 1.0000000000000001 у JS",
+      "number — рівно 1. Сервер (Template/Report) порівнює в decimal, як і рівність",
+      "(продовження аудиту A6), тож його відповідь тут — правильна, а клієнтова може",
+      "відрізнятися. Клієнтський vitest цей розділ НЕ читає; серверний тест звіряє",
+      "expected — відповідь сервера.",
+      "",
+      "Сторож: у cases жоден числовий літерал не має понад significantDigitsLimit",
+      "значущих цифр, а кожен вираз тут має хоча б один такий — інакше це не виняток."
+    ],
+    "significantDigitsLimit": 15,
+    "cases": [
+      { "expression": "1.0000000000000001 > 1",           "kind": "boolean", "expected": "true" },
+      { "expression": "1.0000000000000001 >= 1",          "kind": "boolean", "expected": "true" },
+      { "expression": "1.0000000000000001 <= 1",          "kind": "boolean", "expected": "false" },
+      { "expression": "1.0000000000000001 = 1",           "kind": "boolean", "expected": "false" },
+      { "expression": "123456.0000000000001 > 123456",    "kind": "boolean", "expected": "true" },
+      { "expression": "0.30000000000000001 <> 0.3",       "kind": "boolean", "expected": "true" }
+    ]
   },
   "cases": [
     { "function": "SUM",     "expression": "SUM(1, 2, 3)",              "kind": "number",  "expected": "6" },

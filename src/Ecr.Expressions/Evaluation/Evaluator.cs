@@ -407,7 +407,7 @@ public sealed class Evaluator(
             BinaryOperator.Modulo => Arithmetic(left, right, node.Operator),
             BinaryOperator.Power => Arithmetic(left, right, node.Operator),
             BinaryOperator.Less or BinaryOperator.LessOrEqual
-                or BinaryOperator.Greater or BinaryOperator.GreaterOrEqual => Compare(left, right, node.Operator, dialect),
+                or BinaryOperator.Greater or BinaryOperator.GreaterOrEqual => Compare(left, right, node.Operator),
             BinaryOperator.And or BinaryOperator.Or => Logic(left, right, node.Operator),
             _ => ExpressionValue.Error(ExpressionErrors.BadValue),
         };
@@ -580,21 +580,21 @@ public sealed class Evaluator(
     /// найгірший із двох варіантів; узгодження в бік «працює як у SQL і Excel»
     /// дешевше за заборону, яка зламала б уже опубліковані методології.
     ///
-    /// ⛔ Аудит A6: у діалекті методологій числа впорядковує АРИФМЕТИКА режиму
+    /// ⛔ Аудит A6: числа впорядковує АРИФМЕТИКА режиму
     /// (<see cref="IEvaluationArithmetic.CompareNumbers"/>) — та сама, що рахує
-    /// рівність. Доти впорядкування завжди йшло в <c>double</c>, а рівність — у
-    /// <c>decimal</c>, і в <c>Strict</c> для <c>1.0000000000000001</c> проти
-    /// <c>1</c> виходило <c>&gt;=</c> і <c>&lt;&gt;</c> при <c>NOT &gt;</c>.
-    /// <c>Legacy</c> лишається в <c>double</c> — там це і є NCalc.
+    /// рівність (<see cref="AreEqual"/>), у БУДЬ-ЯКОМУ діалекті. Доти
+    /// впорядкування завжди йшло в <c>double</c>, а рівність — у <c>decimal</c>,
+    /// і для <c>1.0000000000000001</c> проти <c>1</c> виходило <c>&gt;=</c>,
+    /// <c>&lt;=</c> і <c>&lt;&gt;</c> при <c>NOT &gt;</c>. <c>Strict</c>, шаблони
+    /// і звіти — <c>decimal</c>; <c>Legacy</c> — <c>double</c>, там це і є NCalc.
     ///
-    /// ⚠ Діалекти шаблонів і звітів тут свідомо НЕ змінено: їхнє впорядкування
-    /// й далі <c>double</c>. Перевести їх у <c>decimal</c> — значить розвести
-    /// сервер із клієнтською підказкою (<c>evaluate.ts</c> рахує в JS
-    /// <c>number</c>) на літералах із 16+ значущими цифрами. Це рішення
-    /// координатора, а не цього виправлення.
+    /// ⚠ Шаблони і звіти переведено в <c>decimal</c> рішенням координатора:
+    /// сервер — джерело істини. Клієнтська підказка (<c>evaluate.ts</c>, JS
+    /// <c>number</c>) на літералах із 16+ значущими цифрами — наближення; такі
+    /// вирази — явні винятки <c>clientApproximation</c> у
+    /// <c>expression-equivalence.json</c>.
     /// </remarks>
-    private ExpressionValue Compare(
-        ExpressionValue left, ExpressionValue right, BinaryOperator op, ExpressionDialect dialect)
+    private ExpressionValue Compare(ExpressionValue left, ExpressionValue right, BinaryOperator op)
     {
         int order;
         if (left.AsDouble() is { } a && right.AsDouble() is { } b)
@@ -607,9 +607,7 @@ public sealed class Evaluator(
                 return ExpressionValue.Error(ExpressionErrors.BadValue);
             }
 
-            order = dialect == ExpressionDialect.Methodology
-                ? arithmetic.CompareNumbers(left, right)!.Value
-                : a.CompareTo(b);
+            order = arithmetic.CompareNumbers(left, right)!.Value;
         }
         else if (left.Type == ExpressionValueType.Boolean && right.Type == ExpressionValueType.Boolean)
         {
