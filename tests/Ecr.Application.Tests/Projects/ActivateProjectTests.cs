@@ -99,8 +99,12 @@ public sealed class ActivateProjectTests
         // саме по собі не давало права активувати БУДЬ-ЯКИЙ проєкт —
         // потрібен грант на КОНКРЕТНИЙ.
         var project = Arrange();
+        // ⚠ S17: грант Read — проєкт видимий, бракує рівня Manage (без гранта — 404).
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(ResourceKind.Project, project.Id, GrantLevel.Read)
+                .Build());
 
         var denied = await Assert.ThrowsAsync<Application.Errors.AccessDeniedException>(
             () => Handler().HandleAsync(project.Id, CancellationToken.None));

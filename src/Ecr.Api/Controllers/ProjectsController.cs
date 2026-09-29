@@ -135,6 +135,9 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpGet("{id:int}/approval-route")]
     [ProducesResponseType<Ecr.Application.Workflow.ApprovalRouteDto>(StatusCodes.Status200OK)]
+    // ⚠ S17: 404 — лише «проєкту немає або він невидимий» (`ECR-PRJ-0404`);
+    // «маршруту немає» лишається 200 із порожнім набором.
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<Ecr.Application.Workflow.ApprovalRouteDto>> ApprovalRoute(
         int id, CancellationToken ct)
         => await getRoute.HandleAsync(id, ct).ConfigureAwait(false);
@@ -212,6 +215,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPost("{id:int}/activate")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Activate(int id, CancellationToken ct)
     {
         await activate.HandleAsync(id, ct).ConfigureAwait(false);
@@ -229,6 +233,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPost("{id:int}/archive")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Archive(int id, CancellationToken ct)
     {
@@ -240,6 +245,7 @@ public sealed class ProjectsController(
     /// <summary>Клонує проєкт разом із налаштуваннями. Право <c>Project.Manage</c>.</summary>
     [HttpPost("{id:int}/clone")]
     [ProducesResponseType<Contracts.ProjectIdResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Clone(
         int id, [FromBody] CloneProjectRequest request, CancellationToken ct)
     {
@@ -259,6 +265,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPut("{id:int}/current-period")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetCurrentPeriod(
         int id, [FromBody] SetCurrentPeriodRequest request, CancellationToken ct)
     {
@@ -283,6 +290,7 @@ public sealed class ProjectsController(
     /// </remarks>
     [HttpPut("{id:int}/timezone")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ChangeTimeZone(
         int id, [FromBody] ChangeProjectTimeZoneRequest request, CancellationToken ct)
@@ -331,6 +339,8 @@ public sealed class ProjectsController(
     /// <summary>Календар періодів проєкту. Право <c>Document.View</c>.</summary>
     [HttpGet("{id:int}/periods")]
     [ProducesResponseType<Ecr.Application.Periods.Dto.PeriodCalendarDto>(StatusCodes.Status200OK)]
+    // ⚠ S17: невидимий проєкт — 404, як неіснуючий.
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Periods(int id, CancellationToken ct)
     {
         // Календар добудовується перед читанням: проєкт міг бути створений до

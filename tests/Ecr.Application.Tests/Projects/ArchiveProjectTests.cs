@@ -106,8 +106,12 @@ public sealed class ArchiveProjectTests
     {
         // ⛔ Q-179 (аудит фази 2, авторизація).
         var project = ArrangeClosed();
+        // ⚠ S17: грант Read — проєкт видимий, бракує рівня Manage (без гранта — 404).
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(new AccessBuilder { UserId = 9 }
+                .Permission("Project.Manage")
+                .Grant(ResourceKind.Project, project.Id, GrantLevel.Read)
+                .Build());
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => Handler().HandleAsync(project.Id, CancellationToken.None));

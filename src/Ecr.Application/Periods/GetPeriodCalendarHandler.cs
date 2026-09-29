@@ -32,37 +32,21 @@ public sealed class GetPeriodCalendarHandler(
             .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
-        // ⛔ `ECR-PRJ-0404`: суб'єкт відмови — проєкт, а старий `ECR-PRD-0422`
-        // обіцяв 422 цифрами і віддавав 404 конвеєром (`P-25`, рядок 4).
-        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw new NotFoundException(
-                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
-                          new Dictionary<string, object?>
-                          {
-                              ["messageKey"] = "err.ECR-PRJ-0404.project",
-                              ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                          });
-
         // ⛔ Q-246: `Document.View` — глобальне право «працює з документами
         // взагалі», не «бачить кожен проєкт» (саме тому `ListProjectsHandler`
-        // фільтрує перелік проєктів за грантом). Без цієї перевірки будь-хто
-        // з `Document.View` бачив повний календар ЧУЖОГО проєкту — відкриття,
-        // закриття, пільговий строк, `reopenedUntil`, id поточного періоду.
-        // Той самий патерн, що й `ActivateProjectHandler`/`RunCalculationHandler`
-        // (Q-179): грант на КОНКРЕТНИЙ проєкт, перевірений ПІСЛЯ existence-check
-        // (інакше запит на неіснуючий проєкт завжди повертав би 403 замість 404).
+        // фільтрує перелік проєктів за грантом). Без гранта будь-хто з
+        // `Document.View` бачив повний календар ЧУЖОГО проєкту.
         // ⚠ D-214: календар — рівень документа, його відкриває й роль, звужена
-        // аркушами чи періодами (`SeesDocumentsOf`).
-        if (!profile.SeesDocumentsOf(projectId))
-        {
-            throw new AccessDeniedException(
-                "ECR-AUTH-0403", $"Немає гранта на проєкт {projectId}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-AUTH-0403.noProjectGrant",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
+        // аркушами чи періодами (`SeesDocumentsOf` — саме так і рахує
+        // `ProjectVisibility`).
+        //
+        // ⛔ S17: і відмова на чужий проєкт — та сама, що на неіснуючий
+        // (`ECR-PRJ-0404`, `ProjectVisibility`), а не `403`: різниця 404/403
+        // розповідала, які id проєктів існують.
+        ProjectVisibility.RequireVisible(profile, projectId);
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+                      ?? throw ProjectVisibility.NotFound(projectId);
 
         // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
         Security.PermissionCheck.RequireIn(profile, "Document.View", projectId);

@@ -187,13 +187,15 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
         var stranger = await Provisioning.AdministratorAsync(app, "Q246aStranger", ["Document.View"]);
 
         // ⛔ Доказ сценарію: `stranger` має `Document.View` узагалі, але
-        // жодного гранта на проєкт `owner` — календар чужого проєкту має
-        // дати 403, а не 200 (і не запис у cfg.Period чужого проєкту).
+        // жодного гранта на проєкт `owner` — календар чужого проєкту не
+        // віддається (і не пишеться в cfg.Period чужого проєкту).
+        // ⚠ S17: відмова — `404 ECR-PRJ-0404`, як на неіснуючий проєкт, а не
+        // `403`: різниця розповідала б, що проєкт є.
         var strangerCalendar = await stranger.Client.GetAsync(
             new Uri($"/api/v1/projects/{projectId}/periods", UriKind.Relative));
-        Assert.Equal(HttpStatusCode.Forbidden, strangerCalendar.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, strangerCalendar.StatusCode);
         var strangerBody = await strangerCalendar.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("ECR-AUTH-0403", strangerBody.GetProperty("errorCode").GetString());
+        Assert.Equal("ECR-PRJ-0404", strangerBody.GetProperty("errorCode").GetString());
 
         // Легітимний власник (грант Manage видано самим створенням проєкту,
         // `Q-179`) і далі бачить свій календар — фікс не ламає позитивний
@@ -235,13 +237,14 @@ public sealed class ProjectAndPeriodScenarios(SqlServerFixture sql)
 
         // ⛔ Доказ сценарію: `stranger` має `Period.Configure` узагалі, але
         // жодного гранта на проєкт `owner` — фіксація чужого поточного
-        // періоду має дати 403, а не 204.
+        // періоду відхиляється, а не 204.
+        // ⚠ S17: відмова — `404 ECR-PRJ-0404`, як на неіснуючий проєкт.
         var strangerPin = await stranger.Client.PutAsJsonAsync(
             new Uri($"/api/v1/projects/{projectId}/current-period", UriKind.Relative),
             new { pinnedPeriodId = periodId, reason = "Q-246 stranger probe" });
-        Assert.Equal(HttpStatusCode.Forbidden, strangerPin.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, strangerPin.StatusCode);
         var strangerBody = await strangerPin.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("ECR-AUTH-0403", strangerBody.GetProperty("errorCode").GetString());
+        Assert.Equal("ECR-PRJ-0404", strangerBody.GetProperty("errorCode").GetString());
 
         // Легітимний власник (грант Manage видано самим створенням проєкту)
         // і далі фіксує поточний період свого проєкту — фікс не ламає

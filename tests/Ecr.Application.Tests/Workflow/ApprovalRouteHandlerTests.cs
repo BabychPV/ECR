@@ -233,8 +233,9 @@ public sealed class ApprovalRouteHandlerTests
         // ⛔ Q-179 (аудит фази 2, авторизація). Глобальне `Project.Manage`
         // саме по собі не давало права міняти маршрут БУДЬ-ЯКОГО проєкту —
         // потрібен грант на КОНКРЕТНИЙ.
+        // ⚠ S17: грант Read — проєкт видимий, бракує рівня Manage (без гранта — 404).
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(ReaderProfile());
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(() => Replace([11]));
 
@@ -247,7 +248,7 @@ public sealed class ApprovalRouteHandlerTests
     public async Task Без_гранта_на_проєкт_читання_маршруту_відхиляється()
     {
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>())
-            .Returns(new AccessBuilder { UserId = 9 }.Permission("Project.Manage").Build());
+            .Returns(ReaderProfile());
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => new GetApprovalRouteHandler(_workflow, _access, _user)
@@ -255,6 +256,13 @@ public sealed class ApprovalRouteHandlerTests
 
         Assert.Equal("ECR-AUTH-0403", denied.ErrorCode);
     }
+
+    /// <summary>Право є, проєкт видимий (грант Read), рівня Manage немає.</summary>
+    private static AccessProfile ReaderProfile()
+        => new AccessBuilder { UserId = 9 }
+            .Permission("Project.Manage")
+            .Grant(Ecr.Domain.Enums.ResourceKind.Project, ProjectId, Ecr.Domain.Enums.GrantLevel.Read)
+            .Build();
 
     private Task<int> Replace(int[] roleIds)
         => new ReplaceApprovalRouteHandler(_workflow, _access, _uow, _user)

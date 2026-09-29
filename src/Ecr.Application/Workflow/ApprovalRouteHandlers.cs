@@ -36,6 +36,10 @@ public sealed class GetApprovalRouteHandler(
         var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                                             .ConfigureAwait(false);
 
+        // ⛔ S17: невидимий проєкт — `404 ECR-PRJ-0404`, як неіснуючий, і ДО
+        // перевірок права/рівня: інакше відмова розповідала б про чужий проєкт.
+        Projects.ProjectVisibility.RequireVisible(profile, projectId);
+
         // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
         PermissionCheck.RequireIn(profile, Permission, projectId);
 
@@ -94,6 +98,9 @@ public sealed class ReplaceApprovalRouteHandler(
 
         var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                                             .ConfigureAwait(false);
+
+        // ⛔ S17: невидимий проєкт — як неіснуючий (див. `GetApprovalRouteHandler`).
+        Projects.ProjectVisibility.RequireVisible(profile, projectId);
 
         // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
         PermissionCheck.RequireIn(profile, Permission, projectId);

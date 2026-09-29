@@ -517,18 +517,14 @@ public sealed class ActivateProjectHandler(
         // ДОКУМЕНТА, і «проєкту немає» доїжджало до обробника помилок сітки,
         // якої на екрані переліку проєктів немає взагалі.
         //
-        // ⚠ Існування перевіряється ДО гранта: грант на неіснуючий `projectId`
-        // не буває виданий нікому за визначенням, і зворотний порядок
-        // перетворив би КОЖЕН запит на неіснуючий проєкт на `403`, приховуючи
-        // справжню причину (`ECR-PRJ-0404`) за помилковим кодом гранта.
+        // ⛔ S17: невидимий проєкт (немає гранта Read) — та сама відповідь, що
+        // й неіснуючий (`ProjectVisibility`). Доти існування перевірялося ДО
+        // гранта, і різниця 404/403 розповідала, які id проєктів існують.
+        // `403` нижче — лише для ВИДИМОГО проєкту, якому бракує рівня.
+        ProjectVisibility.RequireVisible(profile, projectId);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PRJ-0404.project",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            ?? throw ProjectVisibility.NotFound(projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини. Глобальне
@@ -717,16 +713,11 @@ public sealed class ArchiveProjectHandler(
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
-        // грант на неіснуючий `projectId` не буває виданий нікому.
+        // ⛔ S17: невидимий проєкт — як неіснуючий (див. `ActivateProjectHandler`).
+        ProjectVisibility.RequireVisible(profile, projectId);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PRJ-0404.project",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            ?? throw ProjectVisibility.NotFound(projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.
@@ -840,16 +831,11 @@ public sealed class ChangeProjectTimeZoneHandler(
             .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
-        // грант на неіснуючий `projectId` не буває виданий нікому.
+        // ⛔ S17: невидимий проєкт — як неіснуючий (див. `ActivateProjectHandler`).
+        ProjectVisibility.RequireVisible(profile, projectId);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-            ?? throw new NotFoundException(
-                ErrorCodes.ProjectNotFound, $"Проєкту {projectId} не існує.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PRJ-0404.project",
-                    ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            ?? throw ProjectVisibility.NotFound(projectId);
 
         // ⛔ Той самий патерн гранта на КОНКРЕТНИЙ проєкт, що й
         // Activate/Archive/Clone (Q-179): глобальне `Project.Manage` каже «ця

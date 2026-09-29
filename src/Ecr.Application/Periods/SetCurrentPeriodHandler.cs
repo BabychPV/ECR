@@ -45,16 +45,13 @@ public sealed class SetCurrentPeriodHandler(
                          "ECR-AUTH-0401", "Анонімний запит не може змінювати поточний період.",
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
-        // ⛔ `ECR-PRJ-0404`: старий `ECR-PRD-0422` обіцяв 422 цифрами і віддавав
-        // 404 конвеєром — суперечність усередині одного коду (`P-25`, рядок 4).
+        // ⛔ S17: невидимий проєкт — та сама відповідь, що й неіснуючий
+        // (`ECR-PRJ-0404`, `ProjectVisibility`). Доти існування перевірялося
+        // ДО гранта, і різниця 404/403 розповідала, які id проєктів існують.
+        Projects.ProjectVisibility.RequireVisible(profile, projectId);
+
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw new NotFoundException(
-                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
-                          new Dictionary<string, object?>
-                          {
-                              ["messageKey"] = "err.ECR-PRJ-0404.project",
-                              ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                          });
+                      ?? throw Projects.ProjectVisibility.NotFound(projectId);
 
         // ⛔ Q-246: `Period.Configure` — глобальне право «координатор періодів»,
         // не грант на КОЖЕН проєкт. Без цієї перевірки будь-хто з цим правом

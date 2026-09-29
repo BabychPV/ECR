@@ -103,13 +103,17 @@ public sealed partial class ReopenPeriodHandler(
             // адміністратора, який відкриває період, це різниця між «помилився в
             // номері періоду» і «проєкт видалили».
             var period = await periods.LockAsync(periodId, innerCt).ConfigureAwait(false)
-                         ?? throw new NotFoundException(
-                             ErrorCodes.PeriodNotFound, $"Період {periodId} не знайдено.",
-                             new Dictionary<string, object?>
-                             {
-                                 ["messageKey"] = "err.ECR-PRD-0404.period",
-                                 ["periodId"] = periodId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                             });
+                         ?? throw Projects.ProjectVisibility.PeriodNotFound(periodId);
+
+            // ⛔ S17: період НЕВИДИМОГО проєкту (немає гранта Read) — та сама
+            // відповідь, що й неіснуючий період. Доти тут був `403` «немає
+            // гранта Manage», а на неіснуючий id — `404`: перебором id видно
+            // було, які періоди (і отже проєкти) існують. `403` нижче лишається
+            // лише для видимого проєкту, якому бракує рівня Manage.
+            if (!Projects.ProjectVisibility.IsVisible(profile, period.ProjectId))
+            {
+                throw Projects.ProjectVisibility.PeriodNotFound(periodId);
+            }
 
             var project = await periods.FindProjectAsync(period.ProjectId, innerCt).ConfigureAwait(false)
                           ?? throw new NotFoundException(

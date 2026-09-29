@@ -58,20 +58,13 @@ public sealed class CloneProjectHandler(
         // спільного з «період поза межами проєкту». Старий код до того ж казав
         // цифрами 422 при статусі 404 (`P-25`, рядок 4).
         //
-        // ⚠ Існування — ДО гранта: грант на неіснуючий `sourceProjectId` не
-        // буває виданий нікому, і зворотний порядок ховав би `ECR-PRJ-0404`
-        // за помилковим `403`.
+        // ⛔ S17: невидимий проєкт-джерело — та сама відповідь, що й неіснуючий
+        // (`ProjectVisibility`). Доти існування перевірялося ДО гранта, і
+        // різниця 404/403 розповідала, які id проєктів існують.
+        ProjectVisibility.RequireVisible(profile, sourceProjectId);
+
         var source = await periods.FindProjectAsync(sourceProjectId, ct).ConfigureAwait(false)
-                     ?? throw new NotFoundException(
-                         ErrorCodes.ProjectNotFound, $"Проєкт {sourceProjectId} не знайдено.",
-                         new Dictionary<string, object?>
-                         {
-                             // Наявний ключ: той самий факт «проєкту не існує»,
-                             // що вже несуть ActivateProjectHandler/ArchiveProjectHandler/
-                             // ChangeProjectTimeZoneHandler (2026-09-23).
-                             ["messageKey"] = "err.ECR-PRJ-0404.project",
-                             ["projectId"] = sourceProjectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                         });
+                     ?? throw ProjectVisibility.NotFound(sourceProjectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на проєкт-ДЖЕРЕЛО, не
         // лише глобальне `Project.Manage` — рішення людини. Клонування читає

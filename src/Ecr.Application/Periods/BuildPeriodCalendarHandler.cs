@@ -30,27 +30,22 @@ public sealed class BuildPeriodCalendarHandler(
             .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
-        // ⛔ `ECR-PRJ-0404`, а не `ECR-PRD-0422` (`P-25`, рядок 4). Старий код
-        // суперечив сам собі: його цифри кажуть 422, а `NotFoundException`
-        // віддає 404 — клієнт, який виводить HTTP із коду, читав із однієї
-        // відповіді два різні статуси. Заразом виправлено суб'єкт: немає
-        // ПРОЄКТУ, а не «період поза межами проєкту».
-        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
-                      ?? throw new NotFoundException(
-                          ErrorCodes.ProjectNotFound, $"Проєкт {projectId} не знайдено.",
-                          new Dictionary<string, object?>
-                          {
-                              ["messageKey"] = "err.ECR-PRJ-0404.project",
-                              ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                          });
-
         // ⛔ Q-246: цей обробник не лише ЧИТАЄ — він ПИШЕ нові рядки `cfg.Period`
-        // (нижче, `periods.AddRange` + `SaveChangesAsync`). Без цієї перевірки
+        // (нижче, `periods.AddRange` + `SaveChangesAsync`). Без гранта Read
         // будь-хто з глобальним `Document.View` міг ініціювати запис у чужий
-        // проєкт, якого немає навіть у його власному списку `/api/v1/projects`
-        // (`ListProjectsHandler` фільтрує саме за цим грантом). Той самий
-        // патерн, що й `ActivateProjectHandler`/`RunCalculationHandler` (Q-179):
-        // перевірка ПІСЛЯ existence-check, щоб відсутній проєкт лишався 404.
+        // проєкт, якого немає навіть у його власному списку `/api/v1/projects`.
+        //
+        // ⛔ S17: відмова на чужий проєкт — та сама, що на неіснуючий
+        // (`ECR-PRJ-0404`, `ProjectVisibility`), а не `403`: різниця 404/403
+        // розповідала, які id проєктів існують.
+        Projects.ProjectVisibility.RequireVisible(profile, projectId);
+
+        var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false)
+                      ?? throw Projects.ProjectVisibility.NotFound(projectId);
+
+        // ⚠ Видимий (роль, звужена аркушами чи періодами, D-214), але без
+        // гранта Read на сам проєкт — `403`: запис календаря — рівень проєкту,
+        // а проєкт людина бачить, тож приховувати тут нічого.
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Read)
         {
             throw new AccessDeniedException(
