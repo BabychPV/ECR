@@ -215,18 +215,35 @@ public sealed class CreatePeriodPolicyHandler(
 }
 
 /// <summary>
-/// Зміна offsets наявної політики періодів (T6/#37). Право <c>Project.Manage</c>.
+/// Зміна offsets наявної політики періодів (T6/#37). Право <c>Project.Manage</c>
+/// і грант <c>Manage</c> у КОЖНОМУ проєкті, що її використовує (S19).
 /// </summary>
 /// <remarks>
 /// ⚠ Проєкти, які вже посилаються на цю політику, не перераховують межі
 /// автоматично: наступний ідемпотентний виклик <c>GET …/periods</c>
 /// (<c>BuildPeriodCalendarHandler</c>) підхопить нові offsets сам.
+///
+/// ⛔ S19 (аудит безпеки). Політика СПІЛЬНА: її зсуви діють на межі періодів
+/// усіх проєктів, що на неї посилаються. Доти вистачало глобального
+/// <c>Project.Manage</c> — власник одного проєкту зсував відкриття й закриття
+/// періодів чужих, і в журналі не лишалося нічого. Тепер: право й грант
+/// <c>Manage</c> на кожен такий проєкт; політика без жодного проєкту —
+/// глобальне <c>Project.Manage</c>, як і її створення. Зміна й запис
+/// <c>StructureChange</c> (старі й нові зсуви) — одна транзакція.
 /// </remarks>
 public sealed class UpdatePeriodPolicyHandler(
-    IPeriodStore periods, IAccessDecisionService access, ICurrentUser currentUser, IUnitOfWork uow)
+    IPeriodStore periods,
+    IAccessDecisionService access,
+    ICurrentUser currentUser,
+    IUnitOfWork uow,
+    IAuditWriter audit,
+    IClock clock)
 {
     /// <summary>Право керування проєктами.</summary>
     public const string Permission = "Project.Manage";
+
+    /// <summary>Тип сутності в <c>aud.StructureChange</c>.</summary>
+    public const string AuditEntityType = "PeriodPolicy";
 
     /// <summary>Змінює offsets політики.</summary>
     /// <param name="id">Політика.</param>
@@ -236,6 +253,11 @@ public sealed class UpdatePeriodPolicyHandler(
     /// <param name="yearGraceOffsetDays">Пільговий строк після кінця року.</param>
     /// <param name="ct">Токен скасування.</param>
     /// <exception cref="NotFoundException">Політики немає (<c>ECR-PRD-0422</c>).</exception>
+    /// <exception cref="AccessDeniedException">
+    /// <c>ECR-AUTH-0403</c> — немає права чи гранта <c>Manage</c> бодай на один
+    /// проєкт політики (<c>periodPolicyShared</c>, лише кількість таких проєктів —
+    /// без id, щоб не розповідати про невидимі).
+    /// </exception>
     /// <exception cref="DomainException">
     /// <c>ECR-PRD-4225</c> — пільговий строк довший за жорстке закриття, або
     /// річний пільговий строк від'ємний.
@@ -244,15 +266,102 @@ public sealed class UpdatePeriodPolicyHandler(
         int id, int openOffsetDays, int graceOffsetDays, int hardCloseOffsetDays,
         int yearGraceOffsetDays, CancellationToken ct)
     {
-        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
+            .ConfigureAwait(false);
 
-        var policy = await periods.GetPolicyAsync(id, ct).ConfigureAwait(false);
-        policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
+        var userId = currentUser.UserId
+                     ?? throw new AccessDeniedException(
+                         "ECR-AUTH-0401", "Анонімний запит не може змінювати політику періодів.",
+                         new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.anonymousWrite" });
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        PeriodPolicyDto? result = null;
 
-        return PeriodPolicyMapping.ToDto(policy);
+        await uow.ExecuteInTransactionAsync(async innerCt =>
+        {
+            var policy = await periods.GetPolicyAsync(id, innerCt).ConfigureAwait(false);
+            var projectIds = await periods.ListProjectIdsUsingPolicyAsync(id, innerCt).ConfigureAwait(false);
+
+            // ⚠ Перевірки — саме тут, у тілі `HandleAsync`, а не в окремому
+            // методі: сторож `ProjectPermissionCheckTests` (IL) парує вхід «хоч у
+            // якомусь проєкті» з перевіркою в проєкті В ТОМУ САМОМУ методі.
+            if (projectIds.Count == 0)
+            {
+                // Політика ні на що не діє — як і її створення, це дія поза
+                // будь-яким проєктом (`GlobalUseOfProjectCode`).
+                if (!profile.Has(Permission))
+                {
+                    throw new AccessDeniedException(
+                        "ECR-AUTH-0403", $"Потрібне право {Permission}.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                            ["permission"] = Permission,
+                        });
+                }
+            }
+            else
+            {
+                var unmanaged = projectIds.Count(pid =>
+                    !profile.Has(Permission, pid)
+                    || profile.LevelFor(ResourceKind.Project, pid) < GrantLevel.Manage);
+
+                if (unmanaged > 0)
+                {
+                    // ⚠ Лише КІЛЬКІСТЬ, без id: серед них можуть бути проєкти,
+                    // яких людина не бачить (S17 — їхнє існування не розкривається).
+                    throw new AccessDeniedException(
+                        "ECR-AUTH-0403",
+                        $"Політику використовують проєкти ({unmanaged}), якими ви не керуєте.",
+                        new Dictionary<string, object?>
+                        {
+                            ["messageKey"] = "err.ECR-AUTH-0403.periodPolicyShared",
+                            ["projectCount"] = unmanaged.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        });
+                }
+            }
+
+            var before = PeriodPolicyMapping.ToDto(policy);
+            policy.UpdateOffsets(openOffsetDays, graceOffsetDays, hardCloseOffsetDays, yearGraceOffsetDays);
+            var after = PeriodPolicyMapping.ToDto(policy);
+
+            // ⛔ Журнал — у тій самій транзакції, що й зміна: збій збереження не
+            // лишає запису про зміну, якої не сталося, і навпаки.
+            await audit.WriteStructureChangeAsync(
+                new StructureChangeRecord(
+                    clock.UtcNow,
+
+                    // ⚠ Нуль, як і для інших сутностей поза шаблоном: політика
+                    // спільна для проєктів різних версій.
+                    TemplateVersionId: 0,
+                    EntityType: AuditEntityType,
+                    EntityId: policy.Id,
+                    ChangeClass: ChangeClass.Guarded,
+                    Operation: "UpdateOffsets",
+                    OldJson: OffsetsJson(before, projectIds),
+                    NewJson: OffsetsJson(after, projectIds),
+                    ChangeReason: null,
+                    ChangedByUserId: userId,
+                    CorrelationId: currentUser.CorrelationId),
+                innerCt).ConfigureAwait(false);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            result = after;
+        }, ct).ConfigureAwait(false);
+
+        return result!;
     }
+
+    private static string OffsetsJson(PeriodPolicyDto dto, IReadOnlyList<int> projectIds)
+        => System.Text.Json.JsonSerializer.Serialize(new
+        {
+            openOffsetDays = dto.OpenOffsetDays,
+            graceOffsetDays = dto.GraceOffsetDays,
+            hardCloseOffsetDays = dto.HardCloseOffsetDays,
+            yearGraceOffsetDays = dto.YearGraceOffsetDays,
+            projectIds,
+        });
 }
 
 /// <summary>Спільне перетворення сутності в DTO для обох обробників CRUD політик.</summary>

@@ -41,6 +41,16 @@ public sealed class PeriodStore(EcrDbContext db) : IPeriodStore
                    ["periodPolicyId"] = periodPolicyId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                });
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<int>> ListProjectIdsUsingPolicyAsync(int periodPolicyId, CancellationToken ct)
+        => await db.Projects
+            .AsNoTracking()
+            .Where(p => p.PeriodPolicyId == periodPolicyId)
+            .OrderBy(p => p.Id)
+            .Select(p => p.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
     /// <summary>Стеля переліку політик.</summary>
     /// <remarks>
     /// ⚠ Межа є навіть там, де рядків завідомо одиниці. «Їх завжди мало» —

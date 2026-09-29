@@ -362,6 +362,9 @@ public sealed class ReopenPeriodTransactionTests(SqlServerFixture sql)
 
         public void AddPolicy(PeriodPolicy policy) => inner.AddPolicy(policy);
 
+        public Task<IReadOnlyList<int>> ListProjectIdsUsingPolicyAsync(int periodPolicyId, CancellationToken ct)
+            => inner.ListProjectIdsUsingPolicyAsync(periodPolicyId, ct);
+
         public void AddRange(IEnumerable<Period> periods) => inner.AddRange(periods);
 
         public Task AddProjectAsync(Project project, CancellationToken ct)

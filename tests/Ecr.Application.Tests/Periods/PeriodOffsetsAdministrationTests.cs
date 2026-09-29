@@ -45,7 +45,15 @@ public sealed class PeriodOffsetsAdministrationTests
     {
         _user.UserId.Returns(AdminId);
         _periods.GetPolicyAsync(PolicyId, Arg.Any<CancellationToken>()).Returns(_policy);
+
+        // S19: зміна політики — у транзакції; політика без проєктів — глобальне право.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+        _periods.ListProjectIdsUsingPolicyAsync(PolicyId, Arg.Any<CancellationToken>()).Returns(new List<int>());
     }
+
+    private UpdatePeriodPolicyHandler Updater()
+        => new(_periods, _access, _user, _uow, Substitute.For<IAuditWriter>(), Substitute.For<Ecr.Domain.Abstractions.IClock>());
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
@@ -55,7 +63,7 @@ public sealed class PeriodOffsetsAdministrationTests
         _access.BuildProfileAsync(AdminId, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = AdminId }.Permission("Project.Manage").Build());
 
-        var handler = new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow);
+        var handler = Updater();
 
         await handler.HandleAsync(
             PolicyId, openOffsetDays: -3, graceOffsetDays: 10, hardCloseOffsetDays: 30,
@@ -84,7 +92,7 @@ public sealed class PeriodOffsetsAdministrationTests
         _access.BuildProfileAsync(AdminId, Arg.Any<CancellationToken>())
             .Returns(new AccessBuilder { UserId = AdminId }.Permission("Document.View").Build());
 
-        var handler = new UpdatePeriodPolicyHandler(_periods, _access, _user, _uow);
+        var handler = Updater();
 
         var denied = await Assert.ThrowsAsync<AccessDeniedException>(
             () => handler.HandleAsync(

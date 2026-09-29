@@ -4931,6 +4931,8 @@ USING (VALUES
     (N'err.ECR-PWD-0422.containsUserName', N'en', N'The new password must not contain the user name.', 1),
     (N'err.ECR-PWD-0422.tooCommon',        N'en', N'This password is among the most commonly used ones. Choose a different password.', 1),
     (N'err.ECR-PWD-0422.sameAsCurrent',    N'en', N'The new password must differ from the current one.', 1),
+    -- S19: спільна політика періодів — Manage на КОЖЕН її проєкт (`UpdatePeriodPolicyHandler`); лише кількість, без id.
+    (N'err.ECR-AUTH-0403.periodPolicyShared',  N'en', N'This period policy is also used by {projectCount} project(s) you do not manage. Changing it would move their period boundaries.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
