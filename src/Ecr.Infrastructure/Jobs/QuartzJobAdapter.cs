@@ -1,8 +1,6 @@
 using System.Globalization;
-using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
-using Ecr.Domain.Errors;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,21 +29,12 @@ public sealed partial class QuartzJobAdapter(
 {
     /// <summary>
     /// Скільки РЕТРАЇВ (не спроб) дозволено після першого провалу (D-134, №11
-    /// T10 #40).
+    /// T10 #40) — <see cref="JobRetryPolicy.MaxRetryAttempts"/>.
     /// </summary>
-    /// <remarks>
-    /// ⚠ Судження, не факт із документа (жоден тікет не називає число):
-    /// три ретраї покривають типову транзієнтну відмову (дедлок, обрив
-    /// з'єднання з SQL Server) без нескінченного спаму на систематично
-    /// зламаній задачі. Значення суто внутрішнє — конфігурації, яку читав би
-    /// хтось іззовні, тут немає.
-    /// </remarks>
-    public const int MaxRetryAttempts = 3;
+    public const int MaxRetryAttempts = JobRetryPolicy.MaxRetryAttempts;
 
-    /// <summary>
-    /// Базова затримка експоненційного відступу: 30 с, 60 с, 120 с.
-    /// </summary>
-    public static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(30);
+    /// <summary>Базова затримка відступу — <see cref="JobRetryPolicy.RetryBaseDelay"/>.</summary>
+    public static readonly TimeSpan RetryBaseDelay = JobRetryPolicy.RetryBaseDelay;
 
     /// <summary>Стан скасованої задачі в <c>itg.JobProgress</c>.</summary>
     private const string CancelledState = "Cancelled";
@@ -198,7 +187,7 @@ public sealed partial class QuartzJobAdapter(
         {
             var attempt = CurrentAttempt(context);
 
-            if (attempt < MaxRetryAttempts && IsWorthRetrying(ex))
+            if (JobRetryPolicy.ShouldRetry(attempt, ex))
             {
                 // ⚠ Ретрай — НЕ Failed. Клієнт, що опитує стан, має й далі
                 // бачити задачу «у виконанні», а не короткий спалах «провалу»,
@@ -221,11 +210,10 @@ public sealed partial class QuartzJobAdapter(
                         "Failed",
                         // ⛔ V-03: текст винятку БАЗИ (імена об'єктів, значення
                         // ключа) у `/jobs` не йде — лише в журнал рядком нижче.
-                        JobProgressMessageCodec.Shorten(
-                            JobFailureText.For(ex, correlationId), IJobProgressStore.MaxErrorLength),
+                        JobRetryPolicy.FailureText(ex, correlationId),
                         clock,
                         CancellationToken.None,
-                        ErrorCodeOf(ex)))
+                        JobRetryPolicy.ErrorCodeOf(ex)))
                 .ConfigureAwait(false);
 
             LogJobFailed(logger, jobId, typeName ?? "—", ex);
@@ -352,39 +340,6 @@ public sealed partial class QuartzJobAdapter(
     }
 
     /// <summary>
-    /// Чи має сенс повторювати задачу після цього винятку.
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Перелічені типи — це ВЕРДИКТ про вже збережений стан, а не збій
-    /// дороги до нього: «зріз за період уже поданий» (<c>ECR-RPT-0409</c>),
-    /// «сутності немає», «права немає», «джерело не пускає» (<c>H-20</c>).
-    /// Той самий стан через 30 с дасть той самий вердикт, тож три ретраї
-    /// (30+60+120 = 210 с) лише ховають причину: користувач увесь цей час
-    /// бачить «виконується», а справжнє пояснення доїжджає аж наприкінці.
-    /// Провал із першої спроби показує його відразу.
-    /// <para>
-    /// ⛔ Розрізнення — лише за ТИПОМ винятку, ніколи за текстом
-    /// повідомлення: текст пишуть люди, і список за підрядком мовчки
-    /// перестане працювати від першої ж правки формулювання.
-    /// </para>
-    /// <para>
-    /// ⚠ Двох типів тут НЕМАЄ навмисно, і це не забудькуватість.
-    /// <see cref="BusinessRuleException"/> — ним із адаптерів збору приїжджає
-    /// <c>ECR-INT-0503</c> («джерело недоступне або відповідає надто
-    /// повільно»), тобто рівно та транзієнтна відмова, заради якої ретрай і
-    /// будували. <see cref="ConcurrencyConflictException"/> — конфлікт версій
-    /// минає сам, щойно повтор перечитає свіжий стан. Розширити перелік на
-    /// «усі помилки з кодом» означало б знову зламати те, що тут працює.
-    /// </para>
-    /// </remarks>
-    private static bool IsWorthRetrying(Exception ex)
-        => ex is not (DomainException
-            or NotFoundException
-            or AccessDeniedException
-            or SourceAuthenticationException)
-           && !JobFailureText.IsConstraintViolation(ex);
-
-    /// <summary>
     /// Планує новий одноразовий триґер того самого <c>JobKey</c> з
     /// експоненційним відступом і пише в прогрес, ЩО задача повторює спробу.
     /// </summary>
@@ -395,11 +350,8 @@ public sealed partial class QuartzJobAdapter(
         var jobId = context.JobDetail.Key.Name;
         var nextAttempt = attempt + 1;
 
-        // ⚠ 2^(спроба-1) на базову затримку: 30 с, 60 с, 120 с — типовий
-        // експоненційний відступ, а не лінійний, щоб транзієнтна відмова
-        // джерела (наприклад, SQL Server під навантаженням) мала час
-        // розвантажитися, а не отримувала три удари поспіль за секунди.
-        var delay = TimeSpan.FromTicks(RetryBaseDelay.Ticks * (1L << (nextAttempt - 1)));
+        // 30 с, 60 с, 120 с — JobRetryPolicy.DelayBefore (спільно з JobWorker).
+        var delay = JobRetryPolicy.DelayBefore(nextAttempt);
 
         // ⚠ Час — через IClock, не DateTimeOffset.UtcNow: годинник підмінний
         // у тестах (ForbiddenApiTests пильнує саме прямі виклики годинника
@@ -426,15 +378,7 @@ public sealed partial class QuartzJobAdapter(
             // `ex.Message` лишається НЕ перекладеним параметром (дані, як
             // `run.Status` в `ArchiveJob`) — текст винятку вже такий, яким
             // його сформував код, що його кинув, а не готовий UI-рядок.
-            var envelope = new JobProgressMessageEnvelope(
-                "jobs.retryScheduled",
-                new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["attempt"] = nextAttempt.ToString(CultureInfo.InvariantCulture),
-                    ["max"] = MaxRetryAttempts.ToString(CultureInfo.InvariantCulture),
-                    ["delaySeconds"] = delay.TotalSeconds.ToString("0", CultureInfo.InvariantCulture),
-                    ["error"] = JobFailureText.For(ex, correlationId),
-                });
+            var message = JobRetryPolicy.RetryScheduledMessage(nextAttempt, delay, ex, correlationId);
 
             // ⛔ Саме тут жила найдорожча частина дефекту, знайденого наскрізною
             // перевіркою (`tools/smoke.ps1`, крок 23). `ex.Message` ішов у
@@ -451,7 +395,7 @@ public sealed partial class QuartzJobAdapter(
                     () => progress.ReportAsync(
                         jobId,
                         0,
-                        JobProgressMessageCodec.EncodeWithinLimit(envelope, "error"),
+                        message,
                         clock.UtcNow,
                         CancellationToken.None))
                 .ConfigureAwait(false);
@@ -520,7 +464,8 @@ public sealed partial class QuartzJobAdapter(
         metrics.RecordStartLatency(elapsed.TotalMilliseconds, typeName ?? "—");
     }
 
-    private static IBackgroundJob? Resolve(IServiceProvider provider, string? typeName)
+    /// <summary>Знаходить задачу за повним іменем типу (спільно з <c>JobWorker</c>).</summary>
+    internal static IBackgroundJob? Resolve(IServiceProvider provider, string? typeName)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
@@ -546,17 +491,6 @@ public sealed partial class QuartzJobAdapter(
         IJobProgressStore? store, string jobId, string state, string? error, IClock clock, CancellationToken ct,
         string? errorCode = null)
         => store is null ? Task.CompletedTask : store.FinishAsync(jobId, state, error, clock.UtcNow, ct, errorCode);
-
-    /// <summary>
-    /// Код каталогу для провалу (BE-08): власний код доменної чи прикладної
-    /// помилки, інакше — <see cref="ErrorCodes.Internal"/> (непередбачена).
-    /// </summary>
-    private static string ErrorCodeOf(Exception ex) => ex switch
-    {
-        EcrException e => e.ErrorCode,
-        DomainException d => d.ErrorCode,
-        _ => ErrorCodes.Internal,
-    };
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {TypeName} ({JobId}) не зареєстрована.")]
     private static partial void LogUnknownJob(ILogger logger, string typeName, string jobId);
