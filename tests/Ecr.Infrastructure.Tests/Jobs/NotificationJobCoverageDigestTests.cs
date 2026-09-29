@@ -249,6 +249,59 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
     }
 
     /// <summary>
+    /// D-212: автостворення запису синком <c>External</c> — робота за політикою,
+    /// а не збій, тож у зведення «збоїв за період» не йде (як <c>ConflictKeptManual</c>);
+    /// вимкнення запису (Warning) — іде.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Правило з порогом Info: без виключення в запиті автостворення дійшло б
+    /// до листа, і кожен новий елемент AF давав би лист про «збій».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "D-212")]
+    public async Task Автостворення_синком_не_йде_у_зведення_а_вимкнення_йде()
+    {
+        var now = new DateTime(2035, 6, 7, 6, 0, 0, DateTimeKind.Utc);
+        var world = await ArrangeAsync(now);
+
+        try
+        {
+            await using (var setup = CreateContext())
+            {
+                setup.CollectionCoverages.Add(CollectionCoverage.SkippedRegistry(
+                    world.EntityId, CollectionCoverage.RegistryAutoCreated,
+                    "element=AF-NEW created", now.AddMinutes(-10)));
+                setup.CollectionCoverages.Add(CollectionCoverage.SkippedRegistry(
+                    world.EntityId, CollectionCoverage.RegistryDeactivated,
+                    "element=AF-GONE deactivated", now.AddMinutes(-9)));
+                await setup.SaveChangesAsync(CancellationToken.None);
+            }
+
+            var (_, messages) = await RunJobAsync(now, NotificationSeverity.Info);
+
+            var message = Assert.Single(messages);
+            Assert.Contains($"[coverage] {world.EntityCode}: {CollectionCoverage.RegistryDeactivated}", message.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain(CollectionCoverage.RegistryAutoCreated, message.Body, StringComparison.Ordinal);
+
+            await using var db = CreateContext();
+            var queued = await db.NotificationOutbox
+                .AsNoTracking()
+                .Where(n => n.EventCode == "maintenance.failures" && n.Body.Contains(world.EntityCode))
+                .OrderByDescending(n => n.Id)
+                .FirstOrDefaultAsync();
+
+            Assert.NotNull(queued);
+            Assert.DoesNotContain(CollectionCoverage.RegistryAutoCreated, queued!.Body, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CleanupAsync(world.EntityId);
+        }
+    }
+
+    /// <summary>
     /// U12: причина прогону збору, записана конвертом, іде в лист ТЕКСТОМ мови
     /// листа; стара причина (сирий текст до U12) — як є.
     /// </summary>

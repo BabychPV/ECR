@@ -126,6 +126,9 @@ public sealed class NotificationJob(
         // `SkippedWriteConflict` і `SkippedNeedsConfirmation` — навпаки, У
         // зведенні: значення не записано, і людина правки не робила.
         //
+        // ⚠ `RegistryAutoCreated` (D-212) — теж поза зведенням: синк `External`
+        // створив запис за політикою, це робота, а не збій; видно в журналі UI.
+        //
         // ⚠ Групування (сутність, період, статус) — у базі: 5 000 пропусків
         // того самого періоду — ОДИН рядок із лічильником, а не сто рядків,
         // що витіснили б із зведення решту збоїв (`MaxDigestItems`).
@@ -133,7 +136,8 @@ public sealed class NotificationJob(
             .AsNoTracking()
             .Where(c => c.Status != null
                         && c.CoveredFrom >= since
-                        && c.Status != CollectionCoverage.ConflictKeptManual)
+                        && c.Status != CollectionCoverage.ConflictKeptManual
+                        && c.Status != CollectionCoverage.RegistryAutoCreated)
             .GroupBy(c => new { c.SourceEntityId, c.PeriodKey, c.Status })
             .Select(g => new
             {
