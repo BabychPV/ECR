@@ -3,6 +3,11 @@ using System.Reflection;
 using System.Text;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.Integration;
+using Ecr.Infrastructure;
+using Ecr.Infrastructure.Jobs;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Ecr.Architecture.Tests;
@@ -99,6 +104,56 @@ public sealed class JobLaneTests
         }
 
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
+    }
+
+    /// <summary>
+    /// Api не бере лейн перерахунку, коли його виконує окремий пул (<c>D-206</c>),
+    /// а виконавець черги й адаптер з'являються лише в режимі <c>Database</c> (F1c).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Перевіряється РЕЄСТРАЦІЯ контейнера (<c>AddEcrInfrastructure</c>), а не
+    /// сам <see cref="JobLaneMap"/>: лейни, правильно пораховані й не передані
+    /// воркеру, так само лишили б перерахунок в Api.
+    /// Мутація: <c>Lanes = JobLanes.All</c> у DependencyInjection — перший рядок
+    /// Theory червоний.
+    /// </remarks>
+    [Theory]
+    [InlineData("Database", "Worker", true, false)]
+    [InlineData("Database", "InProcess", true, true)]
+    [InlineData("Database", null, true, true)]
+    [InlineData("Quartz", "Worker", false, false)]
+    [InlineData(null, null, false, false)]
+    public void Воркер_Api_опитує_лейни_за_режимом_і_виконавцем_перерахунку(
+        string? mode, string? executor, bool workerRegistered, bool claimsRecalc)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Ecr"] = "Server=.;Database=EcrJobLaneGuard;Integrated Security=true",
+            [DbBackgroundJobScheduler.ModeKey] = mode,
+            [JobLaneMap.ExecutorKey] = executor,
+        };
+
+        var services = new ServiceCollection();
+        services.AddEcrInfrastructure(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+
+        var worker = services.Any(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(JobWorker));
+        var dbScheduler = services.Any(d =>
+            d.ServiceType == typeof(IBackgroundJobScheduler) && d.ImplementationType == typeof(DbBackgroundJobScheduler));
+
+        Assert.Equal(workerRegistered, worker);
+        Assert.Equal(workerRegistered, dbScheduler);
+        Assert.Single(services, d => d.ServiceType == typeof(IBackgroundJobScheduler));
+        Assert.Contains(services, d => d.ServiceType == typeof(IJobQueue));
+        Assert.Contains(services, d => d.ServiceType == typeof(IJobLeaseContext));
+
+        if (workerRegistered)
+        {
+            var lanes = services.Single(d => d.ServiceType == typeof(JobWorkerOptions))
+                .ImplementationInstance is JobWorkerOptions options ? options.Lanes : [];
+
+            Assert.Contains(JobLanes.Default, lanes);
+            Assert.Equal(claimsRecalc, lanes.Contains(JobLanes.Recalc));
+        }
     }
 
     [Fact]

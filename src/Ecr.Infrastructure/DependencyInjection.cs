@@ -258,11 +258,32 @@ public static class DependencyInjection
         // ⚠ Scoped, а не Singleton: прогрес живе в itg.JobProgress, тобто в
         // DbContext, а той scoped. Singleton тримав би один контекст на всі
         // одночасні постановки в чергу.
-        services.AddScoped<IBackgroundJobScheduler>(sp => new Jobs.QuartzJobScheduler(
+        services.AddScoped(sp => new Jobs.QuartzJobScheduler(
             sp.GetService<ISchedulerFactory>(),
             sp.GetService<IJobProgressStore>(),
             sp.GetService<IClock>(),
             sp.GetService<ICorrelationIdAccessor>()));
+
+        // MI-02 (F1c): черга в базі. Порти реєструються завжди (fencing читає оренду
+        // й у режимі Quartz — там вона null); виконавець і адаптер — лише за
+        // `Jobs:Queue:Mode = Database`. Дефолт — Quartz до зеленого F1d.
+        services.AddScoped<IJobQueue, Jobs.DbJobQueue>();
+        services.AddScoped<Jobs.JobLeaseContext>();
+        services.AddScoped<IJobLeaseContext>(sp => sp.GetRequiredService<Jobs.JobLeaseContext>());
+        services.AddSingleton<Jobs.JobQueueSignal>();
+        if (Jobs.DbBackgroundJobScheduler.ReadMode(configuration) == Jobs.JobQueueMode.Database)
+        {
+            services.AddScoped<IBackgroundJobScheduler, Jobs.DbBackgroundJobScheduler>();
+            services.AddSingleton(new Jobs.JobWorkerOptions
+            {
+                Lanes = Jobs.JobLaneMap.ApiLanes(Jobs.JobLaneMap.ReadExecutor(configuration)),
+            });
+            services.AddHostedService<Jobs.JobWorker>();
+        }
+        else
+        {
+            services.AddScoped<IBackgroundJobScheduler>(sp => sp.GetRequiredService<Jobs.QuartzJobScheduler>());
+        }
 
         // ⚠ Задача реєструється як МАРКЕР IRecalculationJob, бо саме ним її
         // називає use-case. Без цього рядка `EnqueueAsync<IRecalculationJob>`

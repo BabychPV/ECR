@@ -80,6 +80,10 @@ public static partial class EcrConfigurationValidation
     [
         ("Schema:StartupMode", ["Validate", "Migrate"]),
         ("Database:EditionMode", Enum.GetNames<SqlEditionMode>()),
+
+        // MI-02 (F1c): «Databse» інакше мовчки лишав би Quartz.
+        (Infrastructure.Jobs.DbBackgroundJobScheduler.ModeKey, Enum.GetNames<Infrastructure.Jobs.JobQueueMode>()),
+        (Infrastructure.Jobs.JobLaneMap.ExecutorKey, Enum.GetNames<Infrastructure.Jobs.RecalculationExecutor>()),
     ];
 
     /// <summary>Ключ адреси OTLP-колектора.</summary>

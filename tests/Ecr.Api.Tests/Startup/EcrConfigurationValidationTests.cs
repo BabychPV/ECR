@@ -29,6 +29,8 @@ public sealed class EcrConfigurationValidationTests(SqlServerFixture sql)
     [InlineData("Database:EditionMode", "Enterprse")]
     [InlineData("Database:EditionMode", "2")]
     [InlineData("Schema:StartupMode", "Migarte")]
+    [InlineData("Jobs:Queue:Mode", "Databse")]
+    [InlineData("Jobs:Recalculation:Executor", "Workers")]
     public void Недійсне_значення_називає_ключ(string key, string value)
     {
         var problems = EcrConfigurationValidation.Validate(Config((key, value)));
