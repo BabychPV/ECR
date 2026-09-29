@@ -137,6 +137,11 @@ public interface ICalculationModule
 /// ⛔ Завантажується тут, у підготовці, а не на рядку: під час обчислення звернень до
 /// БД немає жодного.
 /// </param>
+/// <param name="Libraries">
+/// ✎ HSE301 L: формули імпортованих методологій, на які транзитивно посилається версія,
+/// з версіями бібліотек, чинними на бізнес-дату прив'язки; <c>null</c> — версія за межу
+/// своїх формул не посилається.
+/// </param>
 public sealed record CalculationBindingContext(
     MethodologyDescriptor Methodology,
     long DocumentId,
@@ -147,7 +152,59 @@ public sealed record CalculationBindingContext(
     Ecr.Expressions.PeriodContext Period,
     IReadOnlyDictionary<string, byte?> OutputScales,
     IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants,
-    Ecr.Expressions.Evaluation.IRegistrySnapshot? Registries = null);
+    Ecr.Expressions.Evaluation.IRegistrySnapshot? Registries = null,
+    CalculationLibraries? Libraries = null);
+
+/// <summary>
+/// Замикання бібліотечних формул версії (HSE301 L): що з імпортованих методологій
+/// рахується в контексті рядка викликача.
+/// </summary>
+/// <remarks>
+/// ⛔ Формула бібліотеки рахується В КОНТЕКСТІ РЯДКА ВИКЛИКАЧА: аргументи — рядка
+/// викликача, константи — версії бібліотеки (з кандидатами на поточну речовину),
+/// посилання — у просторі імен бібліотеки. Результат бібліотеки, записаний її власним
+/// прогоном, не читається: у бібліотеки рядків немає, і число залежало б від того,
+/// хто рахувався першим.
+/// </remarks>
+/// <param name="Imports">Імена <c>!Code</c> викликача, що ведуть за межу його версії.</param>
+/// <param name="Versions">Версії бібліотек у порядку, в якому їх знайдено.</param>
+public sealed record CalculationLibraries(
+    IReadOnlyDictionary<string, LibraryLink> Imports,
+    IReadOnlyList<CalculationLibrary> Versions);
+
+/// <summary>Одна версія бібліотеки в замиканні — лише потрібні формули.</summary>
+/// <param name="MethodologyId">Методологія-бібліотека.</param>
+/// <param name="MethodologyCode">Її код — джерело кроку в трейсі.</param>
+/// <param name="MethodologyVersionId">Версія, чинна на дату.</param>
+/// <param name="NumericMode">Арифметика версії (публікація звіряє з викликачем).</param>
+/// <param name="CalendarMode">Календар версії (публікація звіряє з викликачем).</param>
+/// <param name="Formulas">Потрібні формули в порядку <c>EvaluationOrder</c> бібліотеки.</param>
+/// <param name="Constants">Код константи → усі кандидати версії бібліотеки.</param>
+/// <param name="Imports">Імена цієї бібліотеки, що ведуть далі — в її власні імпорти.</param>
+public sealed record CalculationLibrary(
+    int MethodologyId,
+    string MethodologyCode,
+    int MethodologyVersionId,
+    NumericMode NumericMode,
+    CalendarMode CalendarMode,
+    IReadOnlyList<MethodologyFormula> Formulas,
+    IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> Constants,
+    IReadOnlyDictionary<string, LibraryLink> Imports);
+
+/// <summary>Куди веде <c>!Code</c> за межею своєї версії.</summary>
+/// <param name="MethodologyId">Методологія, у формулу якої веде ім'я.</param>
+/// <param name="MethodologyCode">Її код.</param>
+/// <param name="MethodologyVersionId">Її версія, чинна на дату.</param>
+/// <param name="IsCycle">
+/// Імпорт веде назад у методологію, що вже є на шляху від викликача: обчислення дасть
+/// <c>#CYCLE</c>, а не рекурсію. Так виглядає бібліотека, перевидана з посиланням назад
+/// уже після публікації викликача.
+/// </param>
+public sealed record LibraryLink(
+    int MethodologyId,
+    string MethodologyCode,
+    int MethodologyVersionId,
+    bool IsCycle);
 
 /// <summary>
 /// Кеш знімків довідників ОДНОГО прогону: ключ — (довідники, бізнес-дата, момент
