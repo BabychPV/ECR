@@ -97,9 +97,42 @@ public sealed class RecalculationJob(
         // проєкту (`DocumentId <= 0` — нічний розклад чи адміністративна
         // команда) лишається `DocumentId = null`, як і завжди: він рахує ВСІ
         // документи проєкту заново, тож законно перекриває їх усіх.
-        var run = new Domain.Entities.Calculations.CalculationRun(
-            projectId, request.PeriodKey, request.TriggeredByUserId, clock.UtcNow,
-            documentId: request.DocumentId > 0 ? request.DocumentId : null);
+        //
+        // ⛔⛔ ОДИН ПРОГІН НА ПЕРІОД, а не один на рік. Прогін «на весь рік»
+        // (`PeriodKey = null`, нічний розклад) раніше створював ОДИН
+        // `CalculationRun` без періоду, а оркестратор пише результати без
+        // ключа періоду (`ICalculationResultStore.WriteResultsAsync`) — сховище
+        // бере його з прогону, `run.PeriodKey ?? 0`. Тобто кожне число нічного
+        // перерахунку лягало в «період 0», якого не читає ні
+        // `ReadCurrentAsync`, ні зріз `rpt.*`: нічний перерахунок рахував і
+        // не показував нічого (`RecalculationJobYearRunResultsVisibilityTests`).
+        // Прогін на кожен період дає і правильну партицію результатів, і
+        // правильне перемикання актуальності (`SwitchCurrentRunAsync` — за
+        // `(ProjectId, PeriodKey)`): ручний прогін січня перекриває нічний
+        // лише в січні, а не лишає два актуальні прогони з подвоєними рядками.
+        // Модель `CalculationRun` не змінюється — `PeriodKey` лишається
+        // nullable для прогону, якому немає чого рахувати (див. нижче).
+        var startedAt = clock.UtcNow;
+        var periodRuns = new SortedDictionary<int, (Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)>();
+        Domain.Entities.Calculations.CalculationRun? yearRun = null;
+
+        Domain.Entities.Calculations.CalculationRun NewRun(int? periodKey)
+            => new(
+                projectId, periodKey, request.TriggeredByUserId, startedAt,
+                documentId: request.DocumentId > 0 ? request.DocumentId : null);
+
+        async Task<(Domain.Entities.Calculations.CalculationRun Run, ModuleProfile Profile)> RunForAsync(int periodKey)
+        {
+            if (!periodRuns.TryGetValue(periodKey, out var entry))
+            {
+                entry = (NewRun(periodKey), new ModuleProfile());
+                periodRuns.Add(periodKey, entry);
+                db.CalculationRuns.Add(entry.Run);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            }
+
+            return entry;
+        }
 
         try
         {
@@ -108,8 +141,12 @@ public sealed class RecalculationJob(
             // так і сталося з `ProjectId = 0` вище), виняток летів МИМО catch
             // нижче — і задача лишалася `Running` назавжди, хоча catch
             // виглядав так, ніби мав це перехопити.
-            db.CalculationRuns.Add(run);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            //
+            // ⚠ Названий період — прогін створюється ОДРАЗУ, як і завжди.
+            if (request.PeriodKey is { } requestedPeriod)
+            {
+                await RunForAsync(requestedPeriod).ConfigureAwait(false);
+            }
 
             // ⛔ Q-151/Q-162 (аудит фази 1). `RunCalculationHandler` УЖЕ ставив
             // у чергу payload без `DocumentId` (нуль після розбору JSON) —
@@ -122,8 +159,6 @@ public sealed class RecalculationJob(
             var documentIds = request.DocumentId > 0
                 ? (IReadOnlyList<long>)[request.DocumentId]
                 : await ProjectDocumentIdsAsync(projectId, ct).ConfigureAwait(false);
-
-            var totalProfile = new ModuleProfile();
 
             for (var i = 0; i < documentIds.Count; i++)
             {
@@ -216,12 +251,12 @@ public sealed class RecalculationJob(
                         ct)
                     .ConfigureAwait(false);
 
-                // ⛔ ОДИН прогін (`run.Id`) на всі документи — `CalculationRun`
-                // прив'язаний до проєкту й періоду (`FK_CalculationRun_Project`),
-                // не до документа. Профілі модулів зводяться в один сумарний
-                // запис нижче — `ModuleProfile.Record` акумулює за кодом
-                // модуля, тож повторний виклик на кожен документ саме те, для
-                // чого метод і існує.
+                // ⛔ ОДИН прогін на ПЕРІОД (`RunForAsync`) на всі документи —
+                // `CalculationRun` прив'язаний до проєкту й періоду
+                // (`FK_CalculationRun_Project`), не до документа. Профілі модулів
+                // зводяться в сумарний запис прогону періоду —
+                // `ModuleProfile.Record` акумулює за кодом модуля, тож повторний
+                // виклик на кожен документ саме те, для чого метод і існує.
                 //
                 // ⛔⛔ ПОПЕРІОДНО, а не одним викликом на весь прогін. Раніше
                 // тут стояло `new PeriodKey(request.PeriodKey ?? 0)`: один
@@ -285,6 +320,8 @@ public sealed class RecalculationJob(
                     var periodCeiling =
                         formulaCeiling + ((ceiling - formulaCeiling) * (p + 1) / methodologyPeriods.Count);
 
+                    var (run, runProfile) = await RunForAsync(period).ConfigureAwait(false);
+
                     var profile = await orchestrator
                         .RunAsync(
                             run.Id,
@@ -301,13 +338,29 @@ public sealed class RecalculationJob(
                             ct)
                         .ConfigureAwait(false);
 
-                    totalProfile.Merge(profile);
+                    runProfile.Merge(profile);
                 }
             }
 
+            // ⚠ Рік, у якому немає жодного періоду в скоупі (жодного
+            // екземпляра таблиць або всі періоди закриті), лишає по собі один
+            // прогін без періоду — як і раніше: задача за розкладом мусить
+            // лишати слід (профіль пишеться завжди, J-1), а результатів у
+            // такого прогону немає, тож «періоду 0» він не наповнить.
+            if (periodRuns.Count == 0)
+            {
+                yearRun = NewRun(periodKey: null);
+                db.CalculationRuns.Add(yearRun);
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                await runs.CompleteAsync(yearRun.Id, new ModuleProfile(), ct).ConfigureAwait(false);
+            }
+
             // Завершення — прикладний сценарій: профіль і перемикання
-            // актуальності однією транзакцією (ФВ-9.11).
-            await runs.CompleteAsync(run.Id, totalProfile, ct).ConfigureAwait(false);
+            // актуальності однією транзакцією (ФВ-9.11) — на кожен період.
+            foreach (var (run, profile) in periodRuns.Values)
+            {
+                await runs.CompleteAsync(run.Id, profile, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -326,10 +379,26 @@ public sealed class RecalculationJob(
             // Прогін позначається `Failed` лише якщо його `INSERT` УСПІШНО
             // відбувся (`run.Id` призначений базою): позначати нема чого,
             // якщо самого рядка в базі немає.
-            if (run.Id > 0)
+            //
+            // ⚠ Прогонів тут може бути кілька (по одному на період): позначаються
+            // вставлені й НЕ завершені. Уже завершений прогін періоду став
+            // актуальним і зняв актуальність із попереднього — позначити його
+            // `Failed` означало б лишити той період без актуальних результатів.
+            var started = periodRuns.Values
+                .Select(entry => entry.Run)
+                .Append(yearRun)
+                .OfType<Domain.Entities.Calculations.CalculationRun>()
+                .Where(run => run.Id > 0 && run.Status == "Running")
+                .ToList();
+
+            if (started.Count > 0)
             {
-                db.CalculationRuns.Attach(run);
-                run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: ex.Message);
+                foreach (var run in started)
+                {
+                    db.CalculationRuns.Attach(run);
+                    run.Complete("Failed", clock.UtcNow, profileJson: null, errorMessage: ex.Message);
+                }
+
                 await db.SaveChangesAsync(ct).ConfigureAwait(false);
             }
 
