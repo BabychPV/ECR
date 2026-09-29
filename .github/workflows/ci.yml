@@ -297,6 +297,30 @@ jobs:
           ECR_A11Y_THEME: ${{ matrix.theme }}
         run: pwsh -File tools/verify-all.ps1 -SkipDeployment -Only 'Доступність клієнта'
 
+  # ⚠ Job Object (ФВ-9.8, D-206) існує лише у Windows. На `ubuntu-latest`
+  # `Ecr.Worker.Tests` перевіряють лише зрозумілу відмову
+  # `PlatformNotSupportedException`, а самі межі пам'яті й KILL_ON_JOB_CLOSE —
+  # ніде. Це завдання ганяє той самий проєкт на Windows, де гілки тестів із
+  # живими процесами справді виконуються. SQL не потрібен.
+  #
+  # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
+  # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
+  # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
+  # зачіпає.
+  worker-windows:
+    name: worker (windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Тести Ecr.Worker (Job Object)
+        run: dotnet test tests/Ecr.Worker.Tests --nologo --logger "trx;LogFileName=worker-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
+
   # ⛔ Набір у ПЕРЕМІШАНОМУ порядку — і це НЕ восьмий гейт. Він не блокує
   # мерж (`continue-on-error`), бо його призначення інше: показати, що набір
   # зелений ПО СУТІ, а не тому, що штатний порядок випадково влаштовує
