@@ -183,6 +183,52 @@ describe('CoverageEventsPanel', () => {
     }
   });
 
+  it('відмова джерела віддати дані — бейдж `danger` і причина конвертом, резолвлена каталогом', async () => {
+    // ⛔ Застряглий інтервал збору (джерело відповідає, але дані нечитабельні)
+    // раніше не лишав у журналі покриття нічого. `details` — конверт: без
+    // `collectionRunErrorText` у панелі тут стояв би сирий JSON.
+    const details = JSON.stringify({
+      k: 'coverageEvents.sourceDataRefused',
+      p: { path: 'tagA', from: '2026-02-28T12:00:00.0000000Z', to: '2026-03-01T12:00:00.0000000Z', key: '0123456789ABCDEF' },
+      i: {
+        k: 'jobs.collectionRunReason',
+        p: { code: 'ECR-INT-0422' },
+        i: { k: 'err.ECR-INT-0422.timestampUnreadable', p: { dataSource: 'PIAF', sourcePath: 'tagA', valueType: 'NULL' } },
+      },
+    });
+    const Refused = { ...Ceiling, id: 9201, sourceEntityCode: 'STACK-1', sourceEntityName: null, periodKey: null, status: 'SourceDataRefused', details };
+    respond(() => ({ items: [Refused], nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('STACK-1');
+
+    const row = document.querySelector<HTMLElement>('tr[data-row-key="9201"]') as HTMLElement;
+    const badge = row.querySelector<HTMLElement>('[data-status-kind="coverage"]');
+    expect(badge?.dataset.statusState).toBe('SourceDataRefused');
+    expect(badge?.dataset.statusTone).toBe('danger');
+    expect(badge?.textContent).toBe('⟦status.coverage.SourceDataRefused⟧');
+
+    expect(
+      within(row).getByText(
+        '⟦coverageEvents.sourceDataRefused (path=tagA, from=2026-02-28T12:00:00.0000000Z, to=2026-03-01T12:00:00.0000000Z, key=0123456789ABCDEF, '
+          + 'message=⟦jobs.collectionRunReason (code=ECR-INT-0422, '
+          + 'message=⟦err.ECR-INT-0422.timestampUnreadable (dataSource=PIAF, sourcePath=tagA, valueType=NULL)⟧)⟧)⟧',
+      ),
+    ).toBeTruthy();
+    expect(within(row).queryByText(details)).toBeNull();
+  });
+
+  it('фільтр статусу пропонує відмову джерела з підписом каталогу', async () => {
+    respond(() => ({ items: [], nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('⟦coverageEvents.empty⟧');
+
+    fireEvent.click(await screen.findByRole('textbox', { name: '⟦coverageEvents.filterStatus⟧' }));
+
+    expect(await screen.findByRole('option', { name: '⟦status.coverage.SourceDataRefused⟧' })).toBeTruthy();
+  });
+
   it('фільтр статусу пропонує події синку довідника з підписами каталогу', async () => {
     respond(() => ({ items: [], nextCursor: null, totalCount: null }));
     show();

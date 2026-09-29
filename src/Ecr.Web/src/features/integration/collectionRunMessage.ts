@@ -94,6 +94,59 @@ function render(key: string, params: Record<string, string>): string | null {
       return t('jobs.collectionAuthRefused', params);
     case 'jobs.collectionAbandoned':
       return t('jobs.collectionAbandoned', params);
+    // Подія журналу покриття `SourceDataRefused` (`CoverageEventsPanel`): атрибут,
+    // інтервал і вкладена причина `jobs.collectionRunReason`.
+    case 'coverageEvents.sourceDataRefused':
+      return t('coverageEvents.sourceDataRefused', params);
+    default:
+      return adapterRefusal(key, params);
+  }
+}
+
+/**
+ * Власна причина відмови адаптера з кодом каталогу — вкладена в
+ * `jobs.collectionRunReason` (`CollectionRunner.Refused`): збирач більше не
+ * зводить її до «джерело недоступне», а несе ключ і параметри адаптера.
+ *
+ * ⚠ Перелік — ключі, які адаптери збору кидають при читанні (`SqlDataSource`,
+ * `PiSqlClientDataSource`, `PiWebApiDataSource`, `SourceUnitConverter`).
+ * Невідомий ключ — `null`, і вся причина лишається сирим рядком: чесніше за
+ * вгаданий переклад.
+ */
+function adapterRefusal(key: string, params: Record<string, string>): string | null {
+  switch (key) {
+    case 'err.ECR-INT-0422.timestampUnreadable':
+      return t('err.ECR-INT-0422.timestampUnreadable', params);
+    case 'err.ECR-INT-0422.timestampsOutOfOrder':
+      return t('err.ECR-INT-0422.timestampsOutOfOrder', params);
+    case 'err.ECR-INT-0422.queryKindNotConfigured':
+      return t('err.ECR-INT-0422.queryKindNotConfigured', params);
+    case 'err.ECR-INT-0422.sourceUnitMismatch':
+      return t('err.ECR-INT-0422.sourceUnitMismatch', params);
+    case 'err.ECR-INT-0404.sourcePathNotFound':
+      return t('err.ECR-INT-0404.sourcePathNotFound', params);
+    case 'err.ECR-INT-0502.credentialsRefused':
+      return t('err.ECR-INT-0502.credentialsRefused', params);
+    case 'err.ECR-INT-0502.piWebApiUnauthorized':
+      return t('err.ECR-INT-0502.piWebApiUnauthorized', params);
+    case 'err.ECR-INT-0503.sourcePathTooLong':
+      return t('err.ECR-INT-0503.sourcePathTooLong', params);
+    case 'err.ECR-INT-0503.queryNotConfigured':
+      return t('err.ECR-INT-0503.queryNotConfigured', params);
+    case 'err.ECR-INT-0503.connectionStringBroken':
+      return t('err.ECR-INT-0503.connectionStringBroken', params);
+    case 'err.ECR-INT-0503.connectFailed':
+      return t('err.ECR-INT-0503.connectFailed', params);
+    case 'err.ECR-INT-0503.sourceMissing':
+      return t('err.ECR-INT-0503.sourceMissing', params);
+    case 'err.ECR-INT-0503.currentValueUnreadable':
+      return t('err.ECR-INT-0503.currentValueUnreadable', params);
+    case 'err.ECR-INT-0503.piWebApiErrorStatus':
+      return t('err.ECR-INT-0503.piWebApiErrorStatus', params);
+    case 'err.ECR-INT-0503.piWebApiTimeout':
+      return t('err.ECR-INT-0503.piWebApiTimeout', params);
+    case 'err.ECR-INT-0503.controlCharacterInName':
+      return t('err.ECR-INT-0503.controlCharacterInName', params);
     default:
       return null;
   }

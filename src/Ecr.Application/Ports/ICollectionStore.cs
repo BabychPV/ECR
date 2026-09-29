@@ -52,6 +52,33 @@ public interface ICollectionStore
         IReadOnlyList<TimeInterval> covered, CancellationToken ct);
 
     /// <summary>
+    /// Записує в журнал покриття ПОДІЮ зі статусом про інтервал, який збір
+    /// прочитати не зміг (<c>CollectionCoverage.SourceDataRefused</c>).
+    /// </summary>
+    /// <param name="sourceEntityId">Сутність джерела.</param>
+    /// <param name="sourcePath">Атрибут, що відмовив; <c>null</c> — уся сутність.</param>
+    /// <param name="fromUtc">Початок непрочитаного інтервалу.</param>
+    /// <param name="toUtc">Кінець непрочитаного інтервалу.</param>
+    /// <param name="status">Статус події з <c>CollectionCoverage.KnownStatuses</c>.</param>
+    /// <param name="errorCode">Код відмови — частина ключа дедуплікації.</param>
+    /// <param name="reason">Пояснення конвертом (<c>Q-326</c>) — лягає в <c>Details</c>.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns><c>true</c> — подію записано; <c>false</c> — така сама вже є.</returns>
+    /// <remarks>
+    /// ⛔ Подія НЕ є покриттям: рядок має статус, а острови покриття й
+    /// наздоганяння читають лише <c>Status IS NULL</c> — інтервал лишається
+    /// прогалиною і після запису події.
+    /// <para>
+    /// ⚠ Ідемпотентно: та сама (сутність, атрибут, інтервал, статус, код) на
+    /// кожному наступному прогоні нової події не дає — інакше щогодинне
+    /// наздоганяння засипало б журнал копіями однієї відмови.
+    /// </para>
+    /// </remarks>
+    public Task<bool> RecordCoverageEventAsync(
+        int sourceEntityId, string? sourcePath, DateTime fromUtc, DateTime toUtc,
+        string status, string errorCode, JobProgressMessageEnvelope reason, CancellationToken ct);
+
+    /// <summary>
     /// Покриті інтервали від <paramref name="notBefore"/> — основа для пошуку
     /// прогалин. Ознака здоров'я інтеграції — саме журнал покриття, а не тиша (ІНТ-3.3).
     /// </summary>

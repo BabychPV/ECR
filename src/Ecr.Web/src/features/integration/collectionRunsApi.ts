@@ -122,6 +122,9 @@ export const CoverageEventStatuses = [
   'RegistryElementUnlinked',
   'RegistryValueRejected',
   'RegistryPendingUpdate',
+  // Збір: джерело відмовило віддати дані інтервалу з кодом каталогу (`CollectionRunner`);
+  // інтервал лишається прогалиною, причина — конвертом у `details`.
+  'SourceDataRefused',
 ] as const;
 export type CoverageEventStatus = (typeof CoverageEventStatuses)[number];
 

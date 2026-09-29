@@ -4216,6 +4216,12 @@ USING (VALUES
     (N'err.ECR-REG-0409.externalKeyTakenConcurrently', N'en', N'Identifier "{externalId}" was just linked by another request.', 1),
     (N'err.ECR-REG-0404.externalKey',           N'en', N'External identifier {id} was not found in registry "{registryCode}".', 1),
     -- COLL:registry-extkeys ── кінець секції ──
+    -- COLL:coverage-refusal ── Джерело відмовило віддати дані інтервалу з кодом каталогу (HSE301 A7/F4e, `CollectionRunner`) ──
+    -- Подія журналу покриття `SourceDataRefused`: інтервал лишається прогалиною, наздоганяння повторить його.
+    -- `{message}` — вкладена причина `jobs.collectionRunReason` («код: ключ адаптера з параметрами»).
+    (N'status.coverage.SourceDataRefused',      N'en', N'Source refused the data', 1),
+    (N'coverageEvents.sourceDataRefused',       N'en', N'Attribute "{path}", interval [{from}, {to}) was not collected: {message}. The interval stays a gap; catch-up retries it on every run until the source data is fixed.', 1),
+    -- COLL:coverage-refusal ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),

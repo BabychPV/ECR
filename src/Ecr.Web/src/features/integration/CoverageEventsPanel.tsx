@@ -8,6 +8,7 @@ import {
   type CoverageEventStatus,
   type CoverageEventView,
 } from './collectionRunsApi';
+import { collectionRunErrorText } from './collectionRunMessage';
 import { DataTable } from '@/shared/ui/DataTable';
 import { FilterBar, type FilterOption } from '@/shared/ui/FilterBar';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
@@ -96,11 +97,13 @@ export function CoverageEventsPanel(): JSX.Element {
             label: t('coverageEvents.details'),
             sortable: false,
             minWidth: 260,
-            // ⚠ Серверний текст як є — той самий прийом, що `errorMessage` у
-            // `CollectionRunDetailDrawer`: пояснення пише сервер, без стеків (ФВ-6.11).
+            // ⚠ Той самий прийом, що `errorMessage` у `CollectionRunDetailDrawer`:
+            // конверт (`SourceDataRefused` — ключ, інтервал і вкладена причина
+            // адаптера) резолвиться мовою інтерфейсу, решта — серверний текст як
+            // є, без стеків (ФВ-6.11).
             render: (row) => (
               <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-                {row.details ?? '—'}
+                {row.details == null ? '—' : collectionRunErrorText(row.details)}
               </Text>
             ),
           },
@@ -165,6 +168,8 @@ function statusFilterLabel(status: CoverageEventStatus): string {
       return t('status.coverage.RegistryValueRejected');
     case 'RegistryPendingUpdate':
       return t('status.coverage.RegistryPendingUpdate');
+    case 'SourceDataRefused':
+      return t('status.coverage.SourceDataRefused');
     default:
       return status;
   }

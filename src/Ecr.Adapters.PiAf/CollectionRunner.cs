@@ -2,7 +2,9 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
+using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.External;
+using Ecr.Domain.Entities.Integration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -208,7 +210,37 @@ public sealed partial class CollectionRunner(
             if (outcome.Collected is not { } result)
             {
                 failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
-                failureReason ??= SourceDetail(outcome.Message);
+
+                // ⚠ Відмова з кодом каталогу несе ВЛАСНИЙ ключ і параметри
+                // адаптера (`Reason`); лише сирий виняток — речення як є.
+                failureReason ??= outcome.Reason ?? SourceDetail(outcome.Message);
+
+                if (IsDataRefusal(outcome))
+                {
+                    // ⛔ Застряглий інтервал видно в журналі покриття: джерело
+                    // ВІДПОВІДАЄ, але цих даних не віддає, і наздоганяння
+                    // стукатиме в них щоразу. Подія — не покриття: інтервал
+                    // лишається прогалиною.
+                    await store
+                        .RecordCoverageEventAsync(
+                            sourceEntityId,
+                            state.Path,
+                            state.Cursor,
+                            interval.ToUtc,
+                            CollectionCoverage.SourceDataRefused,
+                            outcome.ErrorCode!,
+                            Reason(
+                                "coverageEvents.sourceDataRefused",
+                                ("path", state.Path),
+                                ("from", Instant(state.Cursor)),
+                                ("to", Instant(interval.ToUtc))) with
+                            {
+                                Inner = WithCode(outcome.ErrorCode!, outcome.Reason!),
+                            },
+                            ct)
+                        .ConfigureAwait(false);
+                }
+
                 return false;
             }
 
@@ -854,11 +886,84 @@ public sealed partial class CollectionRunner(
         }
         catch (Exception ex)
         {
-            // ⛔ Текст — без стека (ФВ-6.11): він іде в itg.CollectionRun, а
-            // цей журнал видно в інтерфейсі обслуговування.
-            return new ReadOutcome(null, SourceUnavailable, ex.Message);
+            return Refused(ex);
         }
     }
+
+    /// <summary>Відмова адаптера — результатом читання, з класифікацією за типом винятку.</summary>
+    /// <remarks>
+    /// ⛔ Виняток із кодом каталогу (<see cref="EcrException"/>,
+    /// <see cref="DomainException"/>) зберігає ВЛАСНИЙ код, ключ
+    /// (<c>Details["messageKey"]</c>) і параметри. Раніше будь-який виняток
+    /// ставав <c>ECR-INT-0503</c> з реченням адаптера: «дані джерела
+    /// нечитабельні» (<c>ECR-INT-0422</c> <c>.timestampUnreadable</c>, HSE301 A7)
+    /// видавалося за «джерело недоступне», а причина йшла українським
+    /// реченням на будь-якій мові інтерфейсу.
+    /// <para>
+    /// Лише сирі винятки транспорту (<see cref="HttpRequestException"/>,
+    /// <c>SqlException</c>, тайм-аут тощо) — <c>ECR-INT-0503</c>, як і раніше.
+    /// Текст — без стека (ФВ-6.11): він іде в <c>itg.CollectionRun</c>, а цей
+    /// журнал видно в інтерфейсі обслуговування.
+    /// </para>
+    /// </remarks>
+    private static ReadOutcome Refused(Exception ex) => ex switch
+    {
+        SourceAuthenticationException auth => new ReadOutcome(null, auth.ErrorCode, auth.Message, Unauthorized: true),
+        EcrException coded when IsCatalogCode(coded.ErrorCode)
+            => new ReadOutcome(null, coded.ErrorCode, coded.Message, Reason: CodedReason(coded.Details, coded.Message)),
+        DomainException coded when IsCatalogCode(coded.ErrorCode)
+            => new ReadOutcome(null, coded.ErrorCode, coded.Message, Reason: CodedReason(coded.Details, coded.Message)),
+        _ => new ReadOutcome(null, SourceUnavailable, ex.Message),
+    };
+
+    /// <summary>Код каталогу помилок: <c>ECR-&lt;ОБЛАСТЬ&gt;-&lt;NNNN&gt;</c>.</summary>
+    private static bool IsCatalogCode(string? code)
+        => code is not null && CatalogCode().IsMatch(code);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^ECR-[A-Z]+-\d{4}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex CatalogCode();
+
+    /// <summary>
+    /// Причина відмови з кодом каталогу: ключ адаптера й підстановки; без ключа — речення як є.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Параметри — рядками, кожен не довший за <see cref="MaxParamLength"/>:
+    /// причина лягає і в <c>ErrorMessage</c> прогону, і в <c>Details</c> події
+    /// (<c>nvarchar(1000)</c>).
+    /// </remarks>
+    private static JobProgressMessageEnvelope? CodedReason(IReadOnlyDictionary<string, object?>? details, string message)
+    {
+        if (details?.GetValueOrDefault("messageKey") is not string { Length: > 0 } key)
+        {
+            return SourceDetail(message);
+        }
+
+        var parameters = details
+            .Where(d => d.Key != "messageKey" && d.Value is not null)
+            .ToDictionary(
+                d => d.Key,
+                d => JobProgressMessageCodec.Shorten(
+                    Convert.ToString(d.Value, CultureInfo.InvariantCulture) ?? string.Empty, MaxParamLength),
+                StringComparer.Ordinal);
+
+        return new JobProgressMessageEnvelope(key, parameters.Count == 0 ? null : parameters);
+    }
+
+    /// <summary>Стеля одного параметра причини від адаптера.</summary>
+    private const int MaxParamLength = 200;
+
+    /// <summary>
+    /// Відмова ДАНИХ, а не джерела: код каталогу, що не є ні недоступністю
+    /// (<c>0503</c>), ні автентифікацією (<c>0502</c>), і власна причина-ключ.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Недоступне джерело — затримка (ФВ-11.3), вона минає сама й подією в
+    /// журналі покриття не є; нечитабельні дані самі не минуть.
+    /// </remarks>
+    private static bool IsDataRefusal(ReadOutcome outcome)
+        => outcome is { Collected: null, Unauthorized: false, Reason: not null, ErrorCode: { } code }
+           && code != SourceUnavailable
+           && code != AuthenticationRefused;
 
     /// <summary>
     /// Перевіряє одиниці й зберігає точки. Мапінг, чия одиниця змінилася,
@@ -1029,6 +1134,10 @@ public sealed partial class CollectionRunner(
     /// <c>true</c> — джерело відмовило в автентифікації (<c>H-20</c>): такий
     /// збій не йде в наздоганяння і не повторюється.
     /// </param>
+    /// <param name="Reason">
+    /// Причина відмови з кодом каталогу — ключ і параметри адаптера
+    /// (<see cref="CodedReason"/>); <c>null</c> — сирий виняток або відмови не було.
+    /// </param>
     /// <remarks>
     /// ⚠ Поле зветься <c>Collected</c>, а не <c>Result</c>, свідомо:
     /// архітектурне правило 5 забороняє блокувальні <c>.Result</c> і шукає їх
@@ -1039,5 +1148,6 @@ public sealed partial class CollectionRunner(
         CollectionResult? Collected,
         string? ErrorCode,
         string? Message,
-        bool Unauthorized = false);
+        bool Unauthorized = false,
+        JobProgressMessageEnvelope? Reason = null);
 }

@@ -44,8 +44,9 @@ public sealed partial class CollectionRunner
     /// ⚠ Запити будуються ДО першого <c>await</c>: курсори читаються в момент
     /// виклику, а не тоді, коли дійде черга до мережі.
     /// ⚠ Відмова адаптера цілком — це відмова кожного атрибута раунду з тією ж
-    /// класифікацією, що в <see cref="ReadAsync"/>: автентифікація окремо
-    /// (<c>H-20</c>), решта — «джерело недоступне». Скасування летить далі.
+    /// класифікацією, що в <see cref="ReadAsync"/> (<see cref="Refused"/>):
+    /// автентифікація окремо (<c>H-20</c>), код каталогу — власний, решта —
+    /// «джерело недоступне». Скасування летить далі.
     /// </remarks>
     private static async Task<IReadOnlyList<ReadOutcome>> ReadRoundAsync(
         IBatchCollectionSource batch,
@@ -88,10 +89,9 @@ public sealed partial class CollectionRunner
     private static ReadOutcome Outcome(BatchReadItem item) => item switch
     {
         { Collected: { } collected } => new ReadOutcome(collected, null, null),
-        { Error: SourceAuthenticationException ex } => new ReadOutcome(null, ex.ErrorCode, ex.Message, Unauthorized: true),
-
-        // ⛔ Текст — без стека (ФВ-6.11), як у ReadAsync.
-        { Error: { } ex } => new ReadOutcome(null, SourceUnavailable, ex.Message),
+        // ⛔ Та сама класифікація, що в ReadAsync: автентифікація окремо, код
+        // каталогу — власним кодом і ключем, сирий виняток — 0503.
+        { Error: { } ex } => Refused(ex),
         _ => new ReadOutcome(null, SourceUnavailable, null),
     };
 

@@ -165,8 +165,17 @@ public sealed class CollectionCoverage : Entity<long>
     [
         SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling, SkippedWriteConflict, SkippedNeedsConfirmation,
         RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
-        RegistryValueRejected, RegistryPendingUpdate,
+        RegistryValueRejected, RegistryPendingUpdate, SourceDataRefused,
     ];
+
+    /// <summary>
+    /// Збір: джерело відмовило віддати дані інтервалу з кодом каталогу (дані
+    /// нечитабельні — напр. <c>ECR-INT-0422</c> <c>.timestampUnreadable</c>), а не
+    /// було недоступне. Інтервал лишається прогалиною; подія — нульової довжини
+    /// в момент відмови, інтервал і причина — конвертом у <c>Details</c>
+    /// (<c>CollectionStore.RecordCoverageEventAsync</c>).
+    /// </summary>
+    public const string SourceDataRefused = "SourceDataRefused";
 
     /// <summary>Статуси подій синку довідника — підмножина <see cref="KnownStatuses"/>.</summary>
     public static readonly IReadOnlyList<string> RegistryStatuses =

@@ -1,5 +1,7 @@
 using System.Data;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Domain.Abstractions;
@@ -268,6 +270,107 @@ public sealed class CollectionStore(EcrDbContext db, IClock clock) : ICollection
         }
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Рядок події — нульової довжини в момент запису (<c>CoveredFrom =
+    /// CoveredTo</c> = годинник сховища), без прогону й періоду, як і решта
+    /// подій журналу (<see cref="CollectionCoverage.Skipped"/>, Q-186):
+    /// «коли» у стрічці подій означає момент відмови, а сам непрочитаний
+    /// інтервал їде параметрами конверта. Острови покриття його не бачать
+    /// двічі: за статусом (<c>Status IS NULL</c>) і за нульовою довжиною.
+    /// <para>
+    /// ⚠ Дедуп — ключ <c>key</c> параметром ЗОВНІШНЬОГО рівня конверта
+    /// (<see cref="DedupKeyParam"/>): суфікс «; key=…», як у
+    /// <c>RegistrySyncJob</c>, зламав би JSON, і шухляда показала б сирий
+    /// рядок. Перевірка й вставка — одним пакетом під <c>UPDLOCK, HOLDLOCK</c>:
+    /// два прогони тієї самої сутності не запишуть ту саму подію двічі.
+    /// </para>
+    /// <para>
+    /// ⚠ Конверт, що не влазить у <c>nvarchar(1000)</c>, пишеться без
+    /// вкладеної причини (лишаються атрибут, інтервал і ключ): причину з кодом
+    /// усе одно несе <c>ErrorMessage</c> прогону.
+    /// </para>
+    /// </remarks>
+    public async Task<bool> RecordCoverageEventAsync(
+        int sourceEntityId,
+        string? sourcePath,
+        DateTime fromUtc,
+        DateTime toUtc,
+        string status,
+        string errorCode,
+        JobProgressMessageEnvelope reason,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+        ArgumentException.ThrowIfNullOrWhiteSpace(errorCode);
+        ArgumentNullException.ThrowIfNull(reason);
+
+        if (!CollectionCoverage.KnownStatuses.Contains(status, StringComparer.Ordinal))
+        {
+            throw new ArgumentException($"Статус «{status}» не з CollectionCoverage.KnownStatuses.", nameof(status));
+        }
+
+        var key = CoverageEventKey(sourceEntityId, sourcePath, fromUtc, toUtc, status, errorCode);
+        var keyed = new Dictionary<string, string>(reason.Params ?? new Dictionary<string, string>(), StringComparer.Ordinal)
+        {
+            [DedupKeyParam] = key,
+        };
+
+        var details = JobProgressMessageCodec.Encode(reason with { Params = keyed });
+
+        if (details.Length > CollectionCoverage.MaxDetailsLength)
+        {
+            details = JobProgressMessageCodec.Encode(reason with { Params = keyed, Inner = null });
+        }
+
+        var now = clock.UtcNow;
+
+        // ⚠ Шаблон LIKE — рівно та форма, якою кодувальник пише параметр:
+        // ключ — шістнадцятковий, тож символів-шаблонів LIKE у ньому немає.
+        var pattern = string.Concat("%\"", DedupKeyParam, "\":\"", key, "\"%");
+
+        var written = await db.Database
+            .ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO itg.CollectionCoverage (SourceEntityId, CoveredFrom, CoveredTo, CollectionRunId, PeriodKey, Status, Details)
+                SELECT {sourceEntityId}, {now}, {now}, NULL, NULL, {status}, {details}
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM itg.CollectionCoverage cc WITH (UPDLOCK, HOLDLOCK)
+                    WHERE cc.SourceEntityId = {sourceEntityId}
+                      AND cc.Status = {status}
+                      AND cc.Details LIKE {pattern});
+                """,
+                ct)
+            .ConfigureAwait(false);
+
+        return written > 0;
+    }
+
+    /// <summary>Ім'я параметра конверта події, що несе ключ дедуплікації.</summary>
+    public const string DedupKeyParam = "key";
+
+    /// <summary>
+    /// Ключ дедуплікації події: відбиток (сутність, атрибут, інтервал, статус, код).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Мітки — з точністю <c>datetime2(3)</c> (<see cref="ToStoredPrecision"/>): той
+    /// самий інтервал, прочитаний удруге з іншими тіками, мусить дати той самий ключ.
+    /// </remarks>
+    internal static string CoverageEventKey(
+        int sourceEntityId, string? sourcePath, DateTime fromUtc, DateTime toUtc, string status, string errorCode)
+    {
+        var subject = string.Join(
+            '\u001f',
+            sourceEntityId.ToString(CultureInfo.InvariantCulture),
+            sourcePath ?? string.Empty,
+            ToStoredPrecision(fromUtc).ToString(StoredTimestampFormat, CultureInfo.InvariantCulture),
+            ToStoredPrecision(toUtc).ToString(StoredTimestampFormat, CultureInfo.InvariantCulture),
+            status,
+            errorCode);
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(subject)))[..16];
     }
 
     /// <inheritdoc />

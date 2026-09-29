@@ -30,6 +30,40 @@ describe('collectionRunErrorText', () => {
     );
   });
 
+  it('власна відмова адаптера з кодом каталогу резолвиться вкладеним ключем із параметрами', () => {
+    // ⛔ До фіксу збирач писав сюди `ECR-INT-0503` + `jobs.collectionSourceError`
+    // з українським реченням адаптера. Тепер — код і ключ самої відмови; без
+    // гілки в `render` цей ключ дав би `null`, і вся причина лишилася б сирим JSON.
+    const raw = JSON.stringify({
+      k: 'jobs.collectionRunReason',
+      p: { code: 'ECR-INT-0422' },
+      i: {
+        k: 'err.ECR-INT-0422.timestampUnreadable',
+        p: { dataSource: 'PIAF', sourcePath: 'tagA', valueType: 'NULL' },
+      },
+    });
+
+    expect(collectionRunErrorText(raw)).toBe(
+      '⟦jobs.collectionRunReason (code=ECR-INT-0422, message=⟦err.ECR-INT-0422.timestampUnreadable (dataSource=PIAF, sourcePath=tagA, valueType=NULL)⟧)⟧',
+    );
+  });
+
+  it('подія `SourceDataRefused` — два рівні вкладення, кожен через каталог', () => {
+    const raw = JSON.stringify({
+      k: 'coverageEvents.sourceDataRefused',
+      p: { path: 'tagA', from: 'F', to: 'T', key: 'ABC' },
+      i: {
+        k: 'jobs.collectionRunReason',
+        p: { code: 'ECR-INT-0422' },
+        i: { k: 'err.ECR-INT-0422.timestampUnreadable', p: { sourcePath: 'tagA' } },
+      },
+    });
+
+    expect(collectionRunErrorText(raw)).toBe(
+      '⟦coverageEvents.sourceDataRefused (path=tagA, from=F, to=T, key=ABC, message=⟦jobs.collectionRunReason (code=ECR-INT-0422, message=⟦err.ECR-INT-0422.timestampUnreadable (sourcePath=tagA)⟧)⟧)⟧',
+    );
+  });
+
   it('старий рядок (сирий текст до U12) — як є', () => {
     expect(collectionRunErrorText('ECR-INT-0503: джерело недоступне')).toBe(
       'ECR-INT-0503: джерело недоступне',

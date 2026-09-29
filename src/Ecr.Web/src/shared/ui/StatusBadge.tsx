@@ -240,6 +240,10 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
    * рішення людини: звірити, прив'язати); `RegistryConflictKeptManual` і
    * `RegistryPendingUpdate` — `info`: перше — правило `D-118`, друге — лише звірка
    * S5, синк ще не пише.
+   *
+   * `SourceDataRefused` (збір, `CollectionRunner`) — `danger`: джерело відповідає,
+   * але дані інтервалу віддати не може (напр. нечитабельна мітка часу), і
+   * наздоганяння без правки джерела чи запиту не допоможе.
    */
   coverage: {
     SkippedPointCeiling: 'danger',
@@ -253,6 +257,7 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     RegistryElementUnlinked: 'warning',
     RegistryValueRejected: 'danger',
     RegistryPendingUpdate: 'info',
+    SourceDataRefused: 'danger',
   },
 
   /**
