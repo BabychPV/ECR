@@ -1,6 +1,7 @@
 // tests/Ecr.Api.Tests/PublishBindingRaceApiTests.cs
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Ecr.Domain.Entities.Calculations;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Enums;
@@ -29,10 +30,11 @@ namespace Ecr.Api.Tests;
 /// знімка. Відв'язка під блоком чекає коміту публікації; без блоку вона
 /// комітиться, поки публікація стоїть.
 ///
-/// ⚠ Після публікації відв'язка проходить (<c>200</c>): C5b лише впорядковує
-/// прив'язки з публікацією, а не забороняє їх для опублікованої версії —
-/// джерело <c>Calculated</c>-колонки заводять уже після публікації
-/// (<c>PublishChecks.CheckComputedColumns</c>).
+/// ⚠ Після коміту публікації відв'язка бачить уже <c>Published</c> і, оскільки це
+/// останнє джерело <c>Formula</c>-колонки, отримує <c>409 ECR-TMPL-4091</c>
+/// (<c>D-215</c>); прив'язка лишається активною. Без блоку та сама відв'язка
+/// комітилася б посеред публікації ще на чернетці, а публікація відхилялася б
+/// <c>4226</c> на стані, що змінився під нею.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class PublishBindingRaceApiTests(SqlServerFixture sql)
@@ -55,7 +57,7 @@ public sealed class PublishBindingRaceApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Відв_язка_під_час_публікації_чекає_її_коміту_а_не_проскакує_повз_перевірку()
+    public async Task Відв_язка_під_час_публікації_чекає_її_коміту_і_бачить_уже_опубліковану_версію()
     {
         var draft = await ArrangeAsync();
         var gate = new PublishDraftEditRaceApiTests.FirstReadGate();
@@ -103,8 +105,15 @@ public sealed class PublishBindingRaceApiTests(SqlServerFixture sql)
             published.IsSuccessStatusCode,
             $"Публікація: {(int)published.StatusCode} {publishBody}\n{baseApp.ErrorsText}");
 
-        // Лише блок, не заборона: після коміту публікації відв'язка проходить.
-        Assert.True(unbound.StatusCode == HttpStatusCode.OK, $"{(int)unbound.StatusCode}: {unbindBody}\n{baseApp.ErrorsText}");
+        // Після коміту публікації відв'язка бачить Published: це останнє джерело
+        // Formula-колонки, тож D-215 відмовляє, а не лишає колонку без джерела.
+        Assert.True(
+            unbound.StatusCode == HttpStatusCode.Conflict,
+            $"{(int)unbound.StatusCode}: {unbindBody}\n{baseApp.ErrorsText}");
+        using (var problem = JsonDocument.Parse(unbindBody))
+        {
+            Assert.Equal("ECR-TMPL-4091", problem.RootElement.GetProperty("errorCode").GetString());
+        }
 
         await using var db = Context();
         var status = await db.TemplateVersions
@@ -114,7 +123,7 @@ public sealed class PublishBindingRaceApiTests(SqlServerFixture sql)
             .Select(b => b.IsActive).SingleAsync();
 
         Assert.Equal(TemplateVersionStatus.Published, status);
-        Assert.False(bindingActive);
+        Assert.True(bindingActive, "Відмовлена відв'язка мала відкотитися цілком.");
     }
 
     /// <summary>

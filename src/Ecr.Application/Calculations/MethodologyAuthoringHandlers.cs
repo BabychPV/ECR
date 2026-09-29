@@ -976,6 +976,10 @@ public sealed class ListCalculationBindingsHandler(
 /// прив'язує). Блок тут лише впорядковує: правка, що прийшла під час
 /// публікації, чекає її коміту — так само, як презентаційний патч
 /// (<c>PatchPresentationHandler</c>).
+///
+/// ⛔ Одна вузька заборона все ж є (<c>D-215</c>): відв'язка, після якої в колонки
+/// типу <c>Formula</c> опублікованої версії не лишається жодного джерела, —
+/// <c>409 ECR-TMPL-4091</c> (<see cref="RequireSourceLeftAsync"/>).
 /// </remarks>
 public sealed class SaveCalculationBindingHandler(
     ICalculationBindingStore bindings,
@@ -1042,13 +1046,15 @@ public sealed class SaveCalculationBindingHandler(
             // самий, що в публікації й структурних обробниках: версія першою.
             // ⚠ Колонки немає — блокувати нічого; відмову `ECR-TMPL-0404` дає
             // перевірка колонки нижче, у звичному порядку відмов.
+            TemplateVersionStatus? lockedStatus = null;
             if (templateVersionId is { } versionId)
             {
-                await templateVersions.LockVersionForUpdateAsync(versionId, innerCt).ConfigureAwait(false);
+                lockedStatus = await templateVersions.LockVersionForUpdateAsync(versionId, innerCt).ConfigureAwait(false);
             }
 
             saved = await SaveLockedAsync(
-                methodologyId, columnDefId, code, matchJson, isActive, userId, innerCt).ConfigureAwait(false);
+                methodologyId, columnDefId, code, matchJson, isActive, userId,
+                templateVersionId, lockedStatus, innerCt).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
         return saved!;
@@ -1077,6 +1083,10 @@ public sealed class SaveCalculationBindingHandler(
     }
 
     /// <summary>Перевірки й запис прив'язки — під блоком версії, у транзакції викликача.</summary>
+    /// <remarks>
+    /// <paramref name="templateVersionId"/> — версія колонки (<c>null</c> — колонки немає);
+    /// <paramref name="lockedStatus"/> — її стан, прочитаний ПІД блоком.
+    /// </remarks>
     private async Task<CalculationBindingDto> SaveLockedAsync(
         int methodologyId,
         int columnDefId,
@@ -1084,6 +1094,8 @@ public sealed class SaveCalculationBindingHandler(
         string matchJson,
         bool isActive,
         int userId,
+        int? templateVersionId,
+        TemplateVersionStatus? lockedStatus,
         CancellationToken ct)
     {
         var methodology = await drafts.FindAsync(methodologyId, ct).ConfigureAwait(false)
@@ -1174,6 +1186,18 @@ public sealed class SaveCalculationBindingHandler(
         // що тримає блок версії: окрема транзакція тут відпустила б його раніше.
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
 
+        // ⛔ HSE301 C5b (D-215): відв'язка останнього джерела `Formula`-колонки
+        // ОПУБЛІКОВАНОЇ версії — 409. Джерела рахуються ПІСЛЯ запису, у цій самій
+        // транзакції під блоком версії: так заміна «прив'язати нове → відв'язати
+        // старе» (двома PUT, як робить клієнт) проходить, а відмова відкочує запис.
+        if (existing is not null && before!.IsActive && !binding.IsActive
+            && column.DataType == CellDataType.Formula
+            && lockedStatus is TemplateVersionStatus.Published or TemplateVersionStatus.Deprecated
+            && templateVersionId is { } versionId)
+        {
+            await RequireSourceLeftAsync(versionId, column, columnDefId, ct).ConfigureAwait(false);
+        }
+
         await audit.WriteStructureChangeAsync(
             new StructureChangeRecord(
                 ChangedAt: clock.UtcNow,
@@ -1206,6 +1230,56 @@ public sealed class SaveCalculationBindingHandler(
             ct).ConfigureAwait(false);
 
         return MethodologyAuthoringMap.Binding(binding);
+    }
+
+    /// <summary>
+    /// Після відв'язки в колонки лишилося хоч одне джерело: формула шаблону або
+    /// інша АКТИВНА прив'язка будь-якої методології (<c>D-215</c>).
+    /// </summary>
+    /// <param name="templateVersionId">Опублікована версія колонки (під блоком).</param>
+    /// <param name="column">Колонка-приймач.</param>
+    /// <param name="columnDefId">Її ідентифікатор.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-TMPL-4091</c>, <c>lastSourceOfPublishedColumn</c>.</exception>
+    /// <remarks>
+    /// ⚠ Те саме визначення джерела, що в публікації (<c>PublishChecks.CheckComputedColumns</c>,
+    /// <c>ECR-TMPL-4226</c>): формула шаблону на колонці або активна прив'язка
+    /// (<c>ListBoundColumnIdsAsync</c>). Питання ставиться базі ПІСЛЯ <c>SaveChanges</c> —
+    /// відповідь уже враховує цю відв'язку. Структура версії вантажиться лише тоді, коли
+    /// прив'язок не лишилося, тобто на рідкісному шляху відмови.
+    /// </remarks>
+    private async Task RequireSourceLeftAsync(
+        int templateVersionId, BoundColumnRef column, int columnDefId, CancellationToken ct)
+    {
+        var bound = await bindings.ListBoundColumnIdsAsync(templateVersionId, ct).ConfigureAwait(false);
+        if (bound.Contains(columnDefId))
+        {
+            return;
+        }
+
+        var version = await templateVersions.GetWithStructureAsync(templateVersionId, ct).ConfigureAwait(false);
+        var hasFormula = version.Sheets
+            .SelectMany(s => s.Tables)
+            .Where(t => t.Id == column.TableDefId)
+            .SelectMany(t => t.Formulas)
+            .Any(f => !f.IsDeleted && f.ColumnDefId == columnDefId);
+
+        if (hasFormula)
+        {
+            return;
+        }
+
+        throw new BusinessRuleException(
+            Domain.Errors.ErrorCodes.LastSourceOfPublishedColumn,
+            $"Колонка {column.Code} опублікованої версії {version.Version} лишилася б без джерела: "
+            + "ні формули шаблону, ні іншої активної прив'язки. Спершу прив'яжіть нове джерело, "
+            + "потім вимикайте це.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-TMPL-4091.lastSourceOfPublishedColumn",
+                ["columnCode"] = column.Code,
+                ["templateVersion"] = version.Version,
+            });
     }
 
     /// <summary>Предикат прив'язки — плаский JSON-об'єкт «колонка → значення».</summary>
