@@ -77,10 +77,15 @@ public interface IJobQueue
     public Task<bool> RestartAsync(string jobId, CancellationToken ct);
 
     /// <summary>
-    /// Повертає в <c>Queued</c> <c>Running</c> з простроченою орендою; задачу,
-    /// що вже вичерпала <paramref name="maxReclaims"/>, закриває <c>Failed</c>
-    /// з ключем причини (отруйна задача, правка Б «Аудиту»).
+    /// Закриває прострочені <c>Running</c>, яких <see cref="ClaimAsync"/> уже не
+    /// переклеймить: вичерпала <paramref name="maxReclaims"/> — <c>Failed</c> з
+    /// ключем причини (отруйна задача, правка Б «Аудиту»); просили скасувати —
+    /// <c>Cancelled</c>.
     /// </summary>
+    /// <remarks>
+    /// ⚠ Просту прострочену оренду в <c>Queued</c> не повертає: її переклеймлює
+    /// сам <see cref="ClaimAsync"/> (той самий <c>JobId</c>, <c>ReclaimCount</c> + 1).
+    /// </remarks>
     /// <returns>Скільки рядків змінено.</returns>
     public Task<int> ExpireAsync(int maxReclaims, CancellationToken ct);
 }
