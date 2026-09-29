@@ -36,4 +36,13 @@ public interface IResourceNameResolver
     /// </summary>
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<Security.GrantableProject>> ListProjectsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Код і назва аркушів ЧИННОЇ версії шаблону кожного проєкту — для області
+    /// призначення ролі за аркушами (D-214). Видалені аркуші — ні.
+    /// </summary>
+    /// <param name="projectIds">Проєкти; <c>null</c> — усі.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Security.GrantableSheet>> ListProjectSheetsAsync(
+        IReadOnlyCollection<int>? projectIds, CancellationToken ct);
 }

@@ -40,6 +40,13 @@ public sealed record ResourceGrantDto(
 /// </remarks>
 public sealed record GrantableProject(int Id, string Code, Ecr.Domain.ValueObjects.LocalizedText NameL10n);
 
+/// <summary>Аркуш чинної версії шаблону проєкту — для області призначення ролі (D-214).</summary>
+/// <param name="ProjectId">Проєкт.</param>
+/// <param name="Code">Код аркуша — те, що йде в <c>scope.sheets</c>.</param>
+/// <param name="NameL10n">Назва мовами каталогу.</param>
+/// <remarks>⛔ Лише ідентичність аркуша: ні таблиць, ні колонок, ні даних.</remarks>
+public sealed record GrantableSheet(int ProjectId, string Code, Ecr.Domain.ValueObjects.LocalizedText NameL10n);
+
 /// <summary>Версія набору грантів ролі — для <c>ETag</c> / <c>If-Match</c>.</summary>
 /// <remarks>
 /// ⚠ Хеш НАБОРУ, а не лічильник: токена конкурентності в <c>sec.Role</c> і

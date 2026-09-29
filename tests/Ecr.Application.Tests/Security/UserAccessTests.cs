@@ -279,7 +279,8 @@ public sealed class UserAccessTests
     private ReplaceUserRolesHandler Roles() => new(
         _users, _access, _uow, _user, _audit, _clock,
         new DisableBootstrapAdminHandler(_users, _uow, _audit, _user, _clock),
-        Substitute.For<IDocumentStore>());
+        Substitute.For<IDocumentStore>(),
+        Substitute.For<IResourceNameResolver>());
 
     private SetUserEmailHandler Email() => new(_users, _access, _uow, _user);
 

@@ -67,7 +67,8 @@ public sealed partial class AssignGroupRoleHandler(
     IAuditWriter audit,
     ICurrentUser currentUser,
     IClock clock,
-    IDocumentStore documents)
+    IDocumentStore documents,
+    IResourceNameResolver sheetCatalog)
 {
     /// <summary>Призначає роль групі.</summary>
     /// <param name="roleId">Роль.</param>
@@ -135,7 +136,9 @@ public sealed partial class AssignGroupRoleHandler(
         // право ним керувати (`RoleAssignmentScopeRules`).
         var domainScope = scope is null
             ? null
-            : await RoleAssignmentScopeRules.ValidateAsync(scope, role.Code, profile, documents, ct).ConfigureAwait(false);
+            : await RoleAssignmentScopeRules
+                .ValidateAsync(scope, role.Code, profile, documents, sheetCatalog, ct)
+                .ConfigureAwait(false);
 
         var assignment = new RoleAssignment(roleId, userId: null, principalSid: sid);
         assignment.SetValidity(validFrom, validTo);
@@ -153,7 +156,16 @@ public sealed partial class AssignGroupRoleHandler(
                         TargetUserId: null,
                         TargetRoleId: roleId,
                         DetailsJson: JsonSerializer.Serialize(
-                            new { role = role.Code, sid, name, validFrom, validTo, dangerous, scope = domainScope?.ProjectIds }),
+                            new
+                            {
+                                role = role.Code, sid, name, validFrom, validTo, dangerous,
+                                scope = domainScope?.ProjectIds,
+
+                                // D-214: звуження — окремо, форма `scope` та сама.
+                                sheets = domainScope is { SheetCodes.Count: > 0 } ? domainScope.SheetCodes : null,
+                                periodFrom = domainScope?.PeriodFrom?.Value,
+                                periodTo = domainScope?.PeriodTo?.Value,
+                            }),
                         ChangedByUserId: profile.UserId,
                         CorrelationId: currentUser.CorrelationId),
                     token).ConfigureAwait(false);

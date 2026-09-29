@@ -160,7 +160,8 @@ public sealed class GroupRoleAssignmentTests
 
     private ListGroupRoleAssignmentsHandler List() => new(_users, _resolver, _access, _user);
 
-    private AssignGroupRoleHandler Assign() => new(_users, _resolver, _access, _uow, _audit, _user, _clock, _documents);
+    private AssignGroupRoleHandler Assign()
+        => new(_users, _resolver, _access, _uow, _audit, _user, _clock, _documents, Substitute.For<IResourceNameResolver>());
 
     private RevokeGroupRoleHandler Revoke() => new(_users, _access, _uow, _audit, _user, _clock);
 }

@@ -9687,8 +9687,20 @@
         "type": "object"
       },
       "RoleScopeDto": {
-        "description": "Область дії призначення ролі в тілі запиту (ФВ-6.14).",
+        "additionalProperties": false,
+        "description": "Область дії призначення ролі в тілі запиту й у відповіді (ФВ-6.14, D-214).",
         "properties": {
+          "periods": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopePeriodsDto",
+                "description": "Проміжок звітних періодів; `null` — усі періоди."
+              }
+            ]
+          },
           "projects": {
             "description": "Проєкти, у яких роль діє; непорожньо, без повторів.",
             "items": {
@@ -9696,11 +9708,44 @@
               "type": "integer"
             },
             "type": "array"
+          },
+          "sheets": {
+            "description": "Коди аркушів (`SheetDef.Code`) — роль діє лише на них; `null` чи\nпорожньо — на всіх аркушах.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
           "projects"
         ],
+        "type": "object"
+      },
+      "RoleScopePeriodsDto": {
+        "additionalProperties": false,
+        "description": "Проміжок звітних періодів області (D-214): межі включні, будь-яка може бути відкритою.",
+        "properties": {
+          "from": {
+            "description": "Перший період (`Рік*100+Номер`, напр. `202601`); `null` — від початку.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "to": {
+            "description": "Останній період; `null` — без кінця.",
+            "format": "int32",
+            "type": [
+              "null",
+              "integer"
+            ]
+          }
+        },
         "type": "object"
       },
       "RoleValidityWindow": {

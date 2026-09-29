@@ -19576,10 +19576,27 @@ export interface components {
              */
             roleId: number;
         };
-        /** @description Область дії призначення ролі в тілі запиту (ФВ-6.14). */
+        /** @description Область дії призначення ролі в тілі запиту й у відповіді (ФВ-6.14, D-214). */
         RoleScopeDto: {
+            periods?: null | components["schemas"]["RoleScopePeriodsDto"];
             /** @description Проєкти, у яких роль діє; непорожньо, без повторів. */
             projects: number[];
+            /** @description Коди аркушів (`SheetDef.Code`) — роль діє лише на них; `null` чи
+             *     порожньо — на всіх аркушах. */
+            sheets?: null | string[];
+        };
+        /** @description Проміжок звітних періодів області (D-214): межі включні, будь-яка може бути відкритою. */
+        RoleScopePeriodsDto: {
+            /**
+             * Format: int32
+             * @description Перший період (`Рік*100+Номер`, напр. `202601`); `null` — від початку.
+             */
+            from?: null | number;
+            /**
+             * Format: int32
+             * @description Останній період; `null` — без кінця.
+             */
+            to?: null | number;
         };
         /** @description Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16). */
         RoleValidityWindow: {

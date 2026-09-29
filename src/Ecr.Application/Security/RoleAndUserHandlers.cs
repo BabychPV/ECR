@@ -255,7 +255,8 @@ public sealed class ReplaceUserRolesHandler(
     IAuditWriter audit,
     Domain.Abstractions.IClock clock,
     DisableBootstrapAdminHandler disableBootstrap,
-    IDocumentStore documents)
+    IDocumentStore documents,
+    IResourceNameResolver sheetCatalog)
 {
     /// <summary>Право керування користувачами.</summary>
     public const string Permission = "Security.ManageUsers";
@@ -321,7 +322,7 @@ public sealed class ReplaceUserRolesHandler(
                 }
 
                 domainScopes[code] = await RoleAssignmentScopeRules
-                    .ValidateAsync(scope, code, profile, documents, ct)
+                    .ValidateAsync(scope, code, profile, documents, sheetCatalog, ct)
                     .ConfigureAwait(false);
             }
         }
@@ -348,6 +349,16 @@ public sealed class ReplaceUserRolesHandler(
                             to = roleCodes,
                             scopes = domainScopes?.ToDictionary(
                                 s => s.Key, s => s.Value.ProjectIds, StringComparer.Ordinal),
+
+                            // D-214: звуження аркушами й періодами — окремим
+                            // полем, щоб форма `scopes` для наявних читачів журналу
+                            // не змінилась.
+                            narrowing = domainScopes?
+                                .Where(s => s.Value.IsNarrowed)
+                                .ToDictionary(
+                                    s => s.Key,
+                                    s => new { sheets = s.Value.SheetCodes, from = s.Value.PeriodFrom?.Value, to = s.Value.PeriodTo?.Value },
+                                    StringComparer.Ordinal),
                         }),
                         ChangedByUserId: actorId,
                         CorrelationId: currentUser.CorrelationId),

@@ -139,6 +139,43 @@ public sealed class ResourceNameResolver(EcrDbContext db) : IResourceNameResolve
         return rows.ConvertAll(p => new Ecr.Application.Security.GrantableProject(p.Id, p.Code, p.NameL10n));
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⛔ Лише ідентичність аркуша (проєкт, код, назва) — та сама межа, що й у
+    /// довідника проєктів: ні таблиць, ні колонок, ні даних.
+    ///
+    /// ⚠ Версія — ЧИННА версія проєкту (<c>Project.TemplateVersionId</c>): саме
+    /// в ній шукає код аркуша профіль прав. Межа — та сама, що в проєктів, на
+    /// кожен проєкт — його аркуші (десятки).
+    /// </remarks>
+    public async Task<IReadOnlyList<Ecr.Application.Security.GrantableSheet>> ListProjectSheetsAsync(
+        IReadOnlyCollection<int>? projectIds, CancellationToken ct)
+    {
+        var projects = db.Projects.AsNoTracking();
+        if (projectIds is not null)
+        {
+            var ids = projectIds.Distinct().ToList();
+            projects = projects.Where(p => ids.Contains(p.Id));
+        }
+
+        var rows = await projects
+            .OrderBy(p => p.Code)
+            .Take(MaxProjects)
+            .Join(
+                db.SheetDefs.AsNoTracking().Where(s => !s.IsDeleted),
+                p => p.TemplateVersionId,
+                s => s.TemplateVersionId,
+                (p, s) => new { ProjectId = p.Id, s.Code, s.NameL10n, s.Ordinal })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .OrderBy(r => r.ProjectId)
+            .ThenBy(r => r.Ordinal)
+            .Select(r => new Ecr.Application.Security.GrantableSheet(r.ProjectId, r.Code, r.NameL10n))
+            .ToList();
+    }
+
     private static List<int> IdsOf(
         IReadOnlyCollection<(ResourceKind Kind, int Id)> resources, ResourceKind kind)
         => [.. resources.Where(r => r.Kind == kind).Select(r => r.Id).Distinct()];

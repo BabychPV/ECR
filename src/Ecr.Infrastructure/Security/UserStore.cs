@@ -142,7 +142,8 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // ⚠ Область розбирає ДОМЕН (`ScopedProjectIds`): зіпсований JSON дає
+        // ⚠ Область розбирає ДОМЕН (`RoleScopeDto.FromStored` → `RoleAssignmentScope.TryParse`,
+        // з аркушами й періодами D-214): зіпсований JSON дає
         // порожній перелік — «не діє ніде», — а не `null`, що читалося б як
         // «діє скрізь».
         return rows
@@ -150,9 +151,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 x.Code,
                 x.Assignment.ValidFrom,
                 x.Assignment.ValidTo,
-                x.Assignment.ScopedProjectIds() is { } projects
-                    ? new Ecr.Application.Security.RoleScopeDto(projects)
-                    : null))
+                Ecr.Application.Security.RoleScopeDto.FromStored(x.Assignment.ScopeJson)))
             .ToList();
     }
 
@@ -649,7 +648,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // профілі: зіпсована область показується порожньою, як і діє.
         return [.. rows.Select(x => new GroupRoleAssignmentView(
             x.a.Id, x.a.RoleId, x.Code, x.a.PrincipalSid!, null, x.a.ValidFrom, x.a.ValidTo,
-            x.a.ScopedProjectIds() is { } projects ? new Ecr.Application.Security.RoleScopeDto(projects) : null))];
+            Ecr.Application.Security.RoleScopeDto.FromStored(x.a.ScopeJson)))];
     }
 
     /// <inheritdoc />
