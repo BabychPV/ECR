@@ -36,7 +36,6 @@ public sealed class RunCalculationFencingTests(SqlServerFixture sql) : DbJobQueu
         var (runA, runB) = await TwoRunsAsync(document.ProjectId, document.PeriodKey.Value);
 
         var jobId = await EnqueueAsync();
-        await Task.Delay(DbBackgroundJobSchedulerTests.AvailableAtRounding);
 
         await using var hostA = NewHost();
         var claimA = await hostA.Queue.ClaimAsync(
