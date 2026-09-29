@@ -1,4 +1,5 @@
 // src/Ecr.Infrastructure/Jobs/DbJobQueue.cs
+using System.Collections.Concurrent;
 using System.Data;
 using System.Globalization;
 using Ecr.Application.Ports;
@@ -139,6 +140,9 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
 
     private const string AbsorbedMarker = "@@behind@@";
 
+    // Бази, для яких RCSI уже підтверджено: «сервер|база» → 0. Лише ON (див. EnsureRcsiAsync).
+    private static readonly ConcurrentDictionary<string, byte> RcsiConfirmed = new(StringComparer.OrdinalIgnoreCase);
+
     /// <inheritdoc />
     public async Task<JobEnqueueResult> EnqueueAsync(JobEnqueueRequest request, CancellationToken ct)
     {
@@ -211,6 +215,8 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         {
             throw new ArgumentException("Лейни claim — лише з JobLanes.All, щонайменше один.", nameof(lanes));
         }
+
+        await EnsureRcsiAsync(ct).ConfigureAwait(false);
 
         // Значення лейна в SQL — константа з JobLanes.All, а не рядок викликача.
         var ordered = JobLanes.All.Where(l => lanes.Contains(l, StringComparer.Ordinal)).ToArray();
@@ -587,6 +593,52 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
         {
             await db.Database.CloseConnectionAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Захоплення вимагає RCSI бази: перевіряється до першого claim, раз на
+    /// процес для кожної бази (сервер + ім'я).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <c>NOT EXISTS</c> на <c>Running</c> тієї ж цілі в <see cref="ClaimQueuedSql"/>
+    /// іде БЕЗ <c>READPAST</c> (правка А) і розраховує, що рядок під чужим
+    /// локом читається останньою закоміченою версією. Без RCSI той самий запит
+    /// чекає на лок — хости стають у чергу один за одним, і черга, що «працює»,
+    /// насправді серіалізована. Тому OFF — відмова з поясненням, а не мовчазна
+    /// деградація; постановку (<see cref="EnqueueAsync"/>) це не блокує.
+    ///
+    /// ⚠ <see cref="Startup.SqlCapabilitiesProbe"/> читає те саме, але заповнюється
+    /// лише стартом Api і лише для бази з конфігурації — черзі він недоступний
+    /// (конструктор без <c>ISqlCapabilities</c>, воркер і тести без старту).
+    /// Кешується лише ON: після <c>06-rcsi.sql</c> перезапуск процесу не потрібен.
+    /// </remarks>
+    private async Task EnsureRcsiAsync(CancellationToken ct)
+    {
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        var key = $"{connection.DataSource}|{connection.Database}";
+        if (RcsiConfirmed.ContainsKey(key))
+        {
+            return;
+        }
+
+        var (database, on) = await RunAsync(
+            "SELECT DB_NAME(), CAST(is_read_committed_snapshot_on AS int) FROM sys.databases WHERE name = DB_NAME();",
+            _ => { },
+            async r => await r.ReadAsync(ct).ConfigureAwait(false)
+                ? (r.GetString(0), !r.IsDBNull(1) && r.GetInt32(1) == 1)
+                : (connection.Database, false),
+            ct).ConfigureAwait(false);
+
+        if (!on)
+        {
+            throw new InvalidOperationException(
+                $"Черга задач не захоплює задачі: у базі «{database}» вимкнено READ_COMMITTED_SNAPSHOT (RCSI). " +
+                "Claim читає Running тієї ж цілі без READPAST і без RCSI блокується на чужих орендах — " +
+                "хости виконували б задачі по черзі. Увімкніть RCSI скриптом " +
+                "src/Ecr.Infrastructure/Persistence/Sql/06-rcsi.sql (у вікні обслуговування: обриває сеанси).");
+        }
+
+        RcsiConfirmed.TryAdd(key, 0);
     }
 
     private void AddShown(SqlParameterCollection p)
