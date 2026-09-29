@@ -273,11 +273,23 @@ async function addGrant(
   // дефолтним `Project` (`GrantsPanel.tsx`: новий рядок заводиться саме з
   // ним) — вибирати нема чого, документ і стенд узгоджені саме на цьому виді
   // ресурсу.
-  const resourceIdField = page.getByLabel('Resource id 1');
-  await expect(resourceIdField, 'немає поля Resource id щойно доданого рядка').toBeVisible({
+  //
+  // ⛔ Аудит U6: числового поля id більше немає — проєкт обирається за КОДОМ.
+  // Код не сталий: `Ecr.DataGen` (`BuildScaffoldAsync`) дає `P<8 цифр із
+  // часу>`, тож він не вписується літералом. Той самий id, що й стенд
+  // (`e2e-stand.ps1`: `resourceId = 1`), перекладається в код через API під
+  // сесією адміністратора (`page.request` ділить куки з вкладкою) — так грант
+  // іде на ТОЙ САМИЙ проєкт, а не на «перший, що трапився в списку».
+  const code = await projectCode(page, grant.resourceId);
+
+  const projectField = page.getByRole('textbox', { name: 'Project 1', exact: true });
+  await projectField.click();
+  await page.getByRole('option', { name: code, exact: true }).click();
+  // ⚠ Не `getByRole('cell', { name: code })`: доступне ім'я комірки пікера
+  // теж містить значення поля, і локатор резолвився б у ДВІ комірки.
+  await expect(projectField, 'пікер не показує обраний проєкт').toHaveValue(code, {
     timeout: 10_000,
   });
-  await resourceIdField.fill(String(grant.resourceId));
 
   // ⚠ Той самий нюанс, що й у ролі вище: `getByLabel` став би неоднозначним
   // щойно список відкриється (`aria-label` тут стоїть прямо на полі, а не на
@@ -285,6 +297,20 @@ async function addGrant(
   // текст як власну доступну назву).
   await page.getByRole('textbox', { name: 'Level 1', exact: true }).click();
   await page.getByRole('option', { name: grant.level, exact: true }).click();
+}
+
+/** Код проєкту стенда за його id (`GET /api/v1/projects` під поточною сесією). */
+async function projectCode(page: Page, projectId: number): Promise<string> {
+  const response = await page.request.get('/api/v1/projects?limit=200');
+  expect(response.ok(), `перелік проєктів: ${response.status()}`).toBe(true);
+
+  const body = (await response.json()) as { items: { id: number; code: string }[] };
+  const project = body.items.find((item) => item.id === projectId);
+  if (project === undefined) {
+    throw new Error(`проєкту ${projectId} немає в переліку адміністратора — грант стенда не діє`);
+  }
+
+  return project.code;
 }
 
 /** Зберігає чернетку гранта і чекає підтвердження сервера. */
