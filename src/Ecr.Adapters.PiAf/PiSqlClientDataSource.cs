@@ -776,7 +776,7 @@ public sealed class PiSqlClientDataSource(
     /// і далі його немає (D-30). Звітні числа звіряються до копійки, а
     /// подвійна точність дає розбіжність, якої ніхто не може пояснити.
     /// </remarks>
-    private static (decimal? Numeric, string? Text) Value(object? raw)
+    internal static (decimal? Numeric, string? Text) Value(object? raw)
         => raw switch
         {
             null or DBNull => (null, null),
