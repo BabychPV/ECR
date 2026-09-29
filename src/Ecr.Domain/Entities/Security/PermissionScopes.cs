@@ -54,4 +54,29 @@ public static class PermissionScopes
     /// <summary>Чи право без проєкту.</summary>
     /// <param name="code">Код права.</param>
     public static bool IsGlobal(string code) => Global.Contains(code);
+
+    /// <summary>
+    /// Проєктні права, які дає й роль, звужена аркушами чи періодами (D-214).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише права рівня ДОКУМЕНТА, кожне з яких далі проходить крізь межі
+    /// аркуша й періоду: перелік і відкриття документа (<c>Document.View</c>),
+    /// вивантаження й завантаження книги (межі читання й рішення про запис на
+    /// кожну комірку), повернення аркуша в роботу (рішення на аркуш × період).
+    /// Решта проєктних прав (розрахунки, звіти, створення й видалення
+    /// документа, керування проєктом і періодами) охоплює ВЕСЬ проєкт — роль
+    /// «лише аркуш F1» дала б їх на всі аркуші, тож така роль їх не дає ніде.
+    /// Хибно пропущене право видно одразу (403), хибно додане — розширює доступ.
+    /// </remarks>
+    public static readonly IReadOnlySet<string> Narrowable = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "Document.View",
+        "Document.Export",
+        "Document.Import",
+        "Document.Reopen",
+    };
+
+    /// <summary>Чи дає право роль, звужена аркушами чи періодами.</summary>
+    /// <param name="code">Код права.</param>
+    public static bool IsNarrowable(string code) => Narrowable.Contains(code);
 }

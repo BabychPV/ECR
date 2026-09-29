@@ -1,4 +1,5 @@
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
 
@@ -35,7 +36,20 @@ public readonly record struct CellAccessContext(
     DocumentStatus SheetStatus,
     bool ColumnIsComputed,
     bool ColumnIsReadOnly,
-    bool RowIsReadOnly);
+    bool RowIsReadOnly)
+{
+    /// <summary>
+    /// Код аркуша (<see cref="SheetDefId"/>); <c>null</c> — невідомий. Потрібен
+    /// ролям, звуженим аркушами (D-214): без нього вони тут не діють.
+    /// </summary>
+    public string? SheetCode { get; init; }
+
+    /// <summary>
+    /// Звітний період рішення; <c>null</c> — рішення не про період. Потрібен
+    /// ролям, звуженим періодами (D-214): без нього вони тут не діють.
+    /// </summary>
+    public PeriodKey? Period { get; init; }
+}
 
 /// <summary>
 /// Правила доступу як **чиста функція**: жодних запитів, жодного часу.
@@ -268,7 +282,10 @@ public static class EditRules
         // раніше, і жоден наявний тест затвердження не правився.
         // ⚠ Роль — чинна в ЦЬОМУ проєкті (ФВ-6.14): роль з областю «проєкт A»
         // не робить людину учасником маршруту проєкту B.
-        if (requiredRoleId is { } roleId && !profile.RoleIdsIn(context.ProjectId).Contains(roleId))
+        // ⚠ D-214: роль, звужена аркушами чи періодами, — учасник маршруту лише
+        // на своєму аркуші у своєму періоді.
+        if (requiredRoleId is { } roleId
+            && !profile.RoleIdsAt(context.ProjectId, context.SheetCode, context.Period).Contains(roleId))
         {
             return EditDecision.Deny(
                 EditDenyReason.NoGrant,
@@ -378,12 +395,27 @@ public static class EditRules
     /// лишаються видимими.
     /// </remarks>
     public static bool CanRead(AccessProfile profile, int projectId, int sheetDefId, int tableDefId, int columnDefId)
+        => CanReadIn(profile, projectId, sheetDefId, sheetCode: null, tableDefId, columnDefId, period: null);
+
+    /// <summary>Те саме, з кодом аркуша й періодом — для ролей, звужених ними (D-214).</summary>
+    /// <param name="profile">Профіль прав.</param>
+    /// <param name="projectId">Проєкт документа.</param>
+    /// <param name="sheetDefId">Аркуш.</param>
+    /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий.</param>
+    /// <param name="tableDefId">Таблиця.</param>
+    /// <param name="columnDefId">Колонка; <c>0</c> — рішення про таблицю цілком.</param>
+    /// <param name="period">Період; <c>null</c> — рішення не про період.</param>
+    public static bool CanReadIn(
+        AccessProfile profile, int projectId, int sheetDefId, string? sheetCode, int tableDefId, int columnDefId,
+        PeriodKey? period)
         => Effective(profile, default(CellAccessContext) with
         {
             ProjectId = projectId,
             SheetDefId = sheetDefId,
             TableDefId = tableDefId,
             ColumnDefId = columnDefId,
+            SheetCode = sheetCode,
+            Period = period,
         }) >= GrantLevel.Read;
 
     /// <summary>
@@ -419,10 +451,19 @@ public static class EditRules
         // лише в її області, але там — так само «виграє завжди».
         profile.Scoped.TryGetValue(context.ProjectId, out var scoped);
 
+        // ⛔ D-214: ролі, звужені аркушами чи періодами, — лише ті шари, чия
+        // область містить аркуш і період рішення. Поза ними роль для цього
+        // рішення не існує: ні її грантів, ні її заборон.
+        var layers = scoped is null || scoped.Narrowed.Count == 0
+            ? []
+            : scoped.Narrowed.Where(l => l.AppliesTo(context.SheetCode, context.Period)).ToList();
+
         foreach (var (kind, id) in scopes)
         {
             var key = $"{kind}:{id}";
-            if (profile.Denies.Contains(key) || (scoped is not null && scoped.Denies.Contains(key)))
+            if (profile.Denies.Contains(key)
+                || (scoped is not null && scoped.Denies.Contains(key))
+                || layers.Exists(l => l.Denies.Contains(key)))
             {
                 return GrantLevel.None;
             }
@@ -461,15 +502,23 @@ public static class EditRules
         // ⚠ Прив'язати грант до КОНКРЕТНОГО проєкту (а не до «будь-якого
         // видимого») без колонки `ProjectId` у гранті неможливо — це окрема
         // зміна схеми.
-        if (!profile.Grants.TryGetValue($"{ResourceKind.Project}:{context.ProjectId}", out var projectLevel)
-            || projectLevel < GrantLevel.Read)
+        //
+        // ⚠ D-214: грант на проєкт від звуженої ролі відкриває проєкт лише в
+        // межах її аркушів і періодів — тобто лише тоді, коли її шар діє тут.
+        var projectKey = $"{ResourceKind.Project}:{context.ProjectId}";
+        var projectVisible =
+            (profile.Grants.TryGetValue(projectKey, out var projectLevel) && projectLevel >= GrantLevel.Read)
+            || layers.Exists(l => l.Grants.TryGetValue(projectKey, out var layerLevel) && layerLevel >= GrantLevel.Read);
+
+        if (!projectVisible)
         {
             return GrantLevel.None;
         }
 
         // Від найдрібнішого до найширшого: перший оголошений і виграє. На
-        // одному рівні гранти ролей без області й з областю цього проєкту
-        // складаються так само, як дві ролі без області, — ширший рівень.
+        // одному рівні гранти ролей без області, з областю цього проєкту й
+        // звужених шарів, що діють тут, складаються так само, як дві ролі без
+        // області, — ширший рівень.
         for (var i = scopes.Length - 1; i >= 0; i--)
         {
             var (kind, id) = scopes[i];
@@ -480,6 +529,15 @@ public static class EditRules
             {
                 level = found && level > scopedLevel ? level : scopedLevel;
                 found = true;
+            }
+
+            foreach (var layer in layers)
+            {
+                if (layer.Grants.TryGetValue(key, out var layerLevel))
+                {
+                    level = found && level > layerLevel ? level : layerLevel;
+                    found = true;
+                }
             }
 
             if (found)

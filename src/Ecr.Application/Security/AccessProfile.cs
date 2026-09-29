@@ -1,6 +1,7 @@
 // src/Ecr.Application/Security/AccessProfile.cs
 
 using Ecr.Domain.Enums;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
 
@@ -79,6 +80,58 @@ public sealed class AccessProfile
         => Scoped.TryGetValue(projectId, out var scoped) ? scoped.RoleIds : UnscopedRoleIds ?? RoleIds;
 
     /// <summary>
+    /// Ролі, чинні на аркуші в періоді проєкту: <see cref="RoleIdsIn"/> плюс
+    /// ролі, звужені аркушами чи періодами (D-214), чия область їх містить.
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий (звужені аркушами не діють).</param>
+    /// <param name="period">Період; <c>null</c> — невідомий (звужені періодами не діють).</param>
+    public IReadOnlySet<int> RoleIdsAt(int projectId, string? sheetCode, PeriodKey? period)
+    {
+        var roles = RoleIdsIn(projectId);
+        if (!Scoped.TryGetValue(projectId, out var scoped) || scoped.Narrowed.Count == 0)
+        {
+            return roles;
+        }
+
+        var result = roles.ToHashSet();
+        foreach (var layer in scoped.Narrowed.Where(l => l.AppliesTo(sheetCode, period)))
+        {
+            result.UnionWith(layer.RoleIds);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Чи бачить профіль документи проєкту — рівень документа (перелік,
+    /// відкриття, шапка на читання).
+    /// </summary>
+    /// <param name="projectId">Проєкт.</param>
+    /// <remarks>
+    /// ⛔ D-214: роль, звужена аркушами чи періодами, ВІДКРИВАЄ документ (грант
+    /// ≥ <c>Read</c> на сам проєкт області), але не більше: рівень проєкту в
+    /// <see cref="LevelFor"/> вона не піднімає, тож дії над документом цілком
+    /// (видалення, шапка, створення) і над проєктом (звіти, розрахунки,
+    /// керування) лишаються за ролями без звуження. Усе нижче рівня документа —
+    /// через <see cref="EditRules.Effective"/> з аркушем і періодом.
+    /// </remarks>
+    public bool SeesDocumentsOf(int projectId)
+    {
+        if (LevelFor(ResourceKind.Project, projectId) >= GrantLevel.Read)
+        {
+            return true;
+        }
+
+        var key = $"{ResourceKind.Project}:{projectId}";
+        return !Denies.Contains(key)
+               && Scoped.TryGetValue(projectId, out var scoped)
+               && scoped.Narrowed.Any(l => !l.Denies.Contains(key)
+                                           && l.Grants.TryGetValue(key, out var level)
+                                           && level >= GrantLevel.Read);
+    }
+
+    /// <summary>
     /// Профіль побудований у сеансі симуляції «очима користувача» (D-96).
     /// Права беруться повністю від <see cref="SimulatedForUserId"/>, але
     /// <b>будь-яка</b> дія запису відхиляється з
@@ -127,9 +180,16 @@ public sealed class AccessProfile
     /// </summary>
     /// <param name="permissionCode">Код права.</param>
     /// <param name="projectId">Проєкт, у якому діє перевірка.</param>
+    /// <remarks>
+    /// ⚠ Роль, звужена аркушами чи періодами (D-214), дає тут лише права рівня
+    /// документа (<see cref="Domain.Entities.Security.PermissionScopes.Narrowable"/>)
+    /// — інших у її шарі немає, їх відсіяно при побудові профілю.
+    /// </remarks>
     public bool Has(string permissionCode, int projectId)
         => Permissions.Contains(permissionCode)
-           || (Scoped.TryGetValue(projectId, out var scoped) && scoped.Permissions.Contains(permissionCode));
+           || (Scoped.TryGetValue(projectId, out var scoped)
+               && (scoped.Permissions.Contains(permissionCode)
+                   || scoped.Narrowed.Any(l => l.Permissions.Contains(permissionCode))));
 
     /// <summary>
     /// Чи є право бодай у якомусь проєкті — вхідна перевірка ПЕРЕЛІКІВ через
@@ -142,7 +202,9 @@ public sealed class AccessProfile
     /// бачити B. Сторож вимагає реєструвати кожне використання.
     /// </remarks>
     public bool HasInAnyProject(string permissionCode)
-        => Permissions.Contains(permissionCode) || Scoped.Values.Any(s => s.Permissions.Contains(permissionCode));
+        => Permissions.Contains(permissionCode)
+           || Scoped.Values.Any(s => s.Permissions.Contains(permissionCode)
+                                     || s.Narrowed.Any(l => l.Permissions.Contains(permissionCode)));
 
     /// <summary>Ефективний рівень гранта на ресурс з урахуванням заборон.</summary>
     public GrantLevel LevelFor(ResourceKind kind, int resourceId)
@@ -183,4 +245,49 @@ public sealed record ScopedProjectAccess(
     IReadOnlyDictionary<string, GrantLevel> Grants,
     IReadOnlySet<string> Denies,
     IReadOnlySet<int> RoleIds,
-    IReadOnlySet<string> Permissions);
+    IReadOnlySet<string> Permissions)
+{
+    /// <summary>
+    /// Шари ролей, чия область у цьому проєкті звужена ще й аркушами чи
+    /// періодами (D-214) — окремо на кожне призначення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Окремо, а не злиті з полями вище: шар діє лише там, де його аркуш і
+    /// період (<see cref="NarrowedAccess.AppliesTo"/>). Злиття зробило б грант
+    /// ролі «лише аркуш F1» грантом на весь проєкт.
+    /// </remarks>
+    public IReadOnlyList<NarrowedAccess> Narrowed { get; init; } = [];
+}
+
+/// <summary>Що дає одне призначення ролі, звужене аркушами чи періодами (D-214), в одному проєкті.</summary>
+/// <param name="SheetCodes">Коди аркушів; <c>null</c> — усі аркуші.</param>
+/// <param name="PeriodFrom">Перший період, включно; <c>null</c> — відкрито.</param>
+/// <param name="PeriodTo">Останній період, включно; <c>null</c> — відкрито.</param>
+/// <param name="Grants">Гранти ролі на будь-який рівень, включно з проєктом: ключ <c>"{ResourceKind}:{ResourceId}"</c>.</param>
+/// <param name="Denies">Заборони ролі.</param>
+/// <param name="RoleIds">Роль (ролі) шару.</param>
+/// <param name="Permissions">Лише права рівня документа (<see cref="Domain.Entities.Security.PermissionScopes.Narrowable"/>).</param>
+public sealed record NarrowedAccess(
+    IReadOnlySet<string>? SheetCodes,
+    PeriodKey? PeriodFrom,
+    PeriodKey? PeriodTo,
+    IReadOnlyDictionary<string, GrantLevel> Grants,
+    IReadOnlySet<string> Denies,
+    IReadOnlySet<int> RoleIds,
+    IReadOnlySet<string> Permissions)
+{
+    /// <summary>Чи діє шар на аркуші в періоді.</summary>
+    /// <param name="sheetCode">Код аркуша; <c>null</c> — невідомий.</param>
+    /// <param name="period">Період; <c>null</c> — невідомий.</param>
+    /// <remarks>
+    /// ⛔ Невідомий вимір при звуженні за ним — шар НЕ діє (закрито за
+    /// замовчуванням): рішення без аркуша чи періоду не може знати, що воно в
+    /// межах області.
+    /// </remarks>
+    public bool AppliesTo(string? sheetCode, PeriodKey? period)
+        => (SheetCodes is null || (sheetCode is not null && SheetCodes.Contains(sheetCode)))
+           && (PeriodFrom is null && PeriodTo is null
+               || (period is { } p
+                   && (PeriodFrom is not { } from || p.Value >= from.Value)
+                   && (PeriodTo is not { } to || p.Value <= to.Value)));
+}

@@ -1,4 +1,5 @@
 using Ecr.Domain.Entities.Configuration;
+using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Security;
 
@@ -27,6 +28,9 @@ public sealed class DocumentReadScope
 {
     private readonly AccessProfile _profile;
     private readonly int _projectId;
+    private readonly PeriodKey? _period;
+    private readonly TemplateVersionSnapshot _snapshot;
+    private readonly Dictionary<int, string> _sheetCodes = [];
     private readonly Dictionary<int, int> _sheetOfTable = [];
     private readonly Dictionary<int, int> _tableOfColumn = [];
     private readonly Dictionary<int, List<int>> _columnsOfTable = [];
@@ -34,13 +38,17 @@ public sealed class DocumentReadScope
     private readonly Dictionary<int, bool> _columns = [];
     private readonly Dictionary<(int TableDefId, string Code), int> _columnByCode = [];
 
-    private DocumentReadScope(AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot)
+    private DocumentReadScope(AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot, PeriodKey? period)
     {
         _profile = profile;
         _projectId = projectId;
+        _period = period;
+        _snapshot = snapshot;
 
         foreach (var sheet in snapshot.Sheets)
         {
+            _sheetCodes[sheet.Id] = sheet.Code;
+
             foreach (var table in sheet.Tables)
             {
                 _sheetOfTable[table.Id] = sheet.Id;
@@ -62,13 +70,34 @@ public sealed class DocumentReadScope
     /// <param name="profile">Профіль прав.</param>
     /// <param name="projectId">Проєкт документа.</param>
     /// <param name="snapshot">Знімок структури версії шаблону документа.</param>
+    /// <remarks>
+    /// ⚠ Межі без періоду: роль, звужена періодами (D-214), у них нижче рівня
+    /// документа не відкриває нічого — період називає <see cref="InPeriod"/>.
+    /// </remarks>
     public static DocumentReadScope For(AccessProfile profile, int projectId, TemplateVersionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        return new DocumentReadScope(profile, projectId, snapshot);
+        return new DocumentReadScope(profile, projectId, snapshot, period: null);
     }
+
+    /// <summary>Ті самі межі, але про дані конкретного періоду (D-214).</summary>
+    /// <param name="period">Період, про дані якого питають.</param>
+    /// <returns>Нові межі; ці лишаються незмінними.</returns>
+    /// <remarks>
+    /// ⚠ Окремий крок, а не параметр служби: межі без періоду — закриті для
+    /// ролі, звуженої періодами, тож шлях, що період знає, мусить його назвати.
+    /// Шлях, що не знає (історія комірки, порівняння версій), лишається
+    /// закритим — безпечний бік.
+    /// </remarks>
+    public DocumentReadScope InPeriod(PeriodKey period)
+        => new(_profile, _projectId, _snapshot, period);
+
+    /// <summary>Чи бачить профіль ресурс аркуша — з кодом аркуша й періодом (D-214).</summary>
+    private bool Readable(int sheetDefId, int tableDefId, int columnDefId)
+        => EditRules.CanReadIn(
+            _profile, _projectId, sheetDefId, _sheetCodes.GetValueOrDefault(sheetDefId), tableDefId, columnDefId, _period);
 
     /// <summary>Чи бачить профіль колонку (і, отже, її значення).</summary>
     /// <param name="columnDefId">Колонка версії шаблону.</param>
@@ -80,7 +109,7 @@ public sealed class DocumentReadScope
         }
 
         var readable = _tableOfColumn.TryGetValue(columnDefId, out var tableDefId)
-                       && EditRules.CanRead(_profile, _projectId, _sheetOfTable[tableDefId], tableDefId, columnDefId);
+                       && Readable(_sheetOfTable[tableDefId], tableDefId, columnDefId);
 
         _columns[columnDefId] = readable;
         return readable;
@@ -102,7 +131,7 @@ public sealed class DocumentReadScope
         }
 
         var readable = _sheetOfTable.TryGetValue(tableDefId, out var sheetDefId)
-                       && (EditRules.CanRead(_profile, _projectId, sheetDefId, tableDefId, columnDefId: 0)
+                       && (Readable(sheetDefId, tableDefId, columnDefId: 0)
                            || _columnsOfTable[tableDefId].Exists(CanReadColumn));
 
         _tables[tableDefId] = readable;
