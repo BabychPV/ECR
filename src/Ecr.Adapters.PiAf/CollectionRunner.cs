@@ -1,4 +1,5 @@
-﻿using Ecr.Application.Errors;
+﻿using System.Globalization;
+using Ecr.Application.Errors;
 using Ecr.Application.Integration;
 using Ecr.Application.Ports;
 using Ecr.Domain.Entities.External;
@@ -150,7 +151,11 @@ public sealed partial class CollectionRunner(
         var covered = new List<TimeInterval>();
         var retrieved = 0;
         string? failureCode = null;
-        string? failureMessage = null;
+
+        // ⚠ U12: причина — конверт (ключ + параметри, `Q-326`), а не готове
+        // речення: `ErrorMessage` прогону читають мовою ЧИТАЧА (шухляда
+        // прогону, зведення), а мова в момент запису невідома.
+        JobProgressMessageEnvelope? failureReason = null;
         var step = 0;
 
         // ⚠ «Джерело нас у цьому прогоні вже пускало». Саме цим відрізняється
@@ -203,7 +208,7 @@ public sealed partial class CollectionRunner(
             if (outcome.Collected is not { } result)
             {
                 failureCode ??= outcome.ErrorCode ?? SourceUnavailable;
-                failureMessage ??= outcome.Message;
+                failureReason ??= SourceDetail(outcome.Message);
                 return false;
             }
 
@@ -222,7 +227,7 @@ public sealed partial class CollectionRunner(
             if (saved.UnitChange is { } change)
             {
                 failureCode ??= SourceUnitConverter.UnitChangedCode;
-                failureMessage ??= change;
+                failureReason ??= change;
                 return false;
             }
 
@@ -252,10 +257,12 @@ public sealed partial class CollectionRunner(
                 // а > загубив би точки. Далі цей атрибут у цьому
                 // інтервалі прочитати неможливо — так і пишемо.
                 failureCode ??= SourceUnavailable;
-                failureMessage ??=
-                    $"Атрибут «{state.Path}»: понад {MaxPointsPerRequest} точок мають однакову мітку "
-                    + $"{state.Cursor:O}; сторінкування за часом далі не просувається, "
-                    + $"[{state.Cursor:O}, {interval.ToUtc:O}) не дочитано.";
+                failureReason ??= Reason(
+                    "jobs.collectionSameTimestamp",
+                    ("path", state.Path),
+                    ("limit", Number(MaxPointsPerRequest)),
+                    ("cursor", Instant(state.Cursor)),
+                    ("to", Instant(interval.ToUtc)));
                 return false;
             }
 
@@ -265,10 +272,13 @@ public sealed partial class CollectionRunner(
             if (state.Pages >= maxPages)
             {
                 failureCode ??= SourceUnavailable;
-                failureMessage ??=
-                    $"Атрибут «{state.Path}»: прочитано {state.Pages} сторінок по {MaxPointsPerRequest} точок "
-                    + $"до {state.Cursor:O} — ліміт сторінок на прогін. Покриття записано за прочитане; "
-                    + $"[{state.Cursor:O}, {interval.ToUtc:O}) дочитає наздоганяння з цього місця.";
+                failureReason ??= Reason(
+                    "jobs.collectionPageLimit",
+                    ("path", state.Path),
+                    ("pages", Number(state.Pages)),
+                    ("limit", Number(MaxPointsPerRequest)),
+                    ("cursor", Instant(state.Cursor)),
+                    ("to", Instant(interval.ToUtc)));
                 return false;
             }
 
@@ -471,9 +481,10 @@ public sealed partial class CollectionRunner(
 
                 step++;
                 await progress
-                    .ReportAsync(
+                    .ReportKeyAsync(
                         Percent(step, work.Count),
-                        $"Зібрано точок: {retrieved}; інтервалів {step} із {work.Count}",
+                        "jobs.collectionProgress",
+                        Params(("points", Number(retrieved)), ("step", Number(step)), ("total", Number(work.Count))),
                         ct)
                     .ConfigureAwait(false);
             }
@@ -489,7 +500,12 @@ public sealed partial class CollectionRunner(
                 .ConfigureAwait(false);
 
             await store
-                .FinishRunAsync(runId, "Failed", retrieved, ex.Message, CancellationToken.None)
+                .FinishRunAsync(
+                    runId,
+                    "Failed",
+                    retrieved,
+                    Encode(Reason("jobs.collectionRuleFailed", ("code", ex.ErrorCode), ("error", Trim(ex.Message)))),
+                    CancellationToken.None)
                 .ConfigureAwait(false);
 
             throw;
@@ -513,9 +529,9 @@ public sealed partial class CollectionRunner(
             inFlight = null;
 
             failureCode ??= SourceUnavailable;
-            failureMessage ??=
-                $"Прогін перевищив ліміт часу {runDuration.TotalMinutes:0} хв: джерело відповідає, "
-                + "але надто повільно. Непрочитане піде в наздоганяння наступного разу.";
+            failureReason ??= Reason(
+                "jobs.collectionTimeout",
+                ("minutes", runDuration.TotalMinutes.ToString("0", CultureInfo.InvariantCulture)));
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {
@@ -529,8 +545,7 @@ public sealed partial class CollectionRunner(
             // далі: задача мусить побачити, що її скасували.
             await CloseAfterFailureAsync(
                     runId, sourceEntityId, CoveredWithInFlight(), "Degraded", retrieved,
-                    $"{SourceUnavailable}: прогін скасовано ззовні (зупинка задачі). "
-                    + "Непрочитане піде в наздоганяння наступного разу.",
+                    Encode(WithCode(SourceUnavailable, Reason("jobs.collectionCancelled"))),
                     ex)
                 .ConfigureAwait(false);
             throw;
@@ -548,7 +563,7 @@ public sealed partial class CollectionRunner(
             // (`FailAuthenticationAsync`).
             await CloseAfterFailureAsync(
                     runId, sourceEntityId, CoveredWithInFlight(), CollectionFailure.FailedStatus, retrieved,
-                    Compose("Збій прогону збору.", Describe(ex)),
+                    Encode(Reason("jobs.collectionRunFailed", ("error", Trim(Describe(ex))))),
                     ex)
                 .ConfigureAwait(false);
             throw;
@@ -566,7 +581,9 @@ public sealed partial class CollectionRunner(
                     runId,
                     failureCode is null ? "Succeeded" : "Degraded",
                     retrieved,
-                    failureCode is null ? null : $"{failureCode}: {failureMessage ?? "джерело недоступне"}",
+                    failureCode is null
+                        ? null
+                        : Encode(WithCode(failureCode, failureReason ?? Reason("jobs.collectionSourceUnavailable"))),
                     ct)
                 .ConfigureAwait(false);
         }
@@ -577,21 +594,48 @@ public sealed partial class CollectionRunner(
             // повтор додав би ті самі інтервали ще раз поверх уже відстежених.
             await CloseAfterFailureAsync(
                     runId, sourceEntityId, [], CollectionFailure.FailedStatus, retrieved,
-                    Compose("Збій закриття прогону збору.", Describe(ex)),
+                    Encode(Reason("jobs.collectionCloseFailed", ("error", Trim(Describe(ex))))),
                     ex)
                 .ConfigureAwait(false);
             throw;
         }
 
         await progress
-            .ReportAsync(
+            .ReportKeyAsync(
                 100,
-                failureCode is null
-                    ? $"Збір завершено: {retrieved} точок"
-                    : $"Збір завершено частково: {retrieved} точок, діапазон у наздоганянні",
+                failureCode is null ? "jobs.collectionDone" : "jobs.collectionDonePartial",
+                Params(("points", Number(retrieved))),
                 ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Конверт причини (<c>Q-326</c>): ключ каталогу й параметри підстановки.</summary>
+    private static JobProgressMessageEnvelope Reason(string key, params (string Name, string Value)[] parameters)
+        => new(key, parameters.Length == 0 ? null : Params(parameters));
+
+    /// <summary>Причина відмови з кодом попереду — та сама форма «код: причина», що й до U12.</summary>
+    private static JobProgressMessageEnvelope WithCode(string code, JobProgressMessageEnvelope reason)
+        => new("jobs.collectionRunReason", Params(("code", code)), reason);
+
+    /// <summary>Текст відмови від адаптера; <c>null</c> — адаптер нічого не сказав.</summary>
+    /// <remarks>
+    /// ⚠ Сам текст — ДАНІ джерела (мова транспорту чи сервера PI), не наше
+    /// формулювання: він іде параметром як є, перекладається лише рамка.
+    /// </remarks>
+    private static JobProgressMessageEnvelope? SourceDetail(string? detail)
+        => string.IsNullOrWhiteSpace(detail) ? null : Reason("jobs.collectionSourceError", ("detail", Trim(detail)));
+
+    private static Dictionary<string, string> Params(params (string Name, string Value)[] parameters)
+        => parameters.ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
+
+    private static string Encode(JobProgressMessageEnvelope envelope) => JobProgressMessageCodec.Encode(envelope);
+
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private static string Instant(DateTime value) => value.ToString("O", CultureInfo.InvariantCulture);
+
+    /// <summary>Вільний текст — не довший за <see cref="MaxDetailLength"/> (стовпець <c>nvarchar(2000)</c>).</summary>
+    private static string Trim(string text) => JobProgressMessageCodec.Shorten(text, MaxDetailLength);
 
     /// <summary>
     /// Закриває прогін як невдалий через відмову в автентифікації і віддає
@@ -834,7 +878,7 @@ public sealed partial class CollectionRunner(
             return new SaveOutcome(0, null);
         }
 
-        string? unitChange = null;
+        JobProgressMessageEnvelope? unitChange = null;
 
         foreach (var point in points)
         {
@@ -856,8 +900,11 @@ public sealed partial class CollectionRunner(
                 .ConfigureAwait(false);
 
             pausedPaths.Add(map.SourceField);
-            unitChange ??= $"Атрибут «{map.SourceField}» повертає одиницю «{actualCode}», "
-                           + $"а в мапінгу оголошено одиницю {map.SourceUnitId}. Мапінг призупинено.";
+            unitChange ??= Reason(
+                "jobs.collectionUnitChanged",
+                ("path", map.SourceField),
+                ("actual", actualCode),
+                ("declared", map.SourceUnitId?.ToString(CultureInfo.InvariantCulture) ?? "—"));
         }
 
         var accepted = pausedPaths.Count == 0
@@ -930,8 +977,8 @@ public sealed partial class CollectionRunner(
 
     /// <summary>Підсумок збереження батча.</summary>
     /// <param name="Written">Скільки точок записано.</param>
-    /// <param name="UnitChange">Текст про зміну одиниці; <c>null</c> — не було.</param>
-    private sealed record SaveOutcome(int Written, string? UnitChange);
+    /// <param name="UnitChange">Причина-конверт про зміну одиниці; <c>null</c> — не було.</param>
+    private sealed record SaveOutcome(int Written, JobProgressMessageEnvelope? UnitChange);
 
     /// <summary>Атрибути, які читаємо для сутності.</summary>
     /// <remarks>

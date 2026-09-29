@@ -144,7 +144,8 @@ public sealed class MaintenanceRunFailureDigestTests(SqlServerFixture sql)
             sender.IsConfigured.Returns(false);
 
             var notification = new NotificationJob(
-                digestDb, clock, new OutboxDispatcher(digestDb, clock, sender), Channels(clock));
+                digestDb, clock, new OutboxDispatcher(digestDb, clock, sender), Channels(clock),
+                Substitute.For<IUiStringCatalog>());
 
             await notification.ExecuteAsync(
                 null, Substitute.For<IJobProgress>(), CancellationToken.None);

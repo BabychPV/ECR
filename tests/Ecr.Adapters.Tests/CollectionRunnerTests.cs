@@ -111,7 +111,8 @@ public sealed class CollectionRunnerTests
 
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Degraded", Arg.Is<int>(n => n > 0),
-            Arg.Is<string?>(m => m != null && m.StartsWith("ECR-INT-0422", StringComparison.Ordinal)),
+            Arg.Is<string?>(m => CollectionRunnerMessageEnvelopeTests.IsReason(
+                m, "jobs.collectionUnitChanged", "ECR-INT-0422")),
             Arg.Any<CancellationToken>());
 
         // Інтервал непокритий: після рішення людини його забере наздоганяння.
@@ -338,7 +339,7 @@ public sealed class CollectionRunnerTests
         // той самий статус, що й за звичайної відмови джерела.
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Degraded", Arg.Any<int>(),
-            Arg.Is<string?>(m => m != null && m.Contains("ліміт", StringComparison.Ordinal)),
+            Arg.Is<string?>(m => CollectionRunnerMessageEnvelopeTests.IsReason(m, "jobs.collectionTimeout", "ECR-INT-0503")),
             Arg.Any<CancellationToken>());
 
         // Покриття НЕ пишеться за інтервал, що не встиг прочитатися: дірка

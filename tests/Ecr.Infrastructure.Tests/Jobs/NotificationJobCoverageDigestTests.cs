@@ -248,6 +248,85 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
         }
     }
 
+    /// <summary>
+    /// U12: причина прогону збору, записана конвертом, іде в лист ТЕКСТОМ мови
+    /// листа; стара причина (сирий текст до U12) — як є.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Регресія: без резолву в листі стояв би сирий JSON із ключем
+    /// каталогу замість причини. Мутація «Details = r.ErrorMessage» (без
+    /// резолву) робить цей тест червоним.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Finding", "U12")]
+    public async Task Причина_прогону_збору_конвертом_іде_в_лист_текстом_а_стара_як_є()
+    {
+        var now = new DateTime(2035, 7, 7, 7, 0, 0, DateTimeKind.Utc);
+        var world = await ArrangeAsync(now);
+
+        try
+        {
+            await using (var setup = CreateContext())
+            {
+                var reason = JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(
+                    "jobs.collectionRunReason",
+                    new Dictionary<string, string> { ["code"] = "ECR-INT-0503" },
+                    new JobProgressMessageEnvelope(
+                        "jobs.collectionTimeout", new Dictionary<string, string> { ["minutes"] = "15" })));
+
+                var fresh = new CollectionRun(world.EntityId, now.AddHours(-3), now.AddHours(-2), false, null, now.AddMinutes(-40));
+                fresh.Complete("Degraded", 3, now.AddMinutes(-30), reason);
+
+                var legacy = new CollectionRun(world.EntityId, now.AddHours(-2), now.AddHours(-1), false, null, now.AddMinutes(-25));
+                legacy.Complete("Degraded", 0, now.AddMinutes(-20), "ECR-INT-0503: legacy raw reason");
+
+                setup.CollectionRuns.AddRange(fresh, legacy);
+                await setup.SaveChangesAsync(CancellationToken.None);
+            }
+
+            var catalog = Substitute.For<IUiStringCatalog>();
+            catalog.GetScopedAsync(NotificationJob.DigestLanguage, UiStringScope.Private, Arg.Any<CancellationToken>())
+                .Returns(new UiStringCatalog(
+                    NotificationJob.DigestLanguage,
+                    1,
+                    new Dictionary<string, string>
+                    {
+                        ["jobs.collectionRunReason"] = "{code}: {message}",
+                        ["jobs.collectionTimeout"] = "time limit of {minutes} min exceeded",
+                    }));
+
+            var (_, messages) = await RunJobAsync(now, NotificationSeverity.Info, catalog);
+
+            var message = Assert.Single(messages);
+            Assert.Contains(
+                $"[collection] {world.EntityCode}: Degraded. ECR-INT-0503: time limit of 15 min exceeded",
+                message.Body,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                $"[collection] {world.EntityCode}: Degraded. ECR-INT-0503: legacy raw reason",
+                message.Body,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("jobs.collection", message.Body, StringComparison.Ordinal);
+
+            await using var db = CreateContext();
+            var queued = await db.NotificationOutbox
+                .AsNoTracking()
+                .Where(n => n.EventCode == "maintenance.failures" && n.Body.Contains(world.EntityCode))
+                .OrderByDescending(n => n.Id)
+                .FirstOrDefaultAsync();
+
+            Assert.NotNull(queued);
+            Assert.Contains("ECR-INT-0503: time limit of 15 min exceeded", queued!.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain("jobs.collection", queued.Body, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CleanupAsync(world.EntityId);
+        }
+    }
+
     [Theory]
     [InlineData(CollectionCoverage.SkippedPeriodClosed, NotificationSeverity.Warning)]
     [InlineData(CollectionCoverage.SkippedPointCeiling, NotificationSeverity.Error)]
@@ -308,13 +387,14 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
     /// </summary>
     /// <param name="now">Момент прогону.</param>
     /// <param name="minSeverity">Межа правила для <see cref="NotificationEventKind.CollectionFailed"/>.</param>
+    /// <param name="catalog">Каталог рядків для резолву причин збору (U12); <c>null</c> — порожня підміна.</param>
     /// <remarks>
     /// ⚠ Правило на <see cref="NotificationEventKind.JobFailed"/> теж є (від
     /// <c>Info</c>): якби подію покриття змапили не туди, доставка все одно
     /// відбулася б — і тест побачив би ХИБНИЙ вид, а не тишу.
     /// </remarks>
     private async Task<(List<NotificationDelivery> Deliveries, List<NotificationMessage> Messages)> RunJobAsync(
-        DateTime now, NotificationSeverity minSeverity)
+        DateTime now, NotificationSeverity minSeverity, IUiStringCatalog? catalog = null)
     {
         var clock = new TestClock(now);
         var channel = new NotificationChannel(NotificationChannelKind.Smtp, "coverage-test", "{}", now, null);
@@ -346,7 +426,8 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
 
         var job = new NotificationJob(
             db, clock, new OutboxDispatcher(db, clock, sender),
-            new NotificationDispatcher(store, [channelSender], clock));
+            new NotificationDispatcher(store, [channelSender], clock),
+            catalog ?? Substitute.For<IUiStringCatalog>());
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 
@@ -372,6 +453,10 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
 
         await db.CollectionCoverages
             .Where(c => c.SourceEntityId == entityId)
+            .ExecuteDeleteAsync(CancellationToken.None);
+
+        await db.CollectionRuns
+            .Where(r => r.SourceEntityId == entityId)
             .ExecuteDeleteAsync(CancellationToken.None);
 
         await db.MaintenanceRuns

@@ -111,8 +111,10 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
         Assert.IsType<InvalidOperationException>(outcome.Error);
         Assert.Equal("Failed", outcome.Run.Status);
         Assert.NotNull(outcome.Run.FinishedAt);
-        Assert.Contains("InvalidOperationException", outcome.Run.ErrorMessage, StringComparison.Ordinal);
-        Assert.Contains("прогрес недоступний", outcome.Run.ErrorMessage, StringComparison.Ordinal);
+        var reason = CollectionRunnerMessageEnvelopeTests.Decode(outcome.Run.ErrorMessage);
+        Assert.Equal("jobs.collectionRunFailed", reason.Key);
+        Assert.Contains("InvalidOperationException", reason.Params!["error"], StringComparison.Ordinal);
+        Assert.Contains("прогрес недоступний", reason.Params["error"], StringComparison.Ordinal);
 
         // Покрито рівно перший інтервал — прогалину до запитаного діапазону.
         var coverage = Assert.Single(outcome.Coverage);
@@ -144,7 +146,9 @@ public sealed class CollectionRunnerSqlRobustnessTests(SqlServerFixture sql)
 
         Assert.IsAssignableFrom<OperationCanceledException>(outcome.Error);
         Assert.Equal("Degraded", outcome.Run.Status);
-        Assert.Contains("скасовано", outcome.Run.ErrorMessage, StringComparison.Ordinal);
+        Assert.True(
+            CollectionRunnerMessageEnvelopeTests.IsReason(outcome.Run.ErrorMessage, "jobs.collectionCancelled", "ECR-INT-0503"),
+            outcome.Run.ErrorMessage);
 
         // Прогалина до запитаного діапазону прочитана до скасування — покрита;
         // запитаний діапазон — ні, він піде в наздоганяння.

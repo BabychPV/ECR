@@ -91,9 +91,7 @@ public sealed class CollectionRunnerPagingTests
             Arg.Any<long>(),
             "Degraded",
             Arg.Any<int>(),
-            Arg.Is<string?>(m => m != null
-                                 && m.Contains("ліміт сторінок", StringComparison.Ordinal)
-                                 && !m.Contains("джерело недоступне", StringComparison.Ordinal)),
+            Arg.Is<string?>(m => CollectionRunnerMessageEnvelopeTests.IsReason(m, "jobs.collectionPageLimit", null)),
             Arg.Any<CancellationToken>());
 
         // Прогін 2 — наступний за розкладом (свіже вікно після Now), бачить
@@ -131,7 +129,7 @@ public sealed class CollectionRunnerPagingTests
 
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Degraded", Arg.Any<int>(),
-            Arg.Is<string?>(m => m != null && m.Contains("ліміт часу", StringComparison.Ordinal)),
+            Arg.Is<string?>(m => CollectionRunnerMessageEnvelopeTests.IsReason(m, "jobs.collectionTimeout", null)),
             Arg.Any<CancellationToken>());
     }
 
@@ -158,7 +156,7 @@ public sealed class CollectionRunnerPagingTests
         Assert.Equal(CollectionRunner.MaxPointsPerRequest, world.Written.Count);
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Degraded", Arg.Any<int>(),
-            Arg.Is<string?>(m => m != null && m.Contains("однакову мітку", StringComparison.Ordinal)),
+            Arg.Is<string?>(m => CollectionRunnerMessageEnvelopeTests.IsReason(m, "jobs.collectionSameTimestamp", null)),
             Arg.Any<CancellationToken>());
     }
 

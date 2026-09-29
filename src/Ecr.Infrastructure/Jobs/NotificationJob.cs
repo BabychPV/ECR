@@ -40,7 +40,8 @@ public sealed class NotificationJob(
     EcrDbContext db,
     IClock clock,
     Integration.OutboxDispatcher outbox,
-    Notifications.NotificationDispatcher channels) : IBackgroundJob
+    Notifications.NotificationDispatcher channels,
+    IUiStringCatalog catalog) : IBackgroundJob
 {
     /// <summary>Код задачі в журналі обслуговування.</summary>
     public static string Code => "notification";
@@ -167,13 +168,22 @@ public sealed class NotificationJob(
                 .ToDictionaryAsync(e => e.Id, e => e.Code, ct)
                 .ConfigureAwait(false);
 
+        // ⚠ U12: причину прогону збирач пише конвертом (ключ + параметри), а не
+        // готовим реченням. У лист іде ТЕКСТ, резолвлений мовою листа; старі
+        // рядки (сирий текст до U12) резолвер повертає як є. Вид рядка
+        // (`KindOf`) — за СИРИМ значенням: ознака відмови в автентифікації живе
+        // в ньому, а не в перекладі.
+        var reasons = await JobProgressMessageResolver
+            .ResolveManyAsync(catalog, DigestLanguage, [.. failed.Select(r => r.ErrorMessage)], ct)
+            .ConfigureAwait(false);
+
         var collection = failed
-            .Select(r => new DigestItem(
+            .Select((r, i) => new DigestItem(
                 KindOf(r.ErrorMessage),
                 sourceCodes.GetValueOrDefault(
                     r.SourceEntityId, r.SourceEntityId.ToString(CultureInfo.InvariantCulture)),
                 r.Status,
-                r.ErrorMessage,
+                reasons[i],
                 r.FinishedAt))
             .ToList();
 
@@ -324,6 +334,16 @@ public sealed class NotificationJob(
     /// це чекати на наздоганяння, якого не буде.
     /// </remarks>
     public const string AuthenticationKind = "collection.auth";
+
+    /// <summary>Мова, якою в лист резолвиться причина прогону збору (U12).</summary>
+    /// <remarks>
+    /// ⚠ Судження: лист — ОДИН на всіх адресатів (<c>recipients: null</c>, політика
+    /// <c>sec.User.ReceivesAlerts</c>), і мови адресата модель не зберігає. Тому —
+    /// базова мова каталогу, на яку падає будь-який відсутній переклад
+    /// (<see cref="Application.Localization.UiStringResolver.DefaultLanguage"/>).
+    /// Лист мовою кожного адресата — окрема зміна черги сповіщень.
+    /// </remarks>
+    public const string DigestLanguage = Application.Localization.UiStringResolver.DefaultLanguage;
 
     /// <summary>Звичайний вид рядка про збій збору.</summary>
     public const string CollectionKind = "collection";

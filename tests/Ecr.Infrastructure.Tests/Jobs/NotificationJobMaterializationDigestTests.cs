@@ -100,7 +100,8 @@ public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture s
         sender.IsConfigured.Returns(false); // ⚠ Транспорт не налаштований (`P-13`): подія лишається Pending, не зникає.
         var dispatcher = new OutboxDispatcher(db, clock, sender);
         var channels = EmptyChannels();
-        var job = new NotificationJob(db, clock, dispatcher, new NotificationDispatcher(channels, [], clock));
+        var job = new NotificationJob(
+            db, clock, dispatcher, new NotificationDispatcher(channels, [], clock), Substitute.For<IUiStringCatalog>());
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 
@@ -154,7 +155,8 @@ public sealed class NotificationJobMaterializationDigestTests(SqlServerFixture s
         sender.IsConfigured.Returns(false);
         var dispatcher = new OutboxDispatcher(db, clock, sender);
         var job = new NotificationJob(
-            db, clock, dispatcher, new NotificationDispatcher(EmptyChannels(), [], clock));
+            db, clock, dispatcher, new NotificationDispatcher(EmptyChannels(), [], clock),
+            Substitute.For<IUiStringCatalog>());
 
         await job.ExecuteAsync(null, Substitute.For<IJobProgress>(), CancellationToken.None);
 

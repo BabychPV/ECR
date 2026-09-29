@@ -4,6 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { CollectionRunsPanel } from '@/features/integration/CollectionRunsPanel';
+import { loadCatalog } from '@/shared/i18n';
 
 /**
  * Шухляда подробиць прогону (ФВ-5.23): помилка (якщо `hasError`) і покриті
@@ -36,6 +37,12 @@ const Run = {
   triggeredByUserId: null,
 };
 
+/** Рядки каталогу для U12: рамка «код: причина» і сама причина. */
+const Strings: Record<string, string> = {
+  'jobs.collectionRunReason': '{code}: {message}',
+  'jobs.collectionTimeout': 'the run exceeded the time limit of {minutes} min',
+};
+
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
@@ -52,6 +59,9 @@ function respond(detail: unknown): void {
       if (path === '/api/v1/collection-runs/501') return json(detail);
       if (path === '/api/v1/data-sources') return json([]);
       if (path === '/api/v1/sources') return json([]);
+      if (path.startsWith('/api/v1/ui-strings/')) {
+        return json({ languageCode: 'en', revision: 1, strings: Strings });
+      }
 
       return json(null);
     }),
@@ -88,6 +98,8 @@ afterEach(() => {
 });
 
 describe('CollectionRunDetailDrawer', () => {
+  // ⚠ Заодно — зворотна сумісність U12: прогін до U12 має в `errorMessage`
+  // готовий текст, а не конверт, і шухляда показує його як є.
   it('клік на рядок відкриває шухляду й показує текст помилки, коли hasError', async () => {
     respond({
       run: Run,
@@ -100,6 +112,30 @@ describe('CollectionRunDetailDrawer', () => {
     await openDrawer();
 
     expect(await screen.findByText('Джерело недоступне: тайм-аут з’єднання.')).toBeTruthy();
+  });
+
+  it('U12: причина-конверт показується текстом мови інтерфейсу, а не JSON чи ключем', async () => {
+    // ⛔ Мутація «повернути `{detail.errorMessage}` без collectionRunErrorText»
+    // у шухляді — на екрані сирий JSON, тест червоний.
+    respond({
+      run: Run,
+      errorMessage: JSON.stringify({
+        k: 'jobs.collectionRunReason',
+        p: { code: 'ECR-INT-0503' },
+        i: { k: 'jobs.collectionTimeout', p: { minutes: '15' } },
+      }),
+      coverage: [],
+      coverageTruncated: false,
+    });
+    await loadCatalog('en', 'private');
+    show();
+
+    await openDrawer();
+
+    expect(
+      await screen.findByText('ECR-INT-0503: the run exceeded the time limit of 15 min'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/jobs\.collection/)).toBeNull();
   });
 
   it('coverageTruncated показує банер "показано не все"', async () => {
