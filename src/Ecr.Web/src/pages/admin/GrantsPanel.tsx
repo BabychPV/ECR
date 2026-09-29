@@ -1,11 +1,20 @@
-import { useEffect, useState, type JSX } from 'react';
-import { Button, Group, NumberInput, Select, Switch, Table, Text } from '@mantine/core';
+import { useEffect, useRef, useState, type JSX } from 'react';
+import { Button, Group, Select, Switch, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import type { ReplaceGrantsRequest, ResourceGrantDto, RoleView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
+import { ConfirmModal } from '@/shared/ui/ConfirmModal';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { t } from '@/shared/i18n';
+import { EmptyPath, ResourcePicker, type PickPath } from '@/pages/admin/grants/ResourcePicker';
+import {
+  GrantLevels,
+  ResourceKinds,
+  grantLevelLabel,
+  resourceKindLabel,
+} from '@/pages/admin/grants/grantLabels';
 
 /**
  * Ресурсні гранти ролі: до ЧОГО саме вона відкриває доступ.
@@ -21,10 +30,54 @@ import { t } from '@/shared/i18n';
  * питання «що покриває ця роль», і вона має бути видима одним поглядом;
  * часткові правки лишають стан, у якому джерело доступу не відновлюється
  * (ФВ-6.6).
+ *
+ * ⛔ Аудит U6: чернетка раніше перезаписувалась КОЖНОЮ відповіддю сервера
+ * (зміна ролі, фоновий перезапит) — незбережені гранти зникали мовчки. Тепер
+ * чернетка має ознаку «змінено», зареєстрована в `UnsavedGuard`, перемикання
+ * ролі з незбереженим питає підтвердження, а перезапит не чіпає змінену
+ * чернетку.
  */
+
+interface DraftRow {
+  /** Стабільний ключ рядка для React: індекс зсувається при видаленні. */
+  readonly key: number;
+  readonly grant: ResourceGrantDto;
+  readonly path: PickPath;
+}
+
+interface Seed {
+  readonly roleId: number;
+  readonly grants: readonly ResourceGrantDto[];
+}
+
+/**
+ * ⚠ Роль показується кодом: `GET /api/v1/roles` (`RoleView`) не віддає
+ * локалізованої назви, хоча вона є в базі (`CreateRoleModal` її пише). Коли
+ * контракт її отримає — міняється лише цей рядок.
+ */
+function roleLabel(role: RoleView | undefined): string {
+  return role?.code ?? '';
+}
+
+/** Канонічний вигляд набору: порядок і `resourceName` не є зміною. */
+function canonical(grants: readonly ResourceGrantDto[]): string {
+  return grants
+    .map((g) => `${g.resourceKind}:${String(g.resourceId)}:${g.level}:${String(g.isDeny)}`)
+    .sort()
+    .join('|');
+}
+
+function sameGrants(a: readonly ResourceGrantDto[], b: readonly ResourceGrantDto[]): boolean {
+  return canonical(a) === canonical(b);
+}
+
 export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
   const [roleId, setRoleId] = useState<number | null>(null);
-  const [draft, setDraft] = useState<ResourceGrantDto[]>([]);
+  const [rows, setRows] = useState<DraftRow[]>([]);
+  const [seed, setSeed] = useState<Seed | null>(null);
+  // `undefined` — питання немає; `null` — людина хоче зняти вибір ролі.
+  const [pendingRole, setPendingRole] = useState<number | null | undefined>(undefined);
+  const nextKey = useRef(0);
   const queryClient = useQueryClient();
 
   const grants = useQuery({
@@ -33,20 +86,54 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
     enabled: roleId !== null,
   });
 
-  // ⚠ Чернетка синхронізується з відповіддю сервера, а не заводиться раз:
-  // інакше перемикання ролі показувало б гранти попередньої.
+  const draft = rows.map((row) => row.grant);
+  const seeded = seed !== null && seed.roleId === roleId;
+  const dirty = seeded && !sameGrants(draft, seed.grants);
+  const incomplete = rows.some((row) => row.grant.resourceId <= 0);
+
+  // ⚠ Знімок для ефекту й для `UnsavedGuard`: обидва читають поточний стан у
+  // момент виклику, а не той, що був при оголошенні.
+  const latest = useRef({ draft, dirty, seed });
   useEffect(() => {
-    if (grants.data !== undefined) setDraft(grants.data);
-  }, [grants.data]);
+    latest.current = { draft, dirty, seed };
+  });
+
+  useEffect(
+    () =>
+      registerUnsavedSource('grants', {
+        hasUnsaved: () => latest.current.dirty,
+      }),
+    [],
+  );
+
+  /*
+   * ⛔ Відповідь сервера наповнює чернетку лише тоді, коли в ній нема чого
+   * втрачати: інша роль, ще не наповнена, не змінена — або вже дорівнює
+   * відповіді. Змінену чернетку фоновий перезапит (фокус вікна, інвалідація)
+   * НЕ перезаписує: доти це була мовчазна втрата незбережених грантів (U6).
+   */
+  useEffect(() => {
+    if (roleId === null || grants.data === undefined) return;
+
+    const current = latest.current;
+    const sameRole = current.seed?.roleId === roleId;
+    if (sameRole && current.dirty && !sameGrants(current.draft, grants.data)) return;
+
+    setRows(grants.data.map((grant) => ({ key: nextKey.current++, grant, path: EmptyPath })));
+    setSeed({ roleId, grants: grants.data });
+  }, [grants.data, roleId]);
 
   const save = useMutation({
-    mutationFn: (next: ResourceGrantDto[]) =>
-      apiFetch(`/api/v1/roles/${roleId ?? 0}/grants`, {
+    mutationFn: (next: { roleId: number; grants: ResourceGrantDto[] }) =>
+      apiFetch(`/api/v1/roles/${next.roleId}/grants`, {
         method: 'PUT',
-        body: JSON.stringify({ grants: next } satisfies ReplaceGrantsRequest),
+        body: JSON.stringify({ grants: next.grants } satisfies ReplaceGrantsRequest),
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['grants', roleId] });
+    onSuccess: async (_result, next) => {
+      // ⚠ Збережене стає новою точкою відліку ДО перечитання: інакше відповідь,
+      // що відрізняється лише порядком чи назвою, лишила б чернетку «зміненою».
+      setSeed((prev) => (prev?.roleId === next.roleId ? { roleId: next.roleId, grants: next.grants } : prev));
+      await queryClient.invalidateQueries({ queryKey: ['grants', next.roleId] });
       showDone(t('grants.saved'));
     },
     // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
@@ -54,17 +141,33 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
     onError: showApiError,
   });
 
+  function switchRole(next: number | null): void {
+    setRoleId(next);
+    setRows([]);
+    setSeed(null);
+  }
+
+  function requestRole(next: number | null): void {
+    if (next === roleId) return;
+    if (dirty) setPendingRole(next);
+    else switchRole(next);
+  }
+
+  function replace(key: number, change: (row: DraftRow) => DraftRow): void {
+    setRows((prev) => prev.map((row) => (row.key === key ? change(row) : row)));
+  }
+
   return (
     <>
-      <Group mb="sm" gap="xs">
+      <Group mb="sm" gap="xs" align="flex-end">
         <Select
           size="xs"
           miw={200}
           label={t('security.role')}
           placeholder={t('grants.pickRole')}
-          data={roles.map((r) => ({ value: String(r.id), label: r.code }))}
+          data={roles.map((r) => ({ value: String(r.id), label: roleLabel(r) }))}
           value={roleId === null ? null : String(roleId)}
-          onChange={(value) => setRoleId(value === null ? null : Number(value))}
+          onChange={(value) => requestRole(value === null ? null : Number(value))}
         />
 
         {roleId !== null && (
@@ -73,45 +176,60 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
               size="xs"
               variant="default"
               onClick={() =>
-                setDraft([
-                  ...draft,
-                  { resourceKind: 'Project', resourceId: 0, level: 'Read', isDeny: false },
+                setRows((prev) => [
+                  ...prev,
+                  {
+                    key: nextKey.current++,
+                    grant: { resourceKind: 'Project', resourceId: 0, level: 'Read', isDeny: false },
+                    path: EmptyPath,
+                  },
                 ])
               }
             >
               {t('grants.add')}
             </Button>
 
-            {/* ⛔ Заблоковано, поки чернетка не наповнена ВІДПОВІДДю САМЕ на
-                цю роль: перемикання ролі чи невдалий запит лишають `draft`
-                чужим (попередньої ролі) або порожнім, а збереження в цьому
-                стані замінило б справжні гранти чужими/пусткою. */}
+            {/* ⛔ Заблоковано, поки чернетка не наповнена ВІДПОВІДДЮ САМЕ на
+                цю роль (інакше збереження замінило б справжні гранти чужими
+                чи пусткою), поки в ній нема змін і поки хоч один рядок без
+                обраного ресурсу (`resourceId` 0 — грант «ні на що»). */}
             <Button
               size="xs"
               loading={save.isPending}
-              disabled={grants.isPending || Boolean(grants.error)}
-              onClick={() => save.mutate(draft)}
+              disabled={grants.isPending || Boolean(grants.error) || !seeded || !dirty || incomplete}
+              onClick={() => save.mutate({ roleId, grants: draft })}
             >
               {t('common.save')}
             </Button>
+
+            {dirty && (
+              <Text size="xs" c="dimmed" fs="italic" data-testid="grants-unsaved">
+                {incomplete ? t('grants.pickResourceFirst') : t('grants.unsaved')}
+              </Text>
+            )}
           </>
         )}
       </Group>
 
+      {roleId !== null && (
+        <Text size="xs" c="dimmed" mb="xs">
+          {t('grants.projectsScopeHint')}
+        </Text>
+      )}
+
       {/*
-       * ⚠ Перелік редагується як ЧЕРНЕТКА (`draft`), а завантажене значення
+       * ⚠ Перелік редагується як ЧЕРНЕТКА (`rows`), а завантажене значення
        * лише наповнює її. Тому обгортка дивиться на запит, а таблиця малює
        * чернетку: інакше щойно доданий рядок зникав би, доки не збережено.
        *
        * ⛔ Порожній стан НЕ ховає кнопку «додати»: роль без грантів — це
-       * звичайний початок роботи, а не збій. Ховати дію тут означало б
-       * зробити перший грант недосяжним (`A7-22`).
+       * звичайний початок роботи, а не збій (`A7-22`).
        */}
       <AsyncBoundary<ResourceGrantDto[]>
         isPending={roleId !== null && grants.isPending}
         error={grants.error}
         data={roleId === null ? undefined : grants.data}
-        isEmpty={() => draft.length === 0}
+        isEmpty={() => rows.length === 0}
         emptyTitle={roleId === null ? t('grants.pickRole') : t('grants.empty')}
         emptyHint={roleId === null ? t('grants.pickRoleHint') : t('grants.emptyHint')}
         skeleton="table"
@@ -122,7 +240,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>{t('grants.kind')}</Table.Th>
-              <Table.Th>{t('grants.resource')}</Table.Th>
+              <Table.Th>{t('grants.target')}</Table.Th>
               <Table.Th>{t('grants.resourceName')}</Table.Th>
               <Table.Th>{t('grants.level')}</Table.Th>
               <Table.Th>{t('grants.deny')}</Table.Th>
@@ -130,51 +248,53 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {draft.map((grant, index) => (
-              <Table.Tr key={`${grant.resourceKind}:${grant.resourceId}:${index}`}>
+            {rows.map((row, index) => {
+              const { grant } = row;
+
+              return (
+              <Table.Tr key={row.key}>
                 <Table.Td>
                   {/*
                    * ⚠ Тут `aria-label`, а не `label`: підпис уже стоїть у
-                   * заголовку колонки і видно очима. Але читалка НЕ пов'язує
-                   * `<th>` з полем усередині `<td>` — для неї це просто
-                   * безіменний список, і без імені користувач чує «поле зі
-                   * списком» чотири рази підряд.
+                   * заголовку колонки, але читалка НЕ пов'язує `<th>` з полем
+                   * усередині `<td>`.
                    */}
                   <Select
                     size="xs"
                     miw={110}
                     aria-label={`${t('grants.kind')} ${index + 1}`}
-                    data={['Project', 'Sheet', 'Table', 'Column']}
+                    data={ResourceKinds.map((kind) => ({ value: kind, label: resourceKindLabel(kind) }))}
                     value={grant.resourceKind}
                     onChange={(value) =>
                       value !== null &&
-                      replace(index, { ...withoutResourceName(grant), resourceKind: value as never })
+                      replace(row.key, (r) => ({
+                        ...r,
+                        grant: { ...withoutResourceName(r.grant), resourceKind: value as never, resourceId: 0 },
+                      }))
                     }
                   />
                 </Table.Td>
                 <Table.Td>
-                  <NumberInput
-                    size="xs"
-                    miw={90}
-                    aria-label={`${t('grants.resource')} ${index + 1}`}
-                    value={grant.resourceId}
-                    onChange={(value) =>
-                      replace(index, {
-                        ...withoutResourceName(grant),
-                        resourceId: typeof value === 'number' ? value : 0,
+                  <ResourcePicker
+                    index={index}
+                    kind={grant.resourceKind}
+                    resourceId={grant.resourceId}
+                    path={row.path}
+                    onChange={({ resourceId, code, path }) =>
+                      replace(row.key, (r) => {
+                        const base = { ...withoutResourceName(r.grant), resourceId };
+
+                        return { ...r, path, grant: code === null ? base : { ...base, resourceName: code } };
                       })
                     }
                   />
                 </Table.Td>
                 <Table.Td>
                   {/*
-                   * ⚠ Розв'язана назва приходить лише у ВІДПОВІДІ сервера
-                   * (Q-299) — рядок, щойно доданий кнопкою «додати» чи з
-                   * незбереженою правкою `resourceId`, її ще не має
-                   * (`resourceName === undefined`), і це НЕ помилка: назва
-                   * з'явиться після збереження й перечитання. `null` —
-                   * інша річ: сервер шукав і не знайшов (ресурс видалено чи
-                   * id хибний), і це показується явно, а не мовчки.
+                   * ⚠ Назва — від сервера (Q-299) або від щойно обраного в
+                   * пікері ресурсу. `undefined` — ресурс ще не обрано (не
+                   * помилка); `null` — сервер шукав і не знайшов (ресурс
+                   * видалено чи id хибний), і це показується явно.
                    */}
                   {grant.resourceName === null ? (
                     <Text size="xs" c="statusError" fs="italic">
@@ -193,10 +313,11 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     size="xs"
                     miw={110}
                     aria-label={`${t('grants.level')} ${index + 1}`}
-                    data={['Read', 'Write', 'Submit', 'Approve', 'Manage']}
+                    data={GrantLevels.map((level) => ({ value: level, label: grantLevelLabel(level) }))}
                     value={grant.level}
                     onChange={(value) =>
-                      value !== null && replace(index, { ...grant, level: value as never })
+                      value !== null &&
+                      replace(row.key, (r) => ({ ...r, grant: { ...r.grant, level: value as never } }))
                     }
                   />
                 </Table.Td>
@@ -208,9 +329,10 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     size="xs"
                     aria-label={`${t('grants.deny')} ${index + 1}`}
                     checked={grant.isDeny}
-                    onChange={(event) =>
-                      replace(index, { ...grant, isDeny: event.currentTarget.checked })
-                    }
+                    onChange={(event) => {
+                      const isDeny = event.currentTarget.checked;
+                      replace(row.key, (r) => ({ ...r, grant: { ...r.grant, isDeny } }));
+                    }}
                   />
                 </Table.Td>
                 <Table.Td>
@@ -218,23 +340,32 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
                     size="compact-xs"
                     color="statusError"
                     variant="subtle"
-                    onClick={() => setDraft(draft.filter((_, i) => i !== index))}
+                    onClick={() => setRows((prev) => prev.filter((r) => r.key !== row.key))}
                   >
                     {t('grants.remove')}
                   </Button>
                 </Table.Td>
               </Table.Tr>
-            ))}
+              );
+            })}
           </Table.Tbody>
         </Table>
         )}
       </AsyncBoundary>
+
+      <ConfirmModal
+        opened={pendingRole !== undefined}
+        title={t('grants.discardTitle', { role: roleLabel(roles.find((r) => r.id === roleId)) })}
+        text={t('grants.discardText')}
+        verb={t('grants.discardVerb')}
+        onClose={() => setPendingRole(undefined)}
+        onConfirm={() => {
+          if (pendingRole !== undefined) switchRole(pendingRole);
+          setPendingRole(undefined);
+        }}
+      />
     </>
   );
-
-  function replace(index: number, grant: ResourceGrantDto): void {
-    setDraft(draft.map((item, i) => (i === index ? grant : item)));
-  }
 }
 
 /**
