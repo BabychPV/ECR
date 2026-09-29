@@ -49,7 +49,9 @@ permissions:
 # заповнюється відповідями на код, якого вже немає.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # ✎ 2026-09-29 (пряме рішення людини): на dev/integration і PR #463 — не скасовувати,
+  # щоб кожен пуш отримав власний вердикт; на lane/** — скасовувати, як і раніше.
+  cancel-in-progress: ${{ !(github.ref == 'refs/heads/dev/integration' || github.event.pull_request.number == 463) }}
 
 env:
   DOTNET_NOLOGO: 'true'
