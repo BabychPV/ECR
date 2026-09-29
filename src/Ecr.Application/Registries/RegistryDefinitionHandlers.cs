@@ -275,8 +275,13 @@ public sealed class SaveRegistryDefinitionHandler(
     IClock clock,
     IUnitCatalog units,
     IRegistryKeyStore keys,
-    Keys.RegistryKeyService keyService)
+    Keys.RegistryKeyService keyService,
+    Rules.RegistryRuleCompiler? ruleCompiler = null)
 {
+    // ⚠ `ruleCompiler` (RT-17a) необов'язковий лише для тестів, що будують обробник руками: їхні
+    // правила — вирази до рушія (`[Limit] > 0`), і перевіряти їх граматикою правил там нічого.
+    // Контейнер підставляє компілятор завжди; справжній шлях тримає `RegistryRulesHttpTests`.
+
     /// <summary>Право на зміну ОПИСУ довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditDefinition";
 
@@ -370,7 +375,23 @@ public sealed class SaveRegistryDefinitionHandler(
             || !(await EntriesAsync().ConfigureAwait(false)).Any(e => !e.IsDeleted);
 
         ApplyFields(definition, dto.Fields, newFieldsMayBeRequired);
-        var applied = ApplyRules(definition, rules, dto.Rules);
+
+        IReadOnlyList<RegistryDef>? graph = null;
+
+        // ⛔ RT-17a (§6, «Публікація опису»; Д-4): нові, змінені й знову ввімкнені правила
+        // розбираються граматикою правил і перевіряються за формами довідників ДО збереження;
+        // шаблон «Сума дочірніх» розгортається у вираз з параметрів. Неправильний вираз —
+        // 422 `ruleExpressionInvalid` з діагностикою, а не правило, що «виглядає налаштованим».
+        var wantedRules = dto.Rules;
+        if (ruleCompiler is not null && wantedRules is { Count: > 0 })
+        {
+            graph = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
+            wantedRules = await ruleCompiler
+                .PrepareAsync(definition, rules, wantedRules, graph, keys, ct)
+                .ConfigureAwait(false);
+        }
+
+        var applied = ApplyRules(definition, rules, wantedRules);
 
         // ⛔ RT-12 (ФВ-8.16, §4.8): опис із композицією перевіряється цілим графом довідників —
         // цикл замикається через ІНШІ довідники, і знайти його в одному описі неможливо. Опис без
@@ -378,7 +399,7 @@ public sealed class SaveRegistryDefinitionHandler(
         // збереження).
         if (definition.Fields.Any(f => f.RelationKind == RegistryRelationKind.Composition))
         {
-            var graph = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
+            graph ??= await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
             RegistryCompositionRules.Validate(definition, graph);
         }
 
@@ -995,6 +1016,14 @@ public sealed class SaveRegistryDefinitionHandler(
                         ["messageKey"] = "err.ECR-REG-0422.unknownRuleKind",
                         ["ruleKind"] = rule.RuleKind,
                     });
+            }
+
+            // ⛔ RT-17a (`R-5`, `D-154`, §4.7): унікальність задає ключ довідника, а не правило. Нове
+            // `UniqueWithin` не приймається; наявні лишаються (їх пропонують перетворити на ключ) і
+            // не виконуються — на даних можуть бути дублікати, яких правило ніколи не ловило.
+            if (kind == RegistryRuleKind.UniqueWithin)
+            {
+                throw Rules.RegistryRuleCompiler.UniqueWithinReplaced(rule.Code);
             }
 
             var created = new RegistryRuleDef(

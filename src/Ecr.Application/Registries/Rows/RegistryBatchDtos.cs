@@ -1,4 +1,6 @@
 // src/Ecr.Application/Registries/Rows/RegistryBatchDtos.cs
+using Ecr.Application.Registries.Rules;
+
 namespace Ecr.Application.Registries.Rows;
 
 /// <summary>Пакет змін рядків довідника (<c>POST /registries/{code}/entries/batch</c>, RT-14).</summary>
@@ -40,7 +42,20 @@ public sealed record RegistryBatchResult(
     int Updated,
     int Deleted,
     int Unchanged,
-    IReadOnlyList<RegistryBatchRowResult> Rows);
+    IReadOnlyList<RegistryBatchRowResult> Rows)
+{
+    /// <summary>
+    /// Порушення правил довідника після пакета (RT-17a, §7.1): записані рядки й батьки композиції.
+    /// Застосований пакет несе лише <c>Info</c>/<c>Warning</c> (<c>Error</c> — відмова
+    /// <c>422 ECR-REG-4221</c>); <c>dryRun</c> — усі рівні, і <c>Error</c> теж: так сітка бачить Σ до
+    /// збереження. Порожньо — порушень немає або пакет не дійшов до правил через помилки рядків.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ У <c>dryRun</c> <c>entryId</c> НОВОГО запису вигаданий (транзакцію відкочено), а код — заглушка
+    /// авто-коду; правила батька завжди адресують справжній запис.
+    /// </remarks>
+    public IReadOnlyList<RegistryRuleViolationDto> Rules { get; init; } = [];
+}
 
 /// <summary>Результат рядка пакета.</summary>
 /// <param name="ClientRowId">Ідентифікатор рядка на клієнті.</param>

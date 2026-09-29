@@ -733,4 +733,16 @@ public static class ErrorCodes
     /// (<c>QuartzJobAdapter.IsWorthRetrying</c>): ті самі дані дали б той самий вердикт.
     /// </remarks>
     public const string CalculationInputTooLarge = "ECR-CALC-4222";
+
+    /// <summary>
+    /// Порушено правило довідника рівня <c>Error</c> (<c>ECR-REG-4221</c>, FEATURE-REGISTRY-TABLES §6,
+    /// §7.2, <c>ФВ-8.18</c>): запис (upsert, пакет, CSV) відкочено цілком.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 422, а не 409: дані суперечать правилу, а не чужій паралельній зміні. Подробиці —
+    /// <c>ruleViolated</c> (<c>rule</c>, <c>entryCode</c>, <c>message</c>) і повний перелік
+    /// <c>violations</c>. Порушення рівнів <c>Info</c>/<c>Warning</c> запис не зупиняють і їдуть у
+    /// <c>warnings[]</c> відповіді.
+    /// </remarks>
+    public const string RegistryRuleViolation = "ECR-REG-4221";
 }

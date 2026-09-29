@@ -10,6 +10,11 @@ using Ecr.Domain.ValueObjects;
 
 namespace Ecr.Application.Registries;
 
+/// <summary>Результат upsert запису довідника (RT-17a).</summary>
+/// <param name="Id">Запис.</param>
+/// <param name="Warnings">Порушення правил рівнів <c>Info</c>/<c>Warning</c>: запис збережено.</param>
+public sealed record RegistryEntryUpsertResult(long Id, IReadOnlyList<Rules.RegistryRuleViolationDto> Warnings);
+
 /// <summary>Створення і зміна запису довідника (ФВ-8.6, ФВ-8.7).</summary>
 /// <remarks>
 /// ⚠ Значення, ключі, ревізія й аудит — через <see cref="RegistryEntryWriter"/> (S6): тут лише
@@ -20,8 +25,14 @@ public sealed class UpsertRegistryEntryHandler(
     IRegistryStore registries,
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
-    RegistryEntryWriter writer)
+    RegistryEntryWriter writer,
+    IUnitOfWork? uow = null,
+    Rules.RegistryRuleEngine? rules = null)
 {
+    // ⚠ `uow` і `rules` необов'язкові лише для тестів, що будують обробник руками (довідники без
+    // правил) — той самий прийом, що `keys` у RegistryEntryWriter. Контейнер підставляє обидва
+    // завжди; що правила на справжньому шляху виконуються, тримає `RegistryRulesHttpTests`.
+
     /// <summary>
     /// Право на зміну ДАНИХ довідника (`02-contracts.md` §9).
     /// </summary>
@@ -52,6 +63,20 @@ public sealed class UpsertRegistryEntryHandler(
     /// <exception cref="NotFoundException">Довідника або запису немає.</exception>
     /// <exception cref="BusinessRuleException">Код зайнятий або невалідний.</exception>
     public async Task<long> HandleAsync(RegistryEntryUpsertDto dto, CancellationToken ct)
+        => (await HandleWithWarningsAsync(dto, ct).ConfigureAwait(false)).Id;
+
+    /// <summary>
+    /// Створює або оновлює запис і повертає його ідентифікатор разом із порушеннями правил, що
+    /// запису не зупинили (RT-17a, <c>warnings[]</c> відповіді, §7.1).
+    /// </summary>
+    /// <param name="dto">Опис запису.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException">Довідника або запису немає.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Код зайнятий або невалідний; <c>422 ECR-REG-4221</c> — порушено правило рівня <c>Error</c>
+    /// (власне правило запису або правило батька композиції), запис відкочено.
+    /// </exception>
+    public async Task<RegistryEntryUpsertResult> HandleWithWarningsAsync(RegistryEntryUpsertDto dto, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(dto);
 
@@ -116,9 +141,26 @@ public sealed class UpsertRegistryEntryHandler(
 
         // Ревізія (завжди, навіть коли змінилася лише назва), складений ключ RT-10a у
         // транзакції збереження, і ОДНА подія аудиту на всі змінені поля — після коміту.
-        await writer.SaveEntryAsync(definition, entry, changes, userId, ct).ConfigureAwait(false);
+        if (rules is null || uow is null)
+        {
+            await writer.SaveEntryAsync(definition, entry, changes, userId, ct).ConfigureAwait(false);
+            return new RegistryEntryUpsertResult(entry.Id, []);
+        }
 
-        return entry.Id;
+        // ⛔ RT-17a (§6): правила — ПІСЛЯ збереження, у ТІЙ САМІЙ транзакції: знімок довідників
+        // бачить запис таким, яким він ляже, а порушення рівня Error відкочує і запис, і його
+        // ключ, і подію аудиту. Перевіряються й правила батька композиції (Σ складу кейсу).
+        var check = Rules.RegistryRuleCheck.None;
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await writer.SaveEntryAsync(definition, entry, changes, userId, token).ConfigureAwait(false);
+                check = await rules.CheckAsync(definition, [entry.Id], [], token).ConfigureAwait(false);
+                check.ThrowIfErrors();
+            },
+            ct).ConfigureAwait(false);
+
+        return new RegistryEntryUpsertResult(entry.Id, check.Warnings);
     }
 
     /// <summary>Наявна назва, поверх якої лягли мови з запиту (X-03).</summary>

@@ -42,7 +42,8 @@ public sealed partial class RegistryBatchHandler(
     RegistryEntryWriter writer,
     DeleteRegistryEntryHandler deleter,
     IAccessDecisionService access,
-    ICurrentUser currentUser)
+    ICurrentUser currentUser,
+    Rules.RegistryRuleEngine rules)
 {
     /// <summary>Право на зміну даних довідника (`02-contracts.md` §9).</summary>
     public const string Permission = "Registry.EditData";
@@ -61,6 +62,10 @@ public sealed partial class RegistryBatchHandler(
     /// <exception cref="NotFoundException"><c>ECR-REG-0404</c>: довідника немає.</exception>
     /// <exception cref="BusinessRuleException"><c>ECR-REQ-0422</c>: пакет завеликий чи рядок неправильний.</exception>
     /// <exception cref="ConcurrencyConflictException"><c>ECR-REG-4092</c>: гонка за ключем під час запису.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// <c>ECR-REG-4221</c> (RT-17a): без <c>dryRun</c> порушено правило довідника рівня <c>Error</c> —
+    /// власне правило рядка чи правило батька композиції; не записано нічого.
+    /// </exception>
     public async Task<RegistryBatchResult> HandleAsync(
         string registryCode, RegistryBatchRequest request, bool dryRun, CancellationToken ct)
     {
@@ -87,6 +92,7 @@ public sealed partial class RegistryBatchHandler(
         await CheckVersionsAsync(states, ct).ConfigureAwait(false);
 
         IReadOnlyList<RegistryEntryWriteRow> written = [];
+        var ruleCheck = Rules.RegistryRuleCheck.None;
         try
         {
             await uow.ExecuteInTransactionAsync(
@@ -95,6 +101,24 @@ public sealed partial class RegistryBatchHandler(
                     await DeleteAsync(registryCode, states, token).ConfigureAwait(false);
                     await CheckKeysAsync(definition, states, token).ConfigureAwait(false);
                     written = await WriteAsync(definition, states, dryRun, token).ConfigureAwait(false);
+
+                    // ⛔ RT-17a (§6, ⚠ «Агрегатні правила й поштучний ввід»): правила — на стані ПІСЛЯ
+                    // всього пакета, у тій самій транзакції, для записаних рядків і батьків композиції
+                    // записаних та видалених. Error без dryRun — 422 на весь пакет (транзакція
+                    // відкочується); у dryRun — перелік у звіті, щоб сітка показала Σ до збереження.
+                    if (states.TrueForAll(s => s.Errors.Count == 0))
+                    {
+                        ruleCheck = await rules.CheckAsync(
+                            definition,
+                            [.. written.Where(w => w.IsNew || w.IsChanged).Select(w => w.Entry.Id)],
+                            [.. states.Where(s => s.Deleted).Select(s => s.Entry!.Id)],
+                            token).ConfigureAwait(false);
+
+                        if (!dryRun)
+                        {
+                            ruleCheck.ThrowIfErrors();
+                        }
+                    }
 
                     if (dryRun || states.Exists(s => s.Errors.Count > 0))
                     {
@@ -109,7 +133,8 @@ public sealed partial class RegistryBatchHandler(
         }
 
         var applied = !dryRun && states.TrueForAll(s => s.Errors.Count == 0);
-        return await ReportAsync(states, written, applied, dryRun, ct).ConfigureAwait(false);
+        var report = await ReportAsync(states, written, applied, dryRun, ct).ConfigureAwait(false);
+        return report with { Rules = ruleCheck.Violations };
     }
 
     /// <summary>Межі й форма самого запиту — 422 на весь пакет, до будь-якого читання даних.</summary>

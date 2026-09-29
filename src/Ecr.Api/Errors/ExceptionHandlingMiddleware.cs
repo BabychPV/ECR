@@ -493,6 +493,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when IsConflictCode(e.ErrorCode) =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⚠ RT-17a (ФВ-8.18): порушене правило довідника рівня `Error` — дані суперечать правилу,
+        // а не чужій зміні, тож 422, а не 409 сусідніх `4092`/`4093`. Явний арм поруч із ними, щоб
+        // `-4221` не читався як пропущений конфлікт; перелік порушень — у подробиці `violations`.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryRuleViolation =>
+            (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 

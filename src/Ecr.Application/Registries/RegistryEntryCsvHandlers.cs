@@ -31,7 +31,15 @@ public sealed record RegistryEntryImportError(int Row, string Key, string? Field
 /// <param name="Errors">Відхилені рядки; є хоч один — не застосовано нічого.</param>
 /// <param name="Applied">Чи записано зміни.</param>
 public sealed record RegistryEntryImportReport(
-    int Added, int Updated, int Unchanged, IReadOnlyList<RegistryEntryImportError> Errors, bool Applied);
+    int Added, int Updated, int Unchanged, IReadOnlyList<RegistryEntryImportError> Errors, bool Applied)
+{
+    /// <summary>
+    /// Порушення правил довідника рівнів <c>Info</c>/<c>Warning</c> після застосування файлу (RT-17a):
+    /// записи збережено. <c>Error</c> — відмова всього файлу <c>422 ECR-REG-4221</c>. Прев'ю
+    /// (<c>dryRun</c>) правил не виконує: воно нічого не записує.
+    /// </summary>
+    public IReadOnlyList<Rules.RegistryRuleViolationDto> Warnings { get; init; } = [];
+}
 
 /// <summary>
 /// Імпорт записів довідника з CSV (`BE-24`, крок 3); право <c>Registry.EditData</c>
@@ -60,8 +68,13 @@ public sealed class ImportRegistryEntriesHandler(
     Security.IAccessDecisionService access,
     ICurrentUser currentUser,
     IClock clock,
-    RegistryEntryWriter writer)
+    RegistryEntryWriter writer,
+    IUnitOfWork? uow = null,
+    Rules.RegistryRuleEngine? rules = null)
 {
+    // ⚠ `uow` і `rules` (RT-17a) необов'язкові лише для тестів, що будують обробник руками: контейнер
+    // підставляє обидва, і файл проходить ті самі правила, що й ручний upsert і пакет.
+
     // ⚠ Значення, ключі, ревізія й аудит значень — через `RegistryEntryWriter` (S6), той самий,
     // що в ручного upsert; служба ключів — його (`writer.Keys`): `null` лише в тестах, що
     // будують writer руками (храповик запитів B-10 так і міряє довідник без ключів). Справжній
@@ -226,6 +239,10 @@ public sealed class ImportRegistryEntriesHandler(
         // повторний імпорт тим самим значенням — до акумулятора не йдуть.
         var valueChanges = new List<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)>();
 
+        // RT-17a: записи, які файл створив чи змінив, — на них (і на їхніх батьках композиції)
+        // після збереження виконуються правила довідника.
+        var touched = new List<RegistryEntry>();
+
         for (var i = 1; i < records.Count; i++)
         {
             var record = records[i];
@@ -355,6 +372,11 @@ public sealed class ImportRegistryEntriesHandler(
             }
 
             var outcome = isNew ? RowOutcome.Added : values.Count == 0 ? RowOutcome.Unchanged : RowOutcome.Updated;
+            if (outcome != RowOutcome.Unchanged)
+            {
+                touched.Add(entry);
+            }
+
             switch (outcome)
             {
                 case RowOutcome.Added:
@@ -430,7 +452,7 @@ public sealed class ImportRegistryEntriesHandler(
         // dryRun її немає), сумарний журнал імпорту нижче, збереження, per-row події
         // `RegistryValueChanged` одним пакетним викликом — формат DetailsJson той самий, що в
         // ручного upsert.
-        await writer.SaveBatchAsync(
+        Task SaveAsync(CancellationToken token) => writer.SaveBatchAsync(
             definition,
             keyDefs,
             [.. keyed.Select(r => r.Entry)],
@@ -454,9 +476,27 @@ public sealed class ImportRegistryEntriesHandler(
                     ChangedByUserId: userId,
                     CorrelationId: currentUser.CorrelationId),
                 innerCt),
+            token);
+
+        if (rules is null || uow is null)
+        {
+            await SaveAsync(ct).ConfigureAwait(false);
+            return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true);
+        }
+
+        // ⛔ RT-17a (§6): правила — після збереження, у тій самій транзакції; Error відкочує файл
+        // цілком (усе або нічого, як і помилка рядка), Warning — у звіт.
+        var check = Rules.RegistryRuleCheck.None;
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await SaveAsync(token).ConfigureAwait(false);
+                check = await rules.CheckAsync(definition, [.. touched.Select(e => e.Id)], [], token).ConfigureAwait(false);
+                check.ThrowIfErrors();
+            },
             ct).ConfigureAwait(false);
 
-        return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true);
+        return new RegistryEntryImportReport(added, updated, unchanged, errors, Applied: true) { Warnings = check.Warnings };
     }
 
     /// <summary>

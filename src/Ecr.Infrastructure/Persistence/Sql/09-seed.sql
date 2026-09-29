@@ -4687,6 +4687,16 @@ USING (VALUES
     (N'err.ECR-REG-4093.entryChanged', N'en', N'Entry {entryCode} was changed after you opened it.', 1),
     (N'err.ECR-REQ-0422.batchTooLarge', N'en', N'A batch can contain at most {max} rows; this one has {count}.', 1),
     (N'err.ECR-REQ-0422.batchItemInvalid', N'en', N'Batch row "{clientRowId}" cannot be processed: each row needs the action upsert or delete, a deletion needs the entry id, and an entry may appear in the batch only once.', 1),
+    -- RT-17a (ФВ-8.18, FEATURE-REGISTRY-TABLES §6, §7.2; R-5): рушій правил довідника, компіляція правил в описі.
+    (N'err.ECR-REG-4221', N'en', N'Registry rule not met', 1),
+    (N'err.ECR-REG-4221.ruleViolated', N'en', N'{rule}: {message}', 1),
+    (N'err.ECR-REG-0422.ruleExpressionInvalid', N'en', N'Rule {ruleCode} cannot be saved: its expression or parameters are invalid.', 1),
+    (N'err.ECR-REG-0422.uniqueWithinReplacedByKeys', N'en', N'Rule {ruleCode} cannot be added: uniqueness is defined by a registry key now. Add a key instead of a UniqueWithin rule.', 1),
+    (N'registries.rules.violated', N'en', N'{rule}: {message}', 1),
+    (N'registries.rules.invalid', N'en', N'Rule {rule} cannot be evaluated for entry {entryCode}: its expression or parameters are invalid. Fix the rule in the registry definition.', 1),
+    (N'registries.rules.notCondition', N'en', N'A registry rule must be a condition that is TRUE or FALSE.', 1),
+    (N'registries.rules.referenceNotAllowed', N'en', N'{construct} is not available in a registry rule: use ROW., THIS and the registry functions.', 1),
+    (N'registries.rules.parameterInvalid', N'en', N'Rule parameter "{parameter}" is missing or does not match the registries (value: "{value}").', 1),
 
     -- RT: expressions
     -- RT-21 (FEATURE-REGISTRY-TABLES §5.5, `02b` §12, перевірки 15–19 і попередження 21а): статичні перевірки функцій довідників.

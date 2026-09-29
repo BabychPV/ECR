@@ -3269,6 +3269,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-4091` | 409 | довідник із таким кодом уже є |
 | `ECR-REG-4092` | 409 | конфлікт складеного ключа довідника (ФВ-8.15, D-151): інший живий запис уже має ті самі значення полів ключа; для темпорального довідника — у вікні чинності, що перетинається. Випадок каже `messageKey`: `keyTaken`, `keyWindowOverlap` (RT-10a); подробиці `key`, `keyText`, `entryId`, `entryCode` конфліктного запису. `existingDuplicates` (RT-11) — публікація опису з новим або знову ввімкненим ключем на даних, де кілька живих записів уже мають однакове значення ключа; подробиці `key`, `groups`, `checked`, `sample` (до 20 груп `{keyText, entries:[{id, code}]}`), той самий алгоритм, що `POST /registries/{code}/keys/check` |
 | `ECR-REG-4093` | 409 | запис довідника змінено іншим після читання (`D-166`): `baseVersion` рядка не збігся з його `PeriodStart`. У пакеті `POST …/entries/batch` (RT-14) — помилка рядка `entryChanged` з подробицями `entryId`, `entryCode`, а не відповідь 409 |
+| `ECR-REG-4221` | 422 | порушено правило довідника рівня `Error` (ФВ-8.18, RT-17a): upsert `POST …/entries`, пакет `POST …/entries/batch` без `dryRun` чи імпорт CSV відкочено цілком. `messageKey` `ruleViolated`, подробиці `rule`, `entryCode`, `message` першого порушення і `violations[]` (`{entryId, entryCode, rule, severity, messageKey, params}`) — усі порушення рівня `Error`, зокрема правила батька композиції, яке зачепила зміна дитини. Рівні `Info`/`Warning` запис не зупиняють і їдуть у `warnings[]`/`rules[]` відповіді |
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія одиниць неможлива. Заголовок нейтральний, випадок каже `messageKey`-подробиця: різні розмірності (ФВ-16.3, `incompatibleDimensions`), нульовий множник одиниці на конверсії (`zeroFactor`), явна конверсія не для цієї пари (`explicitConversionMismatch`), множник ≤ 0 на заведенні чи зміні одиниці (`factorMustBePositive`, BE-15) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
@@ -3623,6 +3624,25 @@ public sealed class NotFoundException(string errorCode, string message)
 > обмін ключами між записами пакета законний. `409 ECR-REG-4092` — лише гонка під час застосування;
 > `422 ECR-REQ-0422 batchTooLarge` (> 2000) / `batchItemInvalid` (невідома дія, `delete` без `id`,
 > повтор `id`).
+
+> ✎ 2026-09-29 (RT-17a, ФВ-8.18, FEATURE-REGISTRY-TABLES §6, §7.1): правила довідника виконуються
+> під час запису — `POST …/entries`, `POST …/entries/batch`, `POST …/entries/import` — на стані ПІСЛЯ
+> запису, у тій самій транзакції, для записаних записів і для батьків композиції, чиї правила читають
+> змінений (чи видалений) дочірній довідник. Рівень `Error` — `422 ECR-REG-4221` (див. §7), не
+> записано нічого; `Info`/`Warning` — запис збережено, порушення в кінці відповіді:
+> `RegistryEntryIdResponse.warnings[]`, `RegistryBatchResult.rules[]`, `RegistryEntryImportReport.warnings[]`,
+> елемент — `RegistryRuleViolationDto` `{entryId, entryCode, rule, severity, messageKey, params}`
+> (`messageKey` = `registries.rules.violated`, параметри `rule`, `entryCode`, `message`; для шаблону
+> «Сума дочірніх» — `value` = Σ; помилка-значення виразу — `errorCode`; правило, яке не розбирається, —
+> `registries.rules.invalid`). Пакет із `dryRun` повертає в `rules[]` і рівень `Error` (відповідь 200,
+> нічого не записано); прев'ю CSV (`dryRun`) правил не виконує. `UniqueWithin` не виконується (`R-5`).
+> Збереження опису (`PUT …/definition`, публікація чернетки): нові, змінені й знову ввімкнені правила
+> розбираються граматикою правил (діалект `Template`, `THIS`, `ROW.`) і перевіряються за формами
+> довідників — `422 ECR-REG-0422 ruleExpressionInvalid` з `ruleCode` і `diagnostics[]`
+> `{messageKey, params, position, length}`; нове `UniqueWithin` — `422 uniqueWithinReplacedByKeys`;
+> шаблон `{"template":"childSum", child, field, target, tolerance}` розгортається у вираз
+> `ABS(REGSUM(child, ROW.<поле композиції> = THIS, ROW.field) - target) <= tolerance OR REGCOUNT(child, ROW.<поле композиції> = THIS) = 0`
+> (склад, якого ще немає, — не порушення: батько зберігається раніше за дітей).
 
 > ✎ 2026-09-21: `GET /sources/{id}/mapping/preview` — `fields[].isActive`
 > (обов'язкове; `false` — мапінг призупинений, `BE-27`, і його точки адрес не
