@@ -303,6 +303,11 @@ jobs:
   # ніде. Це завдання ганяє той самий проєкт на Windows, де гілки тестів із
   # живими процесами справді виконуються. SQL не потрібен.
   #
+  # ⚠ Тому `--filter "Category!=Integration"`: SQL-тести дочірнього воркера
+  # (I1, `[Collection("SqlServer")]`) без `ECR_TEST_SQL` тут упали б. Вони
+  # ідуть у `server-part (core)` — крок «Тести .NET» ганяє весь `Ecr.sln`
+  # із SQL у контейнері.
+  #
   # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
   # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
   # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
@@ -319,7 +324,7 @@ jobs:
           global-json-file: global.json
 
       - name: Тести Ecr.Worker (Job Object)
-        run: dotnet test tests/Ecr.Worker.Tests --nologo --logger "trx;LogFileName=worker-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
+        run: dotnet test tests/Ecr.Worker.Tests --nologo --filter "Category!=Integration" --logger "trx;LogFileName=worker-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
 
   # ⚠ MSI (installer/Ecr.Installer, WiX 5) не збирається ніде в CI: WiX не має
   # збірки під Linux, тож `tools/build-msi.ps1` досі йшов лише руками на
