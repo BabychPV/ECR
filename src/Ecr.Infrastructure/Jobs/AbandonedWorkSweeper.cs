@@ -11,7 +11,8 @@ namespace Ecr.Infrastructure.Jobs;
 
 /// <summary>
 /// Прибирання покинутої роботи: завислі <c>itg.JobProgress</c>,
-/// <c>itg.CollectionRun</c> і <c>itg.MaintenanceRun</c> (U4, U11) плюс
+/// <c>itg.CollectionRun</c>, <c>itg.MaintenanceRun</c> (U4, U11) і
+/// <c>calc.CalculationRun</c> (P3) плюс
 /// ретенція завершених записів прогресу (аудит P2).
 /// </summary>
 /// <remarks>
@@ -76,6 +77,38 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     /// </remarks>
     public static readonly TimeSpan MaintenanceRunAbandonedAfter = TimeSpan.FromHours(24);
 
+    /// <summary>Ключ каталогу причини покинутого прогону розрахунку (P3, ФВ-9.8).</summary>
+    public const string AbandonedCalculationRunKey = "jobs.calculationRunAbandoned";
+
+    /// <summary>
+    /// Причина для прогону розрахунку, який ніхто не закрив, — конверт
+    /// (<see cref="JobProgressMessageEnvelope"/>), як і для прогону збору.
+    /// </summary>
+    public static readonly string AbandonedCalculationRunReason =
+        JobProgressMessageCodec.Encode(new JobProgressMessageEnvelope(AbandonedCalculationRunKey));
+
+    /// <summary>
+    /// Вік, після якого прогін розрахунку вважається покинутим НЕЗАЛЕЖНО від того,
+    /// чи йде зараз якийсь інший перерахунок.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Судження: у перерахунку немає власного watchdog (на відміну від збору,
+    /// де стеля — 15 хв), а ціль річного перерахунку — до 20 хв (J-1, ПРД-13).
+    /// Дві години — шість цілей: живий прогін так довго не йде, а покинутий при
+    /// живих сусідах (перерахунок ставиться на КОЖНУ правку, тож «хтось живий»
+    /// — звичайний стан) закривається того ж робочого дня. Без живих
+    /// перерахунків межа — <see cref="IJobProgressStore.StaleAfter"/>, як у збору.
+    /// </remarks>
+    public static readonly TimeSpan CalculationRunAbandonedAfter = TimeSpan.FromHours(2);
+
+    /// <summary>Імена типів задачі, що пишуть <c>calc.CalculationRun</c>: маркер і клас.</summary>
+    /// <remarks>
+    /// ⚠ Точне ім'я типу після «.», а не суфікс «RecalculationJob»: той зачепив би й
+    /// <c>IFormulaRecalculationJob</c>, яка прогонів розрахунку не пише.
+    /// </remarks>
+    private static readonly string[] CalculationJobNames =
+        ["." + nameof(IRecalculationJob), "." + nameof(RecalculationJob)];
+
     /// <summary>Скільки рядків прогресу видаляти за один прохід ретенції.</summary>
     public const int PurgeBatch = 5_000;
 
@@ -111,22 +144,24 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
     /// <param name="ct">Скасування.</param>
     /// <param name="startingInstance">
     /// Лише на СТАРТІ: процес, що стартує (<c>JobProgressStore.CurrentMachineName</c>,
-    /// <c>JobProgressStore.CurrentInstanceId</c>). Тоді активні рядки
-    /// попередніх процесів цієї машини закриваються НЕЗАЛЕЖНО від биття.
+    /// <c>JobProgressStore.CurrentRole</c>, <c>JobProgressStore.CurrentInstanceId</c>).
+    /// Тоді активні рядки попередніх процесів цієї машини Й ЦІЄЇ РОЛІ
+    /// закриваються НЕЗАЛЕЖНО від биття.
     /// <c>null</c> — періодичний прохід: лише за віком биття.
     /// </param>
     public async Task<SweepOutcome> SweepAsync(
         string jobReason, DateTime utcNow, bool purge, CancellationToken ct,
-        (string MachineName, string InstanceId)? startingInstance = null)
+        (string MachineName, string Role, string InstanceId)? startingInstance = null)
     {
         // ⚠ Задачі — ПЕРШИМИ: живість прогонів нижче визначається саме за
         // активними задачами, і покинута задача, ще не закрита, тримала б
         // «живим» і свій покинутий прогін.
-        // ⚠ Друга служба (чи перекритий рецикл) на ту саму базу з цієї ж машини
-        // закриє тут задачі ЖИВОГО першого процесу — див. operations-runbook.md, п. 1.1.
+        // ⚠ Друга служба ТІЄЇ Ж РОЛІ (чи перекритий рецикл) на ту саму базу з цієї ж
+        // машини закриє тут задачі ЖИВОГО першого процесу — див. operations-runbook.md,
+        // п. 1.1. Api й воркер на одному хості — різні ролі, один одного не закривають (P3).
         var previous = startingInstance is { } me
             ? await progress
-                .FailPreviousInstanceAsync(me.MachineName, me.InstanceId, jobReason, utcNow, ct)
+                .FailPreviousInstanceAsync(me.MachineName, me.Role, me.InstanceId, jobReason, utcNow, ct)
                 .ConfigureAwait(false)
             : 0;
 
@@ -135,6 +170,7 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
         var live = await LiveJobCodesAsync(utcNow, ct).ConfigureAwait(false);
         var collection = await CloseCollectionRunsAsync(utcNow, live, ct).ConfigureAwait(false);
         var maintenance = await CloseMaintenanceRunsAsync(utcNow, live, ct).ConfigureAwait(false);
+        var calculation = await CloseCalculationRunsAsync(utcNow, live, ct).ConfigureAwait(false);
 
         var purged = purge
             ? await progress
@@ -142,7 +178,7 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
                 .ConfigureAwait(false)
             : 0;
 
-        return new SweepOutcome(jobs, collection, maintenance, purged);
+        return new SweepOutcome(jobs, collection, maintenance, purged, calculation);
     }
 
     /// <summary>Коди задач, які зараз ЖИВІ (активні, зі свіжим биттям).</summary>
@@ -205,6 +241,51 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
                     .SetProperty(r => r.Status, CollectionFailure.FailedStatus)
                     .SetProperty(r => r.FinishedAt, utcNow)
                     .SetProperty(r => r.ErrorMessage, AbandonedCollectionRunReason),
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Закриває прогони розрахунку (<c>calc.CalculationRun</c>) без господаря.</summary>
+    /// <remarks>
+    /// ⚠ Той самий непрямий критерій, що для збору: прогін не знає свого
+    /// <c>jobId</c>, тож без ЖОДНОЇ живої задачі перерахунку сирота — будь-який
+    /// <c>Running</c>, старший за <see cref="IJobProgressStore.StaleAfter"/>; якщо
+    /// якась жива — лише старший за <see cref="CalculationRunAbandonedAfter"/>.
+    /// <para>
+    /// ⛔ Лише <c>Running</c>: <c>Current</c>/<c>Superseded</c>/<c>Failed</c> —
+    /// завершені прогони, і перемикання актуальності тут не зачіпається ніяк.
+    /// </para>
+    /// </remarks>
+    private async Task<int> CloseCalculationRunsAsync(
+        DateTime utcNow, IReadOnlyList<string> live, CancellationToken ct)
+    {
+        var anyCalculationAlive = live.Any(
+            c => CalculationJobNames.Any(name => c.EndsWith(name, StringComparison.Ordinal)));
+        var startedBefore = utcNow - (anyCalculationAlive ? CalculationRunAbandonedAfter : IJobProgressStore.StaleAfter);
+
+        var candidates = await db.CalculationRuns
+            .AsNoTracking()
+            .Where(r => r.Status == "Running" && r.StartedAt < startedBefore)
+            .OrderBy(r => r.StartedAt)
+            .Select(r => r.Id)
+            .Take(MaxRunsPerSweep)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (candidates.Count == 0)
+        {
+            return 0;
+        }
+
+        // ⛔ «Досі Running» — і в записі: прогін міг завершитися сам між вибіркою
+        // і цим рядком, і його справжній результат важливіший.
+        return await db.CalculationRuns
+            .Where(r => candidates.Contains(r.Id) && r.Status == "Running")
+            .ExecuteUpdateAsync(
+                s => s
+                    .SetProperty(r => r.Status, "Failed")
+                    .SetProperty(r => r.FinishedAt, utcNow)
+                    .SetProperty(r => r.ErrorMessage, AbandonedCalculationRunReason),
                 ct)
             .ConfigureAwait(false);
     }
@@ -280,8 +361,9 @@ public sealed class AbandonedWorkSweeper(EcrDbContext db, IJobProgressStore prog
 /// <param name="CollectionRuns">Прогонів збору закрито.</param>
 /// <param name="MaintenanceRuns">Прогонів обслуговування закрито.</param>
 /// <param name="Purged">Завершених записів прогресу видалено.</param>
-public sealed record SweepOutcome(int Jobs, int CollectionRuns, int MaintenanceRuns, int Purged)
+/// <param name="CalculationRuns">Прогонів розрахунку закрито (P3).</param>
+public sealed record SweepOutcome(int Jobs, int CollectionRuns, int MaintenanceRuns, int Purged, int CalculationRuns = 0)
 {
     /// <summary>Чи зробив прохід хоч щось.</summary>
-    public bool Any => Jobs + CollectionRuns + MaintenanceRuns + Purged > 0;
+    public bool Any => Jobs + CollectionRuns + MaintenanceRuns + Purged + CalculationRuns > 0;
 }

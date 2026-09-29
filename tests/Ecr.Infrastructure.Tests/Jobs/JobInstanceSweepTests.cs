@@ -34,12 +34,12 @@ public sealed class JobInstanceSweepTests(SqlServerFixture sql)
     public async Task Старт_закриває_рядки_попереднього_процесу_цієї_машини_зі_свіжим_биттям_і_не_чіпає_інші()
     {
         var machine = $"t{Guid.NewGuid():N}"[..12];
-        var current = JobProgressStore.InstanceIdOf(machine, Guid.NewGuid());
-        var previous = JobProgressStore.InstanceIdOf(machine, Guid.NewGuid());
+        var current = JobProgressStore.InstanceIdOf(machine, JobProgressStore.RoleApi, Guid.NewGuid());
+        var previous = JobProgressStore.InstanceIdOf(machine, JobProgressStore.RoleApi, Guid.NewGuid());
 
         // ⚠ Інша машина, чиє ім'я ПОЧИНАЄТЬСЯ з імені цієї: префікс мусить
         // закінчуватися роздільником, інакше «t1234» зачепив би «t1234x».
-        var otherMachine = JobProgressStore.InstanceIdOf(machine + "x", Guid.NewGuid());
+        var otherMachine = JobProgressStore.InstanceIdOf(machine + "x", JobProgressStore.RoleApi, Guid.NewGuid());
 
         await using var db = sql.CreateContext();
         var store = new JobProgressStore(db);
@@ -63,7 +63,7 @@ public sealed class JobInstanceSweepTests(SqlServerFixture sql)
 
             // Старт процесу `current` на цій машині.
             var outcome = await new AbandonedWorkSweeper(db, new JobProgressStore(db))
-                .SweepAsync(Reason, At, purge: false, CancellationToken.None, (machine, current));
+                .SweepAsync(Reason, At, purge: false, CancellationToken.None, (machine, JobProgressStore.RoleApi, current));
 
             Assert.True(outcome.Jobs >= 2);
             Assert.Equal(
@@ -120,10 +120,14 @@ public sealed class JobInstanceSweepTests(SqlServerFixture sql)
             await db.JobProgresses.Where(p => p.JobId == jobId).ExecuteDeleteAsync();
         }
 
-        // Формат: «{машина}/{GUID N}», у межах стовпця.
-        Assert.StartsWith(JobProgressStore.CurrentMachineName + "/", JobProgressStore.CurrentInstanceId, StringComparison.Ordinal);
+        // Формат: «{машина}/{роль}/{GUID N}» (P3), у межах стовпця.
+        Assert.StartsWith(
+            $"{JobProgressStore.CurrentMachineName}/{JobProgressStore.CurrentRole}/",
+            JobProgressStore.CurrentInstanceId,
+            StringComparison.Ordinal);
         Assert.True(JobProgressStore.CurrentInstanceId.Length <= Domain.Entities.Integration.JobProgress.MaxInstanceIdLength);
-        Assert.Equal(64, JobProgressStore.InstanceIdOf(JobProgressStore.MachineNameOf(new string('m', 80)), Guid.NewGuid()).Length);
+        Assert.Equal(64, JobProgressStore.InstanceIdOf(
+            JobProgressStore.MachineNameOf(new string('m', 80)), JobProgressStore.RoleWorker, Guid.NewGuid()).Length);
     }
 
     [Theory]

@@ -10,21 +10,107 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
     /// <summary>Спроб загалом: перша + <see cref="Jobs.QuartzJobAdapter.MaxRetryAttempts"/> ретраїв (BE-08).</summary>
     private const int MaxAttempts = Jobs.QuartzJobAdapter.MaxRetryAttempts + 1;
 
+    /// <summary>Роль процесу Api (HTTP-застосунок) в <see cref="JobProgress.InstanceId"/>.</summary>
+    public const string RoleApi = "api";
+
+    /// <summary>Роль процесу-воркера (виконавця черги задач) в <see cref="JobProgress.InstanceId"/>.</summary>
+    public const string RoleWorker = "wrk";
+
+    /// <summary>Фіксований перелік ролей. Нова роль — лише новою константою тут.</summary>
+    public static IReadOnlyList<string> Roles { get; } = [RoleApi, RoleWorker];
+
+    /// <summary>Довжина ролі — рівно три символи для КОЖНОЇ ролі.</summary>
+    private const int RoleLength = 3;
+
     /// <summary>Скільки символів імені машини йде в <see cref="JobProgress.InstanceId"/>.</summary>
-    /// <remarks>31 + «/» + 32 (GUID «N») = 64 — рівно межа стовпця.</remarks>
-    private const int MaxMachineNameLength = 31;
+    /// <remarks>
+    /// 27 + «/» + 3 (роль) + «/» + 32 (GUID «N») = 64 — рівно межа стовпця
+    /// (<c>nvarchar(64)</c>, <see cref="JobProgress.MaxInstanceIdLength"/>). ⚠ Було 31
+    /// до ролі (P3, ФВ-9.8): чотири символи віддано ролі й роздільнику. NetBIOS-ім'я
+    /// Windows — до 15 символів, тож обрізання зачіпає хіба довгі DNS-імена Linux.
+    /// </remarks>
+    private const int MaxMachineNameLength = 27;
+
+    /// <summary>Межа імені машини в рядках СТАРОГО формату <c>{машина}/{GUID}</c> (до P3).</summary>
+    private const int LegacyMaxMachineNameLength = 31;
+
+    /// <summary>Довжина GUID у форматі «N».</summary>
+    private const int GuidLength = 32;
 
     /// <summary>Ім'я цієї машини в тому вигляді, в якому воно стоїть в <see cref="JobProgress.InstanceId"/>.</summary>
     public static string CurrentMachineName { get; } = MachineNameOf(Environment.MachineName);
 
-    /// <summary>
-    /// Ідентифікатор ЦЬОГО процесу: <c>{машина}/{GUID}</c>, GUID генерується раз на старті.
-    /// </summary>
+    /// <summary>GUID цього процесу — генерується раз на старті.</summary>
     /// <remarks>
     /// ⚠ GUID, а не PID: Windows повторно видає PID, і новий процес із PID
     /// попереднього не відрізнив би його рядки від своїх.
     /// </remarks>
-    public static string CurrentInstanceId { get; } = InstanceIdOf(CurrentMachineName, Guid.NewGuid());
+    private static readonly Guid ProcessGuid = Guid.NewGuid();
+
+    private static readonly Lock RoleGate = new();
+    private static string currentRole = RoleApi;
+    private static string? currentInstanceId;
+
+    /// <summary>Роль цього процесу; за замовчуванням <see cref="RoleApi"/>.</summary>
+    public static string CurrentRole
+    {
+        get
+        {
+            lock (RoleGate)
+            {
+                return currentRole;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ідентифікатор ЦЬОГО процесу: <c>{машина}/{роль}/{GUID}</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Роль — частина ідентифікатора (P3): Api й воркер на ОДНОМУ хості інакше
+    /// мали б той самий префікс машини, і старт Api закривав би
+    /// (<see cref="FailPreviousInstanceAsync"/>) живі задачі воркера.
+    /// ⚠ Перше читання фіксує роль: рядки вже позначено нею, і зміна ролі після
+    /// цього розщепила б процес на два «інстанси» (<see cref="UseRole"/> кидає).
+    /// </remarks>
+    public static string CurrentInstanceId
+    {
+        get
+        {
+            lock (RoleGate)
+            {
+                return currentInstanceId ??= InstanceIdOf(CurrentMachineName, currentRole, ProcessGuid);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Задає роль процесу. Викликати на старті хоста ДО першої задачі
+    /// (воркер — <see cref="RoleWorker"/>; Api нічого не кличе — роль за замовчуванням).
+    /// </summary>
+    /// <param name="role">Роль із <see cref="Roles"/>.</param>
+    /// <exception cref="ArgumentException">Роль не з переліку.</exception>
+    /// <exception cref="InvalidOperationException">Ідентифікатор уже видано з іншою роллю.</exception>
+    public static void UseRole(string role)
+    {
+        EnsureKnownRole(role);
+
+        lock (RoleGate)
+        {
+            if (string.Equals(role, currentRole, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (currentInstanceId is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Роль процесу вже зафіксовано як «{currentRole}» (ідентифікатор {currentInstanceId} видано): «{role}» задавати треба до першої задачі.");
+            }
+
+            currentRole = role;
+        }
+    }
 
     /// <summary>Ім'я машини, обрізане до межі.</summary>
     /// <param name="machineName">Сире ім'я.</param>
@@ -34,10 +120,25 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         return machineName.Length <= MaxMachineNameLength ? machineName : machineName[..MaxMachineNameLength];
     }
 
-    /// <summary>Ідентифікатор процесу для <paramref name="machineName"/> і <paramref name="process"/>.</summary>
+    /// <summary>Ідентифікатор процесу: <c>{машина}/{роль}/{GUID N}</c>.</summary>
     /// <param name="machineName">Ім'я машини (вже обрізане, <see cref="MachineNameOf"/>).</param>
+    /// <param name="role">Роль із <see cref="Roles"/>.</param>
     /// <param name="process">GUID процесу.</param>
-    public static string InstanceIdOf(string machineName, Guid process) => $"{machineName}/{process:N}";
+    public static string InstanceIdOf(string machineName, string role, Guid process)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(machineName);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(machineName.Length, MaxMachineNameLength, nameof(machineName));
+        EnsureKnownRole(role);
+        return $"{machineName}/{role}/{process:N}";
+    }
+
+    private static void EnsureKnownRole(string role)
+    {
+        if (role is null || role.Length != RoleLength || !Roles.Contains(role, StringComparer.Ordinal))
+        {
+            throw new ArgumentException($"Невідома роль процесу «{role}»: лише {string.Join(", ", Roles)}.", nameof(role));
+        }
+    }
 
     /// <inheritdoc />
     public Task QueueAsync(
@@ -276,6 +377,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         var stale = db.JobProgresses
             .AsNoTracking()
             .Where(p => (p.State == "Running" || p.State == "Queued")
+                        && p.Lane == null
                         && (p.HeartbeatAt == null || p.HeartbeatAt < threshold));
 
         var count = await stale.CountAsync(ct).ConfigureAwait(false);
@@ -335,9 +437,15 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
         // ⚠ `HeartbeatAt == null` — рядок старший за міграцію, що додала
         // колонку. Процес, який його створив, зупинявся заради розгортання
         // цієї ж міграції, тож він гарантовано мертвий.
+        //
+        // ⛔ `Lane == null` (P3, контракт черги §1): рядок черги в базі
+        // (`Lane IS NOT NULL`) закриває ЛИШЕ прострочена оренда (`DbJobQueue`) —
+        // його биття пише власник оренди, і «застигле» биття тут не означає
+        // «покинута»: оренду ще можуть перехопити й довиконати.
         var candidates = await db.JobProgresses
             .AsNoTracking()
             .Where(p => (p.State == "Running" || p.State == "Queued")
+                        && p.Lane == null
                         && (p.HeartbeatAt == null || p.HeartbeatAt < threshold))
             .ToListAsync(ct)
             .ConfigureAwait(false);
@@ -362,6 +470,7 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
             var affected = await db.JobProgresses
                 .Where(p => p.JobId == entry.JobId
                             && (p.State == "Running" || p.State == "Queued")
+                            && p.Lane == null
                             && (p.HeartbeatAt == null || p.HeartbeatAt < threshold))
                 .ExecuteUpdateAsync(
                     s => s
@@ -383,26 +492,59 @@ public sealed class JobProgressStore(EcrDbContext db) : IJobProgressStore
 
     /// <inheritdoc />
     public async Task<int> FailPreviousInstanceAsync(
-        string machineName, string currentInstanceId, string reason, DateTime utcNow, CancellationToken ct)
+        string machineName, string role, string currentInstanceId, string reason, DateTime utcNow,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(machineName);
         ArgumentException.ThrowIfNullOrWhiteSpace(currentInstanceId);
+        EnsureKnownRole(role);
 
-        var prefix = machineName + "/";
+        // ⛔ Префікс — машина І роль (P3). Без ролі старт Api на хості воркера
+        // закривав би живі задачі воркер-процесів (вони теж «цієї машини»).
+        var prefix = $"{machineName}/{role}/";
+        if (!currentInstanceId.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"Ідентифікатор «{currentInstanceId}» не належить машині «{machineName}» і ролі «{role}».",
+                nameof(currentInstanceId));
+        }
 
         // ⛔ Биття тут НЕ перевіряється, і саме в цьому сенс: попередній процес
-        // цієї машини мертвий (його чергу в пам'яті Quartz втрачено), навіть
-        // якщо встиг ударити секунду тому. Рядки інших машин — не тут: їхню
-        // живість видно лише з биття (`FailStaleAsync`).
+        // цієї машини й ролі мертвий (його чергу в пам'яті Quartz втрачено),
+        // навіть якщо встиг ударити секунду тому. Рядки інших машин і інших
+        // ролей — не тут: їхню живість видно лише з биття (`FailStaleAsync`).
         //
+        // ⛔ `Lane == null`: рядок черги в базі закриває лише прострочена оренда
+        // (контракт черги §1) — перехоплена оренда довиконає його.
+        var query = db.JobProgresses
+            .Where(p => (p.State == "Running" || p.State == "Queued")
+                        && p.Lane == null
+                        && p.InstanceId != null
+                        && p.InstanceId != currentInstanceId);
+
+        if (string.Equals(role, RoleApi, StringComparison.Ordinal))
+        {
+            // ⚠ Зворотна сумісність: рядки СТАРОГО формату `{машина}/{GUID}` (до
+            // P3) писав лише Api — воркера тоді не існувало. Старий формат має
+            // рівно один «/» (`NOT LIKE '%/%/%'`); ім'я машини в ньому обрізалося
+            // до 31, а не до 27, тож для обрізаного імені префікс — без «/».
+            var legacyPrefix = machineName.Length < MaxMachineNameLength ? machineName + "/" : machineName;
+            const int legacyMaxLength = LegacyMaxMachineNameLength + 1 + GuidLength;
+
+            query = query.Where(p => p.InstanceId!.StartsWith(prefix)
+                                     || (p.InstanceId!.StartsWith(legacyPrefix)
+                                         && !EF.Functions.Like(p.InstanceId!, "%/%/%")
+                                         && p.InstanceId!.Length <= legacyMaxLength));
+        }
+        else
+        {
+            query = query.Where(p => p.InstanceId!.StartsWith(prefix));
+        }
+
         // ⚠ Поля — ті самі, що пише `JobProgress.Finish("Failed", reason)`
         // (Percent не чіпає), і умова «досі активний» — у самому UPDATE: задачу
         // могли перезапустити в цьому процесі між рядком і записом.
-        return await db.JobProgresses
-            .Where(p => (p.State == "Running" || p.State == "Queued")
-                        && p.InstanceId != null
-                        && p.InstanceId.StartsWith(prefix)
-                        && p.InstanceId != currentInstanceId)
+        return await query
             .ExecuteUpdateAsync(
                 s => s
                     .SetProperty(p => p.State, "Failed")

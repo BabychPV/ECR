@@ -224,14 +224,23 @@ public interface IJobProgressStore
     /// насправді доробила успішно. Тепер покинутою вважається лише задача,
     /// чиє биття (<see cref="HeartbeatAsync"/>) застигло довше за
     /// <see cref="StaleAfter"/>.
+    ///
+    /// ⛔ Рядки черги в базі (<c>Lane IS NOT NULL</c>) — поза цим методом (P3,
+    /// контракт черги §1): їх закриває лише прострочена оренда.
     /// </remarks>
     public Task<int> FailStaleAsync(string reason, DateTime utcNow, CancellationToken ct);
 
     /// <summary>
-    /// Позначає <c>Failed</c> активні задачі ПОПЕРЕДНІХ процесів цієї машини —
-    /// незалежно від свіжості биття.
+    /// Позначає <c>Failed</c> активні задачі ПОПЕРЕДНІХ процесів цієї машини й
+    /// ЦІЄЇ Ж РОЛІ — незалежно від свіжості биття.
     /// </summary>
     /// <param name="machineName">Ім'я цієї машини (префікс <c>InstanceId</c>).</param>
+    /// <param name="role">
+    /// Роль процесу (<c>api</c>, <c>wrk</c>; P3). Рядки іншої ролі тієї ж машини
+    /// не чіпаються: Api й воркер на одному хості не закривають задачі один
+    /// одного. Роль <c>api</c> закриває ще й рядки старого формату
+    /// <c>{машина}/{GUID}</c> — їх писав лише Api.
+    /// </param>
     /// <param name="currentInstanceId">Ідентифікатор поточного процесу — його рядки не чіпаються.</param>
     /// <param name="reason">Причина, що йде в <c>Error</c>.</param>
     /// <param name="utcNow">Момент позначення в UTC.</param>
@@ -241,10 +250,12 @@ public interface IJobProgressStore
     /// ⛔ Лише на СТАРТІ. Перезапуск, коротший за <see cref="StaleAfter"/>,
     /// інакше лишав рядки попереднього процесу «живими» ще ~6 хв. Рядки інших
     /// машин і рядки без <c>InstanceId</c> — поза цим методом
-    /// (<see cref="FailStaleAsync"/>).
+    /// (<see cref="FailStaleAsync"/>). Рядки черги в базі (<c>Lane IS NOT NULL</c>)
+    /// — теж поза ним: їх закриває лише прострочена оренда.
     /// </remarks>
     public Task<int> FailPreviousInstanceAsync(
-        string machineName, string currentInstanceId, string reason, DateTime utcNow, CancellationToken ct);
+        string machineName, string role, string currentInstanceId, string reason, DateTime utcNow,
+        CancellationToken ct);
 }
 
 /// <summary>Активні задачі без биття довше за <see cref="IJobProgressStore.StaleAfter"/>.</summary>

@@ -4194,6 +4194,10 @@ USING (VALUES
     -- Отруйна задача: оренду втрачено {reclaims} разів поспіль — процес-виконавець щоразу зникав.
     (N'jobs.leaseLostTooOften',                 N'en', N'Stopped: the worker lost this job {reclaims} times in a row (its process stopped each time). Restart the job after checking the logs.', 1),
     -- COLL:jobqueue ── кінець секції ──
+    -- COLL:calcrun-sweep ── Покинутий прогін розрахунку (P3, ФВ-9.8, `AbandonedWorkSweeper`) ──
+    -- `AbandonedWorkSweeper.AbandonedCalculationRunReason`: `calc.CalculationRun` у `Running`, який ніхто не закрив.
+    (N'jobs.calculationRunAbandoned',           N'en', N'The calculation run was not closed: the process running it stopped before the run recorded its result. Start the recalculation again.', 1),
+    -- COLL:calcrun-sweep ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),

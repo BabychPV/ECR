@@ -146,6 +146,7 @@ public static partial class StartupSequence
                     purge: false,
                     CancellationToken.None,
                     (Infrastructure.Persistence.JobProgressStore.CurrentMachineName,
+                     Infrastructure.Persistence.JobProgressStore.CurrentRole,
                      Infrastructure.Persistence.JobProgressStore.CurrentInstanceId))
                 .ConfigureAwait(false);
 
