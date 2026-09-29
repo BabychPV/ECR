@@ -403,6 +403,18 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
     /// та, що позаду, стає доступною не пізніше, ніж став би наш ретрай.
     /// </remarks>
     public Task<bool> RequeueAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct)
+        => RequeueCoreAsync(claim, delay, restoreAttempt: false, ct);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ Той самий пакет, що <see cref="RequeueAsync"/> (поглинання й злиття масиву
+    /// задачею позаду — так само), з однією різницею: <c>Attempt − 1</c>, тобто
+    /// значення до захоплення, яке додало <c>+1</c>.
+    /// </remarks>
+    public Task<bool> DeferAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct)
+        => RequeueCoreAsync(claim, delay, restoreAttempt: true, ct);
+
+    private Task<bool> RequeueCoreAsync(JobClaimToken claim, TimeSpan delay, bool restoreAttempt, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(claim);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero, nameof(delay));
@@ -449,6 +461,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 UPDATE itg.JobProgress
                 SET [State] = 'Queued', AvailableAt = @available, ClaimToken = NULL, LeaseUntil = NULL,
                     UpdatedAt = @shown, HeartbeatAt = @shown,
+                    Attempt = CASE WHEN @restoreAttempt = 1 AND ISNULL(Attempt, 0) > 0 THEN Attempt - 1 ELSE Attempt END,
                     -- Позаду на ціль уже стоїть інша Queued: дві Queued на ціль не пускає UX_JobProgress_Target_Queued.
                     TargetKey = CASE WHEN @behind IS NULL THEN TargetKey ELSE NULL END
                 {OwnedBy};
@@ -460,6 +473,7 @@ public sealed class DbJobQueue(EcrDbContext db, IClock clock) : IJobQueue
                 BindClaim(p, claim);
                 BindMerge(p, JobPayloadMerge.ArrayPathOf(JobPayloadMerge.MergeableJobCode));
                 p.Add("@mergeCode", SqlDbType.NVarChar, 64).Value = JobPayloadMerge.MergeableJobCode;
+                p.Add("@restoreAttempt", SqlDbType.Bit).Value = restoreAttempt;
                 p.Add("@delayMs", SqlDbType.Int).Value = checked((int)delay.TotalMilliseconds);
                 p.Add("@absorbed", SqlDbType.NVarChar, JobProgressMessageCodec.MaxEncodedLength).Value = absorbed;
                 AddShown(p);

@@ -37,8 +37,9 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// ⚠ Детерміновано: повний перерахунок тримається точкою перемикання між
 /// обчисленням і записом (<c>IPeriodStore.FindPeriodStateAsync</c>, як у
 /// <c>SubmitRecalculationRaceTests</c>); інкрементна задача або завершується
-/// (одночасне виконання — дефект), або стає в очікування лока документа, яке
-/// видно в <c>sys.dm_tran_locks</c>.
+/// (одночасне виконання — дефект), або відкладається (<c>JobDeferredException</c>,
+/// O1 — не висить за локом, тримаючи слот), і її повтор після звільнення рахує
+/// від останнього входу.
 /// </para>
 /// <para>
 /// Мутація: прибрати взяття лока з <c>FormulaRecalculationJob.ExecuteAsync</c> —
@@ -112,27 +113,28 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
             $"WHERE PeriodKey = {doc.PeriodKey.Value} AND TableRowId = {doc.RowIds[0]} AND ColumnDefId = {inColumn}");
 
         var incrementalJob = IncrementalJob(incrementalDb, doc);
+        var request = new FormulaRecalculationRequest(
+            doc.TableInstanceId, doc.PeriodKey.Value, [new DirtyCell(doc.RowIds[0], inColumn)]);
+
+        // ⚠ O1: інкрементна не чекає повного прогону, тримаючи слот, — вона
+        // відкладається (JobDeferredException), і виконавець повертає її в чергу.
         var incrementalTask = Task.Run(() => incrementalJob.ExecuteAsync(
-            new FormulaRecalculationRequest(doc.TableInstanceId, doc.PeriodKey.Value, [new DirtyCell(doc.RowIds[0], inColumn)]),
-            NoOpProgress.Instance,
-            CancellationToken.None));
+            request, NoOpProgress.Instance, CancellationToken.None));
 
-        using var stopWatch = new CancellationTokenSource();
-        var waiting = WaitUntilSomeoneWaitsOnDocumentLockAsync(doc.DocumentId, stopWatch.Token);
+        var finished = await Task.WhenAny(incrementalTask).WaitAsync(Patience);
+        var ranConcurrently = finished.IsCompletedSuccessfully;
 
-        var first = await Task.WhenAny(incrementalTask, waiting).WaitAsync(Patience);
-        var ranConcurrently = first == incrementalTask;
-        await stopWatch.CancelAsync();
-
-        if (ranConcurrently)
+        if (!ranConcurrently && finished.Exception?.InnerException is not JobDeferredException)
         {
-            // Виняток інкрементної — одразу, а не «щось зависло».
+            // Чужий виняток інкрементної — одразу, а не «щось зависло».
             await incrementalTask;
         }
 
         releaseFull.TrySetResult();
         await fullTask.WaitAsync(Patience);
-        await incrementalTask.WaitAsync(Patience);
+
+        // Повтор відкладеної задачі — як його зробив би виконавець після відступу.
+        await incrementalJob.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None).WaitAsync(Patience);
 
         var output = await LiveOutputAsync(doc);
 
@@ -221,20 +223,21 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
         Assert.True(await DocumentLockGrantedAsync(doc.DocumentId), "PATCH мав пройти, поки лок документа зайнятий.");
         Assert.Contains(jobs.ReceivedCalls(), call => call.GetMethodInfo().Name == nameof(IBackgroundJobScheduler.EnqueueCoalescedAsync));
 
-        // Каскадна задача цього PATCH — у черзі за локом.
+        // Каскадна задача цього PATCH лок не отримує — і не висить за ним, а
+        // відкладається (O1): слот виконавця вільний, поки повний прогін рахує.
         var incrementalJob = IncrementalJob(incrementalDb, doc);
-        var incrementalTask = Task.Run(() => incrementalJob.ExecuteAsync(
-            new FormulaRecalculationRequest(doc.TableInstanceId, doc.PeriodKey.Value, [new DirtyCell(doc.RowIds[0], inColumn)]),
-            NoOpProgress.Instance,
-            CancellationToken.None));
+        var request = new FormulaRecalculationRequest(
+            doc.TableInstanceId, doc.PeriodKey.Value, [new DirtyCell(doc.RowIds[0], inColumn)]);
 
-        using var stopWatch = new CancellationTokenSource();
-        var waiting = WaitUntilSomeoneWaitsOnDocumentLockAsync(doc.DocumentId, stopWatch.Token);
-        Assert.Same(waiting, await Task.WhenAny(incrementalTask, waiting).WaitAsync(bounded));
+        await Assert.ThrowsAsync<JobDeferredException>(
+            () => incrementalJob.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None).WaitAsync(bounded));
+        Assert.True(await DocumentLockGrantedAsync(doc.DocumentId), "Інкрементна мала відкластися, поки повний тримає лок.");
 
         releaseFull.TrySetResult();
         await fullTask.WaitAsync(bounded);
-        await incrementalTask.WaitAsync(bounded);
+
+        // Повтор відкладеної задачі — після відступу виконавця.
+        await incrementalJob.ExecuteAsync(request, NoOpProgress.Instance, CancellationToken.None).WaitAsync(bounded);
 
         Assert.Equal(InputAfter * 2, await LiveOutputAsync(doc));
     }
@@ -267,34 +270,6 @@ public sealed class FormulaRecalculationDocumentLockTests(SqlServerFixture sql)
 
         var provider = services.BuildServiceProvider();
         return ActivatorUtilities.CreateInstance<FormulaRecalculationJob>(provider);
-    }
-
-    /// <summary>Чекає, доки якась сесія стане в чергу за локом документа.</summary>
-    private async Task WaitUntilSomeoneWaitsOnDocumentLockAsync(long documentId, CancellationToken ct)
-    {
-        var resource = FormattableString.Invariant($"ecr:recalc:doc:{documentId}");
-
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync(ct);
-
-        while (true)
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT COUNT(*) FROM sys.dm_tran_locks
-                WHERE resource_type = 'APPLICATION'
-                  AND request_status = 'WAIT'
-                  AND resource_description LIKE '%' + @resource + '%'
-                """;
-            command.Parameters.AddWithValue("@resource", resource);
-
-            if ((int)(await command.ExecuteScalarAsync(ct))! > 0)
-            {
-                return;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
-        }
     }
 
     /// <summary>Чи тримає якась сесія лок документа просто зараз.</summary>

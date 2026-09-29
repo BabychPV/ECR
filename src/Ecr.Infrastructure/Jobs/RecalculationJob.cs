@@ -778,14 +778,6 @@ public sealed class RecalculationJob(
         return refused;
     }
 
-    /// <summary>Скільки задача документа чекає, поки інша задача того самого документа його відпустить.</summary>
-    /// <remarks>
-    /// ⚠ Більше за бюджет повного року (10 хв, ПРД-13): річна задача ОДНОГО
-    /// документа вкладається в нього з запасом. Не дочекалися — виняток, який
-    /// <c>JobRetryPolicy</c> ретраїть, а не мовчазний пропуск перерахунку.
-    /// </remarks>
-    internal static readonly TimeSpan DocumentLockTimeout = TimeSpan.FromMinutes(15);
-
     /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
     /// <param name="documentId">Документ.</param>
     /// <returns>Ім'я ресурсу.</returns>
@@ -793,8 +785,13 @@ public sealed class RecalculationJob(
 
     /// <summary>Бере ексклюзивний лок документа на весь час задачі.</summary>
     /// <returns><c>null</c> — лок не потрібен (перерахунок проєкту без планувальника, не SQL Server).</returns>
+    /// <remarks>
+    /// ⛔ O1 (I2 ФВ-9.8): очікування — лише <see cref="RecalculationDocumentLock.BusyWait"/>,
+    /// а не 15 хв. Документ рахує інша задача — <see cref="JobDeferredException"/>:
+    /// виконавець повертає задачу в чергу, звільнивши слот, без спроби ретраю.
+    /// </remarks>
     private Task<SqlDistributedLock?> AcquireDocumentLockAsync(long documentId, CancellationToken ct)
-        => RecalculationDocumentLock.AcquireAsync(db, documentId, DocumentLockTimeout, ct);
+        => RecalculationDocumentLock.AcquireAsync(db, documentId, RecalculationDocumentLock.BusyWait, ct);
 
     /// <summary>Усі документи проєкту — для перерахунку «на весь проєкт».</summary>
     /// <remarks>

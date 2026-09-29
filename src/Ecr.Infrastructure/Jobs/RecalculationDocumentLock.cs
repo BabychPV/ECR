@@ -27,15 +27,31 @@ public static class RecalculationDocumentLock
     public static string Resource(long documentId)
         => string.Create(CultureInfo.InvariantCulture, $"ecr:recalc:doc:{documentId}");
 
+    /// <summary>Скільки задача чекає лок, перш ніж відкластися (O1, I2 ФВ-9.8).</summary>
+    /// <remarks>
+    /// ⛔ Секунда, а не хвилини. Задача, що чекає лок, ТРИМАЄ СЛОТ виконавця: у
+    /// замірі I2 всі 10 потоків Quartz стояли за локом гарячого документа, і
+    /// перерахунок проєкту простояв 630 с, не почавшись. Коротке очікування
+    /// покриває звичайний випадок (сусідня інкрементна задача пише кілька сотень
+    /// мілісекунд), а довгий власник лока (повний перерахунок) — привід звільнити
+    /// слот, а не чекати його.
+    /// </remarks>
+    public static readonly TimeSpan BusyWait = TimeSpan.FromSeconds(1);
+
+    /// <summary>Через скільки відкладена задача пробує знову.</summary>
+    public static readonly TimeSpan DeferDelay = TimeSpan.FromSeconds(5);
+
     /// <summary>Бере ексклюзивний лок документа, чекаючи не довше за <paramref name="timeout"/>.</summary>
     /// <param name="db">Контекст задачі — джерело рядка з'єднання.</param>
     /// <param name="documentId">Документ.</param>
-    /// <param name="timeout">Скільки чекати.</param>
+    /// <param name="timeout">Скільки чекати (задачі — <see cref="BusyWait"/>).</param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns><c>null</c> — лок не потрібен (документа немає, не SQL Server).</returns>
-    /// <exception cref="InvalidOperationException">
-    /// Не дочекалися. Навмисно тип, який <c>JobRetryPolicy</c> ретраїть: задача
-    /// повертається в чергу з відступом, а не пропускає перерахунок мовчки.
+    /// <exception cref="JobDeferredException">
+    /// Не дочекалися: документ рахує інша задача. Виконавець (<c>JobWorker</c>,
+    /// <c>QuartzJobAdapter</c>) повертає задачу в чергу через <see cref="DeferDelay"/>
+    /// БЕЗ спроби ретраю і звільняє слот — перерахунок не пропускається мовчки й
+    /// не вичерпує ретраїв, скільки б не тривав чужий прогін.
     /// </exception>
     public static async Task<SqlDistributedLock?> AcquireAsync(
         EcrDbContext db, long documentId, TimeSpan timeout, CancellationToken ct)
@@ -67,8 +83,27 @@ public static class RecalculationDocumentLock
         return await SqlDistributedLock
                    .AcquireAsync(connectionString, Resource(documentId), timeout, ct)
                    .ConfigureAwait(false)
-               ?? throw new InvalidOperationException(string.Create(
-                   CultureInfo.InvariantCulture,
-                   $"Документ {documentId} перераховує інша задача довше за {timeout.TotalSeconds:0} с; спробуємо пізніше."));
+               ?? throw new JobDeferredException(
+                   DeferDelay,
+                   string.Create(
+                       CultureInfo.InvariantCulture,
+                       $"Документ {documentId} перераховує інша задача; відкладено на {DeferDelay.TotalSeconds:0} с."));
     }
+}
+
+/// <summary>
+/// Задача не може виконуватися ЗАРАЗ (ресурс зайнятий) і просить виконавця
+/// повернути її в чергу через <see cref="Delay"/>, звільнивши слот.
+/// </summary>
+/// <remarks>
+/// ⛔ Не провал і не ретрай: спроба (<c>Attempt</c>, <c>RetryAttemptKey</c>) не
+/// збільшується, <c>JobRetryPolicy</c> цей виняток не бачить. Інакше задача, що
+/// чесно чекає довгий повний перерахунок, вичерпала б ретраї й упала б <c>Failed</c>.
+/// </remarks>
+/// <param name="delay">Через скільки повторити.</param>
+/// <param name="message">Причина — для журналу.</param>
+public sealed class JobDeferredException(TimeSpan delay, string message) : Exception(message)
+{
+    /// <summary>Через скільки задачу варто спробувати знову.</summary>
+    public TimeSpan Delay { get; } = delay;
 }

@@ -71,6 +71,19 @@ public interface IJobQueue
     /// </summary>
     public Task<bool> RequeueAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct);
 
+    /// <summary>
+    /// Відкладає задачу (O1): те саме, що <see cref="RequeueAsync"/>, але спроба НЕ
+    /// рахується — <c>Attempt</c> повертається до значення до захоплення,
+    /// <c>ReclaimCount</c> не змінюється.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Для задачі, яка не почала роботу, бо ресурс зайнятий (лок документа
+    /// перерахунку): вона звільняє слот виконавця замість чекати, і хоч скільки
+    /// разів відкладеться — ретраїв не вичерпує.
+    /// </remarks>
+    /// <returns><c>false</c> — оренду втрачено.</returns>
+    public Task<bool> DeferAsync(JobClaimToken claim, TimeSpan delay, CancellationToken ct);
+
     /// <summary>Закриває задачу станом <c>Cancelled</c> після запиту скасування.</summary>
     public Task<bool> AcknowledgeCancelAsync(JobClaimToken claim, CancellationToken ct);
 

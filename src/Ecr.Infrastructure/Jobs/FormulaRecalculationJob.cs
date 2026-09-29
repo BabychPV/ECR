@@ -29,18 +29,6 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
     /// <summary>Налаштування розбору завдання; спільні на всі виклики.</summary>
     private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web);
 
-    /// <summary>Скільки одна спроба чекає лока документа, поки його тримає повний перерахунок.</summary>
-    /// <remarks>
-    /// ⚠ Коротше за повний перерахунок (<see cref="RecalculationJob.DocumentLockTimeout"/>):
-    /// задача займає слот лейна <c>Default</c>, спільного з експортом та іншим, і
-    /// тримати його весь річний прогін не можна. Не дочекалися —
-    /// <see cref="InvalidOperationException"/>, і <c>JobRetryPolicy</c> повертає
-    /// задачу в чергу (30/60/120 с): 4 спроби × 2 хв + 3.5 хв відступу ≈ 11.5 хв
-    /// — більше за бюджет повного року (10 хв, ПРД-13). Без суперника лок береться
-    /// одразу, тож звичайний шлях після PATCH не сповільнюється.
-    /// </remarks>
-    internal static readonly TimeSpan DocumentLockTimeout = TimeSpan.FromMinutes(2);
-
     /// <inheritdoc />
     public async Task ExecuteAsync(object? payload, IJobProgress progress, CancellationToken ct)
     {
@@ -73,10 +61,15 @@ public sealed class FormulaRecalculationJob(RecalculationService recalculation, 
         // Під локом порядок один: хто б не був першим, останнім пише той, хто
         // читав останній вхід. Лок береться тут, у задачі, а не в транзакції
         // PATCH: там лише постановка в чергу.
+        //
+        // ⛔ O1 (I2 ФВ-9.8): не чекаємо довгого власника лока, тримаючи слот
+        // виконавця. Зайнято довше за `BusyWait` — `JobDeferredException`, і
+        // виконавець повертає задачу в чергу через `DeferDelay`, не рахуючи спроби.
         var documentId = await DocumentOfAsync(request, ct).ConfigureAwait(false);
 
+        var busyWait = RecalculationDocumentLock.BusyWait;
         await using var documentLock =
-            await RecalculationDocumentLock.AcquireAsync(db, documentId, DocumentLockTimeout, ct).ConfigureAwait(false);
+            await RecalculationDocumentLock.AcquireAsync(db, documentId, busyWait, ct).ConfigureAwait(false);
 
         var written = await recalculation
             .RecalculateAsync(request.TableInstanceId, dirty, ct)

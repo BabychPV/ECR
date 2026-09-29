@@ -189,6 +189,17 @@ public sealed partial class QuartzJobAdapter(
 
             throw;
         }
+        catch (JobDeferredException deferred)
+        {
+            // ⛔ O1 (I2 ФВ-9.8): ресурс зайнятий — новий триґер через відступ з ТИМ
+            // САМИМ лічильником спроби, і потік пулу вільний одразу. Очікування лока
+            // всередині задачі тримало б потік: у I2 так стояли всі 10 потоків Quartz.
+            LogJobDeferred(logger, jobId, typeName ?? "—", deferred.Delay);
+            await ScheduleDeferredAsync(context, correlationId, clock, deferred.Delay).ConfigureAwait(false);
+
+            // Задача знову чекає — злиття масиву йде в неї (O1).
+            QuartzPayloadMerges.Reopen(jobId);
+        }
         catch (Exception ex)
         {
             var attempt = CurrentAttempt(context);
@@ -412,6 +423,28 @@ public sealed partial class QuartzJobAdapter(
     }
 
     /// <summary>
+    /// Відкладення (<see cref="JobDeferredException"/>): одноразовий триґер того
+    /// самого <c>JobKey</c> через <paramref name="delay"/> з ТИМ САМИМ
+    /// <see cref="QuartzJobScheduler.RetryAttemptKey"/> — спроба не рахується.
+    /// </summary>
+    private static async Task ScheduleDeferredAsync(
+        IJobExecutionContext context, string correlationId, IClock clock, TimeSpan delay)
+    {
+        var jobId = context.JobDetail.Key.Name;
+
+        var trigger = TriggerBuilder.Create()
+            .ForJob(context.JobDetail.Key)
+            .WithIdentity($"{jobId}-deferred-{Guid.NewGuid():N}-trigger")
+            .UsingJobData(
+                QuartzJobScheduler.RetryAttemptKey, CurrentAttempt(context).ToString(CultureInfo.InvariantCulture))
+            .UsingJobData(QuartzJobScheduler.CorrelationKey, correlationId)
+            .StartAt(new DateTimeOffset(clock.UtcNow, TimeSpan.Zero).Add(delay))
+            .Build();
+
+        await context.Scheduler.ScheduleJob(trigger, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Виконує запис у сховище прогресу так, щоб ЙОГО власний збій не підмінив
     /// собою результат задачі.
     /// </summary>
@@ -506,6 +539,9 @@ public sealed partial class QuartzJobAdapter(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Задача {JobId} ({TypeName}) завершилася помилкою.")]
     private static partial void LogJobFailed(ILogger logger, string jobId, string typeName, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) відкладена на {Delay}: ресурс зайнятий; спробу не зараховано.")]
+    private static partial void LogJobDeferred(ILogger logger, string jobId, string typeName, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; заплановано повтор.")]
     private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);

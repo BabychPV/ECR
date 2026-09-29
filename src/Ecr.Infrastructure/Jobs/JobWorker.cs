@@ -316,6 +316,7 @@ public sealed partial class JobWorker(
         }
 
         Exception? failure = null;
+        JobDeferredException? deferred = null;
         var cancelled = false;
 
         try
@@ -329,6 +330,10 @@ public sealed partial class JobWorker(
         catch (OperationCanceledException)
         {
             cancelled = true;
+        }
+        catch (JobDeferredException ex)
+        {
+            deferred = ex;
         }
 #pragma warning disable CA1031 // Будь-який провал задачі класифікує JobRetryPolicy нижче.
         catch (Exception ex)
@@ -354,6 +359,17 @@ public sealed partial class JobWorker(
             && (cancelled || failure is not null))
         {
             await FailOvertimeAsync(job, clock).ConfigureAwait(false);
+            return;
+        }
+
+        // ⛔ O1 (I2 ФВ-9.8): ресурс зайнятий (лок документа перерахунку) — у чергу
+        // через відступ, без спроби ретраю; слот звільняється одразу, а не після
+        // очікування чужого прогону.
+        if (deferred is not null)
+        {
+            LogJobDeferred(logger, claim.JobId, job.JobCode, deferred.Delay);
+            await SettleAsync(claim.JobId, q => q.DeferAsync(claim, deferred.Delay, CancellationToken.None))
+                .ConfigureAwait(false);
             return;
         }
 
@@ -545,6 +561,9 @@ public sealed partial class JobWorker(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Задача {JobId} ({TypeName}) впала; повернуто в чергу з затримкою.")]
     private static partial void LogJobRetrying(ILogger logger, string jobId, string typeName, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Задача {JobId} ({TypeName}) відкладена на {Delay}: ресурс зайнятий; спробу не зараховано.")]
+    private static partial void LogJobDeferred(ILogger logger, string jobId, string typeName, TimeSpan delay);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Оренду задачі {JobId} втрачено: її виконує інший виконавець; результат цього виконання не записано.")]
     private static partial void LogLeaseLost(ILogger logger, string jobId);

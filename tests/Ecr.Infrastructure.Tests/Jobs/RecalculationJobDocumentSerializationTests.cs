@@ -34,7 +34,7 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <para>
 /// ⚠ Детерміновано: річна задача тримається бар'єром усередині оркестратора;
 /// поперіодна або дійде до свого оркестратора (одночасне виконання — дефект), або
-/// стане в очікування лока документа, яке видно в <c>sys.dm_tran_locks</c>.
+/// відкладеться (<c>JobDeferredException</c>, O1), і її повтор іде після річної.
 /// Жодних «зачекати N мс і подивитися».
 /// </para>
 /// <para>
@@ -78,30 +78,36 @@ public sealed class RecalculationJobDocumentSerializationTests(SqlServerFixture 
         await yearRunner.Entered.Task.WaitAsync(Patience);
 
         // Кнопка «Перерахувати» того самого документа й періоду — поки річна рахує.
-        var periodTask = Task.Run(() => periodJob.ExecuteAsync(
-            new RecalculationRequest(document.ProjectId, document.DocumentId, january, TriggeredByUserId: 7),
-            NoOpProgress.Instance,
-            CancellationToken.None));
+        var periodRequest = new RecalculationRequest(document.ProjectId, document.DocumentId, january, TriggeredByUserId: 7);
+        var periodTask = Task.Run(() => periodJob.ExecuteAsync(periodRequest, NoOpProgress.Instance, CancellationToken.None));
 
-        using var stopWatch = new CancellationTokenSource();
-        var waiting = WaitUntilSomeoneWaitsOnDocumentLockAsync(document.DocumentId, stopWatch.Token);
-
-        var first = await Task.WhenAny(periodRunner.Entered.Task, waiting, periodTask).WaitAsync(Patience);
+        // ⚠ O1: поперіодна не висить за локом, тримаючи слот, а відкладається
+        // (JobDeferredException) — виконавець поверне її в чергу.
+        var first = await Task.WhenAny(periodRunner.Entered.Task, periodTask).WaitAsync(Patience);
         var ranConcurrently = first == periodRunner.Entered.Task
                               || (first == periodTask && periodRunner.Entered.Task.IsCompleted);
-        await stopWatch.CancelAsync();
 
         // Якщо поперіодна пройшла всередину — даємо їй завершитися ДО річної: це
         // той самий порядок, що й у житті (коротка задача після довгої), і він
         // робить наслідок детермінованим. Її виняток — одразу, а не «щось зависло».
-        if (ranConcurrently || first == periodTask)
+        var deferred = false;
+        try
         {
             await periodTask.WaitAsync(Patience);
+        }
+        catch (JobDeferredException)
+        {
+            deferred = true;
         }
 
         yearRunner.Release();
         await yearTask.WaitAsync(Patience);
-        await periodTask.WaitAsync(Patience);
+
+        // Повтор відкладеної — після відступу виконавця, коли річна вже відпустила документ.
+        if (deferred)
+        {
+            await periodJob.ExecuteAsync(periodRequest, NoOpProgress.Instance, CancellationToken.None).WaitAsync(Patience);
+        }
 
         var yearRunId = Assert.Single(yearRunner.RunIds);
         var periodRunId = Assert.Single(periodRunner.RunIds);
@@ -122,36 +128,6 @@ public sealed class RecalculationJobDocumentSerializationTests(SqlServerFixture 
 
         // ⛔ Причина: поперіодна не мала права почати рахувати, поки річна тримає документ.
         Assert.False(ranConcurrently, "Поперіодна задача рахувала документ одночасно з річною.");
-    }
-
-    /// <summary>Чекає, доки якась сесія стане в чергу за локом документа.</summary>
-    private async Task WaitUntilSomeoneWaitsOnDocumentLockAsync(long documentId, CancellationToken ct)
-    {
-        // Літерал, а не посилання на константу задачі: тест мусить компілюватися
-        // й на коді ДО фіксу, щоб показати червоне.
-        var resource = FormattableString.Invariant($"ecr:recalc:doc:{documentId}");
-
-        await using var connection = new SqlConnection(sql.ConnectionString);
-        await connection.OpenAsync(ct);
-
-        while (true)
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT COUNT(*) FROM sys.dm_tran_locks
-                WHERE resource_type = 'APPLICATION'
-                  AND request_status = 'WAIT'
-                  AND resource_description LIKE '%' + @resource + '%'
-                """;
-            command.Parameters.AddWithValue("@resource", resource);
-
-            if ((int)(await command.ExecuteScalarAsync(ct))! > 0)
-            {
-                return;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
-        }
     }
 
     private static RecalculationJob Job(EcrDbContext db, ICalculationRunner runner)
