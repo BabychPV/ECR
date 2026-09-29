@@ -441,6 +441,12 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryKeyConflict =>
             (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ RT-14 (D-166): «запис змінили після того, як ви його відкрили» — конфлікт стану, як і
+        // 4092. У пакеті це помилка рядка (200), але той самий код кидатиме `POST …/entries` із
+        // `baseVersion` (RT-10a/17a) — і має доїхати 409, а не 422. Явна назва поруч із правилом суфікса.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryEntryChanged =>
+            (StatusCodes.Status409Conflict, e.ErrorCode, e.Message, e.Details),
+
         // ⛔ Та сама родина, і арм з'явився разом із маршрутом
         // `DELETE /registries/{code}/entries/{id}` (директива №15, BE-01):
         // доти `ECR-REG-0409` не доїжджав до HTTP узагалі — обробник існував,

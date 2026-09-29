@@ -150,6 +150,9 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
             var names = await ReferenceNamesAsync([.. plans.SelectMany(p => p.Keys)], ct).ConfigureAwait(false);
             await LockHoldersAsync(keys, plans, ct).ConfigureAwait(false);
 
+            // Фаза 1 обміну ключами (§4.3); фаза 2 — перерахунок нижче повертає живість із запису.
+            await RetireMovedRowsAsync(plans, ct).ConfigureAwait(false);
+
             foreach (var plan in plans)
             {
                 await ApplyAsync(definition, plan, names, batch, ct).ConfigureAwait(false);
@@ -261,6 +264,63 @@ public sealed class RegistryKeyService(IRegistryKeyStore store, IUnitOfWork uow)
                 await store.LockLiveHoldersAsync(keys[i].Id, hashes, ct).ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>
+    /// Перша фаза двофазного запису ключів пакета (§4.3, RT-14): рядки, що покидають своє значення,
+    /// виводяться з унікальності (<c>IsLive = 0</c>) і зберігаються ДО того, як інший запис пакета
+    /// займе це значення.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ SQL Server перевіряє <c>UX_RegistryEntryKey_Live</c> на КОЖНУ інструкцію, а не на кінець
+    /// транзакції. Обмін A: k1→k2, B: k2→k1 одним проходом <c>SaveChanges</c> падав на першому ж
+    /// <c>UPDATE</c> (<c>keyTakenConcurrently</c> на весь пакет), хоча кінцевий стан унікальний.
+    /// Так само новий запис пакета, що бере значення, яке покидає інший, — <c>INSERT</c> міг
+    /// піти раніше за <c>UPDATE</c>.
+    ///
+    /// ⚠ Проміжне збереження — лише коли такий збіг справді є: пакет без обміну пишеться
+    /// одним <c>SaveChanges</c>, як і досі. Виклик — усередині транзакції (як і весь пакетний
+    /// <c>ApplyAsync</c>): інакше проміжний стан закомітився б окремо.
+    /// </remarks>
+    private async Task RetireMovedRowsAsync(IReadOnlyList<EntryPlan> plans, CancellationToken ct)
+    {
+        // Рядок покидає значення (ключ, хеш, початок вікна), якщо запис видалено, частина ключа
+        // спорожніла, хеш чи початок вікна змінилися.
+        var moved = new List<RegistryEntryKey>();
+        var vacated = new Dictionary<(int, string, DateOnly), RegistryEntry>();
+        foreach (var plan in plans)
+        {
+            var validFrom = plan.Entry.ValidFrom ?? DateOnly.MinValue;
+            foreach (var key in plan.Keys)
+            {
+                if (plan.Rows.TryGetValue(key.Definition.Id, out var row)
+                    && row.IsLive
+                    && (plan.Entry.IsDeleted || key.Hash is null
+                        || !row.KeyHash.AsSpan().SequenceEqual(key.Hash) || row.ValidFromKey != validFrom))
+                {
+                    moved.Add(row);
+                    vacated[(row.RegistryKeyDefId, Convert.ToHexString(row.KeyHash), row.ValidFromKey)] = plan.Entry;
+                }
+            }
+        }
+
+        var taken = plans
+            .Where(p => !p.Entry.IsDeleted)
+            .SelectMany(p => p.Keys
+                .Where(k => k.Hash is not null)
+                .Select(k => (Entry: p.Entry, Slot: (k.Definition.Id, Convert.ToHexString(k.Hash!), p.Entry.ValidFrom ?? DateOnly.MinValue))));
+
+        if (!taken.Any(t => vacated.TryGetValue(t.Slot, out var owner) && !ReferenceEquals(owner, t.Entry)))
+        {
+            return;
+        }
+
+        foreach (var row in moved)
+        {
+            row.Retire();
+        }
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     private async Task ApplyAsync(

@@ -10,6 +10,15 @@ export type RegistryRowValue = components['schemas']['RegistryRowValueDto'];
 /** Сторінка рядків: `items`, `nextCursor` (`null` — кінець), `totalCount`. */
 export type RegistryRowsPage = components['schemas']['PagedResultOfRegistryRowDto'];
 
+/** Пакет змін рядків (`POST …/entries/batch`, RT-14). */
+export type RegistryBatchRequest = components['schemas']['RegistryBatchRequest'];
+
+/** Рядок пакета: `clientRowId`, `op` (`upsert`/`delete`), `id?`, `code?`, `baseVersion?`, `values`. */
+export type RegistryBatchItem = components['schemas']['RegistryBatchItemDto'];
+
+/** Звіт пакета: `applied`, `dryRun`, лічильники, `rows[]` у порядку пакета. */
+export type RegistryBatchResult = components['schemas']['RegistryBatchResult'];
+
 /** Параметри читання рядків довідника. */
 export interface RegistryRowsQuery {
   /** Бізнес-дата чинності `yyyy-MM-dd`; обов'язкова для темпорального довідника. */
@@ -61,5 +70,27 @@ export function registryRowsQuery(query: RegistryRowsQuery): string {
 export function getRegistryRows(code: string, query: RegistryRowsQuery = {}): Promise<RegistryRowsPage> {
   return apiFetch<RegistryRowsPage>(
     `/api/v1/registries/${encodeURIComponent(code)}/rows?${registryRowsQuery(query)}`,
+  );
+}
+
+/**
+ * Пакетний запис рядків довідника (FEATURE-REGISTRY-TABLES §7.1, RT-14). Споживач — сітка редактора
+ * даних (RT-31): жива перевірка (`dryRun`) і `Ctrl+S`.
+ *
+ * ⛔ Відповідь — завжди звіт (200): помилки рядків (`entryChanged`, `keyTaken`, значення) лежать у
+ * `rows[].errors`, а не у відмові. `applied: false` означає, що не записано НІЧОГО.
+ */
+export function saveBatch(
+  code: string,
+  items: readonly RegistryBatchItem[],
+  dryRun: boolean,
+): Promise<RegistryBatchResult> {
+  return apiFetch<RegistryBatchResult>(
+    `/api/v1/registries/${encodeURIComponent(code)}/entries/batch?dryRun=${dryRun ? 'true' : 'false'}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [...items] } satisfies RegistryBatchRequest),
+    },
   );
 }

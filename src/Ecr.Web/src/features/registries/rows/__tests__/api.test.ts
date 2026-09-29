@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getRegistryRows, registryRowsQuery } from '@/features/registries/rows/api';
+import { getRegistryRows, registryRowsQuery, saveBatch } from '@/features/registries/rows/api';
 
 /**
  * Споживач `GET /api/v1/registries/{code}/rows` (RT-13, FEATURE-REGISTRY-TABLES §7.1).
@@ -81,5 +81,76 @@ describe('рядки довідника', () => {
 
   it('не надсилає порожніх параметрів', () => {
     expect(registryRowsQuery({ q: '   ', cursor: null })).toBe('limit=100');
+  });
+});
+
+describe('пакет рядків довідника', () => {
+  it('надсилає пакет POST-ом на адресу довідника з dryRun і повертає звіт з помилкою рядка', async () => {
+    const report = {
+      applied: false,
+      dryRun: true,
+      added: 0,
+      updated: 1,
+      deleted: 0,
+      unchanged: 0,
+      rows: [
+        {
+          clientRowId: 'r1',
+          status: 'error',
+          entryId: 9001,
+          version: null,
+          errors: [
+            {
+              field: null,
+              errorCode: 'ECR-REG-4093',
+              messageKey: 'err.ECR-REG-4093.entryChanged',
+              params: { entryCode: 'E000009001' },
+            },
+          ],
+        },
+      ],
+    };
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), init });
+        return new Response(JSON.stringify(report), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    const items = [
+      {
+        clientRowId: 'r1',
+        op: 'upsert',
+        id: 9001,
+        code: null,
+        baseVersion: 'AAABkWmN3kM=',
+        values: { MOL_PCT: '12.4246690' },
+      },
+      { clientRowId: 'r3', op: 'delete', id: 9005, code: null, baseVersion: null, values: null },
+    ];
+
+    const result = await saveBatch('GAS/COMP', items, true);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe('/api/v1/registries/GAS%2FCOMP/entries/batch?dryRun=true');
+    expect(calls[0]!.init?.method).toBe('POST');
+    // Число лишається рядком: сервер читає його без втрати знаків.
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ items });
+    // Помилка рядка — дані звіту, а не відмова.
+    expect(result.applied).toBe(false);
+    expect(result.rows[0]!.errors[0]!.messageKey).toBe('err.ECR-REG-4093.entryChanged');
+  });
+
+  it('без dryRun записує', async () => {
+    const urls = mockFetch({ applied: true, dryRun: false, added: 0, updated: 0, deleted: 0, unchanged: 0, rows: [] });
+
+    await saveBatch('STREAM', [], false);
+
+    expect(urls).toEqual(['/api/v1/registries/STREAM/entries/batch?dryRun=false']);
   });
 });

@@ -288,11 +288,11 @@ public sealed class RegistrySyncJob(
             return new WriteOutcome(result.Errors, Failure: null);
         }
         // ⛔ ConcurrencyConflictException — теж відмова пакета, не падіння прогону: індекс
-        // UX_RegistryEntryKey_Live (keyTakenConcurrently) спрацьовує, коли записи пакета
-        // обмінюються ключами (A: k1→k2, B: k2→k1 — SQL Server перевіряє індекс на кожну
-        // інструкцію) або коли паралельний запис випередив блокування. Поштучний повтор
-        // розводить такі записи. Інші EcrException (немає автора, немає довідника) — збій
-        // прогону, а не дані: їх не ковтаємо.
+        // UX_RegistryEntryKey_Live (keyTakenConcurrently) спрацьовує, коли паралельний запис
+        // випередив блокування (справжня гонка). Обмін ключами між записами пакета (A: k1→k2,
+        // B: k2→k1) до індексу вже не доходить — служба ключів пише їх у дві фази (RT-14).
+        // Поштучний повтор розводить гонку. Інші EcrException (немає автора, немає довідника) —
+        // збій прогону, а не дані: їх не ковтаємо.
         catch (Exception ex) when (ex is BusinessRuleException or DomainException or ConcurrencyConflictException)
         {
             return new WriteOutcome([], ex);

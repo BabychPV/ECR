@@ -9,6 +9,7 @@ using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Entities.External;
 using Ecr.Domain.Entities.Integration;
 using Ecr.Domain.Enums;
+using Ecr.Domain.Services;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Jobs;
 using Ecr.Infrastructure.Persistence;
@@ -65,9 +66,13 @@ namespace Ecr.Infrastructure.Tests.Jobs;
 /// <item>Звірка без урахування вікон (<c>RegistryBatchKeys.DuplicateKeyRows</c>) →
 /// <see cref="Темпоральний_той_самий_ключ_у_вікнах_що_не_перетинаються_записується"/> червоний.</item>
 /// <item>Без <c>ConcurrencyConflictException</c> у <c>catch</c> <c>TryWriteAsync</c> →
-/// <see cref="Обмін_ключами_між_записами_пакета_не_валить_прогін"/> червоний (виняток
-/// <c>keyTakenConcurrently</c> із прогону). Тест дубля після фіксу writer'а до цього <c>catch</c> не
-/// доходить і лишається зеленим.</item>
+/// <see cref="Гонка_за_ключем_під_час_запису_пакета_не_валить_прогін"/> червоний (виняток
+/// <c>keyTakenConcurrently</c> із прогону; RT-14, 2026-09-29 — доти цей <c>catch</c> тримав тест
+/// обміну ключами, який після двофазного запису до індексу вже не доходить). Тест дубля після фіксу
+/// writer'а до цього <c>catch</c> не доходить і лишається зеленим.</item>
+/// <item>RT-14: без першої фази (<c>RegistryKeyService.RetireMovedRowsAsync</c>) →
+/// <see cref="Обмін_ключами_між_записами_пакета_записується"/> червоний (значення лишаються 10/20,
+/// відмова <c>ECR-REG-4092</c> на обидва записи).</item>
 /// <item>Без <c>entry.RegistryDefId == registryDefId</c> у <c>LinksAsync</c> →
 /// <see cref="Синк_довідника_A_не_торкається_запису_довідника_B_з_ключем_того_самого_джерела"/>
 /// червоний (шлях зовнішнього ключа XB переписано).</item>
@@ -286,25 +291,62 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-8.15")]
-    public async Task Обмін_ключами_між_записами_пакета_не_валить_прогін()
+    public async Task Обмін_ключами_між_записами_пакета_записується()
     {
-        // E1: 10 → 20, E2: 20 → 10. Звірка пакета дублів не бачить (після застосування ключі різні),
-        // служба ключів тримачів із пакета не перевіряє — зупиняє лише індекс бази на першій же
-        // інструкції UPDATE (keyTakenConcurrently, ConcurrencyConflictException). Поштучний повтор
-        // бачить тримача поза пакетом → keyTaken на обидва; значення лишаються.
+        // E1: 10 → 20, E2: 20 → 10. Кінцевий стан пакета унікальний. Доти індекс бази зупиняв такий
+        // пакет на першій же інструкції UPDATE (keyTakenConcurrently), а поштучний повтор відхиляв
+        // обидва записи. RT-14: служба ключів пише ключі у дві фази (§4.3) — пакет проходить цілим.
         var stand = await ArrangeAsync(
             RegistrySourceKind.External, Author.Svc, keyed: new KeyedSetup(false, null, null, null, null, 20m, 10m));
         await using var provider = BuildProvider();
 
         try
         {
+            var revision = await RevisionAsync(stand);
+
             await RunAsync(provider, stand);
 
             var values = await CapValuesAsync(stand);
-            Assert.Equal(V(10m, stand.SvcId), values[stand.E1]);
-            Assert.Equal(V(20m, stand.SvcId), values[stand.E2]);
+            Assert.Equal(V(20m, stand.SvcId), values[stand.E1]);
+            Assert.Equal(V(10m, stand.SvcId), values[stand.E2]);
 
-            AssertRejected(await EventsAsync(stand.EntityId), stand, "error=ECR-REG-4092");
+            // Одним пакетом, а не поштучним повтором: ревізія +1, відмов немає.
+            Assert.Equal(revision + 1, await RevisionAsync(stand));
+            Assert.DoesNotContain(await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistryValueRejected);
+        }
+        finally
+        {
+            await DeactivateAsync(stand);
+        }
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task Гонка_за_ключем_під_час_запису_пакета_не_валить_прогін()
+    {
+        // E1: 10 → 12.5, E2: 20 → 30. Між перевіркою ключа й SaveChanges інше з'єднання записує E3 з
+        // ключем 12.5 — спрацьовує саме UX_RegistryEntryKey_Live (keyTakenConcurrently,
+        // ConcurrencyConflictException) на весь пакет. Прогін не падає: поштучний повтор бачить E3
+        // тримачем → відмова E1 (4092), E2 записано.
+        var stand = await ArrangeAsync(
+            RegistrySourceKind.External, Author.Svc, keyed: new KeyedSetup(false, null, null, null, null, 12.5m, 30m));
+        var race = new KeyRace(Hash(12.5m), () => InsertCompetitorAsync(stand, 12.5m));
+        await using var provider = BuildProvider(race);
+
+        try
+        {
+            await RunAsync(provider, stand);
+
+            Assert.True(race.Fired, "гонку не відтворено: перевірка ключа не дійшла до підробленого читання");
+            var values = await CapValuesAsync(stand);
+            Assert.Equal(V(10m, stand.SvcId), values[stand.E1]);
+            Assert.Equal(V(30m, stand.SvcId), values[stand.E2]);
+
+            var rejected = Assert.Single(await EventsAsync(stand.EntityId), e => e.Status == CollectionCoverage.RegistryValueRejected);
+            Assert.Contains($"entry={stand.E1};", rejected.Details, StringComparison.Ordinal);
+            Assert.Contains("ECR-REG-4092", rejected.Details, StringComparison.Ordinal);
         }
         finally
         {
@@ -645,8 +687,29 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         await job.ExecuteAsync(stand.EntityId, CancellationToken.None);
     }
 
+    /// <summary>
+    /// Запис E3 з ключем <paramref name="cap"/> ІНШИМ з'єднанням — «паралельний запис», що закомітився
+    /// між перевіркою ключа й збереженням пакета синку.
+    /// </summary>
+    private async Task InsertCompetitorAsync(Stand stand, decimal cap)
+    {
+        await using var db = Context();
+        var e3 = new RegistryEntry(stand.RegistryId, EcrCode.Create("E3"), Text("E3"));
+        db.RegistryEntries.Add(e3);
+        db.RegistryEntryKeys.Add(new RegistryEntryKey(
+            e3, stand.KeyDefId, Hash(cap), cap.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        await db.SaveChangesAsync();
+    }
+
+    private static byte[] Hash(decimal cap)
+        => RegistryKeyNormalizer.Hash(RegistryKeyNormalizer.Canonical([new RegistryKeyPart(CellDataType.Decimal, cap)])!);
+
     /// <summary>Контейнер як у проді: застосунок + інфраструктура + обгортка автора задачі.</summary>
-    private ServiceProvider BuildProvider()
+    /// <param name="race">
+    /// Гонка за ключем (RT-14): сховище ключів — справжнє; перше пакетне блокування замінено вставкою
+    /// іншого з'єднання, а перша перевірка хеша гонки відповідає «вільно» (<see cref="RacingKeyStore"/>).
+    /// </param>
+    private ServiceProvider BuildProvider(KeyRace? race = null)
     {
         var configuration = Substitute.For<IConfiguration>();
         configuration[Arg.Any<string>()].Returns((string?)null);
@@ -667,6 +730,11 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         // ⚠ Quartz тримає планувальник у глобальному репозиторії за ім'ям — підробка, як у
         // MaterializeIntegrationActorTests.
         services.AddScoped(_ => Substitute.For<IBackgroundJobScheduler>());
+
+        if (race is not null)
+        {
+            services.AddScoped<IRegistryKeyStore>(sp => new RacingKeyStore(new RegistryKeyStore(sp.GetRequiredService<EcrDbContext>()), race));
+        }
 
         return services.BuildServiceProvider();
     }
@@ -795,6 +863,82 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
         DateOnly? E2To,
         decimal Source1,
         decimal Source2);
+
+    /// <summary>Одна гонка за ключем на весь прогін (спільна для всіх DI-scope спроб запису).</summary>
+    private sealed class KeyRace(byte[] hash, Func<Task> competitor)
+    {
+        private bool _hidden;
+
+        public bool Fired { get; private set; }
+
+        /// <summary>
+        /// Інше з'єднання займає ключ — до ПЕРШОГО блокування транзакції синку: діапазонний замок
+        /// будь-якого сусіднього хеша накрив би й цей проміжок індексу, і вставка чекала б до таймауту.
+        /// </summary>
+        public async Task FireAsync()
+        {
+            Fired = true;
+            await competitor();
+        }
+
+        /// <summary>Перша перевірка хеша гонки після вставки «не бачить» тримача — як програна гонка.</summary>
+        public bool Hide(byte[] keyHash)
+        {
+            if (!Fired || _hidden || !keyHash.AsSpan().SequenceEqual(hash))
+            {
+                return false;
+            }
+
+            _hidden = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Справжнє сховище ключів, у якому перше пакетне блокування тримачів замінено вставкою іншого
+    /// з'єднання, а перша перевірка хеша гонки каже «вільно». Після гонки — усе як у проді.
+    /// </summary>
+    private sealed class RacingKeyStore(IRegistryKeyStore inner, KeyRace race) : IRegistryKeyStore
+    {
+        public Task<IReadOnlyList<RegistryKeyDef>> ListActiveKeysAsync(int registryDefId, CancellationToken ct)
+            => inner.ListActiveKeysAsync(registryDefId, ct);
+
+        public Task<IReadOnlyList<RegistryKeyDef>> ListKeysForUpdateAsync(int registryDefId, CancellationToken ct)
+            => inner.ListKeysForUpdateAsync(registryDefId, ct);
+
+        public void AddKey(RegistryKeyDef key) => inner.AddKey(key);
+
+        public Task<IReadOnlyList<RegistryValue>> ListCurrentValuesAsync(RegistryEntry entry, CancellationToken ct)
+            => inner.ListCurrentValuesAsync(entry, ct);
+
+        public Task<IReadOnlyList<RegistryEntryKey>> ListEntryKeysAsync(long registryEntryId, CancellationToken ct)
+            => inner.ListEntryKeysAsync(registryEntryId, ct);
+
+        public async Task<IReadOnlyList<RegistryKeyHolder>> FindLiveHoldersForUpdateAsync(
+            int registryKeyDefId, byte[] keyHash, long exceptEntryId, CancellationToken ct)
+            => race.Hide(keyHash)
+                ? []
+                : await inner.FindLiveHoldersForUpdateAsync(registryKeyDefId, keyHash, exceptEntryId, ct);
+
+        public Task<IReadOnlyList<RegistryKeyHolder>> FindLiveHoldersAsync(
+            int registryKeyDefId, IReadOnlyCollection<byte[]> keyHashes, CancellationToken ct)
+            => inner.FindLiveHoldersAsync(registryKeyDefId, keyHashes, ct);
+
+        public Task<IReadOnlyDictionary<long, string>> FindEntryCodesAsync(IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+            => inner.FindEntryCodesAsync(registryEntryIds, ct);
+
+        public Task<IReadOnlyDictionary<int, string>> FindUnitCodesAsync(IReadOnlyCollection<int> unitIds, CancellationToken ct)
+            => inner.FindUnitCodesAsync(unitIds, ct);
+
+        public void Add(RegistryEntryKey key) => inner.Add(key);
+
+        public Task PreloadAsync(IReadOnlyCollection<RegistryEntry> entries, CancellationToken ct) => inner.PreloadAsync(entries, ct);
+
+        public Task LockLiveHoldersAsync(int registryKeyDefId, IReadOnlyCollection<byte[]> keyHashes, CancellationToken ct)
+            => race.Fired ? inner.LockLiveHoldersAsync(registryKeyDefId, keyHashes, ct) : race.FireAsync();
+
+        public void ForgetPreloaded() => inner.ForgetPreloaded();
+    }
 
     /// <summary>Каталог: діти елемента сутності.</summary>
     private sealed class FakeCatalog(IReadOnlyList<SourceEntityDescriptor> children) : ISourceCatalogReader

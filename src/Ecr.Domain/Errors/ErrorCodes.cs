@@ -398,6 +398,16 @@ public static class ErrorCodes
     public const string RegistryKeyConflict = "ECR-REG-4092";
 
     /// <summary>
+    /// Запис довідника змінено іншим після читання (<c>ECR-REG-4093</c>, FEATURE-REGISTRY-TABLES §7.2,
+    /// <c>D-166</c>): <c>baseVersion</c> рядка не збігся з його <c>PeriodStart</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ У пакеті (RT-14) — помилка рядка <c>entryChanged</c>, не виняток: пакет завжди 200.
+    /// Випадки прев'ю імпорту й профілю (<c>importPreviewStale</c>, <c>profileChanged</c>) — RT-18.
+    /// </remarks>
+    public const string RegistryEntryChanged = "ECR-REG-4093";
+
+    /// <summary>
     /// Конверсія одиниць неможлива. ⚠ Не лише різні розмірності: тим самим кодом
     /// відмовляє й множник ≤ 0 на заведенні та зміні одиниці; випадок — у <c>messageKey</c>.
     /// </summary>

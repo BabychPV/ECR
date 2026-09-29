@@ -61,6 +61,16 @@ public sealed record RegistryEntryWriteBatch(int RegistryDefId, IReadOnlyList<Re
     /// поведінка S6 (немає — створюється).
     /// </summary>
     public bool UpdateOnly { get; init; }
+
+    /// <summary>
+    /// Коди нових записів довідника з <c>CodeMode = Auto</c> — заглушки, а не номери послідовності
+    /// (RT-14, <c>dryRun</c>). За замовчуванням <c>false</c> — поведінка без змін.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Лише для запису, який виклик ВІДКОТИТЬ: номер <c>sp_sequence_get_range</c> транзакція не
+    /// повертає, і кожна жива перевірка сітки (раз на 600 мс, §8.4) пропалювала б шкалу кодів.
+    /// </remarks>
+    public bool PlaceholderAutoCodes { get; init; }
 }
 
 /// <summary>
@@ -85,7 +95,22 @@ public sealed record RegistryEntryUpdateBatch(int RegistryDefId, IReadOnlyList<R
 /// </param>
 /// <param name="Applied">Чи записано зміни.</param>
 public sealed record RegistryEntryWriteResult(
-    int Added, int Updated, int Unchanged, IReadOnlyList<RegistryEntryImportError> Errors, bool Applied);
+    int Added, int Updated, int Unchanged, IReadOnlyList<RegistryEntryImportError> Errors, bool Applied)
+{
+    /// <summary>
+    /// Рядки пакета, що пройшли перевірку значень, — із записом (RT-14: пакет рядків адресує результат
+    /// клієнтському рядку, а Id нового запису відомий лише після збереження). Рядок, який далі
+    /// відхилила звірка ключів, є і тут, і в <see cref="Errors"/>.
+    /// </summary>
+    public IReadOnlyList<RegistryEntryWriteRow> Rows { get; init; } = [];
+}
+
+/// <summary>Рядок пакета <see cref="RegistryEntryWriter"/>, що пройшов перевірку значень.</summary>
+/// <param name="Row">Номер у пакеті, з 1.</param>
+/// <param name="Entry">Запис; у нового <c>Id</c> з'являється після збереження.</param>
+/// <param name="IsNew">Запис створено цим пакетом.</param>
+/// <param name="IsChanged">Хоч одне значення фактично змінилося.</param>
+public sealed record RegistryEntryWriteRow(int Row, RegistryEntry Entry, bool IsNew, bool IsChanged);
 
 /// <summary>
 /// Єдина точка запису записів і значень довідника (<c>dic.RegistryEntry</c>,
@@ -178,6 +203,21 @@ public sealed class RegistryEntryWriter(
     }
 
     /// <summary>
+    /// Заглушкові коди нових записів (<see cref="RegistryEntryWriteBatch.PlaceholderAutoCodes"/>):
+    /// без звернення до послідовності, поза шкалою <c>E</c> + цифри.
+    /// </summary>
+    private static Queue<EcrCode> PlaceholderCodes(RegistryDef definition, int count)
+    {
+        var codes = new Queue<EcrCode>();
+        for (var i = 0; definition.CodeMode == RegistryCodeMode.Auto && i < count; i++)
+        {
+            codes.Enqueue(EcrCode.Create($"Z_DRYRUN_{Guid.NewGuid():N}"));
+        }
+
+        return codes;
+    }
+
+    /// <summary>
     /// Записує пакет записів одного довідника — все або нічого, без HTTP-специфіки (фонова
     /// задача, інтеграції).
     /// </summary>
@@ -252,7 +292,7 @@ public sealed class RegistryEntryWriter(
                 item.Values ?? new Dictionary<string, object?>()))
             .ToList();
 
-        return await WriteTargetsAsync(definition, targets, userId, ct).ConfigureAwait(false);
+        return await WriteTargetsAsync(definition, targets, userId, batch.PlaceholderAutoCodes, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -315,12 +355,12 @@ public sealed class RegistryEntryWriter(
                 item.Values ?? new Dictionary<string, object?>()));
         }
 
-        return await WriteTargetsAsync(definition, targets, userId, ct).ConfigureAwait(false);
+        return await WriteTargetsAsync(definition, targets, userId, placeholderAutoCodes: false, ct).ConfigureAwait(false);
     }
 
     /// <summary>Спільне ядро <see cref="WriteAsync"/> і <see cref="UpdateAsync"/>.</summary>
     private async Task<RegistryEntryWriteResult> WriteTargetsAsync(
-        RegistryDef definition, IReadOnlyList<WriteTarget> targets, int userId, CancellationToken ct)
+        RegistryDef definition, IReadOnlyList<WriteTarget> targets, int userId, bool placeholderAutoCodes, CancellationToken ct)
     {
         var existingIds = targets.Where(t => t.Existing is not null).Select(t => t.Existing!.Id).Distinct().ToList();
         var valuesByEntry = existingIds.Count == 0
@@ -336,14 +376,14 @@ public sealed class RegistryEntryWriter(
         var staged = new List<RegistryEntry>();
         var keyed = new List<KeyedTarget>();
         var valueChanges = new List<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)>();
+        var written = new List<RegistryEntryWriteRow>();
         var (added, updated, unchanged) = (0, 0, 0);
 
         // RT-12 (D-157): коди нових записів без коду — одним зверненням до послідовності на пакет.
-        var autoCodes = await ReserveAutoCodesAsync(
-                definition,
-                targets.Count(t => t is { Existing: null, MayCreate: true, Code.Length: 0 }),
-                ct)
-            .ConfigureAwait(false);
+        var autoCount = targets.Count(t => t is { Existing: null, MayCreate: true, Code.Length: 0 });
+        var autoCodes = placeholderAutoCodes
+            ? PlaceholderCodes(definition, autoCount)
+            : await ReserveAutoCodesAsync(definition, autoCount, ct).ConfigureAwait(false);
 
         void Count(RowOutcome outcome, int delta)
         {
@@ -431,6 +471,7 @@ public sealed class RegistryEntryWriter(
 
             var outcome = isNew ? RowOutcome.Added : changes.Count > 0 ? RowOutcome.Updated : RowOutcome.Unchanged;
             Count(outcome, +1);
+            written.Add(new RegistryEntryWriteRow(row, entry, isNew, changes.Count > 0));
 
             if (keyDefs.Count > 0)
             {
@@ -466,13 +507,13 @@ public sealed class RegistryEntryWriter(
 
         if (errors.Count > 0 || added + updated == 0)
         {
-            return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: false);
+            return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: false) { Rows = written };
         }
 
         await SaveBatchAsync(definition, keyDefs, keyDefs.Count > 0 ? staged : [], valueChanges, userId, beforeSave: null, ct)
             .ConfigureAwait(false);
 
-        return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: true);
+        return new RegistryEntryWriteResult(added, updated, unchanged, errors, Applied: true) { Rows = written };
     }
 
     private int RequireUserId()

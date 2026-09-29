@@ -3268,6 +3268,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-0422` | 422 | перемикання `SourceKind` у відкритому періоді (ФВ-8.9) |
 | `ECR-REG-4091` | 409 | довідник із таким кодом уже є |
 | `ECR-REG-4092` | 409 | конфлікт складеного ключа довідника (ФВ-8.15, D-151): інший живий запис уже має ті самі значення полів ключа; для темпорального довідника — у вікні чинності, що перетинається. Випадок каже `messageKey`: `keyTaken`, `keyWindowOverlap` (RT-10a); подробиці `key`, `keyText`, `entryId`, `entryCode` конфліктного запису. `existingDuplicates` (RT-11) — публікація опису з новим або знову ввімкненим ключем на даних, де кілька живих записів уже мають однакове значення ключа; подробиці `key`, `groups`, `checked`, `sample` (до 20 груп `{keyText, entries:[{id, code}]}`), той самий алгоритм, що `POST /registries/{code}/keys/check` |
+| `ECR-REG-4093` | 409 | запис довідника змінено іншим після читання (`D-166`): `baseVersion` рядка не збігся з його `PeriodStart`. У пакеті `POST …/entries/batch` (RT-14) — помилка рядка `entryChanged` з подробицями `entryId`, `entryCode`, а не відповідь 409 |
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія одиниць неможлива. Заголовок нейтральний, випадок каже `messageKey`-подробиця: різні розмірності (ФВ-16.3, `incompatibleDimensions`), нульовий множник одиниці на конверсії (`zeroFactor`), явна конверсія не для цієї пари (`explicitConversionMismatch`), множник ≤ 0 на заведенні чи зміні одиниці (`factorMustBePositive`, BE-15) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
@@ -3592,6 +3593,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/registries/{code}/rows?asOf=&asOfUtc=&parentEntryId=&q=&cursor=&limit=` | `Registry.View` | 8 |
+| `POST` | `/api/v1/registries/{code}/entries/batch?dryRun=` | `Registry.EditData` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
@@ -3607,6 +3609,18 @@ public sealed class NotFoundException(string errorCode, string message)
 > (невідоме поле чи значення не того типу — `422 registryRowsFilter`). `values.<КОД>.value` — рядком
 > (`decimal` без втрати знаків), `version` — жетон конкуренції (`D-166`: найпізніший `PeriodStart`
 > запису та значень).
+
+> ✎ 2026-09-29 (RT-14): `POST /registries/{code}/entries/batch?dryRun=` — `{items[≤2000]}`
+> (`RegistryBatchRequest`: `clientRowId`, `op` = `upsert`|`delete`, `id?`, `code?` — лише для нового
+> запису довідника з ручним кодом, `baseVersion?`, `values`) → завжди `200 RegistryBatchResult`
+> (`applied`, `dryRun`, лічильники, `rows[]` зі `status` = `added`|`updated`|`unchanged`|`deleted`|`error`,
+> `entryId`, `version` після запису, `errors[]` `{field, errorCode, messageKey, params}`). Весь пакет —
+> одна транзакція: хоч одна помилка рядка або `dryRun` — відкат, не записано нічого (і номер
+> послідовності авто-коду не витрачається). Застарілий `baseVersion` — помилка рядка
+> `ECR-REG-4093 entryChanged`; ключ, який тримає запис поза пакетом, — помилка рядка `4092 keyTaken`;
+> обмін ключами між записами пакета законний. `409 ECR-REG-4092` — лише гонка під час застосування;
+> `422 ECR-REQ-0422 batchTooLarge` (> 2000) / `batchItemInvalid` (невідома дія, `delete` без `id`,
+> повтор `id`).
 
 > ✎ 2026-09-21: `GET /sources/{id}/mapping/preview` — `fields[].isActive`
 > (обов'язкове; `false` — мапінг призупинений, `BE-27`, і його точки адрес не

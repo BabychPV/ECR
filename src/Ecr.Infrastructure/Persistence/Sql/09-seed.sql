@@ -4639,6 +4639,11 @@ USING (VALUES
     (N'err.ECR-REG-0422.entryCodeAutomatic', N'en', N'Entry codes of this registry are assigned automatically: leave the code empty for a new entry.', 1),
     -- RT-13 (FEATURE-REGISTRY-TABLES §7.1): фільтр поля в GET …/rows.
     (N'err.ECR-REQ-0422.registryRowsFilter', N'en', N'Cannot filter registry "{registryCode}" by {field} = "{value}": the field does not exist or the value does not match its type.', 1),
+    -- RT-14 (FEATURE-REGISTRY-TABLES §7.1–7.2, D-166): пакетний запис рядків, застарілий baseVersion.
+    (N'err.ECR-REG-4093', N'en', N'Changed by someone else', 1),
+    (N'err.ECR-REG-4093.entryChanged', N'en', N'Entry {entryCode} was changed after you opened it.', 1),
+    (N'err.ECR-REQ-0422.batchTooLarge', N'en', N'A batch can contain at most {max} rows; this one has {count}.', 1),
+    (N'err.ECR-REQ-0422.batchItemInvalid', N'en', N'Batch row "{clientRowId}" cannot be processed: each row needs the action upsert or delete, a deletion needs the entry id, and an entry may appear in the batch only once.', 1),
 
     -- RT: expressions
     -- RT-21 (FEATURE-REGISTRY-TABLES §5.5, `02b` §12, перевірки 15–19 і попередження 21а): статичні перевірки функцій довідників.

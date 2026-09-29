@@ -253,6 +253,7 @@ public static class DependencyInjection
         // RT: data
         services.AddScoped<Registries.RegistryEntryWriter>(); // S6
         services.AddScoped<Registries.Rows.GetRegistryRowsHandler>(); // RT-13
+        services.AddScoped<Registries.Rows.RegistryBatchHandler>(); // RT-14
 
         // RT: expressions
 

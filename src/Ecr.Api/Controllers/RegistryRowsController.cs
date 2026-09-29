@@ -16,7 +16,7 @@ namespace Ecr.Api.Controllers;
 [ApiController]
 [Route("api/v1/registries")]
 [Authorize]
-public sealed class RegistryRowsController(GetRegistryRowsHandler getRows) : ControllerBase
+public sealed class RegistryRowsController(GetRegistryRowsHandler getRows, RegistryBatchHandler saveBatch) : ControllerBase
 {
     /// <summary>Префікс параметра фільтра поля: <c>field.&lt;КОД&gt;=значення</c>.</summary>
     private const string FieldFilterPrefix = "field.";
@@ -60,4 +60,30 @@ public sealed class RegistryRowsController(GetRegistryRowsHandler getRows) : Con
 
         return Ok(await getRows.HandleAsync(request, ct).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// Пакетний запис рядків довідника (RT-14): <c>upsert</c> і <c>delete</c> однією транзакцією.
+    /// Право <c>Registry.EditData</c> або грант <c>Write</c> на довідник.
+    /// </summary>
+    /// <remarks>
+    /// Звіт — завжди 200, як імпорт CSV: помилки рядків (зокрема <c>ECR-REG-4093 entryChanged</c> для
+    /// застарілого <c>baseVersion</c> і <c>4092 keyTaken</c>) — дані для сітки. Хоч одна помилка або
+    /// <c>dryRun</c> — не записано нічого. 409 — лише гонка за ключем під час запису.
+    /// </remarks>
+    /// <param name="code">Код довідника.</param>
+    /// <param name="request">Рядки пакета, ≤ 2000.</param>
+    /// <param name="dryRun">Лише перевірка — із відкатом.</param>
+    /// <param name="ct">Токен скасування.</param>
+    [HttpPost("{code}/entries/batch")]
+    [ProducesResponseType<RegistryBatchResult>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<RegistryBatchResult>> SaveBatch(
+        string code,
+        [FromBody] RegistryBatchRequest request,
+        [FromQuery] bool dryRun,
+        CancellationToken ct = default)
+        => Ok(await saveBatch.HandleAsync(code, request, dryRun, ct).ConfigureAwait(false));
 }
