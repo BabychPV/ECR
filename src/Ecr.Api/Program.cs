@@ -52,7 +52,7 @@ builder.Configuration.AddEnvironmentVariables(prefix: "ECR_");
 builder.Logging.AddEcrFileLog();
 
 builder.Services.AddEcrInfrastructure(builder.Configuration);
-builder.Services.AddEcrCalculations();
+builder.Services.AddEcrCalculations(builder.Configuration.GetSection(CalculationLimits.SectionName).Get<CalculationLimits>());
 builder.Services.AddExcelAdapters();
 builder.Services.AddPiAfAdapters();
 // ⚠ Окремим викликом, а не всередині AddPiAfAdapters: SQL-джерело (FLERT,
