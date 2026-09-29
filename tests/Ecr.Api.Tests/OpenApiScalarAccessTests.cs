@@ -58,6 +58,10 @@ public sealed class OpenApiScalarAccessTests(SqlServerFixture sql)
             Environment.SetEnvironmentVariable("ECR_Auth__EnableNegotiate", "false");
             Environment.SetEnvironmentVariable("ECR_Auth__StampCacheSeconds", "0");
 
+            // S11: без сертифіката Production не стартує; тут предмет — маршрути,
+            // тож кільце — під явною згодою стенда.
+            Environment.SetEnvironmentVariable("ECR_Auth__DataProtection__AllowUnprotectedKeys", "true");
+
             builder.UseEnvironment("Production");
             builder.ConfigureLogging(logging =>
             {

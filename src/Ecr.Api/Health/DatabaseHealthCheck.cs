@@ -21,7 +21,8 @@ public sealed class DatabaseHealthCheck(
     Ecr.Domain.Abstractions.IClock clock,
     IUiStringCatalog catalog,
     ICurrentUser currentUser,
-    DataProtectionKeyProtection keyProtection) : IHealthCheck
+    DataProtectionKeyProtection keyProtection,
+    IHostEnvironment? environment = null) : IHealthCheck
 {
     /// <summary>Скільки вільних партицій попереду вважається достатнім.</summary>
     /// <remarks>
@@ -29,6 +30,11 @@ public sealed class DatabaseHealthCheck(
     /// вночі, коли архівація впреться у відсутню межу.
     /// </remarks>
     private const int MinimumPartitionsAhead = 2;
+
+    /// <summary>Запасний текст ключа <c>health.db.limitation.dataProtectionKeys</c>.</summary>
+    private const string UnprotectedKeysFallback =
+        "Session keys are stored unencrypted in sec.DataProtectionKey: no certificate is configured "
+        + "(Auth:DataProtection:CertificateThumbprint). Restrict the table to the service account with DENY for everyone else.";
 
     /// <summary>Файлові групи, без яких фізична модель не працює.</summary>
     private static readonly string[] RequiredFilegroups =
@@ -89,6 +95,20 @@ public sealed class DatabaseHealthCheck(
                     Param("names", string.Join(", ", missing)), cancellationToken)
                     .ConfigureAwait(false);
                 return HealthCheckResult.Unhealthy(message, data: data);
+            }
+
+            // ⛔ S11: у Production незахищене кільце стартує лише з явною згодою
+            // `Auth:DataProtection:AllowUnprotectedKeys` (одноразові стенди, старт
+            // пише Critical). Degraded, а не Unhealthy (рішення координатора):
+            // стенд лишається робочим, але стан не зелений і причина названа.
+            // Після Unhealthy-перевірок — вони важливіші за цей стан. Текст — той
+            // самий ключ каталогу, що й обмеження: факт той самий.
+            if (!keyProtection.IsProtected && environment?.IsProduction() == true)
+            {
+                var message = await Text(
+                    "health.db.limitation.dataProtectionKeys", UnprotectedKeysFallback, null, cancellationToken)
+                    .ConfigureAwait(false);
+                return HealthCheckResult.Degraded(message, data: data);
             }
 
             if (partitionsAhead < MinimumPartitionsAhead)
@@ -221,10 +241,7 @@ public sealed class DatabaseHealthCheck(
         if (!keyProtection.IsProtected)
         {
             list.Add(await Text(
-                "health.db.limitation.dataProtectionKeys",
-                "Session keys are stored unencrypted in sec.DataProtectionKey: no certificate is configured "
-                + "(Auth:DataProtection:CertificateThumbprint). Restrict the table to the service account with DENY for everyone else.",
-                null, ct).ConfigureAwait(false));
+                "health.db.limitation.dataProtectionKeys", UnprotectedKeysFallback, null, ct).ConfigureAwait(false));
         }
 
         list.Add(await Text(

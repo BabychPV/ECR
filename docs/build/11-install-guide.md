@@ -221,9 +221,17 @@ $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адмініст
     -Database 'ECR' `
     -MsiPath '.\Ecr.msi' `
     -ConnectionString $cs `
+    -DataProtectionThumbprint '<відбиток сертифіката з Cert:\LocalMachine\My>' `
     -BootstrapPassword $bp `
     -FirstDeployment
 ```
+
+⛔ **З 2026-09-29 (S11) `-DataProtectionThumbprint` обов'язковий.** Без
+сертифіката з закритим ключем у `Cert:\LocalMachine\My` служба в Production
+не стартує, і `deploy-ecr.ps1` зупиняється на кроці 1, ще до встановлення.
+Сертифікат **один на всі вузли**; обліковому запису служби потрібне право
+читання його закритого ключа. Докладно — `docs/admin/operations-runbook.md`
+п. 2.1 і п. 6.4 (ротація відкритих ключів після першого ввімкнення).
 
 ⛔ **Викликати САМЕ так** (`.\deploy-ecr.ps1 ...`), а НЕ
 `pwsh -File .\deploy-ecr.ps1 ...` і не через новий процес: `-ConnectionString`/
@@ -406,12 +414,14 @@ Windows-обліковий запис: є звичайна форма логін
 ```powershell
 .\tools\deploy-ecr.ps1 `
     -SqlInstance 'ІМ''Я_СЕРВЕРА\SQLEXPRESS' -Database 'ECR' `
-    -MsiPath '.\Ecr.msi' -ConnectionString $cs
+    -MsiPath '.\Ecr.msi' -ConnectionString $cs `
+    -DataProtectionThumbprint '<відбиток сертифіката з Cert:\LocalMachine\My>'
 ```
 
 (без `-BootstrapPassword` і без `-FirstDeployment` — це не перше
-розгортання; `-ConnectionString` усе одно потрібен, бо крок 4/7
-записує його щоразу — значення не змінюється, якщо рядок той самий).
+розгортання; `-ConnectionString` і `-DataProtectionThumbprint` усе одно
+потрібні, бо крок 4/7 записує їх щоразу — значення не змінюється, якщо воно
+те саме).
 
 ⚠ **Воркер (розділ 2.6): `-EnableWorker` — на КОЖНОМУ оновленні.** MSI не
 пам'ятає `WORKER_ENABLED`; оновлення без прапорця прибирає службу

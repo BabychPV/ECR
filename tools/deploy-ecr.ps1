@@ -156,6 +156,26 @@
     працює лише для вже відомого домен-користувача з роллю в системі, а
     такого на порожній базі ще немає.
 
+.PARAMETER DataProtectionThumbprint
+    ⛔ S11 (аудит безпеки, 2026-09-29): ОБОВ'ЯЗКОВИЙ. Відбиток сертифіката з
+    закритим ключем у `Cert:\LocalMachine\My`, яким застосунок шифрує ключі
+    кільця DataProtection у `sec.DataProtectionKey`. Служба працює в
+    середовищі Production, а там без сертифіката застосунок НЕ СТАРТУЄ: ключі
+    у відкритому вигляді дали б кожному, хто читає базу чи її бекап, підробити
+    cookie сеансу будь-якого користувача. Перевіряється на кроці 1 — ДО
+    встановлення служби: сертифікат є в `Cert:\LocalMachine\My` і має закритий
+    ключ (`HasPrivateKey`). Пишеться в реєстр служби змінною
+    `ECR_Auth__DataProtection__CertificateThumbprint` тим самим каналом, що й
+    рядок підключення (крок 4).
+
+    ⚠ Вузлів за балансувальником кілька (D-32) — сертифікат ОДИН і той самий
+    на всіх (експорт/імпорт PFX), інакше вузли не розшифрують ключі один
+    одного. Обліковому запису служби (`-ServiceAccount`) потрібне право
+    читання закритого ключа (certlm.msc → Усі завдання → Керування закритими
+    ключами) — цього скрипт не надає. Згоди на незахищене кільце для
+    одноразових стендів цей скрипт не ставить ніколи (сторож в
+    Ecr.Architecture.Tests).
+
 .PARAMETER AppPort
     Порт Kestrel і правило брандмауера. За замовчуванням 5000.
 
@@ -218,7 +238,8 @@
 .EXAMPLE
     # Побачити повний план, нічого не роблячи в системі
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
-        -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -WhatIf
+        -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 `
+        -DataProtectionThumbprint '<відбиток з Cert:\LocalMachine\My>' -WhatIf
 
 .EXAMPLE
     # Перше розгортання на чистому сервері (порожня база — потрібен bootstrap)
@@ -226,6 +247,7 @@
     $bp = Read-Host -AsSecureString -Prompt 'Пароль bootstrap-адміністратора'
     .\tools\deploy-ecr.ps1 -SqlInstance NCATUATV12 -Database ECR `
         -ServiceAccount 'DOMAIN\ecr-svc$' -Version 1.0.0 -ConnectionString $cs `
+        -DataProtectionThumbprint '<відбиток з Cert:\LocalMachine\My>' `
         -BootstrapPassword $bp -ConfigValues .\uat-config.json -FirstDeployment
 
 .NOTES
@@ -252,6 +274,7 @@ param(
     [System.Security.SecureString] $ServicePassword,
     [System.Security.SecureString] $ConnectionString,
     [System.Security.SecureString] $BootstrapPassword,
+    [string] $DataProtectionThumbprint,
     [int] $AppPort = 5000,
     [string] $ConfigValues,
     [string] $MsiPath,
@@ -553,6 +576,41 @@ function Get-ServiceEnvironmentValue {
     return $entry.Substring($Name.Length + 1)
 }
 
+# ⛔ S11: відбиток у тому вигляді, в якому його шукає застосунок
+# (`AuthenticationSetup.FindCertificate`): без пробілів і нерозривних пробілів —
+# з вікна сертифіката Windows його копіюють групами по два символи.
+function ConvertTo-NormalizedThumbprint {
+    param([string] $Thumbprint)
+    if (-not $Thumbprint) { return '' }
+    return (-join ($Thumbprint.ToCharArray() | Where-Object { [char]::IsLetterOrDigit($_) })).ToUpperInvariant()
+}
+
+# ⚠ Чиста функція (як Get-ReadinessVerdict): рішення кроку 1 про сертифікат
+# Data Protection перевіряється на готовому об'єкті, без сховища сертифікатів.
+# Вхід — нормалізований відбиток і знайдений сертифікат ($null — не знайдено).
+# Вихід — текст причини відмови або $null, якщо все гаразд.
+function Get-DataProtectionCertificateProblem {
+    param(
+        [string] $Thumbprint,
+        $Certificate
+    )
+
+    if (-not $Thumbprint) {
+        return ("-DataProtectionThumbprint не задано. Служба працює в Production, а там без сертифіката " +
+            "застосунок не стартує (S11): ключі DataProtection у sec.DataProtectionKey у відкритому вигляді " +
+            "дали б кожному, хто читає базу чи бекап, підробити сеанс будь-якого користувача. Постав сертифікат " +
+            "із закритим ключем у Cert:\LocalMachine\My (ОДИН на всі вузли) і передай його відбиток.")
+    }
+    if (-not $Certificate) {
+        return "Сертифіката з відбитком $Thumbprint немає в Cert:\LocalMachine\My. Імпортуй PFX (із закритим ключем) у сховище машини."
+    }
+    if (-not $Certificate.HasPrivateKey) {
+        return ("Сертифікат $Thumbprint у Cert:\LocalMachine\My без закритого ключа (HasPrivateKey = False): " +
+            "ним можна зашифрувати ключі кільця, але не розшифрувати — жоден сеанс не відкриється. Імпортуй PFX із закритим ключем.")
+    }
+    return $null
+}
+
 # ⚠ ПЕРЕДУМОВИ — до будь-якої зміни системи (дешевша відмова тут, ніж на
 # кроці 3 з наполовину встановленою службою).
 Write-Step "Крок 1/7: передумови"
@@ -586,6 +644,21 @@ if (-not $ConnectionString) {
         "(D-11) при першій спробі стартувати, поки ECR_ConnectionStrings__Ecr не буде додано " +
         "вручну в HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment.")
 }
+
+# ⛔ S11: сертифікат Data Protection — ДО схеми й MSI. Служба без нього в
+# Production не стартує, і дізнатися про це на кроці 6 означало б уже
+# встановлену, але мертву службу. Лише читання сховища — тому й під -WhatIf.
+$DataProtectionThumbprint = ConvertTo-NormalizedThumbprint $DataProtectionThumbprint
+$dataProtectionCertificate = $null
+if ($DataProtectionThumbprint) {
+    $certPath = "Cert:\LocalMachine\My\$DataProtectionThumbprint"
+    if (Test-Path $certPath) { $dataProtectionCertificate = Get-Item $certPath }
+}
+$certificateProblem = Get-DataProtectionCertificateProblem -Thumbprint $DataProtectionThumbprint `
+    -Certificate $dataProtectionCertificate
+if ($certificateProblem) { throw $certificateProblem }
+Write-Host ("Сертифікат Data Protection: $DataProtectionThumbprint ($($dataProtectionCertificate.Subject)), " +
+    "закритий ключ є. Обліковому запису служби потрібне право читання закритого ключа.") -ForegroundColor Green
 
 $sqlAuth = if ($SqlLogin) { @('-U', $SqlLogin) } else { @('-E') }
 
@@ -917,6 +990,16 @@ if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Envi
     Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ASPNETCORE_URLS' `
         -Value "http://+:$AppPort"
     Write-Host "ASPNETCORE_URLS записано (http://+:$AppPort) — служба слухає всі інтерфейси, не лише localhost." -ForegroundColor Green
+}
+
+# ⛔ S11: відбиток сертифіката Data Protection — тим самим каналом (реєстр
+# служби), що й ASPNETCORE_URLS. Не секрет (відбиток — це хеш публічного
+# сертифіката), але без нього служба в Production не стартує.
+if ($PSCmdlet.ShouldProcess('HKLM:\SYSTEM\CurrentControlSet\Services\EcrApi\Environment',
+        'записати ECR_Auth__DataProtection__CertificateThumbprint')) {
+    Set-ServiceEnvironmentVariable -ServiceName 'EcrApi' -Name 'ECR_Auth__DataProtection__CertificateThumbprint' `
+        -Value $DataProtectionThumbprint
+    Write-Host "ECR_Auth__DataProtection__CertificateThumbprint записано ($DataProtectionThumbprint)." -ForegroundColor Green
 }
 
 if ($BootstrapPassword) {

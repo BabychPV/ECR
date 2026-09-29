@@ -336,6 +336,11 @@ if ($Documents -gt 0) {
     $env:ECR_Bootstrap__Password = $BootstrapPassword
     $env:ASPNETCORE_URLS = 'http://localhost:5099'
 
+    # ⛔ S11: без launch-профілю це Production, а там без сертифіката Data
+    # Protection застосунок не стартує. Стенд розробника — явна згода на
+    # незахищене кільце (тоді старт пише Critical, а db — Degraded).
+    $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
+
     # ⚠ Шлях береться В ЛАПКИ: у ньому є пробіл («ECR Web»), а Start-Process
     # ділить -ArgumentList по пробілах і без лапок передає два аргументи.
     # ⛔ `--no-launch-profile` обов'язковий: інакше `dotnet run` бере

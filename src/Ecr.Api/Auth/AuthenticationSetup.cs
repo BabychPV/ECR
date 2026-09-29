@@ -4,6 +4,7 @@ using Ecr.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 
 namespace Ecr.Api.Auth;
 
@@ -24,7 +25,7 @@ namespace Ecr.Api.Auth;
 /// той самий принцип обмеження Negotiate одним маршрутом лишається, просто
 /// немає окремого рівня IIS, де його ще й треба вимкнути вручну.
 /// </remarks>
-public static class AuthenticationSetup
+public static partial class AuthenticationSetup
 {
     /// <summary>Claim із <c>SecurityStamp</c>: перевіряється на кожен запит.</summary>
     public const string SecurityStampClaim = "ecr:stamp";
@@ -140,6 +141,13 @@ public static class AuthenticationSetup
     /// не хоче.</item>
     /// </list>
     ///
+    /// ⛔ S11 (аудит безпеки): у Production незахищене кільце — відмова старту
+    /// (<see cref="UnprotectedInProductionMessage"/>), бо відкритий ключ у
+    /// таблиці чи бекапі дає підробку cookie <c>ecr.auth</c> з <c>ecr:uid</c>
+    /// будь-кого. Захист — лише сертифікат: <c>ProtectKeysWithDpapi</c> (ключ
+    /// машини) на двох вузлах за балансувальником (D-32) дав би кожному вузлу
+    /// ключі, яких інший не розшифрує. Development і тести — як були.
+    ///
     /// ⚠ Відбиток заданий, а сертифіката немає — це відмова старту, а не
     /// відкат до незахищеного режиму. Мовчазний відкат дав би систему, яка
     /// вважає себе захищеною, і адміністратор дізнався б про це не з health, а
@@ -151,6 +159,17 @@ public static class AuthenticationSetup
             .SetApplicationName("Ecr")
             .PersistKeysToDbContext<EcrDbContext>();
 
+        // ⛔ S11: у Production незахищене кільце — відмова старту, а не рядок у
+        // health. Перевіряється ФАКТ (`XmlEncryptor` зібраних опцій), а не
+        // наявність ключа конфігурації — тим самим принципом, що й
+        // `DataProtectionKeyProtection`: «що застосунок зробив».
+        var allowUnprotected = configuration.GetValue(AllowUnprotectedKeysKey, defaultValue: false);
+        services.AddOptions<KeyManagementOptions>()
+            .Validate<IHostEnvironment, ILoggerFactory>(
+                (options, environment, loggers) => CheckKeyProtection(environment, options, allowUnprotected, loggers),
+                UnprotectedInProductionMessage)
+            .ValidateOnStart();
+
         var thumbprint = configuration[CertificateThumbprintKey];
         if (string.IsNullOrWhiteSpace(thumbprint))
         {
@@ -161,6 +180,64 @@ public static class AuthenticationSetup
         builder.ProtectKeysWithCertificate(FindCertificate(thumbprint));
         services.AddSingleton(DataProtectionKeyProtection.ProtectedBy(thumbprint));
     }
+
+    /// <summary>
+    /// Явна згода на незахищене кільце в Production — лише для одноразових
+    /// стендів (`tools/smoke.ps1`, `tools/e2e-stand.ps1`, `tools/setup-dev-db.ps1`).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Не тиха лазівка для майданчика: із цим ключем у Production старт
+    /// пише Critical із причиною, а перевірка <c>db</c> — <c>Degraded</c> із
+    /// тією самою причиною. <c>deploy-ecr.ps1</c> цей ключ не ставить ніколи —
+    /// це тримає сторож <c>DeployScriptNeverAllowsUnprotectedKeysTests</c>.
+    /// </remarks>
+    public const string AllowUnprotectedKeysKey = "Auth:DataProtection:AllowUnprotectedKeys";
+
+    /// <summary>Текст відмови старту в Production без захисту ключів (S11).</summary>
+    public const string UnprotectedInProductionMessage =
+        "Production: ключі кільця DataProtection у sec.DataProtectionKey не захищені — служба не стартує. "
+        + "Хто читає базу або її бекап, той підробляє cookie сеансу будь-якого користувача. "
+        + "Задай " + CertificateThumbprintKey + " (змінна ECR_Auth__DataProtection__CertificateThumbprint) — "
+        + "відбиток сертифіката з закритим ключем у LocalMachine\\My, ОДНОГО для всіх вузлів "
+        + "(DPAPI машини не підходить: вузлів за балансувальником два й більше, D-32). "
+        + "Лише для одноразового стенда: " + AllowUnprotectedKeysKey + " = true (тоді старт пише Critical, "
+        + "а /health/db — Degraded).";
+
+    /// <summary>Текст Critical на старті, коли Production іде без захисту за явною згодою (S11).</summary>
+    public const string UnprotectedByConsentMessage =
+        "Production: ключі кільця DataProtection у sec.DataProtectionKey НЕ захищені — старт дозволено лише "
+        + "явною згодою " + AllowUnprotectedKeysKey + " = true (одноразовий стенд). Хто читає базу або її бекап, "
+        + "той підробляє cookie сеансу будь-якого користувача. На майданчику: прибери згоду й задай "
+        + CertificateThumbprintKey + ".";
+
+    /// <summary>
+    /// Перевірка вимоги захисту ключів на старті (S11): <c>false</c> — відмова
+    /// старту; згода в Production — Critical у журнал і старт.
+    /// </summary>
+    /// <param name="environment">Середовище хоста.</param>
+    /// <param name="options">Зібрані опції керування ключами.</param>
+    /// <param name="allowUnprotected">Значення <see cref="AllowUnprotectedKeysKey"/>.</param>
+    /// <param name="loggers">Фабрика журналів.</param>
+    internal static bool CheckKeyProtection(
+        IHostEnvironment environment, KeyManagementOptions options, bool allowUnprotected, ILoggerFactory loggers)
+    {
+        if (!environment.IsProduction() || options.XmlEncryptor is not null)
+        {
+            return true;
+        }
+
+        if (!allowUnprotected)
+        {
+            return false;
+        }
+
+        var logger = loggers.CreateLogger("Ecr.Startup");
+        LogUnprotectedByConsent(logger, UnprotectedByConsentMessage);
+        return true;
+    }
+
+    [LoggerMessage(Level = LogLevel.Critical, Message = "{Message}")]
+    private static partial void LogUnprotectedByConsent(ILogger logger, string message);
 
     /// <summary>Сертифікат за відбитком у <c>LocalMachine\My</c> (`D14-08`).</summary>
     private static X509Certificate2 FindCertificate(string thumbprint)
@@ -195,8 +272,8 @@ public static class AuthenticationSetup
             throw new InvalidOperationException(
                 $"{CertificateThumbprintKey} = '{thumbprint}': сховище LocalMachine\\My недоступне "
                 + $"({unreachable.GetType().Name}: {unreachable.Message}). Або зроби його доступним "
-                + "обліковому запису служби, або прибери ключ — тоді ключі кільця лежатимуть у "
-                + "sec.DataProtectionKey відкрито, і /health/db про це скаже.",
+                + "обліковому запису служби, або (лише поза Production) прибери ключ — тоді ключі кільця "
+                + "лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.",
                 unreachable);
         }
 
@@ -204,8 +281,8 @@ public static class AuthenticationSetup
         {
             throw new InvalidOperationException(
                 $"{CertificateThumbprintKey} = '{thumbprint}': сертифіката з таким відбитком немає в "
-                + "LocalMachine\\My. Або постав сертифікат, або прибери ключ — тоді ключі кільця "
-                + "лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.");
+                + "LocalMachine\\My. Або постав сертифікат, або (лише поза Production) прибери ключ — тоді "
+                + "ключі кільця лежатимуть у sec.DataProtectionKey відкрито, і /health/db про це скаже.");
         }
 
         return found[0];

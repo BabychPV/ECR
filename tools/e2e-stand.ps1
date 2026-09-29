@@ -320,6 +320,11 @@ $env:ECR_API_URL = $base
 # тимчасовий процес.
 $env:ECR_Auth__RequireHttps = 'false'
 
+# ⛔ S11: процес іде без launch-профілю, тобто в Production, а там без
+# сертифіката Data Protection застосунок не стартує. Одноразовий стенд — явна
+# згода на незахищене кільце (тоді старт пише Critical, а db — Degraded).
+$env:ECR_Auth__DataProtection__AllowUnprotectedKeys = 'true'
+
 Step 'старт застосунку'
 $api = Start-Process -PassThru -WindowStyle Hidden dotnet `
     -ArgumentList "run --project `"$(Join-Path $root 'src/Ecr.Api')`" --no-build --no-launch-profile" `

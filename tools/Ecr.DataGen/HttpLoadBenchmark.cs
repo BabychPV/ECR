@@ -180,6 +180,7 @@ public sealed class HttpLoadBenchmark
                       $env:ECR_ConnectionStrings__Ecr = "<той самий рядок>"
                       $env:ECR_Bootstrap__Password    = "<разовий пароль>"
                       $env:ECR_Auth__RequireHttps     = "false"    ⛔ по HTTP без цього cookie не повертається
+                      $env:ECR_Auth__DataProtection__AllowUnprotectedKeys = "true"    ⛔ S11: без сертифіката Production не стартує
                       $env:ASPNETCORE_URLS            = "{BaseAddress.GetLeftPart(UriPartial.Authority)}"
                       dotnet run --project src\Ecr.Api --no-launch-profile
                 """));

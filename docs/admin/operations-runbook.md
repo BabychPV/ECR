@@ -88,7 +88,8 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Auth:RequireHttps` | `true` | cookie лише через HTTPS |
 | `Auth:EnableNegotiate` | `true` | вхід Windows (Negotiate) |
 | `Auth:StampCacheSeconds` | 5 | як швидко блокування чи зміна ролей діє на відкриті сесії, с |
-| `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2) |
+| `Auth:DataProtection:CertificateThumbprint` | немає | відбиток сертифіката з `LocalMachine\My` для захисту ключів Data Protection (п. 6.2). ⛔ **З 2026-09-29 (S11) у Production обов'язковий**: без нього служба не стартує. Один і той самий сертифікат (із закритим ключем, з правом читання для облікового запису служби) — на всіх вузлах |
+| `Auth:DataProtection:AllowUnprotectedKeys` | `false` | лише для одноразових стендів (`smoke.ps1`, `e2e-stand.ps1`, `setup-dev-db.ps1`): дозволяє старт у Production без сертифіката. На майданчику не вмикати: старт пише Critical у журнал подій (джерело `ECR`), `db` — Degraded з причиною. `deploy-ecr.ps1` його не ставить ніколи |
 | `Security:RateLimit:LoginPermitPerMinute` | 60 | спроб входу за хвилину |
 | `Security:RateLimit:TrustForwardedFor` | `false` | брати IP із `X-Forwarded-For`. Вмикати лише за довіреним проксі |
 | `Security:RateLimit:SearchPermit` / `SearchWindowSeconds` | 30 / 10 | обмеження пошуку |
@@ -286,6 +287,7 @@ SQL Server Agent (`14-agent-jobs.sql`) ставиться лише з `deploy-ec
 |---|---|---|
 | `/health/ready` 503, `db` Unhealthy | БД недоступна або змінився рядок підключення | перевірити SQL Server і `ECR_ConnectionStrings__Ecr` у реєстрі служби, перезапустити `EcrApi` |
 | служба не стартує, у лозі незастосовані міграції | оновили код без схеми, а `StartupMode=Validate` | застосувати схему (п. 8) і запустити службу |
+| служба не стартує: «Production: ключі кільця DataProtection … не захищені» | не задано `Auth:DataProtection:CertificateThumbprint` (S11) | встановити сертифікат із закритим ключем у `LocalMachine\My` на кожному вузлі, дати права облікового запису служби, задати `ECR_Auth__DataProtection__CertificateThumbprint` (`deploy-ecr.ps1 -DataProtectionThumbprint`). Старі відкриті ключі в таблиці лишаються чинними до кінця строку — після ввімкнення захисту ротація, п. 6.4 |
 | служба не стартує після зміни відбитка | немає сертифіката `Auth:DataProtection:CertificateThumbprint` у `LocalMachine\My` | встановити сертифікат із закритим ключем і дати права облікового запису служби |
 | `db` Degraded: менше 2 партицій попереду | не працює Agent-задача (Express) | `EXEC arc.usp_EnsurePartitions @MonthsAhead = 6;` або скрипт `GET /api/v1/health/partitions/script` |
 | `db` Unhealthy: RCSI | базу відновили або створили без `06-rcsi.sql` | виконати `06-rcsi.sql`. Перезапуск не потрібен: перевірка читає RCSI щоразу, а не з проби старту |
@@ -361,6 +363,60 @@ BACKUP LOG      [Ecr] TO DISK = N'<шлях>\Ecr_log.trn'  WITH CHECKSUM, COMPRE
 
 ⚠ Процедура відновлення **на стенді не перевірялась**. Перевірте її до
 приймання.
+
+### 6.4. Ротація відкритих ключів Data Protection (S11)
+
+**Коли:** один раз — після першого розгортання з сертифікатом
+(`deploy-ecr.ps1 -DataProtectionThumbprint`) на майданчику, де служба
+раніше працювала без нього.
+
+**Чому:** з сертифікатом **нові** ключі кільця пишуться в
+`sec.DataProtectionKey` зашифрованими, але **старі**, записані відкрито,
+застосунок і далі читає й приймає до кінця їхнього строку (типово 90 днів).
+Доки старий ключ у таблиці — будь-хто з доступом на читання до бази або до
+будь-якого бекапу, зробленого раніше, може підробити cookie сеансу будь-якого
+користувача.
+
+⛔ **Попередження — наслідки для користувачів:**
+
+- **усі користувачі вийдуть із системи**: сеанси, підписані старими ключами,
+  стануть недійсними;
+- **секрети каналів сповіщень доведеться ввести наново**: вони зашифровані
+  тими самими ключами і після ротації не розшифровуються. Перелік каналів —
+  `/admin/notifications`; перед ротацією підготуйте їхні секрети.
+
+Узгодьте вікно з користувачами.
+
+**Кроки** (на всіх вузлах одночасно):
+
+1. Переконатися, що служба вже стартувала з сертифікатом: у реєстрі служби є
+   `ECR_Auth__DataProtection__CertificateThumbprint`, `/health/db` не містить
+   обмеження «Session keys are stored unencrypted».
+2. Повний бекап бази (п. 6.2).
+3. Зупинити службу на **кожному** вузлі: `Stop-Service EcrApi`.
+4. Подивитися, які ключі відкриті:
+
+   ```sql
+   SELECT Id, FriendlyName FROM sec.DataProtectionKey
+   WHERE Xml NOT LIKE N'%encryptedSecret%';
+   ```
+
+5. Видалити відкриті ключі:
+
+   ```sql
+   DELETE FROM sec.DataProtectionKey WHERE Xml NOT LIKE N'%encryptedSecret%';
+   ```
+
+   Якщо після цього в таблиці не лишилося жодного ключа — це нормально:
+   застосунок створить новий, уже зашифрований, під час першого старту.
+6. `Start-Service EcrApi` на всіх вузлах, потім `/health/ready` і `/health/db`.
+7. Увійти в систему й ввести наново секрети каналів сповіщень
+   (`/admin/notifications`, перевірка — `POST /api/v1/notifications/channels/{id}/test`).
+8. **Бекапи, зроблені до кроку 5, містять відкриті ключі.** Обмежте доступ до
+   них або знищіть їх відповідно до політики зберігання: для них ротація
+   нічого не змінює.
+
+⚠ Процедура **на стенді не перевірялась**. Перевірте її до приймання.
 
 ## 7. Архівація років
 
