@@ -743,21 +743,12 @@ public sealed class CreateUserHandler(
             // і саме цей пароль (не обраний самим користувачем) ніколи
             // повторно не перевіряється довжиною — до першої зміни він і є
             // чинним паролем облікового запису.
+            //
+            // ⚠ S15: та сама перевірка, що й у `ChangePasswordHandler` —
+            // правило не залежить від того, чи пароль разовий (видає
+            // адміністратор), чи свій.
             var policy = await users.GetPolicyAsync(user, ct).ConfigureAwait(false);
-            if (initialPassword.Length < policy.MinLength)
-            {
-                // ⚠ Той самий факт, що й у `ChangePasswordHandler`: ключ
-                // перевикористаний, «коротший за N символів» не залежить від
-                // того, чи пароль розовий (видає адміністратор), чи свій.
-                throw new BusinessRuleException(
-                    "ECR-PWD-0422",
-                    $"Разовий пароль коротший за {policy.MinLength} символів.",
-                    new Dictionary<string, object?>
-                    {
-                        ["messageKey"] = "err.ECR-PWD-0422.tooShort",
-                        ["minLength"] = policy.MinLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    });
-            }
+            PasswordPolicyCheck.Ensure(policy, initialPassword, userName, "Разовий пароль");
 
             user.SetPassword(hasher.Hash(initialPassword));
 

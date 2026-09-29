@@ -16,7 +16,7 @@ import { expect, test, type Page } from '@playwright/test';
  * ⚠ Паролі тут ТЕСТОВІ й існують лише в тимчасовій базі, яку стенд же й
  * видаляє (`tools/e2e-stand.ps1`).
  */
-const Operator = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
+const Operator = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 /** Стенд віддає період — за ним видно, що база піднялася. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';

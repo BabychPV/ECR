@@ -247,7 +247,7 @@ try {
         provider        = 'Local'
         sid             = $null
         displayName     = 'Smoke operator'
-        initialPassword = 'Smoke-Operator-2026!'
+        initialPassword = 'Smk-Operator-2026!'
         roleCodes       = @('SmokeOperator')
     } | Out-Null
 
@@ -256,12 +256,12 @@ try {
     # проєкт дає 403, і це правильно.
     Step 'вхід оператором і зміна разового пароля'
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smoke-Operator-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smk-Operator-2026!' } | Out-Null
     Call POST '/api/v1/auth/change-password' `
-        @{ currentPassword = 'Smoke-Operator-2026!'; newPassword = 'Smoke-Work-2026!' } | Out-Null
+        @{ currentPassword = 'Smk-Operator-2026!'; newPassword = 'Smk-Work-2026!' } | Out-Null
 
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smoke-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smk-Work-2026!' } | Out-Null
 
     # ⛔ Без гранта перелік порожній для всіх, включно з власником усіх прав
     # (`A7-22`). Оператор має `Security.ManageRoles` і видає грант своїй ролі.
@@ -277,7 +277,7 @@ try {
     # ⚠ Грант прокручує штамп безпеки носіям ролі (`A7-23`) — сеанс треба
     # перевидати, як це зробить браузер, отримавши 401.
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smoke-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = 'smoke'; password = 'Smk-Work-2026!' } | Out-Null
 
     Step 'проєкт видно у переліку'
     $projects = Call GET '/api/v1/projects'

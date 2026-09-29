@@ -387,13 +387,13 @@ try {
     Step 'три іменовані користувачі'
     Call POST '/api/v1/users' @{
         userName = 'e2e-operator'; provider = 'Local'; sid = $null
-        displayName = 'E2E operator'; initialPassword = 'E2E-Operator-2026!'
+        displayName = 'E2E operator'; initialPassword = 'E2E-Oper8tor-2026!'
         roleCodes = @('E2EOperator')
     } | Out-Null
 
     Call POST '/api/v1/users' @{
         userName = 'e2e-admin'; provider = 'Local'; sid = $null
-        displayName = 'E2E administrator'; initialPassword = 'E2E-Admin-2026!'
+        displayName = 'E2E administrator'; initialPassword = 'E2E-Adm1n-2026!'
         roleCodes = @('E2EAdmin')
     } | Out-Null
 
@@ -416,7 +416,7 @@ try {
     # відеокадр трасування не показав меню замість діалогу.
     Call POST '/api/v1/users' @{
         userName = 'e2e-reviewer'; provider = 'Local'; sid = $null
-        displayName = 'E2E reviewer'; initialPassword = 'E2E-Reviewer-2026!'
+        displayName = 'E2E reviewer'; initialPassword = 'E2E-Rev1ewer-2026!'
         roleCodes = @('E2EAdmin')
     } | Out-Null
 
@@ -425,9 +425,9 @@ try {
     # а не той, заради якого прогін написаний (`ФВ-6.18`).
     Step 'зміна разових паролів усіх трьох'
     foreach ($account in @(
-            @{ user = 'e2e-operator'; issued = 'E2E-Operator-2026!'; work = 'E2E-Operator-Work-2026!' },
-            @{ user = 'e2e-admin'; issued = 'E2E-Admin-2026!'; work = 'E2E-Admin-Work-2026!' },
-            @{ user = 'e2e-reviewer'; issued = 'E2E-Reviewer-2026!'; work = 'E2E-Reviewer-Work-2026!' })) {
+            @{ user = 'e2e-operator'; issued = 'E2E-Oper8tor-2026!'; work = 'E2E-Oper8tor-Work-2026!' },
+            @{ user = 'e2e-admin'; issued = 'E2E-Adm1n-2026!'; work = 'E2E-Adm1n-Work-2026!' },
+            @{ user = 'e2e-reviewer'; issued = 'E2E-Rev1ewer-2026!'; work = 'E2E-Rev1ewer-Work-2026!' })) {
 
         $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
         Call POST '/api/v1/login/local' @{ userName = $account.user; password = $account.issued } | Out-Null
@@ -439,7 +439,7 @@ try {
     # (`A7-22`). Грант видає адміністратор — оператор такого права не має.
     Step 'ресурсні гранти на проєкт'
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Admin-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Adm1n-Work-2026!' } | Out-Null
 
     # ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag`
     # відповіді GET, як це робить екран грантів.
@@ -460,7 +460,7 @@ try {
 
     Step 'перевірка стенда: проєкт, період, документ'
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Admin-Work-2026!' } | Out-Null
+    Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Adm1n-Work-2026!' } | Out-Null
 
     $projects = Call GET '/api/v1/projects'
     if ($projects.items.Count -eq 0) { Fail 'перелік проєктів порожній: грант не діє' }

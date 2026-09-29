@@ -46,8 +46,8 @@ import { Routes } from './routes';
  * для людини.
  */
 const Roles = [
-  { name: 'operator', user: 'e2e-operator', password: 'E2E-Operator-Work-2026!' },
-  { name: 'admin', user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' },
+  { name: 'operator', user: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!' },
+  { name: 'admin', user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' },
 ];
 
 /*
@@ -228,7 +228,7 @@ test.describe('Знімки маршрутів (D-142)', () => {
         scheme,
       );
 
-      await signIn(page, 'e2e-admin', 'E2E-Admin-Work-2026!');
+      await signIn(page, 'e2e-admin', 'E2E-Adm1n-Work-2026!');
 
       // ⚠ Унікальний код: прогін, що впав до `finally`, не має ламати наступний
       // через `dataSourceCodeTaken`.

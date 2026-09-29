@@ -35,8 +35,8 @@ import { expect, test, type Page, type TestInfo } from '@playwright/test';
  */
 
 /** Облікові записи стенда (`tools/e2e-stand.ps1`); існують лише в тимчасовій базі. */
-const Operator = { user: 'e2e-operator', password: 'E2E-Operator-Work-2026!' };
-const Admin = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
+const Operator = { user: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!' };
+const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 /** Період і документ приходять зі стенда — зашите число ламалося б у січні. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';

@@ -89,26 +89,12 @@ public sealed class ChangePasswordHandler(
                 "ECR-AUTH-0401", "Чинний пароль не підходить.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.currentPasswordWrong" });
         }
-        if (newPassword is null || newPassword.Length < policy.MinLength)
-        {
-            // ⚠ Код ОКРЕМИЙ від «пароль треба змінити» (`P-01`). Спільний
-            // код означав два різні стани — «ще не міняв» і «спробував
-            // невдало», — і клієнт не міг сказати користувачеві, що саме не
-            // так із введеним паролем: він просто показував ту саму форму.
-            //
-            // ⛔ У деталях — ВИМОГА, а не введене значення: текст помилки йде
-            // і в лог, і клієнту, а пароль там не має опинитися ніколи
-            // (ФВ-6.11).
-            throw new BusinessRuleException(
-                "ECR-PWD-0422",
-                $"Новий пароль коротший за {policy.MinLength} символів.",
-                new Dictionary<string, object?>
-                {
-                    // ⚠ Рядком: резолвер підставляє в шаблон лише `string`.
-                    ["messageKey"] = "err.ECR-PWD-0422.tooShort",
-                    ["minLength"] = policy.MinLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
-        }
+        // ⚠ Код ОКРЕМИЙ від «пароль треба змінити» (`P-01`). Спільний код
+        // означав два різні стани — «ще не міняв» і «спробував невдало», — і
+        // клієнт не міг сказати користувачеві, що саме не так із введеним
+        // паролем. S15: та сама перевірка, що й при скиданні та створенні.
+        PasswordPolicyCheck.Ensure(policy, newPassword, user.UserName, "Новий пароль");
+        PasswordPolicyCheck.EnsureNotCurrent(hasher, newPassword, user.PasswordHash);
 
         // SetPassword знімає прапорець і крутить SecurityStamp, тому всі інші
         // сесії стають недійсними негайно.

@@ -45,8 +45,8 @@ import { expect, test, type Page } from '@playwright/test';
  * ⚠ Паролі тут ТЕСТОВІ й існують лише в тимчасовій базі, яку стенд же й
  * видаляє (`tools/e2e-stand.ps1`).
  */
-const Admin = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
-const Operator = { user: 'e2e-operator', password: 'E2E-Operator-Work-2026!' };
+const Admin = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
+const Operator = { user: 'e2e-operator', password: 'E2E-Oper8tor-Work-2026!' };
 
 /**
  * Роль оператора, заведена стендом (`tools/e2e-stand.ps1`, крок «роль

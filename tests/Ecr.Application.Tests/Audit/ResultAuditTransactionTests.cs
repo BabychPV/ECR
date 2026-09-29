@@ -125,7 +125,9 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
         _user.UserId.Returns(userId);
 
         var hasher = Substitute.For<IPasswordHasher>();
-        hasher.Verify(Arg.Any<string>(), Arg.Any<string>()).Returns(true);
+        // ⚠ S15: лише чинний пароль збігається з хешем — інакше новий пароль
+        // «збігся б із чинним» і відмова настала б до збереження.
+        hasher.Verify("old-password", "old-hash").Returns(true);
         hasher.Hash(Arg.Any<string>()).Returns("new-hash");
 
         await using var db = Context();

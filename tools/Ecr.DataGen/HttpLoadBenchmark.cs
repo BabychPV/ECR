@@ -82,7 +82,8 @@ public sealed class HttpLoadBenchmark
     private const string WorkPassword = "Gate-Work-2026!";
 
     /// <summary>Робочий пароль bootstrap після зміни разового.</summary>
-    private const string BootstrapWorkPassword = "Gate-Bootstrap-Work-2026!";
+    /// <remarks>⚠ S15: без імені входу («bootstrap») — інакше зміну відхиляє політика пароля.</remarks>
+    private const string BootstrapWorkPassword = "Gate-Bstrp-Work-2026!";
 
     /// <summary>
     /// Різні розміри батчу <c>PATCH</c> — саме вони роблять ваду <c>WR-01</c> видимою.

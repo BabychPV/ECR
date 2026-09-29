@@ -29,7 +29,8 @@ namespace Ecr.Scenarios.Tests;
 internal static class Provisioning
 {
     private const string InitialBootstrapPassword = "Scenario-Bootstrap-2026-Initial!";
-    private const string WorkingBootstrapPassword = "Scenario-Bootstrap-2026-Working!";
+    // ⚠ S15: без імені входу («bootstrap») — інакше зміну пароля відхиляє політика.
+    private const string WorkingBootstrapPassword = "Scenario-Bstrp-2026-Working!";
     private const string IssuedUserPassword = "Scenario-Issued-2026!";
     private const string WorkUserPassword = "Scenario-Work-2026!";
 

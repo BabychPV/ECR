@@ -130,16 +130,8 @@ public sealed class ResetUserPasswordHandler(
 
         // Та сама політика, що й для разового пароля при створенні (CreateUserHandler).
         var policy = await users.GetPolicyAsync(target, ct).ConfigureAwait(false);
-        if (newPassword is null || newPassword.Length < policy.MinLength)
-        {
-            throw new BusinessRuleException(
-                "ECR-PWD-0422", $"Разовий пароль коротший за {policy.MinLength} символів.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-PWD-0422.tooShort",
-                    ["minLength"] = policy.MinLength.ToString(CultureInfo.InvariantCulture),
-                });
-        }
+        // S15: спільна перевірка — довжина, цифра за політикою, ім'я, блок-лист.
+        PasswordPolicyCheck.Ensure(policy, newPassword, target.UserName, "Разовий пароль");
 
         // SetPassword крутить SecurityStamp — чинні сесії цілі гаснуть на наступному запиті.
         target.SetPassword(hasher.Hash(newPassword));

@@ -52,17 +52,31 @@ public sealed class ChangePasswordContractApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Правило_сервера_лише_довжина_пароль_без_малих_літер_приймається()
+    public async Task Правило_сервера_довжина_і_цифра_пароль_без_малих_літер_приймається()
     {
         // ⚠ Підказка `password.policy` мусить казати саме це правило: до V-16
         // вона вимагала великі, малі й цифру, а сервер приймав `FSEC-NOLOWER-2026`.
+        //
+        // ✎ S15: `RequireDigit` тепер застосовується за рядком політики, а в
+        // розгорнутій базі він `1` (умовчання стовпця `DF_PwdP_Dig`). Великі й
+        // малі літери — як і досі не вимагаються (`RequireUpper` не читає ніхто).
         await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql);
         var client = await SignInAsync(app).ConfigureAwait(true);
 
-        var response = await client.PostAsJsonAsync(
+        var noDigit = await client.PostAsJsonAsync(
             new Uri("/api/v1/auth/change-password", UriKind.Relative),
             new { currentPassword = Password, newPassword = "NOLOWER-NODIGIT-X" }).ConfigureAwait(true);
+        var noDigitBody = await noDigit.Content.ReadAsStringAsync().ConfigureAwait(true);
+
+        Assert.True(noDigit.StatusCode == HttpStatusCode.UnprocessableEntity, $"{noDigit.StatusCode}: {noDigitBody}");
+        Assert.Equal(
+            "err.ECR-PWD-0422.digitRequired",
+            JsonDocument.Parse(noDigitBody).RootElement.GetProperty("messageKey").GetString());
+
+        var response = await client.PostAsJsonAsync(
+            new Uri("/api/v1/auth/change-password", UriKind.Relative),
+            new { currentPassword = Password, newPassword = "NOLOWER-DIGIT-2026-X" }).ConfigureAwait(true);
 
         Assert.True(response.IsSuccessStatusCode, $"{response.StatusCode}: {await response.Content.ReadAsStringAsync().ConfigureAwait(true)}");
     }

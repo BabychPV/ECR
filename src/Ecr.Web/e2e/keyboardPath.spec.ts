@@ -21,7 +21,7 @@ import { expectFocusRing, expectFocusTrapped, expectFocusVisible, focusState } f
  * ⚠ Паролі тут ТЕСТОВІ й існують лише в тимчасовій базі, яку стенд же й
  * видаляє. У продуктивній системі жодного з цих записів немає.
  */
-const Operator = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
+const Operator = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 /**
  * `F-25` (пряме рішення людини, `ApproveSheetHandler.cs`): та сама людина
@@ -37,7 +37,7 @@ const Operator = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
  * процесу. Фокус і Enter проходили без жодної помилки — відкривалося меню
  * «Тема/Пароль/Вийти» замість діалогу підтвердження.
  */
-const Reviewer = { user: 'e2e-reviewer', password: 'E2E-Reviewer-Work-2026!' };
+const Reviewer = { user: 'e2e-reviewer', password: 'E2E-Rev1ewer-Work-2026!' };
 
 /** Період і документ приходять зі стенда: зашите число ламалося б у січні. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';

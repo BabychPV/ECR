@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { EcrApiError, apiFetch } from '@/api/client';
 import type { ChangePasswordRequest } from '@/api/types';
-import { isPasswordTooShort } from '@/features/security/UserAdminActions';
+import { isPasswordPolicyRefusal } from '@/features/security/UserAdminActions';
 import { MeQueryKey } from '@/shared/session/useSession';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { PageHeader } from '@/shared/ui/PageHeader';
@@ -74,7 +74,8 @@ export function ChangePasswordPage(): JSX.Element {
   // `PasswordPolicy.MinLength` (`UserStore.GetPolicyAsync`). Тому — реактивна
   // перевірка за тим самим патерном, що й у `UserAdminActions.tsx`: код
   // помилки й `messageKey`, а не текст, під полем, а не в загальному банері.
-  const tooShort = isPasswordTooShort(error);
+  // S15: так само під полем — без цифри, з іменем, поширений, збіг із чинним.
+  const tooShort = isPasswordPolicyRefusal(error);
   const tooShortText = tooShort ? (problemText(error).detail ?? problemText(error).title) : null;
   const currentWrong = isCurrentPasswordWrong(error);
   const currentWrongText = currentWrong ? (problemText(error).detail ?? problemText(error).title) : null;

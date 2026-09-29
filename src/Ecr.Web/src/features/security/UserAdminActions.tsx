@@ -16,16 +16,32 @@ import { LockReasonMaxLength, lockUser, resetUserPassword, unlockUser } from './
 // ✎ `X-26`: пропи — `a11yLabels.passwordToggleProps()` (каталог + запасний літерал).
 
 /**
- * Відмова «пароль закороткий» — єдина, що належить ПОЛЮ, а не діалогу.
+ * Причини, з яких сервер відхиляє САМ новий пароль (`PasswordPolicyCheck`, S15).
+ *
+ * ⚠ Перелік закритий, а не «будь-який `err.ECR-PWD-0422.*`»: інша відмова з
+ * тим самим кодом не стосується введеного пароля і йде банером.
+ */
+const PasswordPolicyKeys: ReadonlySet<string> = new Set([
+  'err.ECR-PWD-0422.tooShort',
+  'err.ECR-PWD-0422.digitRequired',
+  'err.ECR-PWD-0422.containsUserName',
+  'err.ECR-PWD-0422.tooCommon',
+  'err.ECR-PWD-0422.sameAsCurrent',
+]);
+
+/**
+ * Відмова політики пароля (закороткий, без цифри, з іменем, поширений, чинний) —
+ * єдина, що належить ПОЛЮ, а не діалогу.
  *
  * ⚠ Розрізнення за кодом і `messageKey`, не за текстом: текст локалізований.
  */
-export function isPasswordTooShort(error: unknown): boolean {
-  return (
-    error instanceof EcrApiError
-    && error.problem.errorCode === 'ECR-PWD-0422'
-    && error.problem.extensions2?.['messageKey'] === 'err.ECR-PWD-0422.tooShort'
-  );
+export function isPasswordPolicyRefusal(error: unknown): boolean {
+  if (!(error instanceof EcrApiError) || error.problem.errorCode !== 'ECR-PWD-0422') {
+    return false;
+  }
+
+  const key = error.problem.extensions2?.['messageKey'];
+  return typeof key === 'string' && PasswordPolicyKeys.has(key);
 }
 
 type LockAction = 'lock' | 'unlock';
@@ -99,7 +115,7 @@ export function UserAdminActions({ user }: { user: UserView }): JSX.Element | nu
     setLockAction(action);
   };
 
-  const tooShort = isPasswordTooShort(reset.error);
+  const tooShort = isPasswordPolicyRefusal(reset.error);
   const tooShortText = tooShort ? (problemText(reset.error).detail ?? problemText(reset.error).title) : null;
 
   return (

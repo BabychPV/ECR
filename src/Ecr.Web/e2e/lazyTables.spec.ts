@@ -22,7 +22,7 @@ import { expect, test, type Page } from '@playwright/test';
  * редагувати, а не скільки сіток монтується. Тому цей прогін нічого не
  * готує й нічого не псує наступним.
  */
-const Operator = { user: 'e2e-admin', password: 'E2E-Admin-Work-2026!' };
+const Operator = { user: 'e2e-admin', password: 'E2E-Adm1n-Work-2026!' };
 
 /** Період і документ приходять зі стенда: зашите число ламалося б у січні. */
 const PeriodKey = process.env['ECR_E2E_PERIOD'] ?? '';

@@ -15,7 +15,7 @@ import { ChangePasswordPage } from '@/pages/ChangePasswordPage';
  * ⛔ Мінімальна довжина не доступна клієнту ДО спроби (перевірено окремо:
  * немає в `GET /api/v1/public/bootstrap`, немає в публічній частині каталогу
  * рядків), тож відтворюється лише реактивна частина — той самий патерн, що
- * й `UserAdminActions.tsx` (`isPasswordTooShort`): відмова `tooShort` іде під
+ * й `UserAdminActions.tsx` (`isPasswordPolicyRefusal`): відмова `tooShort` іде під
  * полем НОВОГО пароля, а не загальним банером `ErrorAlert`.
  */
 
@@ -132,6 +132,28 @@ describe('ChangePasswordPage: клієнтська перевірка політ
     // Не загальним банером, і сирий код клієнту не показаний.
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByText('ECR-PWD-0422')).toBeNull();
+  });
+
+  // S15: решта причин політики — теж під полем нового пароля, не банером.
+  it.each([
+    ['err.ECR-PWD-0422.digitRequired', 'The new password must contain at least one digit.'],
+    ['err.ECR-PWD-0422.containsUserName', 'The new password must not contain the user name.'],
+    ['err.ECR-PWD-0422.tooCommon', 'This password is among the most commonly used ones.'],
+    ['err.ECR-PWD-0422.sameAsCurrent', 'The new password must differ from the current one.'],
+  ])('S15: %s — під полем нового пароля, не банером', async (messageKey, detail) => {
+    refusal = { status: 422, errorCode: 'ECR-PWD-0422', messageKey, detail };
+    const user = userEvent.setup();
+    show();
+
+    await user.type(await screen.findByLabelText('Current password'), 'OldPassword1');
+    await user.type(screen.getByLabelText('New password'), 'Jdoe-Password-2026');
+    await user.type(screen.getByLabelText('Repeat password'), 'Jdoe-Password-2026');
+    await user.click(screen.getByRole('button', { name: 'Change' }));
+
+    const message = await screen.findByText(detail);
+    const field = screen.getByLabelText('New password');
+    expect(message.closest('.mantine-InputWrapper-root')?.contains(field)).toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('V-16: хибний поточний пароль (401) — під полем поточного пароля, без виходу з системи', async () => {
