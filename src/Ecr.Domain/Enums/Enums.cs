@@ -786,3 +786,39 @@ public enum SourceEventValueKind : byte
     /// <summary>Запис довідника — за явною таблицею <c>ext.SourceEventValueMap</c>.</summary>
     ValueMap = 3,
 }
+
+/// <summary>
+/// Стан зв'язку «подія джерела ↔ рядок» (<c>ext.SourceEventLink.Status</c>,
+/// FEATURE-HSE301-VIEW §4.7.3–4.7.4).
+/// </summary>
+/// <remarks>
+/// ⚠ У базі — текстом (<c>nvarchar(32)</c>), як <c>RowWindowValueStatus</c>: реєстр
+/// читають і люди запитом із SSMS. Числа тут у базу не потрапляють.
+/// Дозволені переходи — <c>SourceEventLink.IsTransitionAllowed</c>.
+/// </remarks>
+public enum SourceEventLinkStatus : byte
+{
+    /// <summary>Рядок записано, усі значення зіставлено.</summary>
+    Synced = 0,
+
+    /// <summary>Подія ще триває (<c>EndUtc = null</c>) — рядка немає.</summary>
+    Open = 1,
+
+    /// <summary>Джерело цього разу подію не повернуло; рядок лишається як є.</summary>
+    Missing = 2,
+
+    /// <summary>Період закритий — нічого не записано.</summary>
+    PeriodClosed = 3,
+
+    /// <summary>Початок прив'язаної події переїхав в інший місяць; рядок не перенесено.</summary>
+    PeriodChanged = 4,
+
+    /// <summary>Екземпляра періоду ще немає — повтор наступним прогоном.</summary>
+    PeriodNotOpen = 5,
+
+    /// <summary>Рядок записано, але частину значень не зіставлено з довідником.</summary>
+    Unmapped = 6,
+
+    /// <summary>Стеля <c>MaxDynamicRows</c> таблиці — рядок не створено.</summary>
+    RowLimit = 7,
+}
