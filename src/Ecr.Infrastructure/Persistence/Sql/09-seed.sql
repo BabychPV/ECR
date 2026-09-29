@@ -4979,15 +4979,37 @@ WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
 -- `@textUpdates` і `@removed` — те саме для секцій над MERGE: без інкременту
 -- кеш `ui:{lang}:{scope}:{revision}` і ETag клієнта тримали б старий каталог.
 SET @inserted = @@ROWCOUNT;
+IF @inserted > 0 OR @textUpdates > 0 OR @removed > 0
+BEGIN
+    UPDATE sys_ecr.UiStringRevision
+    SET Revision = Revision + 1, ModifiedAt = SYSUTCDATETIME()
+    WHERE Id = 1;
+END
+GO
 
 -- ── I18N: ru/kz базові переклади (2026-09-29) ────────────────────────────
 -- Рішення людини 2026-09-29: мови продукту — en, ru, kz (української немає).
 -- «Переклади робить людина, але базові тексти, які вже є, — зробити зараз, і
 -- при встановленні вони мають бути в БД».
 --
--- ⚠ Окремий MERGE на мову, а не рядки в блоці вище: той блок — еталон мовою
--- збірки, і його читають сторожі (`SeedCatalogTextTests`, `SeedTextUpdateTests`)
--- та клієнтські тести (`a11yFixtures`, `longestString`) як «ключ → en-текст».
+-- ⚠ Окремі батчі, а не рядки в блоці вище: той блок — еталон мовою збірки, і
+-- його читають сторожі (`SeedCatalogTextTests`, `SeedTextUpdateTests`) та
+-- клієнтські тести (`a11yFixtures`, `longestString`) як «ключ → en-текст».
+--
+-- ⛔ Порціями через `#I18N`, а не одним MERGE на мову. Компіляція MERGE з
+-- ~3000 рядками VALUES — ~1 с CPU і до 110 МБ пам'яті компіляції (велика
+-- брама компіляції: одна на весь сервер), і обидва стояли в одному батчі з
+-- en-MERGE: батч зріс 1.3 → 4.8 с, під навантаженням — 26 с при таймауті
+-- фікстури 30 с. Тепер кожна порція (≤ 500 рядків, ~10 МБ, ~0.1 с) — свій
+-- батч, а MERGE читає вже заповнену `#I18N`. `OPTION (RECOMPILE)` — щоб
+-- план порції з літералами не осідав у кеші (~1 МБ на порцію на КОЖНУ базу).
+-- ⚠ `#I18N` живе між батчами, бо `SeedRunner` виконує всі батчі на одному
+-- з'єднанні в одній транзакції (так само `sqlcmd`). Нова порція — новий
+-- `INSERT … OPTION (RECOMPILE);` + `GO`, не дописування в наявну понад 500.
+--
+-- ⚠ Revision тут піднімається окремо від en-батча: за одного прогону сіду,
+-- що вставив і en, і переклади, він зросте на 2, а не на 1. Для ETag важливо
+-- лише «змінився», а без нових рядків не зростає зовсім.
 --
 -- ⚠ Семантика та сама — WHEN NOT MATCHED: свіжа база отримує все, розгорнута —
 -- лише відсутні пари (ключ, мова). Переклад, який уже ввела людина через
@@ -5003,10 +5025,19 @@ SET @inserted = @@ROWCOUNT;
 -- сторож «Змінених текстів» (`SeedTextUpdateTests`) поки знає лише en-блок.
 -- Прибираєш ключ — прибери й переклади та додай (ключ, ru|kz, останнє
 -- значення) у «Прибрані ключі»; інакше `SeedTranslationTests` червоний.
-MERGE sys_ecr.UiString AS t
-USING (
-    SELECT v.[Key], v.Lang, v.Val, e.Scope
-      FROM (VALUES
+DROP TABLE IF EXISTS #I18N;
+CREATE TABLE #I18N
+(
+    [Key] nvarchar(200)  COLLATE DATABASE_DEFAULT NOT NULL,
+    Lang  nvarchar(8)    COLLATE DATABASE_DEFAULT NOT NULL,
+    Val   nvarchar(1000) COLLATE DATABASE_DEFAULT NOT NULL,
+    PRIMARY KEY ([Key], Lang)
+);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'app.loading', N'ru', N'Загрузка...'),
     (N'common.save', N'ru', N'Сохранить'),
     (N'common.cancel', N'ru', N'Отмена'),
@@ -5506,7 +5537,14 @@ USING (
     (N'err.ECR-CALC-0422.ruleMatchInvalid', N'ru', N'Условие отбора правила «{code}» не является плоским объектом JSON из пар столбец–значение; такое условие не совпадает ни с одной строкой. Чтобы охватить всю таблицу, используйте пустой объект JSON.'),
     (N'err.ECR-CALC-0422.rulePriorityDuplicate', N'ru', N'У правил {rules} одинаковый приоритет {priority}: какое из них сработает первым, зависело бы от порядка хранения. Задайте каждому активному правилу собственный приоритет.'),
     (N'err.ECR-CALC-0422.ruleCatchAllNotLast', N'ru', N'Правило «{rule}» (пустое условие — вся таблица) имеет приоритет {priority}, более высокий, чем у конкретных правил {shadowed}: они никогда не сработают. Пустому условию нужен самый низкий приоритет (наибольшее число).'),
-    (N'err.ECR-CALC-0422.unknownConstants', N'ru', N'Формулы ссылаются на константы, которые не определены в этой версии ({count}): {constants}. Каждая из них вычислилась бы в #REF.'),
+    (N'err.ECR-CALC-0422.unknownConstants', N'ru', N'Формулы ссылаются на константы, которые не определены в этой версии ({count}): {constants}. Каждая из них вычислилась бы в #REF.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'err.ECR-CALC-0422.selfDependency', N'ru', N'Методика не может зависеть от самой себя.'),
     (N'err.ECR-CALC-0422.selfImport', N'ru', N'Методика не может импортировать саму себя: её собственные формулы и так видны.'),
     (N'err.ECR-CALC-0432.undeclaredArguments', N'ru', N'В выражении формулы есть токены, отсутствующие в объявленном списке аргументов (токенов: {undeclaredCount}).'),
@@ -6006,7 +6044,14 @@ USING (
     (N'methodologies.rules', N'ru', N'Правила выбора строк'),
     (N'methodologies.addRule', N'ru', N'Добавить правило'),
     (N'methodologies.ruleSaved', N'ru', N'Правило сохранено.'),
-    (N'methodologies.matchJson', N'ru', N'Предикат'),
+    (N'methodologies.matchJson', N'ru', N'Предикат')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'methodologies.matchJsonHint', N'ru', N'Структурированный предикат, а не выражение. Пустой объект соответствует всей таблице — поэтому у такого правила должен быть самый низкий приоритет.'),
     (N'methodologies.priority', N'ru', N'Приоритет'),
     (N'methodologies.priorityHint', N'ru', N'Чем меньше число, тем выше приоритет. Срабатывает первое совпадение.'),
@@ -6506,7 +6551,14 @@ USING (
     (N'version.deprecateHint', N'ru', N'Версия не удаляется: проекты, уже привязанные к ней, продолжают работать. Она просто перестаёт предлагаться для новых.'),
     (N'version.deprecated', N'ru', N'Версия выведена из использования.'),
     (N'version.cloneHint', N'ru', N'Опубликованная версия заморожена: структурные изменения вносятся в клон с сохранением кодов и ключей строк.'),
-    (N'version.structureFrozen', N'ru', N'Эта опубликованная версия заморожена: структурные изменения — через «Клонировать версию».'),
+    (N'version.structureFrozen', N'ru', N'Эта опубликованная версия заморожена: структурные изменения — через «Клонировать версию».')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'version.cloned', N'ru', N'Клон готов и открыт.'),
     (N'version.presentation', N'ru', N'Оформление'),
     (N'version.patched', N'ru', N'Применено; текущая редакция версии — {revision}.'),
@@ -7006,7 +7058,14 @@ USING (
     (N'uiStrings.key', N'ru', N'Ключ'),
     (N'uiStrings.original', N'ru', N'Язык по умолчанию'),
     (N'uiStrings.translation', N'ru', N'Перевод'),
-    (N'uiStrings.untranslated', N'ru', N'не переведено'),
+    (N'uiStrings.untranslated', N'ru', N'не переведено')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'uiStrings.edit', N'ru', N'Изменить'),
     (N'uiStrings.saved', N'ru', N'Сохранено; текущая редакция каталога — {revision}.'),
     (N'uiStrings.empty', N'ru', N'Нет подходящих ключей'),
@@ -7506,7 +7565,14 @@ USING (
     (N'enum.resourceKind.Column', N'ru', N'Столбец'),
     (N'enum.resourceKind.Registry', N'ru', N'Справочник'),
     (N'enum.grantLevel.Read', N'ru', N'Чтение'),
-    (N'enum.grantLevel.Write', N'ru', N'Запись'),
+    (N'enum.grantLevel.Write', N'ru', N'Запись')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'enum.grantLevel.Submit', N'ru', N'Подача'),
     (N'enum.grantLevel.Approve', N'ru', N'Утверждение'),
     (N'enum.grantLevel.Manage', N'ru', N'Управление'),
@@ -7994,18 +8060,13 @@ USING (
     (N'recalcApprovals.expires', N'ru', N'Действует до'),
     (N'recalcApprovals.confirm', N'ru', N'Подтвердить'),
     (N'recalcApprovals.confirmedDone', N'ru', N'Согласование пересчёта подтверждено.')
-      ) AS v ([Key], Lang, Val)
-      JOIN sys_ecr.UiString AS e ON e.[Key] = v.[Key] AND e.LanguageCode = N'en'
-) AS s
-   ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
-WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
-     VALUES (s.[Key], s.Lang, s.Val, s.Scope, SYSUTCDATETIME());
-SET @inserted = @inserted + @@ROWCOUNT;
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
 
-MERGE sys_ecr.UiString AS t
-USING (
-    SELECT v.[Key], v.Lang, v.Val, e.Scope
-      FROM (VALUES
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'app.loading', N'kz', N'Жүктелуде...'),
     (N'common.save', N'kz', N'Сақтау'),
     (N'common.cancel', N'kz', N'Болдырмау'),
@@ -8505,7 +8566,14 @@ USING (
     (N'err.ECR-CALC-0422.ruleMatchInvalid', N'kz', N'«{code}» ережесінің сәйкестік шарты баған–мән жұптарынан тұратын жазық JSON нысаны емес; мұндай шарт бірде-бір жолға сәйкес келмейді. Бүкіл кестені қамту үшін бос JSON нысанын пайдаланыңыз.'),
     (N'err.ECR-CALC-0422.rulePriorityDuplicate', N'kz', N'{rules} ережелерінің басымдығы бірдей — {priority}: қайсысы бірінші сәйкес келетіні сақтау ретіне байланысты болар еді. Әр белсенді ережеге өз басымдығын беріңіз.'),
     (N'err.ECR-CALC-0422.ruleCatchAllNotLast', N'kz', N'«{rule}» ережесінің (бос шарт — бүкіл кесте) басымдығы {priority}, ол нақты {shadowed} ережелерінен жоғары: олар ешқашан қолданылмайды. Бос шартқа ең төменгі басымдық (ең үлкен сан) қажет.'),
-    (N'err.ECR-CALC-0422.unknownConstants', N'kz', N'Формулалар осы нұсқада анықталмаған константаларға сілтейді ({count}): {constants}. Олардың әрқайсысы #REF мәнін берер еді.'),
+    (N'err.ECR-CALC-0422.unknownConstants', N'kz', N'Формулалар осы нұсқада анықталмаған константаларға сілтейді ({count}): {constants}. Олардың әрқайсысы #REF мәнін берер еді.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'err.ECR-CALC-0422.selfDependency', N'kz', N'Әдістеме өзіне тәуелді бола алмайды.'),
     (N'err.ECR-CALC-0422.selfImport', N'kz', N'Әдістеме өзін импорттай алмайды: оның өз формулалары онсыз да көрінеді.'),
     (N'err.ECR-CALC-0432.undeclaredArguments', N'kz', N'Формула өрнегінде оның көрсетілген аргументтер тізімінде жоқ {undeclaredCount} токен қолданылған.'),
@@ -9005,7 +9073,14 @@ USING (
     (N'methodologies.rules', N'kz', N'Жолдарды таңдау ережелері'),
     (N'methodologies.addRule', N'kz', N'Ереже қосу'),
     (N'methodologies.ruleSaved', N'kz', N'Ереже сақталды.'),
-    (N'methodologies.matchJson', N'kz', N'Предикат'),
+    (N'methodologies.matchJson', N'kz', N'Предикат')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'methodologies.matchJsonHint', N'kz', N'Өрнек емес, құрылымдалған предикат. Бос объект бүкіл кестеге сәйкес келеді — сондықтан мұндай ереженің басымдығы ең төмен болуы тиіс.'),
     (N'methodologies.priority', N'kz', N'Басымдық'),
     (N'methodologies.priorityHint', N'kz', N'Сан неғұрлым аз болса, басымдық соғұрлым жоғары. Бірінші сәйкестік қолданылады.'),
@@ -9505,7 +9580,14 @@ USING (
     (N'version.deprecateHint', N'kz', N'Нұсқа жойылмайды: оған байланыстырылған жобалар жұмысын жалғастырады. Ол жай ғана жаңа жобаларға ұсынылмайды.'),
     (N'version.deprecated', N'kz', N'Нұсқа қолданыстан шығарылды.'),
     (N'version.cloneHint', N'kz', N'Жарияланған нұсқа мұздатылған: құрылымдық өзгерістер кодтар мен жол кілттері сақталатын клонға енгізіледі.'),
-    (N'version.structureFrozen', N'kz', N'Бұл жарияланған нұсқа мұздатылған: құрылымдық өзгерістер «Нұсқаны клондау» арқылы енгізіледі.'),
+    (N'version.structureFrozen', N'kz', N'Бұл жарияланған нұсқа мұздатылған: құрылымдық өзгерістер «Нұсқаны клондау» арқылы енгізіледі.')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'version.cloned', N'kz', N'Клон дайын және ашылды.'),
     (N'version.presentation', N'kz', N'Безендіру'),
     (N'version.patched', N'kz', N'Қолданылды; нұсқаның ағымдағы редакциясы — {revision}.'),
@@ -10005,7 +10087,14 @@ USING (
     (N'uiStrings.key', N'kz', N'Кілт'),
     (N'uiStrings.original', N'kz', N'Әдепкі тіл'),
     (N'uiStrings.translation', N'kz', N'Аударма'),
-    (N'uiStrings.untranslated', N'kz', N'аударылмаған'),
+    (N'uiStrings.untranslated', N'kz', N'аударылмаған')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'uiStrings.edit', N'kz', N'Өңдеу'),
     (N'uiStrings.saved', N'kz', N'Сақталды; каталогтың ағымдағы редакциясы — {revision}.'),
     (N'uiStrings.empty', N'kz', N'Сәйкес кілттер жоқ'),
@@ -10505,7 +10594,14 @@ USING (
     (N'enum.resourceKind.Column', N'kz', N'Баған'),
     (N'enum.resourceKind.Registry', N'kz', N'Анықтамалық'),
     (N'enum.grantLevel.Read', N'kz', N'Оқу'),
-    (N'enum.grantLevel.Write', N'kz', N'Жазу'),
+    (N'enum.grantLevel.Write', N'kz', N'Жазу')
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+INSERT INTO #I18N ([Key], Lang, Val)
+SELECT v.[Key], v.Lang, v.Val
+  FROM (VALUES
     (N'enum.grantLevel.Submit', N'kz', N'Тапсыру'),
     (N'enum.grantLevel.Approve', N'kz', N'Бекіту'),
     (N'enum.grantLevel.Manage', N'kz', N'Басқару'),
@@ -10993,21 +11089,30 @@ USING (
     (N'recalcApprovals.expires', N'kz', N'Жарамдылық мерзімі'),
     (N'recalcApprovals.confirm', N'kz', N'Растау'),
     (N'recalcApprovals.confirmedDone', N'kz', N'Қайта есептеу келісімі расталды.')
-      ) AS v ([Key], Lang, Val)
+       ) AS v ([Key], Lang, Val)
+OPTION (RECOMPILE);
+GO
+
+-- Лише відсутні пари (ключ, мова); область — з en-рядка.
+MERGE sys_ecr.UiString AS t
+USING (
+    SELECT v.[Key], v.Lang, v.Val, e.Scope
+      FROM #I18N AS v
       JOIN sys_ecr.UiString AS e ON e.[Key] = v.[Key] AND e.LanguageCode = N'en'
 ) AS s
    ON t.[Key] = s.[Key] AND t.LanguageCode = s.Lang
 WHEN NOT MATCHED THEN INSERT ([Key], LanguageCode, Value, Scope, ModifiedAt)
      VALUES (s.[Key], s.Lang, s.Val, s.Scope, SYSUTCDATETIME());
-SET @inserted = @inserted + @@ROWCOUNT;
--- ── I18N: кінець секції ──────────────────────────────────────────────────
 
-IF @inserted > 0 OR @textUpdates > 0 OR @removed > 0
+IF @@ROWCOUNT > 0
 BEGIN
     UPDATE sys_ecr.UiStringRevision
     SET Revision = Revision + 1, ModifiedAt = SYSUTCDATETIME()
     WHERE Id = 1;
 END
+
+DROP TABLE #I18N;
+-- ── I18N: кінець секції ──────────────────────────────────────────────────
 GO
 
 -- ── Опис звіту: одна державна форма з каталогу ФВ-10.7 ───────────────────

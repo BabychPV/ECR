@@ -573,15 +573,22 @@ public sealed class SeedTests(SqlServerFixture sql)
         // round-trip для кожного клієнта на кожному рестарті — навіть коли
         // жодного нового рядка не додалося.
         var before = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+        var rowsBefore = await ScalarAsync("SELECT COUNT(*) FROM sys_ecr.UiString");
 
+        // ⚠ Двічі на ОДНОМУ контексті, тобто на одному з'єднанні: переклади
+        // йдуть через тимчасову `#I18N`, яка живе, доки живе з'єднання. Другий
+        // прогін без її прибирання впав би на «There is already an object
+        // named '#I18N'».
         await using (var db = CreateContext())
         {
+            await new SeedRunner(db).RunAsync(CancellationToken.None);
             await new SeedRunner(db).RunAsync(CancellationToken.None);
         }
 
         var after = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
 
         Assert.Equal(before, after);
+        Assert.Equal(rowsBefore, await ScalarAsync("SELECT COUNT(*) FROM sys_ecr.UiString"));
     }
 
     [Fact]
