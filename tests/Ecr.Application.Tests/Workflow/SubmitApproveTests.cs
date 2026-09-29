@@ -119,6 +119,14 @@ public sealed class SubmitApproveTests
         _rows.GetRowIdsAsync(Arg.Any<long>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>())
              .Returns(new Dictionary<string, long> { ["7001001"] = 1001L });
         _metadata.GetAsync(TemplateVersion, Arg.Any<CancellationToken>()).Returns(Snapshot());
+
+        // ⚠ S6: тіло відмови подання фільтрується межами читання того, хто
+        // подає. За замовчуванням він бачить усе — у тій структурі, яку тест
+        // підставив у `_metadata` сам (читається ліниво, у момент виклику).
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<CancellationToken>())
+            .Returns(async _ => ReadScopes.Everything(
+                await _metadata.GetAsync(TemplateVersion, CancellationToken.None)));
+
         // ⚠ Ключ — `TableInstanceId` (500), а не `DocumentId`: саме так
         // адресується зріз (`ICellStore.ReadSliceAsync`). Доти обробник
         // передавав сюди `documentId`, і фікстура повторювала ту саму
@@ -670,6 +678,59 @@ public sealed class SubmitApproveTests
         Assert.Empty(_snapshots);
         Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
         await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// S6 (ФВ-6.6): блокувальна помилка лише в таблиці під забороною того, хто
+    /// подає, — відмова знеособлена: ключ <c>hiddenIssues</c>, без числа, без
+    /// коду правила, тексту, рядка й колонки.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ МУТАЦІЙНИЙ ДОКАЗ: віддати в тілі <c>blocking</c> замість відфільтрованого
+    /// (як до цього фіксу) — червоніє.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Блокувальна_помилка_під_забороною_подавача_знеособлена_у_відмові()
+    {
+        WithRule("[Volume] <= 100");
+        _access.ReadScopeAsync(Arg.Any<AccessProfile>(), Document, Arg.Any<CancellationToken>())
+            .Returns(async _ => DocumentReadScope.For(
+                new AccessBuilder()
+                    .Grant(ResourceKind.Project, AccessBuilder.ProjectId, GrantLevel.Read)
+                    .Deny(ResourceKind.Table, 3)
+                    .Build(),
+                AccessBuilder.ProjectId,
+                await _metadata.GetAsync(TemplateVersion, CancellationToken.None)));
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("ECR-SUB-4221", error.ErrorCode);
+        Assert.Equal("err.ECR-SUB-4221.hiddenIssues", error.Details!["messageKey"]);
+        Assert.False(error.Details.ContainsKey("messageCount"));
+
+        var body = System.Text.Json.JsonSerializer.Serialize(error.Details);
+        Assert.DoesNotContain("CAP", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Volume", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("7001001", body, StringComparison.Ordinal);
+        Assert.Equal(DocumentStatus.Draft, _sheets[Water].Status);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-6.6")]
+    public async Task Блокувальна_помилка_без_заборони_у_відмові_названа_регресія()
+    {
+        WithRule("[Volume] <= 100");
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Submit().HandleAsync(Document, Water, Period, CancellationToken.None));
+
+        Assert.Equal("err.ECR-SUB-4221.validationBlocked", error.Details!["messageKey"]);
+        Assert.Equal("1", error.Details["messageCount"]);
+        Assert.Contains("CAP", System.Text.Json.JsonSerializer.Serialize(error.Details), StringComparison.Ordinal);
     }
 
     [Fact]

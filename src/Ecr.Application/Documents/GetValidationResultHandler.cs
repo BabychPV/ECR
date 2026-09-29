@@ -86,9 +86,13 @@ public sealed class GetValidationResultHandler(
         var readable = stored.Count == 0
             ? null
             : await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+        // ⛔ Приховані помилки — одним знеособленим зауваженням
+        // (`HiddenValidationIssues`), а не мовчки: інакше читач, чиї зауваження
+        // всі під забороною, бачить «зауважень немає» при заблокованому поданні.
+        // Таблиці 0 у знімку немає, тож перерезолв нижче його текст не чіпає.
         var messages = readable is null
             ? stored
-            : [.. stored.Where(m => readable.CanReadAt(m.TableDefId, m.ColumnCode))];
+            : HiddenValidationIssues.ForViewer(stored, m => readable.CanReadAt(m.TableDefId, m.ColumnCode));
 
         if (messages.Count == 0)
         {

@@ -415,17 +415,47 @@ public sealed class SubmitSheetHandler(
             // змінитися від плану запиту на тих самих даних.
             blocking = OrderAsOnScreen(blocking, tables, rowIdsByTable);
 
+            // ⛔ S6 (ФВ-6.6): подання рахує аркуш ЦІЛКОМ, але тіло відмови читає
+            // той, хто подає, — і таблиці й колонки під його забороною в ньому
+            // не називаються. Приховані помилки — одним знеособленим
+            // зауваженням без числа й адреси (`HiddenValidationIssues`).
+            var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
+            var shown = Validation.HiddenValidationIssues.ForViewer(
+                blocking, m => readable.CanReadAt(m.TableDefId, m.ColumnCode));
+            var onlyHidden = shown.Count == 1 && Validation.HiddenValidationIssues.IsPlaceholder(shown[0]);
+
+            // ⚠ Число — лише разом із видимими: `messageCount` рахує рядки
+            // переліку (знеособлене — один рядок), а коли видимих немає, число
+            // не несе нічого, крім натяку на обсяг прихованого, — його немає.
+            var details = new Dictionary<string, object?>
+            {
+                ["messageKey"] = onlyHidden
+                    ? Validation.HiddenValidationIssues.MessageKey
+                    : "err.ECR-SUB-4221.validationBlocked",
+                ["messages"] = shown
+                    .Select(m => new
+                    {
+                        m.RuleCode,
+                        m.Message,
+                        m.RowKey,
+                        m.ColumnCode,
+                        MessageKey = Validation.HiddenValidationIssues.IsPlaceholder(m)
+                            ? Validation.HiddenValidationIssues.MessageKey
+                            : null,
+                    })
+                    .ToList(),
+            };
+            if (!onlyHidden)
+            {
+                details["messageCount"] = shown.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
             throw new BusinessRuleException(
                 ErrorCodes.SubmitBlocked,
-                $"Подання неможливе: блокувальних помилок валідації — {blocking.Count}.",
-                new Dictionary<string, object?>
-                {
-                    ["messageKey"] = "err.ECR-SUB-4221.validationBlocked",
-                    ["messageCount"] = blocking.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["messages"] = blocking
-                        .Select(m => new { m.RuleCode, m.Message, m.RowKey, m.ColumnCode })
-                        .ToList(),
-                });
+                onlyHidden
+                    ? "Подання неможливе: є зауваження поза вашою видимістю."
+                    : $"Подання неможливе: блокувальних помилок валідації — {shown.Count}.",
+                details);
         }
 
         // ⛔ `DAT-06`. Зріз, стан аркуша й проведення в звітність — ОДНИМ

@@ -4766,6 +4766,11 @@ USING (VALUES
     (N'err.ECR-CELL-4223.entryNotValidOnDate', N'en', N'The chosen registry entry is not valid on {asOf}, the last day of the period: {cellCount} cell(s).', 1),
     -- S9: межа частоти зміни пароля — на КОРИСТУВАЧА, не на адресу (`LoginRateLimiting`).
     (N'err.ECR-REQ-0429.tooManyPasswordChanges', N'en', N'Too many password change attempts. Try again in a minute.', 1),
+    -- S6: зауваження лише в таблицях/колонках під забороною читача — знеособлено, без числа й адреси
+    -- (`HiddenValidationIssues`). ⚠ Лише `en`: мови `uk` у `sys_ecr.Language` немає (FK_UiString_Lang),
+    -- ru/kz — робота термінолога. Текст для uk: «Є зауваження поза вашою видимістю — подання
+    -- заблоковане. Зверніться до відповідального за проєкт.»
+    (N'err.ECR-SUB-4221.hiddenIssues',         N'en', N'There are issues outside your visibility — submission is blocked. Contact the project owner.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).

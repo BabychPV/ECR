@@ -553,7 +553,10 @@ public static class ErrorCodes
     /// <item><c>err.ECR-SUB-4221.staleMethodologyResults</c> — застарілі
     /// результати прив'язаних методологій (F-05);</item>
     /// <item><c>err.ECR-SUB-4221.validationBlocked</c> — незакриті блокувальні
-    /// помилки валідації аркуша.</item>
+    /// помилки валідації аркуша;</item>
+    /// <item><c>err.ECR-SUB-4221.hiddenIssues</c> — блокувальні помилки лише в
+    /// таблицях чи колонках під забороною читача (S6): знеособлено, без числа
+    /// й адреси (<c>HiddenValidationIssues</c>).</item>
     /// </list>
     /// </summary>
     /// <remarks>

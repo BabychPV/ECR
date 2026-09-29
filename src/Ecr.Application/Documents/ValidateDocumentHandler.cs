@@ -137,7 +137,10 @@ public sealed class ValidateDocumentHandler(
         // (`RowKey`, `ColumnCode`) і текст правила — теж зміст прихованого.
         var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
-        return [.. messages.Where(m => readable.CanReadAt(m.TableDefId, m.ColumnCode))];
+        // ⛔ Приховані помилки не зникають мовчки (`HiddenValidationIssues`):
+        // інакше запускач, чиї зауваження всі під забороною, бачить «зауважень
+        // немає», а «Подати» відмовляє.
+        return HiddenValidationIssues.ForViewer(messages, m => readable.CanReadAt(m.TableDefId, m.ColumnCode));
     }
 
 }

@@ -236,6 +236,11 @@ public sealed class SubmitBlockedMessageOrderTests(SqlServerFixture sql)
 
         var metadata = Metadata(doc);
 
+        // ⚠ S6: тіло 422 фільтрується межами читання подавача; тут він бачить усе.
+        access.ReadScopeAsync(Arg.Any<AccessProfile>(), doc.DocumentId, Arg.Any<CancellationToken>())
+              .Returns(async _ => ReadScopes.Everything(
+                  await metadata.GetAsync(doc.Document.TemplateVersionId, CancellationToken.None)));
+
         return new SubmitSheetHandler(
             new NormalizedCellStore(db), new RowStore(db, bulk, clock), new WorkflowStore(db), documents,
             metadata, access,
