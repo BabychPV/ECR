@@ -124,16 +124,13 @@ public sealed partial class WorkerSupervisor(
     /// <returns>Код виходу; <c>null</c> — скасовано, поки процес жив.</returns>
     private async Task<int?> RunChildOnceAsync(int slot, JobObject job, CancellationToken cancellationToken)
     {
-        var info = new ProcessStartInfo(child.FileName) { UseShellExecute = false, CreateNoWindow = true };
-        foreach (var argument in child.Arguments)
-        {
-            info.ArgumentList.Add(argument);
-        }
-
-        using var process = new Process { StartInfo = info };
+        // ⛔ I1: процес народжується призупиненим і відпускається лише в Job Object
+        // (JobObject.Start). Жодної інструкції поза межами пам'яті й без
+        // KILL_ON_JOB_CLOSE — вікна «Process.Start → Assign» (борг P1) більше немає.
+        Process process;
         try
         {
-            process.Start();
+            process = job.Start(child);
         }
         catch (Win32Exception ex)
         {
@@ -141,19 +138,7 @@ public sealed partial class WorkerSupervisor(
             return StartFailedExitCode;
         }
 
-        try
-        {
-            job.Assign(process);
-        }
-        catch (Win32Exception ex)
-        {
-            // ⛔ Процес поза Job Object — без меж і без KILL_ON_JOB_CLOSE, тобто
-            // майбутній сирота. Жити йому не можна.
-            LogStartFailed(logger, ex, slot, child.FileName);
-            process.Kill();
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            return StartFailedExitCode;
-        }
+        using var owned = process;
 
         LogChildStarted(logger, slot, process.Id);
         ChildStarted?.Invoke(this, new WorkerChildEventArgs(slot, process.Id, null));
