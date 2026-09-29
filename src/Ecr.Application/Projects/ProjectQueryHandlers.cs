@@ -379,7 +379,7 @@ public sealed class CreateProjectHandler(
         // ігнорується, тож виклик безпечний завжди.
         var validatedCustomCount = Domain.Services.PeriodCalendar.CountFor(periodKind, customPeriodCount ?? 0);
 
-        var project = new Project(
+        Project Build() => new(
             EcrCode.Create(code),
             new LocalizedText(name.ToDictionary(StringComparer.Ordinal)),
             new DateOnly(reportingYear, 1, 1),
@@ -398,8 +398,8 @@ public sealed class CreateProjectHandler(
             // друге джерело істини про те саме число.
             periodKind == PeriodKind.Custom ? validatedCustomCount : null);
 
-        await periods.AddProjectAsync(project, ct).ConfigureAwait(false);
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+        // ⚠ Помилки введення (код, назва) — до транзакції, а не всередині неї.
+        _ = Build();
 
         // ⛔ Виявлено ПІСЛЯ `Q-179`: якщо є право створити проєкт — є право
         // ним володіти. До цього творець не отримував ЖОДНОГО гранта на
@@ -407,13 +407,26 @@ public sealed class CreateProjectHandler(
         // погодження (усі перевіряють `GrantLevel.Manage` на конкретний
         // `projectId` після `Q-179`) відмовляли б власному творцю доти,
         // доки хтось не видасть грант окремим кроком.
-        await GrantOwnershipAsync(profile, project.Id, ct).ConfigureAwait(false);
-
-        return project.Id;
+        //
+        // ⛔ Проєкт і грант власності — ОДИН коміт. Доти проєкт комітився
+        // першим, грант — окремою транзакцією: збій на гранті лишав проєкт
+        // без власника, якого ніхто не бачив і не міг навіть видалити.
+        return await CreateOwnedAsync(
+            profile,
+            async token =>
+            {
+                // Будується всередині: повтор транзакції стратегією не має
+                // додавати вже відстежувану (і відкочену) сутність удруге.
+                var project = Build();
+                await periods.AddProjectAsync(project, token).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+                return project.Id;
+            },
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Видає щойно створений проєкт у володіння творцю.
+    /// Записує проєкт і видає його у володіння творцю — однією транзакцією.
     /// </summary>
     /// <remarks>
     /// ⛔ Грант прив'язаний до РОЛІ (`sec.ResourceGrant.RoleId`), не до
@@ -442,10 +455,11 @@ public sealed class CreateProjectHandler(
     /// хв) або новому вході — так само, як будь-яка інша зміна грантів, що
     /// не супроводжується ротацією штампа.
     /// </remarks>
-    private Task GrantOwnershipAsync(AccessProfile profile, int projectId, CancellationToken ct)
-        => ProjectOwnershipGrant.GrantAsync(
+    private Task<int> CreateOwnedAsync(
+        AccessProfile profile, Func<CancellationToken, Task<int>> createProject, CancellationToken ct)
+        => ProjectOwnershipGrant.CreateOwnedAsync(
             users, access, audit, uow, currentUser, clock,
-            profile, projectId, Permission, "CreateProjectOwnership", ct);
+            profile, Permission, "CreateProjectOwnership", createProject, ct);
 }
 
 /// <summary>
