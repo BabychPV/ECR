@@ -232,8 +232,26 @@ HSE301).
   Контракт тексту: один параметр `?` — корінь (`EntityPath` сутності, інакше її код); колонки
   `ElementId` (GUID), `ElementName`, необов'язкова `ElementPath`. `ReadAddress` = `ElementName`.
   Повний — менше ніж `MaxCatalogRows` (20 000) рядків і кожен має `ElementId` та `ElementName`.
-  ⚠ Ключа на рівні джерела (`PiSqlClient:{code}:…`) у коді немає — ключ спільний для всіх
-  RTQP-джерел, як і решта `PiSqlClient:*`.
+- **Ключ на рівні джерела (2026-09-29, рішення людини:** «Додай ключ джерела, бо ми можемо
+  звертатися до різних баз на одному AF-сервері»). Для КОЖНОГО запиту PI SQL Client
+  (`CatalogQuery`, `TemplateQuery`, `ValueQuery`, `InterpolatedQuery`, `SummaryQuery`,
+  `CurrentValueQuery`, `ElementListQuery`, а також `EventQuery`/`EventTemplateQuery` подій
+  FEATURE-HSE301-VIEW §4.7) адаптер шукає спершу `PiSqlClient:{код}:<Query>`, потім спільний
+  `PiSqlClient:<Query>` — одна реалізація (`PiSqlClientDataSource.ScopedKey`/`ConfiguredQuery`),
+  форма та сама, що `Sql:{код}:<Query>` у `SqlDataSource`. `{код}` — `ext.DataSource.Code`
+  (незмінний природний ключ, видно в конфігураторі; `Id` різний між середовищами).
+  Порожній/пробільний ключ джерела = відсутній → спільний (так уже поводиться
+  `ConfigurationSecretProvider`). Відмова «не налаштовано» має для всіх запитів одну форму
+  параметрів: `queryKind`, `dataSource`, `sourceConfigKey`, `sharedConfigKey`, `configKey`;
+  `configKey` — заповнювач тексту сіду свого ключа: для `.queryKindNotConfigured` («set
+  {configKey}») — обидва через « / », для `.eventQueryNotConfigured` («set {sourceConfigKey} (or
+  the shared {configKey})») — спільний; тексти сіду не змінено. Через це запис джерела читається
+  ДО перевірки ключа: без джерела — `ECR-INT-0503` `.sourceMissing`, як і з ключем; до
+  RTQP-з'єднання відмова 0422 і далі не доходить.
+  Приклад: `PiSqlClient:AIR:ElementListQuery` і `PiSqlClient:FLARE:ElementListQuery` із різними
+  каталогами у `[База].[Element].[Element]`, спільний `PiSqlClient:ElementListQuery` — для решти.
+  ⚠ Фізично ключі читаються через `ISecretProvider`, тобто з `Secrets:PiSqlClient:…`
+  (змінна середовища `ECR_Secrets__PiSqlClient__AIR__ElementListQuery`).
 - **Запобіжник (обидва транспорти):** 0 елементів при наявних зв'язках → знімок НЕповний, жодного
   `RegistrySourceMissing`: порожню відповідь не відрізнити від хибного кореня чи тексту запиту.
   Відмова переліку — виняток адаптера: прогін `Failed` з його кодом і `messageKey`, подій не пише.

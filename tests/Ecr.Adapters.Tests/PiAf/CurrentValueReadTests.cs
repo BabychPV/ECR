@@ -183,7 +183,9 @@ public sealed class CurrentValueReadTests
     [Trait("Requirement", Requirement)]
     public async Task PiSqlClient_без_ключа_CurrentValueQuery_відмовляє_0422_до_джерела()
     {
+        // Запис джерела читається (ключ джерела, 2026-09-29), з'єднання — ні: інакше 0503.
         var store = Substitute.For<ICollectionStore>();
+        store.FindDataSourceAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(PiSqlClientSourceKeyTests.Rtqp("PIAF"));
         var adapter = new PiSqlClientDataSource(
             store, Substitute.For<ISecretProvider>(), Substitute.For<ISecretProvider>());
 
@@ -193,8 +195,7 @@ public sealed class CurrentValueReadTests
         Assert.Equal("ECR-INT-0422", error.ErrorCode);
         Assert.Equal("err.ECR-INT-0422.queryKindNotConfigured", error.Details!["messageKey"]);
         Assert.Equal("CurrentValue", error.Details["queryKind"]);
-        Assert.Equal(PiSqlClientDataSource.CurrentValueQueryKey, error.Details["configKey"]);
-        await store.DidNotReceiveWithAnyArgs().FindDataSourceAsync(default, default);
+        Assert.Equal(PiSqlClientDataSource.CurrentValueQueryKey, error.Details["sharedConfigKey"]);
     }
 
     [Fact]

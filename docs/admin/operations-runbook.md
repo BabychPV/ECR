@@ -102,7 +102,8 @@ Api й воркер на **одному** хості — різні ролі й 
 | `Smtp:UseStartTls` | (`true`) | |
 | `Smtp:User`, `Smtp:SecretName` | немає | автентифікація. Пароль — секрет `Secrets:<SecretName>` |
 | `Secrets:<ім'я>` | немає | секрети джерел і каналів. **Лише змінні оточення** |
-| `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client |
+| `PiSqlClient:CatalogQuery` / `TemplateQuery` / `ValueQuery` | немає (вбудовані) | перевизначення запитів адаптера PI SQL Client. `InterpolatedQuery`, `SummaryQuery`, `CurrentValueQuery`, `ElementListQuery`, `EventQuery`, `EventTemplateQuery` — без вбудованого тексту |
+| `PiSqlClient:<код джерела>:<Query>` | немає | запит для ОДНОГО джерела (інша база AF на тому ж сервері), перекриває спільний `PiSqlClient:<Query>` — для будь-якого із запитів вище; напр. `PiSqlClient:AIR:ElementListQuery`. ⚠ Усі `PiSqlClient:*` адаптер читає через канал секретів, тобто фізично це `Secrets:PiSqlClient:…` — змінна `ECR_Secrets__PiSqlClient__AIR__ElementListQuery` |
 | `Sql:CatalogQuery` / `Sql:ValueQuery` | немає (вбудовані) | те саме для SQL-джерела |
 | `Bootstrap:Password` | немає | запасний пароль `bootstrap`. Основний шлях — файл `bootstrap.secret` |
 | `Telemetry:Enabled` | `false` | експорт метрик по OTLP (п. 3.4). Вимкнено — не реєструється нічого з OpenTelemetry, навантаження нуль. Вмикається лише рядком `true` |

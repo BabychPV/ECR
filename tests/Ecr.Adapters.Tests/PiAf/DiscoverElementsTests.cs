@@ -85,7 +85,10 @@ public sealed class DiscoverElementsTests
     [Trait("Requirement", Requirement)]
     public async Task PiSqlClient_без_ключа_ElementListQuery_відмовляє_0422_до_джерела()
     {
+        // Запис джерела читається (ключ буває власним у джерела, 2026-09-29), з'єднання — ні:
+        // рядок з'єднання не розбирається, і дійди адаптер до нього — була б 0503, не 0422.
         var store = Substitute.For<ICollectionStore>();
+        store.FindDataSourceAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(PiSqlClientSourceKeyTests.Rtqp("PIAF"));
         var adapter = new PiSqlClientDataSource(store, Substitute.For<ISecretProvider>(), Substitute.For<ISecretProvider>());
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
@@ -94,8 +97,8 @@ public sealed class DiscoverElementsTests
         Assert.Equal("ECR-INT-0422", error.ErrorCode);
         Assert.Equal("err.ECR-INT-0422.queryKindNotConfigured", error.Details!["messageKey"]);
         Assert.Equal("ElementList", error.Details["queryKind"]);
-        Assert.Equal(PiSqlClientDataSource.ElementListQueryKey, error.Details["configKey"]);
-        await store.DidNotReceiveWithAnyArgs().FindDataSourceAsync(default, default);
+        Assert.Equal(PiSqlClientDataSource.ElementListQueryKey, error.Details["sharedConfigKey"]);
+        Assert.Equal("PiSqlClient:PIAF:ElementListQuery", error.Details["sourceConfigKey"]);
     }
 
     [Fact]

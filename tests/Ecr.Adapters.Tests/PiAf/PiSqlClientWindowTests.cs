@@ -46,7 +46,10 @@ public sealed class PiSqlClientWindowTests
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     public async Task Інтерпольований_без_ключа_відмовляє_0422_з_ключем_каталогу_і_не_чіпає_джерело()
     {
+        // Запис джерела читається (ключ джерела, рішення людини 2026-09-29), з'єднання — ні:
+        // рядок з'єднання не розбирається, і дійди адаптер до нього — була б 0503, не 0422.
         var (source, store) = Adapter();
+        store.FindDataSourceAsync(Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns(PiSqlClientSourceKeyTests.Rtqp("PIAF"));
 
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => source.ReadAsync(Interpolated(TimeSpan.FromMinutes(1)), CancellationToken.None));
@@ -54,8 +57,8 @@ public sealed class PiSqlClientWindowTests
         Assert.Equal("ECR-INT-0422", error.ErrorCode);
         Assert.Equal("err.ECR-INT-0422.queryKindNotConfigured", error.Details!["messageKey"]);
         Assert.Equal("Interpolated", error.Details["queryKind"]);
-        Assert.Equal(PiSqlClientDataSource.InterpolatedQueryKey, error.Details["configKey"]);
-        await store.DidNotReceiveWithAnyArgs().FindDataSourceAsync(default, default);
+        Assert.Equal(PiSqlClientDataSource.InterpolatedQueryKey, error.Details["sharedConfigKey"]);
+        Assert.Equal("PiSqlClient:PIAF:InterpolatedQuery", error.Details["sourceConfigKey"]);
     }
 
     [Fact]

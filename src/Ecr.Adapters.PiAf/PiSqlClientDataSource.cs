@@ -159,14 +159,10 @@ public sealed class PiSqlClientDataSource(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // ⛔ Тип запиту перевіряється ДО джерела: без налаштованого тексту
-        // інтерпольований запит не підміняється сирим (V-3, D-172).
-        var queryText = request.Kind switch
+        if (request.Kind is not (SourceQueryKind.Raw or SourceQueryKind.Interpolated))
         {
-            SourceQueryKind.Raw => null,
-            SourceQueryKind.Interpolated => ConfiguredOrRefuse(InterpolatedQueryKey, request.Kind.ToString()),
-            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Невідомий тип запиту."),
-        };
+            throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Невідомий тип запиту.");
+        }
 
         if (request.Kind == SourceQueryKind.Interpolated && !(request.Step > TimeSpan.Zero))
         {
@@ -176,6 +172,13 @@ public sealed class PiSqlClientDataSource(
         var source = await store.FindDataSourceAsync(request.DataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(
                          $"Джерело {request.DataSourceId} не існує або вимкнене.", request.DataSourceId);
+
+        // ⛔ Тип запиту перевіряється ДО з'єднання: без налаштованого тексту
+        // інтерпольований запит не підміняється сирим (V-3, D-172). Запис джерела
+        // читається раніше — ключ запиту буває власним у кожного джерела (<see cref="ScopedKey"/>).
+        var queryText = request.Kind == SourceQueryKind.Interpolated
+            ? ConfiguredOrRefuse(source.Code, InterpolatedQueryKey, request.Kind.ToString())
+            : null;
 
         var (element, attribute) = Split(request.SourcePath);
 
@@ -258,8 +261,13 @@ public sealed class PiSqlClientDataSource(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var configured = settings?.Find(SummaryQueryKey);
-        if (string.IsNullOrWhiteSpace(configured))
+        // Запис джерела — до вибору шляху: summary-запит теж буває власним у джерела.
+        var source = await store.FindDataSourceAsync(request.DataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable(
+                         $"Джерело {request.DataSourceId} не існує або вимкнене.", request.DataSourceId);
+
+        var configured = ConfiguredQuery(settings, source.Code, SummaryQueryKey);
+        if (configured is null)
         {
             return await WindowFold.FromRawAsync(this, request, ct).ConfigureAwait(false);
         }
@@ -268,10 +276,6 @@ public sealed class PiSqlClientDataSource(
         {
             throw new ArgumentException("Вікно порожнє або перевернуте.", nameof(request));
         }
-
-        var source = await store.FindDataSourceAsync(request.DataSourceId, ct).ConfigureAwait(false)
-                     ?? throw Unavailable(
-                         $"Джерело {request.DataSourceId} не існує або вимкнене.", request.DataSourceId);
 
         var (element, attribute) = Split(request.SourcePath);
 
@@ -326,26 +330,50 @@ public sealed class PiSqlClientDataSource(
     /// <summary>Ключ summary-запиту вікна (HSE301 §4.3). Типового тексту немає.</summary>
     public const string SummaryQueryKey = "PiSqlClient:SummaryQuery";
 
-    /// <summary>Тип запиту не налаштовано — той самий код, що й інші відмови конфігурації збору.</summary>
-    private const string QueryNotConfigured = "ECR-INT-0422";
+    /// <summary>
+    /// Текст запиту з налаштування (спершу ключ джерела, далі спільний — <see cref="ConfiguredQuery"/>)
+    /// або відмова <c>ECR-INT-0422</c> <c>.queryKindNotConfigured</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Рішення людини 2026-09-29 («ми можемо звертатися до різних баз на одному AF-сервері»):
+    /// ключ джерела — для КОЖНОГО запиту, не лише подій. <c>configKey</c> тут — обидва ключі
+    /// через « / »: наявний текст сіду <c>.queryKindNotConfigured</c> («set {configKey}») тоді
+    /// радить те саме, що перевірялось, без зміни тексту ключа.
+    /// </remarks>
+    /// <param name="dataSourceCode">Код джерела.</param>
+    /// <param name="key">Спільний ключ.</param>
+    /// <param name="kind">Тип запиту — для відмови.</param>
+    private string ConfiguredOrRefuse(string dataSourceCode, string key, string kind)
+        => ConfiguredQuery(settings, dataSourceCode, key)
+           ?? throw NotConfigured(
+               dataSourceCode, key, kind, "err.ECR-INT-0422.queryKindNotConfigured",
+               $"{ScopedKey(dataSourceCode, key)} / {key}");
 
-    /// <summary>Текст запиту з налаштування або відмова <c>ECR-INT-0422</c>.</summary>
-    private string ConfiguredOrRefuse(string key, string kind)
+    /// <summary>
+    /// Відмова «запит не налаштовано» — одна форма параметрів для всіх запитів PI SQL Client:
+    /// <c>queryKind</c>, <c>dataSource</c>, <c>sourceConfigKey</c>, <c>sharedConfigKey</c>, <c>configKey</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>configKey</c> — заповнювач тексту сіду свого <c>messageKey</c>: для
+    /// <c>.queryKindNotConfigured</c> («set {configKey}») — обидва ключі через « / »; для
+    /// <c>.eventQueryNotConfigured</c> («set {sourceConfigKey} (or the shared {configKey})») — спільний.
+    /// </remarks>
+    private static BusinessRuleException NotConfigured(
+        string dataSourceCode, string key, string kind, string messageKey, string configKey)
     {
-        var configured = settings?.Find(key);
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            return configured;
-        }
+        var own = ScopedKey(dataSourceCode, key);
 
-        throw new BusinessRuleException(
-            QueryNotConfigured,
-            $"Запит типу {kind} для PI SQL Client не налаштовано: немає ключа {key}.",
+        return new BusinessRuleException(
+            IExternalDataSource.QueryRefusedCode,
+            $"Запит типу {kind} для джерела {dataSourceCode} не налаштовано: немає ні {own}, ні {key}.",
             new Dictionary<string, object?>
             {
-                ["messageKey"] = "err.ECR-INT-0422.queryKindNotConfigured",
+                ["messageKey"] = messageKey,
                 ["queryKind"] = kind,
-                ["configKey"] = key,
+                ["dataSource"] = dataSourceCode,
+                ["sourceConfigKey"] = own,
+                ["sharedConfigKey"] = key,
+                ["configKey"] = configKey,
             });
     }
 
@@ -375,10 +403,10 @@ public sealed class PiSqlClientDataSource(
     {
         ArgumentNullException.ThrowIfNull(paths);
 
-        var queryText = ConfiguredOrRefuse(CurrentValueQueryKey, "CurrentValue");
-
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
+
+        var queryText = ConfiguredOrRefuse(source.Code, CurrentValueQueryKey, "CurrentValue");
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
 
@@ -672,26 +700,8 @@ public sealed class PiSqlClientDataSource(
     /// <param name="kind">Тип запиту — для відмови.</param>
     /// <param name="dataSourceCode">Код джерела: спершу його власний ключ (<see cref="ConfiguredQuery"/>).</param>
     private string EventQueryOrRefuse(string key, string kind, string dataSourceCode)
-    {
-        var configured = ConfiguredQuery(settings, dataSourceCode, key);
-        if (configured is not null)
-        {
-            return configured;
-        }
-
-        throw new BusinessRuleException(
-            IExternalDataSource.QueryRefusedCode,
-            $"Запит типу {kind} для джерела {dataSourceCode} не налаштовано: немає ні "
-            + $"{ScopedKey(dataSourceCode, key)}, ні {key}.",
-            new Dictionary<string, object?>
-            {
-                ["messageKey"] = "err.ECR-INT-0422.eventQueryNotConfigured",
-                ["queryKind"] = kind,
-                ["dataSource"] = dataSourceCode,
-                ["configKey"] = key,
-                ["sourceConfigKey"] = ScopedKey(dataSourceCode, key),
-            });
-    }
+        => ConfiguredQuery(settings, dataSourceCode, key)
+           ?? throw NotConfigured(dataSourceCode, key, kind, "err.ECR-INT-0422.eventQueryNotConfigured", key);
 
     /// <summary>Текст запиту подій із шаблоном, підставленим літералом.</summary>
     /// <remarks>
@@ -745,10 +755,10 @@ public sealed class PiSqlClientDataSource(
     /// </remarks>
     public async Task<SourceElementsResult> DiscoverElementsAsync(int dataSourceId, string root, CancellationToken ct)
     {
-        var queryText = ConfiguredOrRefuse(ElementListQueryKey, IExternalDataSource.ElementListQueryKind);
-
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
+
+        var queryText = ConfiguredOrRefuse(source.Code, ElementListQueryKey, IExternalDataSource.ElementListQueryKind);
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         using var command = connection.CreateCommand();
@@ -1115,6 +1125,10 @@ public sealed class PiSqlClientDataSource(
     /// ⚠ Запит — властивість <b>джерела</b>, а не транспорту: два PI SQL-джерела
     /// (різні бази AF, різні шаблони подій) не мусять ділити один текст. Без
     /// власного ключа поведінка та сама, що й до F4e, — спільний ключ або типовий текст.
+    /// Рішення людини 2026-09-29: так — для КОЖНОГО запиту (<c>Catalog</c>, <c>Template</c>,
+    /// <c>Value</c>, <c>Interpolated</c>, <c>Summary</c>, <c>CurrentValue</c>, <c>ElementList</c>,
+    /// події). Порожній чи пробільний ключ джерела = відсутній (як <c>ConfigurationSecretProvider</c>
+    /// і <c>SqlDataSource</c>): порожній текст запитом не буває.
     /// Публічний для тестів: живого RTQP у контурі розробки немає.
     /// </remarks>
     /// <param name="settings">Канал налаштувань.</param>
