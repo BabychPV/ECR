@@ -584,6 +584,90 @@ public sealed class SeedTests(SqlServerFixture sql)
         Assert.Equal(before, after);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9")]
+    public async Task Сід_заводить_базові_переклади_ru_і_kz_з_областю_англійського_рядка()
+    {
+        // ✎ Рішення людини 2026-09-29: «переклади робить людина, але базові
+        // тексти, які вже є, — зробити зараз, і при встановленні вони мають бути
+        // в БД». Мова — не лише рядок у `sys_ecr.Language`: без рядків каталогу
+        // вибір ru/kz у перемикачі показував би англійський інтерфейс.
+        Assert.Equal("Сохранить", await StringAsync(
+            "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'ru'"));
+        Assert.Equal("Сақтау", await StringAsync(
+            "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'kz'"));
+
+        // ⚠ Область перекладу — та сама, що в англійського рядка: публічний
+        // `common.save` (0) видно до входу, приватний `profile.language` (1) — ні.
+        // Переклад із іншою областю або витік би анонімно, або зник би зі
+        // сторінки входу.
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sys_ecr.UiString AS t
+            JOIN sys_ecr.UiString AS e ON e.[Key] = t.[Key] AND e.LanguageCode = N'en'
+            WHERE t.LanguageCode IN (N'ru', N'kz')
+              AND t.[Key] IN (N'common.save', N'profile.language', N'login.submit', N'err.ECR-AUTH-0423')
+              AND t.Scope <> e.Scope
+            """));
+        Assert.Equal(8, await ScalarAsync("""
+            SELECT COUNT(*) FROM sys_ecr.UiString
+            WHERE LanguageCode IN (N'ru', N'kz')
+              AND [Key] IN (N'common.save', N'profile.language', N'login.submit', N'err.ECR-AUTH-0423')
+            """));
+
+        // ⛔ Переклад без англійського оригіналу сід не заводить (JOIN у блоці `I18N:`).
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*) FROM sys_ecr.UiString AS t
+            WHERE t.LanguageCode IN (N'ru', N'kz')
+              AND t.ModifiedByUserId IS NULL
+              AND NOT EXISTS (SELECT 1 FROM sys_ecr.UiString AS e WHERE e.[Key] = t.[Key] AND e.LanguageCode = N'en')
+            """));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-14.9")]
+    public async Task Розгорнута_база_без_перекладу_отримує_його_а_переклад_людини_сід_не_затирає()
+    {
+        // ⚠ Стара база: розгорнута до 2026-09-29, перекладу `common.save` немає, а
+        // `common.cancel` людина вже переклала по-своєму через `/admin/ui-strings`.
+        var seeded = await StringAsync(
+            "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru'");
+        await ExecuteAsync("""
+            DELETE FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'ru';
+            UPDATE sys_ecr.UiString SET Value = N'Отменить действие'
+            WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru';
+            """);
+        var before = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+
+        try
+        {
+            await using (var db = CreateContext())
+            {
+                await new SeedRunner(db).RunAsync(CancellationToken.None);
+            }
+
+            Assert.Equal("Сохранить", await StringAsync(
+                "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.save' AND LanguageCode = N'ru'"));
+            Assert.Equal("Отменить действие", await StringAsync(
+                "SELECT Value FROM sys_ecr.UiString WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru'"));
+
+            // ⛔ Без інкременту клієнт із чинним ETag не побачив би нового перекладу.
+            var after = await ScalarAsync("SELECT Revision FROM sys_ecr.UiStringRevision WHERE Id = 1");
+            Assert.True(after > before, $"Revision не змінився: було {before}, стало {after}.");
+        }
+        finally
+        {
+            await ExecuteAsync($"""
+                UPDATE sys_ecr.UiString SET Value = N'{seeded!.Replace("'", "''", StringComparison.Ordinal)}'
+                WHERE [Key] = N'common.cancel' AND LanguageCode = N'ru';
+                """);
+        }
+    }
+
     private EcrDbContext CreateContext()
         => new(new DbContextOptionsBuilder<EcrDbContext>()
             .UseSqlServer(sql.ConnectionString)

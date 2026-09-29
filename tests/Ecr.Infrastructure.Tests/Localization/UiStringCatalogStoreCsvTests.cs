@@ -13,7 +13,12 @@ namespace Ecr.Infrastructure.Tests.Localization;
 [Collection("SqlServer")]
 public sealed class UiStringCatalogStoreCsvTests(SqlServerFixture sql)
 {
-    private static readonly string[] Keys = ["common.save", "common.cancel"];
+    // ✎ 2026-09-29: власні ключі тесту, а не посіяні `common.save`/`common.cancel`:
+    // сід тепер заводить і їхні переклади kz (рішення людини), і `finally`, що
+    // їх видаляв, лишав би базу, якій наступний сід повертає рядки з
+    // інкрементом Revision — `SeedTests.Повторний_запуск_без_нових_рядків_не_піднімає_Revision`
+    // падав би залежно від порядку тестів у колекції.
+    private static readonly string[] Keys = ["test.csvStore.save", "test.csvStore.cancel"];
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
@@ -28,6 +33,11 @@ public sealed class UiStringCatalogStoreCsvTests(SqlServerFixture sql)
 
         try
         {
+            // Еталон: експорт перелічує ключі мови за замовчуванням.
+            await store.SetManyAsync(
+                [.. Keys.Select(k => new UiStringWrite(k, "en", "e " + k, UiStringScope.Public, null, at))],
+                CancellationToken.None);
+
             var before = await store.GetRevisionAsync(CancellationToken.None);
 
             var after = await store.SetManyAsync(
@@ -39,8 +49,8 @@ public sealed class UiStringCatalogStoreCsvTests(SqlServerFixture sql)
             Assert.Equal(after, await store.GetRevisionAsync(CancellationToken.None));
 
             var rows = await store.ListForExportAsync("kz", CancellationToken.None);
-            var save = rows.Single(r => r.Key == "common.save");
-            Assert.Equal(("т common.save", at), (save.Value, save.ModifiedAt));
+            var save = rows.Single(r => r.Key == Keys[0]);
+            Assert.Equal(("т " + Keys[0], at), (save.Value, save.ModifiedAt));
             Assert.True(await store.LanguageExistsAsync("kz", CancellationToken.None));
             Assert.False(await store.LanguageExistsAsync("xx", CancellationToken.None));
         }
@@ -49,8 +59,9 @@ public sealed class UiStringCatalogStoreCsvTests(SqlServerFixture sql)
             await using var connection = new SqlConnection(sql.ConnectionString);
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText =
-                "DELETE FROM sys_ecr.UiString WHERE LanguageCode = N'kz' AND [Key] IN (N'common.save', N'common.cancel');";
+            command.CommandText = "DELETE FROM sys_ecr.UiString WHERE [Key] IN (@a, @b);";
+            command.Parameters.AddWithValue("@a", Keys[0]);
+            command.Parameters.AddWithValue("@b", Keys[1]);
             await command.ExecuteNonQueryAsync();
         }
     }

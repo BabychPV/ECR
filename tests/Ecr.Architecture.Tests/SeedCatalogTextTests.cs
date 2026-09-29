@@ -102,13 +102,20 @@ public sealed partial class SeedCatalogTextTests
     }
 
     /// <summary>
-    /// Сід заводить рядки ЛИШЕ мовою збірки: переклади — дані реєстру (D-95).
+    /// Блок каталогу збірки (<c>MERGE sys_ecr.UiString AS t</c>) заводить рядки
+    /// ЛИШЕ мовою збірки.
     /// </summary>
     /// <remarks>
     /// ⚠ Тримає чесним сторожа вище: рядок іншою мовою — це кирилиця, якій
     /// місце є, і без цієї перевірки її поява була б приводом розширити
-    /// <c>CyrillicByDesign</c> замість розмови про те, що переклад поїхав у
-    /// збірку.
+    /// <c>CyrillicByDesign</c> замість того, щоб покласти переклад туди, де
+    /// йому місце.
+    ///
+    /// ✎ 2026-09-29, рішення людини: базові переклади ru/kz наявних текстів
+    /// лежать у сіді — але в ОКРЕМИХ блоках <c>I18N:</c> після цього MERGE
+    /// (область беруть з en-рядка), і їх стереже <c>SeedTranslationTests</c>.
+    /// Решту перекладів, як і раніше, веде людина через
+    /// <c>PUT /api/v1/ui-strings/{lang}/{key}</c> (D-95).
     /// </remarks>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage1)]
@@ -129,7 +136,8 @@ public sealed partial class SeedCatalogTextTests
         Assert.True(
             foreign.Count == 0,
             $"У {SeedFile} заведено рядки не мовою збірки: {string.Join(", ", foreign)}. "
-            + "Переклади — дані реєстру (PUT /api/v1/ui-strings/{lang}/{key}), а не збірки (D-95).");
+            + "Базові переклади ru/kz — в окремих блоках «I18N:» нижче цього MERGE (SeedTranslationTests), "
+            + "решта — дані реєстру (PUT /api/v1/ui-strings/{lang}/{key}, D-95).");
     }
 
     /// <summary>Рядки блоку <c>MERGE sys_ecr.UiString</c>: ключ, мова, значення.</summary>
