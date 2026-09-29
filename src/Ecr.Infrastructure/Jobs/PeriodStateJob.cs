@@ -288,6 +288,7 @@ public sealed partial class PeriodStateJob(
         var toMaterialize = new List<int>();
         var skipped = new List<SkippedPeriodTransition>();
         var reopened = 0;
+        var attempt = 0;
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
@@ -296,6 +297,25 @@ public sealed partial class PeriodStateJob(
             toMaterialize.Clear();
             skipped.Clear();
             reopened = 0;
+
+            // ⛔ Аудит 2026-09-28, B5. І ТРЕКЕР — теж заново. Попередня спроба
+            // відкотилась у базі, але лишила періоди проєкту в трекері вже
+            // зміненими (`Grace` після системного Reopen): `FromSql` нижче
+            // повертає ВІДСТЕЖУВАНІ екземпляри як є (identity resolution не
+            // перезаписує їх значеннями з бази), план бачить `Grace` і Reopen
+            // не повторює — а `SaveChanges` зберігає період уже без рядка
+            // аудиту, що відкотився разом із першою спробою. Якщо ж упав сам
+            // коміт ПІСЛЯ `SaveChanges`, зміни вже прийняті трекером, і період
+            // не зберігся б узагалі. Відв'язати — і прочитати з бази наново.
+            DetachPeriods(project.Id);
+
+            // Проєкт відстежується на весь прогін: на повторі його `CurrentPeriod`
+            // з першої спроби теж міг лишитись прийнятим трекером, хоч у базі
+            // відкотився. Перечитати лише на повторі — перша спроба бере свіжий.
+            if (attempt++ > 0)
+            {
+                await db.Entry(project).ReloadAsync(innerCt).ConfigureAwait(false);
+            }
 
             // ⚠ UPDLOCK: Reopen бере той самий рядок так само (ФВ-1.10a).
             // Тепер блокування справді тримається до кінця транзакції.
@@ -415,18 +435,25 @@ public sealed partial class PeriodStateJob(
     /// </remarks>
     private void Discard(Project project)
     {
-        foreach (var entry in db.ChangeTracker.Entries<Period>()
-                     .Where(e => e.Entity.ProjectId == project.Id)
-                     .ToList())
-        {
-            entry.State = EntityState.Detached;
-        }
+        DetachPeriods(project.Id);
 
         var projectEntry = db.Entry(project);
         if (projectEntry.State is EntityState.Modified)
         {
             projectEntry.CurrentValues.SetValues(projectEntry.OriginalValues);
             projectEntry.State = EntityState.Unchanged;
+        }
+    }
+
+    /// <summary>Відв'язує від трекера всі періоди проєкту.</summary>
+    /// <param name="projectId">Проєкт.</param>
+    private void DetachPeriods(int projectId)
+    {
+        foreach (var entry in db.ChangeTracker.Entries<Period>()
+                     .Where(e => e.Entity.ProjectId == projectId)
+                     .ToList())
+        {
+            entry.State = EntityState.Detached;
         }
     }
 
