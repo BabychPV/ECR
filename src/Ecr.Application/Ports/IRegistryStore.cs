@@ -135,6 +135,51 @@ public interface IRegistryStore
     public Task<RegistryEntryReferences> CountReferencesAsync(long registryEntryId, CancellationToken ct);
 
     /// <summary>
+    /// Хто посилається на НАБІР записів <b>ззовні</b> набору — за видами (RT-12, каскадне
+    /// видалення композиції, FEATURE-REGISTRY-TABLES §4.8).
+    /// </summary>
+    /// <param name="registryEntryIds">Записи, що видаляються разом: батько й усі його частини.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Посилання членів набору один на одного НЕ рахуються: частина композиції посилається на
+    /// свого батька полем <c>Lookup</c>, і без цього виключення каскад не видалив би жодного
+    /// батька з частинами — підрахунок іде запитом до бази, де незбережене видалення частин ще
+    /// не видно. Посилання ззовні (комірка документа на частину, запис іншого довідника,
+    /// частина з <c>Restrict</c>, яка в набір не входить) рахуються як у
+    /// <see cref="CountReferencesAsync(long, CancellationToken)"/>.
+    /// </remarks>
+    public Task<RegistryEntryReferences> CountReferencesFromOutsideAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct);
+
+    /// <summary>
+    /// Живі (не видалені логічно) частини композиції переданих батьків — <b>з відстеженням</b>
+    /// і з політикою видалення поля композиції (RT-12, <c>D-155</c>).
+    /// </summary>
+    /// <param name="parentEntryIds">Батьки; порожній набір — порожній результат.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ З відстеженням: каскад видаляє знайдене логічно (<c>SoftDelete</c>) і зберігає. Частина —
+    /// це запис, значення поля композиції (<c>RelationKind = Composition</c>) якого вказує на
+    /// батька.
+    /// </remarks>
+    public Task<IReadOnlyList<RegistryCompositionChild>> ListCompositionChildrenAsync(
+        IReadOnlyCollection<long> parentEntryIds, CancellationToken ct);
+
+    /// <summary>
+    /// Резервує <paramref name="count"/> послідовних номерів <c>dic.RegistryEntryCodeSeq</c> —
+    /// коди нових записів довідника з <c>CodeMode = Auto</c> (<c>D-157</c>) — одним зверненням.
+    /// </summary>
+    /// <param name="count">Скільки номерів; більше нуля.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Перший номер діапазону; далі — <paramref name="count"/> − 1 наступних.</returns>
+    /// <remarks>
+    /// ⚠ Невикористані номери (рядок пакета відхилено, пакет не збережено) пропадають: код
+    /// унікальний лише в межах довідника, і дірка в шкалі нічого не ламає — так само, як у
+    /// будь-якої послідовності.
+    /// </remarks>
+    public Task<long> NextEntryCodesAsync(int count, CancellationToken ct);
+
+    /// <summary>
     /// «Де використано» ВИЗНАЧЕННЯ довідника: хто посилається на сам довідник,
     /// а не на окремий його запис (директива №15, <c>BE-24</c>).
     /// </summary>
@@ -268,6 +313,13 @@ public sealed record RegistryEntryStanding(
     /// </remarks>
     public bool IsValidOn(DateOnly date) => new Ecr.Domain.ValueObjects.ValidityWindow(ValidFrom, ValidTo).Contains(date);
 }
+
+/// <summary>Частина композиції (<c>D-155</c>) — запис, що належить батькові.</summary>
+/// <param name="Entry">Запис-частина (відстежуваний).</param>
+/// <param name="ParentEntryId">Батько, на якого вказує поле композиції.</param>
+/// <param name="OnParentDelete">Що робити з частиною, коли видаляють батька.</param>
+public sealed record RegistryCompositionChild(
+    RegistryEntry Entry, long ParentEntryId, Ecr.Domain.Enums.ParentDeletePolicy OnParentDelete);
 
 /// <summary>Вид зв'язку M:N і скільки таких зв'язків у довіднику.</summary>
 /// <param name="LinkKind">Вид відношення: <c>permit-water-body</c>, <c>permit-pollutant</c>.</param>

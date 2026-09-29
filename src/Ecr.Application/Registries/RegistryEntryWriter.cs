@@ -39,7 +39,9 @@ internal sealed record RegistryValuesPrefetch(
 /// <summary>Один запис пакета <see cref="RegistryEntryWriter.WriteAsync"/>.</summary>
 /// <param name="Code">
 /// Бізнес-код запису. Наявний запис із цим кодом (без урахування регістру, як колація бази)
-/// оновлюється; немає такого — створюється з назвою, рівною коду (як в імпорті CSV).
+/// оновлюється; немає такого — створюється з назвою, рівною коду (як в імпорті CSV). У довіднику з
+/// <c>CodeMode = Auto</c> (<c>D-157</c>) порожній код — новий запис із кодом послідовності, а
+/// непорожній, якого в довіднику немає, — помилка рядка <see cref="RegistryEntryWriter.EntryCodeAutomaticKey"/>.
 /// </param>
 /// <param name="Values">
 /// Значення за кодами полів ОПУБЛІКОВАНОГО опису. Тип — будь-який, який приймає ручний upsert
@@ -129,8 +131,51 @@ public sealed class RegistryEntryWriter(
     /// </summary>
     public const string KeyDuplicateInBatchKey = "err.ECR-REG-4092.keyDuplicateInBatch";
 
+    /// <summary>
+    /// Ключ помилки: код нового запису довідника з <c>CodeMode = Auto</c> видає послідовність
+    /// (<c>D-157</c>), а виклик назвав свій — такого запису в довіднику немає.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Відмова, а не «взяти код із запиту»: дві шкали кодів в одному довіднику зробили б пошук
+    /// запису за кодом неоднозначним (саме тому <c>CodeMode</c> ставиться лише при створенні).
+    /// Мовчки підмінити код на автоматичний теж не можна — виклик думав би, що запис має його код.
+    /// </remarks>
+    public const string EntryCodeAutomaticKey = "err.ECR-REG-0422.entryCodeAutomatic";
+
     /// <summary>Служба ключів, з якою працює writer; <c>null</c> — лише в тестах без ключів.</summary>
     internal RegistryKeyService? Keys => keys;
+
+    /// <summary>Код запису з номера послідовності: <c>E</c> + 9 цифр (<c>D-157</c>).</summary>
+    /// <param name="number">Номер <c>dic.RegistryEntryCodeSeq</c>.</param>
+    /// <remarks>
+    /// Латиниця й цифри — задовольняє <c>EcrCode</c>; понад 999 999 999 номер просто довшає.
+    /// </remarks>
+    public static string AutoCode(long number)
+        => "E" + number.ToString("D9", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Коди для <paramref name="count"/> нових записів довідника з <c>CodeMode = Auto</c> — одним
+    /// зверненням до послідовності. Спільна точка ВСІХ шляхів запису (ручний upsert, CSV, пакет).
+    /// </summary>
+    /// <param name="definition">Довідник; у ручному режимі — порожня черга без звернення.</param>
+    /// <param name="count">Скільки кодів потрібно.</param>
+    /// <param name="ct">Токен скасування.</param>
+    internal async Task<Queue<EcrCode>> ReserveAutoCodesAsync(RegistryDef definition, int count, CancellationToken ct)
+    {
+        var codes = new Queue<EcrCode>();
+        if (definition.CodeMode != RegistryCodeMode.Auto || count <= 0)
+        {
+            return codes;
+        }
+
+        var first = await registries.NextEntryCodesAsync(count, ct).ConfigureAwait(false);
+        for (var i = 0L; i < count; i++)
+        {
+            codes.Enqueue(EcrCode.Create(AutoCode(first + i)));
+        }
+
+        return codes;
+    }
 
     /// <summary>
     /// Записує пакет записів одного довідника — все або нічого, без HTTP-специфіки (фонова
@@ -166,10 +211,17 @@ public sealed class RegistryEntryWriter(
         // Порожній чи повторений код — помилка того, хто склав пакет, а не даних: ні помилкою
         // рядка з каталогу (тексти імпорту кажуть «у файлі»), ні «переможцем останнім».
         var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var anyEmpty = false;
         foreach (var item in batch.Entries)
         {
             var code = item?.Code?.Trim() ?? string.Empty;
-            if (code.Length == 0 || !codes.Add(code))
+            if (code.Length == 0)
+            {
+                anyEmpty = true;
+                continue;
+            }
+
+            if (!codes.Add(code))
             {
                 throw new ArgumentException($"Код запису «{code}» порожній або повторюється в пакеті.", nameof(batch));
             }
@@ -177,6 +229,13 @@ public sealed class RegistryEntryWriter(
 
         var userId = RequireUserId();
         var definition = await RequireDefinitionAsync(batch.RegistryDefId, ct).ConfigureAwait(false);
+
+        // ⚠ RT-12 (D-157): порожній код законний лише в довіднику з `CodeMode = Auto` — це новий
+        // запис, код якому видасть послідовність. У ручному режимі — помилка виклику, як і досі.
+        if (anyEmpty && definition.CodeMode != RegistryCodeMode.Auto)
+        {
+            throw new ArgumentException("Код запису «» порожній або повторюється в пакеті.", nameof(batch));
+        }
 
         // Наявні записи й їхні значення — пакетом (B-10), з відстеженням (як в імпорті).
         var existing = codes.Count == 0
@@ -187,8 +246,8 @@ public sealed class RegistryEntryWriter(
         var targets = batch.Entries
             .Select((item, i) => new WriteTarget(
                 i + 1,
-                item.Code.Trim(),
-                existing.GetValueOrDefault(item.Code.Trim()),
+                item.Code?.Trim() ?? string.Empty,
+                existing.GetValueOrDefault(item.Code?.Trim() ?? string.Empty),
                 MayCreate: !batch.UpdateOnly,
                 item.Values ?? new Dictionary<string, object?>()))
             .ToList();
@@ -279,6 +338,13 @@ public sealed class RegistryEntryWriter(
         var valueChanges = new List<(RegistryEntry Entry, IReadOnlyList<RegistryValueFieldChange> Changes)>();
         var (added, updated, unchanged) = (0, 0, 0);
 
+        // RT-12 (D-157): коди нових записів без коду — одним зверненням до послідовності на пакет.
+        var autoCodes = await ReserveAutoCodesAsync(
+                definition,
+                targets.Count(t => t is { Existing: null, MayCreate: true, Code.Length: 0 }),
+                ct)
+            .ConfigureAwait(false);
+
         void Count(RowOutcome outcome, int delta)
         {
             switch (outcome)
@@ -308,7 +374,18 @@ public sealed class RegistryEntryWriter(
                 continue;
             }
 
-            if (!EcrCode.TryCreate(code, out var ecrCode))
+            if (target.Existing is null && definition.CodeMode == RegistryCodeMode.Auto && code.Length > 0)
+            {
+                errors.Add(new RegistryEntryImportError(row, code, null, EntryCodeAutomaticKey));
+                continue;
+            }
+
+            EcrCode ecrCode;
+            if (code.Length == 0 && target.Existing is null)
+            {
+                ecrCode = autoCodes.Dequeue();
+            }
+            else if (!EcrCode.TryCreate(code, out ecrCode))
             {
                 errors.Add(new RegistryEntryImportError(row, code, null, "err.ECR-CFG-0422.invalidCode"));
                 continue;
@@ -327,7 +404,10 @@ public sealed class RegistryEntryWriter(
             entry ??= AddEntry(
                 definition.Id,
                 ecrCode,
-                new LocalizedText(new Dictionary<string, string> { [UiStringResolver.DefaultLanguage] = code }),
+                new LocalizedText(new Dictionary<string, string>
+                {
+                    [UiStringResolver.DefaultLanguage] = code.Length == 0 ? ecrCode.Value : code,
+                }),
                 userId);
 
             IReadOnlyList<RegistryValueFieldChange> changes;

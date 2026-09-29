@@ -4587,6 +4587,14 @@ USING (VALUES
     (N'err.ECR-REG-4092.keyCodeMismatch', N'en', N'The key of this row belongs to a different entry than its code.', 1),
 
     -- RT: data
+    -- RT-12 (ФВ-8.16, D-155, D-157): обмеження опису композиції й автоматичний код запису.
+    (N'err.ECR-REG-0422.compositionNotLookup', N'en', N'Field "{fieldCode}" is {dataType}: only a Lookup field can make an entry part of an entry of another registry.', 1),
+    (N'err.ECR-REG-0422.compositionMoreThanOne', N'en', N'Registry "{registryCode}" has more than one composition field ({fields}): an entry can be part of only one parent.', 1),
+    (N'err.ECR-REG-0422.compositionTargetSelf', N'en', N'Composition field "{fieldCode}" must point to another registry: a hierarchy inside one registry uses the parent entry instead.', 1),
+    (N'err.ECR-REG-0422.compositionNotRequired', N'en', N'Composition field "{fieldCode}" must be required: a part without a parent would never be visible.', 1),
+    (N'err.ECR-REG-0422.compositionChildTemporal', N'en', N'Registry "{registryCode}" is part of another registry and cannot have its own validity dates: its entries are visible exactly when their parent is.', 1),
+    (N'err.ECR-REG-0422.compositionCycle', N'en', N'Composition forms a cycle: {chain}. A registry cannot be part of itself, even through other registries.', 1),
+    (N'err.ECR-REG-0422.entryCodeAutomatic', N'en', N'Entry codes of this registry are assigned automatically: leave the code empty for a new entry.', 1),
 
     -- RT: expressions
     -- RT-21 (FEATURE-REGISTRY-TABLES §5.5, `02b` §12, перевірки 15–19 і попередження 21а): статичні перевірки функцій довідників.

@@ -122,7 +122,11 @@ public sealed class ImportRegistryEntriesHandler(
         var header = records.Count > 0 ? records[0] : [];
         var codeColumn = IndexOf(header, "code");
 
-        if (codeColumn < 0)
+        // ⚠ RT-12 (D-157, §4.8): у довіднику з `CodeMode = Auto` стовпець `code` необов'язковий —
+        // наявний запис знаходить первинний ключ, новий отримує код послідовності.
+        var autoCode = definition.CodeMode == RegistryCodeMode.Auto;
+
+        if (codeColumn < 0 && !autoCode)
         {
             throw Invalid(
                 "err.ECR-REG-0422.entriesCsvHeaderCode",
@@ -199,6 +203,19 @@ public sealed class ImportRegistryEntriesHandler(
         var seenCodes = new HashSet<string>(StringComparer.Ordinal);
         var (added, updated, unchanged) = (0, 0, 0);
 
+        // RT-12 (D-157): коди нових рядків без коду — одним зверненням на файл, через writer (та
+        // сама точка, що в ручного upsert і пакета). Рядок без коду й без збігу за ключем — новий.
+        // ⚠ Прев'ю (dryRun) послідовність не витрачає: запис не зберігається, і код-заглушка
+        // нікуди не потрапляє.
+        var autoCodes = await writer.ReserveAutoCodesAsync(
+                definition,
+                dryRun ? 0 : Enumerable.Range(1, Math.Max(0, records.Count - 1))
+                    .Count(i => !records[i].All(string.IsNullOrWhiteSpace)
+                                && Cell(records[i], codeColumn).Trim().Length == 0
+                                && !keyMatch.EntriesByRow.ContainsKey(i)),
+                ct)
+            .ConfigureAwait(false);
+
         // ⛔ Прогалина, яку закриває ця правка: на відміну від ручного
         // редагування (UpsertRegistryEntryHandler.HandleAsync), імпорт CSV
         // досі не писав жодного детального сліду зміни поля — лише сумарну
@@ -220,26 +237,40 @@ public sealed class ImportRegistryEntriesHandler(
             var rowNumber = i + 1;
             var code = Cell(record, codeColumn).Trim();
 
-            if (code.Length == 0)
+            if (code.Length == 0 && !autoCode)
             {
                 errors.Add(new RegistryEntryImportError(rowNumber, code, null, "err.ECR-REG-0422.entryCodeRequired"));
                 continue;
             }
 
-            if (!seenCodes.Add(code))
+            if (code.Length > 0 && !seenCodes.Add(code))
             {
                 errors.Add(new RegistryEntryImportError(rowNumber, code, null, "err.ECR-REG-0422.entryCodeDuplicateInFile"));
                 continue;
             }
 
-            if (!EcrCode.TryCreate(code, out var ecrCode))
+            var ecrCode = default(EcrCode);
+            if (code.Length > 0 && !EcrCode.TryCreate(code, out ecrCode))
             {
                 errors.Add(new RegistryEntryImportError(rowNumber, code, null, "err.ECR-CFG-0422.invalidCode"));
                 continue;
             }
 
-            var byCode = prefetched.EntriesByCode.GetValueOrDefault(code);
+            var byCode = code.Length == 0 ? null : prefetched.EntriesByCode.GetValueOrDefault(code);
             var byKey = keyMatch.EntriesByRow.GetValueOrDefault(i);
+
+            // RT-12 (D-157): новий запис автоматичного довідника отримує код послідовності; код із
+            // файлу, якого в довіднику немає, — чужа шкала, і мовчки його не беремо й не підміняємо.
+            if (autoCode && byKey is null && byCode is null)
+            {
+                if (code.Length > 0)
+                {
+                    errors.Add(new RegistryEntryImportError(rowNumber, code, null, RegistryEntryWriter.EntryCodeAutomaticKey));
+                    continue;
+                }
+
+                ecrCode = autoCodes.Count > 0 ? autoCodes.Dequeue() : EcrCode.Create(RegistryEntryWriter.AutoCode(0));
+            }
 
             // ⚠ Код називає один наявний запис, первинний ключ — інший: «оновити за ключем» тихо
             // змінило б не той запис, про який думала людина, а «за кодом» — дало б йому ключ,
@@ -285,7 +316,10 @@ public sealed class ImportRegistryEntriesHandler(
             entry ??= writer.AddEntry(
                 definition.Id,
                 ecrCode,
-                new LocalizedText(new Dictionary<string, string> { [UiStringResolver.DefaultLanguage] = code }),
+                new LocalizedText(new Dictionary<string, string>
+                {
+                    [UiStringResolver.DefaultLanguage] = code.Length == 0 ? ecrCode.Value : code,
+                }),
                 userId);
 
             // ⚠ Запис, знайдений за ключем, міг не потрапити в пакет «за кодами» — його значення
@@ -730,7 +764,7 @@ public sealed class ImportRegistryEntriesHandler(
     }
 
     private static string Cell(IReadOnlyList<string> record, int index)
-        => index < record.Count ? record[index] : string.Empty;
+        => index >= 0 && index < record.Count ? record[index] : string.Empty;
 
     /// <summary>Прочитане пакетом до циклу рядків.</summary>
     /// <param name="EntriesByCode">Наявні записи довідника за кодом.</param>

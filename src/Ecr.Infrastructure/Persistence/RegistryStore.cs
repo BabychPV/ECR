@@ -236,6 +236,124 @@ public sealed class RegistryStore(EcrDbContext db) : IRegistryStore
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Ті самі сім видів, що в <see cref="CountReferencesAsync"/>, але власником посилання, який
+    /// сам у наборі, нехтується: набір видаляється разом (RT-12, каскад композиції). Набір —
+    /// одиниці-сотні записів (кейс і його склад), тому <c>IN (…)</c> одним списком.
+    /// </remarks>
+    public async Task<RegistryEntryReferences> CountReferencesFromOutsideAsync(
+        IReadOnlyCollection<long> registryEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(registryEntryIds);
+
+        if (registryEntryIds.Count == 0)
+        {
+            return RegistryEntryReferences.None;
+        }
+
+        var ids = registryEntryIds.Distinct().ToList();
+
+        var cells = await db.CellValues
+            .CountAsync(c => c.ValueRegistryEntryId != null && ids.Contains(c.ValueRegistryEntryId.Value), ct)
+            .ConfigureAwait(false);
+
+        var headers = await db.DocumentHeaderValues
+            .CountAsync(h => h.ValueRegistryEntryId != null && ids.Contains(h.ValueRegistryEntryId.Value), ct)
+            .ConfigureAwait(false);
+
+        // ⛔ Саме тут частини композиції перестають блокувати видалення батька: їхнє значення
+        // поля композиції посилається на батька, але власник значення — у наборі.
+        var values = await (
+                from value in db.RegistryValues.AsNoTracking()
+                join owner in db.RegistryEntries.AsNoTracking() on value.RegistryEntryId equals owner.Id
+                where value.ValueRefEntryId != null
+                      && ids.Contains(value.ValueRefEntryId.Value)
+                      && !ids.Contains(owner.Id)
+                      && !owner.IsDeleted
+                select value.Id)
+            .CountAsync(ct).ConfigureAwait(false);
+
+        var children = await db.RegistryEntries
+            .CountAsync(
+                e => e.ParentEntryId != null && ids.Contains(e.ParentEntryId.Value) && !ids.Contains(e.Id) && !e.IsDeleted,
+                ct)
+            .ConfigureAwait(false);
+
+        var links = await db.RegistryEntryLinks
+            .CountAsync(
+                l => (ids.Contains(l.LeftEntryId) || ids.Contains(l.RightEntryId))
+                     && !(ids.Contains(l.LeftEntryId) && ids.Contains(l.RightEntryId)),
+                ct)
+            .ConfigureAwait(false);
+
+        var constants = await db.MethodologyConstants
+            .CountAsync(c => c.SubstanceEntryId != null && ids.Contains(c.SubstanceEntryId.Value), ct)
+            .ConfigureAwait(false);
+
+        var substances = await db.MethodologySubstances
+            .CountAsync(m => ids.Contains(m.SubstanceEntryId), ct).ConfigureAwait(false);
+
+        return new RegistryEntryReferences(cells, headers, values, children, links, constants, substances);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryCompositionChild>> ListCompositionChildrenAsync(
+        IReadOnlyCollection<long> parentEntryIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(parentEntryIds);
+
+        if (parentEntryIds.Count == 0)
+        {
+            return [];
+        }
+
+        var parents = parentEntryIds.Distinct().ToList();
+
+        // ⚠ Жодного AsNoTracking у джерелах: воно діє на ВЕСЬ запит, і частини повернулися б
+        // невідстежуваними — каскад «видаляв» би їх лише в пам'яті. Відстежуються лише записи:
+        // значення й поля в проєкцію не потрапляють.
+        var rows = await (
+                from value in db.RegistryValues
+                join field in db.RegistryFieldDefs on value.RegistryFieldDefId equals field.Id
+                join child in db.RegistryEntries on value.RegistryEntryId equals child.Id
+                where field.RelationKind == RegistryRelationKind.Composition
+                      && value.ValueRefEntryId != null
+                      && parents.Contains(value.ValueRefEntryId.Value)
+                      && !child.IsDeleted
+                orderby child.Id
+                select new { Child = child, Parent = value.ValueRefEntryId!.Value, field.OnParentDelete })
+            .Take(MaxEntries)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return rows
+            .Select(r => new RegistryCompositionChild(r.Child, r.Parent, r.OnParentDelete))
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<long> NextEntryCodesAsync(int count, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        // Той самий спосіб, що `CalculationResultStore.SequenceRangeAsync`: один виклик
+        // sp_sequence_get_range на весь пакет замість NEXT VALUE FOR на кожен запис.
+        var range = await db.Database
+            .SqlQuery<long>($"""
+                DECLARE @first sql_variant;
+                EXEC sys.sp_sequence_get_range
+                    @sequence_name = N'dic.RegistryEntryCodeSeq',
+                    @range_size = {(long)count},
+                    @range_first_value = @first OUTPUT;
+                SELECT CONVERT(bigint, @first) AS Value;
+                """)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return range.Single();
+    }
+
+    /// <inheritdoc />
     public async Task<UsageResponse> FindDefinitionUsageAsync(
         int registryDefId, int take, CancellationToken ct)
     {

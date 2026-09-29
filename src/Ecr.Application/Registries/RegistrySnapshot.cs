@@ -144,41 +144,28 @@ public sealed class RegistrySnapshot : IRegistrySnapshot
             perEntry[value.FieldDefId] = value;
         }
 
-        // 2. Видимість батька композиції — рекурсивно.
-        var visibility = new Dictionary<long, bool>();
-
-        bool IsVisible(long entryId)
-        {
-            if (visibility.TryGetValue(entryId, out var known))
+        // 2. Видимість батька композиції — рекурсивно. ⛔ Правило одне, у RegistryResolver (RT-12):
+        // друга копія тут розійшлася б із переліком записів на першому ж виправленні.
+        var isVisible = resolver.VisibleWithCompositionParents(
+            candidates.ContainsKey,
+            entryId =>
             {
-                return known;
-            }
+                var composition = byId[candidates[entryId].RegistryDefId].Composition;
+                if (composition is null)
+                {
+                    return (false, null);
+                }
 
-            if (!candidates.TryGetValue(entryId, out var entry))
-            {
-                return visibility[entryId] = false;
-            }
-
-            var composition = byId[entry.RegistryDefId].Composition;
-            if (composition is null)
-            {
-                return visibility[entryId] = true;
-            }
-
-            // ⚠ «Невидимий» ставиться ДО рекурсії: цикл композицій забороняє опис (RT-12), але
-            // дані могли прийти повз нього — і тоді замкнене коло невидиме, а не нескінченне.
-            visibility[entryId] = false;
-            var parent = valuesByEntry.TryGetValue(entryId, out var own)
-                         && own.TryGetValue(composition.Id, out var link)
-                ? link.RefEntryId
-                : null;
-
-            return visibility[entryId] = parent is { } parentId && IsVisible(parentId);
-        }
+                var parent = valuesByEntry.TryGetValue(entryId, out var own)
+                             && own.TryGetValue(composition.Id, out var link)
+                    ? link.RefEntryId
+                    : null;
+                return (true, parent);
+            });
 
         var visible = new Dictionary<long, EntryData>();
         foreach (var entry in candidates.Values
-                     .Where(e => IsVisible(e.Id))
+                     .Where(e => isVisible(e.Id))
                      .OrderBy(e => e.Ordinal)
                      .ThenBy(e => e.Id))
         {

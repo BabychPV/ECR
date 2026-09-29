@@ -3,6 +3,7 @@ using Ecr.Application.Common;
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
 using Ecr.Application.Registries.Dto;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Dictionaries;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -80,11 +81,22 @@ public sealed class UpsertRegistryEntryHandler(
         // Код валідується як EcrCode (D-89) — тим самим правилом, що коди
         // колонок і шаблонів. Окреме «майже таке саме» правило для довідників
         // розійшлося б із рештою системи на першому ж символі.
-        var code = EcrCode.Create(dto.Code);
+        //
+        // ⛔ RT-12 (D-157): у довіднику з `CodeMode = Auto` код НОВОГО запису видає послідовність
+        // — через writer, як і в CSV та пакеті. Код у запиті тоді має бути порожнім: чужа шкала
+        // кодів у тому самому довіднику зробила б пошук за кодом неоднозначним. Для наявного
+        // запису (`Id`) код не змінюється в жодному режимі, тож і не перевіряється тут.
+        var auto = definition.CodeMode == RegistryCodeMode.Auto;
+        EcrCode? code = auto ? null : EcrCode.Create(dto.Code);
 
         var entry = dto.Id is { } id
             ? await LoadAsync(id, definition.Id, ct).ConfigureAwait(false)
-            : await CreateAsync(definition.Id, code, dto, userId, ct).ConfigureAwait(false);
+            : await CreateAsync(
+                definition.Id,
+                code ?? await AutoCodeAsync(definition, dto.Code, ct).ConfigureAwait(false),
+                dto,
+                userId,
+                ct).ConfigureAwait(false);
 
         // ⛔ X-03: назва ЗЛИВАЄТЬСЯ з наявною, а не заміняється. Доти
         // `Rename(dto.Display)` писав рівно те, що приїхало, — а форма правки
@@ -136,6 +148,26 @@ public sealed class UpsertRegistryEntryHandler(
     /// <summary>Назва нового запису без порожніх мов.</summary>
     private static LocalizedText WithoutEmpty(LocalizedText? display)
         => Merge(new LocalizedText(), display);
+
+    /// <summary>Код нового запису довідника з <c>CodeMode = Auto</c> (<c>D-157</c>).</summary>
+    /// <exception cref="BusinessRuleException"><c>ECR-REG-0422</c>, <c>entryCodeAutomatic</c>: запит назвав свій код.</exception>
+    private async Task<EcrCode> AutoCodeAsync(RegistryDef definition, string? requested, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Коди записів довідника «{definition.Code}» видає система: для нового запису код лишають порожнім.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.entryCodeAutomatic",
+                    ["registryCode"] = definition.Code,
+                    ["code"] = requested,
+                });
+        }
+
+        return (await writer.ReserveAutoCodesAsync(definition, 1, ct).ConfigureAwait(false)).Dequeue();
+    }
 
     private async Task<RegistryEntry> LoadAsync(long id, int registryDefId, CancellationToken ct)
     {

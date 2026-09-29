@@ -333,6 +333,16 @@ public sealed class SaveRegistryDefinitionHandler(
         ApplyFields(definition, dto.Fields);
         var applied = ApplyRules(definition, rules, dto.Rules);
 
+        // ⛔ RT-12 (ФВ-8.16, §4.8): опис із композицією перевіряється цілим графом довідників —
+        // цикл замикається через ІНШІ довідники, і знайти його в одному описі неможливо. Опис без
+        // композиції нового ребра не додає, тож граф не читається (зайвий запит на кожне
+        // збереження).
+        if (definition.Fields.Any(f => f.RelationKind == RegistryRelationKind.Composition))
+        {
+            var graph = await registries.ListDefinitionsAsync(ct).ConfigureAwait(false);
+            RegistryCompositionRules.Validate(definition, graph);
+        }
+
         // ⛔ Обов'язковість перевіряється ПІСЛЯ застосування, на цілому описі:
         // довідник без жодного ключового поля не має бізнес-ключа, і його
         // записи неможливо зіставити ні з зовнішнім джерелом, ні між версіями.
@@ -697,6 +707,202 @@ public sealed class SaveRegistryDefinitionHandler(
                 })
                 .ToList(),
         });
+}
+
+/// <summary>
+/// Обмеження опису композиції довідників (<c>ФВ-8.16</c>, <c>D-155</c>,
+/// FEATURE-REGISTRY-TABLES §4.8) — відмови <c>ECR-REG-0422</c> з ключем для людини.
+/// </summary>
+/// <remarks>
+/// ⛔ Домен тримає лише інваріант типу (<see cref="RegistryFieldDef.ComposeInto"/> кидає
+/// <see cref="InvalidOperationException"/> — це помилка коду, а не введення, і без перевірки тут
+/// вона доїхала б до клієнта як 500). Решта правил — властивості ГРАФА довідників, яких один опис
+/// не бачить: одна композиція на довідник, ціль — інший довідник, поле обов'язкове, дочірній
+/// довідник нетемпоральний, циклів немає.
+/// </remarks>
+public static class RegistryCompositionRules
+{
+    /// <summary>
+    /// Робить поле частиною композиції — після перевірки типу, яка дає <c>422</c> ДО домену.
+    /// </summary>
+    /// <param name="field">Нове поле опису.</param>
+    /// <param name="onParentDelete">Що робити з частиною, коли видаляють батька.</param>
+    /// <exception cref="BusinessRuleException"><c>ECR-REG-0422</c>, ключ <c>compositionNotLookup</c>.</exception>
+    /// <remarks>
+    /// ⚠ Запит збереження опису ще не несе <c>relationKind</c>/<c>onParentDelete</c> (поля DTO —
+    /// крок RT-11, §9.1): коли вони з'являться, <c>ApplyFields</c> кличе цей метод замість
+    /// <see cref="RegistryFieldDef.ComposeInto"/>.
+    /// </remarks>
+    public static void Compose(RegistryFieldDef field, ParentDeletePolicy onParentDelete)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+
+        if (field.DataType != CellDataType.Lookup)
+        {
+            throw NotLookup(field);
+        }
+
+        field.ComposeInto(onParentDelete);
+    }
+
+    /// <summary>Перевіряє композицію опису на тлі всіх довідників.</summary>
+    /// <param name="definition">Опис після застосування правки (у пам'яті, ще не збережений).</param>
+    /// <param name="registries">
+    /// Усі довідники (збережені); збережена копія <paramref name="definition"/> заміщується
+    /// версією з пам'яті.
+    /// </param>
+    /// <exception cref="BusinessRuleException"><c>ECR-REG-0422</c>, ключі <c>composition*</c>.</exception>
+    public static void Validate(RegistryDef definition, IReadOnlyList<RegistryDef> registries)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(registries);
+
+        var compositions = Compositions(definition).ToList();
+        if (compositions.Count == 0)
+        {
+            return;
+        }
+
+        // Масовий імпорт іде повз домен (`CK_RegField_Composition` тримає базу); тут — щоб опис,
+        // який таки дійшов сюди, відмовив словами, а не порушенням обмеження.
+        if (compositions.FirstOrDefault(f => f.DataType != CellDataType.Lookup) is { } notLookup)
+        {
+            throw NotLookup(notLookup);
+        }
+
+        if (compositions.Count > 1)
+        {
+            var fields = string.Join(", ", compositions.Select(f => f.Code));
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Довідник «{definition.Code}» має більше одного поля композиції ({fields}): запис може бути частиною лише одного батька.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.compositionMoreThanOne",
+                    ["registryCode"] = definition.Code,
+                    ["fields"] = fields,
+                });
+        }
+
+        var field = compositions[0];
+        if (field.RefRegistryDefId is not { } target || target == definition.Id)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поле композиції «{field.Code}» мусить указувати на інший довідник: ієрархія в межах одного — це батьківський запис.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.compositionTargetSelf",
+                    ["fieldCode"] = field.Code,
+                });
+        }
+
+        if (!field.IsRequired)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Поле композиції «{field.Code}» мусить бути обов'язковим: частина без батька не видна ніколи.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.compositionNotRequired",
+                    ["fieldCode"] = field.Code,
+                });
+        }
+
+        if (definition.IsTemporal)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Довідник «{definition.Code}» — частина іншого і не може мати власного вікна чинності: його записи видно рівно тоді, коли видно батька.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.compositionChildTemporal",
+                    ["registryCode"] = definition.Code,
+                });
+        }
+
+        if (FindCycle(definition, registries) is { } chain)
+        {
+            throw new BusinessRuleException(
+                "ECR-REG-0422",
+                $"Композиція замикається в коло: {chain}. Довідник не може бути частиною самого себе, навіть через інші.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-REG-0422.compositionCycle",
+                    ["chain"] = chain,
+                });
+        }
+    }
+
+    /// <summary>
+    /// Коло композиції, що проходить через <paramref name="definition"/>: пошук у глибину по
+    /// ребрах «дитина → батько»; <c>null</c> — кола немає.
+    /// </summary>
+    /// <returns>Ланцюжок кодів <c>A → B → A</c>.</returns>
+    /// <remarks>
+    /// ⚠ Шукається лише коло, що проходить через цей опис: саме його може додати правка. Коло
+    /// між іншими довідниками (дані повз опис) обхід пропускає, а не зациклюється.
+    /// </remarks>
+    private static string? FindCycle(RegistryDef definition, IReadOnlyList<RegistryDef> registries)
+    {
+        var byId = new Dictionary<int, RegistryDef>();
+        foreach (var registry in registries)
+        {
+            byId[registry.Id] = registry;
+        }
+
+        byId[definition.Id] = definition;
+
+        var visited = new HashSet<int>();
+        var path = new List<string> { definition.Code };
+
+        string? Walk(RegistryDef node)
+        {
+            foreach (var edge in Compositions(node))
+            {
+                if (edge.RefRegistryDefId is not { } parentId)
+                {
+                    continue;
+                }
+
+                if (parentId == definition.Id)
+                {
+                    return string.Join(" → ", path.Append(definition.Code));
+                }
+
+                if (!visited.Add(parentId) || !byId.TryGetValue(parentId, out var parent))
+                {
+                    continue;
+                }
+
+                path.Add(parent.Code);
+                if (Walk(parent) is { } found)
+                {
+                    return found;
+                }
+
+                path.RemoveAt(path.Count - 1);
+            }
+
+            return null;
+        }
+
+        return Walk(definition);
+    }
+
+    private static IEnumerable<RegistryFieldDef> Compositions(RegistryDef registry)
+        => registry.Fields.Where(f => f.RelationKind == RegistryRelationKind.Composition);
+
+    private static BusinessRuleException NotLookup(RegistryFieldDef field)
+        => new(
+            "ECR-REG-0422",
+            $"Поле «{field.Code}» має тип {field.DataType}: частиною іншого довідника запис робить лише поле Lookup.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-REG-0422.compositionNotLookup",
+                ["fieldCode"] = field.Code,
+                ["dataType"] = field.DataType.ToString(),
+            });
 }
 
 
