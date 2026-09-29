@@ -439,9 +439,10 @@ GO
 -- ✎ Питання: «Регуляторний звіт і далі бачать усі з доступом до проєкту?» —
 -- відповідь: «ні, додай роль». Вміст зрізу (`GET …/snapshots/{id}/rows`,
 -- `…/export.xlsx`) вимагає `Report.ViewSnapshot` у проєкті зрізу плюс грант
--- Read на проєкт. `Viewer`, `Auditor` і `DataEntry` цього права НЕ отримують:
+-- Read на проєкт. `Viewer` і `DataEntry` цього права НЕ отримують:
 -- перелік зрізів і перевірка суми їм лишаються (`Report.ViewRegulatory`),
--- вміст — ні. `Approver` і `SystemAdministrator` отримують право шаблонами
+-- вміст — ні. ✎ `Auditor` — отримує (окремий MERGE нижче, рішення людини
+-- 2026-09-29, 15:29). `Approver` і `SystemAdministrator` отримують право шаблонами
 -- `Report.%` / `%` вище (право безпечне, рядок каталогу — у MERGE прав).
 --
 -- ⚠ Роль — лише те, без чого зріз не переглянути: сторінка зрізів і перелік
@@ -465,6 +466,23 @@ USING (
     JOIN sec.Permission AS p ON p.Code = m.Code AND p.IsDangerous = 0
     CROSS JOIN sec.Role AS r
     WHERE r.Code = N'ReportViewer'
+) AS s
+ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
+WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);
+GO
+
+-- ✎ Рішення людини 2026-09-29, 15:29: «Чи бачить «Аудитор» вміст регуляторних
+-- зрізів за замовчуванням — так». Лише вміст (`Report.ViewSnapshot`):
+-- `Report.Export` аудитору не додається, книга лишається за ним закритою.
+-- ⚠ MERGE … WHEN NOT MATCHED: наявна база отримує пару на наступному старті;
+-- якщо адміністратор право в аудитора зняв — повторний seed його поверне
+-- (так само, як і решту вбудованих пар).
+MERGE sec.RolePermission AS t
+USING (
+    SELECT r.Id AS RoleId, p.Code AS PermissionCode
+    FROM sec.Role AS r
+    JOIN sec.Permission AS p ON p.Code = N'Report.ViewSnapshot' AND p.IsDangerous = 0
+    WHERE r.Code = N'Auditor'
 ) AS s
 ON t.RoleId = s.RoleId AND t.PermissionCode = s.PermissionCode
 WHEN NOT MATCHED THEN INSERT (RoleId, PermissionCode) VALUES (s.RoleId, s.PermissionCode);

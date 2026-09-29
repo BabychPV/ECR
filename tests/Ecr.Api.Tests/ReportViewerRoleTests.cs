@@ -43,11 +43,10 @@ public sealed class ReportViewerRoleTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-6.14")]
     [InlineData("Viewer")]
     [InlineData("DataEntry")]
-    [InlineData("Auditor")]
     public async Task Читання_проєкту_без_права_на_вміст_403_на_рядки_й_книгу(string builtInRole)
     {
-        // ⚠ Кожна з цих ролей мала шлях до вмісту до рішення: `Viewer` і
-        // `Auditor` — `Report.ViewRegulatory` (рядки), `Viewer` і `DataEntry` —
+        // ⚠ Кожна з цих ролей мала шлях до вмісту до рішення: `Viewer` —
+        // `Report.ViewRegulatory` (рядки), `Viewer` і `DataEntry` —
         // `Report.Export` (книга).
         var (a, _) = await TwoSnapshotsAsync().ConfigureAwait(true);
 
@@ -59,7 +58,33 @@ public sealed class ReportViewerRoleTests(SqlServerFixture sql)
 
         await AssertForbiddenAsync(rows, builtInRole == "DataEntry" ? "Report.ViewRegulatory" : "Report.ViewSnapshot")
             .ConfigureAwait(true);
-        await AssertForbiddenAsync(book, builtInRole == "Auditor" ? "Report.Export" : "Report.ViewSnapshot")
+        await AssertForbiddenAsync(book, "Report.ViewSnapshot").ConfigureAwait(true);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-6.14")]
+    public async Task Аудитор_з_грантом_Read_бачить_рядки_зрізу_але_не_книгу()
+    {
+        // ✎ Рішення людини 2026-09-29, 15:29: «Чи бачить «Аудитор» вміст
+        // регуляторних зрізів за замовчуванням — так». Сід дає вбудованій ролі
+        // `Report.ViewSnapshot`; `Report.Export` — ні, тож книга лишається 403
+        // саме на праві книги, а не на праві вмісту.
+        var (a, _) = await TwoSnapshotsAsync().ConfigureAwait(true);
+
+        using var app = new EcrApiFactory(sql);
+        using var client = await SignedInAsync(app, [("Auditor", null)], readOn: [a.ProjectId]).ConfigureAwait(true);
+
+        var rows = await client.GetAsync(RowsOf(a.SnapshotId)).ConfigureAwait(true);
+        var body = await rows.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(rows.StatusCode == HttpStatusCode.OK, $"Auditor: {rows.StatusCode} {body} {app.ErrorsText}");
+
+        using var page = JsonDocument.Parse(body);
+        var row = Assert.Single(page.RootElement.GetProperty("rows").EnumerateArray());
+        Assert.Equal("E_CO2", row.GetProperty("cells").GetProperty("OutputCode").GetString());
+
+        await AssertForbiddenAsync(await client.GetAsync(BookOf(a.SnapshotId)).ConfigureAwait(true), "Report.Export")
             .ConfigureAwait(true);
     }
 

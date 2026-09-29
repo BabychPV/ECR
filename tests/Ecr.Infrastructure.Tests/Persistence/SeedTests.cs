@@ -189,7 +189,7 @@ public sealed class SeedTests(SqlServerFixture sql)
     [Trait(TestCategories.Stage, TestCategories.Stage8)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
     [Trait("Requirement", "ФВ-6.12")]
-    public async Task Вміст_регуляторного_зрізу_має_лише_переглядач_звітів_погоджувач_і_адміністратор()
+    public async Task Вміст_регуляторного_зрізу_має_лише_переглядач_звітів_аудитор_погоджувач_і_адміністратор()
     {
         // ⛔ Рішення людини 2026-09-29 («ні, додай роль»): вміст зрізу —
         // окреме право `Report.ViewSnapshot`, безпечне (шаблони його беруть).
@@ -209,15 +209,23 @@ public sealed class SeedTests(SqlServerFixture sql)
 
         // ⛔ Хто будує й погоджує звіти — має (шаблони `Report.%` і `%`); хто
         // лише читає чи вводить дані — НІ, хоч `Report.ViewRegulatory` /
-        // `Report.Export` у них лишились.
+        // `Report.Export` у них лишились. ✎ Аудитор — має (рішення людини
+        // 2026-09-29, 15:29: «бачить вміст за замовчуванням — так»), але
+        // книги (`Report.Export`) йому не додано.
         Assert.Equal(
-            "Approver,ReportViewer,SystemAdministrator",
+            "Approver,Auditor,ReportViewer,SystemAdministrator",
             await StringAsync("""
                 SELECT STRING_AGG(r.Code, N',') WITHIN GROUP (ORDER BY r.Code)
                 FROM sec.RolePermission AS rp
                 JOIN sec.Role AS r ON r.Id = rp.RoleId AND r.IsBuiltIn = 1
                 WHERE rp.PermissionCode = N'Report.ViewSnapshot'
                 """));
+        Assert.Equal(0, await ScalarAsync("""
+            SELECT COUNT(*)
+            FROM sec.RolePermission AS rp
+            JOIN sec.Role AS r ON r.Id = rp.RoleId
+            WHERE r.Code = N'Auditor' AND rp.PermissionCode = N'Report.Export'
+            """));
     }
 
     [Fact]
@@ -242,12 +250,12 @@ public sealed class SeedTests(SqlServerFixture sql)
 
         Assert.Equal(1, await ScalarAsync(
             "SELECT COUNT(*) FROM sec.Permission WHERE Code = N'Report.ViewSnapshot'"));
-        Assert.Equal(3, await ScalarAsync("""
+        Assert.Equal(4, await ScalarAsync("""
             SELECT COUNT(*)
             FROM sec.RolePermission AS rp
             JOIN sec.Role AS r ON r.Id = rp.RoleId
             WHERE rp.PermissionCode = N'Report.ViewSnapshot'
-              AND r.Code IN (N'Approver', N'SystemAdministrator', N'ReportViewer')
+              AND r.Code IN (N'Approver', N'SystemAdministrator', N'ReportViewer', N'Auditor')
             """));
         Assert.Equal(3, await ScalarAsync("""
             SELECT COUNT(*)
