@@ -10898,6 +10898,9 @@ export interface paths {
          *     переглянути чужі дані. Будь-який запис під симуляцією відхиляється
          *     `EditDenyReason.SimulationReadOnly` — навіть із правом
          *     `Manage` (ФВ-6.16a).
+         *
+         *     ⛔ D-210: ціль — bootstrap-адміністратор або власник небезпечного права —
+         *     `403 ECR-SIM-4031`; сеанс не відкривається, спроба — у журналі.
          */
         post: {
             parameters: {
@@ -10923,6 +10926,17 @@ export interface paths {
                         "application/json": components["schemas"]["SimulationSessionResponse"];
                         "text/json": components["schemas"]["SimulationSessionResponse"];
                         "text/plain": components["schemas"]["SimulationSessionResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
                 /** @description Unprocessable Entity */

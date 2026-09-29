@@ -28825,7 +28825,7 @@
         ]
       },
       "post": {
-        "description": "Сеанс пишеться в `aud.SimulationSession` <b>одразу</b> і не\nбатчиться: без запису «подивитися очима» стало б способом безслідно\nпереглянути чужі дані. Будь-який запис під симуляцією відхиляється\n`EditDenyReason.SimulationReadOnly` — навіть із правом\n`Manage` (ФВ-6.16a).",
+        "description": "Сеанс пишеться в `aud.SimulationSession` <b>одразу</b> і не\nбатчиться: без запису «подивитися очима» стало б способом безслідно\nпереглянути чужі дані. Будь-який запис під симуляцією відхиляється\n`EditDenyReason.SimulationReadOnly` — навіть із правом\n`Manage` (ФВ-6.16a).\n\n⛔ D-210: ціль — bootstrap-адміністратор або власник небезпечного права —\n`403 ECR-SIM-4031`; сеанс не відкривається, спроба — у журналі.",
         "requestBody": {
           "content": {
             "application/*+json": {
@@ -28866,6 +28866,26 @@
               }
             },
             "description": "Created"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "422": {
             "content": {

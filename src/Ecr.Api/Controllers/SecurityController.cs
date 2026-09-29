@@ -460,9 +460,13 @@ public sealed class SecurityController(
     /// переглянути чужі дані. Будь-який запис під симуляцією відхиляється
     /// <c>EditDenyReason.SimulationReadOnly</c> — навіть із правом
     /// <c>Manage</c> (ФВ-6.16a).
+    ///
+    /// ⛔ D-210: ціль — bootstrap-адміністратор або власник небезпечного права —
+    /// <c>403 ECR-SIM-4031</c>; сеанс не відкривається, спроба — у журналі.
     /// </remarks>
     [HttpPost("security/simulation")]
     [ProducesResponseType<Contracts.SimulationSessionResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> StartSimulation(
         [FromBody] StartSimulationRequest request, CancellationToken ct)

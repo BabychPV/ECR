@@ -282,6 +282,27 @@ public interface IUserStore
     /// <param name="ct">Токен скасування.</param>
     public Task<IReadOnlyList<Security.PermissionCatalogItem>> ListPermissionsAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Чи можна дивитися очима <paramref name="userId"/> (<c>D-210</c>): прапорець
+    /// і роль первинного налаштування та небезпечні права (<c>IsDangerous</c>)
+    /// з його ОСОБИСТИХ призначень.
+    /// </summary>
+    /// <param name="userId">Ціль «View as».</param>
+    /// <param name="utcNow">Поточний момент; прострочені підміни не рахуються.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Не з профілю доступу: профіль викидає ГЛОБАЛЬНІ права ролі з областю
+    /// (ФВ-6.14), а область небезпечності не знімає. Тут рахується кожне право
+    /// кожного призначення — з областю чи без, чинного чи ще не чинного
+    /// (майбутнє почне діяти посеред сеансу, бо профіль сеансу будується на
+    /// кожен запит).
+    ///
+    /// ⚠ Групові призначення не входять: членство чужого запису невідоме
+    /// (<c>P-02</c>), і профіль сеансу симуляції груп суб'єкта теж не бере.
+    /// </remarks>
+    public Task<SimulationTargetPrivileges> GetSimulationTargetPrivilegesAsync(
+        int userId, DateTime utcNow, CancellationToken ct);
+
     /// <summary>Політика паролів запису або типова.</summary>
     /// <remarks>
     /// Повертає завжди щось: відсутня політика не має означати «без обмежень» —
@@ -322,3 +343,8 @@ public interface IUserStore
 /// <c>default</c> — «не заблоковано», а не <c>null</c>, на якому впав би обробник.
 /// </remarks>
 public readonly record struct FailedAttemptOutcome(int FailedAttempts, DateTime? LockedUntil, bool LockedNow);
+
+/// <summary>Привілеї цілі «View as», що забороняють симуляцію (<c>D-210</c>).</summary>
+/// <param name="IsBootstrapAdmin">Прапорець запису або роль <c>BootstrapAdministrator</c>.</param>
+/// <param name="DangerousPermissions">Небезпечні права з особистих призначень; порожньо — немає.</param>
+public sealed record SimulationTargetPrivileges(bool IsBootstrapAdmin, IReadOnlyList<string> DangerousPermissions);

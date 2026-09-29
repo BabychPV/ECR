@@ -732,6 +732,46 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public async Task<SimulationTargetPrivileges> GetSimulationTargetPrivilegesAsync(
+        int userId, DateTime utcNow, CancellationToken ct)
+    {
+        // ⚠ Роль не фільтрується за IsActive: профіль доступу (`AccessDecisionService.LoadAsync`)
+        // бере права й вимкненої ролі, тож і стеля симуляції мусить їх бачити.
+        var rows = await (
+                from assignment in db.RoleAssignments.AsNoTracking()
+                join role in db.Roles.AsNoTracking() on assignment.RoleId equals role.Id
+                where assignment.UserId == userId
+                from permission in db.RolePermissions.AsNoTracking()
+                    .Where(rp => rp.RoleId == role.Id
+                                 && db.Permissions.Any(p => p.Id == rp.PermissionCode && p.IsDangerous))
+                    .Select(rp => rp.PermissionCode)
+                    .DefaultIfEmpty()
+                select new { Assignment = assignment, role.Code, Permission = permission })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // Прострочене не дає нічого; чинне і ще не чинне — рахуються. Чинність — доменним
+        // методом (`IsEffectiveOn`), а не копією умови в SQL (`H-23a`).
+        var today = DateOnly.FromDateTime(utcNow);
+        var live = rows
+            .Where(r => r.Assignment.IsEffectiveOn(today) || r.Assignment.ValidFrom > today)
+            .ToList();
+
+        var isBootstrap = live.Exists(r => string.Equals(r.Code, BootstrapAdmin.RoleCode, StringComparison.Ordinal))
+                          || await db.Users.AsNoTracking()
+                              .AnyAsync(u => u.Id == userId && u.IsBootstrapAdmin, ct)
+                              .ConfigureAwait(false);
+
+        return new SimulationTargetPrivileges(
+            isBootstrap,
+            [.. live
+                .Where(r => r.Permission is not null)
+                .Select(r => r.Permission!)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)]);
+    }
+
+    /// <inheritdoc />
     public async Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);

@@ -548,6 +548,39 @@ public sealed class FakeUserStore : IUserStore
                     code, code.Split('.')[0], Dangerous.Contains(code)))]);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Лише особисті призначення (<see cref="Grants"/> і <see cref="DatedGrants"/>, крім
+    /// прострочених) — як і бойове сховище; області підробка не моделює.
+    /// </remarks>
+    public Task<SimulationTargetPrivileges> GetSimulationTargetPrivilegesAsync(
+        int userId, DateTime utcNow, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+        if (user is null)
+        {
+            return Task.FromResult(new SimulationTargetPrivileges(false, []));
+        }
+
+        var today = DateOnly.FromDateTime(utcNow);
+        var codes = Grants.Where(g => g.UserName == user.UserName).Select(g => g.RoleCode)
+            .Concat(DatedGrants
+                .Where(g => g.UserName == user.UserName && (g.ValidTo is null || g.ValidTo >= today))
+                .Select(g => g.RoleCode))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var dangerous = Roles
+            .Where(r => codes.Contains(r.Code))
+            .SelectMany(r => r.Permissions)
+            .Where(Dangerous.Contains)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        return Task.FromResult(new SimulationTargetPrivileges(
+            user.IsBootstrapAdmin || codes.Contains(BootstrapAdmin.RoleCode), dangerous));
+    }
+
+    /// <inheritdoc />
     public Task<PasswordPolicy> GetPolicyAsync(User user, CancellationToken ct) => Task.FromResult(Policy);
 
     /// <inheritdoc />
