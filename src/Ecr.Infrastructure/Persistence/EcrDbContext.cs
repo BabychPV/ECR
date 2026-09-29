@@ -150,6 +150,12 @@ public sealed class EcrDbContext(DbContextOptions<EcrDbContext> options)
     public DbSet<RowWindowSource> RowWindowSources => Set<RowWindowSource>();
     public DbSet<RowWindowValue> RowWindowValues => Set<RowWindowValue>();
 
+    /// <summary>Мапінг подій джерела в динамічну таблицю і зв'язки «подія ↔ рядок» (HSE301 §4.7.3).</summary>
+    public DbSet<SourceEventMap> SourceEventMaps => Set<SourceEventMap>();
+    public DbSet<SourceEventFieldMap> SourceEventFieldMaps => Set<SourceEventFieldMap>();
+    public DbSet<SourceEventValueMap> SourceEventValueMaps => Set<SourceEventValueMap>();
+    public DbSet<SourceEventLink> SourceEventLinks => Set<SourceEventLink>();
+
     // itg
     public DbSet<CollectionRun> CollectionRuns => Set<CollectionRun>();
     public DbSet<CollectionCoverage> CollectionCoverages => Set<CollectionCoverage>();
