@@ -52,11 +52,19 @@ public sealed class SourcesController(
 
     /// <summary>
     /// Прив'язує сутність збору до довідника або відв'язує її (<c>ФВ-8.11</c>).
-    /// Право <c>Integration.Manage</c>.
+    /// Право <c>Integration.Manage</c> і, крім того, право редагувати дані
+    /// довідника — <c>Registry.EditData</c> або грант <c>Write</c> на цей довідник.
     /// </summary>
     /// <param name="id">Сутність збору.</param>
     /// <param name="request">Довідник; <c>null</c> — відв'язати.</param>
     /// <param name="ct">Скасування.</param>
+    /// <remarks>
+    /// ⚠ Право на дані перевіряється для цільового довідника, а при відв'язці чи
+    /// переприв'язці — і для поточного: після прив'язки синк пише в довідник від
+    /// <c>svc-integration</c>, тож прив'язка — делегування права на його дані.
+    /// Без права — <c>403 ECR-AUTH-0403</c>. <c>D-202</c>, доповнення 2026-09-29
+    /// (<c>docs/tz/10-decisions.md</c> §1.19) — судження розробки, на підтвердження.
+    /// </remarks>
     [HttpPut("{id:int}/registry")]
     [ProducesResponseType<Ecr.Application.Sources.SourceEntityDto>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
