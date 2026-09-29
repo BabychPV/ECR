@@ -75,6 +75,7 @@ public sealed class ExcelImporterAtomicApplyTests
 
     public ExcelImporterAtomicApplyTests()
     {
+        BatchStoreStubs.DelegateToSingle(_rows, _cells, _access);
         _clock.UtcNow.Returns(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc));
         _user.UserId.Returns(9);
         _access.BuildProfileAsync(9, Arg.Any<CancellationToken>()).Returns(Profile());

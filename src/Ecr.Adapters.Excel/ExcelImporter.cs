@@ -300,6 +300,12 @@ public sealed class ExcelImporter(
     /// (транзакційна черга) це неможливо зробити всередині: Quartz тримає чергу
     /// в пам'яті, воркер стартує раніше за коміт і прочитав би або старі дані,
     /// або — після відкату — дані, яких не було ніколи.
+    ///
+    /// ⛔ P8 (застосування 3/3): книга пише ОДНИМ книжковим шляхом
+    /// (<see cref="PatchCellsHandler.HandleWorkbookAsync"/>), а не циклом
+    /// поштучних PATCH — ~18 звернень до бази НА КОЖНУ таблицю (219 на книгу з
+    /// 12 таблиць) стали сталими на книгу (<c>ExcelImportApplyWorkbookTests</c>).
+    /// Правила ті самі — той самий обробник, ті самі методи правил.
     /// </remarks>
     public async Task<PatchCellsResponse> ApplyAsync(long documentId, string previewToken, CancellationToken ct)
     {
@@ -310,6 +316,7 @@ public sealed class ExcelImporter(
         var validation = new List<ValidationMessageDto>();
         var seeds = new List<RecalculationSeed>();
         long seedTableInstanceId = 0;
+        var diffs = plan.Tables.Where(t => t.Changes.Count > 0).ToList();
 
         var period = new PeriodKey(plan.PeriodKey);
         var sheets = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
@@ -329,11 +336,14 @@ public sealed class ExcelImporter(
                 // власник, воно видається одразу.
                 //
                 // ⚠ Стан аркуша тут не перевіряється: це робить
-                // `PatchCellsHandler` під тим самим блокуванням і своєю відмовою
-                // (`ECR-ACCS-0403`), тож двох правд про «подано» не з'являється.
+                // `PatchCellsHandler` своєю відмовою (`ECR-ACCS-0403`), тож двох
+                // правд про «подано» не з'являється. Прочитаний тут під
+                // блокуванням стан він отримує готовим — без другого звернення.
+                var statuses = new Dictionary<int, Ecr.Domain.Enums.DocumentStatus>();
                 foreach (var sheetDefId in sheets)
                 {
-                    _ = await sheetGate.EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
+                    statuses[sheetDefId] = await sheetGate
+                        .EnterEditAsync(documentId, sheetDefId, period, innerCt).ConfigureAwait(false);
                 }
 
                 // ⚠ Накопичувачі скидаються НА ПОЧАТКУ замикання, а не поруч із
@@ -347,41 +357,42 @@ public sealed class ExcelImporter(
                 seeds.Clear();
                 seedTableInstanceId = 0;
 
-                foreach (var diff in plan.Tables.Where(t => t.Changes.Count > 0))
+                // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
+                // baseVersion. Саме це змушує звичайний шлях запису відхилити
+                // всю книгу, якщо між переглядом і застосуванням хтось правив ті
+                // самі рядки (ECR-CELL-0409) — тобто конфлікт ловить одна
+                // перевірка, а не дві, які вміють розійтися.
+                //
+                // ⚠ Той самий обробник, що й batch-PATCH, із Origin = "Import":
+                // окремий шлях запису означав би, що аудит, валідація і
+                // перерахунок для імпорту працюють інакше.
+                var requests = diffs
+                    .Select(diff => new PatchCellsRequest(
+                        diff.TableInstanceId,
+                        diff.PeriodKey,
+                        "Import",
+                        [.. diff.Changes
+                            .GroupBy(c => c.RowKey, StringComparer.Ordinal)
+                            .Select(g => new PatchRow(
+                                g.Key,
+                                diff.RowVersions.GetValueOrDefault(g.Key),
+                                [.. g.Select(c => new PatchCell(c.ColumnCode, c.NewValue))]))]))
+                    .ToList();
+
+                IReadOnlyList<PatchCellsResponse> responses;
+                try
                 {
-                    // ⚠ Версії рядків беруться з ПЕРЕГЛЯДУ і передаються як
-                    // baseVersion. Саме це змушує звичайний шлях запису відхилити
-                    // весь батч, якщо між переглядом і застосуванням хтось правив ті
-                    // самі рядки (ECR-CELL-0409) — тобто конфлікт ловить одна
-                    // перевірка, а не дві, які вміють розійтися.
-                    var rows = diff.Changes
-                        .GroupBy(c => c.RowKey, StringComparer.Ordinal)
-                        .Select(g => new PatchRow(
-                            g.Key,
-                            diff.RowVersions.GetValueOrDefault(g.Key),
-                            g.Select(c => new PatchCell(c.ColumnCode, c.NewValue)).ToList()))
-                        .ToList();
+                    responses = await patch
+                        .HandleWorkbookAsync(requests, seeds, innerCt, statuses)
+                        .ConfigureAwait(false);
+                }
+                catch (EcrException error) when (Blame(error, diffs) is { } named)
+                {
+                    throw named;
+                }
 
-                    PatchCellsResponse response;
-
-                    try
-                    {
-                        // ⚠ Той самий шлях, що й batch-PATCH, із Origin = "Import".
-                        // Окремий шлях запису означав би, що аудит, валідація і
-                        // перерахунок для імпорту працюють інакше — і розбіжність
-                        // виявиться на числах, а не на коді.
-                        response = await patch
-                            .HandleAsync(
-                                new PatchCellsRequest(diff.TableInstanceId, diff.PeriodKey, "Import", rows),
-                                innerCt,
-                                deferRecalculationUntilMi02: seeds)
-                            .ConfigureAwait(false);
-                    }
-                    catch (EcrException error) when (Blame(error, diff) is { } named)
-                    {
-                        throw named;
-                    }
-
+                foreach (var response in responses)
+                {
                     applied += response.AppliedCells;
                     validation.AddRange(response.Validation);
 
@@ -389,12 +400,9 @@ public sealed class ExcelImporter(
                     {
                         versions[key] = version;
                     }
-
-                    if (seedTableInstanceId == 0)
-                    {
-                        seedTableInstanceId = diff.TableInstanceId;
-                    }
                 }
+
+                seedTableInstanceId = diffs.Count > 0 ? diffs[0].TableInstanceId : 0;
             },
             ct)
             .ConfigureAwait(false);
@@ -463,57 +471,41 @@ public sealed class ExcelImporter(
     }
 
     /// <summary>
-    /// Та сама відмова, але з номером таблиці, на якій застосування спинилося;
-    /// <c>null</c> — тип відмови невідомий, і викликач лишає оригінал як є.
+    /// Конфлікт версії таблиці, на якій книга спинилася, — лише з комірками, що
+    /// змінилися після перегляду; <c>null</c> — відмову лишити як є.
     /// </summary>
     /// <remarks>
-    /// ⛔ Без цього перекладу «усе або нічого» було б гіршим за часткове
-    /// застосування: користувач бачить, що не змінилося НІЧОГО, і не знає, де
-    /// саме шукати причину. Книга на десять таблиць, відмова без адреси — і
-    /// єдиний спосіб знайти винувату таблицю це пробувати їх по одній.
+    /// ⚠ Номер таблиці (<c>tableInstanceId</c>) відмова вже несе — його додає
+    /// книжковий шлях (<see cref="PatchCellsHandler.HandleWorkbookAsync"/>) тим
+    /// самим ключем, що додавав тут колишній поштучний цикл. Лишилося те, чого
+    /// обробник знати не може: що показав перегляд.
     ///
-    /// ⚠ Тип відмови зберігається (від нього залежить HTTP-статус у
-    /// <c>ExceptionHandlingMiddleware.Map</c>), як і код та <c>messageKey</c>:
-    /// додається РІВНО одне поле. Невідомий підтип <see cref="EcrException"/>
-    /// дає <c>null</c> — фільтр <c>when</c> не спрацьовує, і оригінальний
-    /// виняток іде далі зі своїм стеком, а не підмінюється типом, який змінив
-    /// би статус відповіді.
+    /// ⛔ F-24: конфлікт версії — РЯДКОВИЙ, і обробник запису перелічує КОЖНУ
+    /// комірку батчу в розбіжному рядку. Для імпорту це означало список
+    /// комірок, яких ніхто, крім самого імпорту, не чіпав: їхнє чинне
+    /// значення рівно те, що перегляд показав як «було». Лишаються ті, що
+    /// справді змінилися після перегляду, — саме їх людині треба звірити.
     /// </remarks>
-    private static EcrException? Blame(EcrException error, TableDiff diff)
+    private static ConcurrencyConflictException? Blame(EcrException error, IReadOnlyList<TableDiff> diffs)
     {
-        var details = new Dictionary<string, object?>(StringComparer.Ordinal);
-
-        if (error.Details is not null)
+        if (error is not ConcurrencyConflictException
+            || error.Details is not { } source
+            || source.GetValueOrDefault("tableInstanceId") is not string instance
+            || source.GetValueOrDefault("conflicts") is not IEnumerable<CellConflictDto> conflicts
+            || diffs.FirstOrDefault(d => string.Equals(
+                   d.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                   instance,
+                   StringComparison.Ordinal)) is not { } diff)
         {
-            foreach (var (key, value) in error.Details)
-            {
-                details[key] = value;
-            }
+            return null;
         }
 
-        details["tableInstanceId"] =
-            diff.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-        // ⛔ F-24: конфлікт версії — РЯДКОВИЙ, і обробник запису перелічує КОЖНУ
-        // комірку батчу в розбіжному рядку. Для імпорту це означало список
-        // комірок, яких ніхто, крім самого імпорту, не чіпав: їхнє чинне
-        // значення рівно те, що перегляд показав як «було». Лишаються ті, що
-        // справді змінилися після перегляду, — саме їх людині треба звірити.
-        if (error is ConcurrencyConflictException
-            && details.TryGetValue("conflicts", out var raw)
-            && raw is IEnumerable<CellConflictDto> conflicts)
+        var details = new Dictionary<string, object?>(source, StringComparer.Ordinal)
         {
-            details["conflicts"] = ChangedSincePreview(conflicts, diff);
-        }
-
-        return error switch
-        {
-            ConcurrencyConflictException => new ConcurrencyConflictException(error.ErrorCode, error.Message, details),
-            AccessDeniedException => new AccessDeniedException(error.ErrorCode, error.Message, details),
-            NotFoundException => new NotFoundException(error.ErrorCode, error.Message, details),
-            BusinessRuleException => new BusinessRuleException(error.ErrorCode, error.Message, details),
-            _ => null,
+            ["conflicts"] = ChangedSincePreview(conflicts, diff),
         };
+
+        return new ConcurrencyConflictException(error.ErrorCode, error.Message, details);
     }
 
     /// <summary>

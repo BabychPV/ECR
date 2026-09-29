@@ -58,6 +58,7 @@ public sealed class ExcelImportLookupValidityTests
 
     public ExcelImportLookupValidityTests()
     {
+        BatchStoreStubs.DelegateToSingle(_rows, _cells, _access);
         var clock = Substitute.For<IClock>();
         clock.UtcNow.Returns(new DateTime(2026, 1, 20, 9, 0, 0, DateTimeKind.Utc));
         Clock = clock;

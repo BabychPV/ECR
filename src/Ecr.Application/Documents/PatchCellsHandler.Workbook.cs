@@ -28,7 +28,8 @@ namespace Ecr.Application.Documents;
 /// ЕТАПОМ (усі екземпляри проходять етап, перш ніж почнеться наступний), а в
 /// межах етапу — за порядком екземплярів; поштучна послідовність назвала б
 /// першу за порядком екземплярів. Стан бази від цього не залежить: відмова
-/// відкочує все.
+/// відкочує все. ✎ 2026-09-29: такий порядок прийнято рішенням координатора
+/// (P8, порція 3) — не «виправляти» на поштучний.
 ///
 /// ⚠ Транзакцію «усе або нічого» (DAT-05) тримає викликач; без неї — одна
 /// власна на всю книгу (<see cref="IUnitOfWork.ExecuteInTransactionAsync"/>).
@@ -44,11 +45,23 @@ public sealed partial class PatchCellsHandler
     /// (див. однойменний параметр <see cref="HandleAsync"/>).
     /// </param>
     /// <param name="ct">Скасування.</param>
+    /// <param name="heldSheetStatuses">
+    /// Стани аркушів (<c>SheetDefId</c> → стан), які викликач УЖЕ прочитав під
+    /// спільним блокуванням <see cref="ISheetEditGate.EnterEditAsync"/> у ЦІЙ САМІЙ
+    /// транзакції (<c>ExcelImporter</c>); <c>null</c> — взяти й прочитати тут.
+    /// </param>
     /// <returns>Відповідь на кожен батч — у порядку <paramref name="requests"/>.</returns>
+    /// <remarks>
+    /// ⚠ Стан, прочитаний під спільним блокуванням, лишається правдою до кінця
+    /// транзакції: подання бере виняткове блокування того самого ключа й не
+    /// зафіксується, поки воно тримається. Друге читання нічого не додало б, крім
+    /// двох звернень на аркуш.
+    /// </remarks>
     public async Task<IReadOnlyList<PatchCellsResponse>> HandleWorkbookAsync(
         IReadOnlyList<PatchCellsRequest> requests,
         ICollection<RecalculationSeed> deferRecalculationUntilMi02,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(deferRecalculationUntilMi02);
@@ -110,7 +123,7 @@ public sealed partial class PatchCellsHandler
 
         if (active.Count > 0)
         {
-            await ApplyWorkbookAsync(active, documentId, period, userId, ct).ConfigureAwait(false);
+            await ApplyWorkbookAsync(active, documentId, period, userId, heldSheetStatuses, ct).ConfigureAwait(false);
         }
 
         var responses = new List<PatchCellsResponse>(items.Count);
@@ -141,7 +154,12 @@ public sealed partial class PatchCellsHandler
 
     /// <summary>Перевірки й запис непорожніх батчів книги — етап за етапом.</summary>
     private async Task ApplyWorkbookAsync(
-        List<WorkbookItem> active, long documentId, PeriodKey period, int userId, CancellationToken ct)
+        List<WorkbookItem> active,
+        long documentId,
+        PeriodKey period,
+        int userId,
+        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses,
+        CancellationToken ct)
     {
         foreach (var item in active)
         {
@@ -200,7 +218,8 @@ public sealed partial class PatchCellsHandler
         var isLateEdit = await DetermineIsLateEditAsync(documentId, period.Value, ct).ConfigureAwait(false);
 
         await uow.ExecuteInTransactionAsync(
-            innerCt => PersistWorkbookAsync(active, documentId, period, userId, now, isLateEdit, previous, innerCt),
+            innerCt => PersistWorkbookAsync(
+                active, documentId, period, userId, now, isLateEdit, previous, heldSheetStatuses, innerCt),
             ct).ConfigureAwait(false);
     }
 
@@ -383,6 +402,7 @@ public sealed partial class PatchCellsHandler
         DateTime now,
         bool isLateEdit,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses,
         CancellationToken ct)
     {
         var statuses = new Dictionary<int, Domain.Enums.DocumentStatus>();
@@ -393,6 +413,13 @@ public sealed partial class PatchCellsHandler
                 if (sheet.Any(x => CreatesRowsUnderCeiling(x.Context)))
                 {
                     await sheetGate.EnterSubmitAsync(documentId, sheet.Key, period, ct).ConfigureAwait(false);
+                }
+
+                // ⚠ Стан, уже прочитаний викликачем під спільним блокуванням цієї
+                // транзакції, — без другого звернення (див. `heldSheetStatuses`).
+                if (heldSheetStatuses is not null && heldSheetStatuses.TryGetValue(sheet.Key, out var held))
+                {
+                    return held;
                 }
 
                 return await sheetGate.EnterEditAsync(documentId, sheet.Key, period, ct).ConfigureAwait(false);
@@ -468,6 +495,11 @@ public sealed partial class PatchCellsHandler
                     error.Details!.GetValueOrDefault("tableInstanceId") as string,
                     StringComparison.Ordinal));
             throw Blame(StaleRowsConflict(guilty.Planned, staleRowIds), guilty.Id)!;
+        }
+        catch (EcrException error) when (active.Count == 1 && Blame(error, active[0].Id) is { } named)
+        {
+            // Кілька наборів — сховище вже назвало винний; один — називаємо тут.
+            throw named;
         }
 
         foreach (var item in active)
