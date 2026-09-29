@@ -136,7 +136,6 @@ describe('ChangePasswordPage: клієнтська перевірка політ
 
   // S15: решта причин політики — теж під полем нового пароля, не банером.
   it.each([
-    ['err.ECR-PWD-0422.digitRequired', 'The new password must contain at least one digit.'],
     ['err.ECR-PWD-0422.containsUserName', 'The new password must not contain the user name.'],
     ['err.ECR-PWD-0422.tooCommon', 'This password is among the most commonly used ones.'],
     ['err.ECR-PWD-0422.sameAsCurrent', 'The new password must differ from the current one.'],

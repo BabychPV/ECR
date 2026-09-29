@@ -13,10 +13,9 @@ namespace Ecr.Application.Security;
 /// (<c>CreateUserHandler</c>) — S15, ФВ-6.4a.
 /// </summary>
 /// <remarks>
-/// ⛔ До S15 кожен шлях перевіряв лише довжину своєю копією умови, а
-/// <see cref="PasswordPolicy.RequireDigit"/> не читав ніхто: прапорець у
-/// рядку політики нічого не вмикав. Спільна функція — щоб правило не
-/// розходилося між трьома копіями знову.
+/// ⛔ До S15 кожен шлях перевіряв лише довжину своєю копією умови. Спільна
+/// функція — щоб правило не розходилося між трьома копіями знову. Прапорці
+/// складності політики (цифра, регістр) не застосовуються — V-16/P-1.
 ///
 /// ⚠ Відмова — той самий код <c>ECR-PWD-0422</c>, що й «закороткий», з окремим
 /// <c>messageKey</c> на кожну причину: клієнт показує причину під полем пароля,
@@ -99,13 +98,10 @@ public static class PasswordPolicyCheck
                 });
         }
 
-        if (policy.RequireDigit && !password.Any(char.IsAsciiDigit))
-        {
-            throw new BusinessRuleException(
-                "ECR-PWD-0422",
-                $"{subject} мусить містити хоча б одну цифру.",
-                new Dictionary<string, object?> { ["messageKey"] = "err.ECR-PWD-0422.digitRequired" });
-        }
+        // ⛔ V-16/P-1: цифра не вимагається; вмикається лише рішенням людини.
+        // `PasswordPolicy.RequireDigit` навмисно НЕ читається: у розгорнутій
+        // базі стовпець має умовчання 1 (`DF_PwdP_Dig`), і читання прапорця
+        // мовчки зробило б цифру обов'язковою скрізь.
 
         if (!string.IsNullOrWhiteSpace(userName)
             && userName.Trim().Length >= MinUserNameLengthToMatch

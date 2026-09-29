@@ -23,14 +23,13 @@ import { LockReasonMaxLength, lockUser, resetUserPassword, unlockUser } from './
  */
 const PasswordPolicyKeys: ReadonlySet<string> = new Set([
   'err.ECR-PWD-0422.tooShort',
-  'err.ECR-PWD-0422.digitRequired',
   'err.ECR-PWD-0422.containsUserName',
   'err.ECR-PWD-0422.tooCommon',
   'err.ECR-PWD-0422.sameAsCurrent',
 ]);
 
 /**
- * Відмова політики пароля (закороткий, без цифри, з іменем, поширений, чинний) —
+ * Відмова політики пароля (закороткий, з іменем, поширений, чинний) —
  * єдина, що належить ПОЛЮ, а не діалогу.
  *
  * ⚠ Розрізнення за кодом і `messageKey`, не за текстом: текст локалізований.

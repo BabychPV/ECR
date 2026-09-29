@@ -10,22 +10,16 @@ namespace Ecr.Domain.Entities.Security;
 /// У першому релізі діє **базова** політика (ФВ-6.4a, D-104): довжина і
 /// блокування після N невдач. Складність, історія і строк дії лишаються
 /// полями, але не вмикаються, доки ІБ не дасть формулювання (`P-1`).
-///
-/// ✎ S15: <see cref="RequireDigit"/> застосовується, коли його ввімкнено в
-/// рядку політики (<c>PasswordPolicyCheck</c>); сід його не вмикає. Незалежно
-/// від прапорців діють заборони імені користувача в паролі та найпоширеніших
-/// паролів — вони не є «складністю» і формулювання ІБ не потребують.
 /// </remarks>
 public sealed class PasswordPolicy : Entity<int>
 {
     private PasswordPolicy() { }
 
-    public PasswordPolicy(string code, int minLength, int maxFailedAttempts, bool requireDigit = false)
+    public PasswordPolicy(string code, int minLength, int maxFailedAttempts)
     {
         Code = code;
         MinLength = minLength;
         MaxFailedAttempts = maxFailedAttempts;
-        RequireDigit = requireDigit;
     }
 
     public string Code { get; private set; } = null!;

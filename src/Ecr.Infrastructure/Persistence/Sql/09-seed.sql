@@ -4928,7 +4928,6 @@ USING (VALUES
     (N'err.ECR-SIM-4031.bootstrapTarget',      N'en', N'You cannot view the system as the initial setup administrator.', 1),
     (N'err.ECR-SIM-4031.dangerousTarget',      N'en', N'You cannot view the system as a user who holds dangerous permissions: the session would show you rights you do not have.', 1),
     -- S15: причини відмови політики пароля поруч із `tooShort` (`PasswordPolicyCheck`).
-    (N'err.ECR-PWD-0422.digitRequired',    N'en', N'The new password must contain at least one digit.', 1),
     (N'err.ECR-PWD-0422.containsUserName', N'en', N'The new password must not contain the user name.', 1),
     (N'err.ECR-PWD-0422.tooCommon',        N'en', N'This password is among the most commonly used ones. Choose a different password.', 1),
     (N'err.ECR-PWD-0422.sameAsCurrent',    N'en', N'The new password must differ from the current one.', 1),

@@ -17,9 +17,9 @@ namespace Ecr.Application.Tests.Security;
 /// (зміна власного, скидання адміністратором, разовий пароль при створенні).
 /// </summary>
 /// <remarks>
-/// ⛔ До S15 кожен шлях перевіряв тільки <c>MinLength</c>, а
-/// <c>PasswordPolicy.RequireDigit</c> не читав ніхто. Кожен тест нижче
-/// червоний на коді до фіксу: пароль приймався і зберігався.
+/// ⛔ До S15 кожен шлях перевіряв тільки <c>MinLength</c>. Тести відмов нижче
+/// червоні на коді до фіксу: пароль приймався і зберігався. Цифра не
+/// вимагається (V-16/P-1).
 /// </remarks>
 public sealed class PasswordPolicyCheckTests
 {
@@ -73,27 +73,14 @@ public sealed class PasswordPolicyCheckTests
     [InlineData(PasswordPath.Reset)]
     [InlineData(PasswordPath.Create)]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Requirement", "ФВ-6.4a")]
     [Trait("Finding", "S15")]
-    public async Task Пароль_без_цифри_відхиляється_коли_політика_її_вимагає(PasswordPath path)
+    public async Task Пароль_без_цифри_приймається_навіть_із_прапорцем_RequireDigit(PasswordPath path)
     {
-        _users.Policy = new PasswordPolicy("Default", minLength: 12, maxFailedAttempts: 5, requireDigit: true);
+        // ⛔ V-16/P-1: сервер цифру не вимагає. Прапорець ставиться саме в `1`,
+        // бо таке умовчання стовпця в розгорнутій базі (`DF_PwdP_Dig`): читання
+        // прапорця зробило б цифру обов'язковою скрізь без рішення людини.
+        typeof(PasswordPolicy).GetProperty(nameof(PasswordPolicy.RequireDigit))!.SetValue(_users.Policy, true);
 
-        var error = await Assert.ThrowsAsync<BusinessRuleException>(
-            () => SetAsync(path, "No-Digits-Here-At-All"));
-
-        await AssertRefusedAsync(error, "err.ECR-PWD-0422.digitRequired");
-    }
-
-    [Theory]
-    [InlineData(PasswordPath.Change)]
-    [InlineData(PasswordPath.Reset)]
-    [InlineData(PasswordPath.Create)]
-    [Trait(TestCategories.Stage, TestCategories.Stage3)]
-    [Trait("Finding", "S15")]
-    public async Task Без_прапорця_політики_пароль_без_цифри_приймається(PasswordPath path)
-    {
-        // Сід цифру не вимагає (`P-1`): прапорець — рішення політики, не коду.
         await SetAsync(path, "No-Digits-Here-At-All");
 
         var stored = path == PasswordPath.Create
