@@ -439,7 +439,7 @@ export function RulesMatrixPanel(): JSX.Element {
 
         {dirty && (
           <Text size="xs" c="dimmed" fs="italic" data-testid="notification-rules-unsaved">
-            {t('grants.unsaved')}
+            {t('notifications.rulesUnsaved')}
           </Text>
         )}
       </Group>

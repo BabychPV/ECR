@@ -186,7 +186,7 @@ describe('RulesMatrixPanel: незбережені правки (U14a)', () => {
       fireEvent.click(cellBox('JobFailed', 'Teams: черговий'));
       fireEvent.click(cellBox('CollectionFailed', 'Пошта чергового'));
 
-      expect(screen.getByTestId('notification-rules-unsaved').textContent).toBe('⟦grants.unsaved⟧');
+      expect(screen.getByTestId('notification-rules-unsaved').textContent).toBe('⟦notifications.rulesUnsaved⟧');
       expect(saveButton().disabled).toBe(false);
       expect(hasUnsavedChanges()).toBe(true);
       expect(unsavedCount()).toBe(2);

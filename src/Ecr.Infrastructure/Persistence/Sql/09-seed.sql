@@ -4096,6 +4096,9 @@ USING (VALUES
     -- Такий дедлайн давав «відкрито» в журналі, а період одразу був закритим.
     (N'err.ECR-PRD-0422.reopenUntilInPast',     N'en', N'The reopen deadline {until} has already passed: a period reopened until then would be closed straight away. Choose a later moment.', 1),
     -- COLL:periods ── кінець секції ──
+    -- COLL:notif-rules ── Матриця правил сповіщень: ознака незбереженої чернетки (аудит U14a) ──
+    (N'notifications.rulesUnsaved',             N'en', N'Unsaved changes', 1),
+    -- COLL:notif-rules ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
