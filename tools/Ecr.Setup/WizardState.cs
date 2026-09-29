@@ -23,10 +23,15 @@ internal enum ServiceAccountMode
 /// <summary>
 /// Спільний стан майстра — кожен крок читає з нього відповіді попередніх
 /// кроків (передусім крок "Огляд") і записує власні відповіді через
-/// <see cref="IWizardStep.Apply"/>. Паролі зберігаються як <see cref="SecureString"/>
-/// від моменту введення до виклику <see cref="DeployRunner"/> — у відкритому
+/// <c>IWizardStep.Apply</c>. Паролі зберігаються як <see cref="SecureString"/>
+/// від моменту введення до виклику <c>DeployRunner</c> — у відкритому
 /// вигляді вони існують лише всередині побудови рядка підключення.
 /// </summary>
+/// <remarks>
+/// ⚠ <c>&lt;c&gt;</c>, а не <c>cref</c>, на типи WinForms/PowerShell-частини
+/// майстра: цей файл також компілюється в <c>Ecr.Architecture.Tests</c>
+/// (S11), де тих типів немає.
+/// </remarks>
 internal sealed class WizardState
 {
     // Крок 1 — режим.
