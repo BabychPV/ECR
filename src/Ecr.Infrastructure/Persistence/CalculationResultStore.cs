@@ -8,7 +8,8 @@ namespace Ecr.Infrastructure.Persistence;
 
 /// <summary>Реалізація <see cref="ICalculationResultStore"/> над <see cref="EcrDbContext"/>.</summary>
 /// <remarks>
-/// Пише **тільки** в <c>calc.CalculationResult</c> і <c>calc.CalculationStep</c>.
+/// Пише **тільки** в <c>calc.CalculationResult</c>, <c>calc.CalculationStep</c> і (з HSE301
+/// A3b) <c>calc.CalculationInput</c>.
 /// У <c>doc.CellValue</c> результати методологій не потрапляють ніколи (D-69).
 /// </remarks>
 public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICalculationResultStore
@@ -148,7 +149,13 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
         }
 
         var steps = outputs.SelectMany(o => o.Trace.Select(s => (Output: o, Step: s))).ToList();
-        if (steps.Count == 0)
+        var inputs = outputs
+            .SelectMany(o => (o.Inputs ?? [])
+                .DistinctBy(a => a.ArgumentCode, StringComparer.OrdinalIgnoreCase)
+                .Select(a => (Output: o, Argument: a)))
+            .ToList();
+
+        if (steps.Count == 0 && inputs.Count == 0)
         {
             return;
         }
@@ -160,6 +167,25 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
             ?? throw new InvalidOperationException($"Прогону {calculationRunId} не існує.");
 
         var periodKey = run.PeriodKey ?? 0;
+
+        if (steps.Count > 0)
+        {
+            await WriteStepsAsync(calculationRunId, periodKey, steps, ct).ConfigureAwait(false);
+        }
+
+        if (inputs.Count > 0)
+        {
+            await WriteInputsAsync(calculationRunId, periodKey, inputs, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Кроки трейсу з адресою й результатом.</summary>
+    private async Task WriteStepsAsync(
+        long calculationRunId,
+        int periodKey,
+        List<(CalculationOutput Output, CalculationTraceStep Step)> steps,
+        CancellationToken ct)
+    {
         var nextId = await ReserveStepIdRangeAsync(steps.Count, ct).ConfigureAwait(false);
         var results = PendingResults(calculationRunId);
 
@@ -180,6 +206,80 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
                 step.Expression, step.Value, step.Detail ?? step.TraceJson, ResultIdOf(results, output, step), step.Masked);
             db.CalculationSteps.Add(entity);
         }
+    }
+
+    /// <summary>
+    /// Входи рядків — <c>calc.CalculationInput</c>: «з яких чисел вийшло це число»
+    /// (HSE301 A3b, ФВ-9.13, дефект Д-5).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ До кроку таблицю лише видаляли (<c>DocumentDeletionStore</c>), а не писали ніде:
+    /// перерахунок через рік дав би інше число без жодного способу з'ясувати, чому.
+    /// Значення — в одиниці ДЖЕРЕЛА, як його бачила формула (ФВ-16.10).
+    /// <para>
+    /// ⚠ <c>Lookup</c>-аргумент версії <c>Strict</c> формула читала як id запису
+    /// (<c>EntryId</c>, D-161) — тож і вхід зберігає id: саме з ним звірятиметься поточна
+    /// комірка (§7.3, «змінилося після розрахунку»).
+    /// </para>
+    /// </remarks>
+    private async Task WriteInputsAsync(
+        long calculationRunId,
+        int periodKey,
+        List<(CalculationOutput Output, CalculationArgument Argument)> inputs,
+        CancellationToken ct)
+    {
+        var nextId = await ReserveInputIdRangeAsync(inputs.Count, ct).ConfigureAwait(false);
+
+        foreach (var (output, argument) in inputs)
+        {
+            var row = new CalculationInputRow(
+                calculationRunId, periodKey, output.DocumentId, output.SourceRowKey, argument.ArgumentCode);
+            typeof(Domain.Abstractions.Entity<long>)
+                .GetProperty(nameof(Domain.Abstractions.Entity<long>.Id))!
+                .SetValue(row, nextId++);
+
+            // ⚠ Колонка — nvarchar(400). Довший текст обрізається тут, а не валить
+            // SaveChanges: у тому самому наборі змін — результати прогону, і вхід-пояснення
+            // не має права забрати їх із собою.
+            var text = argument.ValueString is { Length: > MaxInputText } full
+                ? full[..MaxInputText]
+                : argument.ValueString;
+
+            row.SetValue(argument.Value ?? argument.EntryId, text, argument.UnitId);
+            db.CalculationInputs.Add(row);
+        }
+    }
+
+    /// <summary>Довжина <c>calc.CalculationInput.ValueString</c>.</summary>
+    private const int MaxInputText = 400;
+
+    /// <summary>
+    /// Резервує безперервний діапазон ідентифікаторів входів і повертає перший.
+    /// </summary>
+    /// <remarks>
+    /// Та сама спільна <c>calc.CalculationResultSeq</c>, що й для кроків, і з тієї самої
+    /// причини: гілки пакета пишуть паралельно, кожна своїм контекстом, а власної
+    /// послідовності в таблиці немає (нова — це міграція). Ключ —
+    /// <c>(PeriodKey, Id)</c> у своїй таблиці, перетин значень з іншими таблицями нічого
+    /// не ламає. Старих Id з <c>MAX+1</c> тут не буває: до кроку A3b таблицю не писав ніхто.
+    /// </remarks>
+    private async Task<long> ReserveInputIdRangeAsync(int count, CancellationToken ct)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+
+        // Запас на провайдера без послідовностей — як у ReserveResultIdRangeAsync.
+        if (!db.Database.IsSqlServer())
+        {
+            var last = await db.CalculationInputs
+                .AsNoTracking()
+                .Select(i => (long?)i.Id)
+                .MaxAsync(ct)
+                .ConfigureAwait(false);
+
+            return (last ?? 0) + 1;
+        }
+
+        return await SequenceRangeAsync(count, ct).ConfigureAwait(false);
     }
 
     /// <summary>

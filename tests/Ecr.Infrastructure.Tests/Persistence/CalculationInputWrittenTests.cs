@@ -11,13 +11,19 @@ using Xunit;
 namespace Ecr.Infrastructure.Tests.Persistence;
 
 /// <summary>
-/// Трейс прив'язаний до результату й рядка (HSE301 A3b, ФВ-9.13, дефект Д-5;
-/// FEATURE-HSE301-VIEW §7.1) — на реальному SQL Server через справжній
-/// <see cref="CalculationResultStore"/>.
+/// Трейс прив'язаний до результату й рядка, а входи рядка пишуться в
+/// <c>calc.CalculationInput</c> (HSE301 A3b, ФВ-9.13, дефект Д-5; FEATURE-HSE301-VIEW §7.1) —
+/// на реальному SQL Server через справжній <see cref="CalculationResultStore"/>.
 /// </summary>
 /// <remarks>
 /// ⛔ До кроку <c>WriteTraceAsync</c> писав <c>resultId: null</c> і не знав ні документа, ні
-/// рядка: трейс знаходився лише за прогоном, тобто з комірки — ніяк.
+/// рядка: трейс знаходився лише за прогоном, тобто з комірки — ніяк. А
+/// <c>calc.CalculationInput</c> не писав ніхто: «з яких чисел вийшло це число» зберігалося лише
+/// в поточних комірках, які після розрахунку змінюються.
+///
+/// Мутаційні докази: <c>resultId: null</c> — <see cref="Крок_має_результат_і_адресу"/>
+/// червоний; не писати входи — <see cref="Входи_рядка_пишуться_в_CalculationInput"/> червоний;
+/// писати на <c>Off</c> — <see cref="Off_не_пише_нічого"/> червоний.
 /// </remarks>
 [Collection("SqlServer")]
 public sealed class CalculationInputWrittenTests(SqlServerFixture sql)
@@ -91,9 +97,51 @@ public sealed class CalculationInputWrittenTests(SqlServerFixture sql)
 
         await using var check = stand.Chain.CreateContext();
 
-        // Не порожняк: результати прогону записано, мовчить лише трейс.
+        // Не порожняк: результати прогону записано, мовчить лише трейс — ні кроків, ні входів.
         Assert.NotEqual(0, await check.CalculationResults.CountAsync(r => r.CalculationRunId == stand.RunId));
         Assert.Equal(0, await check.CalculationSteps.CountAsync(s => s.CalculationRunId == stand.RunId));
+        Assert.Equal(0, await check.CalculationInputs.CountAsync(i => i.CalculationRunId == stand.RunId));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage4)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "ФВ-9.13")]
+    public async Task Входи_рядка_пишуться_в_CalculationInput()
+    {
+        var stand = await StandAsync();
+        var output = stand.Output();
+
+        await using (var db = stand.Chain.CreateContext())
+        {
+            var store = new CalculationResultStore(db, new TestClock(Now));
+            await store.WriteResultsAsync(stand.RunId, [output], CancellationToken.None);
+            await store.WriteTraceAsync(stand.RunId, [output], TraceLevel.ErrorsOnly, CancellationToken.None);
+            await db.SaveChangesAsync();
+        }
+
+        await using var check = stand.Chain.CreateContext();
+        var inputs = await check.CalculationInputs.AsNoTracking()
+            .Where(i => i.CalculationRunId == stand.RunId)
+            .OrderBy(i => i.Id)
+            .ToListAsync();
+
+        Assert.Equal(["Volume", "Rho20", "Category"], inputs.Select(i => i.ArgumentCode));
+        Assert.All(inputs, i =>
+        {
+            Assert.Equal(stand.DocumentId, i.DocumentId);
+            Assert.Equal(Row, i.SourceRowKey);
+            Assert.Equal(stand.PeriodKey, i.PeriodKey);
+        });
+
+        // Значення — в одиниці джерела, як його бачила формула.
+        var volume = inputs[0];
+        Assert.Equal(269.258m, volume.Value);
+        Assert.Equal(stand.UnitId, volume.UnitId);
+        Assert.Equal(0.9589m, inputs[1].Value);
+        Assert.Null(inputs[1].UnitId);
+        Assert.Null(inputs[2].Value);
+        Assert.Equal("V8", inputs[2].ValueString);
     }
 
     private async Task<Stand> StandAsync()
@@ -118,11 +166,12 @@ public sealed class CalculationInputWrittenTests(SqlServerFixture sql)
 
         var unit = await db.Units.AsNoTracking().OrderBy(u => u.Id).Select(u => u.Id).FirstAsync();
 
-        return new Stand(chain, document.DocumentId, run.Id, version.Id, unit);
+        return new Stand(chain, document.DocumentId, document.PeriodKey.Value, run.Id, version.Id, unit);
     }
 
     /// <summary>Прогін документа з однією методологією на кшталт 301.</summary>
-    private sealed record Stand(TestDocumentBuilder Chain, long DocumentId, long RunId, int VersionId, int UnitId)
+    private sealed record Stand(
+        TestDocumentBuilder Chain, long DocumentId, int PeriodKey, long RunId, int VersionId, int UnitId)
     {
         /// <summary>Рядок прикладу A: <c>V_Sm3</c> (невидима), <c>M_t</c> і <c>tons</c> двох речовин.</summary>
         public CalculationOutput Output() => new(
@@ -140,6 +189,14 @@ public sealed class CalculationInputWrittenTests(SqlServerFixture sql)
                     Detail: Json("CONVERT(!V_Sm3 * @Rho20, 'kg', 't')", "Rho20")),
                 new CalculationTraceStep(3, "tons", "!M_t * CST.K", 0.0891735m, null, SubstanceEntryId: 901),
                 new CalculationTraceStep(4, "tons", "!M_t * CST.K", 0.1101428m, null, SubstanceEntryId: 902),
+            ],
+            [
+                new CalculationArgument("Volume", 269.258m, null, UnitId),
+                new CalculationArgument("Rho20", 0.9589m, null, null),
+
+                // Той самий аргумент двічі (два кроки читали його) — один рядок входу.
+                new CalculationArgument("rho20", 0.9589m, null, null),
+                new CalculationArgument("Category", null, "V8", null),
             ]);
 
         private static string Json(string expression, string argument)

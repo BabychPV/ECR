@@ -332,11 +332,17 @@ public sealed record CalculationArgument(
 /// <param name="SourceRowKey">Рядок документа.</param>
 /// <param name="Values">Обчислені виходи.</param>
 /// <param name="Trace">Кроки трейсу; порожній список, якщо <c>TraceLevel = Off</c>.</param>
+/// <param name="Inputs">
+/// Аргументи рядка, які прочитали записані кроки, — рядки <c>calc.CalculationInput</c>
+/// (HSE301 A3b, FEATURE-HSE301-VIEW §7.1), у одиниці джерела. <c>null</c> чи порожньо — входів
+/// не пишемо (<c>TraceLevel = Off</c> або жодного кроку).
+/// </param>
 public sealed record CalculationOutput(
     long DocumentId,
     string? SourceRowKey,
     IReadOnlyList<CalculationOutputValue> Values,
-    IReadOnlyList<CalculationTraceStep> Trace);
+    IReadOnlyList<CalculationTraceStep> Trace,
+    IReadOnlyList<CalculationArgument>? Inputs = null);
 
 /// <summary>Один обчислений вихід — рядок <c>calc.CalculationResult</c>.</summary>
 /// <param name="MethodologyVersionId">Версія, що дала число.</param>

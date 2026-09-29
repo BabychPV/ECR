@@ -402,7 +402,36 @@ public sealed class GenericCalculationModule(
             trace.Steps
                 .Select(s => new CalculationTraceStep(
                     s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked, s.ToJson(), s.SubstanceEntryId))
-                .ToList());
+                .ToList(),
+            ReadArguments(input, trace));
+    }
+
+    /// <summary>
+    /// Аргументи рядка, які прочитали ЗАПИСАНІ кроки, — майбутні рядки
+    /// <c>calc.CalculationInput</c> (§7.1).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Не всі колонки рядка, а лише ті, на які посилаються формули кроків трейсу: вхід
+    /// існує, щоб пояснити крок, і без кроку пояснювати нічого. Так обсяг входів іде за
+    /// рівнем трейсу (ЗБР-3): на <c>Off</c> кроків немає — немає й входів; на
+    /// <c>ErrorsOnly</c> — лише входи видимих і невдалих кроків.
+    ///
+    /// ⚠ Аргумент, якого в рядку немає (<c>#ARG</c>), входом не стає: значення в нього
+    /// немає, а «порожнє» збрехало б, що комірка існувала.
+    /// </remarks>
+    private static List<CalculationArgument> ReadArguments(CalculationInput input, TraceRecorder trace)
+    {
+        var read = trace.Steps
+            .SelectMany(s => s.Detail?.Inputs ?? [])
+            .Where(i => i.Kind == TraceInputKind.Argument)
+            .Select(i => i.Code)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return read.Count == 0
+            ? []
+            : [.. input.Arguments
+                .Where(a => read.Contains(a.ArgumentCode))
+                .DistinctBy(a => a.ArgumentCode, StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>

@@ -142,6 +142,25 @@ public sealed class TraceJsonTests
         Assert.All(output.Trace.Where(s => s.StepCode == "tons"), s => Assert.Equal(s.SubstanceEntryId, Substance(s)));
     }
 
+    /// <remarks>
+    /// ⛔ Входи рядка — аргументи, які прочитали ЗАПИСАНІ кроки, а не всі колонки рядка:
+    /// без кроку пояснювати нічого, і обсяг <c>calc.CalculationInput</c> іде за рівнем трейсу.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.13")]
+    public async Task Входи_рядка_це_аргументи_записаних_кроків()
+    {
+        var shown = await new ScopeStand().RunAsync(TraceLevel.ErrorsOnly);
+        var hidden = await new ScopeStand(visible: false).RunAsync(TraceLevel.ErrorsOnly);
+        var off = await new ScopeStand().RunAsync(TraceLevel.Off);
+
+        Assert.Equal(["Volume", "Rho20", "S_wt"], shown.Inputs!.Select(a => a.ArgumentCode));
+        Assert.Equal(0.9589m, Assert.Single(shown.Inputs!, a => a.ArgumentCode == "Rho20").Value);
+        Assert.Empty(hidden.Inputs!);
+        Assert.Empty(off.Inputs!);
+    }
+
     private static long? Substance(CalculationTraceStep step)
     {
         using var json = JsonDocument.Parse(step.Detail!);
