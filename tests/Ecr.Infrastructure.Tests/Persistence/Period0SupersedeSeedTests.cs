@@ -162,6 +162,38 @@ public sealed class Period0SupersedeSeedTests(SqlServerFixture sql)
         Assert.Equal(before, after);
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Кількість_змінених_рядків_потрапляє_в_журнал_старту()
+    {
+        var chain = new TestDocumentBuilder(sql.ConnectionString);
+        var document = await chain.BuildAsync();
+
+        await using (var arrange = chain.CreateContext())
+        {
+            var (versionId, unitId) = await MethodologyAsync(arrange);
+            var store = new CalculationResultStore(arrange, new TestClock(Now));
+            var yearRun = await CurrentRunAsync(arrange, document.ProjectId, periodKey: null);
+            await WriteAsync(arrange, store, yearRun, document.DocumentId, versionId, unitId, "Y-1");
+        }
+
+        var logger = new RecordingLogger<SeedRunner>();
+
+        await using (var db = chain.CreateContext())
+        {
+            await new SeedRunner(db, logger).RunAsync(CancellationToken.None);
+        }
+
+        // ⛔ Саме Information і саме текст PRINT: застосунок виконує сід на кожному
+        // старті, і інакше число з одноразового виправлення даних не бачив би ніхто.
+        const string Prefix = "period0-supersede: ";
+        var line = Assert.Single(
+            logger.OfLevel(Microsoft.Extensions.Logging.LogLevel.Information),
+            r => r.Message.Contains(Prefix, StringComparison.Ordinal)).Message;
+        Assert.True(RowsOf(line[line.IndexOf(Prefix, StringComparison.Ordinal)..]) >= 1, line);
+    }
+
     /// <summary>Виконує seed — той самий шлях, що й старт застосунку; повертає PRINT-и.</summary>
     private async Task<List<string>> RunSeedAsync()
     {

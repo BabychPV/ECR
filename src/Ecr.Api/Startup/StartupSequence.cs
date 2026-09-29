@@ -75,7 +75,7 @@ public static partial class StartupSequence
 
         // 4) Ідемпотентний seed. Без нього немає ні мов, ні прав, ні одиниць —
         //    застосунок формально піднімається і не робить нічого.
-        await new SeedRunner(db).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        await new SeedRunner(db, logger).RunAsync(CancellationToken.None).ConfigureAwait(false);
         LogSeedDone(logger);
 
         // 4a) Bootstrap-адміністратор. ⛔ Крок був ОГОЛОШЕНИЙ (обробник є,
