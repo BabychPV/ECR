@@ -53,6 +53,27 @@ public interface ICellStore
     /// паралельно), у результаті немає — викликач вирішує, чи дочитувати.
     /// </remarks>
     public Task<IReadOnlyDictionary<long, string>> ApplyAsync(CellChangeSet changes, CancellationToken ct);
+
+    /// <summary>
+    /// Застосовує набори змін КІЛЬКОХ екземплярів одним пакетом — те саме, що
+    /// <see cref="ApplyAsync"/> на кожен, але кожен крок (захоплення, видалення,
+    /// <c>MERGE</c>, «дотик») один на весь пакет (P8, застосування імпорту книги).
+    /// </summary>
+    /// <returns>Екземпляр → нові версії його рядків (як у <see cref="ApplyAsync"/>).</returns>
+    /// <remarks>
+    /// ⚠ Екземпляри в пакеті — різні (інакше <see cref="ArgumentException"/>).
+    ///
+    /// ⚠ Транзакція — як у <see cref="ApplyAsync"/>: відкрита викликачем —
+    /// приєднатися й не комітити (DAT-05 «усе або нічого» тримає він); немає —
+    /// одна коротка власна на весь пакет.
+    ///
+    /// ⛔ Конфлікт версії — той самий <c>ECR-CELL-0409</c>, що дав би поштучний
+    /// виклик на ПЕРШОМУ (у порядку входу) наборі з застарілими рядками:
+    /// <see cref="CellChangeSet.StaleRowIdsDetail"/> — лише його рядки, а на
+    /// пакеті з кількох екземплярів — ще й <c>tableInstanceId</c>.
+    /// </remarks>
+    public Task<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ApplyBatchAsync(
+        IReadOnlyCollection<CellChangeSet> changes, CancellationToken ct);
 }
 
 /// <summary>Комірка з адресою і значенням.</summary>

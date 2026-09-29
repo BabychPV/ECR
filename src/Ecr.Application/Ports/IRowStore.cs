@@ -143,6 +143,26 @@ public interface IRowStore
         long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct);
 
     /// <summary>
+    /// Створює рядки КІЛЬКОХ екземплярів ОДНИМ пакетом (P8, застосування
+    /// імпорту книги); результат — <c>Id</c> на кожен набір у порядку входу,
+    /// усередині набору — у порядку його ключів.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ <see cref="CreateRowsAsync"/> у циклі по ~91 таблиці книги — два
+    /// звернення на кожну. Тут: один діапазон <c>SEQUENCE</c> і одна вставка на
+    /// весь пакет. Поштучний метод і є цим методом з одним набором
+    /// (<c>RowStoreCreateBatchEquivalenceTests</c>).
+    ///
+    /// ⚠ Не комітить сам: у транзакції викликача (DAT-05 «усе або нічого»)
+    /// невдалий пакет не лишає жодного рядка. Зайнятий ключ — та сама
+    /// <c>ECR-ROW-0409</c>, що дав би поштучний виклик на першому (у порядку
+    /// входу) винному наборі; на пакеті з кількох екземплярів відмова несе ще
+    /// й <c>tableInstanceId</c>.
+    /// </remarks>
+    public Task<IReadOnlyList<IReadOnlyList<long>>> CreateRowsBatchAsync(
+        IReadOnlyList<RowCreationBatch> batches, CancellationToken ct);
+
+    /// <summary>
     /// Піднімає <c>ModifiedAt</c> зачеплених рядків.
     /// </summary>
     /// <remarks>
@@ -230,6 +250,14 @@ public interface IRowStore
 /// <param name="PeriodKey">Період екземпляра; він же ключ партиції.</param>
 public sealed record TableInstanceRef(
     long TableInstanceId, long DocumentId, int TableDefId, int TemplateVersionId, int PeriodKey);
+
+/// <summary>Набір нових рядків одного екземпляра для <see cref="IRowStore.CreateRowsBatchAsync"/>.</summary>
+/// <param name="TableInstanceId">Екземпляр таблиці.</param>
+/// <param name="PeriodKey">Період екземпляра — ключ партиції.</param>
+/// <param name="RowKeys">Ключі нових рядків.</param>
+/// <param name="Ordinal">Порядковий номер, спільний для всіх рядків набору (як у <see cref="IRowStore.CreateRowsAsync"/>).</param>
+public sealed record RowCreationBatch(
+    long TableInstanceId, PeriodKey PeriodKey, IReadOnlyList<RowKey> RowKeys, int Ordinal);
 
 /// <summary>Стан одного живого рядка таблиці.</summary>
 /// <param name="RowKey">Ключ рядка.</param>

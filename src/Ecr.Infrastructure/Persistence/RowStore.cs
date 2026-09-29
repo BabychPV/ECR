@@ -394,21 +394,45 @@ public sealed class RowStore(
     /// </exception>
     public async Task<IReadOnlyList<long>> CreateRowsAsync(
         long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct)
+        => (await CreateRowsBatchAsync(
+            [new RowCreationBatch(tableInstanceId, periodKey, rowKeys, ordinal)], ct).ConfigureAwait(false))[0];
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ P8: єдина реалізація і для одного екземпляра (<see cref="CreateRowsAsync"/>),
+    /// і для книги імпорту — ОДИН діапазон <c>SEQUENCE</c> на всі набори в
+    /// порядку входу, ОДИН <c>SaveChangesAsync</c>.
+    /// </remarks>
+    /// <exception cref="BusinessRuleException">
+    /// Ключ уже існує (<c>ECR-ROW-0409</c>) — див. <see cref="DuplicateRowKeyException"/>
+    /// і <see cref="BlameDuplicateAsync"/>.
+    /// </exception>
+    public async Task<IReadOnlyList<IReadOnlyList<long>>> CreateRowsBatchAsync(
+        IReadOnlyList<RowCreationBatch> batches, CancellationToken ct)
     {
-        if (rowKeys.Count == 0)
+        ArgumentNullException.ThrowIfNull(batches);
+
+        var total = batches.Sum(b => b.RowKeys.Count);
+        if (total == 0)
         {
-            return [];
+            return [.. batches.Select(IReadOnlyList<long> (_) => [])];
         }
 
-        var firstId = await bulk.ReserveIdsAsync("doc.TableRowSeq", rowKeys.Count, ct).ConfigureAwait(false);
+        var nextId = await bulk.ReserveIdsAsync("doc.TableRowSeq", total, ct).ConfigureAwait(false);
         var utcNow = clock.UtcNow;
-        var ids = new List<long>(rowKeys.Count);
+        var result = new List<IReadOnlyList<long>>(batches.Count);
 
-        for (var i = 0; i < rowKeys.Count; i++)
+        foreach (var batch in batches)
         {
-            var id = firstId + i;
-            ids.Add(id);
-            db.TableRows.Add(new TableRow(periodKey, id, tableInstanceId, rowKeys[i], ordinal, utcNow));
+            var ids = new List<long>(batch.RowKeys.Count);
+            foreach (var rowKey in batch.RowKeys)
+            {
+                ids.Add(nextId);
+                db.TableRows.Add(new TableRow(
+                    batch.PeriodKey, nextId++, batch.TableInstanceId, rowKey, batch.Ordinal, utcNow));
+            }
+
+            result.Add(ids);
         }
 
         try
@@ -417,10 +441,74 @@ public sealed class RowStore(
         }
         catch (DbUpdateException ex) when (IsRowKeyConflict(ex))
         {
-            throw DuplicateRowKeyException([.. rowKeys.Select(k => k.Value)]);
+            var nonEmpty = batches.Where(b => b.RowKeys.Count > 0).ToList();
+            if (nonEmpty.Count == 1)
+            {
+                // Один набір — рівно та відмова, що була в поштучного
+                // (без додаткового запиту й без поля екземпляра).
+                throw DuplicateRowKeyException([.. nonEmpty[0].RowKeys.Select(k => k.Value)]);
+            }
+
+            throw await BlameDuplicateAsync(nonEmpty, ct).ConfigureAwait(false);
         }
 
-        return ids;
+        return result;
+    }
+
+    /// <summary>
+    /// Та сама відмова <c>ECR-ROW-0409</c>, що дав би поштучний виклик на
+    /// ПЕРШОМУ (у порядку входу) наборі, де ключ зайнятий, плюс поле
+    /// <c>tableInstanceId</c> (як у <c>ExcelImporter.Blame</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ P8 (DAT-05): відмова без адреси на книзі з ~91 таблиці змушувала б
+    /// шукати винну таблицю перебором. Конфлікт бази називає лише «якийсь ключ
+    /// зайнятий», тож винного знаходить один запит уже на шляху збою: EF
+    /// відкотив свою вставку (власна транзакція або точка збереження у
+    /// ширшій), і з'єднання придатне. Зайнятим вважається і ключ, який
+    /// повторюється у САМОМУ пакеті (поштучний виклик другого набору впав би
+    /// на ключі першого). Винного не знайдено (гонитву вже прибрали) — відмова
+    /// з усіма ключами, без екземпляра.
+    /// </remarks>
+    private async Task<BusinessRuleException> BlameDuplicateAsync(
+        IReadOnlyList<RowCreationBatch> batches, CancellationToken ct)
+    {
+        var instanceIds = batches.Select(b => b.TableInstanceId).Distinct().ToList();
+        var periods = batches.Select(b => b.PeriodKey.Value).Distinct().ToList();
+        var keys = batches.SelectMany(b => b.RowKeys).Select(k => k.Value).Distinct().ToList();
+
+        // ⚠ Без фільтра IsDeleted: UQ_TableRow_Key його теж не має.
+        var existing = await db.TableRows.AsNoTracking()
+            .Where(r => periods.Contains(r.PeriodKeyValue)
+                        && instanceIds.Contains(r.TableInstanceId)
+                        && keys.Contains(r.RowKeyValue))
+            .Select(r => new { r.PeriodKeyValue, r.TableInstanceId, r.RowKeyValue })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var taken = existing.Select(r => (r.PeriodKeyValue, r.TableInstanceId, r.RowKeyValue)).ToHashSet();
+
+        foreach (var batch in batches)
+        {
+            var batchKeys =batch.RowKeys.Select(k => k.Value).ToArray();
+            var collides = false;
+            foreach (var key in batchKeys)
+            {
+                collides |= !taken.Add((batch.PeriodKey.Value, batch.TableInstanceId, key));
+            }
+
+            if (collides)
+            {
+                var single = DuplicateRowKeyException(batchKeys);
+                var details = new Dictionary<string, object?>(single.Details!, StringComparer.Ordinal)
+                {
+                    ["tableInstanceId"] = batch.TableInstanceId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                };
+                return new BusinessRuleException(single.ErrorCode, single.Message, details);
+            }
+        }
+
+        return DuplicateRowKeyException([.. keys]);
     }
 
     /// <summary>
@@ -449,10 +537,10 @@ public sealed class RowStore(
     private static bool IsRowKeyConflict(DbUpdateException ex)
         => SqlConflict.IsUniqueConstraintViolation(ex);
 
-    private static BusinessRuleException DuplicateRowKeyException(IReadOnlyList<string> rowKeys)
+    private static BusinessRuleException DuplicateRowKeyException(string[] rowKeys)
         => new(
             "ECR-ROW-0409",
-            rowKeys.Count == 1
+            rowKeys.Length == 1
                 ? $"Рядок із ключем {rowKeys[0]} у цій таблиці вже існує."
                 // ⚠ «Принаймні один», не «усі»: конфлікт бази називає лише те,
                 // що ЯКИЙСЬ ключ із батчу зайнятий — SaveChanges падає одним
@@ -464,7 +552,7 @@ public sealed class RowStore(
             // ⚠ Той самий факт, що вже несуть CreateRowHandler/PatchCellsHandler
             // (перевірка ДО запису): тут — програна гонитва проти бази, той
             // самий код і ті самі ключі каталогу.
-            rowKeys.Count == 1
+            rowKeys.Length == 1
                 ? new Dictionary<string, object?>
                 {
                     ["rowKeys"] = rowKeys,

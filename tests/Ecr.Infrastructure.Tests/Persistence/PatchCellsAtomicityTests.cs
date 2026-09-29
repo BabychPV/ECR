@@ -255,5 +255,12 @@ public sealed class PatchCellsAtomicityTests(SqlServerFixture sql)
             await inner.ApplyAsync(changes, ct).ConfigureAwait(false);
             throw new InvalidOperationException(FaultMarker);
         }
+
+        public async Task<IReadOnlyDictionary<long, IReadOnlyDictionary<long, string>>> ApplyBatchAsync(
+            IReadOnlyCollection<CellChangeSet> changes, CancellationToken ct)
+        {
+            await inner.ApplyBatchAsync(changes, ct).ConfigureAwait(false);
+            throw new InvalidOperationException(FaultMarker);
+        }
     }
 }

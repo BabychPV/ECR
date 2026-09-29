@@ -786,6 +786,10 @@ public sealed class MaterializeIntegrationActorTests(SqlServerFixture sql)
             long tableInstanceId, PeriodKey periodKey, IReadOnlyList<RowKey> rowKeys, int ordinal, CancellationToken ct)
             => inner.CreateRowsAsync(tableInstanceId, periodKey, rowKeys, ordinal, ct);
 
+        public Task<IReadOnlyList<IReadOnlyList<long>>> CreateRowsBatchAsync(
+            IReadOnlyList<RowCreationBatch> batches, CancellationToken ct)
+            => inner.CreateRowsBatchAsync(batches, ct);
+
         public Task TouchRowsAsync(IReadOnlyList<long> rowIds, PeriodKey periodKey, DateTime utcNow, CancellationToken ct)
             => inner.TouchRowsAsync(rowIds, periodKey, utcNow, ct);
 
