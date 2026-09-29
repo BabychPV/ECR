@@ -153,6 +153,9 @@ public sealed class SaveTableDefHandler(
         // наприкінці (той самий клас дефекту, що Q-243).
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             if (existing is null)
             {
                 // ⚠ Ordinal, якщо не переданий явно, — за наявними таблицями ЦЬОГО
@@ -329,6 +332,9 @@ public sealed class DeleteTableDefHandler(
         // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, nameof(TableDef), table.Id,

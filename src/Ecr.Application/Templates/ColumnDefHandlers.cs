@@ -164,6 +164,11 @@ public sealed class SaveColumnDefHandler(
         // `aud.StructureChange`.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії ПЕРШИМ і повторна перевірка «ще
+            // чернетка» під ним — інакше колонка лягала б у версію, яку
+            // опублікували між читанням вище і цим записом.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             if (existing is null)
             {
                 // ⚠ Ordinal, якщо не переданий явно, — за наявними колонками:
@@ -506,6 +511,9 @@ public sealed class DeleteColumnDefHandler(
         // про видалення, якого в даних не було.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: див. SaveColumnDefHandler.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, nameof(ColumnDef), column.Id,

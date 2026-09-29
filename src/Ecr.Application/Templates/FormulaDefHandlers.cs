@@ -152,6 +152,9 @@ public sealed class SaveFormulaDefHandler(
         // наприкінці (той самий клас дефекту, що Q-243).
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             if (existing is null)
             {
                 existing = new FormulaDef(table.Id, scope, command.Expression, command.Dialect);
@@ -476,6 +479,9 @@ public sealed class DeleteFormulaDefHandler(
         // ⛔ Q-244: аудит і `SoftDelete`/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, nameof(FormulaDef), formula.Id,

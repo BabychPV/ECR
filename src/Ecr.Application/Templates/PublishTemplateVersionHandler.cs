@@ -63,6 +63,32 @@ public sealed class PublishTemplateVersionHandler(
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-TMPL-0422.publishReasonRequired" });
         }
 
+        // ⛔ C5: УСЯ публікація — одна транзакція, і перша її дія — блок рядка
+        // версії. Доти знімок для перевірок читався без жодного блоку, а
+        // перехід стану комітився окремо, пізніше: колонка чи формула,
+        // закомічена паралельною правкою чернетки між цими моментами, лягала
+        // в опубліковану версію неперевіреною, а `cfg.FormulaDependency` про
+        // нову формулу не знав. Тепер правка, що почалася раніше, комітиться
+        // до читання знімка й потрапляє в перевірки; правка, що прийшла
+        // пізніше, чекає коміту публікації й бачить `Published` (див.
+        // `DraftVersionLock`). Порядок блокувань — версія першою, як у всіх
+        // структурних обробниках.
+        await uow.ExecuteInTransactionAsync(
+            token => PublishLockedAsync(templateVersionId, userId, reason, token),
+            ct).ConfigureAwait(false);
+
+        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Публікація під блоком рядка версії, усередині транзакції.</summary>
+    private async Task PublishLockedAsync(int templateVersionId, int userId, string reason, CancellationToken ct)
+    {
+        // ⚠ Стан, повернений блоком, тут не перевіряється окремо: відмову
+        // для вже опублікованої версії дає `version.Publish` нижче тим самим
+        // кодом `ECR-TMPL-0409`, і сутність читається вже ПІСЛЯ блоку, тобто
+        // несе закомічений стан.
+        await versionStore.LockVersionForUpdateAsync(templateVersionId, ct).ConfigureAwait(false);
+
         // ⛔ Саме `GetWithStructureAsync`, а не `IRepository.GetAsync`. Другий —
         // це `FindAsync` без жодного `Include` при вимкненому лінивому
         // завантаженні, тож `version.Sheets` приходила ПОРОЖНЬОЮ, і все нижче
@@ -165,21 +191,15 @@ public sealed class PublishTemplateVersionHandler(
         // Аудит і зміна стану — в одній транзакції: подія публікації без
         // публікації (і навпаки) зробила б журнал недостовірним.
         // ⛔ C4: коментар тут стояв і раніше, а транзакції не було — `INSERT`
-        // аудиту автокомітився до `SaveChangesAsync`.
-        await uow.ExecuteInTransactionAsync(
-            async token =>
-            {
-                await audit.WritePublicationEventAsync(
-                    new PublicationEventRecord(
-                        clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
-                        ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
-                    token).ConfigureAwait(false);
-
-                await uow.SaveChangesAsync(token).ConfigureAwait(false);
-            },
+        // аудиту автокомітився до `SaveChangesAsync`. ⛔ C5: транзакція тепер
+        // охоплює й блок, і читання знімка, і перевірки (див. `PublishAsync`).
+        await audit.WritePublicationEventAsync(
+            new PublicationEventRecord(
+                clock.UtcNow, EntityType: "TemplateVersion", EntityId: templateVersionId,
+                ResultDiffJson: null, ChangeReason: reason, ChangedByUserId: userId),
             ct).ConfigureAwait(false);
 
-        await metadataCache.InvalidateAsync(templateVersionId, ct).ConfigureAwait(false);
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>

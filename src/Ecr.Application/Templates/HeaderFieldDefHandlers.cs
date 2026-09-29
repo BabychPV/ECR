@@ -137,6 +137,9 @@ public sealed class SaveHeaderFieldDefHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             if (existing is null)
             {
                 var ordinal = command.Ordinal

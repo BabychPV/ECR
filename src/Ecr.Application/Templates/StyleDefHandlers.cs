@@ -66,22 +66,32 @@ public sealed class SaveStyleDefHandler(
         version.EnsureStructurallyMutable();
 
         var ecrCode = EcrCode.Create(code);
-        var existing = await styles.FindByCodeAsync(templateVersionId, ecrCode.Value, ct).ConfigureAwait(false);
+        StyleDef? existing = null;
 
-        if (existing is null)
+        // ⛔ C5: транзакція заради блоку рядка версії — той самий порядок, що
+        // в решті обробників чернетки й у публікації: версія першою, «ще
+        // чернетка» — під блоком, лише потім запис.
+        await uow.ExecuteInTransactionAsync(async innerCt =>
         {
-            existing = new StyleDef(templateVersionId, ecrCode);
-            styles.AddDefinition(existing);
-        }
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
 
-        existing.SetAppearance(
-            command.FontName, command.FontSize, command.IsBold, command.IsItalic,
-            command.ForegroundArgb, command.BackgroundArgb, command.BorderJson,
-            command.HorizontalAlign, command.VerticalAlign, command.WrapText, command.NumberFormat);
+            existing = await styles.FindByCodeAsync(templateVersionId, ecrCode.Value, innerCt).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+            if (existing is null)
+            {
+                existing = new StyleDef(templateVersionId, ecrCode);
+                styles.AddDefinition(existing);
+            }
 
-        return Map(existing);
+            existing.SetAppearance(
+                command.FontName, command.FontSize, command.IsBold, command.IsItalic,
+                command.ForegroundArgb, command.BackgroundArgb, command.BorderJson,
+                command.HorizontalAlign, command.VerticalAlign, command.WrapText, command.NumberFormat);
+
+            await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return Map(existing!);
     }
 
     /// <summary>Складає DTO стилю для відповіді.</summary>

@@ -128,6 +128,9 @@ public sealed class SaveValidationRuleHandler(
         // наприкінці (той самий клас дефекту, що Q-243).
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             if (existing is null)
             {
                 existing = new ValidationRule(
@@ -307,6 +310,9 @@ public sealed class DeleteValidationRuleHandler(
         // ⛔ Q-244: аудит і видалення/`SaveChanges` тепер одна транзакція.
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5: блок рядка версії першим, «ще чернетка» — під ним.
+            await DraftVersionLock.EnsureDraftUnderLockAsync(store, version, innerCt).ConfigureAwait(false);
+
             await audit.WriteStructureChangeAsync(
                 new StructureChangeRecord(
                     clock.UtcNow, templateVersionId, nameof(ValidationRule), rule.Id,

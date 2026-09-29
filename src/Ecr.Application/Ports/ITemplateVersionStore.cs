@@ -31,6 +31,30 @@ public interface ITemplateVersionStore
     public Task<int> IncrementPresentationRevisionAsync(int templateVersionId, CancellationToken ct);
 
     /// <summary>
+    /// Бере блок оновлення на рядок версії до кінця поточної транзакції й
+    /// повертає її <b>закомічений</b> стан, прочитаний під цим блоком (C5).
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Публікація й кожна структурна правка чернетки беруть цей блок
+    /// ПЕРШОЮ дією своєї транзакції: правка, що почалася до публікації,
+    /// комітиться до її перевірок і потрапляє в них; правка, що прийшла
+    /// після, дочікується коміту публікації й бачить <c>Published</c>. Без
+    /// блоку колонка чи формула, закомічена між перевірками публікації та її
+    /// комітом, лягала в опубліковану версію неперевіреною, а
+    /// <c>cfg.FormulaDependency</c> про нову формулу не знав.
+    ///
+    /// ⚠ Порядок блокувань — рядок версії завжди першим; жоден шлях не бере
+    /// його після блоків на дочірніх рядках структури.
+    /// </remarks>
+    /// <param name="templateVersionId">Версія.</param>
+    /// <param name="ct">Скасування.</param>
+    /// <returns>Стан версії під блоком.</returns>
+    /// <exception cref="Errors.NotFoundException"><c>ECR-TMPL-0404</c> — версії немає.</exception>
+    /// <exception cref="InvalidOperationException">Виклик поза транзакцією.</exception>
+    public Task<Domain.Enums.TemplateVersionStatus> LockVersionForUpdateAsync(
+        int templateVersionId, CancellationToken ct);
+
+    /// <summary>
     /// Чи існують документи, прив'язані до цієї версії.
     /// </summary>
     /// <remarks>

@@ -162,6 +162,15 @@ public sealed class PatchPresentationHandler(
 
         await uow.ExecuteInTransactionAsync(async innerCt =>
         {
+            // ⛔ C5, порядок блокувань: рядок версії ПЕРШИМ, як у публікації й
+            // структурних обробниках чернетки. Без цього патч брав блоки на
+            // рядках колонок/аркушів і лише потім (інкрементом ревізії) — на
+            // рядку версії, тобто у зворотному порядку до правки чернетки, що
+            // тримає версію й хоче той самий рядок колонки: взаємне
+            // очікування. Стан тут не перевіряється — презентаційний патч
+            // законний і на опублікованій версії.
+            await store.LockVersionForUpdateAsync(templateVersionId, innerCt).ConfigureAwait(false);
+
             await store.ApplyPresentationAsync(templateVersionId, changes, innerCt).ConfigureAwait(false);
 
             // Інкремент — атомарний statement із OUTPUT (R-B7). Застосунок не

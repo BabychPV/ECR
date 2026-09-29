@@ -65,6 +65,52 @@ public sealed class TemplateVersionStore(EcrDbContext db) : ITemplateVersionStor
 
     /// <inheritdoc />
     /// <remarks>
+    /// ⛔ Блокуюче читання (<c>UPDLOCK</c>) обходить версіонування рядків
+    /// RCSI: звичайний <c>SELECT</c> тут віддав би знімок до чужого коміту й
+    /// не чекав би ні на кого — тобто не серіалізував би нічого. <c>HOLDLOCK</c>
+    /// тримає блок до кінця транзакції навіть для відсутнього рядка.
+    ///
+    /// ⚠ Поза транзакцією блок звільнився б одразу після statement — виклик
+    /// без неї є помилкою програміста, а не станом даних, тому
+    /// <see cref="InvalidOperationException"/>, а не мовчазне «ніби заблоковано».
+    /// </remarks>
+    public async Task<Domain.Enums.TemplateVersionStatus> LockVersionForUpdateAsync(
+        int templateVersionId, CancellationToken ct)
+    {
+        var tx = db.Database.CurrentTransaction
+            ?? throw new InvalidOperationException(
+                "LockVersionForUpdateAsync викликано поза транзакцією: блок рядка версії звільнився б одразу.");
+
+        var connection = (SqlConnection)db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(ct).ConfigureAwait(false);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqlTransaction)tx.GetDbTransaction();
+        command.CommandText = """
+            SELECT Status
+            FROM   cfg.TemplateVersion WITH (UPDLOCK, HOLDLOCK, ROWLOCK)
+            WHERE  Id = @id;
+            """;
+        command.Parameters.AddWithValue("@id", templateVersionId);
+
+        var result = await command.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is null or DBNull
+            ? throw new NotFoundException(
+                "ECR-TMPL-0404",
+                $"Версії шаблону {templateVersionId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-TMPL-0404.templateVersion",
+                    ["versionId"] = templateVersionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                })
+            : (Domain.Enums.TemplateVersionStatus)Convert.ToByte(result, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Питання не про кількість, а про факт: якщо на версії вже є документи,
     /// структурна правка заборонена незалежно від того, один він чи мільйон.
     /// Тому <c>AnyAsync</c>, а не <c>CountAsync</c>.

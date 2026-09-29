@@ -46,6 +46,11 @@ public sealed class StyleDefTests
 
         _store.GetWithStructureAsync(1, Arg.Any<CancellationToken>()).Returns(_draft);
 
+        // ⚠ C5: запис стилю тепер іде транзакцією (блок рядка версії); без
+        // цього NSubstitute не викликав би замикання, і запису не було б.
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         _styles.FindByCodeAsync(1, Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(call => _stored.GetValueOrDefault(call.ArgAt<string>(1)));
 
