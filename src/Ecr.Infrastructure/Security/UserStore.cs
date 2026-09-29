@@ -376,7 +376,8 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
                 return new RoleView(
                     r.Id, r.Code, r.IsBuiltIn, r.IsActive,
                     [.. mine.Select(p => p.Code).Order(StringComparer.Ordinal)],
-                    [.. mine.Where(p => p.IsDangerous).Select(p => p.Code).Order(StringComparer.Ordinal)]);
+                    [.. mine.Where(p => p.IsDangerous).Select(p => p.Code).Order(StringComparer.Ordinal)],
+                    r.NameL10n);
             })
             .ToList();
     }

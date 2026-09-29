@@ -9,6 +9,7 @@ import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { t } from '@/shared/i18n';
 import { EmptyPath, ResourcePicker, type PickPath } from '@/pages/admin/grants/ResourcePicker';
+import { roleLabel } from '@/pages/admin/grants/roleLabel';
 import {
   GrantLevels,
   ResourceKinds,
@@ -91,14 +92,6 @@ function isStaleGrants(error: unknown): boolean {
   );
 }
 
-/**
- * ⚠ Роль показується кодом: `GET /api/v1/roles` (`RoleView`) не віддає
- * локалізованої назви, хоча вона є в базі (`CreateRoleModal` її пише). Коли
- * контракт її отримає — міняється лише цей рядок.
- */
-function roleLabel(role: RoleView | undefined): string {
-  return role?.code ?? '';
-}
 
 /** Канонічний вигляд набору: порядок і `resourceName` не є зміною. */
 function canonical(grants: readonly ResourceGrantDto[]): string {

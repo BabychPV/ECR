@@ -286,7 +286,7 @@ public sealed class FakeUserStore : IUserStore
         ArgumentNullException.ThrowIfNull(permissionCodes);
 
         var id = Roles.Count + 1;
-        Roles.Add(new RoleView(id, role.Code, role.IsBuiltIn, role.IsActive, [.. permissionCodes], []));
+        Roles.Add(new RoleView(id, role.Code, role.IsBuiltIn, role.IsActive, [.. permissionCodes], [], role.NameL10n));
         return Task.FromResult(id);
     }
 
@@ -307,7 +307,11 @@ public sealed class FakeUserStore : IUserStore
         int roleId, string code, IReadOnlyDictionary<string, string>? name, CancellationToken ct)
     {
         var index = Roles.FindIndex(r => r.Id == roleId);
-        Roles[index] = Roles[index] with { Code = code };
+        Roles[index] = Roles[index] with
+        {
+            Code = code,
+            NameL10n = name is null ? Roles[index].NameL10n : new Domain.ValueObjects.LocalizedText(name.ToDictionary(StringComparer.Ordinal)),
+        };
         return Task.CompletedTask;
     }
 

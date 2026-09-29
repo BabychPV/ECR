@@ -19571,6 +19571,7 @@ export interface components {
             isActive: boolean;
             /** @description Вбудована роль із seed: видаленню не підлягає. */
             isBuiltIn: boolean;
+            nameL10n?: null | components["schemas"]["LocalizedText"];
             /** @description Права ролі. */
             permissions: string[];
         };

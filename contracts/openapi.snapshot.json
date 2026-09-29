@@ -9693,6 +9693,17 @@
             "description": "Вбудована роль із seed: видаленню не підлягає.",
             "type": "boolean"
           },
+          "nameL10n": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LocalizedText",
+                "description": "Назва мовами каталогу (`sec.Role.NameL10n`) — те, що адміністратор\nзадав при створенні чи перейменуванні. Сховище заповнює її завжди;\n`null` лише в підробках, що назви не моделюють. Клієнт без назви\nпоказує код."
+              }
+            ]
+          },
           "permissions": {
             "description": "Права ролі.",
             "items": {

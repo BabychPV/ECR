@@ -19,13 +19,20 @@ namespace Ecr.Application.Security;
 /// <param name="DangerousPermissions">
 /// Небезпечні права серед них — показуються окремо, бо їх видають поіменно.
 /// </param>
+/// <param name="NameL10n">
+/// Назва мовами каталогу (<c>sec.Role.NameL10n</c>) — те, що адміністратор
+/// задав при створенні чи перейменуванні. Сховище заповнює її завжди;
+/// <c>null</c> лише в підробках, що назви не моделюють. Клієнт без назви
+/// показує код.
+/// </param>
 public sealed record RoleView(
     int Id,
     string Code,
     bool IsBuiltIn,
     bool IsActive,
     IReadOnlyList<string> Permissions,
-    IReadOnlyList<string> DangerousPermissions);
+    IReadOnlyList<string> DangerousPermissions,
+    LocalizedText? NameL10n = null);
 
 /// <summary>Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16).</summary>
 /// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
