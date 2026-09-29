@@ -46,7 +46,7 @@ public sealed class JobObjectTests
             // ⛔ Без SetInformationJobObject 256 МБ комітяться спокійно і
             // процес живе далі — тоді тут червоне.
             Assert.True(eater.WaitForExit(30_000), "процес, що комітить 2× межі, мав завершитися");
-            Assert.NotEqual(0, eater.ExitCode);
+            Assert.Equal(ChildStub.ExitOutOfMemory, eater.ExitCode);
             Assert.False(idle.HasExited, "сусід у тому ж Job Object мав лишитися живим");
         }
         finally
@@ -89,7 +89,7 @@ public sealed class JobObjectTests
 
             var fallen = first.HasExited ? first : second;
             Assert.True(fallen.HasExited, "один із процесів мав упертися в стелю пулу");
-            Assert.NotEqual(0, fallen.ExitCode);
+            Assert.Equal(ChildStub.ExitOutOfMemory, fallen.ExitCode);
         }
         finally
         {

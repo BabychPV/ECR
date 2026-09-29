@@ -54,6 +54,9 @@ internal sealed record ChildStubOptions(int EatMegabytes, bool Hang, TimeSpan? E
 /// </summary>
 internal sealed class ChildStub(ChildStubOptions options) : BackgroundService
 {
+    /// <summary>Код виходу, коли пам'ять не видано (межа Job Object).</summary>
+    public const int ExitOutOfMemory = 5;
+
     /// <summary>Тримає закомічену пам'ять живою.</summary>
     private static List<byte[]>? eaten;
 
@@ -62,9 +65,7 @@ internal sealed class ChildStub(ChildStubOptions options) : BackgroundService
     {
         if (options.EatMegabytes > 0)
         {
-            // ⚠ Окремий потік без catch: OutOfMemoryException від межі Job
-            // Object має покласти процес, як поклала б справжню задачу.
-            var thread = new Thread(() => Eat(options.EatMegabytes)) { IsBackground = true };
+            var thread = new Thread(() => EatOrExit(options.EatMegabytes)) { IsBackground = true };
             thread.Start();
         }
 
@@ -80,6 +81,24 @@ internal sealed class ChildStub(ChildStubOptions options) : BackgroundService
         }
 
         await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+    }
+
+    /// <remarks>
+    /// ⚠ OutOfMemoryException від межі Job Object не лишається необробленою:
+    /// тоді процес помирав би через звіт WER, і тривалість падіння гуляла від 5
+    /// до понад 30 с. Власний код виходу ще й називає причину наглядачеві.
+    /// </remarks>
+    private static void EatOrExit(int megabytes)
+    {
+        try
+        {
+            Eat(megabytes);
+        }
+        catch (OutOfMemoryException)
+        {
+            eaten = null;
+            Environment.Exit(ExitOutOfMemory);
+        }
     }
 
     private static void Eat(int megabytes)

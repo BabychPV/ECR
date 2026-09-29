@@ -18,8 +18,9 @@ public sealed record JobObjectLimits(long ProcessMemoryBytes, long JobMemoryByte
 /// </summary>
 /// <remarks>
 /// ⚠ Стеля пам'яті не «вбиває» процес сама: Windows відмовляє в коміті понад
-/// межу, і .NET падає з <see cref="OutOfMemoryException"/>. Для воркера це
-/// рівнозначно — процес, що пішов за межу, завершується, сусіди живі.
+/// межу, і .NET кидає <see cref="OutOfMemoryException"/> (заглушка дочірнього
+/// виходить із кодом <c>ChildStub.ExitOutOfMemory</c>). Процес, що пішов за
+/// межу, завершується, сусіди живі.
 ///
 /// ⚠ Поза Windows — <see cref="PlatformNotSupportedException"/> з поясненням:
 /// ізольований пул підтримується лише на Windows Server (цільова платформа).
