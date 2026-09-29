@@ -9012,6 +9012,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/keys/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Жива перевірка дублікатів майбутнього ключа на наявних записах. Право
+         *     `Registry.EditDefinition`.
+         * @description ⛔ Той самий алгоритм, що й публікація ключа: «дублікатів немає» тут означає, що публікація
+         *     не відмовить `409 existingDuplicates` на тих самих даних.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RegistryKeyCheckRequest"];
+                    "application/json": components["schemas"]["RegistryKeyCheckRequest"];
+                    "text/json": components["schemas"]["RegistryKeyCheckRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryKeyCheckResponse"];
+                        "text/json": components["schemas"]["RegistryKeyCheckResponse"];
+                        "text/plain": components["schemas"]["RegistryKeyCheckResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/usage": {
         parameters: {
             query?: never;
@@ -17658,6 +17733,8 @@ export interface components {
              */
             totalCount: null | number;
         };
+        /** @enum {unknown} */
+        ParentDeletePolicy: "Restrict" | "Cascade" | null;
         /** @description Зміна однієї комірки. Три різні операції (R-B4):
          *     значення — записати; `Value = null` — стерти (рядок видаляється);
          *     `IsEmpty = true` — явна порожнеча; поле відсутнє в запиті — не чіпати. */
@@ -18182,6 +18259,8 @@ export interface components {
              */
             sheetDefId: number;
         };
+        /** @enum {unknown} */
+        RegistryCodeMode: "Manual" | "Auto" | null;
         /** @description Опис довідника для конфігуратора і для клієнта. */
         RegistryDefDto: {
             /** @description Код довідника. */
@@ -18211,8 +18290,11 @@ export interface components {
              * @description Версія опублікованого опису, від якої відштовхується чернетка.
              */
             baseDefinitionVersion: number;
+            codeMode?: null | components["schemas"]["RegistryCodeMode"];
             /** @description Поля чернетки. */
             fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Ключі чернетки; `null` — чернетка ключів не змінює. */
+            keys?: null | components["schemas"]["RegistryKeySaveDto"][];
             /** @description Причина зміни. */
             reason: string;
             /** @description Версія для наступного збереження чи публікації. */
@@ -18244,6 +18326,7 @@ export interface components {
         RegistryDefinitionDto: {
             /** @description Код довідника. */
             code: string;
+            codeMode?: null | components["schemas"]["RegistryCodeMode"];
             /**
              * Format: int32
              * @description Ревізія даних; росте від зміни записів.
@@ -18263,6 +18346,9 @@ export interface components {
             id: number;
             /** @description Чи мають записи вікно чинності. */
             isTemporal: boolean;
+            /** @description Складені ключі довідника (`D-151`, RT-11), і вимкнені теж: вимкнений ключ пояснює, чому
+             *     колись діяла саме така унікальність. */
+            keys?: null | components["schemas"]["RegistryKeyDto"][];
             /** @description Мапінг зовнішніх полів на поля довідника (`ФВ-8.11`). */
             mappings: components["schemas"]["RegistryMappingDto"][];
             /** @description Назва мовами каталогу. */
@@ -18452,11 +18538,13 @@ export interface components {
             lookupRegistryDefId: null | number;
             /** @description Підпис мовами каталогу. */
             nameL10n: components["schemas"]["LocalizedText"];
+            onParentDelete?: null | components["schemas"]["ParentDeletePolicy"];
             /**
              * Format: int32
              * @description Порядок у переліку.
              */
             ordinal: number;
+            relationKind?: null | components["schemas"]["RegistryRelationKind"];
             /**
              * Format: int32
              * @description Одиниця значення.
@@ -18486,6 +18574,88 @@ export interface components {
             /** @description Дія: `SaveDefinition`, `SwitchSourceSet`. */
             operation: string;
         };
+        /** @description Запит живої перевірки дублікатів ключа до збереження (§4.5). */
+        RegistryKeyCheckRequest: {
+            /** @description Коди полів майбутнього ключа в порядку частин. */
+            fieldCodes: string[];
+            /**
+             * @description Порівнювати текст без урахування регістру (як у ключа).
+             * @default true
+             */
+            ignoreCase: boolean;
+        };
+        /** @description Результат перевірки дублікатів ключа на наявних даних (§4.5). */
+        RegistryKeyCheckResponse: {
+            /**
+             * Format: int32
+             * @description Скільки живих записів перевірено.
+             */
+            checked: number;
+            /**
+             * Format: int32
+             * @description Скільки значень ключа мають більше одного запису.
+             */
+            groups: number;
+            /** @description Перші групи (не більше двадцяти) — приклади для людини. */
+            sample: components["schemas"]["RegistryKeyDuplicateDto"][];
+        };
+        /** @description Складений ключ довідника в описі (`D-151`, FEATURE-REGISTRY-TABLES §4.1). */
+        RegistryKeyDto: {
+            /** @description Код ключа в межах довідника. */
+            code: string;
+            /** @description Поля ключа в порядку частин — це й порядок аргументів `REGFIND`. */
+            fieldCodes: string[];
+            /**
+             * Format: int32
+             * @description Ідентифікатор ключа.
+             */
+            id: number;
+            /** @description Текстові частини порівнюються без урахування регістру. */
+            ignoreCase: boolean;
+            /** @description Чи діє ключ. */
+            isActive: boolean;
+            /** @description Первинний ключ: ним шукає `REGFIND`. */
+            isPrimary: boolean;
+            /** @description Назва мовами каталогу. */
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
+        /** @description Одне значення ключа, яке мають кілька записів. */
+        RegistryKeyDuplicateDto: {
+            /** @description Записи з цим значенням. */
+            entries: components["schemas"]["RegistryKeyDuplicateEntryDto"][];
+            /** @description Людський вигляд значення ключа. */
+            keyText: string;
+        };
+        /** @description Запис у групі дублікатів. */
+        RegistryKeyDuplicateEntryDto: {
+            /** @description Код запису. */
+            code: string;
+            /**
+             * Format: int64
+             * @description Ідентифікатор запису.
+             */
+            id: number;
+        };
+        /** @description Ключ, який зберігає конструктор (`D-151`). */
+        RegistryKeySaveDto: {
+            /** @description Код ключа; у наявного не змінюється. */
+            code: string;
+            /** @description Коди полів у порядку частин (1–8); у наявного не змінюються. */
+            fieldCodes: string[];
+            /**
+             * Format: int32
+             * @description `null` — новий ключ; інакше — правка наявного.
+             */
+            id: null | number;
+            /** @description Порівняння тексту без регістру; у наявного не змінюється. */
+            ignoreCase: boolean;
+            /** @description Чи діє ключ; вимкнений — не перевіряється. */
+            isActive: boolean;
+            /** @description Первинний ключ; у наявного не змінюється. */
+            isPrimary: boolean;
+            /** @description Назва мовами каталогу; змінюється. */
+            nameL10n: components["schemas"]["LocalizedText"];
+        };
         /** @description Мапінг зовнішнього поля на поле довідника. */
         RegistryMappingDto: {
             /** @description Поле довідника, куди лягає значення. */
@@ -18512,7 +18682,8 @@ export interface components {
         RegistryRelationDto: {
             /** @description Поле-посилання; `null` для M:N — там поля немає. */
             fieldCode: null | string;
-            /** @description Вид: `Hierarchy`, `Cascade` або `Association`. */
+            /** @description Вид: `Hierarchy`, `Cascade`, `Composition` (поле композиції, `D-155`) або
+             *     `Association`. */
             kind: string;
             /**
              * Format: int32
@@ -18521,6 +18692,7 @@ export interface components {
             linkCount: null | number;
             /** @description Вид відношення M:N; `null` для зв'язків через поле. */
             linkKind: null | string;
+            onParentDelete?: null | components["schemas"]["ParentDeletePolicy"];
             /** @description Код довідника-цілі; `null` для M:N. */
             targetRegistryCode: null | string;
             /**
@@ -18529,6 +18701,8 @@ export interface components {
              */
             targetRegistryDefId: null | number;
         };
+        /** @enum {unknown} */
+        RegistryRelationKind: "Reference" | "Composition" | null;
         /** @description Правило цілісності довідника. */
         RegistryRuleDto: {
             /** @description Код правила. */
@@ -19336,8 +19510,11 @@ export interface components {
         };
         /** @description Запит на збереження чернетки опису (`BE-24` крок 2). */
         SaveRegistryDefinitionDraftRequest: {
+            codeMode?: null | components["schemas"]["RegistryCodeMode"];
             /** @description Повний перелік полів після правки. */
             fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Повний перелік ключів; `null` — публікація ключів не змінює. */
+            keys?: null | components["schemas"]["RegistryKeySaveDto"][];
             /** @description Причина зміни; при публікації йде в журнал. */
             reason: string;
             /** @description Версія чернетки, від якої відштовхується правка; `null` — чернетки ще немає. */
@@ -19347,8 +19524,12 @@ export interface components {
         };
         /** @description Запит на збереження опису довідника. */
         SaveRegistryDefinitionDto: {
+            codeMode?: null | components["schemas"]["RegistryCodeMode"];
             /** @description Повний перелік полів після правки. */
             fields: components["schemas"]["RegistryFieldSaveDto"][];
+            /** @description Повний перелік ключів після правки (RT-11); ключ, якого в переліку немає, вимикається.
+             *     `null` — ключі не змінюються (клієнт, що про ключі не знає, їх не вимикає). */
+            keys?: null | components["schemas"]["RegistryKeySaveDto"][];
             /** @description Причина зміни. Обов'язкова: опис довідника змінює те, як читаються ВЖЕ
              *     збережені записи, і питання «чому тут з'явилося це поле» ставлять через рік. */
             reason: string;
