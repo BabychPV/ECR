@@ -1844,7 +1844,7 @@
             ]
           },
           "ruleCode": {
-            "description": "Код правила: `ORPHANED_CELL`, `BROKEN_FK`, `ARCHIVE_CHECKSUM`.",
+            "description": "Код правила: `ORPHANED_CELL` (комірка посилається на відсутній запис\nдовідника; `doc.CellValue`, вага 2), `BROKEN_FK` (рядок посилається\nна відсутній екземпляр таблиці; `doc.TableRow`, вага 3),\n`ARCHIVE_CHECKSUM` (контрольні суми архіву й джерела не збіглися;\n`itg.ArchiveRun`, вага 3), `UNBOUND_CALCULATED_COLUMN` (колонка\n`Calculated` версії живого проєкту без чинної прив'язки методології;\n`cfg.ColumnDef`, вага 2), `UNSOURCED_FORMULA_COLUMN` (колонка\n`Formula` опублікованої або виведеної з обігу версії без формули шаблону\nй без чинної прив'язки методології; `cfg.ColumnDef`, вага 2).",
             "type": "string"
           },
           "severity": {

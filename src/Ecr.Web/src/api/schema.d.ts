@@ -16347,7 +16347,15 @@ export interface components {
              * @description Хто закрив; `null` — ніхто.
              */
             resolvedByUserId: null | number;
-            /** @description Код правила: `ORPHANED_CELL`, `BROKEN_FK`, `ARCHIVE_CHECKSUM`. */
+            /** @description Код правила: `ORPHANED_CELL` (комірка посилається на відсутній запис
+             *     довідника; `doc.CellValue`, вага 2), `BROKEN_FK` (рядок посилається
+             *     на відсутній екземпляр таблиці; `doc.TableRow`, вага 3),
+             *     `ARCHIVE_CHECKSUM` (контрольні суми архіву й джерела не збіглися;
+             *     `itg.ArchiveRun`, вага 3), `UNBOUND_CALCULATED_COLUMN` (колонка
+             *     `Calculated` версії живого проєкту без чинної прив'язки методології;
+             *     `cfg.ColumnDef`, вага 2), `UNSOURCED_FORMULA_COLUMN` (колонка
+             *     `Formula` опублікованої або виведеної з обігу версії без формули шаблону
+             *     й без чинної прив'язки методології; `cfg.ColumnDef`, вага 2). */
             ruleCode: string;
             /**
              * Format: uint8
