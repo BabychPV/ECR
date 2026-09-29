@@ -330,17 +330,9 @@ public sealed class PiSqlClientDataSource(
     private const string QueryNotConfigured = "ECR-INT-0422";
 
     /// <summary>Текст запиту з налаштування або відмова <c>ECR-INT-0422</c>.</summary>
-    /// <param name="key">Спільний ключ.</param>
-    /// <param name="kind">Тип запиту — для відмови.</param>
-    /// <param name="dataSourceCode">
-    /// Код джерела: спершу його власний ключ (<see cref="ConfiguredQuery"/>);
-    /// <c>null</c> — лише спільний (перевірка ДО пошуку джерела, як для інтерпольованого).
-    /// </param>
-    private string ConfiguredOrRefuse(string key, string kind, string? dataSourceCode = null)
+    private string ConfiguredOrRefuse(string key, string kind)
     {
-        var configured = dataSourceCode is null
-            ? settings?.Find(key)
-            : ConfiguredQuery(settings, dataSourceCode, key);
+        var configured = settings?.Find(key);
         if (!string.IsNullOrWhiteSpace(configured))
         {
             return configured;
@@ -444,7 +436,7 @@ public sealed class PiSqlClientDataSource(
     /// <remarks>
     /// ⛔ Типового тексту немає (V-3): імена RTQP-об'єктів подій факела в
     /// репозиторії не підтверджені. Без ключа — <c>ECR-INT-0422</c>
-    /// <c>.queryKindNotConfigured</c>, не порожній список.
+    /// <c>.eventQueryNotConfigured</c>, не порожній список.
     /// <para>
     /// Контракт тексту: заповнювач <c>{template}</c> — літералом
     /// (<see cref="Literal"/>); параметри <c>?</c> — від і до, UTC (події, що
@@ -488,7 +480,7 @@ public sealed class PiSqlClientDataSource(
         var source = await store.FindDataSourceAsync(query.DataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable($"Джерело {query.DataSourceId} не існує або вимкнене.", query.DataSourceId);
 
-        var text = ConfiguredOrRefuse(EventQueryKey, IExternalDataSource.EventQueryKind, source.Code);
+        var text = EventQueryOrRefuse(EventQueryKey, IExternalDataSource.EventQueryKind, source.Code);
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         using var command = connection.CreateCommand();
@@ -512,7 +504,7 @@ public sealed class PiSqlClientDataSource(
         var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
                      ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
 
-        var text = ConfiguredOrRefuse(EventTemplateQueryKey, IExternalDataSource.EventTemplateQueryKind, source.Code);
+        var text = EventQueryOrRefuse(EventTemplateQueryKey, IExternalDataSource.EventTemplateQueryKind, source.Code);
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         using var command = connection.CreateCommand();
@@ -528,9 +520,10 @@ public sealed class PiSqlClientDataSource(
 
     /// <summary>Події з результату запиту подій (контракт колонок — <see cref="EventQueryKey"/>).</summary>
     /// <remarks>
-    /// Час — правилом <see cref="Utc"/>: <c>StartTime</c> обов'язковий, <c>EndTime</c>
+    /// Час — правилом <see cref="EventTime"/>: <c>StartTime</c> обов'язковий, <c>EndTime</c>
     /// і <c>Modified</c> можуть бути <c>NULL</c>; нечитабельний тип — відмова
-    /// <c>.timestampUnreadable</c>. Публічний для тестів: <c>OdbcDataReader</c> ззовні не зробиш.
+    /// <c>.eventTimestampUnreadable</c>, рядок без <c>EventId</c> — <c>.eventIdMissing</c>
+    /// (обидві <c>ECR-INT-0422</c>). Публічний для тестів: <c>OdbcDataReader</c> ззовні не зробиш.
     /// </remarks>
     /// <param name="reader">Відкритий результат запиту.</param>
     /// <param name="dataSource">Код джерела — для тексту відмови.</param>
@@ -557,18 +550,24 @@ public sealed class PiSqlClientDataSource(
             if (string.IsNullOrWhiteSpace(id))
             {
                 // Без ідентифікатора подію не зв'язати з рядком документа ніколи:
-                // це дефект тексту запиту, а не стан даних.
-                throw new InvalidOperationException(
-                    $"Запит подій джерела {dataSource} повернув рядок без EventId: ключа синхронізації немає.");
+                // це дефект тексту запиту, а не стан даних, — відмова вікна (422), не 500.
+                throw new BusinessRuleException(
+                    IExternalDataSource.QueryRefusedCode,
+                    $"Запит подій джерела {dataSource} повернув рядок без EventId: ключа синхронізації немає.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-INT-0422.eventIdMissing",
+                        ["dataSource"] = dataSource,
+                    });
             }
 
             var added = folder.Add(new SourceEventRow(
                 id,
                 Text(Column(row, "EventName")),
                 Text(Column(row, "Template")),
-                Utc(Column(row, "StartTime"), dataSource, $"{id}|StartTime"),
-                UtcOrNull(Column(row, "EndTime"), dataSource, $"{id}|EndTime"),
-                UtcOrNull(Column(row, "Modified"), dataSource, $"{id}|Modified"),
+                (DateTime)EventTime(Column(row, "StartTime"), dataSource, id, "StartTime", required: true)!,
+                EventTime(Column(row, "EndTime"), dataSource, id, "EndTime", required: false),
+                EventTime(Column(row, "Modified"), dataSource, id, "Modified", required: false),
                 Text(Column(row, "PrimaryElement")),
                 Text(Column(row, "ParentId")),
                 Text(Column(row, "AttrScope")),
@@ -626,6 +625,72 @@ public sealed class PiSqlClientDataSource(
         }
 
         return [.. order.Select(name => new SourceEventTemplate(name, byName[name]))];
+    }
+
+    /// <summary>Час події в UTC — тим самим правилом, що <see cref="Utc"/>, але з власним ключем відмови.</summary>
+    /// <remarks>
+    /// ⚠ Ключ <c>.eventTimestampUnreadable</c>, а не точковий <c>.timestampUnreadable</c>:
+    /// текст того говорить про <c>Ts</c> і запит значень, а людина тут читає про подію.
+    /// <see cref="DateTime"/> без поясу вважається UTC — те саме явне припущення.
+    /// </remarks>
+    /// <param name="raw">Значення колонки.</param>
+    /// <param name="dataSource">Код джерела.</param>
+    /// <param name="eventId">Ідентифікатор події.</param>
+    /// <param name="field">Колонка: <c>StartTime</c>, <c>EndTime</c>, <c>Modified</c>.</param>
+    /// <param name="required"><c>NULL</c> — відмова, а не <c>null</c>.</param>
+    private static DateTime? EventTime(object? raw, string dataSource, string eventId, string field, bool required)
+        => raw switch
+        {
+            DateTimeOffset zoned => zoned.UtcDateTime,
+            DateTime unzoned => DateTime.SpecifyKind(unzoned, DateTimeKind.Utc),
+            null or DBNull when !required => null,
+            _ => throw EventTimestampUnreadable(dataSource, eventId, field, raw),
+        };
+
+    /// <summary>Відмова «час події не прочитати».</summary>
+    private static BusinessRuleException EventTimestampUnreadable(
+        string dataSource, string eventId, string field, object? raw)
+    {
+        var valueType = raw is null or DBNull ? "NULL" : raw.GetType().Name;
+
+        return new BusinessRuleException(
+            IExternalDataSource.QueryRefusedCode,
+            $"Запит подій джерела {dataSource} повернув {field} типу {valueType} для події «{eventId}»: "
+            + "час прочитати не можна, події вікна не прочитано.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.eventTimestampUnreadable",
+                ["dataSource"] = dataSource,
+                ["eventId"] = eventId,
+                ["field"] = field,
+                ["valueType"] = valueType,
+            });
+    }
+
+    /// <summary>Текст запиту подій або відмова <c>ECR-INT-0422</c> <c>.eventQueryNotConfigured</c>.</summary>
+    /// <param name="key">Спільний ключ.</param>
+    /// <param name="kind">Тип запиту — для відмови.</param>
+    /// <param name="dataSourceCode">Код джерела: спершу його власний ключ (<see cref="ConfiguredQuery"/>).</param>
+    private string EventQueryOrRefuse(string key, string kind, string dataSourceCode)
+    {
+        var configured = ConfiguredQuery(settings, dataSourceCode, key);
+        if (configured is not null)
+        {
+            return configured;
+        }
+
+        throw new BusinessRuleException(
+            IExternalDataSource.QueryRefusedCode,
+            $"Запит типу {kind} для джерела {dataSourceCode} не налаштовано: немає ні "
+            + $"{ScopedKey(dataSourceCode, key)}, ні {key}.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.eventQueryNotConfigured",
+                ["queryKind"] = kind,
+                ["dataSource"] = dataSourceCode,
+                ["configKey"] = key,
+                ["sourceConfigKey"] = ScopedKey(dataSourceCode, key),
+            });
     }
 
     /// <summary>Текст запиту подій із шаблоном, підставленим літералом.</summary>

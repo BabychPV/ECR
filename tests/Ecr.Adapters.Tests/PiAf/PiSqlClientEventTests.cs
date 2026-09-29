@@ -161,7 +161,7 @@ public sealed class PiSqlClientEventTests
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
-    public async Task Подія_без_читабельного_StartTime_це_відмова_0422()
+    public async Task Подія_без_читабельного_StartTime_це_відмова_0422_eventTimestampUnreadable()
     {
         using var table = View();
         table.Rows.Add(Ef1, "A", null, DBNull.Value, End, null, "E", "Category", "V8", null);
@@ -169,8 +169,38 @@ public sealed class PiSqlClientEventTests
         var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Read(table));
 
         Assert.Equal("ECR-INT-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-INT-0422.timestampUnreadable", error.Details!["messageKey"]);
-        Assert.Equal($"{Ef1}|StartTime", error.Details["sourcePath"]);
+        Assert.Equal("err.ECR-INT-0422.eventTimestampUnreadable", error.Details!["messageKey"]);
+        Assert.Equal(
+            (Ef1.ToString(), "StartTime", "NULL", "AF_HP"),
+            (error.Details["eventId"], error.Details["field"], error.Details["valueType"], error.Details["dataSource"]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Кінець_події_рядком_це_відмова_а_не_незакрита_подія()
+    {
+        using var table = View();
+        table.Rows.Add(Ef1, "A", null, Start, "2026-01-28 09:24:50", null, "E", "Category", "V8", null);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Read(table));
+
+        Assert.Equal("err.ECR-INT-0422.eventTimestampUnreadable", error.Details!["messageKey"]);
+        Assert.Equal(("EndTime", "String"), (error.Details["field"], error.Details["valueType"]));
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    public async Task Рядок_без_EventId_це_відмова_0422_а_не_500()
+    {
+        using var table = View();
+        table.Rows.Add(Ef1, "A", null, Start, End, null, "E", "Category", "V8", null);
+        table.Rows.Add(DBNull.Value, "B", null, Start, End, null, "E", "Category", "V9", null);
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(() => Read(table));
+
+        Assert.Equal("ECR-INT-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-INT-0422.eventIdMissing", error.Details!["messageKey"]);
+        Assert.Equal("AF_HP", error.Details["dataSource"]);
     }
 
     [Fact]
@@ -185,8 +215,10 @@ public sealed class PiSqlClientEventTests
             new SourceEventQuery(1, 7, "FlareEvent", From, From.AddDays(1), []), CancellationToken.None));
 
         Assert.Equal("ECR-INT-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-INT-0422.queryKindNotConfigured", error.Details!["messageKey"]);
-        Assert.Equal(("Event", PiSqlClientDataSource.EventQueryKey), (error.Details["queryKind"], error.Details["configKey"]));
+        Assert.Equal("err.ECR-INT-0422.eventQueryNotConfigured", error.Details!["messageKey"]);
+        Assert.Equal(
+            ("Event", "AF_HP", PiSqlClientDataSource.EventQueryKey, "PiSqlClient:AF_HP:EventQuery"),
+            (error.Details["queryKind"], error.Details["dataSource"], error.Details["configKey"], error.Details["sourceConfigKey"]));
         await store.Received(1).FindDataSourceAsync(1, Arg.Any<CancellationToken>());
     }
 
@@ -199,8 +231,10 @@ public sealed class PiSqlClientEventTests
         var error = await Assert.ThrowsAsync<BusinessRuleException>(
             () => source.DiscoverEventTemplatesAsync(1, CancellationToken.None));
 
-        Assert.Equal("err.ECR-INT-0422.queryKindNotConfigured", error.Details!["messageKey"]);
-        Assert.Equal("EventTemplate", error.Details["queryKind"]);
+        Assert.Equal("err.ECR-INT-0422.eventQueryNotConfigured", error.Details!["messageKey"]);
+        Assert.Equal(
+            ("EventTemplate", PiSqlClientDataSource.EventTemplateQueryKey),
+            (error.Details["queryKind"], error.Details["configKey"]));
     }
 
     [Fact]

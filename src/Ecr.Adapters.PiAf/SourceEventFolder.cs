@@ -112,7 +112,7 @@ public sealed class SourceEventFolder
                 return false;
             }
 
-            draft = new Draft(row, row.Template ?? template);
+            draft = new Draft(row, string.IsNullOrWhiteSpace(row.Template) ? template : row.Template);
             byId.Add(row.EventId, draft);
             order.Add(draft);
         }
@@ -179,6 +179,14 @@ public sealed class SourceEventFolder
         => end is { } value && value >= OpenEndSentinel ? null : end;
 
     /// <summary>Область атрибута: <c>P</c> — первинний елемент, решта — подія.</summary>
+    /// <remarks>
+    /// ⚠ Прийнятий дефолт (координатор, 2026-09-29): <c>P</c> або <c>PrimaryElement</c>
+    /// (без регістру, з обрізкою пробілів) — <see cref="SourceEventAttributeScope.PrimaryElement"/>;
+    /// усе інше — <c>E</c>, <c>NULL</c>, порожнє і <b>будь-яке невідоме значення</b> —
+    /// <see cref="SourceEventAttributeScope.Event"/>, без відмови. Контракт тексту
+    /// запиту дає лише <c>E</c>/<c>P</c> (§4.7.2), тож невідоме значення — дефект
+    /// тексту, і атрибут потрапить в область події.
+    /// </remarks>
     /// <param name="raw">Значення колонки <c>AttrScope</c>.</param>
     public static SourceEventAttributeScope Scope(string? raw)
         => raw?.Trim() is { } text
@@ -209,7 +217,7 @@ public sealed class SourceEventFolder
         };
 
     /// <summary>Подія, що збирається.</summary>
-    private sealed class Draft(SourceEventRow first, string template)
+    private sealed class Draft(SourceEventRow first, string templateName)
     {
         public HashSet<(string Name, SourceEventAttributeScope Scope)> Seen { get; } = new(NameAndScope.Instance);
 
@@ -218,7 +226,7 @@ public sealed class SourceEventFolder
         public SourceEvent Build()
             => new(
                 first.EventId,
-                template,
+                templateName,
                 first.EventName,
                 first.StartUtc,
                 OpenEnd(first.EndUtc),

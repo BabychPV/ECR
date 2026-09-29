@@ -4849,6 +4849,14 @@ USING (VALUES
     (N'err.ECR-TMPL-4091', N'en', N'Column would lose its last source', 1),
     (N'err.ECR-TMPL-4091.lastSourceOfPublishedColumn', N'en', N'Column "{columnCode}" of published template version {templateVersion} would be left without a source: it has no template formula and no other active methodology binding. Bind the new source first, then deactivate this one.', 1),
     -- HSE301:C5b ── кінець секції
+
+    -- HSE301:F4e ── події джерела через PI SQL Client (FEATURE-HSE301-VIEW §4.7.2):
+    -- запиту подій немає — стан «не налаштовано», а не порожній список; рядок подій без
+    -- ідентифікатора чи з нечитабельним часом — відмова вікна, а не мовчазний пропуск.
+    (N'err.ECR-INT-0422.eventQueryNotConfigured', N'en', N'No {queryKind} query is configured for source "{dataSource}": set {sourceConfigKey} (or the shared {configKey}) in the environment settings.', 1),
+    (N'err.ECR-INT-0422.eventTimestampUnreadable', N'en', N'The event query of source "{dataSource}" returned {field} of type {valueType} for event "{eventId}". Only datetimeoffset or a date/time type without offset (read as UTC) can be used, so the events of this window are not read.', 1),
+    (N'err.ECR-INT-0422.eventIdMissing', N'en', N'The event query of source "{dataSource}" returned a row without EventId. Without it an event cannot be matched to a document row, so the events of this window are not read: fix the event query in the environment settings.', 1),
+    -- HSE301:F4e ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
