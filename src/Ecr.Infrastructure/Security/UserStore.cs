@@ -511,6 +511,15 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
     }
 
     /// <inheritdoc />
+    public Task<bool> LockRoleForUpdateAsync(int roleId, CancellationToken ct)
+        // ⚠ ROWLOCK — щоб блокування не розповзалося на сторінку і не
+        // зупиняло правку грантів сусідніх ролей. EF обгортає запит у EXISTS
+        // над похідною таблицею — підказки діють на доступ до sec.Role і там.
+        => db.Database
+            .SqlQuery<int>($"SELECT Id AS [Value] FROM sec.Role WITH (UPDLOCK, ROWLOCK) WHERE Id = {roleId}")
+            .AnyAsync(ct);
+
+    /// <inheritdoc />
     public async Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct)
     {
         // ⚠ Носії беруться і за прямим призначенням, і за призначенням на

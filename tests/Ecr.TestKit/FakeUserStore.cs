@@ -330,6 +330,10 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    public Task<bool> LockRoleForUpdateAsync(int roleId, CancellationToken ct)
+        => Task.FromResult(Roles.Any(r => r.Id == roleId));
+
+    /// <inheritdoc />
     public Task<int> RotateStampsForRoleAsync(int roleId, CancellationToken ct)
     {
         var affected = Grants

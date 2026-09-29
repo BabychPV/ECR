@@ -7,6 +7,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
+using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Security;
 
@@ -28,6 +29,45 @@ namespace Ecr.Application.Security;
 public sealed record ResourceGrantDto(
     ResourceKind ResourceKind, int ResourceId, GrantLevel Level, bool IsDeny,
     string? ResourceName = null);
+
+/// <summary>Версія набору грантів ролі — для <c>ETag</c> / <c>If-Match</c>.</summary>
+/// <remarks>
+/// ⚠ Хеш НАБОРУ, а не лічильник: токена конкурентності в <c>sec.Role</c> і
+/// <c>sec.ResourceGrant</c> немає, а міграція поза цією задачею (токен
+/// міграцій черговий). Той самий прийом, що <c>HeaderVersion.Of</c> для шапки
+/// документа (C2). Наслідок чесний: правка, що повернула рівно той самий
+/// набір (A → B → A), конфліктом не вважається — затирати тут нічого.
+///
+/// ⚠ Хешуються лише чотири поля гранта: <c>ResourceName</c> — розв'язана
+/// назва для показу, вона змінюється від перейменування ресурсу, а не від
+/// правки грантів.
+/// </remarks>
+public static class ResourceGrantsVersion
+{
+    /// <summary>Хеш відсортованого набору грантів (hex, 32 символи).</summary>
+    /// <param name="grants">Набір грантів ролі.</param>
+    public static string Of(IEnumerable<ResourceGrantDto> grants)
+    {
+        ArgumentNullException.ThrowIfNull(grants);
+
+        var text = new System.Text.StringBuilder();
+        foreach (var grant in grants
+                     .OrderBy(g => (int)g.ResourceKind)
+                     .ThenBy(g => g.ResourceId)
+                     .ThenBy(g => (int)g.Level)
+                     .ThenBy(g => g.IsDeny))
+        {
+            text.Append(((int)grant.ResourceKind).ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append('|').Append(grant.ResourceId.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append('|').Append(((int)grant.Level).ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .Append('|').Append(grant.IsDeny ? '1' : '0')
+                .Append('\n');
+        }
+
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text.ToString()));
+        return Convert.ToHexString(hash.AsSpan(0, 16));
+    }
+}
 
 /// <summary>Перелік грантів ролі. Право <c>Security.ManageRoles</c>.</summary>
 /// <remarks>
@@ -132,23 +172,55 @@ public sealed class ListResourceGrantsHandler(
 /// відповідь має бути видима одним поглядом. Часткові правки дають стан, у
 /// якому ніхто не скаже напевно, звідки саме взявся доступ, — а це рівно те,
 /// проти чого написане ФВ-6.6.
+///
+/// ⛔ Конкурентність (lost update). Доти два адміністратори, що відкрили
+/// гранти однієї ролі, зберігали по черзі — і другий мовчки затирав набір
+/// першого: заміна цілком не лишала від чужої правки нічого. Тепер клієнт
+/// шле <c>If-Match</c> з версією набору (<see cref="ResourceGrantsVersion"/>,
+/// <c>ETag</c> відповіді <c>GET</c>), і звірка йде ПІД <c>UPDLOCK</c> на рядку
+/// <c>sec.Role</c> у тій самій транзакції, що й запис, штампи й аудит: дві
+/// одночасні заміни з однієї версії — одна <c>204</c>, друга <c>409
+/// ECR-SEC-0409</c>. Без блокування обидві проходять звірку до коміту одна
+/// одної і пишуть обидві (об'єднання наборів — теж втрачена правка).
+///
+/// ⚠ Версія поки НЕОБОВ'ЯЗКОВА: відсутній <c>If-Match</c> — як раніше, із
+/// записом Warning у журнал. Клієнт екрана грантів оновлюється в іншій
+/// гілці (U6a), обов'язковість (<c>422</c>, як C2) вмикається разом із ним.
 /// </remarks>
-public sealed class ReplaceResourceGrantsHandler(
+public sealed partial class ReplaceResourceGrantsHandler(
     IUserStore users,
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IAuditWriter audit,
     IUnitOfWork uow,
-    IClock clock)
+    IClock clock,
+    ILogger<ReplaceResourceGrantsHandler>? logger = null)
 {
-    /// <summary>Замінює набір грантів ролі.</summary>
+    /// <summary>Замінює набір грантів ролі без звірки версії.</summary>
     /// <param name="roleId">Роль.</param>
     /// <param name="grants">Новий набір; порожній — прибрати всі.</param>
     /// <param name="ct">Токен скасування.</param>
+    /// <returns>Версія щойно збереженого набору.</returns>
+    public Task<string> HandleAsync(
+        int roleId, IReadOnlyList<ResourceGrantDto> grants, CancellationToken ct)
+        => HandleAsync(roleId, grants, ifMatch: null, ct);
+
+    /// <summary>Замінює набір грантів ролі.</summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="grants">Новий набір; порожній — прибрати всі.</param>
+    /// <param name="ifMatch">
+    /// Значення <c>If-Match</c> — версія, з якої почалася правка; <c>null</c>
+    /// чи порожнє — без звірки (перехідний режим, див. remarks класу).
+    /// </param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Версія щойно збереженого набору (новий <c>ETag</c>).</returns>
     /// <exception cref="NotFoundException">Ролі немає.</exception>
     /// <exception cref="BusinessRuleException">Дублікат ресурсу в наборі.</exception>
-    public async Task HandleAsync(
-        int roleId, IReadOnlyList<ResourceGrantDto> grants, CancellationToken ct)
+    /// <exception cref="ConcurrencyConflictException">
+    /// Версія застаріла — <c>ECR-SEC-0409</c>, актуальна у <c>details.version</c>.
+    /// </exception>
+    public async Task<string> HandleAsync(
+        int roleId, IReadOnlyList<ResourceGrantDto> grants, string? ifMatch, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(grants);
 
@@ -195,6 +267,76 @@ public sealed class ReplaceResourceGrantsHandler(
                 });
         }
 
+        var expected = Integration.ListCollectionSchedulesHandler.NormalizeETag(ifMatch);
+        if (expected is null && logger is not null)
+        {
+            LogWithoutIfMatch(logger, roleId);
+        }
+
+        // ⛔ Звірка, заміна, штампи й аудит — ОДНА транзакція під UPDLOCK на
+        // рядку ролі (C4 для аудиту). Блокування береться ПЕРШИМ: друга
+        // одночасна заміна чекає тут, а не після звірки, і читає вже
+        // зафіксований набір першої.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await LockAndCheckVersionAsync(roleId, expected, token).ConfigureAwait(false);
+
+                await WriteAsync(role, roleId, grants, actorId, token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
+
+        return ResourceGrantsVersion.Of(grants);
+    }
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "PUT грантів ролі {RoleId} без If-Match: звірки версії не було, можлива втрачена правка.")]
+    private static partial void LogWithoutIfMatch(ILogger logger, int roleId);
+
+    private async Task LockAndCheckVersionAsync(int roleId, string? expected, CancellationToken ct)
+    {
+        if (!await users.LockRoleForUpdateAsync(roleId, ct).ConfigureAwait(false))
+        {
+            throw new NotFoundException(
+                ErrorCodes.SecurityPrincipalNotFound, $"Ролі {roleId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
+                    ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        if (expected is null)
+        {
+            return;
+        }
+
+        // ⚠ Читання ПІСЛЯ блокування: під RCSI знімок береться на початку
+        // оператора, тож він бачить заміну, що зафіксувалася, поки ми чекали.
+        var actual = ResourceGrantsVersion.Of(
+            await users.ListGrantsAsync(roleId, ct).ConfigureAwait(false));
+
+        if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase))
+        {
+            // ⚠ Ключ — загальний `err.ECR-SEC-0409` («конфлікт із налаштуваннями
+            // безпеки»): окремого ключа «гранти застаріли» в каталозі немає, а
+            // нових ключів ця правка не заводить. Актуальна версія — у details.
+            throw new ConcurrencyConflictException(
+                ErrorCodes.SecurityConflict,
+                $"Гранти ролі {roleId} змінили після того, як їх прочитали.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0409",
+                    ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["version"] = actual,
+                });
+        }
+    }
+
+    private async Task WriteAsync(
+        RoleView role, int roleId, IReadOnlyList<ResourceGrantDto> grants, int actorId, CancellationToken ct)
+    {
         await users.ReplaceGrantsAsync(roleId, grants, ct).ConfigureAwait(false);
 
         // ⛔ Обов'язково і в тій самій транзакції. Профіль доступу кешується
@@ -210,23 +352,19 @@ public sealed class ReplaceResourceGrantsHandler(
         // ⚠ Зміна доступу пишеться в журнал безпеки ЗАВЖДИ і повним набором:
         // «хто тепер це бачить» відновлюється лише так. Різницю не рахуємо —
         // попередній стан уже є в попередньому записі журналу.
-        // ⛔ C4: подія, гранти й штампи — одним комітом.
-        await uow.ExecuteInTransactionAsync(
-            async token =>
-            {
-                await audit.WriteSecurityEventAsync(
-                    new SecurityEventRecord(
-                        clock.UtcNow,
-                        "ResourceGrantsReplaced",
-                        TargetUserId: null,
-                        TargetRoleId: roleId,
-                        DetailsJson: JsonSerializer.Serialize(new { role = role.Code, grants }),
-                        ChangedByUserId: actorId,
-                        CorrelationId: null),
-                    token).ConfigureAwait(false);
-
-                await uow.SaveChangesAsync(token).ConfigureAwait(false);
-            },
+        // ⛔ C4: подія, гранти й штампи — одним комітом (транзакція — у
+        // виклику, разом зі звіркою версії).
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                "ResourceGrantsReplaced",
+                TargetUserId: null,
+                TargetRoleId: roleId,
+                DetailsJson: JsonSerializer.Serialize(new { role = role.Code, grants }),
+                ChangedByUserId: actorId,
+                CorrelationId: null),
             ct).ConfigureAwait(false);
+
+        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

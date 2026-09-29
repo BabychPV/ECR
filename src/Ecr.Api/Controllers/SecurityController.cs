@@ -177,12 +177,23 @@ public sealed class SecurityController(
     /// доступ до проєкту, аркуша чи таблиці вимагає гранта, а створити грант
     /// не було чим. Права відповідають на питання «що людина вміє», гранти —
     /// «до чого саме»; без другої відповіді перша нічого не відкриває.
+    ///
+    /// ⚠ Версія набору — у заголовку <c>ETag</c> (тіло лишається масивом, щоб
+    /// не ламати наявних споживачів); її повертають у <c>If-Match</c> на
+    /// <c>PUT</c>.
     /// </remarks>
     [HttpGet("roles/{id:int}/grants")]
     [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.ResourceGrantDto>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ListGrants(int id, CancellationToken ct)
-        => Ok(await listGrants.HandleAsync(id, ct).ConfigureAwait(false));
+    {
+        var grants = await listGrants.HandleAsync(id, ct).ConfigureAwait(false);
+
+        Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.ETag] =
+            $"\"{Ecr.Application.Security.ResourceGrantsVersion.Of(grants)}\"";
+
+        return Ok(grants);
+    }
 
     /// <summary>
     /// Замінює набір грантів ролі цілком. Право <c>Security.ManageRoles</c>.
@@ -191,15 +202,27 @@ public sealed class SecurityController(
     /// ⚠ Саме заміна набору, а не правка по одному: гранти — це відповідь на
     /// питання «що покриває роль», і вона має бути видима одним поглядом.
     /// Часткові правки лишають стан, у якому джерело доступу не відновлюється.
+    ///
+    /// ⛔ <c>If-Match</c> із <c>ETag</c> відповіді <c>GET</c>: набір змінили
+    /// після читання — <c>409 ECR-SEC-0409</c> (актуальна версія в
+    /// <c>details.version</c>), а не мовчазне затирання чужої правки. Без
+    /// заголовка — поки як раніше (перехідний режим до оновлення клієнта).
+    /// Нова версія — у <c>ETag</c> відповіді <c>204</c>.
     /// </remarks>
     [HttpPut("roles/{id:int}/grants")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> ReplaceGrants(
         int id, [FromBody] ReplaceGrantsRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        await replaceGrants.HandleAsync(id, request.Grants, ct).ConfigureAwait(false);
+        var ifMatch = Request.Headers[Microsoft.Net.Http.Headers.HeaderNames.IfMatch].ToString();
+
+        var version = await replaceGrants.HandleAsync(id, request.Grants, ifMatch, ct).ConfigureAwait(false);
+
+        Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.ETag] = $"\"{version}\"";
 
         return NoContent();
     }

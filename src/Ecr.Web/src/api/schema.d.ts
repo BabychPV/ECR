@@ -9903,6 +9903,10 @@ export interface paths {
          *     доступ до проєкту, аркуша чи таблиці вимагає гранта, а створити грант
          *     не було чим. Права відповідають на питання «що людина вміє», гранти —
          *     «до чого саме»; без другої відповіді перша нічого не відкриває.
+         *
+         *     ⚠ Версія набору — у заголовку `ETag` (тіло лишається масивом, щоб
+         *     не ламати наявних споживачів); її повертають у `If-Match` на
+         *     `PUT`.
          */
         get: {
             parameters: {
@@ -9944,6 +9948,12 @@ export interface paths {
          * @description ⚠ Саме заміна набору, а не правка по одному: гранти — це відповідь на
          *     питання «що покриває роль», і вона має бути видима одним поглядом.
          *     Часткові правки лишають стан, у якому джерело доступу не відновлюється.
+         *
+         *     ⛔ `If-Match` із `ETag` відповіді `GET`: набір змінили
+         *     після читання — `409 ECR-SEC-0409` (актуальна версія в
+         *     `details.version`), а не мовчазне затирання чужої правки. Без
+         *     заголовка — поки як раніше (перехідний режим до оновлення клієнта).
+         *     Нова версія — у `ETag` відповіді `204`.
          */
         put: {
             parameters: {
@@ -9968,6 +9978,28 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
                 };
             };
         };

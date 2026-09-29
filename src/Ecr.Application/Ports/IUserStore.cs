@@ -159,6 +159,19 @@ public interface IUserStore
         int roleId, IReadOnlyList<Security.ResourceGrantDto> grants, CancellationToken ct);
 
     /// <summary>
+    /// Бере <c>UPDLOCK</c> на рядку ролі до кінця поточної транзакції.
+    /// </summary>
+    /// <param name="roleId">Роль.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns><c>false</c> — ролі немає.</returns>
+    /// <remarks>
+    /// ⛔ Має сенс лише ВСЕРЕДИНІ явної транзакції: поза нею блокування
+    /// звільняється разом із самим <c>SELECT</c>. Серіалізує заміни набору
+    /// грантів однієї ролі — звірка версії й запис стають атомарними.
+    /// </remarks>
+    public Task<bool> LockRoleForUpdateAsync(int roleId, CancellationToken ct);
+
+    /// <summary>
     /// Прокручує <c>SecurityStamp</c> усім носіям ролі.
     /// </summary>
     /// <param name="roleId">Роль, доступ якої змінився.</param>
