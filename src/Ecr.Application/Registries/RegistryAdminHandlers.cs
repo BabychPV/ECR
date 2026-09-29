@@ -385,10 +385,26 @@ public sealed class DeleteRegistryEntryHandler(
                 });
         }
 
+        // ⛔ D-211: запис External-довідника вручну не видаляється — master AF.
+        ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
         // ⛔ RT-12 (ФВ-8.16, D-155): частини композиції з `Cascade` видаляються разом із батьком —
         // на всю глибину (потік → кейс → рядки складу). Частина з `Restrict` у набір не входить і
         // лишається посиланням ззовні — наявна відмова 409 `entryReferenced` нижче.
         var parts = await CascadePartsAsync(entry, ct).ConfigureAwait(false);
+
+        // ⛔ D-211 + RT-12: каскад у External-довідник — та сама ручна правка його записів, лише
+        // обхідним шляхом через батька. Опис кожного зачепленого довідника читається тут, до
+        // перевірки посилань, і нижче лише отримує нову ревізію.
+        var partRegistries = new List<RegistryDef>();
+        foreach (var partRegistryId in parts.Select(p => p.RegistryDefId).Distinct().Where(id => id != definition.Id))
+        {
+            if (await registries.FindDefinitionByIdAsync(partRegistryId, ct).ConfigureAwait(false) is { } partRegistry)
+            {
+                ExternalRegistryGuard.EnsureManualEditAllowed(partRegistry);
+                partRegistries.Add(partRegistry);
+            }
+        }
 
         // ⚠ Без частин — рівно наявний підрахунок; з частинами — посилання ЗЗОВНІ набору: частина
         // посилається на батька полем композиції, а її видалення ще не збережено, тож запит до бази
@@ -436,14 +452,9 @@ public sealed class DeleteRegistryEntryHandler(
             part.SoftDelete(userId, clock.UtcNow);
         }
 
-        var partRegistries = new List<RegistryDef>();
-        foreach (var partRegistryId in parts.Select(p => p.RegistryDefId).Distinct().Where(id => id != definition.Id))
+        foreach (var partRegistry in partRegistries)
         {
-            if (await registries.FindDefinitionByIdAsync(partRegistryId, ct).ConfigureAwait(false) is { } partRegistry)
-            {
-                partRegistry.BumpDataRevision();
-                partRegistries.Add(partRegistry);
-            }
+            partRegistry.BumpDataRevision();
         }
 
         // ⛔ Слід у журналі структурних змін — як у сусідньої дії над тим самим

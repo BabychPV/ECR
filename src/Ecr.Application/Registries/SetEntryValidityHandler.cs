@@ -71,11 +71,19 @@ public sealed class SetEntryValidityHandler(
         var previousFrom = entry.ValidFrom;
         var previousTo = entry.ValidTo;
 
+        // ⚠ Опис — ДО зміни вікна: він потрібен гарду D-211.
+        var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
+
+        // ⛔ D-211: вікно чинності запису External-довідника — теж дані AF.
+        if (definition is not null)
+        {
+            ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+        }
+
         // Порожнє вікно відхиляє сутність (ECR-REG-0422) — до будь-яких змін
         // у документах.
         entry.SetValidity(from, to);
 
-        var definition = await registries.FindDefinitionByIdAsync(entry.RegistryDefId, ct).ConfigureAwait(false);
         definition?.BumpDataRevision();
 
         int affected = 0;

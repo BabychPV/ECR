@@ -131,6 +131,10 @@ public sealed class ImportRegistryEntriesHandler(
                 $"Довідника «{registryCode}» не існує.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = registryCode });
 
+        // ⛔ D-211: і прев'ю (dryRun), і застосування — прев'ю, яке «проходить», обіцяло б запис,
+        // якого не буде.
+        ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
         var records = CsvReader.Parse(content);
         var header = records.Count > 0 ? records[0] : [];
         var codeColumn = IndexOf(header, "code");

@@ -87,6 +87,9 @@ public sealed partial class RegistryBatchHandler(
                 $"Довідника «{registryCode}» не існує.",
                 new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REG-0404.registry", ["registryCode"] = registryCode });
 
+        // ⛔ D-211: ДО dryRun — пробний прогін External-довідника теж відмова, а не «усе пройде».
+        ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
         var states = items.Select(i => new RowState(i)).ToList();
         await ResolveAsync(definition, states, ct).ConfigureAwait(false);
         await CheckVersionsAsync(states, ct).ConfigureAwait(false);

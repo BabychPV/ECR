@@ -103,6 +103,9 @@ public sealed class UpsertRegistryEntryHandler(
                     ["registryDefId"] = dto.RegistryDefId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
 
+        // ⛔ D-211: записи External-довідника — лише синком з AF. Гард → запис → правила.
+        ExternalRegistryGuard.EnsureManualEditAllowed(definition);
+
         // Код валідується як EcrCode (D-89) — тим самим правилом, що коди
         // колонок і шаблонів. Окреме «майже таке саме» правило для довідників
         // розійшлося б із рештою системи на першому ж символі.
