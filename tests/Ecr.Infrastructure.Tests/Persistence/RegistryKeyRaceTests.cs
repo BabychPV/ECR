@@ -218,6 +218,11 @@ public sealed class RegistryKeyRaceTests(SqlServerFixture sql)
         public Task<IReadOnlyList<RegistryKeyDef>> ListActiveKeysAsync(int registryDefId, CancellationToken ct)
             => inner.ListActiveKeysAsync(registryDefId, ct);
 
+        public Task<IReadOnlyList<RegistryKeyDef>> ListKeysForUpdateAsync(int registryDefId, CancellationToken ct)
+            => inner.ListKeysForUpdateAsync(registryDefId, ct);
+
+        public void AddKey(RegistryKeyDef key) => inner.AddKey(key);
+
         public Task<IReadOnlyList<RegistryValue>> ListCurrentValuesAsync(RegistryEntry entry, CancellationToken ct)
             => inner.ListCurrentValuesAsync(entry, ct);
 

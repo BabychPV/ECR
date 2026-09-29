@@ -20,9 +20,12 @@ internal static class RegistryDraft
         var content = JsonSerializer.Deserialize<RegistryDefinitionDraftContent>(draft.ContentJson, Json)
                       ?? new RegistryDefinitionDraftContent([], []);
 
+        // ⚠ Чернетка, збережена до RT-11, ключів і режиму коду не має — і це `null` («без змін»),
+        // а не порожній перелік: інакше її публікація вимкнула б усі ключі довідника.
         return new RegistryDefinitionDraftDto(
             draft.BaseDefinitionVersion, content.Fields, content.Rules, draft.Reason,
-            draft.UpdatedAt, draft.UpdatedByUserId, Convert.ToBase64String(draft.RowVersion));
+            draft.UpdatedAt, draft.UpdatedByUserId, Convert.ToBase64String(draft.RowVersion),
+            content.Keys, content.CodeMode);
     }
 
     internal static NotFoundException NotFound(string code)
@@ -61,7 +64,9 @@ internal static class RegistryDraft
 /// <summary>Вміст чернетки: те саме, що приймає пряме збереження опису.</summary>
 internal sealed record RegistryDefinitionDraftContent(
     IReadOnlyList<RegistryFieldSaveDto> Fields,
-    IReadOnlyList<RegistryRuleSaveDto> Rules);
+    IReadOnlyList<RegistryRuleSaveDto> Rules,
+    IReadOnlyList<RegistryKeySaveDto>? Keys = null,
+    Domain.Enums.RegistryCodeMode? CodeMode = null);
 
 /// <summary>Чернетка опису довідника, якщо вона є. Право <c>Registry.View</c>.</summary>
 public sealed class GetRegistryDefinitionDraftHandler(
@@ -121,7 +126,9 @@ public sealed class SaveRegistryDefinitionDraftHandler(
         RegistryDraft.RequireVersion(draft, request.RowVersion, definition.Code);
 
         var content = JsonSerializer.Serialize(
-            new RegistryDefinitionDraftContent(request.Fields ?? [], request.Rules ?? []), RegistryDraft.Json);
+            new RegistryDefinitionDraftContent(
+                request.Fields ?? [], request.Rules ?? [], request.Keys, request.CodeMode),
+            RegistryDraft.Json);
 
         // Збереження чернетки перебазовує її на поточну версію: клієнт надсилає
         // ПОВНИЙ стан, прочитаний разом з опублікованим описом.
@@ -279,7 +286,8 @@ public sealed class PublishRegistryDefinitionHandler(
         return await apply
             .ApplyAsync(
                 definition,
-                new SaveRegistryDefinitionDto(content.Fields, content.Rules, draft.Reason),
+                new SaveRegistryDefinitionDto(
+                    content.Fields, content.Rules, draft.Reason, content.Keys, content.CodeMode),
                 "PublishDefinition",
                 userId,
                 ct)

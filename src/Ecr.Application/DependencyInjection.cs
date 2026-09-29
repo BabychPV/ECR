@@ -248,6 +248,7 @@ public static class DependencyInjection
         // docs/build/FEATURE-REGISTRY-TABLES.md §9.0 і §9.1.
         // RT: keys
         services.AddScoped<Registries.Keys.RegistryKeyService>(); // RT-10a
+        services.AddScoped<Registries.Keys.CheckRegistryKeyHandler>(); // RT-11
 
         // RT: data
         services.AddScoped<Registries.RegistryEntryWriter>(); // S6

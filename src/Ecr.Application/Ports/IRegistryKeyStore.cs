@@ -24,6 +24,18 @@ public interface IRegistryKeyStore
     public Task<IReadOnlyList<RegistryKeyDef>> ListActiveKeysAsync(int registryDefId, CancellationToken ct);
 
     /// <summary>
+    /// Усі ключі довідника — і вимкнені — з полями, упорядковані за <c>Id</c>, <b>з відстеженням</b>
+    /// (RT-11): опис змінює їм назву й активність.
+    /// </summary>
+    /// <param name="registryDefId">Довідник.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<RegistryKeyDef>> ListKeysForUpdateAsync(int registryDefId, CancellationToken ct);
+
+    /// <summary>Ставить новий ключ довідника на вставку (RT-11, опис довідника).</summary>
+    /// <param name="key">Ключ; його поля вже збережені.</param>
+    public void AddKey(RegistryKeyDef key);
+
+    /// <summary>
     /// Значення полів запису такими, якими їх побачить збереження: з бази — відстежувані
     /// (зі змінами в пам'яті) — і щойно додані, ще не збережені.
     /// </summary>

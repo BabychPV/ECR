@@ -40,6 +40,17 @@ public sealed class RegistryKeyStore(EcrDbContext db) : IRegistryKeyStore
             .ToListAsync(ct).ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<RegistryKeyDef>> ListKeysForUpdateAsync(int registryDefId, CancellationToken ct)
+        => await db.RegistryKeyDefs
+            .Include(k => k.Fields)
+            .Where(k => k.RegistryDefId == registryDefId)
+            .OrderBy(k => k.Id)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+    /// <inheritdoc />
+    public void AddKey(RegistryKeyDef key) => db.RegistryKeyDefs.Add(key);
+
+    /// <inheritdoc />
     /// <remarks>
     /// ⚠ Запит до бази сам по собі не бачить значень, доданих у цій одиниці роботи (нове поле
     /// наявного запису, новий запис цілком), — їх дає <c>Local</c>. Навпаки, <c>Local</c> не має

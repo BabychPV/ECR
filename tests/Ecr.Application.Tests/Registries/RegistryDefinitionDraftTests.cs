@@ -34,6 +34,7 @@ public sealed class RegistryDefinitionDraftTests
 
     // HSE301 U1: поля тут без одиниць, довідник одиниць не читається.
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+    private readonly IRegistryKeyStore _keys = Substitute.For<IRegistryKeyStore>();
     private readonly RegistryDef _registry;
 
     public RegistryDefinitionDraftTests()
@@ -112,9 +113,43 @@ public sealed class RegistryDefinitionDraftTests
         Allow("Registry.View", "Registry.EditDefinition");
 
         var request = DraftRequest("Renamed", null);
-        await Assert.ThrowsAsync<AccessDeniedException>(() => new SaveRegistryDefinitionHandler(
-                _registries, _uow, _audit, _access, _user, _clock, _units)
+        await Assert.ThrowsAsync<AccessDeniedException>(() => Apply()
             .HandleAsync("PERMIT", new(request.Fields, request.Rules, request.Reason), default));
+    }
+
+    [Fact]
+    [Trait("Directive", "BE-24")]
+    [Trait("Requirement", "ФВ-8.15")]
+    public async Task Чернетка_несе_ключі_й_режим_коду_до_публікації()
+    {
+        // RT-11: ключі й режим коду — частина опису, тож і чернетки. Чернетка, що їх губить,
+        // опублікувала б опис без ключа, який людина щойно завела.
+        RegistryDefinitionDraft? added = null;
+        _drafts.Add(Arg.Do<RegistryDefinitionDraft>(d => added = d));
+
+        var request = DraftRequest("Number", rowVersion: null) with
+        {
+            Keys = [new RegistryKeySaveDto(null, "BY_NUMBER", Text("By number"), ["Number"], false, true, true)],
+            CodeMode = RegistryCodeMode.Auto,
+        };
+        await SaveDraft().HandleAsync("PERMIT", request, default);
+
+        Assert.NotNull(added);
+        typeof(RegistryDefinitionDraft).GetProperty(nameof(RegistryDefinitionDraft.RowVersion))!.SetValue(added, Version1);
+        _drafts.FindAsync(RegistryId, Arg.Any<CancellationToken>()).Returns(added);
+
+        var state = await new GetRegistryDefinitionDraftHandler(_registries, _drafts, _access, _user)
+            .HandleAsync("PERMIT", default);
+        var key = Assert.Single(state.Draft!.Keys!);
+        Assert.Equal(["Number"], key.FieldCodes);
+        Assert.Equal(RegistryCodeMode.Auto, state.Draft.CodeMode);
+
+        await Publish().HandleAsync("PERMIT", new(Convert.ToBase64String(Version1)), default);
+
+        // Режим коду застосовано (записів у довіднику немає), новий ключ дійшов до опису —
+        // створюється він у транзакції, коли поле збережене.
+        Assert.Equal(RegistryCodeMode.Auto, _registry.CodeMode);
+        _keys.Received(1).AddKey(Arg.Is<RegistryKeyDef>(k => k.Code == "BY_NUMBER"));
     }
 
     [Theory]
@@ -215,7 +250,11 @@ public sealed class RegistryDefinitionDraftTests
         => new(_registries, _drafts, _uow, _audit, _access, _user, _clock);
 
     private PublishRegistryDefinitionHandler Publish()
-        => new(_registries, _drafts, new SaveRegistryDefinitionHandler(_registries, _uow, _audit, _access, _user, _clock, _units), _access, _user);
+        => new(_registries, _drafts, Apply(), _access, _user);
+
+    private SaveRegistryDefinitionHandler Apply()
+        => new(_registries, _uow, _audit, _access, _user, _clock, _units, _keys,
+            new Ecr.Application.Registries.Keys.RegistryKeyService(_keys, _uow));
 
     private void Allow(params string[] permissions)
     {

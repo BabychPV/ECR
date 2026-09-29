@@ -47,6 +47,7 @@ public sealed class RegistryCompositionTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+    private readonly IRegistryKeyStore _keys = Substitute.For<IRegistryKeyStore>();
 
     public RegistryCompositionTests()
     {
@@ -194,8 +195,99 @@ public sealed class RegistryCompositionTests
             new long[] { 1, 2, 10, 20, 100, 200, 300, 400, 401 }.Where(visible).ToArray());
     }
 
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.16")]
+    public async Task Нове_поле_композиції_не_Lookup_через_опис_422()
+    {
+        // RT-11: `relationKind` приходить запитом опису, і `ApplyFields` кличе
+        // `RegistryCompositionRules.Compose`, а не `ComposeInto` домену: інакше поле String з
+        // композицією давало б InvalidOperationException, тобто 500 замість 422.
+        var stream = Registry("STREAM", StreamId);
+        var @case = Registry("STREAM_CASE", CaseId);
+        Known(stream, @case);
+
+        var request = Request(@case) with
+        {
+            Fields =
+            [
+                .. Request(@case).Fields,
+                new RegistryFieldSaveDto(
+                    null, "STREAM", Text("STREAM"), nameof(CellDataType.String), 2, IsRequired: true,
+                    IsKey: false, LookupRegistryDefId: StreamId, UnitId: null,
+                    RelationKind: RegistryRelationKind.Composition, OnParentDelete: ParentDeletePolicy.Cascade),
+            ],
+        };
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Saves().HandleAsync("STREAM_CASE", request, default));
+
+        Assert.Equal("ECR-REG-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.compositionNotLookup", error.Details!["messageKey"]);
+        await _uow.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.16")]
+    public async Task Нове_поле_композиції_Lookup_через_опис_стає_частиною_батька()
+    {
+        // RT-11: порожній довідник — нове поле композиції обов'язкове (§4.8) і приймається.
+        var stream = Registry("STREAM", StreamId);
+        var @case = Registry("STREAM_CASE", CaseId);
+        Known(stream, @case);
+
+        var request = Request(@case) with
+        {
+            Fields =
+            [
+                .. Request(@case).Fields,
+                new RegistryFieldSaveDto(
+                    null, "STREAM", Text("STREAM"), nameof(CellDataType.Lookup), 2, IsRequired: true,
+                    IsKey: false, LookupRegistryDefId: StreamId, UnitId: null,
+                    RelationKind: RegistryRelationKind.Composition, OnParentDelete: ParentDeletePolicy.Cascade),
+            ],
+            CodeMode = RegistryCodeMode.Auto,
+        };
+
+        await Saves().HandleAsync("STREAM_CASE", request, default);
+
+        var field = Assert.Single(@case.Fields, f => f.Code == "STREAM");
+        Assert.Equal(RegistryRelationKind.Composition, field.RelationKind);
+        Assert.Equal(ParentDeletePolicy.Cascade, field.OnParentDelete);
+        Assert.Equal(RegistryCodeMode.Auto, @case.CodeMode);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage8)]
+    [Trait("Requirement", "ФВ-8.16")]
+    public async Task Відношення_наявного_поля_не_змінюється()
+    {
+        // Наявне посилання, яке раптом стало композицією, сховало б наявні записи без батька.
+        var stream = Registry("STREAM", StreamId);
+        var @case = Registry("STREAM_CASE", CaseId);
+        var link = new RegistryFieldDef(CaseId, EcrCode.Create("STREAM"), Text("STREAM"), CellDataType.Lookup, 2);
+        SetId(link, 322);
+        link.PointTo(StreamId);
+        @case.AddField(link);
+        Known(stream, @case);
+
+        var request = Request(@case);
+        request = request with
+        {
+            Fields = [.. request.Fields.Select(f => f.Id == 322 ? f with { RelationKind = RegistryRelationKind.Composition } : f)],
+        };
+
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Saves().HandleAsync("STREAM_CASE", request, default));
+
+        Assert.Equal("err.ECR-REG-0422.relationKindImmutable", error.Details!["messageKey"]);
+        Assert.Equal(RegistryRelationKind.Reference, link.RelationKind);
+    }
+
     private SaveRegistryDefinitionHandler Saves()
-        => new(_registries, _uow, _audit, _access, _user, _clock, _units);
+        => new(_registries, _uow, _audit, _access, _user, _clock, _units, _keys,
+            new Ecr.Application.Registries.Keys.RegistryKeyService(_keys, _uow));
 
     private void Known(params RegistryDef[] registries)
     {

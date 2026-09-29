@@ -4585,6 +4585,19 @@ USING (VALUES
     (N'err.ECR-REG-4092.keyTakenConcurrently', N'en', N'Another entry took the key {keyText} a moment ago. Refresh the list and try again.', 1),
     (N'err.ECR-REG-4092.keyDuplicateInFile', N'en', N'Another row of this file has the same key.', 1),
     (N'err.ECR-REG-4092.keyCodeMismatch', N'en', N'The key of this row belongs to a different entry than its code.', 1),
+    -- RT-11: ключі, композиція й режим коду в описі довідника (D-151…D-155, D-157), дублікати на даних (§4.5).
+    (N'err.ECR-REG-4092.existingDuplicates', N'en', N'Key {key} cannot be enabled: {groups} of its values are already shared by several entries. Fix the duplicates first.', 1),
+    (N'err.ECR-REG-0404.key', N'en', N'Registry "{registryCode}" has no key {keyId}.', 1),
+    (N'err.ECR-REG-0422.keyFieldCount', N'en', N'A key consists of 1 to {max} fields.', 1),
+    (N'err.ECR-REG-0422.keyFieldUnknown', N'en', N'Registry "{registryCode}" has no field "{fieldCode}".', 1),
+    (N'err.ECR-REG-0422.keyFieldRepeated', N'en', N'Field "{fieldCode}" appears in the key more than once.', 1),
+    (N'err.ECR-REG-0422.keyFieldTypeNotAllowed', N'en', N'Field "{fieldCode}" is {dataType} and cannot be part of a key: its value is not stored in the entry.', 1),
+    (N'err.ECR-REG-0422.keyFieldNotRequired', N'en', N'Field "{fieldCode}" is optional, but every field of the primary key must be required.', 1),
+    (N'err.ECR-REG-0422.keyImmutable', N'en', N'Key {keyCode} cannot be changed: add a new key and disable this one.', 1),
+    (N'err.ECR-REG-0422.keyCodeTaken', N'en', N'This registry already has a key {keyCode}.', 1),
+    (N'err.ECR-REG-0422.primaryKeyTwice', N'en', N'Registry "{registryCode}" would have more than one active primary key.', 1),
+    (N'err.ECR-REG-0422.codeModeImmutable', N'en', N'The entry code mode of registry "{registryCode}" cannot be changed: it already has entries with their own codes.', 1),
+    (N'err.ECR-REG-0422.relationKindImmutable', N'en', N'The relation of field "{fieldCode}" to its parent cannot be changed: add a new field.', 1),
 
     -- RT: data
     -- RT-12 (ФВ-8.16, D-155, D-157): обмеження опису композиції й автоматичний код запису.

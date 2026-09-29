@@ -3250,7 +3250,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `ECR-REG-0409` | 409 | видалення запису, на який посилаються дані (ФВ-8.6) |
 | `ECR-REG-0422` | 422 | перемикання `SourceKind` у відкритому періоді (ФВ-8.9) |
 | `ECR-REG-4091` | 409 | довідник із таким кодом уже є |
-| `ECR-REG-4092` | 409 | конфлікт складеного ключа довідника (ФВ-8.15, D-151): інший живий запис уже має ті самі значення полів ключа; для темпорального довідника — у вікні чинності, що перетинається. Випадок каже `messageKey`: `keyTaken`, `keyWindowOverlap` (RT-10a); подробиці `key`, `keyText`, `entryId`, `entryCode` конфліктного запису |
+| `ECR-REG-4092` | 409 | конфлікт складеного ключа довідника (ФВ-8.15, D-151): інший живий запис уже має ті самі значення полів ключа; для темпорального довідника — у вікні чинності, що перетинається. Випадок каже `messageKey`: `keyTaken`, `keyWindowOverlap` (RT-10a); подробиці `key`, `keyText`, `entryId`, `entryCode` конфліктного запису. `existingDuplicates` (RT-11) — публікація опису з новим або знову ввімкненим ключем на даних, де кілька живих записів уже мають однакове значення ключа; подробиці `key`, `groups`, `checked`, `sample` (до 20 груп `{keyText, entries:[{id, code}]}`), той самий алгоритм, що `POST /registries/{code}/keys/check` |
 | `ECR-UOM-0404` | 404 | одиниці з таким кодом немає в довіднику |
 | `ECR-UOM-0422` | 422 | конверсія одиниць неможлива. Заголовок нейтральний, випадок каже `messageKey`-подробиця: різні розмірності (ФВ-16.3, `incompatibleDimensions`), нульовий множник одиниці на конверсії (`zeroFactor`), явна конверсія не для цієї пари (`explicitConversionMismatch`), множник ≤ 0 на заведенні чи зміні одиниці (`factorMustBePositive`, BE-15) |
 | `ECR-UOM-4221` | 422 | контекстний коефіцієнт у `uom.Conversion` (ФВ-16.5) |
@@ -3570,6 +3570,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `GET` | `/api/v1/registries/{code}/usage` | `Registry.EditDefinition` | 8 |
 | `POST` | `/api/v1/registries/{code}/entries/import?dryRun=` | `Registry.EditData` | 8 |
 | `POST` | `/api/v1/registries` | `Registry.EditDefinition` | 8 |
+| `POST` | `/api/v1/registries/{code}/keys/check` | `Registry.EditDefinition` | 8 |
 | `GET` | `/api/v1/reports` | `Report.ViewRegulatory` | 5 |
 | `POST` | `/api/v1/reports` | `Report.EditDefinition` | 5 |
 | `POST` | `/api/v1/reports/{id}/versions` | `Report.EditDefinition` | 5 |
@@ -3581,6 +3582,25 @@ public sealed class NotFoundException(string errorCode, string message)
 > дають). `GET /units/{id}/usage` і `GET /registries/{code}/usage` — `kind`
 > лише з `UsageKinds` (`Ecr.Application/Common/UsageKinds.cs`), значення на
 > дроті незмінні.
+
+> ✎ 2026-09-29 (RT-11, FEATURE-REGISTRY-TABLES §4.1, §4.8, §7.1): опис довідника
+> (`GET`/`PUT …/definition`, `…/definition/draft`, `…/definition/publish`) несе
+> `keys[]` (`RegistryKeyDto`/`RegistryKeySaveDto`: `code`, `nameL10n`,
+> `fieldCodes[]`, `isPrimary`, `ignoreCase`, `isActive`), `codeMode`
+> (`Manual`/`Auto`) і `fields[].relationKind`/`fields[].onParentDelete`; у
+> відповіді композиція — `relations[].kind = Composition` з `onParentDelete`.
+> У запиті `keys = null` і `codeMode = null` означають «без змін»; ключ, якого
+> немає в переліку, вимикається. Склад, `isPrimary`, `ignoreCase` ключа і
+> відношення поля не змінюються (`422 ECR-REG-0422 keyImmutable`,
+> `relationKindImmutable`), режим коду — лише в довіднику без записів
+> (`codeModeImmutable`). Публікація ключа на даних із дублікатами —
+> `409 ECR-REG-4092 existingDuplicates`; без дублікатів рядки
+> `dic.RegistryEntryKey` заповнюються в тій самій транзакції.
+> `POST …/keys/check` `{fieldCodes[], ignoreCase}` →
+> `{checked, groups, sample[≤20]:{keyText, entries:[{id, code}]}}` — той самий
+> алгоритм до збереження. `GET …/entries` не пропонує частин композиції,
+> батько яких невидимий на дату, і вимагає `asOf`, якщо темпоральний хоч один
+> батько ланцюжка.
 
 > **`GET /jobs?mine=true` — межа доступу, а не фільтр зручності** (`BE-08`,
 > `Q-156`). Параметри переліку: `state` (`Queued`, `Running`, `Succeeded`,

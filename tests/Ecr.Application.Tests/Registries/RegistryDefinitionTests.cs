@@ -41,6 +41,7 @@ public sealed class RegistryDefinitionTests
     private readonly IClock _clock = Substitute.For<IClock>();
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();
     private readonly IUnitCatalog _units = Substitute.For<IUnitCatalog>();
+    private readonly IRegistryKeyStore _keys = Substitute.For<IRegistryKeyStore>();
 
     private readonly RegistryDef _permits;
     private readonly RegistryDef _substances;
@@ -303,7 +304,12 @@ public sealed class RegistryDefinitionTests
     public async Task Нове_поле_не_може_бути_обовʼязковим_одразу()
     {
         // ⚠ Наявні записи його не мають, і вимога значення зробила б увесь
-        // довідник недійсним у мить збереження.
+        // довідник недійсним у мить збереження. RT-11: відмова — саме через
+        // наявні записи; у порожньому довіднику нове поле може бути обов'язковим.
+        _registries.ListEntriesAsync(PermitsId, Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<Ecr.Domain.Entities.Dictionaries.RegistryEntry>>(
+                [new Ecr.Domain.Entities.Dictionaries.RegistryEntry(PermitsId, EcrCode.Create("P1"), Text("P1"))]);
+
         var fields = Fields();
         fields.Add(new RegistryFieldSaveDto(
             null, "HazardClass", Text("Клас небезпеки"), "Int", 5,
@@ -515,12 +521,13 @@ public sealed class RegistryDefinitionTests
         Assert.DoesNotContain(_permits.Fields, f => f.Code == "Volume");
     }
 
-    private GetRegistryDefinitionHandler Definitions() => new(_registries, _access, _user);
+    private GetRegistryDefinitionHandler Definitions() => new(_registries, _keys, _access, _user);
 
     private GetRegistryHistoryHandler History() => new(_registries, _auditReader, _access, _user);
 
     private SaveRegistryDefinitionHandler Saves()
-        => new(_registries, _uow, _audit, _access, _user, _clock, _units);
+        => new(_registries, _uow, _audit, _access, _user, _clock, _units, _keys,
+            new Ecr.Application.Registries.Keys.RegistryKeyService(_keys, _uow));
 
     private void Allow(params string[] permissions)
     {
