@@ -26,8 +26,24 @@ GO
 -- ⚠ Ідемпотентний: повторний запуск оновлює кроки й розклади, а не створює
 -- другий комплект.
 
-IF DB_ID('msdb') IS NULL
-    THROW 50040, N'msdb недоступна: SQL Server Agent не встановлено. На Express його немає взагалі.', 1;
+-- ⛔ Express визначається РЕДАКЦІЄЮ (`EngineEdition = 4`), а не відсутністю
+-- msdb: msdb є на КОЖНОМУ інстансі, Express включно, тож колишня перевірка
+-- `DB_ID('msdb') IS NULL` не спрацьовувала ніколи — на Express скрипт
+-- створював завдання, які ніхто не виконає (служби Agent там немає як
+-- компонента). Тепер Express — не помилка, а пропуск із поясненням: dev-стенд
+-- на Express розгортається тим самим набором скриптів (`deploy-ecr.ps1
+-- -AllowExpress`), а обслуговування там запускають руками.
+--
+-- ⚠ `SET NOEXEC ON` пропускає ВСІ наступні пакети до `SET NOEXEC OFF` у кінці
+-- файлу: `GO` ділить скрипт на пакети, і `RETURN` вийшов би лише з першого.
+-- NOEXEC діє під час виконання, не розбору, тому працює всередині `IF`.
+IF CAST(SERVERPROPERTY('EngineEdition') AS int) = 4
+BEGIN
+    PRINT N'SQL Server Express: SQL Server Agent немає — завдання обслуговування НЕ створено. '
+        + N'Обслуговування на Express виконувати вручну: EXEC arc.usp_EnsurePartitions '
+        + N'(docs/admin/operations-runbook.md).';
+    SET NOEXEC ON;
+END
 GO
 
 -- ── 1. Партиції на випередження ──────────────────────────────────────────
@@ -148,4 +164,9 @@ GO
 -- розкладом», рано чи пізно заархівує рік, який ще правлять. Її запускає
 -- людина: `EXEC arc.usp_ArchiveYear @ProjectId, @FromPeriodKey, @ToPeriodKey`.
 PRINT N'Завдання SQL Agent створені. Власник — той, під ким виконано скрипт; змінити: sp_update_job @owner_login_name.';
+GO
+
+-- Кінець пропуску для Express (див. початок файлу). Виконується завжди: сесія
+-- sqlcmd не має лишитися в NOEXEC, якщо після цього файлу піде інший.
+SET NOEXEC OFF;
 GO
