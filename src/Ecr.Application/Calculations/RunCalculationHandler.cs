@@ -27,7 +27,9 @@ public sealed class RunCalculationHandler(
     ICurrentUser currentUser,
     IClock clock,
     IRecalculationApprovalStore approvals,
-    IAuditWriter audit)
+    IAuditWriter audit,
+    IJobQueue? queue = null,
+    IJobLeaseContext? lease = null)
 {
     // ⛔ Константи `RecalculateClosedPermission` тут більше немає (`A7-20`).
     // Вона оголошувала право `Calculation.RecalculateClosed`, якого немає в
@@ -190,11 +192,44 @@ public sealed class RunCalculationHandler(
     /// Профіль пишеться ЗАВЖДИ, зокрема порожній: бюджет 10 хвилин — вимога,
     /// і прогін без профілю нічого не каже про те, куди пішов час (J-1).
     /// </para>
+    /// <para>
+    /// ⛔ Fencing видимості (MI-02, правка «Аудиту» 1). Задачу з черги в базі
+    /// (<see cref="IJobLeaseContext.Current"/> задано) могли перехопити, поки
+    /// вона рахувала: оренду прострочено, інший виконавець уже рахує те саме.
+    /// Тоді перемикання актуальності — у ТІЙ САМІЙ транзакції, що й
+    /// <see cref="IJobQueue.FenceAsync"/>: X-лок на рядок задачі до коміту, і
+    /// втрачена оренда (<c>false</c>) відкочує все — результат виконавця без
+    /// оренди НЕ стає видимим (<see cref="JobLeaseLostException"/>).
+    /// Шлях Quartz/HTTP (оренди немає) — як і був.
+    /// </para>
     /// </remarks>
+    /// <exception cref="JobLeaseLostException">Оренду задачі втрачено; нічого не записано.</exception>
     public async Task CompleteAsync(long calculationRunId, ModuleProfile profile, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profile);
 
+        if (lease?.Current is not { } claim || queue is null)
+        {
+            await SwitchAsync(calculationRunId, profile, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await uow.ExecuteInTransactionAsync(
+                async token =>
+                {
+                    if (!await queue.FenceAsync(claim, token).ConfigureAwait(false))
+                    {
+                        throw new JobLeaseLostException(claim.JobId);
+                    }
+
+                    await SwitchAsync(calculationRunId, profile, token).ConfigureAwait(false);
+                },
+                ct)
+            .ConfigureAwait(false);
+    }
+
+    private async Task SwitchAsync(long calculationRunId, ModuleProfile profile, CancellationToken ct)
+    {
         await results
             .SwitchCurrentRunAsync(calculationRunId, profile.ToJson(), ct)
             .ConfigureAwait(false);

@@ -54,6 +54,7 @@ public sealed class DbBackgroundJobSchedulerTests(SqlServerFixture sql) : DbJobQ
         Assert.Equal(first, await jobs.EnqueueExclusiveAsync<IRecalculationJob>(
             "doc5~p202609", new { n = 2 }, CancellationToken.None));
 
+        await Task.Delay(AvailableAtRounding);
         var claimed = await host.Queue.ClaimAsync(
             [JobLanes.Recalc], "test/host", JobQueueLimits.DefaultLease, CancellationToken.None);
         Assert.Equal(first, claimed?.Claim.JobId);
@@ -65,6 +66,14 @@ public sealed class DbBackgroundJobSchedulerTests(SqlServerFixture sql) : DbJobQ
         Assert.Equal("Queued", (await RowAsync(second))?.State);
         Assert.NotNull((await RowAsync(first))?.CancelRequestedAt);
     }
+
+    /// <summary>
+    /// ⚠ Пауза між постановкою й негайним claim: <c>AvailableAt</c> — <c>datetime2(3)</c>,
+    /// і <c>SYSUTCDATETIME()</c> при записі ОКРУГЛЮЄТЬСЯ до мілісекунди вгору до 0,5 мс —
+    /// claim у ту саму мілісекунду бачить задачу «ще не доступною» (дефект DbJobQueue,
+    /// F1b; воркера не зачіпає — він опитує знову).
+    /// </summary>
+    internal static readonly TimeSpan AvailableAtRounding = TimeSpan.FromMilliseconds(5);
 
     private static DbBackgroundJobScheduler Scheduler(Host host)
         => new(
