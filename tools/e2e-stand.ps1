@@ -171,6 +171,88 @@ function Assert-WebPortFree {
 Assert-WebPortFree
 $env:E2E_WEB_PORT = [string] $WebPort
 
+# ⛔ Прогрів Vite ДО Playwright. Без нього перший тест прогону
+# (`cellStates.spec.ts`, тема light) упирався в 30 с на `page.goto`: свіжий
+# чекаут не має кешу оптимізатора залежностей (`node_modules/.vite/deps`), і
+# перше відкриття сторінки чекало, доки esbuild збере 51 залежність.
+# Заміряно 2026-09-29: базова лінія — тест 1 `x … (30.4s)`, решта 28 зелені.
+#
+# ⚠ Прогрівати ЖИВИЙ сервер Playwright звідси неможливо: у стенді він
+# піднімає власний Vite з `reuseExistingServer: false`
+# (`playwright.config.ts`). Тому тут — ОДНОРАЗОВИЙ Vite тією самою командою
+# і на тому самому порту, і прогрівається те, що переживає його зупинку:
+# кеш залежностей на диску. Трансформи власних модулів у пам'яті не
+# переживають, але вони дешеві: на свіжому Vite з теплим кешем
+# `goto /_kitchen-sink` — 0.9 с проти 13.0 с із холодним (окремий замір).
+#
+# ⚠ Чому саме `/src/main.tsx`, а не лише `/` і `/_kitchen-sink`: SPA на обидві
+# адреси віддає той самий `index.html`, і оптимізатор від цього не
+# зрушує. Запит модуля входу запускає обхід статичних імпортів
+# (`preTransformRequests`), після якого оптимізатор комітить кеш — рівно
+# так само, як це робить браузер (перевірено: ті самі 51 файл у `deps`).
+function Invoke-ViteWarmup {
+    param([int] $TimeoutSec = 180)
+
+    $viteCache = Join-Path $client 'node_modules/.vite'
+    $metadata = Join-Path $viteCache 'deps/_metadata.json'
+    $warmLog = Join-Path $root 'artifacts/e2e.vite-warmup.log'
+    New-Item -ItemType Directory -Force (Split-Path $warmLog) | Out-Null
+
+    $vite = Start-Process -PassThru -WindowStyle Hidden -WorkingDirectory $client cmd.exe `
+        -ArgumentList "/c npm run dev -- --port $WebPort --strictPort" `
+        -RedirectStandardOutput $warmLog -RedirectStandardError "$warmLog.err"
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    try {
+        foreach ($path in @('/', '/_kitchen-sink', '/@vite/client', '/src/main.tsx')) {
+            $url = "http://localhost:$WebPort$path"
+            $last = 'немає відповіді'
+            while ($true) {
+                try {
+                    $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 60
+                    $last = [string] $r.StatusCode
+                    if ($r.StatusCode -eq 200) { break }
+                }
+                catch {
+                    $resp = $_.Exception.Response
+                    $last = if ($resp) { [string] [int] $resp.StatusCode } else { $_.Exception.Message }
+                }
+                if ($vite.HasExited) { Fail "прогрів Vite: сервер завершився (код $($vite.ExitCode)) на $url, останній статус: $last; лог: $warmLog" }
+                if ((Get-Date) -gt $deadline) { Fail "прогрів Vite: $url не віддав 200 за $TimeoutSec с, останній статус: $last; лог: $warmLog" }
+                Start-Sleep -Seconds 2
+            }
+        }
+
+        # ⚠ Кеш закомічено, коли є `_metadata.json` і немає `deps_temp_*` (туди
+        # оптимізатор пише до перейменування) — двічі поспіль, бо застарілий
+        # кеш (новий lock-файл) лежить на місці, поки поруч збирається новий.
+        $stable = 0
+        while ($stable -lt 2) {
+            $busy = @(Get-ChildItem $viteCache -Directory -Filter 'deps_temp_*' -ErrorAction SilentlyContinue).Count -gt 0
+            if ((Test-Path $metadata) -and -not $busy) { $stable++ } else { $stable = 0 }
+            if ($stable -ge 2) { break }
+            if ((Get-Date) -gt $deadline) { Fail "прогрів Vite: кеш залежностей ($metadata) не закомічено за $TimeoutSec с; лог: $warmLog" }
+            Start-Sleep -Seconds 2
+        }
+    }
+    finally {
+        # Дерево процесів: cmd → npm → node (vite). Лише своє, за PID.
+        # ⚠ Q-217: stderr taskkill під 'Stop' став би винятком.
+        if (-not $vite.HasExited) {
+            $previousEapKill = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try { & taskkill.exe /T /F /PID $vite.Id | Out-Null }
+            finally { $ErrorActionPreference = $previousEapKill }
+        }
+    }
+
+    # Порт має звільнитися до Playwright: `--strictPort` інакше впаде.
+    foreach ($i in 1..15) {
+        if (-not (Get-NetTCPConnection -State Listen -LocalPort $WebPort -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Seconds 1
+    }
+}
+
 Write-Host ''
 Write-Host "Стенд Playwright на базі $Database (API $Port, Vite $WebPort)" -ForegroundColor Cyan
 
@@ -379,6 +461,12 @@ try {
     Write-Host ''
     Write-Host "  стенд готовий: період $($open.periodKey), документ $($env:ECR_E2E_DOCUMENT)" -ForegroundColor Green
     Write-Host ''
+
+    Step 'прогрів Vite (кеш залежностей)'
+    Assert-WebPortFree
+    $warmStart = Get-Date
+    Invoke-ViteWarmup
+    Write-Host ("      прогріто за {0:N1} с" -f ((Get-Date) - $warmStart).TotalSeconds)
 
     Step 'прогони Playwright'
     Assert-WebPortFree
