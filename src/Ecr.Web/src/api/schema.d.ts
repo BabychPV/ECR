@@ -3389,6 +3389,17 @@ export interface paths {
                         "text/plain": components["schemas"]["EntityFieldMapDto"];
                     };
                 };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -3434,6 +3445,17 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
                 };
                 /** @description Not Found */
                 404: {
@@ -3509,6 +3531,17 @@ export interface paths {
                         "application/json": components["schemas"]["EntityFieldMapDto"];
                         "text/json": components["schemas"]["EntityFieldMapDto"];
                         "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
                 /** @description Not Found */
@@ -3590,6 +3623,17 @@ export interface paths {
                         "text/plain": components["schemas"]["EntityFieldMapDto"];
                     };
                 };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
                 /** @description Not Found */
                 404: {
                     headers: {
@@ -3651,6 +3695,17 @@ export interface paths {
                         "application/json": components["schemas"]["EntityFieldMapDto"];
                         "text/json": components["schemas"]["EntityFieldMapDto"];
                         "text/plain": components["schemas"]["EntityFieldMapDto"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
                     };
                 };
                 /** @description Not Found */

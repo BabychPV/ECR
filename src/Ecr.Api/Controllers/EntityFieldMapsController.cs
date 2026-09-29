@@ -34,6 +34,7 @@ public sealed class EntityFieldMapsController(
     /// <param name="ct">Скасування.</param>
     [HttpPost]
     [ProducesResponseType<EntityFieldMapDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create([FromBody] CreateEntityFieldMapRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -63,6 +64,7 @@ public sealed class EntityFieldMapsController(
     /// </remarks>
     [HttpPost("{id:int}/pause")]
     [ProducesResponseType<EntityFieldMapDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Pause(int id, CancellationToken ct)
@@ -75,6 +77,7 @@ public sealed class EntityFieldMapsController(
     /// <param name="ct">Скасування.</param>
     [HttpPost("{id:int}/resume")]
     [ProducesResponseType<EntityFieldMapDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Resume(int id, CancellationToken ct)
@@ -95,6 +98,7 @@ public sealed class EntityFieldMapsController(
     /// </remarks>
     [HttpPost("{id:int}/accept-unit-change")]
     [ProducesResponseType<EntityFieldMapDto>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -119,6 +123,7 @@ public sealed class EntityFieldMapsController(
     /// </remarks>
     [HttpDelete("{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
