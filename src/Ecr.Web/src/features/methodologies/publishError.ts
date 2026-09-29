@@ -24,6 +24,11 @@ export const PublishProblemKeys = [
   'publish.problem.importNoVersion',
   'publish.problem.libraryHasRules',
   'publish.problem.ambiguousReference',
+  // HSE301 L: замикання бібліотечних формул (`!Code` в імпортовану методологію).
+  'publish.problem.formulaNotFound',
+  'publish.problem.importCycle',
+  'publish.problem.importModeMismatch',
+  'publish.problem.rowScopeReferencesLibrarySubstance',
 ] as const;
 
 type PublishProblemKey = (typeof PublishProblemKeys)[number];
