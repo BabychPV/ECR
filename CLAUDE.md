@@ -94,14 +94,25 @@ CI на `dev/integration` іде подією `pull_request` PR #463 і з 2026-
 (`build`, `test`, `honesty-guard`, `server`, `client`, `a11y (dark)`,
 `a11y (light)`).
 
-**Зони** — файл поза своєю зоною: лист власнику **перед** початком, не після.
+**✎ 2026-09-29: дві сесії.** Пряме рішення людини, тред координації
+29.09 18:26Z, дослівно: «я би залишив Аудит проекту та вимог та Аналіз
+документації та стан проекту, HSE301 можна прибрати коли він закинчить»;
+підтверджено людиною в сесії «Аудит» того ж дня. HSE301 і «Безпека» завершили
+(передача — `.sync-local\HANDOFF-HSE301.md`, `.sync-local\HANDOFF-Безпека.md`).
 
-| Зона | Власник | Файли/каталоги |
+| Сесія | Роль | Що за нею |
 |---|---|---|
-| A. HSE301 / вирази / одиниці / PI SQL-розрахунки | HSE301 | `src/Ecr.Expressions/**`, FEATURE-HSE301 docs, `MaterializeCollectedDataJob.cs`, свої міграції |
-| B. PI-збір, джерела, покриття, UI сторінок джерел | «Аналіз» | `Collection*`, `IntegrationLogs.cs`, `features/sources/**` |
-| C. DIRECTIVE-16 (запис, читання, черга, клієнт) + гейт CI | «Аудит» | `PatchCellsHandler.cs`, `RecalculationService.cs`, `AccessDecisionService.cs`, `NormalizedCellStore.cs`, DIRECTIVE-16 §9 |
-| ~~D. Інтеграція: єдиний push у `dev/integration`, вердикт CI~~ D. Нагляд за вердиктом вершини, мерж #463 (✎ 2026-09-29) | «Аудит» | — |
+| «Аналіз документації та стану проекту» | **Розробка** всіх зон через сабагентів (≤ 3 важкі .NET-агенти) | код, тести, міграції (**токен міграцій**), гарячі файли, контракт, сід, клієнт; черги HSE301 і «Безпеки» з HANDOFF |
+| «Аудит проекту та вимог» | **Незалежна перевірка** (1 важкий агент) | smoke/e2e на вершині кілька разів на день; перевірка оновлення БД; реєстр рішень `docs/tz/10-decisions.md` і DIRECTIVE-16 §9; `CLAUDE.md` і `.github/**`; фінальні перевірки й мерж #463 |
+
+~~**Зони** — файл поза своєю зоною: лист власнику **перед** початком, не після.~~
+
+| ~~Зона~~ | ~~Власник~~ | ~~Файли/каталоги~~ |
+|---|---|---|
+| ~~A. HSE301 / вирази / одиниці / PI SQL-розрахунки~~ | ~~HSE301~~ | ~~`src/Ecr.Expressions/**`, FEATURE-HSE301 docs, `MaterializeCollectedDataJob.cs`, свої міграції~~ |
+| ~~B. PI-збір, джерела, покриття, UI сторінок джерел~~ | ~~«Аналіз»~~ | ~~`Collection*`, `IntegrationLogs.cs`, `features/sources/**`~~ |
+| ~~C. DIRECTIVE-16 (запис, читання, черга, клієнт) + гейт CI~~ | ~~«Аудит»~~ | ~~`PatchCellsHandler.cs`, `RecalculationService.cs`, `AccessDecisionService.cs`, `NormalizedCellStore.cs`, DIRECTIVE-16 §9~~ |
+| ~~D. Інтеграція: єдиний push у `dev/integration`, вердикт CI~~ ~~D. Нагляд за вердиктом вершини, мерж #463 (✎ 2026-09-29)~~ | ~~«Аудит»~~ | — |
 
 **Гарячі файли — черги, а не домовленості на ходу:**
 
@@ -112,10 +123,11 @@ CI на `dev/integration` іде подією `pull_request` PR #463 і з 2026-
 | `openapi.snapshot.json`, `schema.d.ts` | перегенерація — останнім кроком після rebase, у тому ж коміті, що й зміна контракту |
 | `ErrorCodes.cs` + `ExceptionHandlingMiddleware.cs` + `02-contracts.md` §7 | append у кінець, один код = один коміт |
 | `shared/ui/**`, `queryKeys.ts`, `test/setup.ts`, `DependencyInjection.cs` ×2 | попередження листом перед правкою |
-| `CLAUDE.md`, `.github/**`, `package-lock.json`, `Directory.Packages.props` | лише інтегратор, окремим комітом |
+| `CLAUDE.md`, `.github/**`, `package-lock.json`, `Directory.Packages.props` | ~~лише інтегратор, окремим комітом~~ ✎ 2026-09-29: `CLAUDE.md` і `.github/**` — «Аудит»; `package-lock.json`, `Directory.Packages.props` — «Аналіз»; завжди окремим комітом і через lane із зеленим CI |
 | `docs/tz/**` | базова версія ТЗ зафіксована 2026-09-27 рішенням людини: тест `SpecificationBaselineTests` (Ecr.Architecture.Tests) звіряє `docs/CHECKSUMS.txt`; зміна ТЗ = оновлення суми в тому ж коміті (готовий рядок суми — у повідомленні падіння тесту) |
 
-**Навантаження:** ≤ 4 важких .NET-агенти на **всі** сесії разом (облік —
+**Навантаження:** ≤ 4 важких .NET-агенти на **всі** сесії разом (✎ 2026-09-29:
+«Аналіз» ≤ 3, «Аудит» 1) (облік —
 листом на старті/кінці важкого прогону, `MSBUILDDISABLENODEREUSE=1`).
 Worktree — лише `C:\ecr-worktrees\<сесія>-<задача>`; після влиття —
 `git worktree remove`.
