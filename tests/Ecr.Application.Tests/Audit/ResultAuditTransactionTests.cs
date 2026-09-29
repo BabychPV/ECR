@@ -110,7 +110,7 @@ public sealed class ResultAuditTransactionTests(SqlServerFixture sql)
             new FailingUnitOfWork(new UnitOfWork(db)), new TestClock(Now));
 
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => handler.HandleAsync(roleId, [], CancellationToken.None));
+            () => handler.HandleAsync(roleId, [], ResourceGrantsVersion.Of([]), CancellationToken.None));
 
         Assert.Equal(0, await SecurityEventsAsync("ResourceGrantsReplaced", roleId: roleId));
     }

@@ -80,6 +80,22 @@ public sealed class ResourceGrantsVersionTests
         Assert.Equal(ResourceGrantsVersion.Of([Grant(9, GrantLevel.Manage)]), next);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public async Task Без_If_Match_422_і_набір_не_змінюється(string? ifMatch)
+    {
+        var error = await Assert.ThrowsAsync<BusinessRuleException>(
+            () => Handler().HandleAsync(10, [Grant(9, GrantLevel.Manage)], ifMatch, CancellationToken.None));
+
+        Assert.Equal("ECR-REQ-0422", error.ErrorCode);
+        Assert.Equal("err.ECR-REQ-0422.roleGrantsIfMatch", error.Details!["messageKey"]);
+        Assert.Equal(7, Assert.Single(_users.GrantsByRole[10]).ResourceId);
+        await _uow.DidNotReceive().ExecuteInTransactionAsync(
+            Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>());
+    }
+
     private static ResourceGrantDto Grant(int projectId, GrantLevel level)
         => new(ResourceKind.Project, projectId, level, IsDeny: false);
 

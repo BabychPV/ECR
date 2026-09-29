@@ -223,13 +223,14 @@ public sealed class SecurityController(
     /// ⛔ <c>If-Match</c> із <c>ETag</c> відповіді <c>GET</c>: набір змінили
     /// після читання — <c>409 ECR-SEC-0409</c> (актуальна версія в
     /// <c>details.version</c>), а не мовчазне затирання чужої правки. Без
-    /// заголовка — поки як раніше (перехідний режим до оновлення клієнта).
+    /// заголовка — <c>422 ECR-REQ-0422</c> (<c>err.ECR-REQ-0422.roleGrantsIfMatch</c>).
     /// Нова версія — у <c>ETag</c> відповіді <c>204</c>.
     /// </remarks>
     [HttpPut("roles/{id:int}/grants")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ReplaceGrants(
         int id, [FromBody] ReplaceGrantsRequest request, CancellationToken ct)
     {

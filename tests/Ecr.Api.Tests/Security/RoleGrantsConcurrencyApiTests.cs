@@ -182,20 +182,25 @@ public sealed class RoleGrantsConcurrencyApiTests(SqlServerFixture sql)
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage3)]
     [Trait(TestCategories.Category, TestCategories.Integration)]
-    public async Task Без_If_Match_заміна_поки_проходить_як_раніше()
+    public async Task Без_If_Match_422_з_ключем_і_набір_не_змінюється()
     {
-        // ⚠ Перехідний режим: клієнт екрана грантів ще не шле If-Match
-        // (оновлюється в U6a). Коли обов'язковість увімкнеться — тут 422.
+        // ⛔ Перехідний режим знято разом з оновленням екрана (U6a): запит без
+        // заголовка — запит того, хто набору не читав, і «останній перемагає»
+        // для нього більше не діє.
         var ids = await ArrangeAsync().ConfigureAwait(true);
         using var app = new EcrApiFactory(sql, stampCacheSeconds: 0);
         using var a = await SignedInAsync(app, $"ga_{_tag}").ConfigureAwait(true);
         var grants = Grants(ids.Target);
 
         var put = await PutAsync(a, grants, ifMatch: null, Project(900_021, "Read")).ConfigureAwait(true);
+        var body = await put.Content.ReadAsStringAsync().ConfigureAwait(true);
 
-        Assert.True(put.StatusCode == HttpStatusCode.NoContent, $"{put.StatusCode}: {app.ErrorsText}");
-        Assert.False(string.IsNullOrEmpty(put.Headers.ETag?.Tag));
-        Assert.Equal(900_021, Assert.Single(await ListAsync(a, grants).ConfigureAwait(true)).ResourceId);
+        Assert.True(put.StatusCode == HttpStatusCode.UnprocessableEntity, $"{put.StatusCode}: {body}\n{app.ErrorsText}");
+        var root = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("ECR-REQ-0422", root.GetProperty("errorCode").GetString());
+        Assert.Equal("err.ECR-REQ-0422.roleGrantsIfMatch", root.GetProperty("messageKey").GetString());
+        Assert.Empty(await ListAsync(a, grants).ConfigureAwait(true));
+        Assert.Equal(0, await GrantEventsAsync(ids.Target).ConfigureAwait(true));
     }
 
     private static Uri Grants(int roleId) => new($"/api/v1/roles/{roleId}/grants", UriKind.Relative);

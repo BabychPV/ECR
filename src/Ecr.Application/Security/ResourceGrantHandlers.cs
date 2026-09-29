@@ -7,7 +7,6 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Errors;
-using Microsoft.Extensions.Logging;
 
 namespace Ecr.Application.Security;
 
@@ -217,39 +216,34 @@ public sealed class ListResourceGrantsHandler(
 /// ECR-SEC-0409</c>. Без блокування обидві проходять звірку до коміту одна
 /// одної і пишуть обидві (об'єднання наборів — теж втрачена правка).
 ///
-/// ⚠ Версія поки НЕОБОВ'ЯЗКОВА: відсутній <c>If-Match</c> — як раніше, із
-/// записом Warning у журнал. Клієнт екрана грантів оновлюється в іншій
-/// гілці (U6a), обов'язковість (<c>422</c>, як C2) вмикається разом із ним.
+/// ⛔ Версія ОБОВ'ЯЗКОВА: без <c>If-Match</c> — <c>422 ECR-REQ-0422</c>
+/// (<c>err.ECR-REQ-0422.roleGrantsIfMatch</c>), як для одиниць, джерел і
+/// розкладів. Запит без заголовка — запит того, хто набору не читав; мовчки
+/// пропустити його означало б лишити «останній перемагає» для кожного
+/// клієнта, який просто забув заголовок. Перехідний режим (Warning у журнал)
+/// знято разом з оновленням екрана грантів (U6a).
 /// </remarks>
-public sealed partial class ReplaceResourceGrantsHandler(
+public sealed class ReplaceResourceGrantsHandler(
     IUserStore users,
     IAccessDecisionService access,
     ICurrentUser currentUser,
     IAuditWriter audit,
     IUnitOfWork uow,
-    IClock clock,
-    ILogger<ReplaceResourceGrantsHandler>? logger = null)
+    IClock clock)
 {
-    /// <summary>Замінює набір грантів ролі без звірки версії.</summary>
-    /// <param name="roleId">Роль.</param>
-    /// <param name="grants">Новий набір; порожній — прибрати всі.</param>
-    /// <param name="ct">Токен скасування.</param>
-    /// <returns>Версія щойно збереженого набору.</returns>
-    public Task<string> HandleAsync(
-        int roleId, IReadOnlyList<ResourceGrantDto> grants, CancellationToken ct)
-        => HandleAsync(roleId, grants, ifMatch: null, ct);
-
     /// <summary>Замінює набір грантів ролі.</summary>
     /// <param name="roleId">Роль.</param>
     /// <param name="grants">Новий набір; порожній — прибрати всі.</param>
     /// <param name="ifMatch">
-    /// Значення <c>If-Match</c> — версія, з якої почалася правка; <c>null</c>
-    /// чи порожнє — без звірки (перехідний режим, див. remarks класу).
+    /// Значення <c>If-Match</c> — версія, з якої почалася правка (<c>ETag</c>
+    /// відповіді <c>GET</c>). Обов'язкове.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Версія щойно збереженого набору (новий <c>ETag</c>).</returns>
     /// <exception cref="NotFoundException">Ролі немає.</exception>
-    /// <exception cref="BusinessRuleException">Дублікат ресурсу в наборі.</exception>
+    /// <exception cref="BusinessRuleException">
+    /// Дублікат ресурсу в наборі; немає <c>If-Match</c> — <c>ECR-REQ-0422</c>.
+    /// </exception>
     /// <exception cref="ConcurrencyConflictException">
     /// Версія застаріла — <c>ECR-SEC-0409</c>, актуальна у <c>details.version</c>.
     /// </exception>
@@ -301,11 +295,14 @@ public sealed partial class ReplaceResourceGrantsHandler(
                 });
         }
 
-        var expected = Integration.ListCollectionSchedulesHandler.NormalizeETag(ifMatch);
-        if (expected is null && logger is not null)
-        {
-            LogWithoutIfMatch(logger, roleId);
-        }
+        var expected = Integration.ListCollectionSchedulesHandler.NormalizeETag(ifMatch)
+                       ?? throw new BusinessRuleException(
+                           ErrorCodes.RequestInvalid,
+                           "Заміна грантів ролі має нести заголовок If-Match з ETag прочитаного набору.",
+                           new Dictionary<string, object?>
+                           {
+                               ["messageKey"] = "err.ECR-REQ-0422.roleGrantsIfMatch",
+                           });
 
         // ⛔ Звірка, заміна, штампи й аудит — ОДНА транзакція під UPDLOCK на
         // рядку ролі (C4 для аудиту). Блокування береться ПЕРШИМ: друга
@@ -323,12 +320,7 @@ public sealed partial class ReplaceResourceGrantsHandler(
         return ResourceGrantsVersion.Of(grants);
     }
 
-    [LoggerMessage(
-        Level = LogLevel.Warning,
-        Message = "PUT грантів ролі {RoleId} без If-Match: звірки версії не було, можлива втрачена правка.")]
-    private static partial void LogWithoutIfMatch(ILogger logger, int roleId);
-
-    private async Task LockAndCheckVersionAsync(int roleId, string? expected, CancellationToken ct)
+    private async Task LockAndCheckVersionAsync(int roleId, string expected, CancellationToken ct)
     {
         if (!await users.LockRoleForUpdateAsync(roleId, ct).ConfigureAwait(false))
         {
@@ -339,11 +331,6 @@ public sealed partial class ReplaceResourceGrantsHandler(
                     ["messageKey"] = "err.ECR-SEC-0404.roleNotFound",
                     ["roleId"] = roleId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
-        }
-
-        if (expected is null)
-        {
-            return;
         }
 
         // ⚠ Читання ПІСЛЯ блокування: під RCSI знімок береться на початку

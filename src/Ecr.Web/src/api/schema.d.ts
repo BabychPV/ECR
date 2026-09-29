@@ -10210,7 +10210,7 @@ export interface paths {
          *     ⛔ `If-Match` із `ETag` відповіді `GET`: набір змінили
          *     після читання — `409 ECR-SEC-0409` (актуальна версія в
          *     `details.version`), а не мовчазне затирання чужої правки. Без
-         *     заголовка — поки як раніше (перехідний режим до оновлення клієнта).
+         *     заголовка — `422 ECR-REQ-0422` (`err.ECR-REQ-0422.roleGrantsIfMatch`).
          *     Нова версія — у `ETag` відповіді `204`.
          */
         put: {
@@ -10250,6 +10250,17 @@ export interface paths {
                 };
                 /** @description Conflict */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
