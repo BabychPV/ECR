@@ -10088,6 +10088,17 @@ export interface paths {
                         "text/plain": components["schemas"]["GroupRoleAssignedResult"];
                     };
                 };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
                 /** @description Not Found */
                 404: {
                     headers: {
@@ -14361,8 +14372,30 @@ export interface paths {
                         "text/plain": components["schemas"]["AffectedRolesResponse"];
                     };
                 };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
                 /** @description Not Found */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14753,6 +14786,7 @@ export interface components {
              * @description Роль.
              */
             roleId: number;
+            scope?: null | components["schemas"]["RoleScopeDto"];
             /**
              * Format: date
              * @description Початок дії; `null` — від завжди.
@@ -16461,6 +16495,7 @@ export interface components {
              * @description Роль.
              */
             roleId: number;
+            scope?: null | components["schemas"]["RoleScopeDto"];
             /**
              * Format: date
              * @description Початок дії; `null` — від завжди.
@@ -18567,6 +18602,13 @@ export interface components {
         ReplaceUserRolesRequest: {
             /** @description Коди ролей; порожній набір прибирає всі. */
             roleCodes: string[];
+            /** @description Області дії за кодом ролі (ФВ-6.14): роль діє лише в перелічених
+             *     проєктах. Поле відсутнє — області наявних призначень ЗБЕРІГАЮТЬСЯ (клієнт,
+             *     що про нього не знає, не розширює роль до всіх проєктів); передано —
+             *     роль без запису в ньому діє в усіх проєктах. */
+            scopes?: null | {
+                [key: string]: components["schemas"]["RoleScopeDto"];
+            };
             /** @description Межі чинності за кодом ролі (ФВ-6.16) — підміна на час відпустки; код
              *     без запису тут або відсутній словник узагалі — роль безстрокова, як і
              *     раніше (сумісно з клієнтами, які про це поле не знають). */
@@ -18806,6 +18848,11 @@ export interface components {
              * @description Ідентифікатор.
              */
             roleId: number;
+        };
+        /** @description Область дії призначення ролі в тілі запиту (ФВ-6.14). */
+        RoleScopeDto: {
+            /** @description Проєкти, у яких роль діє; непорожньо, без повторів. */
+            projects: number[];
         };
         /** @description Межі чинності одного призначення — підміна ролі на час відпустки (ФВ-6.16). */
         RoleValidityWindow: {

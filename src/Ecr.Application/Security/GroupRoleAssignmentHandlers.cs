@@ -18,9 +18,10 @@ namespace Ecr.Application.Security;
 /// <param name="PrincipalName">Ім'я групи; <c>null</c> — каталог його не назвав.</param>
 /// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
 /// <param name="ValidTo">Кінець дії (включно); <c>null</c> — безстроково.</param>
+/// <param name="Scope">Область дії (ФВ-6.14); <c>null</c> — роль діє в усіх проєктах.</param>
 public sealed record GroupRoleAssignmentView(
     int Id, int RoleId, string RoleCode, string PrincipalSid, string? PrincipalName,
-    DateOnly? ValidFrom, DateOnly? ValidTo);
+    DateOnly? ValidFrom, DateOnly? ValidTo, RoleScopeDto? Scope = null);
 
 /// <summary>Наслідок призначення ролі групі.</summary>
 /// <param name="Id">Ідентифікатор нового призначення.</param>
@@ -65,7 +66,8 @@ public sealed partial class AssignGroupRoleHandler(
     IUnitOfWork uow,
     IAuditWriter audit,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IDocumentStore documents)
 {
     /// <summary>Призначає роль групі.</summary>
     /// <param name="roleId">Роль.</param>
@@ -73,10 +75,16 @@ public sealed partial class AssignGroupRoleHandler(
     /// <param name="validFrom">Початок дії; <c>null</c> — від завжди.</param>
     /// <param name="validTo">Кінець дії; <c>null</c> — безстроково.</param>
     /// <param name="confirmDangerous">Підтвердження видачі ролі з небезпечними правами.</param>
+    /// <param name="scope">
+    /// Область дії (ФВ-6.14); <c>null</c> — роль діє в усіх проєктах. Змінити
+    /// область наявного призначення — відкликати й призначити знову: нове
+    /// призначення має новий Id, і саме він крутить ревізію групових
+    /// призначень у ключі кешу профілю (<c>GroupsFingerprintAsync</c>).
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     public async Task<GroupRoleAssignedResult> HandleAsync(
         int roleId, string principal, DateOnly? validFrom, DateOnly? validTo, bool confirmDangerous,
-        CancellationToken ct)
+        RoleScopeDto? scope, CancellationToken ct)
     {
         var profile = await PermissionCheck
             .RequireAsync(access, currentUser, ReplaceUserRolesHandler.Permission, ct).ConfigureAwait(false);
@@ -123,23 +131,36 @@ public sealed partial class AssignGroupRoleHandler(
                 });
         }
 
+        // ⛔ ФВ-6.14: область перевіряється ДО запису — існування проєкту й
+        // право ним керувати (`RoleAssignmentScopeRules`).
+        var domainScope = scope is null
+            ? null
+            : await RoleAssignmentScopeRules.ValidateAsync(scope, role.Code, profile, documents, ct).ConfigureAwait(false);
+
         var assignment = new RoleAssignment(roleId, userId: null, principalSid: sid);
         assignment.SetValidity(validFrom, validTo);
+        assignment.SetScope(domainScope);
         users.AddGroupAssignment(assignment);
 
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                clock.UtcNow,
-                "GroupRoleAssigned",
-                TargetUserId: null,
-                TargetRoleId: roleId,
-                DetailsJson: JsonSerializer.Serialize(
-                    new { role = role.Code, sid, name, validFrom, validTo, dangerous }),
-                ChangedByUserId: profile.UserId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія й призначення — одним комітом; область дії — в події.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        clock.UtcNow,
+                        "GroupRoleAssigned",
+                        TargetUserId: null,
+                        TargetRoleId: roleId,
+                        DetailsJson: JsonSerializer.Serialize(
+                            new { role = role.Code, sid, name, validFrom, validTo, dangerous, scope = domainScope?.ProjectIds }),
+                        ChangedByUserId: profile.UserId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         return new GroupRoleAssignedResult(assignment.Id, sid, name, EffectiveAfterNextSignIn: existing.Count == 0);
     }

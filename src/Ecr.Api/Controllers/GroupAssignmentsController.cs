@@ -31,6 +31,7 @@ public sealed class GroupAssignmentsController(
     /// </remarks>
     [HttpPost]
     [ProducesResponseType<GroupRoleAssignedResult>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -41,7 +42,7 @@ public sealed class GroupAssignmentsController(
         var result = await assign
             .HandleAsync(
                 request.RoleId, request.Principal, request.ValidFrom, request.ValidTo,
-                request.ConfirmDangerous ?? false, ct)
+                request.ConfirmDangerous ?? false, request.Scope, ct)
             .ConfigureAwait(false);
 
         return Created(new Uri("/api/v1/security/group-assignments", UriKind.Relative), result);
@@ -65,5 +66,11 @@ public sealed class GroupAssignmentsController(
 /// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
 /// <param name="ValidTo">Кінець дії (включно); <c>null</c> — безстроково.</param>
 /// <param name="ConfirmDangerous">Підтвердження видачі ролі з небезпечними правами.</param>
+/// <param name="Scope">
+/// Область дії (ФВ-6.14): роль діє лише в перелічених проєктах; <c>null</c> —
+/// в усіх. Неіснуючий або невидимий проєкт — <c>422 ECR-REQ-0422</c>, без
+/// <c>Manage</c> на проєкт — <c>403 ECR-AUTH-0403</c>.
+/// </param>
 public sealed record AssignGroupRoleRequest(
-    int RoleId, string Principal, DateOnly? ValidFrom = null, DateOnly? ValidTo = null, bool? ConfirmDangerous = null);
+    int RoleId, string Principal, DateOnly? ValidFrom = null, DateOnly? ValidTo = null, bool? ConfirmDangerous = null,
+    RoleScopeDto? Scope = null);

@@ -373,6 +373,17 @@
             "format": "int32",
             "type": "integer"
           },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopeDto",
+                "description": "Область дії (ФВ-6.14): роль діє лише в перелічених проєктах; `null` —\nв усіх. Неіснуючий або невидимий проєкт — `422 ECR-REQ-0422`, без\n`Manage` на проєкт — `403 ECR-AUTH-0403`."
+              }
+            ]
+          },
           "validFrom": {
             "description": "Початок дії; `null` — від завжди.",
             "format": "date",
@@ -3951,6 +3962,17 @@
             "description": "Роль.",
             "format": "int32",
             "type": "integer"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopeDto",
+                "description": "Область дії (ФВ-6.14); `null` — роль діє в усіх проєктах."
+              }
+            ]
           },
           "validFrom": {
             "description": "Початок дії; `null` — від завжди.",
@@ -8446,6 +8468,16 @@
             },
             "type": "array"
           },
+          "scopes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RoleScopeDto"
+            },
+            "description": "Області дії за кодом ролі (ФВ-6.14): роль діє лише в перелічених\nпроєктах. Поле відсутнє — області наявних призначень ЗБЕРІГАЮТЬСЯ (клієнт,\nщо про нього не знає, не розширює роль до всіх проєктів); передано —\nроль без запису в ньому діє в усіх проєктах.",
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "validity": {
             "additionalProperties": {
               "$ref": "#/components/schemas/RoleValidityWindow"
@@ -8958,6 +8990,23 @@
         },
         "required": [
           "roleId"
+        ],
+        "type": "object"
+      },
+      "RoleScopeDto": {
+        "description": "Область дії призначення ролі в тілі запиту (ФВ-6.14).",
+        "properties": {
+          "projects": {
+            "description": "Проєкти, у яких роль діє; непорожньо, без повторів.",
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "projects"
         ],
         "type": "object"
       },
@@ -26690,6 +26739,26 @@
             },
             "description": "Created"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -32465,6 +32534,26 @@
             },
             "description": "OK"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -32484,6 +32573,26 @@
               }
             },
             "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
           }
         },
         "summary": "Замінює набір ролей користувача. Право `Security.ManageUsers`.",

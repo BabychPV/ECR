@@ -264,14 +264,16 @@ public sealed class SecurityController(
     /// </remarks>
     [HttpPut("users/{id:int}/roles")]
     [ProducesResponseType<Contracts.AffectedRolesResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> ReplaceUserRoles(
         int id, [FromBody] ReplaceUserRolesRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         var count = await replaceRoles
-            .HandleAsync(id, request.RoleCodes, request.Validity, ct)
+            .HandleAsync(id, request.RoleCodes, request.Validity, request.Scopes, ct)
             .ConfigureAwait(false);
 
         return Ok(new Contracts.AffectedRolesResponse(count));
@@ -568,9 +570,16 @@ public sealed record UserLockRequest(string Reason);
 /// без запису тут або відсутній словник узагалі — роль безстрокова, як і
 /// раніше (сумісно з клієнтами, які про це поле не знають).
 /// </param>
+/// <param name="Scopes">
+/// Області дії за кодом ролі (ФВ-6.14): роль діє лише в перелічених
+/// проєктах. Поле відсутнє — області наявних призначень ЗБЕРІГАЮТЬСЯ (клієнт,
+/// що про нього не знає, не розширює роль до всіх проєктів); передано —
+/// роль без запису в ньому діє в усіх проєктах.
+/// </param>
 public sealed record ReplaceUserRolesRequest(
     IReadOnlyList<string> RoleCodes,
-    IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? Validity = null);
+    IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? Validity = null,
+    IReadOnlyDictionary<string, Ecr.Application.Security.RoleScopeDto>? Scopes = null);
 
 /// <summary>Запит на зміну адреси користувача.</summary>
 /// <param name="Email">Адреса; порожньо — прибрати разом із прапорцем алертів.</param>

@@ -80,12 +80,18 @@ public interface IUserStore
     /// Межі чинності за кодом ролі (<c>ФВ-6.16</c>) — підміна на час
     /// відпустки; <c>null</c> або код без запису тут — роль безстрокова.
     /// </param>
+    /// <param name="scopes">
+    /// Області дії за кодом ролі (<c>ФВ-6.14</c>), уже перевірені. <c>null</c>
+    /// — область кожного переназначеного призначення ЗБЕРІГАЄТЬСЯ; словник —
+    /// роль без запису в ньому діє в усіх проєктах.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки ролей тепер призначено.</returns>
     public Task<int> ReplaceRolesAsync(
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, Security.RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, Domain.Entities.Security.RoleAssignmentScope>? scopes,
         CancellationToken ct);
 
     /// <summary>

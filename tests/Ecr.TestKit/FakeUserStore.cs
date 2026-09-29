@@ -181,9 +181,14 @@ public sealed class FakeUserStore : IUserStore
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, Domain.Entities.Security.RoleAssignmentScope>? scopes,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
+
+        // ⚠ Області дії (ФВ-6.14) підробка не моделює: вони діють у
+        // AccessDecisionService, а його підробки не будують профіль із них.
+        _ = scopes;
 
         var user = _users.Find(u => u.Id == userId)
                    ?? throw new Application.Errors.NotFoundException(

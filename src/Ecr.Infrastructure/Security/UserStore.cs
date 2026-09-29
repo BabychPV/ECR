@@ -134,6 +134,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, Ecr.Application.Security.RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, RoleAssignmentScope>? scopes,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
@@ -203,9 +204,19 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
         db.RoleAssignments.RemoveRange(permanent);
 
+        // ⛔ ФВ-6.14: без словника областей (клієнт про них не знає) область
+        // переназначеної ролі ЗБЕРІГАЄТЬСЯ. Інакше звичайне «зберегти форму»
+        // перетворило б роль «лише в проєкті A» на роль у всіх проєктах.
+        var keptScopes = permanent
+            .Where(a => a.ScopeJson is not null)
+            .GroupBy(a => a.RoleId)
+            .ToDictionary(g => g.Key, g => g.First());
+
         foreach (var role in permanentRoles)
         {
-            db.RoleAssignments.Add(new RoleAssignment(role.Id, user));
+            var assignment = new RoleAssignment(role.Id, user);
+            ApplyScope(assignment, role.Code, scopes, keptScopes.GetValueOrDefault(role.Id));
+            db.RoleAssignments.Add(assignment);
         }
 
         // Строкові — заміна ПОРОЛЬНО: попереднє строкове призначення саме цієї
@@ -214,7 +225,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         // групові — не чіпаються. Це та сама обіцянка, що й раніше («заміна
         // набору не має скасовувати те, що поставили окремим рішенням»), лише
         // тепер «окреме рішення» може бути і цим самим викликом для іншої ролі.
-        foreach (var (roleId, _, from, to) in datedRoles)
+        foreach (var (roleId, code, from, to) in datedRoles)
         {
             var existingDated = await db.RoleAssignments
                 .Where(a => a.UserId == userId && a.RoleId == roleId
@@ -226,6 +237,7 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
             var assignment = new RoleAssignment(roleId, user);
             assignment.SetValidity(from, to);
+            ApplyScope(assignment, code, scopes, existingDated.Find(a => a.ScopeJson is not null));
             db.RoleAssignments.Add(assignment);
         }
 
@@ -238,6 +250,25 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
         user.RefreshSecurityStamp();
 
         return roles.Count;
+    }
+
+    /// <summary>Область дії нового призначення (ФВ-6.14).</summary>
+    /// <param name="assignment">Нове призначення.</param>
+    /// <param name="roleCode">Код його ролі.</param>
+    /// <param name="scopes">Області з виклику; <c>null</c> — зберегти попередню.</param>
+    /// <param name="kept">Попереднє призначення тієї ж ролі з областю; <c>null</c> — не було.</param>
+    private static void ApplyScope(
+        RoleAssignment assignment, string roleCode,
+        IReadOnlyDictionary<string, RoleAssignmentScope>? scopes, RoleAssignment? kept)
+    {
+        if (scopes is not null)
+        {
+            assignment.SetScope(scopes.GetValueOrDefault(roleCode));
+        }
+        else if (kept is not null)
+        {
+            assignment.CarryScopeFrom(kept);
+        }
     }
 
     /// <inheritdoc />
@@ -566,17 +597,23 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<GroupRoleAssignmentView>> ListGroupRoleAssignmentsAsync(CancellationToken ct)
-        => await db.RoleAssignments
+    {
+        var rows = await db.RoleAssignments
             .AsNoTracking()
             .Where(a => a.PrincipalSid != null)
             .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { a, r.Code })
             .OrderBy(x => x.a.PrincipalSid)
             .ThenBy(x => x.Code)
             .Take(MaxRoles)
-            .Select(x => new GroupRoleAssignmentView(
-                x.a.Id, x.a.RoleId, x.Code, x.a.PrincipalSid!, null, x.a.ValidFrom, x.a.ValidTo))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        // ⚠ Область (ФВ-6.14) розбирає ДОМЕН — той самий розбір, що й у
+        // профілі: зіпсована область показується порожньою, як і діє.
+        return [.. rows.Select(x => new GroupRoleAssignmentView(
+            x.a.Id, x.a.RoleId, x.Code, x.a.PrincipalSid!, null, x.a.ValidFrom, x.a.ValidTo,
+            x.a.ScopedProjectIds() is { } projects ? new Ecr.Application.Security.RoleScopeDto(projects) : null))];
+    }
 
     /// <inheritdoc />
     public void AddGroupAssignment(RoleAssignment assignment) => db.RoleAssignments.Add(assignment);

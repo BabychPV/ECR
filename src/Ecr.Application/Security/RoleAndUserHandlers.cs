@@ -235,7 +235,8 @@ public sealed class ReplaceUserRolesHandler(
     ICurrentUser currentUser,
     IAuditWriter audit,
     Domain.Abstractions.IClock clock,
-    DisableBootstrapAdminHandler disableBootstrap)
+    DisableBootstrapAdminHandler disableBootstrap,
+    IDocumentStore documents)
 {
     /// <summary>Право керування користувачами.</summary>
     public const string Permission = "Security.ManageUsers";
@@ -248,12 +249,19 @@ public sealed class ReplaceUserRolesHandler(
     /// без запису тут або відсутній словник — роль безстрокова, як і
     /// раніше.
     /// </param>
+    /// <param name="scopes">
+    /// Області дії за кодом ролі (ФВ-6.14). <c>null</c> — області наявних
+    /// призначень ЗБЕРІГАЮТЬСЯ (клієнт, що про поле не знає, не має мовчки
+    /// розширити роль до всіх проєктів); словник — повна відповідь: роль без
+    /// запису в ньому діє в усіх проєктах.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     /// <returns>Скільки ролей тепер призначено.</returns>
     public async Task<int> HandleAsync(
         int userId,
         IReadOnlyList<string> roleCodes,
         IReadOnlyDictionary<string, RoleValidityWindow>? validity,
+        IReadOnlyDictionary<string, RoleScopeDto>? scopes,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(roleCodes);
@@ -277,28 +285,58 @@ public sealed class ReplaceUserRolesHandler(
 
         ValidateValidity(roleCodes, validity);
 
+        // ⛔ ФВ-6.14: область перевіряється ДО будь-якої зміни — і на
+        // існування проєкту, і на право ним керувати.
+        Dictionary<string, RoleAssignmentScope>? domainScopes = null;
+        if (scopes is not null)
+        {
+            domainScopes = new Dictionary<string, RoleAssignmentScope>(StringComparer.Ordinal);
+            foreach (var (code, scope) in scopes)
+            {
+                if (!roleCodes.Contains(code, StringComparer.Ordinal))
+                {
+                    throw new BusinessRuleException(
+                        ErrorCodes.RequestInvalid,
+                        $"Область дії задано для ролі «{code}», якої немає в наборі, що призначається.",
+                        new Dictionary<string, object?> { ["messageKey"] = "err.ECR-REQ-0422", ["code"] = code });
+                }
+
+                domainScopes[code] = await RoleAssignmentScopeRules
+                    .ValidateAsync(scope, code, profile, documents, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
         var before = await users.ListUserRolesAsync(userId, ct).ConfigureAwait(false);
-        var count = await users.ReplaceRolesAsync(userId, roleCodes, validity, ct).ConfigureAwait(false);
+        var count = await users.ReplaceRolesAsync(userId, roleCodes, validity, domainScopes, ct).ConfigureAwait(false);
 
         // ⛔ Зміна повноважень — подія безпеки, і вона мусить бути в журналі
         // з обома наборами. «Хто це йому видав» — питання, на яке через рік
         // має бути відповідь, а не здогад.
-        await audit.WriteSecurityEventAsync(
-            new SecurityEventRecord(
-                ChangedAt: clock.UtcNow,
-                EventType: "UserRolesReplaced",
-                TargetUserId: userId,
-                TargetRoleId: null,
-                DetailsJson: System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    from = before,
-                    to = roleCodes,
-                }),
-                ChangedByUserId: actorId,
-                CorrelationId: currentUser.CorrelationId),
-            ct).ConfigureAwait(false);
+        // ⛔ C4: подія й призначення — одним комітом; область дії — в події.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
+            {
+                await audit.WriteSecurityEventAsync(
+                    new SecurityEventRecord(
+                        ChangedAt: clock.UtcNow,
+                        EventType: "UserRolesReplaced",
+                        TargetUserId: userId,
+                        TargetRoleId: null,
+                        DetailsJson: System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            from = before,
+                            to = roleCodes,
+                            scopes = domainScopes?.ToDictionary(
+                                s => s.Key, s => s.Value.ProjectIds, StringComparer.Ordinal),
+                        }),
+                        ChangedByUserId: actorId,
+                        CorrelationId: currentUser.CorrelationId),
+                    token).ConfigureAwait(false);
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         // ⚠ Той самий виклик, що й після кожного призначення ролі при
         // створенні (`CreateUserHandler`, D-97): заміна набору — це так само
