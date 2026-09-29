@@ -75,6 +75,9 @@ public sealed class CloneProjectTests
                 Permissions: ["Project.Manage"], DangerousPermissions: [])]);
         _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
             .Returns(new List<ResourceGrantDto>());
+
+        // Грант власності — під UPDLOCK на рядку ролі.
+        _users.LockRoleForUpdateAsync(ManagerRoleId, Arg.Any<CancellationToken>()).Returns(true);
     }
 
     private readonly IAccessDecisionService _access = Substitute.For<IAccessDecisionService>();

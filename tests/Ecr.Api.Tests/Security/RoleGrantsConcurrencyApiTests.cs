@@ -6,6 +6,7 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Ecr.Application.Ports;
 using Ecr.Application.Security;
+using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Security;
 using Ecr.Domain.Enums;
 using Ecr.Domain.ValueObjects;
@@ -95,10 +96,10 @@ public sealed class RoleGrantsConcurrencyApiTests(SqlServerFixture sql)
 
         var version = await ReadVersionAsync(a, grants).ConfigureAwait(true);
 
-        // ⚠ Шлюз тримає кожне читання набору ВСЕРЕДИНІ транзакції, доки не
-        // прийде друге (або 3 с): без блокування обидві заміни прочитали б
-        // стару версію одночасно й пройшли звірку обидві. Під UPDLOCK друга
-        // до читання не доходить, перша відпускається за тайм-аутом.
+        // ⚠ Шлюз тримає перше прочитане ВСЕРЕДИНІ транзакції (див. ReadGate):
+        // без блокування обидві заміни прочитали б стару версію й пройшли
+        // звірку обидві. Під UPDLOCK друга до читання не доходить, перша
+        // відпускається за тайм-аутом.
         gate.Arm();
         var responses = await Task.WhenAll(
             PutAsync(a, grants, version, Project(900_011, "Read")),
@@ -113,6 +114,69 @@ public sealed class RoleGrantsConcurrencyApiTests(SqlServerFixture sql)
         var final = await ListAsync(a, grants).ConfigureAwait(true);
         Assert.Equal(winner, Assert.Single(final).ResourceId);
         Assert.Equal(1, await GrantEventsAsync(ids.Target).ConfigureAwait(true));
+    }
+
+    /// <remarks>
+    /// ⛔ Створення проєкту видає грант власності КОЖНІЙ ролі творця з
+    /// <c>Project.Manage</c> — читанням набору ролі й заміною. Доти без
+    /// блокування і без транзакції: паралельна правка грантів тієї самої ролі
+    /// або затиралася грантом власності, або затирала його.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage3)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    public async Task Створення_проєкту_і_правка_грантів_тієї_самої_ролі_нічого_не_губить()
+    {
+        var ids = await ArrangeAsync().ConfigureAwait(true);
+        var (templateVersionId, creatorName) = await ArrangeCreatorAsync(ids.Target).ConfigureAwait(true);
+        var gate = new ReadGate();
+        using var baseApp = new EcrApiFactory(sql, stampCacheSeconds: 0);
+        using var app = baseApp.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddScoped(sp => GatedUserStore.Create(
+                new UserStore(sp.GetRequiredService<EcrDbContext>()), gate))));
+        using var admin = await SignedInAsync(app, $"ga_{_tag}").ConfigureAwait(true);
+        using var creator = await SignedInAsync(app, creatorName).ConfigureAwait(true);
+        var grants = Grants(ids.Target);
+
+        var version = await ReadVersionAsync(admin, grants).ConfigureAwait(true);
+
+        gate.Arm();
+        var create = creator.PostAsJsonAsync(
+            new Uri("/api/v1/projects", UriKind.Relative),
+            new
+            {
+                code = $"GCP{_tag}",
+                nameL10n = new Dictionary<string, string> { ["en"] = "Grant race" },
+                timeZoneId = "Asia/Almaty",
+                periodKind = "Monthly",
+                year = 2026,
+                templateVersionId,
+                periodPolicyId = 1,
+            });
+        var put = PutAsync(admin, grants, version, Project(900_031, "Read"));
+        await Task.WhenAll(create, put).ConfigureAwait(true);
+
+        var created = await create.ConfigureAwait(true);
+        var createdBody = await created.Content.ReadAsStringAsync().ConfigureAwait(true);
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"{created.StatusCode}: {createdBody}\n{baseApp.ErrorsText}");
+        var projectId = JsonDocument.Parse(createdBody).RootElement.GetProperty("projectId").GetInt32();
+
+        var putStatus = (await put.ConfigureAwait(true)).StatusCode;
+        Assert.True(
+            putStatus is HttpStatusCode.NoContent or HttpStatusCode.Conflict,
+            $"{putStatus}\n{baseApp.ErrorsText}");
+
+        var final = await ListAsync(admin, grants).ConfigureAwait(true);
+        var ids2 = string.Join(", ", final.Select(g => $"{g.ResourceKind}:{g.ResourceId}:{g.Level}"));
+
+        // Грант власності не загубився ніколи; правка адміністратора — або
+        // лягла поруч (204), або відмовлена чесно (409), а не мовчки затерта.
+        Assert.True(
+            final.Any(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == projectId && g.Level == GrantLevel.Manage),
+            $"PUT {putStatus}; немає гранта власності на {projectId}: [{ids2}]");
+        Assert.True(
+            putStatus == HttpStatusCode.Conflict || final.Any(g => g.ResourceId == 900_031),
+            $"PUT 204, але його гранта немає: [{ids2}]");
     }
 
     [Fact]
@@ -220,6 +284,37 @@ public sealed class RoleGrantsConcurrencyApiTests(SqlServerFixture sql)
         return (manager.Id, target.Id);
     }
 
+    /// <summary>
+    /// Творець проєктів: носій цільової ролі, якій додається <c>Project.Manage</c>;
+    /// плюс чернеткова версія шаблону для створення.
+    /// </summary>
+    private async Task<(int TemplateVersionId, string CreatorName)> ArrangeCreatorAsync(int targetRoleId)
+    {
+        await using var db = CreateContext();
+        var now = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        var template = new Template(
+            EcrCode.Create($"GCT{_tag}"),
+            new LocalizedText(new Dictionary<string, string> { ["en"] = "Grant race" }), createdByUserId: 1, now);
+        db.Templates.Add(template);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        var version = new TemplateVersion(template.Id, "1.0.0.0", createdByUserId: 1, now);
+        db.TemplateVersions.Add(version);
+
+        db.RolePermissions.Add(new RolePermission(targetRoleId, "Project.Manage"));
+
+        var creator = new User($"gc_{_tag}", "gc", AuthProvider.Local);
+        creator.SetPassword(new PasswordHasher().Hash(Password));
+        db.Users.Add(creator);
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        db.RoleAssignments.Add(new RoleAssignment(targetRoleId, creator.Id, principalSid: null));
+        await db.SaveChangesAsync().ConfigureAwait(false);
+
+        return (version.Id, creator.UserName);
+    }
+
     private static async Task<HttpClient> SignedInAsync(WebApplicationFactory<Program> app, string userName)
     {
         var client = app.CreateClient();
@@ -232,7 +327,17 @@ public sealed class RoleGrantsConcurrencyApiTests(SqlServerFixture sql)
     private EcrDbContext CreateContext()
         => new(new DbContextOptionsBuilder<EcrDbContext>().UseSqlServer(sql.ConnectionString).Options);
 
-    /// <summary>Тримає кожне читання набору, доки не прийде друге (або 3 с).</summary>
+    /// <summary>
+    /// Тримає ПЕРШЕ прочитане значення набору, доки не прийде друге читання
+    /// (або 3 с), і ще 1 с після того; друге проходить одразу.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Шлюз стоїть ПІСЛЯ читання: перший учасник тримає вже прочитаний
+    /// (можливо, застарілий) набір, а другий за цю секунду встигає
+    /// зафіксуватися. Без блокування це рівно той інтерлівінг, у якому перший
+    /// затирає другого; під UPDLOCK другий до читання не доходить, доки
+    /// перший не закомітиться.
+    /// </remarks>
     private sealed class ReadGate : IReadGate
     {
         private readonly TaskCompletionSource _both = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -255,6 +360,7 @@ public sealed class RoleGrantsConcurrencyApiTests(SqlServerFixture sql)
             }
 
             await Task.WhenAny(_both.Task, Task.Delay(TimeSpan.FromSeconds(3))).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
         }
     }
 
@@ -315,7 +421,8 @@ public class GatedUserStore : DispatchProxy
 
     private async Task<IReadOnlyList<ResourceGrantDto>> GatedAsync(int roleId, CancellationToken ct)
     {
+        var grants = await _inner.ListGrantsAsync(roleId, ct).ConfigureAwait(false);
         await _gate.PassAsync().ConfigureAwait(false);
-        return await _inner.ListGrantsAsync(roleId, ct).ConfigureAwait(false);
+        return grants;
     }
 }

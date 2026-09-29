@@ -70,6 +70,13 @@ public sealed class CreateProjectTests
         _users.ListGrantsAsync(ManagerRoleId, Arg.Any<CancellationToken>())
             .Returns(new List<ResourceGrantDto>());
 
+        // Грант власності йде транзакцією під UPDLOCK на рядку ролі: без цих
+        // двох налаштувань NSubstitute не виконав би замикання й «не знайшов»
+        // би роль.
+        _users.LockRoleForUpdateAsync(ManagerRoleId, Arg.Any<CancellationToken>()).Returns(true);
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+
         // ⛔ T6/#37: обробник тепер ЗАВАНТАЖУЄ політику (щоб узяти
         // `YearGraceOffsetDays`), а не лише перевіряє, що ідентифікатор
         // додатний. Без цього стаба кожен тест, що доходить до

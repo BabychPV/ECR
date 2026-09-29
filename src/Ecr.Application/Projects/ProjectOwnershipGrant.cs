@@ -61,51 +61,48 @@ internal static class ProjectOwnershipGrant
         CancellationToken ct)
     {
         var allRoles = await users.ListRolesAsync(ct).ConfigureAwait(false);
+
+        // ⚠ Порядок за Id — частина протоколу блокувань (див. нижче).
         var qualifyingRoles = allRoles
             .Where(r => profile.RoleIds.Contains(r.Id) && r.Permissions.Contains(permission))
+            .OrderBy(r => r.Id)
             .ToList();
 
         var grantedAny = false;
 
-        foreach (var role in qualifyingRoles)
-        {
-            var existing = await users.ListGrantsAsync(role.Id, ct).ConfigureAwait(false);
-
-            // ⚠ Проєкт щойно створений/клонований — дубліката бути не може за
-            // побудовою (`projectId` ще не існував ні для кого), але
-            // перевірка тут коштує дешевше за мовчазний `UQ_ResourceGrant`
-            // виняток, якби це припущення колись перестало виконуватися.
-            if (existing.Any(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == projectId))
+        // ⛔ Read-then-replace набору грантів — під UPDLOCK на рядку ролі й в
+        // одній транзакції із записом і аудитом. Доти тут не було ні
+        // транзакції, ні блокування: паралельний `PUT /roles/{id}/grants`,
+        // що зафіксувався між читанням `existing` і заміною, мовчки зникав —
+        // заміна видаляла його грант і вставляла старий набір + власність.
+        //
+        // ⛔ Порядок блокувань (без дедлоку з `ReplaceResourceGrantsHandler`):
+        // серед ресурсів безпеки обидва шляхи беруть рядок `sec.Role` ПЕРШИМ,
+        // і лише потім торкаються `sec.ResourceGrant` цієї ролі; PUT бере рівно
+        // одну роль, тут — кілька, але завжди за зростанням Id. Жоден шлях не
+        // чекає на роль із меншим Id, тримаючи роль із більшим, — циклу немає.
+        // Рядки `sec.User` (штампи) бере лише PUT і вже під своєю роллю;
+        // `doc.Project` тут закомічений до цієї транзакції.
+        await uow.ExecuteInTransactionAsync(
+            async token =>
             {
-                continue;
-            }
-
-            var updated = existing
-                .Append(new ResourceGrantDto(ResourceKind.Project, projectId, GrantLevel.Manage, IsDeny: false))
-                .ToList();
-
-            await users.ReplaceGrantsAsync(role.Id, updated, ct).ConfigureAwait(false);
-            grantedAny = true;
-
-            await audit.WriteSecurityEventAsync(
-                new SecurityEventRecord(
-                    clock.UtcNow,
-                    "ResourceGrantsReplaced",
-                    TargetUserId: null,
-                    TargetRoleId: role.Id,
-                    DetailsJson: JsonSerializer.Serialize(new
+                grantedAny = false;
+                foreach (var role in qualifyingRoles)
+                {
+                    if (!await users.LockRoleForUpdateAsync(role.Id, token).ConfigureAwait(false))
                     {
-                        role = role.Code,
-                        reason,
-                        projectId,
-                    }),
-                    // ⚠ `!.Value`, не повторна перевірка: виклик відбувається
-                    // лише після того, як `PermissionCheck.RequireAsync` уже
-                    // вимагав автентифікованого користувача.
-                    ChangedByUserId: currentUser.UserId!.Value,
-                    CorrelationId: currentUser.CorrelationId),
-                ct).ConfigureAwait(false);
-        }
+                        // Роль видалили між читанням профілю й блокуванням —
+                        // видавати грант нікому.
+                        continue;
+                    }
+
+                    grantedAny |= await GrantToRoleAsync(
+                        users, audit, currentUser, clock, role, projectId, reason, token).ConfigureAwait(false);
+                }
+
+                await uow.SaveChangesAsync(token).ConfigureAwait(false);
+            },
+            ct).ConfigureAwait(false);
 
         // ⚠ Точкове скидання — лише ЦЬОГО інстансу. Носії ролі через групу AD
         // (творець теж, якщо роль у нього групова) побачать грант на
@@ -113,11 +110,62 @@ internal static class ProjectOwnershipGrant
         // ревізію у відбитку груп ключа профілю (`GroupsFingerprintAsync`).
         // Прямі носії на інших інстансах — після TTL; це розширення доступу,
         // не залишковий знятий доступ.
+        // ⚠ Після коміту: скинутий до коміту профіль міг би перебудуватися
+        // паралельним запитом ще без гранта й лягти в кеш.
         if (grantedAny)
         {
             await access.InvalidateProfileAsync(currentUser.UserId!.Value, ct).ConfigureAwait(false);
         }
+    }
 
-        await uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    private static async Task<bool> GrantToRoleAsync(
+        IUserStore users,
+        IAuditWriter audit,
+        ICurrentUser currentUser,
+        IClock clock,
+        RoleView role,
+        int projectId,
+        string reason,
+        CancellationToken ct)
+    {
+        // ⚠ Читання ПІСЛЯ блокування: під RCSI оператор бачить заміну,
+        // що зафіксувалася, поки ми чекали на UPDLOCK.
+        var existing = await users.ListGrantsAsync(role.Id, ct).ConfigureAwait(false);
+
+        // ⚠ Проєкт щойно створений/клонований — дубліката бути не може за
+        // побудовою (`projectId` ще не існував ні для кого), але
+        // перевірка тут коштує дешевше за мовчазний `UQ_ResourceGrant`
+        // виняток, якби це припущення колись перестало виконуватися.
+        if (existing.Any(g => g.ResourceKind == ResourceKind.Project && g.ResourceId == projectId))
+        {
+            return false;
+        }
+
+        var updated = existing
+            .Append(new ResourceGrantDto(ResourceKind.Project, projectId, GrantLevel.Manage, IsDeny: false))
+            .ToList();
+
+        await users.ReplaceGrantsAsync(role.Id, updated, ct).ConfigureAwait(false);
+
+        await audit.WriteSecurityEventAsync(
+            new SecurityEventRecord(
+                clock.UtcNow,
+                "ResourceGrantsReplaced",
+                TargetUserId: null,
+                TargetRoleId: role.Id,
+                DetailsJson: JsonSerializer.Serialize(new
+                {
+                    role = role.Code,
+                    reason,
+                    projectId,
+                }),
+                // ⚠ `!.Value`, не повторна перевірка: виклик відбувається
+                // лише після того, як `PermissionCheck.RequireAsync` уже
+                // вимагав автентифікованого користувача.
+                ChangedByUserId: currentUser.UserId!.Value,
+                CorrelationId: currentUser.CorrelationId),
+            ct).ConfigureAwait(false);
+
+        return true;
     }
 }
