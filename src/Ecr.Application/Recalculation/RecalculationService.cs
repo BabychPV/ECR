@@ -608,10 +608,18 @@ public sealed class RecalculationService(
             var writable = await EnterSheetsAsync(
                 instance.DocumentId, periodKey, sheetOfInstance.Values, heldSheetDefId, token).ConfigureAwait(false);
 
+            // ⛔ O2 (ФВ-9.8, замір I2). Доти тіло нижче виконувалося НА КОЖЕН
+            // екземпляр: `ReadCellsAsync` → `MERGE doc.CellValue` →
+            // `INSERT aud.CellChange`, тобто 3 × N_таблиць звернень на
+            // документо-період (90 таблиць × 12 періодів = 1 080 `MERGE` на
+            // документ-рік, ~11 мс ЦП SQL кожен — 66 % ЦП SQL річного
+            // перерахунку). Тепер — по одному на документо-період: той самий
+            // `MERGE` з табличним параметром (`ApplyBatchAsync`, P8), лише з
+            // усіма екземплярами разом. Порядок і вміст записів ті самі:
+            // екземпляри в порядку `byInstance`, комірки — в порядку `cells`.
+            var batch = new List<(long Target, IReadOnlyList<CellRecord> Records)>();
             foreach (var (target, cells) in byInstance.Where(pair => pair.Value.Count > 0))
             {
-                IReadOnlyList<CellRecord> records = [.. cells.Values];
-
                 // ⛔ Аркуш поданий або затверджений — його обчислені числа вже в
                 // зрізі подання й не змінюються (ФВ-9.17, `RecalculationWritePolicy`):
                 // шлях змінити подане — Reopen. Екземпляр без відомого аркуша не
@@ -621,19 +629,64 @@ public sealed class RecalculationService(
                     continue;
                 }
 
-                applied += records.Count;
+                batch.Add((target, [.. cells.Values]));
+            }
 
-                // ⚠ Старі значення читаються ДО запису — після `ApplyAsync` їх уже
-                // немає ніде, а саме вони й становлять половину запису аудиту
-                // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
-                var previous = await cellStore
-                    .ReadCellsAsync([.. records.Select(r => r.Address)], token)
-                    .ConfigureAwait(false);
+            applied = batch.Sum(item => item.Records.Count);
 
-                await cellStore.ApplyAsync(
-                    new CellChangeSet(
-                        target,
-                        records,
+            if (batch.Count > 0)
+            {
+                await WriteBatchAsync(
+                    instance.DocumentId, batch, rowKeyByRowIdByInstance, isLateEdit, now, token).ConfigureAwait(false);
+            }
+
+            await uow.SaveChangesAsync(token).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Пише обчислені комірки ВСІХ екземплярів документо-періоду одним пакетом:
+    /// одне читання старих значень, один <c>MERGE</c>, один запис аудиту.
+    /// </summary>
+    /// <param name="documentId">Документ прогону.</param>
+    /// <param name="batch">Екземпляри, у які писати можна, з їхніми комірками — у порядку запису.</param>
+    /// <param name="rowKeyByRowIdByInstance">Ключ рядка за його ідентифікатором — для аудиту.</param>
+    /// <param name="isLateEdit">Зміна в <c>Grace</c> (<c>D-70</c>).</param>
+    /// <param name="now">Мить зміни для аудиту.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ Виконується ВСЕРЕДИНІ транзакції запису, під спільними блокуваннями
+    /// аркушів (<see cref="EnterSheetsAsync"/>): сховище й аудит приєднуються
+    /// до ambient-транзакції (Q-243), тож значення й аудит, як і доти, лягають
+    /// одним комітом або не лягають зовсім.
+    ///
+    /// ⚠ Пакет рівносильний поштучному запису за побудовою: адреси різних
+    /// екземплярів не перетинаються (рядок належить рівно одному екземпляру),
+    /// тож запис одного не змінює «старих» значень іншого, і прочитати їх усі
+    /// до запису — те саме, що читати перед кожним
+    /// (<c>RecalculationBatchWriteTests</c>, побайтне порівняння з поштучним).
+    /// </remarks>
+    private async Task WriteBatchAsync(
+        long documentId,
+        IReadOnlyList<(long Target, IReadOnlyList<CellRecord> Records)> batch,
+        Dictionary<long, Dictionary<long, string>> rowKeyByRowIdByInstance,
+        bool isLateEdit,
+        DateTime now,
+        CancellationToken ct)
+    {
+        // ⚠ Старі значення читаються ДО запису — після `ApplyBatchAsync` їх уже
+        // немає ніде, а саме вони й становлять половину запису аудиту
+        // (той самий порядок, що в `PatchCellsHandler.ReadPreviousValuesAsync`).
+        var previous = await cellStore
+            .ReadCellsAsync([.. batch.SelectMany(item => item.Records.Select(r => r.Address))], ct)
+            .ConfigureAwait(false);
+
+        await cellStore.ApplyBatchAsync(
+            [.. batch.Select(item => new CellChangeSet(
+                        item.Target,
+                        item.Records,
                         Deletes: [],
 
                         // ⛔ `D14-07` (директива №14 частина 3, `DAT-02` п. 3).
@@ -660,36 +713,32 @@ public sealed class RecalculationService(
                         // однаково пишуть без `ExpectedRowVersions`.
                         TouchedRowIds: [],
                         ChangedByUserId: SystemUserId,
-                        isLateEdit),
-                    token).ConfigureAwait(false);
+                        isLateEdit))],
+            ct).ConfigureAwait(false);
 
-                var rowKeyByRowId = rowKeyByRowIdByInstance.TryGetValue(target, out var found)
+        // ⛔ `DAT-02` п. 2: аудит пишеться рівно по `Records`, тобто по тому,
+        // що ПІШЛО в `upserts`. Фільтр незміненого стоїть в `Evaluate` — до
+        // того, як комірка потрапить у цей список, — саме тому, щоб журнал і
+        // сховище не могли розійтися: другого переліку, який довелося б
+        // тримати в тому самому стані, тут немає.
+        await audit.WriteCellChangesAsync(
+            [.. batch.SelectMany(item =>
+            {
+                var rowKeyByRowId = rowKeyByRowIdByInstance.TryGetValue(item.Target, out var found)
                     ? found
                     : new Dictionary<long, string>();
 
-                // ⛔ `DAT-02` п. 2: аудит пишеться рівно по `records`, тобто по
-                // тому, що ПІШЛО в `upserts`. Фільтр незміненого стоїть в
-                // `Evaluate` — до того, як комірка потрапить у цей список, —
-                // саме тому, щоб журнал і сховище не могли розійтися: другого
-                // переліку, який довелося б тримати в тому самому стані, тут
-                // немає.
-                await audit.WriteCellChangesAsync(
-                    [.. records.Select(r => new CellChangeRecord(
-                        now, r.Address, instance.DocumentId,
-                        RowKey: rowKeyByRowId.GetValueOrDefault(r.Address.TableRowId, string.Empty),
-                        OldValue: Was(previous, r.Address),
-                        NewValue: Describe(r.Value),
-                        SystemUserId,
-                        Origin: "Recalculation",
-                        isLateEdit,
-                        CorrelationId: null))],
-                    token).ConfigureAwait(false);
-            }
-
-            await uow.SaveChangesAsync(token).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
-
-        return applied;
+                return item.Records.Select(r => new CellChangeRecord(
+                    now, r.Address, documentId,
+                    RowKey: rowKeyByRowId.GetValueOrDefault(r.Address.TableRowId, string.Empty),
+                    OldValue: Was(previous, r.Address),
+                    NewValue: Describe(r.Value),
+                    SystemUserId,
+                    Origin: "Recalculation",
+                    isLateEdit,
+                    CorrelationId: null));
+            })],
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>

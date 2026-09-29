@@ -352,16 +352,18 @@ public sealed class RecalculationJobClosedPeriodTests(SqlServerFixture sql)
     /// </remarks>
     private IReadOnlyList<CellRecord> AppliedOrEmpty()
         => [.. _cells.ReceivedCalls()
-            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync))
-            .SelectMany(c => ((CellChangeSet)c.GetArguments()[0]!).Upserts)];
+            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync))
+            .SelectMany(c => (IReadOnlyCollection<CellChangeSet>)c.GetArguments()[0]!)
+            .SelectMany(set => set.Upserts)];
 
     /// <summary>Комірки, які служба віддала на запис.</summary>
+    /// <remarks>O2: документо-період пишеться одним пакетом (<c>ApplyBatchAsync</c>).</remarks>
     private IReadOnlyList<CellRecord> Applied()
     {
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
     /// <summary>

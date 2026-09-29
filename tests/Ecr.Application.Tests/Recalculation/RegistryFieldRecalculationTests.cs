@@ -110,7 +110,8 @@ public sealed class RegistryFieldRecalculationTests
 
         Assert.Equal(0, written);
         Assert.DoesNotContain(
-            _cells.ReceivedCalls(), c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            _cells.ReceivedCalls(), c => c.GetMethodInfo().Name
+                is nameof(ICellStore.ApplyAsync) or nameof(ICellStore.ApplyBatchAsync));
     }
 
     [Fact]
@@ -347,8 +348,8 @@ public sealed class RegistryFieldRecalculationTests
     private IReadOnlyList<CellRecord> Applied()
     {
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 }

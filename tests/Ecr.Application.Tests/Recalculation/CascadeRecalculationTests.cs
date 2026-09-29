@@ -182,6 +182,7 @@ public sealed class CascadeRecalculationTests
 
         Assert.Equal(0, written);
         await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(null!, default);
+        await _cells.DidNotReceiveWithAnyArgs().ApplyBatchAsync(null!, default);
     }
 
     [Fact]
@@ -217,6 +218,7 @@ public sealed class CascadeRecalculationTests
 
         Assert.Equal(0, written);
         await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(null!, default);
+        await _cells.DidNotReceiveWithAnyArgs().ApplyBatchAsync(null!, default);
     }
 
     [Fact]
@@ -580,10 +582,12 @@ public sealed class CascadeRecalculationTests
     /// <summary>Комірки, які служба віддала на запис.</summary>
     private IReadOnlyList<CellRecord> Applied()
     {
+        // O2: документо-період пишеться ОДНИМ пакетом (`ApplyBatchAsync`), і
+        // саме один виклик тут і вимагається.
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
     /// <summary>

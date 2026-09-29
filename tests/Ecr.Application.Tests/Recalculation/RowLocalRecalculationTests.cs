@@ -199,8 +199,9 @@ public sealed class RowLocalRecalculationTests
     /// <summary>Комірки, які служба віддала на запис (по всіх екземплярах).</summary>
     private IReadOnlyList<CellRecord> Applied()
         => [.. _cells.ReceivedCalls()
-            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync))
-            .SelectMany(c => ((CellChangeSet)c.GetArguments()[0]!).Upserts)];
+            .Where(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync))
+            .SelectMany(c => (IReadOnlyCollection<CellChangeSet>)c.GetArguments()[0]!)
+            .SelectMany(set => set.Upserts)];
 
     private RecalculationService Service()
     {

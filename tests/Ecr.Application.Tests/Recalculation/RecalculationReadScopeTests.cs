@@ -206,9 +206,9 @@ public sealed class RecalculationReadScopeTests
     private IReadOnlyList<CellRecord> Applied()
     {
         var call = _cells.ReceivedCalls()
-            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .Single(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
     private RecalculationService Service()

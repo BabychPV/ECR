@@ -94,6 +94,7 @@ public sealed class ExpressionBudgetReachabilityTests
         // а не підроблене число.
         Assert.Equal(0, written);
         await _cells.DidNotReceiveWithAnyArgs().ApplyAsync(null!, default);
+        await _cells.DidNotReceiveWithAnyArgs().ApplyBatchAsync(null!, default);
 
         // ⚠ Порогу часу тут НЕМАЄ і бути не може: замір залежить від машини, а
         // тест, який червоніє від сусіднього процесу на агенті, перестає бути
@@ -167,9 +168,11 @@ public sealed class ExpressionBudgetReachabilityTests
     private IReadOnlyList<CellRecord> Applied()
     {
         var call = _cells.ReceivedCalls()
-            .SingleOrDefault(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyAsync));
+            .SingleOrDefault(c => c.GetMethodInfo().Name == nameof(ICellStore.ApplyBatchAsync));
 
-        return call is null ? [] : ((CellChangeSet)call.GetArguments()[0]!).Upserts;
+        return call is null
+            ? []
+            : [.. ((IReadOnlyCollection<CellChangeSet>)call.GetArguments()[0]!).SelectMany(set => set.Upserts)];
     }
 
     /// <summary>
