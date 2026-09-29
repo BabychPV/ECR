@@ -128,7 +128,7 @@ function Fail {
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
 function Call {
-    param([string] $Method, [string] $Path, $Body)
+    param([string] $Method, [string] $Path, $Body, [hashtable] $Headers)
 
     $arguments = @{
         Uri             = "$base$Path"
@@ -137,6 +137,8 @@ function Call {
         UseBasicParsing = $true
         TimeoutSec      = 60
     }
+
+    if ($null -ne $Headers) { $arguments.Headers = $Headers }
 
     if ($null -ne $Body) {
         $arguments.Body = ($Body | ConvertTo-Json -Depth 8 -Compress)
@@ -148,6 +150,16 @@ function Call {
     if ($response.Content) { return $response.Content | ConvertFrom-Json }
 
     return $null
+}
+
+# Версія набору грантів ролі (`ETag` GET) — для `If-Match` на PUT.
+function GrantsVersion {
+    param([int] $RoleId)
+
+    $etag = (Invoke-WebRequest -Uri "$base/api/v1/roles/$RoleId/grants" -WebSession $session -UseBasicParsing -TimeoutSec 60).Headers['ETag']
+    if (-not $etag) { Fail "GET /api/v1/roles/$RoleId/grants не віддав ETag" }
+
+    return $etag
 }
 
 if ($WebPort -eq 0) { $WebPort = $Port + 1000 }
@@ -424,9 +436,11 @@ try {
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     Call POST '/api/v1/login/local' @{ userName = 'e2e-admin'; password = 'E2E-Admin-Work-2026!' } | Out-Null
 
+    # ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag`
+    # відповіді GET, як це робить екран грантів.
     Call PUT "/api/v1/roles/$adminRole/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
-    } | Out-Null
+    } -Headers @{ 'If-Match' = (GrantsVersion $adminRole) } | Out-Null
 
     # ⚠ Без перелогіну між двома PUT — навмисно. PUT грантів крутить
     # SecurityStamp усіх членів ролі (`RotateStampsForRoleAsync`), зокрема й
@@ -437,7 +451,7 @@ try {
 
     Call PUT "/api/v1/roles/$operatorRole/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Write'; isDeny = $false })
-    } | Out-Null
+    } -Headers @{ 'If-Match' = (GrantsVersion $operatorRole) } | Out-Null
 
     Step 'перевірка стенда: проєкт, період, документ'
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession

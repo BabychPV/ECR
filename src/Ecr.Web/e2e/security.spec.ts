@@ -280,14 +280,14 @@ async function addGrant(
   // (`e2e-stand.ps1`: `resourceId = 1`), перекладається в код через API під
   // сесією адміністратора (`page.request` ділить куки з вкладкою) — так грант
   // іде на ТОЙ САМИЙ проєкт, а не на «перший, що трапився в списку».
-  const code = await projectCode(page, grant.resourceId);
+  const label = await projectLabel(page, grant.resourceId);
 
   const projectField = page.getByRole('textbox', { name: 'Project 1', exact: true });
   await projectField.click();
-  await page.getByRole('option', { name: code, exact: true }).click();
+  await page.getByRole('option', { name: label, exact: true }).click();
   // ⚠ Не `getByRole('cell', { name: code })`: доступне ім'я комірки пікера
   // теж містить значення поля, і локатор резолвився б у ДВІ комірки.
-  await expect(projectField, 'пікер не показує обраний проєкт').toHaveValue(code, {
+  await expect(projectField, 'пікер не показує обраний проєкт').toHaveValue(label, {
     timeout: 10_000,
   });
 
@@ -299,18 +299,32 @@ async function addGrant(
   await page.getByRole('option', { name: grant.level, exact: true }).click();
 }
 
-/** Код проєкту стенда за його id (`GET /api/v1/projects` під поточною сесією). */
-async function projectCode(page: Page, projectId: number): Promise<string> {
-  const response = await page.request.get('/api/v1/projects?limit=200');
-  expect(response.ok(), `перелік проєктів: ${response.status()}`).toBe(true);
+/**
+ * Мітка проєкту стенда в пікері гранта за його id.
+ *
+ * ⚠ Джерело — той самий довідник, що й у пікера (`GET /api/v1/security/projects`,
+ * D-207 п.2), і та сама форма мітки: «назва (код)», або код, коли назви немає
+ * чи вона збігається з кодом (`ResourcePicker.tsx`, `nameWithCode`). Стенд
+ * працює англійською.
+ */
+async function projectLabel(page: Page, projectId: number): Promise<string> {
+  const response = await page.request.get('/api/v1/security/projects');
+  expect(response.ok(), `довідник проєктів: ${response.status()}`).toBe(true);
 
-  const body = (await response.json()) as { items: { id: number; code: string }[] };
-  const project = body.items.find((item) => item.id === projectId);
+  const body = (await response.json()) as {
+    id: number;
+    code: string;
+    nameL10n: { values?: Record<string, string> | null };
+  }[];
+  const project = body.find((item) => item.id === projectId);
   if (project === undefined) {
-    throw new Error(`проєкту ${projectId} немає в переліку адміністратора — грант стенда не діє`);
+    throw new Error(`проєкту ${projectId} немає в довіднику — грант стенда не діє`);
   }
 
-  return project.code;
+  const values = project.nameL10n.values ?? {};
+  const name = values['en'] ?? Object.values(values).find((v) => v.length > 0) ?? '';
+
+  return name.length > 0 && name !== project.code ? `${name} (${project.code})` : project.code;
 }
 
 /** Зберігає чернетку гранта і чекає підтвердження сервера. */

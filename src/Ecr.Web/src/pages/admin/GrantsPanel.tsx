@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { Button, Group, Select, Switch, Table, Text } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/api/client';
+import { EcrApiError, apiFetchResponse } from '@/api/client';
 import { showApiError, showDone } from '@/shared/ui/notify';
 import type { ReplaceGrantsRequest, ResourceGrantDto, RoleView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
@@ -36,6 +36,10 @@ import {
  * чернетка має ознаку «змінено», зареєстрована в `UnsavedGuard`, перемикання
  * ролі з незбереженим питає підтвердження, а перезапит не чіпає змінену
  * чернетку.
+ *
+ * ⛔ Версія набору: `GET` віддає її в `ETag`, `PUT` несе її в `If-Match`.
+ * Застаріла — `409 ECR-SEC-0409`: набір перечитується, чернетка лишається, а
+ * над таблицею — пояснення й «Скинути» (див. `seed.etag`).
  */
 
 interface DraftRow {
@@ -48,6 +52,43 @@ interface DraftRow {
 interface Seed {
   readonly roleId: number;
   readonly grants: readonly ResourceGrantDto[];
+  /**
+   * Версія набору, з якої почалася чернетка (`ETag` відповіді `GET`/`PUT`), —
+   * саме її несе `If-Match`. ⛔ Не версія ОСТАННЬОЇ відповіді сервера: фоновий
+   * перезапит змінену чернетку не чіпає, і якби `If-Match` брав свіжу версію,
+   * збереження мовчки затерло б чужу правку, якої людина не бачила.
+   */
+  readonly etag: string | null;
+}
+
+/**
+ * Гранти ролі разом із версією набору з заголовка `ETag`. ⚠ Не форма тіла
+ * сервера (та — `ResourceGrantDto[]` із `schema.d.ts`), а клієнтська пара
+ * «тіло + заголовок».
+ */
+interface LoadedGrants {
+  readonly grants: ResourceGrantDto[];
+  readonly etag: string | null;
+}
+
+async function fetchGrants(roleId: number): Promise<LoadedGrants> {
+  const response = await apiFetchResponse(`/api/v1/roles/${roleId}/grants`);
+
+  return { grants: (await response.json()) as ResourceGrantDto[], etag: response.headers.get('ETag') };
+}
+
+/**
+ * Чи це відмова через застарілу версію набору (`ECR-SEC-0409` з актуальною
+ * версією в `details.version`), а не інший конфлікт безпеки того самого коду
+ * (дублікат ресурсу в наборі).
+ */
+function isStaleGrants(error: unknown): boolean {
+  return (
+    error instanceof EcrApiError &&
+    error.problem.status === 409 &&
+    error.problem.errorCode === 'ECR-SEC-0409' &&
+    typeof error.problem.extensions2?.['version'] === 'string'
+  );
 }
 
 /**
@@ -77,12 +118,15 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
   const [seed, setSeed] = useState<Seed | null>(null);
   // `undefined` — питання немає; `null` — людина хоче зняти вибір ролі.
   const [pendingRole, setPendingRole] = useState<number | null | undefined>(undefined);
+  // ⛔ Збереження відмовлене `409`: набір змінив хтось інший. Чернетка лишається,
+  // точка відліку — вже свіжий набір сервера; людина вирішує сама.
+  const [conflict, setConflict] = useState(false);
   const nextKey = useRef(0);
   const queryClient = useQueryClient();
 
   const grants = useQuery({
     queryKey: ['grants', roleId],
-    queryFn: () => apiFetch<ResourceGrantDto[]>(`/api/v1/roles/${roleId ?? 0}/grants`),
+    queryFn: () => fetchGrants(roleId ?? 0),
     enabled: roleId !== null,
   });
 
@@ -117,34 +161,71 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
 
     const current = latest.current;
     const sameRole = current.seed?.roleId === roleId;
-    if (sameRole && current.dirty && !sameGrants(current.draft, grants.data)) return;
+    if (sameRole && current.dirty && !sameGrants(current.draft, grants.data.grants)) return;
 
-    setRows(grants.data.map((grant) => ({ key: nextKey.current++, grant, path: EmptyPath })));
-    setSeed({ roleId, grants: grants.data });
+    setRows(grants.data.grants.map((grant) => ({ key: nextKey.current++, grant, path: EmptyPath })));
+    setSeed({ roleId, grants: grants.data.grants, etag: grants.data.etag });
+    setConflict(false);
   }, [grants.data, roleId]);
 
   const save = useMutation({
-    mutationFn: (next: { roleId: number; grants: ResourceGrantDto[] }) =>
-      apiFetch(`/api/v1/roles/${next.roleId}/grants`, {
+    /*
+     * ⛔ `If-Match` — версія, з якої почалася ЦЯ чернетка (`seed.etag`).
+     * Без неї два адміністратори однієї ролі затирали набори один одного
+     * мовчки: заміна цілком не лишає від чужої правки нічого.
+     */
+    mutationFn: async (next: { roleId: number; grants: ResourceGrantDto[]; etag: string | null }) => {
+      const response = await apiFetchResponse(`/api/v1/roles/${next.roleId}/grants`, {
         method: 'PUT',
         body: JSON.stringify({ grants: next.grants } satisfies ReplaceGrantsRequest),
-      }),
-    onSuccess: async (_result, next) => {
+        ...(next.etag === null ? {} : { headers: { 'If-Match': next.etag } }),
+      });
+
+      return response.headers.get('ETag');
+    },
+    onSuccess: async (etag, next) => {
       // ⚠ Збережене стає новою точкою відліку ДО перечитання: інакше відповідь,
       // що відрізняється лише порядком чи назвою, лишила б чернетку «зміненою».
-      setSeed((prev) => (prev?.roleId === next.roleId ? { roleId: next.roleId, grants: next.grants } : prev));
+      setSeed((prev) =>
+        prev?.roleId === next.roleId ? { roleId: next.roleId, grants: next.grants, etag } : prev,
+      );
+      setConflict(false);
       await queryClient.invalidateQueries({ queryKey: ['grants', next.roleId] });
       showDone(t('grants.saved'));
     },
-    // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
-    // (українською без `messageKey`). Той самий розбір, що й скрізь.
-    onError: showApiError,
+    onError: async (error, next) => {
+      // ⛔ `X-08`: тут стояв `error.message` — сирий `detail` сервера
+      // (українською без `messageKey`). Той самий розбір, що й скрізь.
+      showApiError(error);
+      if (!isStaleGrants(error)) return;
+
+      // ⚠ Перечитати набір, але НЕ чіпати чернетку: вона — робота людини.
+      // Свіжий набір стає точкою відліку (і його версія — наступним
+      // `If-Match`), тож наступне «Зберегти» — усвідомлена заміна чужої
+      // правки, а «Скинути» показує, що там тепер.
+      const fresh = await queryClient.fetchQuery({
+        queryKey: ['grants', next.roleId],
+        queryFn: () => fetchGrants(next.roleId),
+        staleTime: 0,
+      });
+      setSeed((prev) =>
+        prev?.roleId === next.roleId ? { roleId: next.roleId, grants: fresh.grants, etag: fresh.etag } : prev,
+      );
+      setConflict(!sameGrants(latest.current.draft, fresh.grants));
+    },
   });
 
   function switchRole(next: number | null): void {
     setRoleId(next);
     setRows([]);
     setSeed(null);
+    setConflict(false);
+  }
+
+  function discardDraft(): void {
+    if (seed === null) return;
+    setRows(seed.grants.map((grant) => ({ key: nextKey.current++, grant, path: EmptyPath })));
+    setConflict(false);
   }
 
   function requestRole(next: number | null): void {
@@ -197,7 +278,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
               size="xs"
               loading={save.isPending}
               disabled={grants.isPending || Boolean(grants.error) || !seeded || !dirty || incomplete}
-              onClick={() => save.mutate({ roleId, grants: draft })}
+              onClick={() => save.mutate({ roleId, grants: draft, etag: seed?.etag ?? null })}
             >
               {t('common.save')}
             </Button>
@@ -210,6 +291,17 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
           </>
         )}
       </Group>
+
+      {roleId !== null && conflict && (
+        <Group mb="xs" gap="xs" data-testid="grants-conflict">
+          <Text size="xs" c="statusError" role="alert">
+            {t('grants.conflict')}
+          </Text>
+          <Button size="compact-xs" variant="default" onClick={discardDraft}>
+            {t('grants.discardVerb')}
+          </Button>
+        </Group>
+      )}
 
       {/* ⚠ D-207 п.2: вибір проєкту показує ВСІ проєкти (код і назву), а не
           лише доступні — колишня підказка `grants.projectsScopeHint` про
@@ -231,7 +323,7 @@ export function GrantsPanel({ roles }: { roles: RoleView[] }): JSX.Element {
       <AsyncBoundary<ResourceGrantDto[]>
         isPending={roleId !== null && grants.isPending}
         error={grants.error}
-        data={roleId === null ? undefined : grants.data}
+        data={roleId === null ? undefined : grants.data?.grants}
         isEmpty={() => rows.length === 0}
         emptyTitle={roleId === null ? t('grants.pickRole') : t('grants.empty')}
         emptyHint={roleId === null ? t('grants.pickRoleHint') : t('grants.emptyHint')}

@@ -92,7 +92,8 @@ function Call {
         [string] $Method,
         [string] $Path,
         $Body,
-        [int[]] $Expect = @(200, 201, 204)
+        [int[]] $Expect = @(200, 201, 204),
+        [hashtable] $Headers
     )
 
     $arguments = @{
@@ -102,6 +103,8 @@ function Call {
         UseBasicParsing = $true
         TimeoutSec      = 120
     }
+
+    if ($null -ne $Headers) { $arguments.Headers = $Headers }
 
     if ($null -ne $Body) {
         $arguments.ContentType = 'application/json; charset=utf-8'
@@ -258,9 +261,13 @@ try {
     # ⛔ Без гранта перелік порожній для всіх, включно з власником усіх прав
     # (`A7-22`). Оператор має `Security.ManageRoles` і видає грант своїй ролі.
     Step 'ресурсний грант на проєкт'
+    # ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag`
+    # відповіді GET, як це робить екран грантів.
+    $grantsVersion = (Invoke-WebRequest -Uri "$base/api/v1/roles/$roleId/grants" -WebSession $session -UseBasicParsing -TimeoutSec 120).Headers['ETag']
+    if (-not $grantsVersion) { Fail "GET /api/v1/roles/$roleId/grants не віддав ETag" }
     Call PUT "/api/v1/roles/$roleId/grants" @{
         grants = @(@{ resourceKind = 'Project'; resourceId = 1; level = 'Manage'; isDeny = $false })
-    } | Out-Null
+    } -Headers @{ 'If-Match' = $grantsVersion } | Out-Null
 
     # ⚠ Грант прокручує штамп безпеки носіям ролі (`A7-23`) — сеанс треба
     # перевидати, як це зробить браузер, отримавши 401.

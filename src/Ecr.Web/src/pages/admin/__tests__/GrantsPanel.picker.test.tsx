@@ -301,7 +301,9 @@ describe('GrantsPanel: незбережена чернетка (U6)', () => {
     const before = grantGets;
     await client.invalidateQueries({ queryKey: ['grants', 10] });
     await waitFor(() => expect(grantGets).toBeGreaterThan(before));
-    await waitFor(() => expect(client.getQueryData(['grants', 10])).toEqual(serverGrants[10]));
+    await waitFor(() =>
+      expect(client.getQueryData(['grants', 10])).toEqual(expect.objectContaining({ grants: serverGrants[10] })),
+    );
 
     expect(screen.getByText('PRJ-B')).not.toBeNull();
     expect(screen.queryByText('PRJ-A')).toBeNull();

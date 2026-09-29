@@ -436,7 +436,11 @@ public sealed class HttpLoadBenchmark
             throw new HttpRequestException("у базі немає жодного проєкту: спершу запустіть генератор");
         }
 
-        await session.PutAsync(Fmt($"/api/v1/roles/{roleId}/grants"), new
+        // ⛔ `If-Match` обов'язковий (без нього — 422): версія набору — `ETag` GET.
+        var grantsUrl = Fmt($"/api/v1/roles/{roleId}/grants");
+        var version = await session.ETagAsync(grantsUrl, ct).ConfigureAwait(false);
+
+        await session.PutAsync(grantsUrl, new
         {
             grants = projects.Select(id => new
             {
@@ -445,7 +449,7 @@ public sealed class HttpLoadBenchmark
                 level = "Manage",
                 isDeny = false,
             }).ToArray(),
-        }, ct).ConfigureAwait(false);
+        }, ct, version).ConfigureAwait(false);
     }
 
     private async Task<List<int>> ProjectIdsAsync(CancellationToken ct)
@@ -1461,9 +1465,33 @@ public sealed class HttpLoadBenchmark
             throw new HttpRequestException(Fmt($"POST {url} → {(int)response.StatusCode}: {text}"));
         }
 
-        public async Task PutAsync(string url, object body, CancellationToken ct)
+        /// <summary><c>ETag</c> відповіді <c>GET</c> — версія для <c>If-Match</c>.</summary>
+        /// <param name="url">Адреса.</param>
+        /// <param name="ct">Токен скасування.</param>
+        public async Task<string> ETagAsync(string url, CancellationToken ct)
         {
-            using var response = await _client.PutAsJsonAsync(url, body, Json, ct).ConfigureAwait(false);
+            using var response = await _client.GetAsync(new Uri(url, UriKind.Relative), ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode || response.Headers.ETag is null)
+            {
+                throw new HttpRequestException(Fmt($"GET {url} → {(int)response.StatusCode}, ETag: {response.Headers.ETag}"));
+            }
+
+            return response.Headers.ETag.Tag;
+        }
+
+        public async Task PutAsync(string url, object body, CancellationToken ct, string? ifMatch = null)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Put, url)
+            {
+                Content = JsonContent.Create(body, options: Json),
+            };
+
+            if (ifMatch is not null)
+            {
+                request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
+            }
+
+            using var response = await _client.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
