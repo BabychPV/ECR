@@ -7488,6 +7488,201 @@
         ],
         "type": "object"
       },
+      "RegistryBatchItemDto": {
+        "description": "Один рядок пакета.",
+        "properties": {
+          "baseVersion": {
+            "description": "`version` рядка з `GET …/rows` (`D-166`); не збігся — помилка рядка `entryChanged`.\n        `null` — без перевірки.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "clientRowId": {
+            "description": "Ідентифікатор рядка на клієнті — ним звіт адресує результат.",
+            "type": "string"
+          },
+          "code": {
+            "description": "Код нового запису довідника з ручним кодом; для `CodeMode = Auto` і для наявного запису — порожньо.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "id": {
+            "description": "Наявний запис; `null` — новий (лише для `upsert`).",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "op": {
+            "description": "`upsert` або `delete`.",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {},
+            "description": "Значення за кодами полів; поле, якого немає, не змінюється.",
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "clientRowId",
+          "op",
+          "id",
+          "code",
+          "baseVersion",
+          "values"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchRequest": {
+        "description": "Пакет змін рядків довідника (`POST /registries/{code}/entries/batch`, RT-14).",
+        "properties": {
+          "items": {
+            "description": "Рядки пакета, ≤ int RegistryBatchHandler.MaxItems.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryBatchItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchResult": {
+        "description": "Звіт пакета — завжди 200, як імпорт CSV.",
+        "properties": {
+          "added": {
+            "description": "Нових записів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "applied": {
+            "description": "Чи записано зміни; хоч одна помилка рядка або `dryRun` — ні.",
+            "type": "boolean"
+          },
+          "deleted": {
+            "description": "Видалених записів.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "dryRun": {
+            "description": "Прогін без запису.",
+            "type": "boolean"
+          },
+          "rows": {
+            "description": "Результат кожного рядка пакета в його порядку.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryBatchRowResult"
+            },
+            "type": "array"
+          },
+          "unchanged": {
+            "description": "Записів без фактичної зміни.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Змінених записів.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applied",
+          "dryRun",
+          "added",
+          "updated",
+          "deleted",
+          "unchanged",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchRowError": {
+        "description": "Помилка рядка пакета.",
+        "properties": {
+          "errorCode": {
+            "description": "Код помилки (`ECR-…`).",
+            "type": "string"
+          },
+          "field": {
+            "description": "Поле; `null` — помилка рядка цілком.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "messageKey": {
+            "description": "Ключ тексту в каталозі.",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Параметри тексту.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "field",
+          "errorCode",
+          "messageKey",
+          "params"
+        ],
+        "type": "object"
+      },
+      "RegistryBatchRowResult": {
+        "description": "Результат рядка пакета.",
+        "properties": {
+          "clientRowId": {
+            "description": "Ідентифікатор рядка на клієнті.",
+            "type": "string"
+          },
+          "entryId": {
+            "description": "Запис; для нового — лише після запису.",
+            "format": "int64",
+            "type": [
+              "null",
+              "integer"
+            ]
+          },
+          "errors": {
+            "description": "Помилки рядка; порожньо — рядок пройшов.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryBatchRowError"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "`added`, `updated`, `unchanged`, `deleted` або `error`.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Нова версія рядка після запису — наступний `baseVersion`; інакше `null`.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "clientRowId",
+          "status",
+          "entryId",
+          "version",
+          "errors"
+        ],
+        "type": "object"
+      },
       "RegistryCodeMode": {
         "enum": [
           "Manual",
@@ -25423,6 +25618,157 @@
         "summary": "Створює або оновлює запис. Право `Registry.EditData`.",
         "tags": [
           "Registries"
+        ]
+      }
+    },
+    "/api/v1/registries/{code}/entries/batch": {
+      "post": {
+        "description": "Звіт — завжди 200, як імпорт CSV: помилки рядків (зокрема `ECR-REG-4093 entryChanged` для\nзастарілого `baseVersion` і `4092 keyTaken`) — дані для сітки. Хоч одна помилка або\n`dryRun` — не записано нічого. 409 — лише гонка за ключем під час запису.",
+        "parameters": [
+          {
+            "description": "Код довідника.",
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Лише перевірка — із відкатом.",
+            "in": "query",
+            "name": "dryRun",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryBatchRequest"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryBatchRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryBatchRequest"
+              }
+            }
+          },
+          "description": "Токен скасування.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryBatchResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryBatchResult"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistryBatchResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "Пакетний запис рядків довідника (RT-14): `upsert` і `delete` однією транзакцією.\nПраво `Registry.EditData` або грант `Write` на довідник.",
+        "tags": [
+          "RegistryRows"
         ]
       }
     },

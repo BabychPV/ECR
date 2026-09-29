@@ -8698,6 +8698,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registries/{code}/entries/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Пакетний запис рядків довідника (RT-14): `upsert` і `delete` однією транзакцією.
+         *     Право `Registry.EditData` або грант `Write` на довідник.
+         * @description Звіт — завжди 200, як імпорт CSV: помилки рядків (зокрема `ECR-REG-4093 entryChanged` для
+         *     застарілого `baseVersion` і `4092 keyTaken`) — дані для сітки. Хоч одна помилка або
+         *     `dryRun` — не записано нічого. 409 — лише гонка за ключем під час запису.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    /** @description Лише перевірка — із відкатом. */
+                    dryRun?: boolean;
+                };
+                header?: never;
+                path: {
+                    /** @description Код довідника. */
+                    code: string;
+                };
+                cookie?: never;
+            };
+            /** @description Токен скасування. */
+            requestBody: {
+                content: {
+                    "application/*+json": components["schemas"]["RegistryBatchRequest"];
+                    "application/json": components["schemas"]["RegistryBatchRequest"];
+                    "text/json": components["schemas"]["RegistryBatchRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RegistryBatchResult"];
+                        "text/json": components["schemas"]["RegistryBatchResult"];
+                        "text/plain": components["schemas"]["RegistryBatchResult"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/registries/{code}/entries/import": {
         parameters: {
             query?: never;
@@ -18351,6 +18452,90 @@ export interface components {
              * @description Аркуш.
              */
             sheetDefId: number;
+        };
+        /** @description Один рядок пакета. */
+        RegistryBatchItemDto: {
+            /** @description `version` рядка з `GET …/rows` (`D-166`); не збігся — помилка рядка `entryChanged`.
+             *             `null` — без перевірки. */
+            baseVersion: null | string;
+            /** @description Ідентифікатор рядка на клієнті — ним звіт адресує результат. */
+            clientRowId: string;
+            /** @description Код нового запису довідника з ручним кодом; для `CodeMode = Auto` і для наявного запису — порожньо. */
+            code: null | string;
+            /**
+             * Format: int64
+             * @description Наявний запис; `null` — новий (лише для `upsert`).
+             */
+            id: null | number;
+            /** @description `upsert` або `delete`. */
+            op: string;
+            /** @description Значення за кодами полів; поле, якого немає, не змінюється. */
+            values: null | {
+                [key: string]: unknown;
+            };
+        };
+        /** @description Пакет змін рядків довідника (`POST /registries/{code}/entries/batch`, RT-14). */
+        RegistryBatchRequest: {
+            /** @description Рядки пакета, ≤ int RegistryBatchHandler.MaxItems. */
+            items: components["schemas"]["RegistryBatchItemDto"][];
+        };
+        /** @description Звіт пакета — завжди 200, як імпорт CSV. */
+        RegistryBatchResult: {
+            /**
+             * Format: int32
+             * @description Нових записів.
+             */
+            added: number;
+            /** @description Чи записано зміни; хоч одна помилка рядка або `dryRun` — ні. */
+            applied: boolean;
+            /**
+             * Format: int32
+             * @description Видалених записів.
+             */
+            deleted: number;
+            /** @description Прогін без запису. */
+            dryRun: boolean;
+            /** @description Результат кожного рядка пакета в його порядку. */
+            rows: components["schemas"]["RegistryBatchRowResult"][];
+            /**
+             * Format: int32
+             * @description Записів без фактичної зміни.
+             */
+            unchanged: number;
+            /**
+             * Format: int32
+             * @description Змінених записів.
+             */
+            updated: number;
+        };
+        /** @description Помилка рядка пакета. */
+        RegistryBatchRowError: {
+            /** @description Код помилки (`ECR-…`). */
+            errorCode: string;
+            /** @description Поле; `null` — помилка рядка цілком. */
+            field: null | string;
+            /** @description Ключ тексту в каталозі. */
+            messageKey: string;
+            /** @description Параметри тексту. */
+            params: {
+                [key: string]: string;
+            };
+        };
+        /** @description Результат рядка пакета. */
+        RegistryBatchRowResult: {
+            /** @description Ідентифікатор рядка на клієнті. */
+            clientRowId: string;
+            /**
+             * Format: int64
+             * @description Запис; для нового — лише після запису.
+             */
+            entryId: null | number;
+            /** @description Помилки рядка; порожньо — рядок пройшов. */
+            errors: components["schemas"]["RegistryBatchRowError"][];
+            /** @description `added`, `updated`, `unchanged`, `deleted` або `error`. */
+            status: string;
+            /** @description Нова версія рядка після запису — наступний `baseVersion`; інакше `null`. */
+            version: null | string;
         };
         /** @enum {unknown} */
         RegistryCodeMode: "Manual" | "Auto" | null;
