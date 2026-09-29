@@ -42,6 +42,10 @@ public sealed class GenericCalculationModule(
     IRegistrySnapshotLoader? registryLoader = null) : ICalculationModule
 {
     private UnitTable? _units;
+
+    /// <summary>Id одиниці → код: трейс називає одиниці кодами (§7.2), а рядок несе Id.</summary>
+    private Dictionary<int, string> _unitCodes = [];
+
     /// <inheritdoc />
     public string Code => "generic";
 
@@ -294,18 +298,27 @@ public sealed class GenericCalculationModule(
             .Select(o => o.Code)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Формули версії за кодом — трейс бере з них одиницю входу `!Formula` (§7.2).
+        var formulasByCode = new Dictionary<string, MethodologyFormula>(StringComparer.OrdinalIgnoreCase);
+        foreach (var formula in ordered)
+        {
+            formulasByCode.TryAdd(formula.Code, formula);
+        }
+
         // ⛔ Константи Row-формул резолвляться БЕЗ речовини: константа, задана по
         // речовинах, у Row-формулі — відмова публікації, а не «коефіцієнт першої».
+        var rowConstantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
         var rowContext = new MethodologyEvaluationContext(
             period,
             arguments,
-            ResolveConstants(version, rowFormulas, substanceEntryId: null, period, binding.Constants),
+            ResolveConstants(version, rowFormulas, substanceEntryId: null, period, binding.Constants, rowConstantUnits),
             units,
             binding.Registries);
+        var rowScope = new TraceScope(input, formulasByCode, rowConstantUnits, SubstanceEntryId: null);
 
         foreach (var formula in rowFormulas)
         {
-            rowContext.SetFormulaResult(formula.Code, Evaluate(formula, rowContext, numeric, trace));
+            rowContext.SetFormulaResult(formula.Code, Evaluate(formula, rowContext, numeric, trace, rowScope));
         }
 
         // Рівень рядка: виходи «раз на рядок» і проміжні значення видимих Row-формул.
@@ -344,10 +357,12 @@ public sealed class GenericCalculationModule(
 
         foreach (var substance in targets)
         {
+            var constantUnits = new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
             var resolved = ResolveConstants(
-                version, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants);
+                version, substanceFormulas, substance?.SubstanceEntryId, period, binding.Constants, constantUnits);
 
             var context = new MethodologyEvaluationContext(period, arguments, resolved, units, binding.Registries);
+            var scope = new TraceScope(input, formulasByCode, constantUnits, substance?.SubstanceEntryId);
 
             // Row-результати — готові, не перераховуються: саме заради цього D-176.
             foreach (var formula in rowFormulas)
@@ -357,7 +372,7 @@ public sealed class GenericCalculationModule(
 
             foreach (var formula in substanceFormulas)
             {
-                var value = Evaluate(formula, context, numeric, trace);
+                var value = Evaluate(formula, context, numeric, trace, scope);
                 context.SetFormulaResult(formula.Code, value);
             }
 
@@ -383,7 +398,7 @@ public sealed class GenericCalculationModule(
             values,
             trace.Steps
                 .Select(s => new CalculationTraceStep(
-                    s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked))
+                    s.Order, s.Code, s.Expression, s.Value, s.Error, s.Masked, Detail: s.ToJson()))
                 .ToList());
     }
 
@@ -511,11 +526,14 @@ public sealed class GenericCalculationModule(
         var snapshot = await unitCatalog.GetAsync(ct).ConfigureAwait(false);
         var table = new UnitTable();
 
+        var codes = new Dictionary<int, string>();
         foreach (var unit in snapshot.Units.Values)
         {
             table.Add(unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase);
+            codes.TryAdd(unit.Id, unit.Code);
         }
 
+        _unitCodes = codes;
         _units = table;
         return table;
     }
@@ -525,7 +543,8 @@ public sealed class GenericCalculationModule(
         MethodologyFormula formula,
         MethodologyEvaluationContext context,
         NumericPolicy numeric,
-        TraceRecorder trace)
+        TraceRecorder trace,
+        TraceScope scope)
     {
         var parsed = formulaEngine.Parse(formula.Expression, ExpressionDialect.Methodology);
         if (!parsed.IsSuccess || parsed.Expression is null)
@@ -546,13 +565,23 @@ public sealed class GenericCalculationModule(
 
         if (result.IsError)
         {
-            trace.Failed(formula.Code, formula.Expression, result.ErrorCode!);
+            trace.Failed(
+                formula.Code,
+                formula.Expression,
+                result.ErrorCode!,
+                trace.RecordsFailures ? Describe(formula, parsed.Expression, context, numeric, scope) : null);
             return result;
         }
 
+        // ⚠ Входи збираються лише для кроку, який запишеться: на `ErrorsOnly` невидима
+        // формула не платить за обхід і повторне читання посилань нічим.
+        var detail = trace.Records(formula.IsVisible)
+            ? Describe(formula, parsed.Expression, context, numeric, scope)
+            : null;
+
         if (result.AsNumber() is not { } number)
         {
-            trace.Step(formula.Code, formula.Expression, null);
+            trace.Step(formula.Code, formula.Expression, null, formula.IsVisible, detail);
             return result;
         }
 
@@ -571,10 +600,91 @@ public sealed class GenericCalculationModule(
         // результату між ЗАЛЕЖНИМИ методологіями, де число проходить через
         // колонку і втрачає знаки за її типом. Це ребро графа
         // `calc.MethodologyDependency`, а не крок усередині формули.
-        trace.Step(formula.Code, formula.Expression, number);
+        trace.Step(formula.Code, formula.Expression, number, formula.IsVisible, detail);
 
         return result;
     }
+
+    /// <summary>Що формула прочитала: одиниця результату й входи для <c>TraceJson</c> v1.</summary>
+    /// <remarks>
+    /// ⛔ Значення входу — тим САМИМ рушієм у тому САМОМУ контексті, що й формула
+    /// (рішення V-8, <c>D-177</c>): вузол посилання обчислюється як вираз. Власне
+    /// читання аргументу чи властивості періоду тут було б другою семантикою, і трейс
+    /// пояснював би не те число, яке пішло в результат.
+    /// </remarks>
+    private TraceDetail Describe(
+        MethodologyFormula formula,
+        ParsedExpression parsed,
+        MethodologyEvaluationContext context,
+        NumericPolicy numeric,
+        TraceScope scope)
+    {
+        var inputs = new List<TraceInput>();
+
+        foreach (var reference in ReferenceCollector.Collect(parsed.Root))
+        {
+            var value = FormatValue(formulaEngine.Evaluate(parsed with { Root = reference.Node }, context, numeric.Mode).Value);
+
+            inputs.Add(reference.Kind switch
+            {
+                TraceInputKind.Argument => new TraceInput(
+                    reference.Kind,
+                    reference.Code,
+                    value,
+                    UnitCode(scope.Input.Arguments
+                        .FirstOrDefault(a => string.Equals(a.ArgumentCode, reference.Code, StringComparison.OrdinalIgnoreCase))
+                        ?.UnitId),
+                    new TraceCell(scope.Input.TableInstanceId, scope.Input.SourceRowKey, reference.Code)),
+
+                TraceInputKind.Constant => new TraceInput(
+                    reference.Kind,
+                    reference.Code,
+                    value,
+                    UnitCode(scope.ConstantUnits.GetValueOrDefault(reference.Code)),
+                    SubstanceEntryId: scope.SubstanceEntryId),
+
+                TraceInputKind.Formula => new TraceInput(
+                    reference.Kind,
+                    reference.Code,
+                    value,
+                    UnitCode(scope.Formulas.TryGetValue(reference.Code, out var source) ? source.OutputUnitId : null)),
+
+                _ => new TraceInput(reference.Kind, reference.Code, value, null, PeriodOffset: reference.PeriodOffset),
+            });
+        }
+
+        return new TraceDetail(UnitCode(formula.OutputUnitId), inputs);
+    }
+
+    /// <summary>Код одиниці за Id; невідома одиниця — <c>null</c>, а не вигаданий код.</summary>
+    private string? UnitCode(int? unitId)
+        => unitId is { } id && _unitCodes.TryGetValue(id, out var code) ? code : null;
+
+    /// <summary>Значення входу текстом — так, як його записує <c>TraceJson</c> v1.</summary>
+    private static string? FormatValue(ExpressionValue value)
+        => value.Type switch
+        {
+            Expressions.Ast.ExpressionValueType.Null => null,
+            Expressions.Ast.ExpressionValueType.Error => value.ErrorCode,
+            Expressions.Ast.ExpressionValueType.Number => value.AsNumber() is { } number
+                ? TraceJson.Format(number)
+                : value.AsDouble()?.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+            Expressions.Ast.ExpressionValueType.Boolean => (bool)value.Value! ? "true" : "false",
+            Expressions.Ast.ExpressionValueType.Date =>
+                ((DateTime)value.Value!).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            _ => value.Value as string,
+        };
+
+    /// <summary>Звідки трейс кроку бере адресу входів і їхні одиниці.</summary>
+    /// <param name="Input">Рядок, що рахується.</param>
+    /// <param name="Formulas">Формули версії за кодом.</param>
+    /// <param name="ConstantUnits">Одиниці розв'язаних констант цієї речовини.</param>
+    /// <param name="SubstanceEntryId">Речовина; <c>null</c> — рівень рядка.</param>
+    private sealed record TraceScope(
+        CalculationInput Input,
+        IReadOnlyDictionary<string, MethodologyFormula> Formulas,
+        IReadOnlyDictionary<string, int?> ConstantUnits,
+        long? SubstanceEntryId);
 
     /// <summary>Резолвить усі константи, згадані у формулах, для однієї речовини.</summary>
     /// <remarks>
@@ -586,7 +696,8 @@ public sealed class GenericCalculationModule(
         IReadOnlyList<MethodologyFormula> formulas,
         long? substanceEntryId,
         Expressions.PeriodContext period,
-        IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> candidatesByCode)
+        IReadOnlyDictionary<string, IReadOnlyList<MethodologyConstant>> candidatesByCode,
+        Dictionary<string, int?> resolvedUnits)
     {
         var resolved = new Dictionary<string, ExpressionValue>(StringComparer.OrdinalIgnoreCase);
 
@@ -615,6 +726,9 @@ public sealed class GenericCalculationModule(
                 resolved[code] = found.Number is { } number
                     ? ExpressionValue.Number(number)
                     : ExpressionValue.Text(found.Text ?? string.Empty);
+
+                // Одиниця — лише для трейсу (§7.2): у вираз константа йде числом.
+                resolvedUnits[code] = found.UnitId;
             }
         }
 

@@ -169,7 +169,9 @@ public sealed class CalculationResultStore(EcrDbContext db, IClock clock) : ICal
                 .GetProperty(nameof(Domain.Abstractions.Entity<long>.Id))!
                 .SetValue(entity, nextId++);
 
-            entity.Describe(step.Expression, step.Value, step.TraceJson, resultId: null, step.Masked);
+            // HSE301 A3b: у колонку — `TraceJson` v1 (§7.2), коли модуль його дав; інакше
+            // голий код помилки, як до кроку.
+            entity.Describe(step.Expression, step.Value, step.Detail ?? step.TraceJson, resultId: null, step.Masked);
             db.CalculationSteps.Add(entity);
         }
     }

@@ -367,11 +367,20 @@ public sealed record CalculationOutputValue(
 /// <param name="StepCode">Код кроку — зазвичай код формули або виходу.</param>
 /// <param name="Expression">Вираз як його бачив рушій.</param>
 /// <param name="Value">Значення кроку.</param>
-/// <param name="TraceJson">Довільна деталізація: підставлені аргументи, константи.</param>
+/// <param name="TraceJson">
+/// Код помилки-значення кроку (<c>#ARG</c>, <c>#REF</c>); <c>null</c> — крок порахувався.
+/// ⚠ Назва історична: сюди завжди клався лише код, і так його читає симуляція
+/// (<c>MethodologyQueryHandlers</c>). Повна деталізація — у <paramref name="Detail"/>.
+/// </param>
 /// <param name="Masked">
 /// Чому значення стало нулем (<c>H-24d-1</c>). Чинна система маскує
 /// <c>NaN</c> і <c>±∞</c> у нуль мовчки; число ми віддаємо те саме, а причину
 /// пишемо — саме за нею такі випадки можна перелічити.
+/// </param>
+/// <param name="Detail">
+/// Крок у схемі <c>TraceJson</c> v1 (HSE301 A3b, FEATURE-HSE301-VIEW §7.2): вираз, результат,
+/// одиниця, помилка й входи. Саме він лягає в <c>calc.CalculationStep.TraceJson</c>;
+/// <c>null</c> — модуль схеми не знає, і пишеться <paramref name="TraceJson"/>, як до кроку.
 /// </param>
 public sealed record CalculationTraceStep(
     int StepOrder,
@@ -379,4 +388,5 @@ public sealed record CalculationTraceStep(
     string? Expression,
     decimal? Value,
     string? TraceJson,
-    Domain.Enums.MaskedZeroReason Masked = Domain.Enums.MaskedZeroReason.None);
+    Domain.Enums.MaskedZeroReason Masked = Domain.Enums.MaskedZeroReason.None,
+    string? Detail = null);

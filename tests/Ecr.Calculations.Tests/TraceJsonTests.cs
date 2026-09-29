@@ -1,6 +1,8 @@
 // tests/Ecr.Calculations.Tests/TraceJsonTests.cs
 using System.Text.Json;
+using Ecr.Application.Ports;
 using Ecr.Domain.Enums;
+using Ecr.Expressions;
 using Ecr.Expressions.Parsing;
 using Ecr.TestKit;
 using Xunit;
@@ -17,6 +19,123 @@ namespace Ecr.Calculations.Tests;
 /// </remarks>
 public sealed class TraceJsonTests
 {
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "ФВ-9.13")]
+    public async Task M_t_прикладу_A_має_входи_V_Sm3_і_Rho20()
+    {
+        // Типовий рівень — ErrorsOnly: видима формула пишеться й на ньому (§7.1).
+        var output = await new ScopeStand().RunAsync(TraceLevel.ErrorsOnly);
+
+        var step = Assert.Single(output.Trace, s => s.StepCode == "M_t");
+        using var json = JsonDocument.Parse(step.Detail!);
+        var root = json.RootElement;
+
+        Assert.Equal(1, root.GetProperty("v").GetInt32());
+        Assert.Equal("CONVERT(!V_Sm3 * @Rho20, 'kg', 't')", root.GetProperty("expr").GetString());
+        Assert.Equal("0.2581914962", root.GetProperty("result").GetString());
+        Assert.Equal("t", root.GetProperty("unit").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("error").ValueKind);
+
+        var inputs = root.GetProperty("inputs").EnumerateArray().ToList();
+        Assert.Equal(["V_Sm3", "Rho20"], inputs.Select(i => i.GetProperty("code").GetString()));
+
+        var volume = inputs[0];
+        Assert.Equal("formula", volume.GetProperty("kind").GetString());
+        Assert.Equal("269.258", volume.GetProperty("value").GetString());
+        Assert.Equal("Sm3", volume.GetProperty("unit").GetString());
+
+        var density = inputs[1];
+        Assert.Equal("arg", density.GetProperty("kind").GetString());
+        Assert.Equal("0.9589", density.GetProperty("value").GetString());
+        var cell = density.GetProperty("cell");
+        Assert.Equal(500, cell.GetProperty("tableInstanceId").GetInt64());
+        Assert.Equal("E-2026-01-001", cell.GetProperty("row").GetString());
+        Assert.Equal("Rho20", cell.GetProperty("column").GetString());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Константа_речовини_у_входах_зі_своєю_речовиною()
+    {
+        var output = await new ScopeStand().RunAsync(TraceLevel.Full);
+
+        var step = Assert.Single(output.Trace, s => s.StepCode == "tons" && s.Value is not null && Substance(s) == 905);
+        using var json = JsonDocument.Parse(step.Detail!);
+
+        var inputs = json.RootElement.GetProperty("inputs").EnumerateArray().ToList();
+        Assert.Equal(["M_t", "K_MASS", "W_COMP"], inputs.Select(i => i.GetProperty("code").GetString()));
+
+        var constant = inputs[1];
+        Assert.Equal("const", constant.GetProperty("kind").GetString());
+        Assert.Equal("0.005", constant.GetProperty("value").GetString());
+        Assert.Equal(905, constant.GetProperty("substance").GetInt64());
+    }
+
+    /// <remarks>
+    /// ⚠ Невдалий крок пояснює, ЯКИЙ вхід зламався: константа, якої для Row-формули не
+    /// існує, лежить у входах зі своїм <c>#REF</c>. А <c>TraceJson</c> порту лишається
+    /// голим кодом — так його читає симуляція.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Невдалий_крок_має_помилку_і_вхід_що_її_дав()
+    {
+        var output = await new ScopeStand(massExpression: "!V_Sm3 * CST.K_MASS").RunAsync(TraceLevel.ErrorsOnly);
+
+        // Крок формули (з виразом), а не запис «вихід не порахувався» того самого коду.
+        var step = Assert.Single(
+            output.Trace,
+            s => s.StepCode == "M_t" && s.Expression is not null && s.TraceJson == ExpressionErrors.BadReference);
+        using var json = JsonDocument.Parse(step.Detail!);
+        var root = json.RootElement;
+
+        Assert.Equal(ExpressionErrors.BadReference, root.GetProperty("error").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("result").ValueKind);
+
+        var constant = Assert.Single(
+            root.GetProperty("inputs").EnumerateArray(), i => i.GetProperty("kind").GetString() == "const");
+        Assert.Equal(ExpressionErrors.BadReference, constant.GetProperty("value").GetString());
+    }
+
+    /// <remarks>
+    /// ⛔ Невидима формула на <c>ErrorsOnly</c> не пише кроку — обсяг наявних методологій
+    /// не росте (ЗБР-3). На <c>Full</c> — пише, і теж зі входами.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Невидимі_кроки_лише_на_Full()
+    {
+        var hidden = await new ScopeStand(visible: false).RunAsync(TraceLevel.ErrorsOnly);
+        var full = await new ScopeStand(visible: false).RunAsync(TraceLevel.Full);
+
+        Assert.Empty(hidden.Trace);
+
+        var step = Assert.Single(full.Trace, s => s.StepCode == "M_t");
+        using var json = JsonDocument.Parse(step.Detail!);
+        Assert.Equal(2, json.RootElement.GetProperty("inputs").GetArrayLength());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Off_не_пише_жодного_кроку_навіть_видимого()
+    {
+        var output = await new ScopeStand().RunAsync(TraceLevel.Off);
+
+        Assert.Empty(output.Trace);
+    }
+
+    private static long? Substance(CalculationTraceStep step)
+    {
+        using var json = JsonDocument.Parse(step.Detail!);
+        var constant = json.RootElement.GetProperty("inputs").EnumerateArray()
+            .FirstOrDefault(i => i.GetProperty("kind").GetString() == "const");
+
+        return constant.ValueKind == JsonValueKind.Object && constant.TryGetProperty("substance", out var id)
+            ? id.GetInt64()
+            : null;
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
     public void Збирач_бере_посилання_в_порядку_тексту_без_повторів()
