@@ -41,10 +41,45 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <summary>Префікс імені тестової бази. Перевизначається <c>ECR_TEST_DB</c>.</summary>
     private const string DatabaseNamePrefix = "EcrTest";
 
+    /// <summary>
+    /// Таймаут команд сіду — той самий, що в застосунку.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Константи в застосунку немає: значення живе дефолтом
+    /// <c>ReadInt(configuration, "Database:CommandTimeoutSeconds", 60)</c> у
+    /// <c>src/Ecr.Infrastructure/DependencyInjection.cs</c> (і тим самим числом у
+    /// <c>appsettings.json</c>). <see cref="SeedRunner"/> бере таймаут із контексту;
+    /// без нього контекст фікстури віддавав <c>null</c>, і кожен батч сіду мав
+    /// дефолтні 30 с SqlClient — удвічі менше, ніж застосунок, тож під
+    /// навантаженням фікстура падала там, де старт застосунку пройшов би.
+    /// </remarks>
+    private const int AppCommandTimeoutSeconds = 60;
+
+    private readonly string _nameSuffix = string.Empty;
+
     private MsSqlContainer? _container;
 
     /// <summary>Сторож попереджень EF — до першого ж запиту будь-якого тесту з базою.</summary>
     static SqlServerFixture() => EfWarningGuard.Install();
+
+    /// <summary>Фікстура колекції: база з іменем за замовчуванням.</summary>
+    public SqlServerFixture()
+    {
+    }
+
+    private SqlServerFixture(string nameSuffix) => _nameSuffix = nameSuffix;
+
+    /// <summary>
+    /// Окрема, штатно розгорнута база з суфіксом у імені — для тестів, які
+    /// змінюють саму схему і не мають права робити це на спільній базі колекції.
+    /// </summary>
+    /// <param name="nameSuffix">Суфікс імені бази, напр. <c>_rerun</c>.</param>
+    /// <remarks>
+    /// Життєвим циклом керує тест: <see cref="InitializeAsync"/> /
+    /// <see cref="DisposeAsync"/>. Конструктор приватний навмисно — xUnit
+    /// вимагає в фікстури колекції рівно один публічний конструктор.
+    /// </remarks>
+    public static SqlServerFixture WithOwnDatabase(string nameSuffix) => new(nameSuffix);
 
     /// <summary>Рядок підключення до тестової БД.</summary>
     public string ConnectionString { get; private set; } = string.Empty;
@@ -55,7 +90,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <inheritdoc />
     public async Task InitializeAsync()
     {
-        DatabaseName = Environment.GetEnvironmentVariable("ECR_TEST_DB") ?? DefaultDatabaseName();
+        DatabaseName = (Environment.GetEnvironmentVariable("ECR_TEST_DB") ?? DefaultDatabaseName()) + _nameSuffix;
 
         var serverConnection = Environment.GetEnvironmentVariable(LocalServerVariable);
         if (string.IsNullOrWhiteSpace(serverConnection))
@@ -413,6 +448,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
         await RunScriptAsync("06-rcsi.sql").ConfigureAwait(false);
 
         await using var seedDb = CreateContext();
+        seedDb.Database.SetCommandTimeout(AppCommandTimeoutSeconds);
         await new SeedRunner(seedDb).RunAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
