@@ -130,6 +130,33 @@ public sealed class UserStore(EcrDbContext db) : IUserStore
             .ConfigureAwait(false);
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<Ecr.Application.Security.UserRoleAssignmentView>> ListUserRoleAssignmentsAsync(
+        int userId, CancellationToken ct)
+    {
+        var rows = await db.RoleAssignments
+            .AsNoTracking()
+            .Where(a => a.UserId == userId)
+            .Join(db.Roles, a => a.RoleId, r => r.Id, (a, r) => new { r.Code, Assignment = a })
+            .OrderBy(x => x.Code)
+            .Take(MaxRoles)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        // ⚠ Область розбирає ДОМЕН (`ScopedProjectIds`): зіпсований JSON дає
+        // порожній перелік — «не діє ніде», — а не `null`, що читалося б як
+        // «діє скрізь».
+        return rows
+            .Select(x => new Ecr.Application.Security.UserRoleAssignmentView(
+                x.Code,
+                x.Assignment.ValidFrom,
+                x.Assignment.ValidTo,
+                x.Assignment.ScopedProjectIds() is { } projects
+                    ? new Ecr.Application.Security.RoleScopeDto(projects)
+                    : null))
+            .ToList();
+    }
+
+    /// <inheritdoc />
     public async Task<int> ReplaceRolesAsync(
         int userId,
         IReadOnlyList<string> roleCodes,

@@ -292,6 +292,24 @@ public sealed class SecurityController(
         => Ok(await listUserRoles.HandleAsync(id, ct).ConfigureAwait(false));
 
     /// <summary>
+    /// Особисті призначення ролей користувача з межами й областю дії (ФВ-6.14).
+    /// Право <c>Security.ManageUsers</c>.
+    /// </summary>
+    /// <param name="id">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⚠ <c>scope: null</c> — роль діє в усіх проєктах; порожній
+    /// <c>scope.projects</c> — збережена область не розбирається, роль не діє
+    /// ніде. Групові призначення — <c>GET /security/group-assignments</c>.
+    /// </remarks>
+    [HttpGet("users/{id:int}/role-assignments")]
+    [ProducesResponseType<IReadOnlyList<Ecr.Application.Security.UserRoleAssignmentView>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UserRoleAssignments(int id, CancellationToken ct)
+        => Ok(await listUserRoles.ListAssignmentsAsync(id, ct).ConfigureAwait(false));
+
+    /// <summary>
     /// Замінює набір ролей користувача. Право <c>Security.ManageUsers</c>.
     /// </summary>
     /// <remarks>

@@ -3,11 +3,13 @@ import { Button, Combobox, Group, Modal, MultiSelect, Stack, Text, TextInput } f
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
-import type { AffectedRolesResponse, RoleView, UserView } from '@/api/types';
+import type { AffectedRolesResponse, RoleScopeDto, RoleView, UserView } from '@/api/types';
 import { AsyncBoundary } from '@/shared/ui/AsyncBoundary';
 import { notificationCloseButtonProps, showApiError, showDone } from '@/shared/ui/notify';
 import { logSuppressedDetail, problemText } from '@/shared/ui/problemText';
 import { t } from '@/shared/i18n';
+import { RoleScopeFields, scopesToSend, useUserRoleScopes } from './UserRoleScopes';
+import { scopeProblem } from './roleScope';
 
 /**
  * Ролі й адреса наявного користувача.
@@ -88,6 +90,16 @@ export function UserAccessEditor({
     setEmail(user?.email ?? '');
   }, [user]);
 
+  // ФВ-6.14: області дії ролей — чернетка поверх збережених.
+  const scopes = useUserRoleScopes(user?.id ?? null);
+  const [scopeDraft, setScopeDraft] = useState<Record<string, readonly number[]>>({});
+  const [scopeError, setScopeError] = useState<{ code: string; text: string } | null>(null);
+  const baselineKey = JSON.stringify(scopes.baseline);
+
+  useEffect(() => {
+    setScopeDraft(JSON.parse(baselineKey) as Record<string, readonly number[]>);
+  }, [baselineKey]);
+
   /**
    * Збереження ролей і адреси — ДВА незалежні записи, і другий може відмовити
    * після першого.
@@ -109,9 +121,18 @@ export function UserAccessEditor({
    */
   const save = useMutation({
     mutationFn: async () => {
+      const scopesBody: Record<string, RoleScopeDto> | undefined = scopesToSend(
+        selected,
+        scopeDraft,
+        scopes.baseline,
+        scopes.state,
+      );
       const result = await apiFetch<AffectedRolesResponse>(
         `/api/v1/users/${user?.id ?? 0}/roles`,
-        { method: 'PUT', body: JSON.stringify({ roleCodes: selected }) },
+        {
+          method: 'PUT',
+          body: JSON.stringify({ roleCodes: selected, ...(scopesBody !== undefined && { scopes: scopesBody }) }),
+        },
       );
 
       try {
@@ -131,6 +152,7 @@ export function UserAccessEditor({
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: ['users'] });
       await queryClient.invalidateQueries({ queryKey: ['user-roles', user?.id] });
+      await queryClient.invalidateQueries({ queryKey: ['user-role-assignments', user?.id] });
     },
     onSuccess: (result) => {
       onClose();
@@ -147,6 +169,16 @@ export function UserAccessEditor({
         });
 
         return;
+      }
+
+      // ФВ-6.14: `403 noProjectManageGrant` / `422` про область — ще й біля
+      // поля тієї ролі, щоб було видно, ЯКУ область відхилено.
+      const problem = scopeProblem(error);
+      if (problem !== null) {
+        const code =
+          problem.roleCode ??
+          selected.find((c) => problem.projectId !== null && (scopeDraft[c] ?? []).includes(problem.projectId));
+        if (code !== undefined) setScopeError({ code, text: messageOf(error) });
       }
 
       showApiError(error);
@@ -291,6 +323,17 @@ export function UserAccessEditor({
                 </Text>
               </Stack>
             )}
+
+            <RoleScopeFields
+              selected={selected}
+              draft={scopeDraft}
+              state={scopes.state}
+              error={scopeError}
+              onChange={(code, projects) => {
+                setScopeError(null);
+                setScopeDraft((draft) => ({ ...draft, [code]: projects }));
+              }}
+            />
           </>
         )}
       </AsyncBoundary>

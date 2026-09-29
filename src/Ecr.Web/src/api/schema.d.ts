@@ -14659,6 +14659,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/users/{id}/role-assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Особисті призначення ролей користувача з межами й областю дії (ФВ-6.14).
+         *     Право `Security.ManageUsers`.
+         * @description ⚠ `scope: null` — роль діє в усіх проєктах; порожній
+         *     `scope.projects` — збережена область не розбирається, роль не діє
+         *     ніде. Групові призначення — `GET /security/group-assignments`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Користувач. */
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UserRoleAssignmentView"][];
+                        "text/json": components["schemas"]["UserRoleAssignmentView"][];
+                        "text/plain": components["schemas"]["UserRoleAssignmentView"][];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProblemDetails"];
+                        "text/json": components["schemas"]["ProblemDetails"];
+                        "text/plain": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/{id}/roles": {
         parameters: {
             query?: never;
@@ -21318,6 +21387,22 @@ export interface components {
             updatedAt: string;
             /** @description Значення — довільний JSON, який поклав клієнт. */
             value: components["schemas"]["JsonElement"];
+        };
+        /** @description Особисте призначення ролі користувачу — з межами чинності й областю дії. */
+        UserRoleAssignmentView: {
+            /** @description Код ролі. */
+            roleCode: string;
+            scope: null | components["schemas"]["RoleScopeDto"];
+            /**
+             * Format: date
+             * @description Початок дії; `null` — від завжди.
+             */
+            validFrom: null | string;
+            /**
+             * Format: date
+             * @description Кінець дії; `null` — безстроково.
+             */
+            validTo: null | string;
         };
         /** @description Обліковий запис у переліку. */
         UserView: {

@@ -38,6 +38,18 @@ public sealed record RoleView(
 /// </remarks>
 public sealed record RoleValidityWindow(DateOnly? ValidFrom, DateOnly? ValidTo);
 
+/// <summary>Особисте призначення ролі користувачу — з межами чинності й областю дії.</summary>
+/// <param name="RoleCode">Код ролі.</param>
+/// <param name="ValidFrom">Початок дії; <c>null</c> — від завжди.</param>
+/// <param name="ValidTo">Кінець дії; <c>null</c> — безстроково.</param>
+/// <param name="Scope">
+/// Область дії (ФВ-6.14); <c>null</c> — роль діє в усіх проєктах. Порожній
+/// перелік — збережена область не розбирається, і роль не діє ніде
+/// (<see cref="Ecr.Domain.Entities.Security.RoleAssignment.ScopedProjectIds"/>).
+/// </param>
+public sealed record UserRoleAssignmentView(
+    string RoleCode, DateOnly? ValidFrom, DateOnly? ValidTo, RoleScopeDto? Scope);
+
 /// <summary>Обліковий запис у переліку.</summary>
 /// <remarks>⛔ Ні хеша пароля, ні солі, ні <c>SecurityStamp</c> тут немає (ФВ-6.11).</remarks>
 /// <param name="Id">Ідентифікатор.</param>
@@ -428,6 +440,36 @@ public sealed class ListUserRolesHandler(
         }
 
         return roles;
+    }
+
+    /// <summary>
+    /// Особисті призначення користувача з межами й областю дії (ФВ-6.14).
+    /// </summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <remarks>
+    /// ⛔ Без цього читання форма ролей не могла показати області, а
+    /// <c>PUT …/roles</c> зі словником <c>scopes</c> — повна відповідь: клієнт,
+    /// що шле його наосліп, мовчки знімав би чужі області. Право те саме, що й
+    /// на запис набору ролей.
+    /// </remarks>
+    public async Task<IReadOnlyList<UserRoleAssignmentView>> ListAssignmentsAsync(int userId, CancellationToken ct)
+    {
+        await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+
+        if (await users.FindByIdAsync(userId, ct).ConfigureAwait(false) is null)
+        {
+            throw new NotFoundException(
+                Domain.Errors.ErrorCodes.SecurityPrincipalNotFound,
+                $"Користувача {userId} не існує.",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-SEC-0404.userNotFound",
+                    ["userId"] = userId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return await users.ListUserRoleAssignmentsAsync(userId, ct).ConfigureAwait(false);
     }
 }
 

@@ -4827,6 +4827,8 @@ USING (VALUES
     (N'security.scopeAllProjects',             N'en', N'All projects', 1),
     (N'security.scopeNowhere',                 N'en', N'No project: the stored scope cannot be read', 1),
     (N'security.scopeGlobalWarning',           N'en', N'A role limited to projects gives no system-wide rights (Security.*, Template.*, Registry.* and the like). The user may also need a role without a project scope.', 1),
+    (N'security.scopeUnavailable',             N'en', N'Project scopes could not be loaded. Saving keeps the scopes as they are.', 1),
+    (N'security.scopeUnreadable',              N'en', N'A stored project scope of this user cannot be read, so the role applies in no project. Saving keeps it as it is.', 1),
     (N'groupRoles.scope',                      N'en', N'Scope', 1),
     (N'groupRoles.scopeChangeHint',            N'en', N'Leave empty for all projects. To change the scope later, revoke and assign again.', 1),
     -- SEC: кінець секції

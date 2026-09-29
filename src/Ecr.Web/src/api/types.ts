@@ -809,3 +809,9 @@ export type EntityFieldMapDto = Schemas['EntityFieldMapDto'];
  * змусить TypeScript обробити випадок, а не мовчки його не показати.
  */
 export type MappingOutcome = Schemas['MappingOutcome'];
+
+/** Область дії призначення ролі (ФВ-6.14): проєкти, у яких роль діє. */
+export type RoleScopeDto = Schemas['RoleScopeDto'];
+
+/** Особисте призначення ролі користувачу з межами й областю (`GET /users/{id}/role-assignments`). */
+export type UserRoleAssignmentView = Schemas['UserRoleAssignmentView'];

@@ -3457,6 +3457,7 @@ public sealed class NotFoundException(string errorCode, string message)
 | `PUT` | `/api/v1/registries/source-kind` | `Integration.Manage` | 4 |
 | `GET` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/roles` | `Security.ManageUsers` | 3 |
+| `GET` | `/api/v1/users/{id}/role-assignments` | `Security.ManageUsers` | 3 |
 | `PUT` | `/api/v1/users/{id}/email` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/users/{id}/reset-password` | `Security.ManageUsers` | 3 |
 | `POST` | `/api/v1/users/{id}/lock` | `Security.ManageUsers` | 3 |

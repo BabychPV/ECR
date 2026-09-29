@@ -104,6 +104,15 @@ public interface IUserStore
     /// </remarks>
     public Task<IReadOnlyList<string>> ListUserRolesAsync(int userId, CancellationToken ct);
 
+    /// <summary>
+    /// Усі особисті призначення користувача — безстрокові й строкові — з
+    /// областю дії (<c>ФВ-6.14</c>). Групові сюди не входять.
+    /// </summary>
+    /// <param name="userId">Користувач.</param>
+    /// <param name="ct">Токен скасування.</param>
+    public Task<IReadOnlyList<Security.UserRoleAssignmentView>> ListUserRoleAssignmentsAsync(
+        int userId, CancellationToken ct);
+
     /// <summary>Сторінка облікових записів.</summary>
     /// <remarks>⛔ Хеш пароля і <c>SecurityStamp</c> не покидають сховище (ФВ-6.11).</remarks>
     public Task<Common.PagedResult<Security.UserView>> ListAsync(

@@ -177,6 +177,20 @@ public sealed class FakeUserStore : IUserStore
     }
 
     /// <inheritdoc />
+    /// <remarks>Області дії підробка не моделює (див. <see cref="ReplaceRolesAsync"/>).</remarks>
+    public Task<IReadOnlyList<UserRoleAssignmentView>> ListUserRoleAssignmentsAsync(int userId, CancellationToken ct)
+    {
+        var user = _users.Find(u => u.Id == userId);
+
+        return Task.FromResult<IReadOnlyList<UserRoleAssignmentView>>(user is null
+            ? []
+            : [.. Grants.Where(g => g.UserName == user.UserName)
+                   .Select(g => new UserRoleAssignmentView(g.RoleCode, null, null, null)),
+               .. DatedGrants.Where(g => g.UserName == user.UserName)
+                   .Select(g => new UserRoleAssignmentView(g.RoleCode, g.ValidFrom, g.ValidTo, null))]);
+    }
+
+    /// <inheritdoc />
     public Task<int> ReplaceRolesAsync(
         int userId,
         IReadOnlyList<string> roleCodes,

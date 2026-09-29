@@ -13563,6 +13563,49 @@
         ],
         "type": "object"
       },
+      "UserRoleAssignmentView": {
+        "description": "Особисте призначення ролі користувачу — з межами чинності й областю дії.",
+        "properties": {
+          "roleCode": {
+            "description": "Код ролі.",
+            "type": "string"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RoleScopeDto",
+                "description": "Область дії (ФВ-6.14); `null` — роль діє в усіх проєктах. Порожній\nперелік — збережена область не розбирається, і роль не діє ніде\n(IReadOnlyList&lt;int&gt;? RoleAssignment.ScopedProjectIds())."
+              }
+            ]
+          },
+          "validFrom": {
+            "description": "Початок дії; `null` — від завжди.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "validTo": {
+            "description": "Кінець дії; `null` — безстроково.",
+            "format": "date",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "roleCode",
+          "validFrom",
+          "validTo",
+          "scope"
+        ],
+        "type": "object"
+      },
       "UserView": {
         "description": "Обліковий запис у переліку.",
         "properties": {
@@ -33605,6 +33648,99 @@
           }
         },
         "summary": "Скидає пароль локального запису на разовий. Право `Security.ManageUsers` (BE-12).",
+        "tags": [
+          "Security"
+        ]
+      }
+    },
+    "/api/v1/users/{id}/role-assignments": {
+      "get": {
+        "description": "⚠ `scope: null` — роль діє в усіх проєктах; порожній\n`scope.projects` — збережена область не розбирається, роль не діє\nніде. Групові призначення — `GET /security/group-assignments`.",
+        "parameters": [
+          {
+            "description": "Користувач.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int32",
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserRoleAssignmentView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Особисті призначення ролей користувача з межами й областю дії (ФВ-6.14).\nПраво `Security.ManageUsers`.",
         "tags": [
           "Security"
         ]
