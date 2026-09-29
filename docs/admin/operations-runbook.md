@@ -77,7 +77,7 @@ Api й воркер на **одному** хості — різні ролі й 
 |---|---|---|
 | `ConnectionStrings:Ecr` | порожньо | рядок підключення до SQL Server. **Секрет**: `ECR_ConnectionStrings__Ecr` |
 | `Schema:StartupMode` | `Validate` | `Validate` — не стартувати, якщо є незастосовані міграції EF. `Migrate` — застосувати їх на старті |
-| `Database:EditionMode` | `Auto` | режим редакції SQL Server (Express / повна). `Auto` — визначити самостійно |
+| `Database:EditionMode` | `Auto` | режим редакції SQL Server (`Standard` / `Enterprise`). `Auto` — визначити самостійно на старті. `deploy-ecr.ps1` записує визначене при установці значення в `ECR_Database__EditionMode`, якщо його не задано явно (`docs/build/11-install-guide.md` §2.5) |
 | `Database:CommandTimeoutSeconds` | 60 | таймаут команди SQL, с |
 | `Database:BulkBatchSize` | 50000 | розмір пачки масового запису |
 | `Cache:SchemaName` / `Cache:TableName` | `dbo` / `Cache` | таблиця розподіленого кешу |
@@ -618,9 +618,95 @@ Msg 50301 … Передперевірка U1: оновлення зупинен
 Окремого механізму відкату в коді **немає**. Міграції EF назад не застосовуються,
 і `deploy-ecr.ps1` відкату не робить.
 
-1. `Stop-Service EcrApi`.
+1. `Stop-Service EcrApi` (і `Stop-Service EcrWorker`, якщо воркер увімкнено, п. 10).
 2. Відновити базу з бекапу, зробленого перед оновленням (п. 6.3).
-3. Встановити попередній MSI.
+3. Встановити попередній MSI (з `WORKER_ENABLED=1`, якщо воркер був і
+   попередня версія його має).
 4. `Start-Service EcrApi` і перевірити health.
 
 Дані, введені після оновлення, при такому відкаті втрачаються.
+
+## 10. Воркер перерахунку (служба `EcrWorker`)
+
+Друга служба — наглядач пулу процесів перерахунку (ФВ-9.8, `D-206`):
+`Ecr.Worker.exe --supervisor` у теці застосунку тримає дочірні процеси під
+Windows Job Object з межами пам'яті. **Типово не встановлюється**; вмикається
+при установці (`deploy-ecr.ps1 -EnableWorker` або `WORKER_ENABLED=1` у
+`msiexec`, `docs/build/11-install-guide.md` §2.6). Той самий обліковий запис,
+що `EcrApi`; рядок підключення — у
+`HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`.
+
+```powershell
+Get-Service EcrWorker
+Get-CimInstance Win32_Service -Filter "Name='EcrWorker'" | Select-Object State, StartMode, StartName, PathName
+Get-CimInstance Win32_Process -Filter "Name='Ecr.Worker.exe'" | Select-Object ProcessId, ParentProcessId, CommandLine
+```
+
+Норма: один процес `--supervisor` і `Jobs:Workers:Count` дочірніх `--child`.
+
+**Налаштування пулу** — змінні `ECR_Jobs__Workers__Count`, `__MemoryLimitMb`,
+`__JobMemoryLimitMb`, `__MaxDuration` у `Environment` служби (перекривають
+`worker.settings.json` поруч з exe, який оновлення перезаписує). Недійсне
+значення — служба не стартує (код виходу 3, перелік недійсних ключів — у
+stderr і журналі); після зміни — `Restart-Service EcrWorker`.
+
+### 10.1. Вимкнути воркер
+
+Швидко, без MSI, — служба лишається зареєстрованою, але не стартує, зокрема
+після перезавантаження:
+
+```powershell
+Stop-Service EcrWorker
+Set-Service EcrWorker -StartupType Disabled
+```
+
+Дочірні процеси закриваються разом із наглядачем (Job Object з
+`KILL_ON_JOB_CLOSE`), окремо їх зупиняти не треба — перевірка: запит
+`Win32_Process` вище порожній.
+
+Прибрати службу зовсім — тим самим MSI, що встановлено (компоненти воркера
+транзитивні, `docs/build/10-installer.md` §1.6):
+
+```powershell
+msiexec /i Ecr.msi /qn /l*v worker-off.log REINSTALL=ALL REINSTALLMODE=vomus WORKER_ENABLED=0 SERVICE_ACCOUNT=DOMAIN\ecr-svc$
+```
+
+⚠ `SERVICE_ACCOUNT` — той самий, що при установці: властивості MSI не
+запам'ятовуються, і REINSTALL без нього перереєструє службу під `LocalSystem`.
+
+### 10.2. Увімкнути назад
+
+Якщо вимикали через `Set-Service`:
+
+```powershell
+Set-Service EcrWorker -StartupType Automatic
+Start-Service EcrWorker
+```
+
+Якщо службу прибирали (чи ніколи не ставили) — найпростіше повторити
+`deploy-ecr.ps1 … -EnableWorker -SkipSchema` з тим самим `-ConnectionString`:
+MSI з `WORKER_ENABLED=1`, рядок підключення в `Environment`, перезапуск і
+перевірка — разом. Вручну — той самий MSI, що в 10.1, з `WORKER_ENABLED=1`,
+потім рядок підключення (`docs/build/11-install-guide.md` §9, служба
+`EcrWorker`) і `Restart-Service EcrWorker`.
+
+⚠ Той самий MSI-файл, що вже встановлено, без `REINSTALL=ALL
+REINSTALLMODE=vomus` нічого не перемикає: це режим обслуговування, умови
+компонентів не переобчислюються.
+
+### 10.3. Відкат воркера
+
+Воркер не змінює схему бази й не має власних даних, тож його відкат — це
+вимкнення (10.1): `EcrApi` працює й без нього.
+
+1. `Stop-Service EcrWorker; Set-Service EcrWorker -StartupType Disabled` —
+   негайно, без MSI.
+2. Причина: журнал подій Application; ручний прогін
+   `& "C:\Program Files\ECR\Api\Ecr.Worker.exe" --supervisor` від
+   адміністратора — вивід у консоль, Ctrl+C зупиняє разом із дочірніми.
+3. Коли причину усунуто — 10.2. Прибрати службу зовсім — MSI з
+   `WORKER_ENABLED=0` (10.1), наступні оновлення — без `-EnableWorker`.
+
+⚠ Оновлення продукту **без** `-EnableWorker` / `WORKER_ENABLED=1` прибирає
+службу воркера (`deploy-ecr.ps1` попереджає перед `msiexec`). Це не збій —
+так сказано командним рядком.

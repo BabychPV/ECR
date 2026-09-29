@@ -22,6 +22,8 @@
   - [2.2 Альтернатива — `deploy-ecr.ps1` напряму (автоматизація/CI)](#2-2-скрипт)
   - [2.3 Якщо служба має працювати під окремим обліковим записом](#2-3-обліковий-запис)
   - [2.4 Побачити план, нічого не роблячи в системі](#2-4-whatif)
+  - [2.5 Редакція SQL Server: Standard чи Enterprise](#2-5-редакція)
+  - [2.6 Воркер перерахунку (служба `EcrWorker`)](#2-6-воркер)
 - [3. Перший вхід у систему](#3-перший-вхід)
 - [4. Оновлення на нову версію](#4-оновлення)
 - [5. Перевстановлення / відновлення](#5-перевстановлення)
@@ -66,6 +68,19 @@
   > «створяться» рядками в `msdb.dbo.sysjobs` — і не виконаються ніколи.
   > Виправлення сторожа — рядок плану `W0.3` директиви №14; доки його немає,
   > Express відсіюється тільки цим абзацом.
+  >
+  > ✎ **2026-09-29 (ФВ-9.8, `D-206`, P2): сторож є, двічі.** `deploy-ecr.ps1`
+  > на кроці 1 визначає редакцію (`SERVERPROPERTY('EngineEdition')`) і на
+  > Express **зупиняється** з поясненням; продовжити можна лише явним
+  > `-AllowExpress` (dev-стенд). `14-agent-jobs.sql` перевіряє
+  > `EngineEdition = 4` замість `DB_ID('msdb')` і на Express пропускає
+  > створення завдань із повідомленням, а не створює мертві. Обслуговування
+  > партицій на такому стенді — руками (`EXEC arc.usp_EnsurePartitions`).
+- **Мінімальна версія — SQL Server 2016 SP1** (`13.0.4001`), редакція
+  **Standard або Enterprise**. Нижче — `deploy-ecr.ps1` зупиняється на
+  кроці 1; рівень сумісності бази нижче 130 зупиняє старт застосунку
+  (`ECR-SYS-5031`, `SchemaValidator`). Яку редакцію знайдено і який
+  `Database:EditionMode` із цього вийшов, скрипт друкує — розділ 2.5.
 - Порт для Kestrel (типово `5000`) вільний.
 - **Більше нічого.** `Ecr-Setup-<версія>.exe` (розділ 1, 2.1) — self-contained
   single-file: жодного .NET SDK чи Runtime, жодного Node, жодного
@@ -277,6 +292,79 @@ $svcPass = Read-Host -AsSecureString -Prompt 'Пароль облікового 
 Додати `-WhatIf` до будь-якого виклику вище — жоден `sqlcmd`, `msiexec`
 чи запис у реєстр не виконається, лише друк того, що ВІДБУЛОСЬ Б.
 
+### 2.5 Редакція SQL Server: Standard чи Enterprise {#2-5-редакція}
+
+Система підлаштовується під редакцію, і визначається це під час установки
+(`D-206`). `deploy-ecr.ps1` на кроці 1 друкує, що знайшов, наприклад:
+
+```
+  SQL Server: Enterprise, версія 15.0.4480.2 (ProductMajorVersion 15, EngineEdition 3, «Enterprise Edition: Core-based Licensing (64-bit)»).
+...
+Database:EditionMode = Enterprise (визначено за редакцією SQL Server).
+```
+
+| Знайдено | `Database:EditionMode` |
+|---|---|
+| Standard | `Standard` |
+| Enterprise Edition | `Enterprise` |
+| Developer, Evaluation | `Standard` — зовні це Enterprise (`EngineEdition = 3`), але стенд; бюджет має витримуватись на Standard (`D-103`) |
+| Express | зупинка; з `-AllowExpress` (лише dev) — `Standard` |
+| нижче 2016 SP1 | зупинка |
+
+Значення пишеться в `Environment` служби (`ECR_Database__EditionMode`)
+**лише якщо ти не задав його сам**. Явне сильніше за визначене:
+`-EditionMode Standard|Enterprise|Auto` у виклику; або
+`"Database": { "EditionMode": "Standard" }` у
+`%ProgramData%\ECR\config\appsettings.Production.json` (тоді скрипт у
+`Environment` нічого не пише — змінна перекрила б файл); або вже наявний
+`ECR_Database__EditionMode` у `Environment` (лишається як є — щоб
+перевизначити, прибери його й повтори розгортання). Для продуктиву на
+Developer/Evaluation-подібному стенді, де ліцензія цілі — Enterprise,
+задай це явно: `-EditionMode Enterprise`.
+
+### 2.6 Воркер перерахунку (служба `EcrWorker`) {#2-6-воркер}
+
+Друга служба — наглядач пулу процесів перерахунку (ФВ-9.8, `D-206`).
+**Типово вимкнена**: без прапорця установка така сама, як без воркера.
+Увімкнути — додати до виклику 2.2 (і до КОЖНОГО наступного оновлення,
+розділ 4 — MSI не пам'ятає цей вибір):
+
+```powershell
+-EnableWorker
+```
+
+Служба ставиться під тим самим обліковим записом (`-ServiceAccount`), що
+й `EcrApi`, отримує той самий рядок підключення в
+`HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker\Environment`, і скрипт
+перевіряє, що вона працює. Через `msiexec` напряму — `WORKER_ENABLED=1`
+(`docs/build/10-installer.md` §1.6, §7).
+
+**Налаштування пулу.** Типові значення — у `worker.settings.json` поруч з
+`Ecr.Worker.exe` (перезаписується оновленням, не правити). Для майданчика —
+змінні служби, вони перекривають файл і переживають оновлення. Приклад —
+цільовий профіль: сервер застосунку 24 ядра / 32 ГБ ОЗП, SQL Server на
+окремому сервері (це й є типові значення збірки; явно задавати їх треба
+лише тоді, коли профіль сервера інший):
+
+| Ключ (змінна служби) | Значення | Чому |
+|---|---|---|
+| `ECR_Jobs__Workers__Count` | `10` | 10 дочірніх процесів перерахунку; решта ядер — застосунку й ОС |
+| `ECR_Jobs__Workers__MemoryLimitMb` | `2048` | межа Job Object на один процес; перевищення — OOM у цьому процесі, а не на сервері |
+| `ECR_Jobs__Workers__JobMemoryLimitMb` | `22528` | межа на весь пул (22 ГБ): лишає ~4 ГБ застосунку й ~3 ГБ ОС |
+| `ECR_Jobs__Workers__MaxDuration` | `00:30:00` | найдовша задача до примусового зняття |
+
+Записати (той самий прийом злиття, що в розділі 9 — чужі записи не
+чіпати), потім перезапустити службу:
+
+```powershell
+$key = 'HKLM:\SYSTEM\CurrentControlSet\Services\EcrWorker'
+$env0 = @((Get-ItemProperty $key -Name Environment -ErrorAction SilentlyContinue).Environment) | Where-Object { $_ -and $_ -notlike 'ECR_Jobs__Workers__Count=*' }
+Set-ItemProperty $key -Name Environment -Type MultiString -Value ([string[]]($env0 + 'ECR_Jobs__Workers__Count=6'))
+Restart-Service EcrWorker
+```
+
+Вимкнути, увімкнути назад, відкотити — `docs/admin/operations-runbook.md` §10.
+
 ---
 
 ## 3. Перший вхід у систему {#3-перший-вхід}
@@ -324,6 +412,10 @@ Windows-обліковий запис: є звичайна форма логін
 (без `-BootstrapPassword` і без `-FirstDeployment` — це не перше
 розгортання; `-ConnectionString` усе одно потрібен, бо крок 4/7
 записує його щоразу — значення не змінюється, якщо рядок той самий).
+
+⚠ **Воркер (розділ 2.6): `-EnableWorker` — на КОЖНОМУ оновленні.** MSI не
+пам'ятає `WORKER_ENABLED`; оновлення без прапорця прибирає службу
+`EcrWorker` (скрипт попереджає про це перед `msiexec`).
 
 `MajorUpgrade` сам знімає стару версію й ставить нову
 (`docs/build/10-installer.md` §1.5) — простою бути не мало б, окрім
