@@ -19,7 +19,8 @@ namespace Ecr.Domain.Tests.External;
 ///
 /// Мутаційний доказ (F9): у <see cref="SourceEventMap.Create"/> пропускати
 /// <c>$end</c> у переліку обов'язкових — червоніє
-/// <see cref="Мапінг_без_start_чи_end_відхиляється"/> (випадок <c>$end</c>).
+/// <see cref="Мапінг_без_start_чи_end_відхиляється"/> (випадок <c>$end</c>) і
+/// <see cref="Останній_end_прибрати_не_можна"/>.
 /// </remarks>
 public sealed class SourceEventMapTests
 {
@@ -35,16 +36,27 @@ public sealed class SourceEventMapTests
     {
         var map = SourceEventMap.Create(
             EntityId, DocumentId, DynamicTable(),
-            [Start(), End(), new(Column("FLARE", CellDataType.String, id: 3), "Flare", SourceEventAttributeScope.PrimaryElement)],
+            [
+                Start(),
+                End(),
+                new(Column("EVENT_NAME", CellDataType.String, id: 3), "$Name"),
+                new(Column("CATEGORY", CellDataType.Lookup, id: 4), "Category", SourceEventAttributeScope.PrimaryElement,
+                    SourceEventValueKind.LookupByCode),
+            ],
             SourceEventVolumeMode.RowWindow);
 
         Assert.Equal(
             (EntityId, DocumentId, TableId, SourceEventVolumeMode.RowWindow, true),
             (map.SourceEntityId, map.DocumentId, map.TableDefId, map.VolumeMode, map.IsActive));
-        Assert.Equal(["$start", "$end", "Flare"], map.Fields.Select(f => f.SourceAttribute));
         Assert.Equal(
-            (3, SourceEventAttributeScope.PrimaryElement, SourceEventValueKind.Direct),
-            (map.Fields[2].TargetColumnDefId, map.Fields[2].AttributeScope, map.Fields[2].ValueKind));
+            ["$start", "$end", "$name", "Category"],
+            map.Fields.Select(f => f.SourceAttribute));
+
+        // «$Name» зберігається канонічним: синхронізація порівнює Ordinal.
+        var category = map.Fields[3];
+        Assert.Equal(
+            (4, SourceEventAttributeScope.PrimaryElement, SourceEventValueKind.LookupByCode),
+            (category.TargetColumnDefId, category.AttributeScope, category.ValueKind));
     }
 
     [Theory]
@@ -65,6 +77,25 @@ public sealed class SourceEventMapTests
 
         AssertKey(error, "ECR-INT-0422", "err.ECR-INT-0422.eventMapStartEndRequired");
         Assert.Equal(missing, error.Details!["attribute"]);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-F9")]
+    public void Останній_end_прибрати_не_можна()
+    {
+        var map = Create();
+
+        var error = Assert.Throws<DomainException>(() => map.RemoveField(2));
+
+        AssertKey(error, "ECR-INT-0422", "err.ECR-INT-0422.eventMapStartEndRequired");
+        Assert.Equal("$end", error.Details!["attribute"]);
+        Assert.Equal(2, map.Fields.Count);
+
+        // Звичайне поле прибирається, і відсутнє — не помилка.
+        map.AddField(new(Column("EVENT_NAME", CellDataType.String, id: 3), "$name"));
+        Assert.True(map.RemoveField(3));
+        Assert.False(map.RemoveField(99));
     }
 
     [Theory]
@@ -92,6 +123,57 @@ public sealed class SourceEventMapTests
             new(Column("FOREIGN", CellDataType.String, id: 30, tableDefId: OtherTableId), "Flare")));
 
         AssertKey(error, "ECR-INT-0422", "err.ECR-INT-0422.eventMapColumnNotInTable");
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-F9")]
+    [InlineData(CellDataType.String)]
+    [InlineData(CellDataType.Decimal)]
+    public void Час_події_лише_в_Date_колонку(CellDataType type)
+    {
+        var error = Assert.Throws<DomainException>(() => SourceEventMap.Create(
+            EntityId, DocumentId, DynamicTable(),
+            [new(Column("START_AT", type, id: 1), "$start"), End()],
+            SourceEventVolumeMode.None));
+
+        AssertKey(error, "ECR-INT-0422", "err.ECR-INT-0422.eventMapStartEndNotDate");
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-F9")]
+    [InlineData("$duration", SourceEventAttributeScope.Event, SourceEventValueKind.Direct)]
+    [InlineData("$name", SourceEventAttributeScope.PrimaryElement, SourceEventValueKind.Direct)]
+    [InlineData("$name", SourceEventAttributeScope.Event, SourceEventValueKind.LookupByName)]
+    public void Зарезервований_атрибут_лише_відомий_і_прямий(
+        string attribute, SourceEventAttributeScope scope, SourceEventValueKind kind)
+    {
+        var map = Create();
+
+        var error = Assert.Throws<DomainException>(() => map.AddField(
+            new(Column("EVENT_NAME", CellDataType.Lookup, id: 3), attribute, scope, kind)));
+
+        AssertKey(error, "ECR-INT-0422", "err.ECR-INT-0422.eventMapReservedAttributeInvalid");
+    }
+
+    [Theory]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Directive", "HSE301-F9")]
+    [InlineData(CellDataType.Lookup, SourceEventValueKind.Direct)]
+    [InlineData(CellDataType.String, SourceEventValueKind.LookupByCode)]
+    [InlineData(CellDataType.Decimal, SourceEventValueKind.ValueMap)]
+    [InlineData(CellDataType.Formula, SourceEventValueKind.Direct)]
+    [InlineData(CellDataType.Calculated, SourceEventValueKind.Direct)]
+    public void Вид_значення_має_пасувати_до_типу_колонки(CellDataType type, SourceEventValueKind kind)
+    {
+        var map = Create();
+
+        var error = Assert.Throws<DomainException>(() => map.AddField(
+            new(Column("TARGET", type, id: 3), "Attr", SourceEventAttributeScope.Event, kind)));
+
+        AssertKey(error, "ECR-INT-0422", "err.ECR-INT-0422.eventMapValueKindMismatch");
+        Assert.Equal(kind.ToString(), error.Details!["valueKind"]);
     }
 
     [Fact]

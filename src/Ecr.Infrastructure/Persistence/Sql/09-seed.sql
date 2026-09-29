@@ -4946,6 +4946,9 @@ USING (VALUES
     (N'err.ECR-INT-0422.eventMapTargetNotDynamic', N'en', N'Events can only be written to a dynamic table; table "{tableCode}" has row mode {rowMode}.', 1),
     (N'err.ECR-INT-0422.eventMapColumnNotInTable', N'en', N'Column "{targetColumn}" belongs to a different table than the event mapping.', 1),
     (N'err.ECR-INT-0409.eventMapColumnTaken', N'en', N'Column "{targetColumn}" already has a field in this event mapping.', 1),
+    (N'err.ECR-INT-0422.eventMapStartEndNotDate', N'en', N'Event time "{attribute}" can only be written to a Date column; "{targetColumn}" is {dataType}.', 1),
+    (N'err.ECR-INT-0422.eventMapReservedAttributeInvalid', N'en', N'"{attribute}" is not a reserved event attribute ($start, $end, $name), or it is not mapped as a direct value of the event itself.', 1),
+    (N'err.ECR-INT-0422.eventMapValueKindMismatch', N'en', N'Column "{targetColumn}" ({dataType}) cannot take event values mapped as {valueKind}: a Lookup column takes a registry entry by code, name or value map; other columns take the value directly; calculated columns take nothing.', 1),
     -- HSE301:F9 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
