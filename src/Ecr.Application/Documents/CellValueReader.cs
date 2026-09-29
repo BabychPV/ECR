@@ -202,21 +202,23 @@ public static class CellValueReader
     };
 
     /// <summary>
-    /// Відмова для неоднозначного числа: той самий код і ключ, що й «очікує
-    /// число», плюс причина й обидва прочитання — підказка, яким записом
-    /// ввести однозначно (нового коду чи ключа не заведено).
+    /// Відмова для неоднозначного числа: той самий код, що й «очікує число», але
+    /// ВЛАСНИЙ ключ <see cref="AmbiguousMessageKey"/> — число є, лише двозначне, і
+    /// «не число» вводило б людину в оману. Причина, текст і обидва прочитання —
+    /// у подробицях (підстановки тексту каталогу).
     /// </summary>
     private static BusinessRuleException Ambiguous(ColumnDef column, object value, NumberTextReading reading)
         => new(
             TypeMismatch,
-            $"Колонка «{column.Code}» очікує {ExpectedType.Number.Fallback}: роздільник неоднозначний "
-            + "(розряди чи десятковий).",
+            $"Колонка «{column.Code}»: «{value}» читається як {reading.AsGroup} або {reading.AsDecimal} "
+            + "(роздільник — розряди чи десятковий).",
             new Dictionary<string, object?>
             {
-                ["messageKey"] = ExpectedType.Number.MessageKey,
+                ["messageKey"] = AmbiguousMessageKey,
                 ["columnCode"] = column.Code,
                 ["expected"] = ExpectedType.Number.Code,
                 ["actualKind"] = value.GetType().Name,
+                ["value"] = value as string,
                 ["reason"] = AmbiguousSeparator,
                 ["asGroup"] = reading.AsGroup,
                 ["asDecimal"] = reading.AsDecimal,
@@ -224,6 +226,9 @@ public static class CellValueReader
 
     /// <summary>Причина відмови в <c>Details["reason"]</c>: роздільник читається двояко.</summary>
     public const string AmbiguousSeparator = "ambiguousSeparator";
+
+    /// <summary>Ключ каталогу неоднозначного числа в комірці (код — <see cref="TypeMismatch"/>).</summary>
+    public const string AmbiguousMessageKey = "err.ECR-CELL-0422.ambiguousSeparator";
 
     /// <summary>
     /// Число, яке сховище збереже БЕЗ втрати; інакше — відмова (`U-23`).

@@ -69,8 +69,9 @@ public sealed class RegistryEntryNumberCultureHttpTests(SqlServerFixture sql)
 
         Assert.True(response.StatusCode == HttpStatusCode.UnprocessableEntity, $"{response.StatusCode}: {body}");
         var problem = JsonDocument.Parse(body).RootElement;
-        Assert.Equal("err.ECR-REG-0422.valueNotNumber", problem.GetProperty("messageKey").GetString());
+        Assert.Equal("err.ECR-REG-0422.valueAmbiguousSeparator", problem.GetProperty("messageKey").GetString());
         Assert.Equal("ambiguousSeparator", problem.GetProperty("reason").GetString());
+        Assert.Equal("1,234", problem.GetProperty("value").GetString());
         Assert.Equal("1234", problem.GetProperty("asGroup").GetString());
         Assert.Equal("1.234", problem.GetProperty("asDecimal").GetString());
 
@@ -124,9 +125,13 @@ public sealed class RegistryEntryNumberCultureHttpTests(SqlServerFixture sql)
         Assert.Equal("error", rows[1].GetProperty("status").GetString());
         var error = rows[1].GetProperty("errors")[0];
         Assert.Equal("ECR-REG-0422", error.GetProperty("errorCode").GetString());
-        Assert.Equal("err.ECR-REG-0422.valueNotNumber", error.GetProperty("messageKey").GetString());
+        Assert.Equal("err.ECR-REG-0422.valueAmbiguousSeparator", error.GetProperty("messageKey").GetString());
         Assert.Equal("QTY", error.GetProperty("field").GetString());
-        Assert.Equal("ambiguousSeparator", error.GetProperty("params").GetProperty("reason").GetString());
+        var parameters = error.GetProperty("params");
+        Assert.Equal("ambiguousSeparator", parameters.GetProperty("reason").GetString());
+        Assert.Equal("1,234", parameters.GetProperty("value").GetString());
+        Assert.Equal("1234", parameters.GetProperty("asGroup").GetString());
+        Assert.Equal("1.234", parameters.GetProperty("asDecimal").GetString());
 
         await using var db = new EcrDbContext(Options());
         Assert.False(await db.RegistryEntries.AnyAsync(e => e.RegistryDefId == f.Id));

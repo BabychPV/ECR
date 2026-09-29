@@ -47,11 +47,22 @@ public sealed class RegistryUserNumbersTests
             Registry(), new Dictionary<string, object?> { ["QTY"] = "1,234" }, NumberCulture.ForLanguage("en")));
 
         Assert.Equal("ECR-REG-0422", error.ErrorCode);
-        Assert.Equal("err.ECR-REG-0422.valueNotNumber", error.Details!["messageKey"]);
+        Assert.Equal("err.ECR-REG-0422.valueAmbiguousSeparator", error.Details!["messageKey"]);
         Assert.Equal("QTY", error.Details["fieldCode"]);
+        Assert.Equal("1,234", error.Details["value"]);
         Assert.Equal("ambiguousSeparator", error.Details["reason"]);
         Assert.Equal("1234", error.Details["asGroup"]);
         Assert.Equal("1.234", error.Details["asDecimal"]);
+    }
+
+    [Fact]
+    public void Справді_не_число_лишає_ключ_не_число()
+    {
+        var error = Assert.Throws<Ecr.Application.Errors.BusinessRuleException>(() => RegistryUserNumbers.Parse(
+            Registry(), new Dictionary<string, object?> { ["QTY"] = "1.234,5" }, NumberCulture.ForLanguage("en")));
+
+        Assert.Equal("err.ECR-REG-0422.valueNotNumber", error.Details!["messageKey"]);
+        Assert.False(error.Details.ContainsKey("reason"));
     }
 
     [Fact]

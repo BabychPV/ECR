@@ -135,7 +135,10 @@ public sealed class CultureNumberReaderTests
             () => CellValueReader.Read(FromWire("1,234"), Column(), NumberCulture.ForLanguage("en")));
 
         Assert.Equal(CellValueReader.TypeMismatch, error.ErrorCode);
-        Assert.Equal("err.ECR-CELL-0422.expectsNumber", error.Details?["messageKey"]);
+
+        // Число є, лише двозначне: власний ключ, а не «очікує число».
+        Assert.Equal("err.ECR-CELL-0422.ambiguousSeparator", error.Details?["messageKey"]);
+        Assert.Equal("1,234", error.Details?["value"]);
         Assert.Equal(CellValueReader.AmbiguousSeparator, error.Details?["reason"]);
         Assert.Equal("1234", error.Details?["asGroup"]);
         Assert.Equal("1.234", error.Details?["asDecimal"]);
@@ -175,9 +178,23 @@ public sealed class CultureNumberReaderTests
         var error = Assert.Throws<BusinessRuleException>(
             () => HeaderValueReader.Read("1,234", HeaderField(), NumberCulture.ForLanguage("en")));
 
-        Assert.Equal("err.ECR-HDR-0422.expectsNumber", error.Details?["messageKey"]);
+        Assert.Equal("err.ECR-HDR-0422.ambiguousSeparator", error.Details?["messageKey"]);
+        Assert.Equal("1,234", error.Details?["value"]);
         Assert.Equal(CellValueReader.AmbiguousSeparator, error.Details?["reason"]);
         Assert.Equal("1234", error.Details?["asGroup"]);
+        Assert.Equal("1.234", error.Details?["asDecimal"]);
+    }
+
+    /// <summary>Справді не число в шапці — старий ключ «очікує число», без причини.</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage1)]
+    public void Не_число_в_полі_шапки_лишає_ключ_очікує_число()
+    {
+        var error = Assert.Throws<BusinessRuleException>(
+            () => HeaderValueReader.Read("1.234,5", HeaderField(), NumberCulture.ForLanguage("en")));
+
+        Assert.Equal("err.ECR-HDR-0422.expectsNumber", error.Details?["messageKey"]);
+        Assert.False(error.Details!.ContainsKey("reason"));
     }
 
     /// <summary>

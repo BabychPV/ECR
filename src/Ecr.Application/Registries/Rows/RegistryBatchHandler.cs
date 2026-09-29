@@ -241,7 +241,7 @@ public sealed partial class RegistryBatchHandler(
             }
 
             state.Fail(
-                error!.FieldCode, "ECR-REG-0422", RegistryNumberTextError.MessageKey,
+                error!.FieldCode, "ECR-REG-0422", error.MessageKey,
                 [.. error.Details()
                     .Where(d => d.Key != "messageKey")
                     .Select(d => (d.Key, d.Value as string))]);

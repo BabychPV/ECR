@@ -49,8 +49,9 @@ public sealed class RequestNumberCultureTests
     }
 
     /// <summary>
-    /// Без мови (en-US) неоднозначне «1,234» — відмова, і вона доїжджає
-    /// каталожним реченням наявного ключа, а не новим кодом.
+    /// Без мови (en-US) неоднозначне «1,234» — відмова тим самим кодом, і вона
+    /// доїжджає каталожним реченням ВЛАСНОГО ключа з обома прочитаннями, а не
+    /// «очікує число» (число є, лише двозначне).
     /// </summary>
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage2)]
@@ -61,6 +62,22 @@ public sealed class RequestNumberCultureTests
         var detail = await MainPathLocalizedErrorTests.DetailAsync(() =>
         {
             CellValueReader.Read("1,234", Column(), NumberCulture.ForLanguage(user.Language));
+            return Task.CompletedTask;
+        });
+
+        Assert.Equal(
+            "\"1,234\" can be read as 1234 or 1.234. Write it without thousands separators or with the decimal separator of your language.",
+            detail);
+    }
+
+    /// <summary>Справді не число — і далі каталожне речення «очікує число».</summary>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    public async Task Не_число_відмовляє_реченням_очікує_число()
+    {
+        var detail = await MainPathLocalizedErrorTests.DetailAsync(() =>
+        {
+            CellValueReader.Read("1.234,5", Column(), NumberCulture.ForLanguage("en"));
             return Task.CompletedTask;
         });
 

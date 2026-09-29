@@ -82,6 +82,9 @@ public static class HeaderValueReader
                 field, value, ExpectedType.Number,
                 new Dictionary<string, object?>
                 {
+                    // Число є, лише двозначне: власний ключ, а не «очікує число».
+                    ["messageKey"] = "err.ECR-HDR-0422.ambiguousSeparator",
+                    ["value"] = text,
                     ["reason"] = CellValueReader.AmbiguousSeparator,
                     ["asGroup"] = reading.AsGroup,
                     ["asDecimal"] = reading.AsDecimal,

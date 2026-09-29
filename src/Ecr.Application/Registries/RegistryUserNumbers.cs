@@ -15,8 +15,14 @@ namespace Ecr.Application.Registries;
 /// <param name="Reading">Прочитання (<see cref="NumberTextKind.Ambiguous"/> або <see cref="NumberTextKind.NotNumber"/>).</param>
 public sealed record RegistryNumberTextError(string FieldCode, CellDataType DataType, string Value, NumberTextReading Reading)
 {
-    /// <summary>Ключ каталогу — наявний «не число» (нового ключа не заведено).</summary>
-    public const string MessageKey = "err.ECR-REG-0422.valueNotNumber";
+    /// <summary>Ключ каталогу «не число».</summary>
+    public const string NotNumberKey = "err.ECR-REG-0422.valueNotNumber";
+
+    /// <summary>Ключ каталогу неоднозначного числа: число є, лише двозначне — «не число» вводило б в оману.</summary>
+    public const string AmbiguousKey = "err.ECR-REG-0422.valueAmbiguousSeparator";
+
+    /// <summary>Ключ каталогу цієї відмови.</summary>
+    public string MessageKey => Reading.Kind == NumberTextKind.Ambiguous ? AmbiguousKey : NotNumberKey;
 
     /// <summary>Параметри відмови: поле, значення, тип і — для неоднозначного — причина з обома прочитаннями.</summary>
     public IReadOnlyDictionary<string, object?> Details()
@@ -48,7 +54,7 @@ public sealed record RegistryNumberTextError(string FieldCode, CellDataType Data
                 : $"Поле «{FieldCode}»: «{Value}» не є числом.",
             new Dictionary<string, object?>(Details())
             {
-                ["messageKey"] = MessageKey,
+                ["messageKey"] = Reading.Kind == NumberTextKind.Ambiguous ? AmbiguousKey : NotNumberKey,
             });
 }
 

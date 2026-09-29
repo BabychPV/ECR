@@ -4883,6 +4883,10 @@ USING (VALUES
     -- D-211: записи External-довідника вручну не змінюються — master AF (`ExternalRegistryGuard`).
     (N'err.ECR-REG-0409.externalSource',       N'en', N'Entries of this registry are synchronized from AF. Change them in AF.', 1),
     (N'registries.externalReadOnly',           N'en', N'Entries of this registry are synchronized from AF and cannot be edited here.', 1),
+    -- Неоднозначне число (CultureNumberReader, reason=ambiguousSeparator): число є, лише двозначне — не «не число».
+    (N'err.ECR-REG-0422.valueAmbiguousSeparator', N'en', N'"{value}" can be read as {asGroup} or {asDecimal}. Write it without thousands separators or with the decimal separator of your language.', 1),
+    (N'err.ECR-CELL-0422.ambiguousSeparator',     N'en', N'"{value}" can be read as {asGroup} or {asDecimal}. Write it without thousands separators or with the decimal separator of your language.', 1),
+    (N'err.ECR-HDR-0422.ambiguousSeparator',      N'en', N'"{value}" can be read as {asGroup} or {asDecimal}. Write it without thousands separators or with the decimal separator of your language.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).
