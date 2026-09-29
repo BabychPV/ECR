@@ -245,7 +245,7 @@ Docker, не поведінка за замовчуванням (команда 
 | Змінна | Приклад | Навіщо |
 |---|---|---|
 | `ECR_ConnectionStrings__Ecr` | `Server=localhost;Database=Ecr;Trusted_Connection=True;TrustServerCertificate=True` | основна БД |
-| `ECR_Database__EditionMode` | `Auto` \| `Standard` \| `Enterprise` | АРХ-7. Прод — завжди `Standard` явно (Developer/Evaluation зовні невідрізнювані від Enterprise, `SqlCapabilitiesProbe`) |
+| `ECR_Database__EditionMode` | `Auto` \| `Standard` \| `Enterprise` | АРХ-7. ~~Прод — завжди `Standard` явно (Developer/Evaluation зовні невідрізнювані від Enterprise, `SqlCapabilitiesProbe`)~~ ✎ 2026-09-29 (`D-206`, P2): значення при установці записує `tools/deploy-ecr.ps1` за редакцією інстансу — Enterprise Edition → `Enterprise`, Standard → `Standard`, **Developer/Evaluation → `Standard`** (їх відрізняє рядок `SERVERPROPERTY('Edition')`, не `EngineEdition`), Express — зупинка (крім `-AllowExpress` для dev). **Явне значення має пріоритет**: `-EditionMode`, `Database:EditionMode` у `appsettings.Production.json` майданчика чи вже наявна змінна служби не перезаписуються (`11-install-guide.md` §2.5). Сам застосунок без змінної — `Auto` (`SqlCapabilitiesProbe`: EngineEdition 3 → Enterprise) |
 | `ECR_Schema__StartupMode` | `Validate` (прод) \| `Migrate` (dev/test) | `B01` §6.3 |
 | `ECR_Auth__CookieName` | `ecr.auth` | |
 | `ECR_Auth__SlidingHours` | `8` | |

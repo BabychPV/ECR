@@ -82,6 +82,22 @@ internal sealed class DeployRunner
             ps.AddParameter("SqlPassword", state.SqlLoginPassword);
         }
 
+        // ⛔ ФВ-9.8 / D-206 (P2): MSI не пам'ятає WORKER_ENABLED, а
+        // deploy-ecr.ps1 без -EnableWorker передає WORKER_ENABLED=0 — тобто
+        // оновлення через майстер мовчки ПРИБРАЛО б уже встановлений воркер.
+        // Обрано простіше з двох варіантів: зберегти поточний стан (служба
+        // EcrWorker є → -EnableWorker), а не окремий вибір на екрані.
+        // Увімкнення воркера вперше лишається рішенням адміністратора —
+        // `deploy-ecr.ps1 -EnableWorker` (11-install-guide.md §2.6); майстер
+        // його ні вмикає, ні вимикає.
+        // ⚠ -AllowExpress НЕ передається навмисно: на Express майстер має
+        // зупинитись на кроці 1 з поясненням скрипта, як і сам скрипт.
+        if (IsWorkerServiceInstalled())
+        {
+            ps.AddParameter("EnableWorker");
+            OutputReceived?.Invoke("Служба EcrWorker уже встановлена — передаю -EnableWorker, щоб оновлення її зберегло.");
+        }
+
         ps.Streams.Information.DataAdded += (_, e) => OutputReceived?.Invoke(FormatInformation(ps.Streams.Information[e.Index]));
         ps.Streams.Warning.DataAdded += (_, e) => OutputReceived?.Invoke("WARNING: " + ps.Streams.Warning[e.Index].Message);
         ps.Streams.Error.DataAdded += (_, e) => OutputReceived?.Invoke("ERROR: " + ps.Streams.Error[e.Index]);
@@ -97,6 +113,19 @@ internal sealed class DeployRunner
         }
 
         return !ps.HadErrors;
+    }
+
+    /// <summary>
+    /// Чи зареєстровано службу EcrWorker — за ключем служби в реєстрі: той
+    /// самий ключ, куди deploy-ecr.ps1 пише її Environment. Без
+    /// System.ServiceProcess.ServiceController: це окремий пакет, а пакети
+    /// тут не додаються.
+    /// </summary>
+    internal static bool IsWorkerServiceInstalled()
+    {
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+            @"SYSTEM\CurrentControlSet\Services\EcrWorker");
+        return key is not null;
     }
 
     private static string FormatInformation(InformationRecord record)
