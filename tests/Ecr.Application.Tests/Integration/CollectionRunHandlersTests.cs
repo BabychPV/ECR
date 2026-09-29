@@ -138,6 +138,11 @@ public sealed class CollectionRunHandlersTests
     [InlineData("RegistryElementUnlinked", CollectionCoverage.RegistryElementUnlinked)]
     [InlineData("RegistryValueRejected", CollectionCoverage.RegistryValueRejected)]
     [InlineData("RegistryPendingUpdate", CollectionCoverage.RegistryPendingUpdate)]
+    [InlineData("registryautocreated", CollectionCoverage.RegistryAutoCreated)]
+    [InlineData("RegistryDeactivated", CollectionCoverage.RegistryDeactivated)]
+    [InlineData("RegistryReactivated", CollectionCoverage.RegistryReactivated)]
+    [InlineData("RegistryRuleViolation", CollectionCoverage.RegistryRuleViolation)]
+    [InlineData("RegistryExternalKeyRelinked", CollectionCoverage.RegistryExternalKeyRelinked)]
     [Trait(TestCategories.Stage, TestCategories.Stage7)]
     [Trait("Requirement", "ІНТ-3.3")]
     public async Task Фільтр_приймає_статуси_конфлікту_запису_і_підтвердження(string asked, string expected)

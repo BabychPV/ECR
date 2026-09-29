@@ -609,6 +609,11 @@ public sealed class RegistrySyncJob(
         RegistrySyncEventKind.SourceMissing => CollectionCoverage.RegistrySourceMissing,
         RegistrySyncEventKind.ElementUnlinked => CollectionCoverage.RegistryElementUnlinked,
         RegistrySyncEventKind.ValueRejected => CollectionCoverage.RegistryValueRejected,
+        RegistrySyncEventKind.AutoCreated => CollectionCoverage.RegistryAutoCreated,
+        RegistrySyncEventKind.Deactivated => CollectionCoverage.RegistryDeactivated,
+        RegistrySyncEventKind.Reactivated => CollectionCoverage.RegistryReactivated,
+        RegistrySyncEventKind.RuleViolation => CollectionCoverage.RegistryRuleViolation,
+        RegistrySyncEventKind.ExternalKeyRelinked => CollectionCoverage.RegistryExternalKeyRelinked,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Невідомий вид події синку."),
     };
 

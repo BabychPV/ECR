@@ -153,6 +153,37 @@ public sealed class CollectionCoverage : Entity<long>
     public const string RegistryPendingUpdate = "RegistryPendingUpdate";
 
     /// <summary>
+    /// Синк довідника <c>External</c> (<c>D-212</c> (1)): новий елемент джерела —
+    /// синк сам створив запис (код — за <c>CodeMode</c>, назва — ім'я елемента AF).
+    /// </summary>
+    public const string RegistryAutoCreated = "RegistryAutoCreated";
+
+    /// <summary>
+    /// Синк довідника: прив'язаного елемента немає в повному знімку, а політика
+    /// <c>OnMissingInSource = Deactivate</c> — запис вимкнено, не видалено (<c>D-212</c>).
+    /// </summary>
+    public const string RegistryDeactivated = "RegistryDeactivated";
+
+    /// <summary>
+    /// Синк довідника <c>External</c>: елемент повернувся в джерело після
+    /// <see cref="RegistryDeactivated"/> — запис увімкнено знову (<c>D-212</c> Q6;
+    /// для <c>Hybrid</c> вмикає людина, і цієї події синк не пише).
+    /// </summary>
+    public const string RegistryReactivated = "RegistryReactivated";
+
+    /// <summary>
+    /// Синк довідника: значення з джерела порушує правило довідника
+    /// (<c>RegistryRuleEngine</c>, <c>ФВ-8.18</c>); запис не змінено.
+    /// </summary>
+    public const string RegistryRuleViolation = "RegistryRuleViolation";
+
+    /// <summary>
+    /// Синк довідника: зв'язок за ключем <c>(DataSourceId, ExternalId)</c> не
+    /// знайдено, і запис переприв'язано за запасним <c>ExternalPath</c> (<c>D-212</c> (7)).
+    /// </summary>
+    public const string RegistryExternalKeyRelinked = "RegistryExternalKeyRelinked";
+
+    /// <summary>
     /// Усі статуси подій журналу покриття (<c>D-118</c>, ФВ-5.23).
     /// </summary>
     /// <remarks>
@@ -166,6 +197,8 @@ public sealed class CollectionCoverage : Entity<long>
         SkippedPeriodClosed, ConflictKeptManual, SkippedPointCeiling, SkippedWriteConflict, SkippedNeedsConfirmation,
         RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
         RegistryValueRejected, RegistryPendingUpdate, SourceDataRefused,
+        RegistryAutoCreated, RegistryDeactivated, RegistryReactivated, RegistryRuleViolation,
+        RegistryExternalKeyRelinked,
     ];
 
     /// <summary>
@@ -182,6 +215,8 @@ public sealed class CollectionCoverage : Entity<long>
     [
         RegistryDiverged, RegistryConflictKeptManual, RegistrySourceMissing, RegistryElementUnlinked,
         RegistryValueRejected, RegistryPendingUpdate,
+        RegistryAutoCreated, RegistryDeactivated, RegistryReactivated, RegistryRuleViolation,
+        RegistryExternalKeyRelinked,
     ];
 
     /// <summary>Записує покритий інтервал.</summary>

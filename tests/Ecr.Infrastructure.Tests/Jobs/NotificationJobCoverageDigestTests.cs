@@ -334,6 +334,16 @@ public sealed class NotificationJobCoverageDigestTests(SqlServerFixture sql)
     // наступним прогоном / потрібне підтвердження людини — попередження.
     [InlineData(CollectionCoverage.SkippedWriteConflict, NotificationSeverity.Warning)]
     [InlineData(CollectionCoverage.SkippedNeedsConfirmation, NotificationSeverity.Warning)]
+    // D-212 PR-3: події синку довідника з AF. Автостворення — робота за
+    // політикою External (Info); решта — довідник змінився або чекає людину.
+    [InlineData(CollectionCoverage.RegistryAutoCreated, NotificationSeverity.Info)]
+    [InlineData(CollectionCoverage.RegistryDeactivated, NotificationSeverity.Warning)]
+    [InlineData(CollectionCoverage.RegistryReactivated, NotificationSeverity.Warning)]
+    [InlineData(CollectionCoverage.RegistryRuleViolation, NotificationSeverity.Warning)]
+    [InlineData(CollectionCoverage.RegistryExternalKeyRelinked, NotificationSeverity.Warning)]
+    // Було Error: неприв'язаний елемент — чекає рішення людини, а не збій.
+    [InlineData(CollectionCoverage.RegistryElementUnlinked, NotificationSeverity.Warning)]
+    [InlineData(CollectionCoverage.RegistryValueRejected, NotificationSeverity.Error)]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Finding", "INT-3.3")]
     public void Серйозність_події_покриття_залежить_від_статусу(string status, NotificationSeverity expected)

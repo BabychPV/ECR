@@ -200,6 +200,14 @@ const expected: readonly (readonly [StatusKind, string, StatusTone])[] = [
   ['coverage', 'RegistryPendingUpdate', 'info'],
   // Збір: джерело відмовило віддати дані інтервалу — саме не мине, `danger`.
   ['coverage', 'SourceDataRefused', 'danger'],
+  // Синк за політикою `D-212`: автостворення — робота за правилом `External`
+  // (`info`); вимкнення, повернення, порушення правила й переприв'язка —
+  // довідник змінився без людини, `warning` (як `NotificationJob.SeverityOf`).
+  ['coverage', 'RegistryAutoCreated', 'info'],
+  ['coverage', 'RegistryDeactivated', 'warning'],
+  ['coverage', 'RegistryReactivated', 'warning'],
+  ['coverage', 'RegistryRuleViolation', 'warning'],
+  ['coverage', 'RegistryExternalKeyRelinked', 'warning'],
 
   // `SnapshotStatus` (`Enums.cs`, `D-65`): `Rejected` у зрізі немає.
   ['snapshot', 'Draft', 'muted'],
@@ -224,8 +232,8 @@ describe('StatusBadge: стан → тон', () => {
    * коли й тут забули рядок: два переліки розійшлися б, а тест лишився б
    * зеленим на тому, що від них лишилося.
    */
-  it('перелік вичерпний: 48 пар, і таблиця компонента не має жодної зайвої', () => {
-    expect(expected).toHaveLength(48);
+  it('перелік вичерпний: 53 пари, і таблиця компонента не має жодної зайвої', () => {
+    expect(expected).toHaveLength(53);
     expect(expected.every(([kind, state]) => isKnownStatus(kind, state))).toBe(true);
 
     const inComponent = Object.entries(statusTable).flatMap(([kind, states]) =>

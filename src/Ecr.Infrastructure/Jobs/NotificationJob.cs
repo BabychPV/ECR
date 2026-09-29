@@ -432,16 +432,33 @@ public sealed class NotificationJob(
     /// </list>
     /// Стеля точок (<see cref="CollectionCoverage.SkippedPointCeiling"/>) —
     /// помилка: інтервал не згорнуто через конфігурацію, і сам він не мине.
+    /// Події синку довідника (<c>D-212</c>): <see cref="CollectionCoverage.RegistryAutoCreated"/>
+    /// — інформація (синк зробив свою роботу за політикою <c>External</c>);
+    /// <see cref="CollectionCoverage.RegistryElementUnlinked"/>,
+    /// <see cref="CollectionCoverage.RegistryDeactivated"/>,
+    /// <see cref="CollectionCoverage.RegistryReactivated"/>,
+    /// <see cref="CollectionCoverage.RegistryRuleViolation"/>,
+    /// <see cref="CollectionCoverage.RegistryExternalKeyRelinked"/> — попередження:
+    /// довідник змінився або чекає рішення людини, але це не збій.
     /// Решта рядків зведення — збої, як і раніше.
     /// Серйозність групи — найвища серед її рядків.
     /// </remarks>
     public static NotificationSeverity SeverityOf(string digestKind, string status)
-        => digestKind == CoverageKind
-           && status is CollectionCoverage.SkippedPeriodClosed
-               or CollectionCoverage.SkippedWriteConflict
-               or CollectionCoverage.SkippedNeedsConfirmation
-            ? NotificationSeverity.Warning
-            : NotificationSeverity.Error;
+        => digestKind != CoverageKind
+            ? NotificationSeverity.Error
+            : status switch
+            {
+                CollectionCoverage.RegistryAutoCreated => NotificationSeverity.Info,
+                CollectionCoverage.SkippedPeriodClosed
+                    or CollectionCoverage.SkippedWriteConflict
+                    or CollectionCoverage.SkippedNeedsConfirmation
+                    or CollectionCoverage.RegistryElementUnlinked
+                    or CollectionCoverage.RegistryDeactivated
+                    or CollectionCoverage.RegistryReactivated
+                    or CollectionCoverage.RegistryRuleViolation
+                    or CollectionCoverage.RegistryExternalKeyRelinked => NotificationSeverity.Warning,
+                _ => NotificationSeverity.Error,
+            };
 
     /// <summary>
     /// Ключ дедуплікації: той самий НАБІР збоїв дає той самий ключ.

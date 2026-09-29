@@ -132,6 +132,21 @@ public enum RegistrySyncEventKind
 
     /// <summary>Значення джерела не приводиться до типу поля.</summary>
     ValueRejected,
+
+    /// <summary><c>External</c>: новий елемент джерела — запис створено синком (<c>D-212</c> (1)).</summary>
+    AutoCreated,
+
+    /// <summary>Елемента немає в повному знімку, політика <c>Deactivate</c> — запис вимкнено (<c>D-212</c>).</summary>
+    Deactivated,
+
+    /// <summary><c>External</c>: елемент повернувся після <see cref="Deactivated"/> — запис увімкнено (<c>D-212</c> Q6).</summary>
+    Reactivated,
+
+    /// <summary>Значення джерела порушує правило довідника; запис не змінено.</summary>
+    RuleViolation,
+
+    /// <summary>Зв'язок переприв'язано за запасним <c>ExternalPath</c> (<c>D-212</c> (7)).</summary>
+    ExternalKeyRelinked,
 }
 
 /// <summary>Подія синхронізації — для журналу й панелі зовнішніх ідентифікаторів.</summary>

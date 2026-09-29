@@ -244,6 +244,12 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
    * `SourceDataRefused` (збір, `CollectionRunner`) — `danger`: джерело відповідає,
    * але дані інтервалу віддати не може (напр. нечитабельна мітка часу), і
    * наздоганяння без правки джерела чи запиту не допоможе.
+   *
+   * Синк за політикою `D-212`: `RegistryAutoCreated` — `info` (синк `External`
+   * зробив свою роботу); `RegistryDeactivated`, `RegistryReactivated`,
+   * `RegistryRuleViolation`, `RegistryExternalKeyRelinked` — `warning`: довідник
+   * змінився без людини або чекає її рішення. Та сама вага, що в
+   * `NotificationJob.SeverityOf`.
    */
   coverage: {
     SkippedPointCeiling: 'danger',
@@ -258,6 +264,11 @@ export const statusTable: Readonly<Record<StatusKind, Readonly<Record<string, St
     RegistryValueRejected: 'danger',
     RegistryPendingUpdate: 'info',
     SourceDataRefused: 'danger',
+    RegistryAutoCreated: 'info',
+    RegistryDeactivated: 'warning',
+    RegistryReactivated: 'warning',
+    RegistryRuleViolation: 'warning',
+    RegistryExternalKeyRelinked: 'warning',
   },
 
   /**

@@ -183,6 +183,36 @@ describe('CoverageEventsPanel', () => {
     }
   });
 
+  it('події синку за політикою D-212 — власні бейджі з тоном і підписом каталогу', async () => {
+    const expected = [
+      ['9301', 'RegistryAutoCreated', 'info'],
+      ['9302', 'RegistryDeactivated', 'warning'],
+      ['9303', 'RegistryReactivated', 'warning'],
+      ['9304', 'RegistryRuleViolation', 'warning'],
+      ['9305', 'RegistryExternalKeyRelinked', 'warning'],
+    ] as const;
+    const items = expected.map(([id, status], index) => ({
+      ...Ceiling,
+      id: Number(id),
+      sourceEntityCode: `AF-${index}`,
+      sourceEntityName: null,
+      periodKey: null,
+      status,
+    }));
+    respond(() => ({ items, nextCursor: null, totalCount: null }));
+    show();
+
+    await screen.findByText('AF-0');
+
+    for (const [id, status, tone] of expected) {
+      const row = document.querySelector<HTMLElement>(`tr[data-row-key="${id}"]`) as HTMLElement;
+      const badge = row.querySelector<HTMLElement>('[data-status-kind="coverage"]');
+      expect(badge?.dataset.statusState, `стан рядка ${id}`).toBe(status);
+      expect(badge?.dataset.statusTone, `тон рядка ${id}`).toBe(tone);
+      expect(badge?.textContent).toBe(`⟦status.coverage.${status}⟧`);
+    }
+  });
+
   it('відмова джерела віддати дані — бейдж `danger` і причина конвертом, резолвлена каталогом', async () => {
     // ⛔ Застряглий інтервал збору (джерело відповідає, але дані нечитабельні)
     // раніше не лишав у журналі покриття нічого. `details` — конверт: без
@@ -244,6 +274,11 @@ describe('CoverageEventsPanel', () => {
       'RegistryElementUnlinked',
       'RegistryValueRejected',
       'RegistryPendingUpdate',
+      'RegistryAutoCreated',
+      'RegistryDeactivated',
+      'RegistryReactivated',
+      'RegistryRuleViolation',
+      'RegistryExternalKeyRelinked',
     ]) {
       expect(await screen.findByRole('option', { name: `⟦status.coverage.${status}⟧` })).toBeTruthy();
     }

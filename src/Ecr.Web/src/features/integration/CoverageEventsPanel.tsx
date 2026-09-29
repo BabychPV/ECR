@@ -170,6 +170,16 @@ function statusFilterLabel(status: CoverageEventStatus): string {
       return t('status.coverage.RegistryPendingUpdate');
     case 'SourceDataRefused':
       return t('status.coverage.SourceDataRefused');
+    case 'RegistryAutoCreated':
+      return t('status.coverage.RegistryAutoCreated');
+    case 'RegistryDeactivated':
+      return t('status.coverage.RegistryDeactivated');
+    case 'RegistryReactivated':
+      return t('status.coverage.RegistryReactivated');
+    case 'RegistryRuleViolation':
+      return t('status.coverage.RegistryRuleViolation');
+    case 'RegistryExternalKeyRelinked':
+      return t('status.coverage.RegistryExternalKeyRelinked');
     default:
       return status;
   }

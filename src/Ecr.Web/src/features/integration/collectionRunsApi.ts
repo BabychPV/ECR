@@ -125,6 +125,13 @@ export const CoverageEventStatuses = [
   // Збір: джерело відмовило віддати дані інтервалу з кодом каталогу (`CollectionRunner`);
   // інтервал лишається прогалиною, причина — конвертом у `details`.
   'SourceDataRefused',
+  // Синк довідника з AF за політикою D-212 (PR-3): автостворення, вимкнення й
+  // повторне ввімкнення запису, порушення правила, переприв'язка за шляхом.
+  'RegistryAutoCreated',
+  'RegistryDeactivated',
+  'RegistryReactivated',
+  'RegistryRuleViolation',
+  'RegistryExternalKeyRelinked',
 ] as const;
 export type CoverageEventStatus = (typeof CoverageEventStatuses)[number];
 
