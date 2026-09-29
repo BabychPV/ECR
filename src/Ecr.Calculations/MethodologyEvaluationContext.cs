@@ -18,16 +18,35 @@ namespace Ecr.Calculations;
 /// модуль рахує в пам'яті воркера, і похід у сховище на кожен <c>CONVERT</c>
 /// зруйнував би бюджет 10 хвилин на річний перерахунок.
 /// </para>
+/// <para>
+/// ✎ HSE301 L: публічний, щоб захист від циклу (<see cref="GetFormulaResult"/>)
+/// перевірявся модульним тестом напряму, а не лише через модуль.
+/// </para>
 /// </remarks>
-internal sealed class MethodologyEvaluationContext(
+/// <param name="period">Календарний контекст періоду.</param>
+/// <param name="arguments">Аргументи рядка (<c>@Arg</c>).</param>
+/// <param name="constants">Розв'язані константи (<c>CST.X</c>).</param>
+/// <param name="units">Довідник одиниць у пам'яті.</param>
+/// <param name="registries">Знімок довідників; <c>null</c> — <c>REG*</c> дають <c>#REF</c>.</param>
+/// <param name="resolve">
+/// ✎ HSE301 L: звідки брати <c>!Code</c>, якого немає серед записаних результатів, —
+/// формулу імпортованої методології (бібліотеки), обчислену в її власному контексті.
+/// Повертає <c>null</c>, якщо ім'я нікуди не веде. <c>null</c> замість резолвера —
+/// лише формули своєї версії, як до кроку.
+/// </param>
+public sealed class MethodologyEvaluationContext(
     PeriodContext period,
     IReadOnlyDictionary<string, ExpressionValue> arguments,
     IReadOnlyDictionary<string, ExpressionValue> constants,
     UnitTable units,
-    IRegistrySnapshot? registries = null) : IEvaluationContext
+    IRegistrySnapshot? registries = null,
+    Func<string, ExpressionValue?>? resolve = null) : IEvaluationContext
 {
     private readonly Dictionary<string, ExpressionValue> _formulaResults =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Імена, які саме зараз резолвляться через <c>resolve</c>, — захист від циклу.</summary>
+    private readonly HashSet<string> _resolving = new(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />
     public PeriodContext Period { get; } = period;
@@ -96,15 +115,51 @@ internal sealed class MethodologyEvaluationContext(
 
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ Лише формули СВОЄЇ версії. Посилання в імпортовану методологію сюди
-    /// не доходить: його відхиляє публікація (<c>publish.problem.
-    /// importedFormulaNotEvaluated</c>, аудит A3). <c>#REF</c> на промах —
-    /// друга лінія, а не спосіб «обчислити» чуже посилання.
+    /// Спершу — записані результати своєї версії. Промах іде в резолвер
+    /// (HSE301 L): формула бібліотеки, обчислена в її власному контексті, і її
+    /// значення запам'ятовується тут — другий <c>!Code</c> того самого рядка
+    /// не рахує її вдруге. Резолвера немає або ім'я нікуди не веде — <c>#REF</c>,
+    /// як до кроку.
+    /// <para>
+    /// ⛔ Захист від циклу — тут, а не лише на публікації. Бібліотеку можуть
+    /// перевидати ПІСЛЯ публікації викликача з посиланням назад, і цикл з'явиться
+    /// лише в рантаймі. Ім'я, що вже резолвиться в цьому контексті, повертає
+    /// <c>#CYCLE</c> замість рекурсії без кінця (<c>StackOverflow</c> убив би
+    /// процес воркера разом з усім прогоном).
+    /// </para>
     /// </remarks>
     public ExpressionValue GetFormulaResult(string name)
-        => _formulaResults.TryGetValue(name, out var value)
-            ? value
-            : ExpressionValue.Error(ExpressionErrors.BadReference);
+    {
+        if (_formulaResults.TryGetValue(name, out var value))
+        {
+            return value;
+        }
+
+        if (resolve is null)
+        {
+            return ExpressionValue.Error(ExpressionErrors.BadReference);
+        }
+
+        if (!_resolving.Add(name))
+        {
+            return ExpressionValue.Error(ExpressionErrors.RuntimeCycle);
+        }
+
+        try
+        {
+            if (resolve(name) is not { } resolved)
+            {
+                return ExpressionValue.Error(ExpressionErrors.BadReference);
+            }
+
+            _formulaResults[name] = resolved;
+            return resolved;
+        }
+        finally
+        {
+            _resolving.Remove(name);
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
