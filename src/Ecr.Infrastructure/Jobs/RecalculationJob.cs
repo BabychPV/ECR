@@ -110,6 +110,17 @@ public sealed class RecalculationJob(
             return;
         }
 
+        // ⛔ Серіалізація ЗА ДОКУМЕНТОМ (P4, борг перед I2). Річна задача
+        // (`doc{id}-year`) і поперіодна (`doc{id}-p{period}`) мають різні ключі
+        // цілі, тож черга пускала їх одночасно. Річна перемикає актуальність УСІХ
+        // своїх прогонів у кінці: коли поперіодна (новіший прогін) завершувалась
+        // раніше, річна падала на `UX_CalculationRun_Current` — порушення
+        // обмеження не ретраїться, і `Failed` ставали прогони всіх її періодів
+        // (`RecalculationJobDocumentSerializationTests`). Лок сесійний, на окремому
+        // з'єднанні: задача живе кількома транзакціями, і транзакційний лок не
+        // накрив би її цілком; черга й пул лишаються як є.
+        await using var documentLock = await AcquireDocumentLockAsync(request.DocumentId, ct).ConfigureAwait(false);
+
         // ⛔ «CalculationRun ховає результати сусідніх документів» (третя
         // хвиля UX-PASS R4): прогін ОДНОГО документа (`request.DocumentId > 0`,
         // маршрут `RecalculateDocumentHandler`) несе свій `DocumentId`, щоб
@@ -765,6 +776,40 @@ public sealed class RecalculationJob(
         // `ECR-PRD-0404`), і підміняти його чужим кодом означало б сховати
         // справжню причину за правдоподібною.
         return refused;
+    }
+
+    /// <summary>Скільки задача документа чекає, поки інша задача того самого документа його відпустить.</summary>
+    /// <remarks>
+    /// ⚠ Більше за бюджет повного року (10 хв, ПРД-13): річна задача ОДНОГО
+    /// документа вкладається в нього з запасом. Не дочекалися — виняток, який
+    /// <c>JobRetryPolicy</c> ретраїть, а не мовчазний пропуск перерахунку.
+    /// </remarks>
+    internal static readonly TimeSpan DocumentLockTimeout = TimeSpan.FromMinutes(15);
+
+    /// <summary>Ресурс <c>sp_getapplock</c> для перерахунку документа.</summary>
+    /// <param name="documentId">Документ.</param>
+    /// <returns>Ім'я ресурсу.</returns>
+    public static string DocumentLockResource(long documentId)
+        => string.Create(CultureInfo.InvariantCulture, $"ecr:recalc:doc:{documentId}");
+
+    /// <summary>Бере ексклюзивний лок документа на весь час задачі.</summary>
+    /// <returns><c>null</c> — лок не потрібен (перерахунок проєкту без планувальника, не SQL Server).</returns>
+    private async Task<SqlDistributedLock?> AcquireDocumentLockAsync(long documentId, CancellationToken ct)
+    {
+        if (documentId <= 0 || !db.Database.IsSqlServer())
+        {
+            return null;
+        }
+
+        var connectionString = db.Database.GetConnectionString()
+            ?? throw new InvalidOperationException("Немає рядка з'єднання для лока документа.");
+
+        return await SqlDistributedLock
+                   .AcquireAsync(connectionString, DocumentLockResource(documentId), DocumentLockTimeout, ct)
+                   .ConfigureAwait(false)
+               ?? throw new InvalidOperationException(string.Create(
+                   CultureInfo.InvariantCulture,
+                   $"Документ {documentId} перераховує інша задача довше за {DocumentLockTimeout.TotalMinutes} хв; спробуємо пізніше."));
     }
 
     /// <summary>Усі документи проєкту — для перерахунку «на весь проєкт».</summary>
