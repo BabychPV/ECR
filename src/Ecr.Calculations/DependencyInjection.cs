@@ -8,6 +8,10 @@ public static class DependencyInjection
 {
     /// <summary>Додає модулі і резолвери.</summary>
     /// <param name="services">Колекція сервісів.</param>
+    /// <param name="limits">
+    /// Ліміти прогону з секції <c>Calculations</c> (ФВ-9.8); <c>null</c> — типові.
+    /// Зв'язує їх з конфігурацією викликач: ця збірка <c>IConfiguration</c> не знає.
+    /// </param>
     /// <remarks>
     /// ⚠ Модуль рівня 2 (скрипти Roslyn) не реєструється й не реєструватиметься,
     /// доки не буде дозволу ІБ (K-1). Його відсутність не має ламати систему —
@@ -15,9 +19,15 @@ public static class DependencyInjection
     /// одиничний сервіс: оркестратор питає «хто вміє це порахувати», і
     /// відсутність одного відповідача не робить питання беззмістовним.
     /// </remarks>
-    public static IServiceCollection AddEcrCalculations(this IServiceCollection services)
+    public static IServiceCollection AddEcrCalculations(
+        this IServiceCollection services, CalculationLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        // ⚠ Без EnsureValid тут: недійсне значення зупиняє старт через
+        // `EcrConfigurationValidation` з ім'ям ключа й змінною оточення, а
+        // оркестратор перевіряє ліміти сам, коли його створюють.
+        services.AddSingleton(limits ?? new CalculationLimits());
 
         services.AddScoped<ConstantResolver>();
         services.AddScoped<MethodologyResolver>();

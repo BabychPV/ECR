@@ -58,6 +58,11 @@ public static partial class EcrConfigurationValidation
         ("Integration:CatalogTimeoutSeconds", 1),
         ("Logging:File:RetainedFiles", 1),
         ("Logging:File:FileSizeLimitMb", 1),
+
+        // ФВ-9.8 (D-205): нуль чи від'ємне — не «без ліміту»; -1 у паралелізмі
+        // зняв би межу зовсім.
+        ("Calculations:MaxParallelism", 1),
+        ("Calculations:MaxInputCellsPerBinding", 1),
     ];
 
     /// <summary>Булеві ключі: лише <c>true</c> або <c>false</c>.</summary>

@@ -17,20 +17,30 @@ namespace Ecr.Calculations;
 /// чинної системи — 20 хвилин, тому «не гірше» тут не працює: потрібне
 /// щонайменше дворазове прискорення. Це і диктує архітектуру нижче.
 /// </remarks>
+/// <param name="resolver">Резолвер версій методологій.</param>
+/// <param name="periods">Сховище періодів.</param>
+/// <param name="scopeFactory">Фабрика scope гілок пакета (<c>Q-249</c>).</param>
+/// <param name="limits">
+/// Ліміти прогону (ФВ-9.8, секція <c>Calculations</c>); <c>null</c> — типові
+/// (<see cref="CalculationLimits"/>).
+/// </param>
 public sealed class CalculationOrchestrator(
     MethodologyResolver resolver,
     IPeriodStore periods,
-    IServiceScopeFactory scopeFactory) : ICalculationRunner
+    IServiceScopeFactory scopeFactory,
+    CalculationLimits? limits = null) : ICalculationRunner
 {
     /// <summary>
-    /// Скільки методологій одного пакета виконувати одночасно.
+    /// Скільки методологій одного пакета виконувати одночасно і скільки комірок
+    /// входу дозволено одній прив'язці (ФВ-9.8, <c>D-205</c>).
     /// </summary>
     /// <remarks>
-    /// Обмеження обов'язкове: прогін не має з'їдати p95 операторів, які в цей
-    /// час заповнюють форми. Ізоляція від інтерактивного піку — вимога, а не
-    /// побажання (ПРД-13).
+    /// Обмеження паралелізму обов'язкове: прогін не має з'їдати p95 операторів,
+    /// які в цей час заповнюють форми. Ізоляція від інтерактивного піку — вимога,
+    /// а не побажання (ПРД-13). ⚠ Перевіряється тут, на створенні, а не на
+    /// першому прогоні: недійсний ліміт — вада складання, а не даних.
     /// </remarks>
-    private const int MaxParallelism = 4;
+    private readonly CalculationLimits _limits = (limits ?? new CalculationLimits()).EnsureValid();
 
     /// <summary>
     /// Кеш знімків довідників за прогоном (RT-23a, FEATURE-REGISTRY-TABLES §5.7).
@@ -150,7 +160,7 @@ public sealed class CalculationOrchestrator(
 
             await Parallel.ForEachAsync(
                 batch.MethodologyVersionIds,
-                new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism, CancellationToken = ct },
+                new ParallelOptions { MaxDegreeOfParallelism = _limits.MaxParallelism, CancellationToken = ct },
                 async (versionId, token) =>
                 {
                     // 3a. ⛔ Q-249: `MethodologyResolver`/`CalculationInputBuilder`/
@@ -176,7 +186,8 @@ public sealed class CalculationOrchestrator(
                     {
                         var stat = await ExecuteAsync(
                             scopedResolver, scopedModules, scopedInputBuilder, scopedOutputWriter,
-                            calculationRunId, documentId, periodKey, binding, registries, token).ConfigureAwait(false);
+                            calculationRunId, documentId, periodKey, binding, registries,
+                            _limits.MaxInputCellsPerBinding, token).ConfigureAwait(false);
 
                         measured.Add(stat);
                     }
@@ -224,6 +235,7 @@ public sealed class CalculationOrchestrator(
         PeriodKey periodKey,
         ResolvedBinding binding,
         RegistrySnapshotCache registries,
+        int maxInputCells,
         CancellationToken ct)
     {
         var module = scopedModules.FirstOrDefault(m => m.CanHandle(binding.Descriptor));
@@ -253,6 +265,45 @@ public sealed class CalculationOrchestrator(
         var inputs = await scopedInputBuilder
             .BuildAsync(binding.TableInstanceId, rowKeys, periodKey, binding.Descriptor, ct)
             .ConfigureAwait(false);
+
+        // 4a. ⛔ Бюджет обсягу прив'язки (ФВ-9.8, D-205): ДО підготовки модуля і
+        //     до першого рядка, тож надмірна прив'язка не породжує ні виходів, ні
+        //     трейсу, ні запису — `outputWriter` не викликається. Міра —
+        //     кількість комірок входу (аргументів усіх рядків), а не
+        //     `GC.GetTotalMemory`: купа — спільна для всього процесу й
+        //     недетермінована, а ліміт мусить давати ту саму відповідь на тих
+        //     самих даних.
+        //
+        //     ⚠ Бюджет НЕ рахує знімок довідників (RT-23a): його вантажить
+        //     `PrepareAsync` нижче, він кешується на ПРОГІН і спільний між
+        //     гілками й прив'язками, тож приписати його одній прив'язці не можна.
+        //     Його обсяг лишається без межі — [debt].
+        //
+        //     ⚠ Зріз таблиці на цей момент уже прочитано (`BuildAsync`): бюджет
+        //     обмежує виконання, виходи, трейс і запис, а не саме читання.
+        //     Порційне читання за rowKeys — [debt].
+        var inputCells = 0L;
+        foreach (var input in inputs)
+        {
+            inputCells += input.Arguments.Count;
+        }
+
+        if (inputCells > maxInputCells)
+        {
+            throw new Domain.Abstractions.DomainException(
+                Domain.Errors.ErrorCodes.CalculationInputTooLarge,
+                $"Прив'язка методології {binding.Descriptor.Code} до таблиці {binding.TableInstanceId} "
+                + $"має {inputCells} комірок входу — більше за бюджет {maxInputCells} "
+                + $"({CalculationLimits.SectionName}:{nameof(CalculationLimits.MaxInputCellsPerBinding)}).",
+                new Dictionary<string, object?>
+                {
+                    ["messageKey"] = "err.ECR-CALC-4222.inputCellsOverBudget",
+                    ["code"] = binding.Descriptor.Code,
+                    ["tableInstanceId"] = binding.TableInstanceId.ToString(CultureInfo.InvariantCulture),
+                    ["cells"] = inputCells.ToString(CultureInfo.InvariantCulture),
+                    ["limit"] = maxInputCells.ToString(CultureInfo.InvariantCulture),
+                });
+        }
 
         var stopwatch = Stopwatch.StartNew();
         var outputs = new List<CalculationOutput>(inputs.Count);
