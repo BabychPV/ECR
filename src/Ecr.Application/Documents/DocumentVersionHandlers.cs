@@ -95,14 +95,19 @@ public sealed class CompareDocumentVersionsHandler(
     /// <summary>Порівнює <paramref name="from"/> із <paramref name="to"/> (<c>current</c> або ідентифікатор версії).</summary>
     public async Task<DocumentCompareDto> HandleAsync(long documentId, long from, string? to, CancellationToken ct)
     {
-        await DocumentVersionAccess.RequireAsync(getDocument, documentId, ct).ConfigureAwait(false);
+        var document = await DocumentVersionAccess.RequireAsync(getDocument, documentId, ct).ConfigureAwait(false);
 
         // ⛔ S6 (ФВ-6.6): порівняння віддає значення комірок так само, як зріз, —
         // і так само шанує заборону на аркуш, таблицю й колонку. Профіль той
         // самий, яким щойно вирішено видимість документа (кеш профілів).
+        //
+        // ⛔ ФВ-6.14: право перегляду — у ПРОЄКТІ документа, а не глобальне.
+        // Глобальний `RequireAsync` тут відмовляв би власникові `Document.View`
+        // з роллю з областю (403 на порівнянні документа, який він бачить).
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+        Security.PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
         var readable = await access.ReadScopeAsync(profile, documentId, ct).ConfigureAwait(false);
 
         long? toId = null;
@@ -326,11 +331,11 @@ public sealed class CompareDocumentVersionsHandler(
 internal static class DocumentVersionAccess
 {
     /// <summary>Чужий і неіснуючий документ — однаковий 404, як у <c>GET /documents/{id}</c>.</summary>
-    public static async Task RequireAsync(GetDocumentHandler getDocument, long documentId, CancellationToken ct)
+    /// <returns>Видимий документ (з його проєктом).</returns>
+    public static async Task<DocumentSummary> RequireAsync(GetDocumentHandler getDocument, long documentId, CancellationToken ct)
     {
-        if (await getDocument.HandleAsync(documentId, null, ct).ConfigureAwait(false) is null)
-        {
-            throw new NotFoundException(
+        return await getDocument.HandleAsync(documentId, null, ct).ConfigureAwait(false)
+            ?? throw new NotFoundException(
                 "ECR-DOC-0404",
                 $"Документ {documentId} не знайдено.",
                 new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -338,6 +343,5 @@ internal static class DocumentVersionAccess
                     ["messageKey"] = "err.ECR-DOC-0404.document",
                     ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
                 });
-        }
     }
 }
