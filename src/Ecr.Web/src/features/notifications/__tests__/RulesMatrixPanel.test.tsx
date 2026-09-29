@@ -287,7 +287,7 @@ describe('RulesMatrixPanel: відмова ≠ порожня матриця (L1
   );
 
   it(
-    'В. ДЗЕРКАЛО: обидві відповіді на місці — матриця з УСІХ подій, банера немає, кнопка доступна',
+    'В. ДЗЕРКАЛО: обидві відповіді на місці — матриця з УСІХ подій, банера немає, кнопка є',
     async () => {
       mockServer({ rules: 'ok', channels: 'ok' });
       const client = show();
@@ -309,8 +309,9 @@ describe('RulesMatrixPanel: відмова ≠ порожня матриця (L1
       expect((cellBox('JobFailed', 'Пошта чергового') as HTMLInputElement).checked).toBe(true);
       expect((cellBox('JobFailed', 'Teams: черговий') as HTMLInputElement).checked).toBe(false);
 
+      // ⚠ Кнопка є, але до першої правки вимкнена (U14a): зберігати нічого.
       expect(saveButton()).toBeTruthy();
-      expect((saveButton() as HTMLButtonElement).disabled).toBe(false);
+      expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
       expect(screen.queryByRole('button', { name: '⟦common.retry⟧' })).toBeNull();
       expect(screen.queryByText(/ECR-SYS-0500|ECR-ACCS-0403/)).toBeNull();
     },

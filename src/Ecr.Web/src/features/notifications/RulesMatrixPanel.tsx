@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import {
   Button,
   Checkbox,
@@ -20,16 +20,20 @@ import {
   type NotificationRule,
   type NotificationRuleMatrix,
 } from '@/features/notifications/api';
+import {
+  cellKey,
+  changedCells,
+  draftOf,
+  type Cell,
+  type Draft,
+  type EventKind,
+  type Severity,
+} from '@/features/notifications/rulesDraft';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { statusKey } from '@/shared/ui/StatusBadge';
 import { showApiError, showDone } from '@/shared/ui/notify';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 import { t } from '@/shared/i18n';
-
-/** Подія, про яку сповіщають; перелік приходить із сервера (`BE-33b`). */
-type EventKind = NotificationRule['eventKind'];
-
-/** Межа серйозності правила. */
-type Severity = NotificationRule['minSeverity'];
 
 /**
  * Варіанти межі серйозності.
@@ -67,27 +71,6 @@ const RulesKey = ['notifications', 'rules'] as const;
  * див. коментар при визначенні константи.
  */
 
-/** Клітинка чернетки: чи діє правило і з якою межею. */
-interface Cell {
-  readonly isEnabled: boolean;
-  readonly minSeverity: Severity;
-}
-
-/** Адреса клітинки в чернетці. */
-function cellKey(eventKind: EventKind, channelId: number): string {
-  return `${eventKind}:${String(channelId)}`;
-}
-
-/** Чернетка з відповіді сервера. */
-function draftOf(rules: readonly NotificationRule[]): ReadonlyMap<string, Cell> {
-  return new Map(
-    rules.map((rule) => [
-      cellKey(rule.eventKind, rule.channelId),
-      { isEnabled: rule.isEnabled, minSeverity: rule.minSeverity },
-    ]),
-  );
-}
-
 /**
  * Матриця правил сповіщень «подія × канал» (`BE-33b`, екран
  * `/admin/notifications`).
@@ -122,20 +105,85 @@ export function RulesMatrixPanel(): JSX.Element {
     queryFn: listNotificationChannels,
   });
 
-  const [draft, setDraft] = useState<ReadonlyMap<string, Cell>>(new Map());
+  const [draft, setDraft] = useState<Draft>(new Map());
+  /**
+   * Точка відліку — відповідь сервера, на якій почали правити.
+   *
+   * ⛔ Аудит U14a: до фіксу чернетку перезаписувала КОЖНА нова `rules.data`
+   * (фокус вікна — `refetchOnWindowFocus` увімкнений за замовчуванням), ознаки
+   * «змінено» не було, а вихід зі сторінки мовчки губив правки.
+   */
+  const [seed, setSeed] = useState<Draft | null>(null);
+
+  const changed = seed === null ? 0 : changedCells(seed, draft);
+  const dirty = changed > 0;
+
+  // ⚠ Знімок для ефекту наповнення: він читає стан у момент відповіді, а не в
+  // момент оголошення, і не мусить залежати від `draft` (інакше кожна правка
+  // перезапускала б його).
+  const latest = useRef({ draft, dirty });
+  useEffect(() => {
+    latest.current = { draft, dirty };
+  });
 
   /*
-   * ⚠ Чернетка наповнюється ВІДПОВІДДЮ, а не заводиться раз. Після збереження
-   * сюди приїжджає матриця, яку повернув сервер (див. `onSuccess`), тож на
-   * екрані лишається його правда, а не наше уявлення про неї.
+   * ⛔ Відповідь сервера наповнює чернетку лише тоді, коли в ній нема чого
+   * втрачати: не змінена — або вже дорівнює відповіді. Незмінена чернетка йде
+   * за сервером (нова відповідь — нова точка відліку); змінену фоновий
+   * перезапит НЕ чіпає.
    */
   useEffect(() => {
-    if (rules.data !== undefined) setDraft(draftOf(rules.data.rules));
+    if (rules.data === undefined) return;
+
+    const incoming = draftOf(rules.data.rules);
+    const current = latest.current;
+    if (current.dirty && changedCells(incoming, current.draft) > 0) return;
+
+    setDraft(incoming);
+    setSeed(incoming);
   }, [rules.data]);
+
+  /*
+   * ⚠ Джерело для `UnsavedGuard` існує, лише ПОКИ чернетка змінена. `flush`
+   * навмисно немає: мовчазний `PUT` усієї матриці при переході (без версії —
+   * U14b) міг би непомітно перезаписати чужу правку й вимкнути алерти; тож
+   * сторож показує діалог, як і для `grants`.
+   */
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    return registerUnsavedSource('notification-rules', {
+      hasUnsaved: () => true,
+      unsavedCount: () => changed,
+    });
+  }, [dirty, changed]);
+
+  // ⚠ Закриття чи перезавантаження вкладки роутер не блокує — тут штатне
+  // питання браузера, і лише поки є що втрачати.
+  useEffect(() => {
+    if (!dirty) return undefined;
+
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      // Старі браузери показують питання лише за непорожнього `returnValue`.
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', warn);
+
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   const save = useMutation({
     mutationFn: (next: NotificationRule[]) => replaceNotificationRules(next),
     onSuccess: (saved: NotificationRuleMatrix) => {
+      // ⚠ Збережене стає новою точкою відліку ДО оновлення кешу: інакше
+      // відповідь, що хоч чимось відрізняється від чернетки, лишила б її
+      // «зміненою» і ефект наповнення її б не взяв.
+      const savedDraft = draftOf(saved.rules);
+      setDraft(savedDraft);
+      setSeed(savedDraft);
+
       // ⚠ Відповідь PUT — це ВЖЕ вся матриця (`NotificationRuleMatrix`), тож
       // інвалідація з повторним GET була б зайвим запитом за тими самими
       // даними — і зайвою миттю, коли екран показує старе.
@@ -364,9 +412,36 @@ export function RulesMatrixPanel(): JSX.Element {
       </ScrollArea>
 
       <Group gap="xs">
-        <Button loading={save.isPending} onClick={() => save.mutate(enabledRules())}>
+        {/* ⚠ Без змін зберігати нічого: активна кнопка тут лише перезаписала б
+            матрицю тим, що вже є, — або чужою правкою, яку екран ще не бачив. */}
+        <Button
+          loading={save.isPending}
+          disabled={!dirty}
+          onClick={() => save.mutate(enabledRules())}
+        >
           {t('notifications.saveRules')}
         </Button>
+
+        {/* Скасування повертає чернетку до ОСТАННЬОЇ відповіді сервера, а не до
+            старої точки відліку: відкидаючи свої правки, людина хоче бачити
+            чинний стан. */}
+        <Button
+          variant="default"
+          disabled={!dirty || save.isPending}
+          onClick={() => {
+            const current = draftOf(matrix.rules);
+            setDraft(current);
+            setSeed(current);
+          }}
+        >
+          {t('common.cancel')}
+        </Button>
+
+        {dirty && (
+          <Text size="xs" c="dimmed" fs="italic" data-testid="notification-rules-unsaved">
+            {t('grants.unsaved')}
+          </Text>
+        )}
       </Group>
     </Stack>
   );
