@@ -321,6 +321,55 @@ jobs:
       - name: Тести Ecr.Worker (Job Object)
         run: dotnet test tests/Ecr.Worker.Tests --nologo --logger "trx;LogFileName=worker-windows.trx" --logger "console;verbosity=normal" --results-directory TestResults
 
+  # ⚠ MSI (installer/Ecr.Installer, WiX 5) не збирається ніде в CI: WiX не має
+  # збірки під Linux, тож `tools/build-msi.ps1` досі йшов лише руками на
+  # машині збірки. Після Worker.wxs (служба EcrWorker, ФВ-9.8, D-206) склад
+  # MSI змінився, і без цього завдання про поламаний .wxs дізналися б на
+  # машині адміністратора. Тут: WiX 5.0.2 як dotnet tool — ЛИШЕ на ранері
+  # (розширення Util/UI/Firewall тягне сам .wixproj через NuGet), повна
+  # збірка `build-msi.ps1` (Api + Worker + веб-клієнт) і `verify-msi.ps1
+  # -StaticOnly` (S1–S5: таблиці MSI, без установки).
+  #
+  # ⛔ НЕ обов'язковий гейт (пряме рішення людини 2026-09-29): до переліку
+  # семи не входить, у `server` не зводиться, `needs` не має — іде паралельно.
+  # Кроки перевірки тут не з `verify-all.ps1`, тож `CiPipelineTests` його не
+  # зачіпає.
+  msi-windows:
+    name: msi (windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Ecr.Web/package-lock.json
+
+      - name: WiX 5.0.2 (dotnet tool, лише ранер)
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" --version
+
+      # ⚠ Версія — три поля (MSI порівнює лише їх); 0.0.<run_number> лише
+      # для перевірки збірки, не для випуску.
+      - name: Збірка MSI (build-msi.ps1)
+        run: pwsh -File tools/build-msi.ps1 -Version "0.0.${{ github.run_number }}"
+
+      - name: Перевірка MSI (verify-msi.ps1 -StaticOnly)
+        run: |
+          $msi = Get-ChildItem artifacts/msi -Filter '*.msi' -Recurse | Sort-Object LastWriteTime | Select-Object -Last 1
+          if (-not $msi) { throw 'MSI не знайдено в artifacts/msi' }
+          Write-Host ("MSI: {0} ({1:N1} MB)" -f $msi.FullName, ($msi.Length / 1MB))
+          pwsh -File tools/verify-msi.ps1 -MsiPath $msi.FullName -StaticOnly
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
   # ⛔ Набір у ПЕРЕМІШАНОМУ порядку — і це НЕ восьмий гейт. Він не блокує
   # мерж (`continue-on-error`), бо його призначення інше: показати, що набір
   # зелений ПО СУТІ, а не тому, що штатний порядок випадково влаштовує
