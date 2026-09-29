@@ -23,6 +23,17 @@ namespace Ecr.Application.Tests.Integration;
 /// <item>прибрано гілку <c>Hybrid</c> (раннє повернення для поля без активного
 /// мапінгу) — 1 з 12 червоний: <see cref="Hybrid_пише_лише_поля_з_активним_мапінгом"/>.</item>
 /// </list>
+/// <para>
+/// D-212 PR-4 (2026-09-30, кожна мутація — правка планувальника, відкат і контрольний прогін):
+/// </para>
+/// <list type="bullet">
+/// <item>людина виграє й у <c>External</c> (без <c>sourceKind == Hybrid &amp;&amp;</c>) —
+/// червоний <see cref="External_перезаписує_значення_людини_без_ConflictKeptManual"/>;</item>
+/// <item>коди шукаються в усіх довідниках разом, а не в <c>RefRegistryDefId</c> —
+/// червоний <see cref="Lookup_з_невідомим_кодом_дає_ValueRejected_entryRefNotFound_і_поле_не_чіпається"/>;</item>
+/// <item>код не обрізається від пробілів — червоні <see cref="Lookup_за_кодом_розв_язується_в_Id"/> і
+/// <see cref="LookupCodes_перелічує_коди_для_розв_язання_без_порожніх_і_дублів"/>.</item>
+/// </list>
 /// </remarks>
 public sealed class RegistrySyncPlannerTests
 {
@@ -40,6 +51,13 @@ public sealed class RegistrySyncPlannerTests
 
     private static readonly RegistrySyncFieldMapping Name =
         new(NameField, "NAME", CellDataType.String, null, "Name", IsActive: true);
+
+    private const int FuelField = 14;
+    private const int FuelRegistry = 77;
+
+    /// <summary>Перелік AF (вид палива) — за КОДОМ запису довідника палив (<c>D-212</c> (5)).</summary>
+    private static readonly RegistrySyncFieldMapping Fuel =
+        new(FuelField, "FUEL", CellDataType.Lookup, null, "Fuel", IsActive: true, RefRegistryDefId: FuelRegistry);
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
@@ -142,10 +160,10 @@ public sealed class RegistrySyncPlannerTests
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "ФВ-8.11")]
-    public void Ручна_правка_лишається_і_дає_ConflictKeptManual()
+    public void Hybrid_ручна_правка_лишається_і_дає_ConflictKeptManual()
     {
         var input = Input(
-            RegistrySourceKind.External,
+            RegistrySourceKind.Hybrid,
             element: Element(("Permit_Limit", 15m)),
             current: Values((LimitField, 13m, true)),
             Limit);
@@ -157,6 +175,99 @@ public sealed class RegistrySyncPlannerTests
         Assert.Equal(RegistrySyncEventKind.ConflictKeptManual, kept.Kind);
         Assert.Equal(13m, kept.CurrentValue);
         Assert.Equal(15m, kept.SourceValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public void External_перезаписує_значення_людини_без_ConflictKeptManual()
+    {
+        // D-212 (1), D-211: у External людина не пише — «людське» значення є
+        // залишком, і синк його перезаписує.
+        var input = Input(
+            RegistrySourceKind.External,
+            element: Element(("Permit_Limit", 15m)),
+            current: Values((LimitField, 13m, true)),
+            Limit);
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Equal(new RegistrySyncUpdate(EntryId, LimitField, "LIMIT", 13m, 15m), Assert.Single(plan.Updates));
+        Assert.Empty(plan.Events);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public void Lookup_за_кодом_розв_язується_в_Id()
+    {
+        var input = Input(
+            RegistrySourceKind.External,
+            element: Element(("Fuel", "  GAS ")),
+            current: Values((FuelField, 7L, false)),
+            Fuel) with
+        {
+            LookupCodes = Codes((FuelRegistry, "GAS", 9L), (FuelRegistry, "OIL", 7L)),
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Equal(new RegistrySyncUpdate(EntryId, FuelField, "FUEL", 7L, 9L), Assert.Single(plan.Updates));
+        Assert.Empty(plan.Events);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public void Lookup_з_невідомим_кодом_дає_ValueRejected_entryRefNotFound_і_поле_не_чіпається()
+    {
+        var input = Input(
+            RegistrySourceKind.External,
+            element: Element(("Fuel", "COAL")),
+            current: Values((FuelField, 7L, false)),
+            Fuel) with
+        {
+            // Код є в іншому довіднику — це не той запис.
+            LookupCodes = Codes((FuelRegistry, "OIL", 7L), (FuelRegistry + 1, "COAL", 5L)),
+        };
+
+        var plan = RegistrySyncPlanner.Plan(input);
+
+        Assert.Empty(plan.Updates);
+        var rejected = Assert.Single(plan.Events);
+        Assert.Equal(RegistrySyncEventKind.ValueRejected, rejected.Kind);
+        Assert.Equal("FUEL", rejected.FieldCode);
+        Assert.Equal("ECR-REG-0422", rejected.ErrorCode);
+        Assert.Equal("err.ECR-REG-0422.entryRefNotFound", rejected.MessageKey);
+        Assert.Equal("COAL", rejected.SourceValue);
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "ФВ-8.11")]
+    public void LookupCodes_перелічує_коди_для_розв_язання_без_порожніх_і_дублів()
+    {
+        var input = new RegistrySyncInput(
+            RegistryDefId,
+            RegistrySourceKind.External,
+            IsCompleteSnapshot: true,
+            Elements:
+            [
+                new RegistrySyncSourceElement(Guid1, Path1, Attrs(("Fuel", "GAS"), ("Permit_Limit", 1m))),
+                new RegistrySyncSourceElement("G2", null, Attrs(("Fuel", " GAS "))),
+                new RegistrySyncSourceElement("G3", null, Attrs(("Fuel", "  "))),
+                new RegistrySyncSourceElement("G4", null, Attrs(("Fuel", null))),
+                new RegistrySyncSourceElement("G5", null, Attrs(("Fuel", 42m))),
+            ],
+            Links: [],
+            Entries: [],
+            Mappings: [Limit, Fuel]);
+
+        var codes = RegistrySyncPlanner.LookupCodes(input);
+
+        Assert.Equal(
+            new[] { new RegistrySyncLookupCode(FuelRegistry, "42"), new RegistrySyncLookupCode(FuelRegistry, "GAS") },
+            codes);
     }
 
     [Fact]
@@ -289,6 +400,14 @@ public sealed class RegistrySyncPlannerTests
 
     private static Dictionary<string, object?> Attrs(params (string Attribute, object? Value)[] attributes)
         => attributes.ToDictionary(a => a.Attribute, a => a.Value, StringComparer.Ordinal);
+
+    private static Dictionary<int, IReadOnlyDictionary<string, long>> Codes(
+        params (int RegistryDefId, string Code, long Id)[] codes)
+        => codes
+            .GroupBy(c => c.RegistryDefId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyDictionary<string, long>)g.ToDictionary(c => c.Code, c => c.Id, StringComparer.OrdinalIgnoreCase));
 
     private static Dictionary<int, RegistrySyncCurrentValue> Values(
         params (int FieldId, object? Value, bool Human)[] values)

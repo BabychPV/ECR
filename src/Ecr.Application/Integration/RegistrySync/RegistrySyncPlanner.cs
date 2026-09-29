@@ -1,5 +1,6 @@
 // src/Ecr.Application/Integration/RegistrySync/RegistrySyncPlanner.cs
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using Ecr.Application.Documents;
 using Ecr.Domain.Abstractions;
 using Ecr.Domain.Entities.Dictionaries;
@@ -31,14 +32,60 @@ namespace Ecr.Application.Integration.RegistrySync;
 /// <see cref="RegistrySyncEventKind.Diverged"/>.</item>
 /// </list>
 /// <para>
-/// ⚠ Ручна правка перемагає (<c>D-118</c>): якщо останнім поле записала людина,
-/// а джерело каже інше — <see cref="RegistrySyncEventKind.ConflictKeptManual"/>,
-/// без запису. Зниклий елемент — лише подія (запис не видаляється), новий
-/// елемент без зв'язку — лише подія (запис не створюється).
+/// ⚠ Ручна правка перемагає лише в <c>Hybrid</c> (<c>D-118</c>, <c>D-212</c> (2)):
+/// якщо останнім поле записала людина, а джерело каже інше —
+/// <see cref="RegistrySyncEventKind.ConflictKeptManual"/>, без запису. У
+/// <c>External</c> ручного запису немає (<c>D-211</c>) — синк перезаписує.
+/// Зниклий елемент — лише подія (запис не видаляється), новий елемент без
+/// зв'язку — лише подія (запис не створюється).
+/// </para>
+/// <para>
+/// ⚠ Поле <c>Lookup</c> з <see cref="RegistrySyncFieldMapping.RefRegistryDefId"/>
+/// приходить із джерела КОДОМ (<c>D-212</c> (5)): задача спершу бере коди з
+/// <see cref="LookupCodes"/>, розв'язує їх у базі й передає в
+/// <see cref="RegistrySyncInput.LookupCodes"/>; коду немає —
+/// <see cref="RegistrySyncEventKind.ValueRejected"/> (<c>entryRefNotFound</c>), поле
+/// не чіпається.
 /// </para>
 /// </remarks>
 public static class RegistrySyncPlanner
 {
+    /// <summary>Код відмови «значення не приводиться до поля».</summary>
+    public const string ValueRejectedCode = "ECR-REG-0422";
+
+    /// <summary>Ключ каталогу: у довіднику, на який посилається поле, немає запису з таким кодом.</summary>
+    public const string EntryRefNotFoundKey = "err.ECR-REG-0422.entryRefNotFound";
+
+    private static readonly IReadOnlyDictionary<string, long> NoCodes = new Dictionary<string, long>();
+
+    /// <summary>
+    /// Коди записів інших довідників, які задача має розв'язати в <c>Id</c> перед
+    /// <see cref="Plan"/>: значення атрибутів знімка для мапінгів <c>Lookup</c> з
+    /// <see cref="RegistrySyncFieldMapping.RefRegistryDefId"/>.
+    /// </summary>
+    /// <param name="input">Той самий вхід, що піде в <see cref="Plan"/> (без <see cref="RegistrySyncInput.LookupCodes"/>).</param>
+    /// <returns>Різні пари «довідник, код» в усталеному порядку; порожні значення не входять.</returns>
+    public static IReadOnlyList<RegistrySyncLookupCode> LookupCodes(RegistrySyncInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var byCode = input.Mappings.Where(m => m.RefRegistryDefId is not null).ToList();
+        var codes = new HashSet<RegistrySyncLookupCode>();
+
+        foreach (var element in input.Elements)
+        {
+            foreach (var mapping in byCode)
+            {
+                if (element.Attributes.TryGetValue(mapping.SourceAttribute, out var raw) && CodeOf(raw) is { } code)
+                {
+                    codes.Add(new RegistrySyncLookupCode(mapping.RefRegistryDefId!.Value, code));
+                }
+            }
+        }
+
+        return [.. codes.OrderBy(c => c.RegistryDefId).ThenBy(c => c.Code, StringComparer.Ordinal)];
+    }
+
     /// <summary>Будує план синхронізації.</summary>
     /// <param name="input">Знімок джерела й стан довідника.</param>
     /// <returns>План; <see cref="RegistrySyncPlan.IsEmpty"/> — якщо нічого не змінилося.</returns>
@@ -86,7 +133,7 @@ public static class RegistrySyncPlanner
 
             foreach (var mapping in mappings)
             {
-                PlanField(input.SourceKind, element, entry, mapping, updates, events);
+                PlanField(input, element, entry, mapping, updates, events);
             }
         }
 
@@ -106,13 +153,15 @@ public static class RegistrySyncPlanner
     }
 
     private static void PlanField(
-        RegistrySourceKind sourceKind,
+        RegistrySyncInput input,
         RegistrySyncSourceElement element,
         RegistrySyncEntryState entry,
         RegistrySyncFieldMapping mapping,
         List<RegistrySyncUpdate> updates,
         List<RegistrySyncEvent> events)
     {
+        var sourceKind = input.SourceKind;
+
         // Hybrid і Local: поле без активного мапінгу — локальне, синк про нього
         // не знає. External: поле лишається зовнішнім і з вимкненим мапінгом —
         // писати не можна, але розбіжність видно (нижче).
@@ -129,7 +178,7 @@ public static class RegistrySyncPlanner
             return;
         }
 
-        if (!TryConvert(mapping, raw, out var incoming, out var rejection))
+        if (!TryIncoming(input, mapping, raw, out var incoming, out var errorCode, out var messageKey))
         {
             events.Add(new RegistrySyncEvent(
                 RegistrySyncEventKind.ValueRejected,
@@ -137,8 +186,8 @@ public static class RegistrySyncPlanner
                 entry.RegistryEntryId,
                 mapping.FieldCode,
                 SourceValue: raw,
-                ErrorCode: rejection.ErrorCode,
-                MessageKey: rejection.Details?.GetValueOrDefault("messageKey") as string));
+                ErrorCode: errorCode,
+                MessageKey: messageKey));
             return;
         }
 
@@ -160,7 +209,9 @@ public static class RegistrySyncPlanner
             return;
         }
 
-        if (current is { LastWriterIsHuman: true })
+        // D-212 (1)/(2): людина виграє лише в Hybrid. External ручного запису не має
+        // (D-211) — «людське» значення там є залишком, і синк його перезаписує.
+        if (sourceKind == RegistrySourceKind.Hybrid && current is { LastWriterIsHuman: true })
         {
             events.Add(new RegistrySyncEvent(
                 RegistrySyncEventKind.ConflictKeptManual, element.ExternalId, entry.RegistryEntryId,
@@ -170,6 +221,68 @@ public static class RegistrySyncPlanner
 
         updates.Add(new RegistrySyncUpdate(
             entry.RegistryEntryId, mapping.RegistryFieldDefId, mapping.FieldCode, currentValue, incoming));
+    }
+
+    /// <summary>
+    /// Значення джерела → типізоване значення поля: код запису іншого довідника
+    /// (<see cref="RegistrySyncFieldMapping.RefRegistryDefId"/>) розв'язується в
+    /// <c>Id</c>, решта — <see cref="TryConvert"/>.
+    /// </summary>
+    private static bool TryIncoming(
+        RegistrySyncInput input,
+        RegistrySyncFieldMapping mapping,
+        object? raw,
+        out object? typed,
+        out string? errorCode,
+        out string? messageKey)
+    {
+        if (mapping.RefRegistryDefId is { } refDefId)
+        {
+            // Порожнє — джерело каже «порожньо»: поле очищується, як і для решти типів.
+            if (CodeOf(raw) is not { } code)
+            {
+                typed = null;
+                errorCode = messageKey = null;
+                return true;
+            }
+
+            var codes = input.LookupCodes?.GetValueOrDefault(refDefId) ?? NoCodes;
+            if (codes.TryGetValue(code, out var id))
+            {
+                typed = id;
+                errorCode = messageKey = null;
+                return true;
+            }
+
+            typed = null;
+            errorCode = ValueRejectedCode;
+            messageKey = EntryRefNotFoundKey;
+            return false;
+        }
+
+        if (TryConvert(mapping, raw, out typed, out var rejection))
+        {
+            errorCode = messageKey = null;
+            return true;
+        }
+
+        errorCode = rejection.ErrorCode;
+        messageKey = rejection.Details?.GetValueOrDefault("messageKey") as string;
+        return false;
+    }
+
+    /// <summary>Код запису зі значення атрибута: текст без пробілів по краях; порожнє — <c>null</c>.</summary>
+    private static string? CodeOf(object? raw)
+    {
+        var text = raw switch
+        {
+            null => null,
+            string s => s,
+            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+            _ => raw.ToString(),
+        };
+
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
     }
 
     /// <summary>

@@ -152,7 +152,9 @@ public sealed class RegistrySyncApplyTests(SqlServerFixture sql)
     [Trait("Requirement", "ФВ-8.11")]
     public async Task Невідомий_автор_це_людина_значення_лишається_і_одна_подія_за_два_прогони()
     {
-        var stand = await ArrangeAsync(RegistrySourceKind.External, e1Author: Author.Unknown);
+        // ⚠ Hybrid, а не External: з D-212 (1) у External людина не пише (D-211), і синк
+        // перезаписує будь-яке значення — правило D-118 лишилось лише для Hybrid.
+        var stand = await ArrangeAsync(RegistrySourceKind.Hybrid, e1Author: Author.Unknown);
         await using var provider = BuildProvider();
 
         try

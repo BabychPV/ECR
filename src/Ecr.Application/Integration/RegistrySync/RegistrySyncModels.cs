@@ -40,7 +40,9 @@ public sealed record RegistrySyncLink(
 /// </param>
 /// <param name="LastWriterIsHuman">
 /// Останнім значення записала людина, а не <c>svc-integration</c> — тоді синк
-/// його не перетирає (<c>D-118</c>).
+/// довідника <c>Hybrid</c> його не перетирає (<c>D-118</c>). ⚠ Для <c>External</c>
+/// ознака не діє: ручного запису там немає (<c>D-211</c>, <c>D-212</c> (1)), і
+/// значення «від людини» — це залишок до блокування, який синк перезаписує.
 /// </param>
 public sealed record RegistrySyncCurrentValue(object? Value, bool LastWriterIsHuman);
 
@@ -58,13 +60,29 @@ public sealed record RegistrySyncEntryState(
 /// <param name="UnitId">Одиниця поля (<c>RegistryFieldDef.UnitId</c>); лише для числових полів.</param>
 /// <param name="SourceAttribute">Ім'я атрибута в джерелі.</param>
 /// <param name="IsActive">Чи діє мапінг.</param>
+/// <param name="RefRegistryDefId">
+/// Для поля <c>Lookup</c>: довідник, на запис якого воно посилається
+/// (<c>RegistryFieldDef.RefRegistryDefId</c>). Задано — атрибут джерела несе
+/// КОД запису (<c>D-212</c> (5)), і планувальник розв'язує його в <c>Id</c> за
+/// <see cref="RegistrySyncInput.LookupCodes"/>; <c>null</c> — значення вже є
+/// <c>Id</c> (поведінка до <c>D-212</c>).
+/// </param>
 public sealed record RegistrySyncFieldMapping(
     int RegistryFieldDefId,
     string FieldCode,
     CellDataType DataType,
     int? UnitId,
     string SourceAttribute,
-    bool IsActive);
+    bool IsActive,
+    int? RefRegistryDefId = null);
+
+/// <summary>
+/// Код запису іншого довідника, який задача має розв'язати в <c>Id</c> ДО
+/// планування (<see cref="RegistrySyncPlanner.LookupCodes"/>).
+/// </summary>
+/// <param name="RegistryDefId">Довідник, у якому шукати код.</param>
+/// <param name="Code">Код запису (обрізаний від пробілів).</param>
+public sealed record RegistrySyncLookupCode(int RegistryDefId, string Code);
 
 /// <summary>Усе, що планувальнику треба знати про один прогін синхронізації одного довідника.</summary>
 /// <param name="RegistryDefId">Довідник.</param>
@@ -78,6 +96,13 @@ public sealed record RegistrySyncFieldMapping(
 /// <param name="Links">Зв'язки <c>dic.RegistryExternalKey</c> цього довідника й цього джерела.</param>
 /// <param name="Entries">Поточний стан прив'язаних записів.</param>
 /// <param name="Mappings">Мапінги полів довідника.</param>
+/// <param name="LookupCodes">
+/// Розв'язані коди: довідник → (код → <c>Id</c> запису), для кодів із
+/// <see cref="RegistrySyncPlanner.LookupCodes"/>. Коду немає в словнику (або
+/// немає словника довідника) — такого запису немає: подія
+/// <see cref="RegistrySyncEventKind.ValueRejected"/> з <c>err.ECR-REG-0422.entryRefNotFound</c>.
+/// Порівняння кодів — компаратором словника (задача ставить той, що й у базі).
+/// </param>
 public sealed record RegistrySyncInput(
     int RegistryDefId,
     RegistrySourceKind SourceKind,
@@ -85,7 +110,8 @@ public sealed record RegistrySyncInput(
     IReadOnlyList<RegistrySyncSourceElement> Elements,
     IReadOnlyList<RegistrySyncLink> Links,
     IReadOnlyList<RegistrySyncEntryState> Entries,
-    IReadOnlyList<RegistrySyncFieldMapping> Mappings);
+    IReadOnlyList<RegistrySyncFieldMapping> Mappings,
+    IReadOnlyDictionary<int, IReadOnlyDictionary<string, long>>? LookupCodes = null);
 
 /// <summary>Одна зміна поля, яку синк має записати через <c>RegistryEntryWriter</c>.</summary>
 /// <param name="RegistryEntryId">Запис довідника.</param>
