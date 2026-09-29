@@ -113,6 +113,10 @@ public sealed class HttpLoadBenchmark
     [
         "Document.View", "Document.Create", "Project.Manage",
         "Calculation.View", "Security.ManageRoles", "System.ViewHealth",
+
+        // I2 ФВ-9.8: перерахунок проєкту ставить той самий оператор, що й
+        // навантаження, — bootstrap цього права не має (D-121).
+        "Calculation.Recalculate",
     ];
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -156,6 +160,14 @@ public sealed class HttpLoadBenchmark
     /// дефект був би наклепом на продукт.
     /// </remarks>
     public int Workers { get; init; }
+
+    /// <summary>Куди писати кожен запит вікна рядком CSV; <c>null</c> — не писати.</summary>
+    /// <remarks>
+    /// I2 ФВ-9.8: вікно навантаження й вікно перерахунку не збігаються, тож
+    /// p50/p95 «під час перерахунку» рахуються з сирих вибірок за часом
+    /// завершення, а не з підсумку всього вікна.
+    /// </remarks>
+    public string? SamplesOut { get; init; }
 
     /// <summary>Виконує повний прогін: підготовка → зондування → навантаження.</summary>
     /// <param name="ct">Токен скасування.</param>
@@ -855,7 +867,10 @@ public sealed class HttpLoadBenchmark
             {
                 tableInstanceId = table.InstanceId,
                 periodKey = target.PeriodKey,
-                origin = "Manual",
+                // ✎ 2026-09-29 (I2): «Manual» сервер відхиляє 422 ECR-REQ-0422
+                // (cellOriginNotAllowed, клієнт може лише UserEdit) — усі записи
+                // навантаження йшли відмовами, і p95 PATCH міряв швидку відмову.
+                origin = "UserEdit",
                 rows,
             },
             ct).ConfigureAwait(false);
@@ -996,7 +1011,8 @@ public sealed class HttpLoadBenchmark
                             (call.IsWrite ? writes : reads).Add(new Sample(
                                 Math.Max(0, (finishedAt - call.Due).TotalMilliseconds),
                                 (finishedAt - startedAt).TotalMilliseconds,
-                                finishedAt));
+                                finishedAt,
+                                (int)status));
                         }
                     }
                     catch (OperationCanceledException)
@@ -1006,6 +1022,10 @@ public sealed class HttpLoadBenchmark
                 },
                 CancellationToken.None))
             .ToArray();
+
+        // I2: абсолютна мітка старту вікна — щоб зіставити вибірки з часом перерахунку в базі.
+        var windowStartedUtc = DateTime.UtcNow;
+        Console.WriteLine(Fmt($"Навантаження стартувало: {windowStartedUtc:O}, {TargetRps} RPS, {LoadSeconds} с."));
 
         var scheduled = await ProduceAsync(channel.Writer, ct).ConfigureAwait(false);
 
@@ -1026,6 +1046,17 @@ public sealed class HttpLoadBenchmark
         }
 
         var after = await CountersAsync(ct).ConfigureAwait(false);
+
+        if (SamplesOut is not null)
+        {
+            var lines = new List<string> { "kind,status,finished_utc,latency_ms,service_ms" };
+            lines.AddRange(reads.Select(s => Line("read", s)));
+            lines.AddRange(writes.Select(s => Line("write", s)));
+            await File.WriteAllLinesAsync(SamplesOut, lines, ct).ConfigureAwait(false);
+
+            string Line(string kind, Sample s) => Fmt(
+                $"{kind},{s.Status},{windowStartedUtc + s.FinishedAt:O},{s.LatencyMs:F1},{s.ServiceMs:F1}");
+        }
 
         return new LoadOutcome(
             [.. reads], [.. writes], statuses, conflicts, scheduled, before, after,
@@ -1080,6 +1111,8 @@ public sealed class HttpLoadBenchmark
         measurements["scheduled"] = load.Scheduled;
         measurements["unserved"] = load.Scheduled - completed;
 
+        measurements["get_slice_p50_ms"] = Percentile(load.Reads, 0.50, s => s.ServiceMs);
+        measurements["patch_p50_ms"] = Percentile(load.Writes, 0.50, s => s.ServiceMs);
         measurements["get_slice_p95_ms"] = Percentile(load.Reads, 0.95, s => s.ServiceMs);
         measurements["get_slice_p99_ms"] = Percentile(load.Reads, 0.99, s => s.ServiceMs);
         measurements["patch_p95_ms"] = Percentile(load.Writes, 0.95, s => s.ServiceMs);
@@ -1562,7 +1595,7 @@ public sealed class HttpLoadBenchmark
 
     private sealed record Call(TimeSpan Due, bool IsWrite);
 
-    private sealed record Sample(double LatencyMs, double ServiceMs, TimeSpan FinishedAt);
+    private sealed record Sample(double LatencyMs, double ServiceMs, TimeSpan FinishedAt, int Status = 0);
 
     private sealed record PatchOutcome(HttpStatusCode Status, bool IsConflict);
 
