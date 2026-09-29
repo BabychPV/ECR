@@ -604,7 +604,11 @@ try {
     # Час побудови друкуємо завжди: «зелено, але 4 хвилини» — теж знахідка.
     Write-Host "      зріз побудовано за $([math]::Round($snapshotWait.Elapsed.TotalSeconds, 1)) с"
 
-    $snapshots = @(Call GET "/api/v1/reports/snapshots?projectId=$projectId&periodKey=$periodKey")
+    # ⛔ `ForEach-Object` розгортає масив. `ConvertFrom-Json` у Windows
+    # PowerShell 5.1 віддає JSON-масив ОДНИМ об'єктом, і `@(…)` загортав його
+    # ще раз: `$snapshots[0]` був усім переліком. На свіжій базі зріз один, і
+    # це не видно; на наявній їх два, і шлях ставав `/snapshots/2 1/rows` → 404.
+    $snapshots = @(Call GET "/api/v1/reports/snapshots?projectId=$projectId&periodKey=$periodKey" | ForEach-Object { $_ })
     if ($snapshots.Count -eq 0) { Fail 'зрізів немає, хоча побудова відзвітувала успіх' }
 
     # Перелік іде найновішими вперед — щойно побудований зріз перший.
