@@ -113,7 +113,7 @@ public sealed class PiSqlClientDataSource(
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
         using var command = connection.CreateCommand();
-        command.CommandText = Query(CatalogQueryKey, DefaultCatalogQuery);
+        command.CommandText = Query(source.Code, CatalogQueryKey, DefaultCatalogQuery);
 
         var result = new List<SourceEntityDescriptor>();
 
@@ -181,7 +181,7 @@ public sealed class PiSqlClientDataSource(
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
 
-        var template = await TemplateAsync(connection, element, ct).ConfigureAwait(false);
+        var template = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
 
         if (template is null)
         {
@@ -194,7 +194,7 @@ public sealed class PiSqlClientDataSource(
 
         using var command = connection.CreateCommand();
         command.CommandText = queryText is null
-            ? ValueQuery(template, attribute)
+            ? ValueQuery(source.Code, template, attribute)
             : Fill(queryText, template, attribute);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
         command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = request.FromUtc });
@@ -217,7 +217,7 @@ public sealed class PiSqlClientDataSource(
             IsTransientOdbcFailure,
             ct).ConfigureAwait(false);
 
-        var points = await ReadPointsAsync(reader, request.SourcePath, request.MaxPoints, ct)
+        var points = await ReadSourcePointsAsync(reader, source.Code, request.SourcePath, request.MaxPoints, ct)
             .ConfigureAwait(false);
 
         // Повний батч означає, що хвіст діапазону лишився непрочитаним —
@@ -277,7 +277,7 @@ public sealed class PiSqlClientDataSource(
 
         using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
 
-        var template = await TemplateAsync(connection, element, ct).ConfigureAwait(false);
+        var template = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
         if (template is null)
         {
             return new WindowResult(
@@ -389,7 +389,7 @@ public sealed class PiSqlClientDataSource(
         {
             var (element, attribute) = Split(path);
 
-            var template = await TemplateAsync(connection, element, ct).ConfigureAwait(false);
+            var template = await TemplateAsync(connection, source.Code, element, ct).ConfigureAwait(false);
             if (template is null)
             {
                 failures.Add(new CurrentValueFailure(path, "ECR-INT-0404", "err.ECR-INT-0404.sourcePathNotFound"));
@@ -405,7 +405,20 @@ public sealed class PiSqlClientDataSource(
                 IsTransientOdbcFailure,
                 ct).ConfigureAwait(false);
 
-            var point = (await ReadPointsAsync(reader, path, 1, ct).ConfigureAwait(false)).FirstOrDefault();
+            SourceDataPoint? point;
+            try
+            {
+                point = (await ReadSourcePointsAsync(reader, source.Code, path, 1, ct).ConfigureAwait(false))
+                    .FirstOrDefault();
+            }
+            catch (BusinessRuleException refused) when (IsTimestampRefusal(refused))
+            {
+                // Поточне значення з нечитабельною міткою — відмова ШЛЯХУ, як і
+                // до F4e (тоді рядок мовчки пропускався і шлях так само ставав
+                // `.currentValueUnreadable`), а не відмова всього знімка.
+                point = null;
+            }
+
             if (point is null)
             {
                 failures.Add(new CurrentValueFailure(path, SourceUnavailable, "err.ECR-INT-0503.currentValueUnreadable"));
@@ -467,8 +480,28 @@ public sealed class PiSqlClientDataSource(
     /// <param name="sourcePath">Шлях атрибута для кожної точки.</param>
     /// <param name="maxPoints">Стеля батча.</param>
     /// <param name="ct">Скасування.</param>
-    public static async Task<List<SourceDataPoint>> ReadPointsAsync(
+    public static Task<List<SourceDataPoint>> ReadPointsAsync(
         DbDataReader reader, string sourcePath, int maxPoints, CancellationToken ct)
+        => ReadSourcePointsAsync(reader, nameof(ExternalTransport.PiSqlClient), sourcePath, maxPoints, ct);
+
+    /// <summary>Точки з результату запиту джерела; час — за правилом <see cref="Utc"/>.</summary>
+    /// <remarks>
+    /// ⛔ Рядок, чию мітку <c>Ts</c> не прочитати (<c>NULL</c>, рядок, число),
+    /// — відмова <c>ECR-INT-0422</c> <c>.timestampUnreadable</c>, а не пропуск
+    /// (аудит A7, як <c>SqlDataSource</c>). До F4e такий рядок мовчки
+    /// відкидався, і невдалий інтервал записувався в покриття як «зібраний повністю».
+    /// <para>
+    /// ⚠ Окреме ім'я, а не перевантаження <see cref="ReadPointsAsync"/>: перевантаження
+    /// робить неоднозначним <c>cref</c> на старий метод (CS0419 — помилка збірки).
+    /// </para>
+    /// </remarks>
+    /// <param name="reader">Відкритий результат запиту.</param>
+    /// <param name="dataSource">Код джерела — для тексту відмови.</param>
+    /// <param name="sourcePath">Шлях атрибута для кожної точки.</param>
+    /// <param name="maxPoints">Стеля батча.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<List<SourceDataPoint>> ReadSourcePointsAsync(
+        DbDataReader reader, string dataSource, string sourcePath, int maxPoints, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
@@ -477,17 +510,14 @@ public sealed class PiSqlClientDataSource(
         while (points.Count < maxPoints && await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var row = Row(reader);
-            if (Column(row, "Ts") is not DateTime timestamp)
-            {
-                continue;
-            }
+            var timestamp = Utc(Column(row, "Ts"), dataSource, sourcePath);
 
             var (numeric, text) = Value(Column(row, "Val"));
             var quality = Column(row, "Quality") as string;
 
             points.Add(new SourceDataPoint(
                 sourcePath,
-                DateTime.SpecifyKind(timestamp, DateTimeKind.Utc),
+                timestamp,
                 numeric,
                 text,
                 Column(row, "Uom") as string,
@@ -690,20 +720,121 @@ public sealed class PiSqlClientDataSource(
         }
     }
 
-    /// <summary>Запит із конфігурації або типовий.</summary>
-    private string Query(string key, string fallback)
-    {
-        var configured = settings?.Find(key);
+    /// <summary>Запит із конфігурації (спершу власний джерела, далі спільний) або типовий.</summary>
+    private string Query(string dataSourceCode, string key, string fallback)
+        => ConfiguredQuery(settings, dataSourceCode, key) ?? fallback;
 
-        return string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+    /// <summary>
+    /// Ключ запиту, власний для джерела: <c>PiSqlClient:{код}:EventQuery</c> для
+    /// <c>PiSqlClient:EventQuery</c> — так само, як <c>Sql:{код}:…</c> у <c>SqlDataSource</c>.
+    /// </summary>
+    /// <param name="dataSourceCode">Код джерела.</param>
+    /// <param name="key">Спільний ключ <c>PiSqlClient:…</c>.</param>
+    public static string ScopedKey(string dataSourceCode, string key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        return key.StartsWith(KeyPrefix, StringComparison.Ordinal)
+            ? key.Insert(KeyPrefix.Length, $"{dataSourceCode}:")
+            : $"{KeyPrefix}{dataSourceCode}:{key}";
     }
+
+    /// <summary>
+    /// Текст запиту з налаштування: спершу власний ключ джерела
+    /// (<see cref="ScopedKey"/>), далі спільний; <c>null</c> — немає жодного.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Запит — властивість <b>джерела</b>, а не транспорту: два PI SQL-джерела
+    /// (різні бази AF, різні шаблони подій) не мусять ділити один текст. Без
+    /// власного ключа поведінка та сама, що й до F4e, — спільний ключ або типовий текст.
+    /// Публічний для тестів: живого RTQP у контурі розробки немає.
+    /// </remarks>
+    /// <param name="settings">Канал налаштувань.</param>
+    /// <param name="dataSourceCode">Код джерела.</param>
+    /// <param name="key">Спільний ключ.</param>
+    public static string? ConfiguredQuery(ISecretProvider? settings, string dataSourceCode, string key)
+    {
+        if (settings is null)
+        {
+            return null;
+        }
+
+        var own = settings.Find(ScopedKey(dataSourceCode, key));
+        if (!string.IsNullOrWhiteSpace(own))
+        {
+            return own;
+        }
+
+        var shared = settings.Find(key);
+        return string.IsNullOrWhiteSpace(shared) ? null : shared;
+    }
+
+    private const string KeyPrefix = "PiSqlClient:";
+
+    /// <summary>Мітка часу з результату запиту в UTC.</summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><see cref="DateTimeOffset"/> — <b>конвертується</b> в UTC: пояс записано в самому значенні.</item>
+    /// <item><see cref="DateTime"/> без поясу — <b>вважається UTC</b> (переозначення, не конвертація).
+    /// ⚠ Це ЯВНЕ ПРИПУЩЕННЯ, типове від людини (аудит A7, як <c>SqlDataSource</c>): RTQP
+    /// віддає час PI як UTC, а межі <c>?</c> ідуть у запит теж UTC, тож фільтр і
+    /// мітки живуть в одній шкалі. Якщо текст запиту поверне місцевий час, ряд
+    /// зсунеться на зсув поясу — лікується в самому тексті запиту.</item>
+    /// <item>усе інше, зокрема <c>NULL</c>, — відмова <c>ECR-INT-0422</c>
+    /// <c>.timestampUnreadable</c>, а не пропуск рядка.</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="raw">Значення колонки.</param>
+    /// <param name="dataSource">Код джерела — для тексту відмови.</param>
+    /// <param name="sourcePath">Що читали — для тексту відмови.</param>
+    internal static DateTime Utc(object? raw, string dataSource, string sourcePath)
+        => UtcOrNull(raw, dataSource, sourcePath) ?? throw TimestampUnreadable(dataSource, sourcePath, raw);
+
+    /// <summary>Як <see cref="Utc"/>, але <c>NULL</c> — це <c>null</c>, а не відмова.</summary>
+    /// <param name="raw">Значення колонки.</param>
+    /// <param name="dataSource">Код джерела — для тексту відмови.</param>
+    /// <param name="sourcePath">Що читали — для тексту відмови.</param>
+    internal static DateTime? UtcOrNull(object? raw, string dataSource, string sourcePath)
+        => raw switch
+        {
+            null or DBNull => null,
+            DateTimeOffset zoned => zoned.UtcDateTime,
+            DateTime unzoned => DateTime.SpecifyKind(unzoned, DateTimeKind.Utc),
+            _ => throw TimestampUnreadable(dataSource, sourcePath, raw),
+        };
+
+    private const string TimestampUnreadableKey = "err.ECR-INT-0422.timestampUnreadable";
+
+    /// <summary>Відмова «мітку часу не прочитати» — той самий ключ, що <c>SqlDataSource</c>.</summary>
+    private static BusinessRuleException TimestampUnreadable(string dataSource, string sourcePath, object? raw)
+    {
+        var valueType = raw is null or DBNull ? "NULL" : raw.GetType().Name;
+
+        return new BusinessRuleException(
+            IExternalDataSource.QueryRefusedCode,
+            $"Запит джерела {dataSource} для «{sourcePath}» повернув час типу {valueType}: "
+            + "мітку часу прочитати не можна, інтервал не зібрано.",
+            new Dictionary<string, object?>
+            {
+                ["messageKey"] = "err.ECR-INT-0422.timestampUnreadable",
+                ["dataSource"] = dataSource,
+                ["sourcePath"] = sourcePath,
+                ["valueType"] = valueType,
+            });
+    }
+
+    /// <summary>Чи це відмова <see cref="TimestampUnreadable"/>.</summary>
+    private static bool IsTimestampRefusal(BusinessRuleException error)
+        => error.Details is { } details
+           && details.TryGetValue("messageKey", out var key)
+           && string.Equals(key as string, TimestampUnreadableKey, StringComparison.Ordinal);
 
     /// <summary>Шаблон елемента; <c>null</c> — елемента немає.</summary>
     private async Task<string?> TemplateAsync(
-        OdbcConnection connection, string element, CancellationToken ct)
+        OdbcConnection connection, string dataSourceCode, string element, CancellationToken ct)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = Query(TemplateQueryKey, DefaultTemplateQuery);
+        command.CommandText = Query(dataSourceCode, TemplateQueryKey, DefaultTemplateQuery);
         command.Parameters.Add(new OdbcParameter("element", OdbcType.NVarChar) { Value = element });
 
         // ⛔ Q-251: цей виклик — частина шляху `ReadAsync` (єдиний викликач
@@ -727,8 +858,8 @@ public sealed class PiSqlClientDataSource(
     /// <see cref="Literal"/>: подвоєння лапки і заборона керівних символів.
     /// Часові межі й ім'я елемента лишаються звичайними параметрами.
     /// </remarks>
-    private string ValueQuery(string template, string attribute)
-        => Fill(Query(ValueQueryKey, DefaultValueQuery), template, attribute);
+    private string ValueQuery(string dataSourceCode, string template, string attribute)
+        => Fill(Query(dataSourceCode, ValueQueryKey, DefaultValueQuery), template, attribute);
 
     /// <summary>Типовий запит значень; перевизначається через конфігурацію.</summary>
     public const string DefaultValueQuery = """
