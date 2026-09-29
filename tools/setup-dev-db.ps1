@@ -248,11 +248,25 @@ error 112), а прогони на такому стенді ще й дали б
 # навмисно: «оновлення», що мовчки створило порожню базу, дало б зелений
 # прогін без жодних живих даних — тобто перевірило б не те.
 if ($Upgrade) {
-    $dbExists = (& sqlcmd -S $Server -E -C -b -h -1 -W -d master `
-            -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>&1 |
-        Where-Object { $_ -match '^\s*[01]\s*$' } | Select-Object -First 1)
+    # ⛔ Вивід спершу ЗБИРАЄТЬСЯ, і лише потім фільтрується. `Select-Object
+    # -First 1` прямо в конвеєрі з `sqlcmd` зупиняє конвеєр і обриває сам
+    # процес — `$LASTEXITCODE` тоді -1 на цілком успішному запиті (так і
+    # впало друге поспіль `-Upgrade` на EcrUpgrade, хоча перше пройшло).
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $dbOutput = & sqlcmd -S $Server -E -C -b -h -1 -W -d master `
+            -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('$Database') IS NULL THEN 0 ELSE 1 END;" 2>&1
+        $dbExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousEap
+    }
+    $dbExists = $dbOutput | Where-Object { "$_" -match '^\s*[01]\s*$' } | Select-Object -First 1
 
-    if ($LASTEXITCODE -ne 0) { throw "Не вдалося запитати $Server про базу $Database (sqlcmd повернув $LASTEXITCODE)." }
+    if ($dbExitCode -ne 0) {
+        throw "Не вдалося запитати $Server про базу $Database (sqlcmd повернув $dbExitCode): $($dbOutput -join ' ')"
+    }
     if ("$dbExists".Trim() -ne '1') {
         throw "-Upgrade: бази $Database на $Server немає. Режим оновлює лише наявну базу; нову створює запуск без -Upgrade."
     }
