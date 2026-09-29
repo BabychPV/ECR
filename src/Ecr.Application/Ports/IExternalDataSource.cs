@@ -90,16 +90,159 @@ public interface IExternalDataSource
     /// <param name="kind">Тип запиту.</param>
     /// <param name="transport">Транспорт адаптера.</param>
     public static BusinessRuleException QueryKindNotSupported(SourceQueryKind kind, ExternalTransport transport)
+        => QueryKindNotSupported(kind.ToString(), transport);
+
+    /// <summary>
+    /// Каталог шаблонів подій джерела та їхніх атрибутів — для конфігуратора,
+    /// щоб шаблон і атрибути обирались зі списку, а не вводились руками (HSE301 §4.7.1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Типова реалізація — <b>відмова</b> <c>ECR-INT-0422</c>
+    /// (<c>.queryKindNotSupported</c>, тип <see cref="EventTemplateQueryKind"/>):
+    /// транспорт, який подій не читає, мусить сказати це, а не повернути
+    /// порожній каталог. Чинні реалізації від цього не змінюються.
+    /// </remarks>
+    /// <param name="dataSourceId">Джерело.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<IReadOnlyList<SourceEventTemplate>> DiscoverEventTemplatesAsync(int dataSourceId, CancellationToken ct)
+        => Task.FromException<IReadOnlyList<SourceEventTemplate>>(
+            QueryKindNotSupported(EventTemplateQueryKind, Transport));
+
+    /// <summary>
+    /// Події шаблону, що <b>перетинають</b> вікно <c>[FromUtc, ToUtc)</c>, з їхніми
+    /// атрибутами (HSE301 §4.7.1).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Типова реалізація — <b>відмова</b> <c>ECR-INT-0422</c>
+    /// (<c>.queryKindNotSupported</c>, тип <see cref="EventQueryKind"/>), не
+    /// порожній список: порожній список синхронізація прочитала б як «усі події
+    /// зникли» (§4.7.4, крок 6).
+    /// </remarks>
+    /// <param name="query">Шаблон, вікно, атрибути, стеля.</param>
+    /// <param name="ct">Скасування.</param>
+    public Task<SourceEventResult> ReadEventsAsync(SourceEventQuery query, CancellationToken ct)
+        => Task.FromException<SourceEventResult>(QueryKindNotSupported(EventQueryKind, Transport));
+
+    /// <summary>Ім'я типу запиту «події джерела» у відмовах <c>ECR-INT-0422</c>.</summary>
+    public const string EventQueryKind = "Event";
+
+    /// <summary>Ім'я типу запиту «каталог шаблонів подій» у відмовах <c>ECR-INT-0422</c>.</summary>
+    public const string EventTemplateQueryKind = "EventTemplate";
+
+    /// <summary>Відмова адаптера, який тип запиту <paramref name="kind"/> не виконує взагалі.</summary>
+    /// <param name="kind">Ім'я типу запиту.</param>
+    /// <param name="transport">Транспорт адаптера.</param>
+    public static BusinessRuleException QueryKindNotSupported(string kind, ExternalTransport transport)
         => new(
             QueryRefusedCode,
             $"Запит типу {kind} транспорт {transport} не виконує.",
             new Dictionary<string, object?>
             {
                 ["messageKey"] = "err.ECR-INT-0422.queryKindNotSupported",
-                ["queryKind"] = kind.ToString(),
+                ["queryKind"] = kind,
                 ["transport"] = transport.ToString(),
             });
 }
+
+/// <summary>Звідки атрибут події: з самої події чи з її первинного елемента.</summary>
+public enum SourceEventAttributeScope : byte
+{
+    /// <summary>Атрибут самої події.</summary>
+    Event = 0,
+
+    /// <summary>Атрибут первинного елемента події — значення на момент її початку.</summary>
+    PrimaryElement = 1,
+}
+
+/// <summary>Атрибут, який треба прочитати з події.</summary>
+/// <param name="Name">Ім'я атрибута з каталогу.</param>
+/// <param name="Scope">Звідки атрибут.</param>
+public sealed record SourceEventAttributeRef(string Name, SourceEventAttributeScope Scope);
+
+/// <summary>Запит подій одного шаблону за вікно (HSE301 §4.7.1).</summary>
+/// <param name="DataSourceId">Джерело.</param>
+/// <param name="SourceEntityId">Сутність джерела — шаблон подій із каталогу.</param>
+/// <param name="Template">Ім'я шаблону подій у джерелі.</param>
+/// <param name="FromUtc">Початок вікна, включно; UTC.</param>
+/// <param name="ToUtc">Кінець вікна, виключно; UTC.</param>
+/// <param name="Attributes">Які атрибути лишити; порожній список — усі, що повернуло джерело.</param>
+/// <param name="MaxEvents">Стеля подій; є ще подія понад неї — <see cref="SourceEventResult.Truncated"/>.</param>
+public sealed record SourceEventQuery(
+    int DataSourceId,
+    int SourceEntityId,
+    string Template,
+    DateTime FromUtc,
+    DateTime ToUtc,
+    IReadOnlyList<SourceEventAttributeRef> Attributes,
+    int MaxEvents = SourceEventQuery.DefaultMaxEvents)
+{
+    /// <summary>Типова стеля подій на запит (§4.7.2).</summary>
+    public const int DefaultMaxEvents = 2_000;
+}
+
+/// <summary>Значення атрибута події: число <b>або</b> текст, ніколи обидва.</summary>
+/// <param name="Name">Ім'я атрибута.</param>
+/// <param name="Scope">Звідки атрибут.</param>
+/// <param name="ValueNumeric">Число в одиниці джерела.</param>
+/// <param name="ValueString">Текст: цифровий стан, перелік, рядок, який не є числом.</param>
+/// <param name="SourceUnitSymbol">UOM джерела; <c>null</c> — джерело не назвало.</param>
+public sealed record SourceEventAttribute(
+    string Name,
+    SourceEventAttributeScope Scope,
+    decimal? ValueNumeric,
+    string? ValueString,
+    string? SourceUnitSymbol);
+
+/// <summary>Подія джерела — нейтральне поняття ядра (V-16); у PI AF це Event Frame.</summary>
+/// <param name="EventId">Незмінний ідентифікатор події в джерелі — ключ синхронізації.</param>
+/// <param name="TemplateName">Шаблон події.</param>
+/// <param name="Name">Назва події; не унікальна.</param>
+/// <param name="StartUtc">Початок, UTC.</param>
+/// <param name="EndUtc">Кінець, UTC; <c>null</c> — подія ще триває.</param>
+/// <param name="ModifiedUtc">Остання зміна в джерелі, UTC; <c>null</c> — джерело не дає.</param>
+/// <param name="PrimaryElementPath">Первинний елемент події; <c>null</c> — немає.</param>
+/// <param name="ParentId">Ідентифікатор батьківської події; <c>null</c> — подія верхнього рівня.</param>
+/// <param name="Attributes">Атрибути в порядку, у якому їх повернуло джерело.</param>
+public sealed record SourceEvent(
+    string EventId,
+    string TemplateName,
+    string? Name,
+    DateTime StartUtc,
+    DateTime? EndUtc,
+    DateTime? ModifiedUtc,
+    string? PrimaryElementPath,
+    string? ParentId,
+    IReadOnlyList<SourceEventAttribute> Attributes);
+
+/// <summary>Прочитані події.</summary>
+/// <param name="Events">Події в порядку джерела.</param>
+/// <param name="Truncated">
+/// Стелю досягнуто й подій було більше: вікно прочитано не повністю, і «зниклою»
+/// за цей прогін не можна позначити жодну подію (§4.7.4, крок 6).
+/// </param>
+/// <param name="ErrorCode">Код відмови джерела; <c>null</c> — відмов не було.</param>
+public sealed record SourceEventResult(
+    IReadOnlyList<SourceEvent> Events,
+    bool Truncated,
+    string? ErrorCode);
+
+/// <summary>Атрибут шаблону подій у каталозі.</summary>
+/// <param name="Name">Ім'я атрибута.</param>
+/// <param name="Scope">Звідки атрибут.</param>
+/// <param name="SourceUnitSymbol">UOM джерела; <c>null</c> — безрозмірний або не названий.</param>
+/// <param name="DataType">Тип значення в термінах джерела.</param>
+public sealed record SourceEventAttributeDescriptor(
+    string Name,
+    SourceEventAttributeScope Scope,
+    string? SourceUnitSymbol,
+    string? DataType);
+
+/// <summary>Шаблон подій джерела з атрибутами — для конфігуратора.</summary>
+/// <param name="TemplateName">Ім'я шаблону.</param>
+/// <param name="Attributes">Атрибути шаблону й первинного елемента.</param>
+public sealed record SourceEventTemplate(
+    string TemplateName,
+    IReadOnlyList<SourceEventAttributeDescriptor> Attributes);
 
 /// <summary>Поточні значення атрибутів — результат <see cref="IExternalDataSource.ReadCurrentAsync"/>.</summary>
 /// <param name="Values">
