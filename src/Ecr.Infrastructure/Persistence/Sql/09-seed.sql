@@ -4778,6 +4778,15 @@ USING (VALUES
     (N'err.ECR-UOM-0422.integralSourceNotRate', N'en', N'A time integral needs a rate unit (quantity per time) at the source; "{code}" is not one.', 1),
     (N'err.ECR-UOM-0422.boundaryConversionFailed', N'en', N'{count} mapped values could not be converted to their target unit and were not written: {fields}', 1),
     -- HSE301:F3 ── кінець секції
+
+    -- HSE301:F9 ── мапінг подій джерела і стан зв'язку подія ↔ рядок: доменні відмови
+    -- (FEATURE-HSE301-VIEW §4.7.3–4.7.4, D-186). ⚠ Заведено ТУТ, а не в F8: кидає їх уже домен F9.
+    -- F8 їх не дублює — повтор ключа ламає MERGE.
+    (N'err.ECR-INT-0422.eventMapStartEndRequired', N'en', N'An event mapping must put the event start ($start) and end ($end) into Date columns; "{attribute}" is not mapped.', 1),
+    (N'err.ECR-INT-0422.eventMapTargetNotDynamic', N'en', N'Events can only be written to a dynamic table; table "{tableCode}" has row mode {rowMode}.', 1),
+    (N'err.ECR-INT-0422.eventMapColumnNotInTable', N'en', N'Column "{targetColumn}" belongs to a different table than the event mapping.', 1),
+    (N'err.ECR-INT-0409.eventMapColumnTaken', N'en', N'Column "{targetColumn}" already has a field in this event mapping.', 1),
+    -- HSE301:F9 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
