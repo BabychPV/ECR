@@ -102,12 +102,46 @@ public sealed class PiWebApiBatchCollectionTests
                 world.Written.Where(p => p.SourcePath == path).Select(p => (int)p.ValueNumeric!.Value).Order());
         }
 
-        // Перший раунд — один пакет на всі три атрибути; хвости — лише A і C.
+        // Перший раунд — один пакет на всі три атрибути. Сума його точок дійшла
+        // до стелі, тож він перечитується по потоку (запобіжник maxCount), а
+        // хвости — лише A і C: B у мережі рівно двічі.
         Assert.Equal(3, world.Server.WebIdsPerStreamsetRequest[0]);
-        Assert.DoesNotContain(world.Server.Requests.Skip(4), r => r.Contains("W-B", StringComparison.Ordinal));
+        Assert.Equal(2, world.Server.Count("webId=W-B"));
         Assert.Contains(new TimeInterval(from, Now), world.Coverage);
         await world.Store.Received().FinishRunAsync(
             Arg.Any<long>(), "Succeeded", 2 * total + 3_000, null, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Finding", "P7")]
+    public async Task Стеля_maxCount_на_всю_відповідь_не_губить_точок()
+    {
+        // Альтернативна семантика: maxCount 5000 — на ВЕСЬ streamsets. Три
+        // потоки по 3000 точок: A отримує 3000 (не обрізаний за ознакою
+        // «рівно стеля»), B — 2000 (обрізаний НИЖЧЕ стелі), C — 0.
+        const int each = 3_000;
+        var from = Now.AddMinutes(-each);
+        var stamps = Enumerable.Range(0, each).Select(i => from.AddMinutes(i)).ToList();
+        var data = new Dictionary<string, List<DateTime>> { ["A"] = stamps, ["B"] = stamps, ["C"] = stamps };
+        var world = new World(["A", "B", "C"], data: data, maxCountIsTotal: true);
+
+        await world.Runner.RunAsync(SourceEntityId, from, Now, world.Progress, CancellationToken.None);
+
+        // ⛔ МУТАЦІЯ (доведено вручну): прибрати запобіжник у ReadChunkAsync
+        // (перечитування пакета по потоку, коли сума точок ≥ стелі) — B
+        // записує 2000, C — 0, а інтервал покривається як повністю прочитаний.
+        foreach (var path in new[] { "A", "B", "C" })
+        {
+            Assert.Equal(
+                Enumerable.Range(0, each),
+                world.Written.Where(p => p.SourcePath == path).Select(p => (int)p.ValueNumeric!.Value).Order());
+        }
+
+        Assert.Equal(3 * each, world.Written.Count);
+        Assert.Contains(new TimeInterval(from, Now), world.Coverage);
+        await world.Store.Received().FinishRunAsync(
+            Arg.Any<long>(), "Succeeded", 3 * each, null, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -204,9 +238,13 @@ public sealed class PiWebApiBatchCollectionTests
             int gaps = 0,
             Dictionary<string, List<DateTime>>? data = null,
             TimeSpan? delay = null,
-            int? maxParallelReads = null)
+            int? maxParallelReads = null,
+            bool maxCountIsTotal = false)
         {
-            Server = new FakePiWebApiServer { Delay = delay ?? TimeSpan.Zero, Data = data };
+            Server = new FakePiWebApiServer
+            {
+                Delay = delay ?? TimeSpan.Zero, Data = data, MaxCountIsTotal = maxCountIsTotal,
+            };
 
             var entity = new SourceEntity(dataSourceId: 5, "STACK-1", RegistrySourceKind.External);
             IReadOnlyList<EntityFieldMap> maps = paths.Select((p, i) => EntityFieldMap.ToColumn(SourceEntityId, p, columnDefId: 100 + i)).ToList();

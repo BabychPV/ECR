@@ -105,9 +105,12 @@ public sealed partial class PiWebApiDataSource
     /// задає збирач (<c>CollectionRunner.DefaultMaxParallelReads</c>),
     /// і другий рівень тут його б помножив.
     /// <para>
-    /// ⚠ <c>maxCount</c> у <c>streamsets/recorded</c> — стеля на КОЖЕН потік,
-    /// не на відповідь загалом; тому обрізання хвоста визначається так само,
-    /// як для <c>streams/{webId}/recorded</c>: потік віддав рівно стелю.
+    /// ⚠ Чи <c>maxCount</c> у <c>streamsets/recorded</c> — стеля на кожен
+    /// потік, чи на відповідь загалом, у репозиторії не задокументовано й на
+    /// живому PI не перевірено. Код правильний за обох: обрізання потоку
+    /// визначається як для <c>streams/{webId}/recorded</c> (потік віддав рівно
+    /// стелю), а пакет, сума точок якого дійшла до стелі, перечитується по
+    /// потоку (див. <see cref="ReadChunkAsync"/>).
     /// </para>
     /// </remarks>
     public async Task<IReadOnlyList<BatchReadItem>> ReadBatchAsync(
@@ -241,6 +244,33 @@ public sealed partial class PiWebApiDataSource
         using (recorded)
         {
             var streams = Streams(recorded.RootElement);
+            var distinct = chunk.Select(c => c.Attribute.WebId!).Distinct(StringComparer.Ordinal).ToList();
+
+            // ⛔ Запобіжник від невідомої семантики maxCount. Якщо стеля в
+            // streamsets — на ВСЮ відповідь, а не на потік, то потік міг
+            // обрізатися нижче стелі (або й до нуля), і ознака «віддав рівно
+            // стелю» цього не побачить: дірка записалася б як покриття.
+            // Сума точок пакета ≥ стелі — ознака, що стеля МОГЛА спрацювати
+            // за будь-якої семантики. Тоді пакет перечитується по потоку:
+            // для одного потоку обидві семантики збігаються. Ціна — лише на
+            // повних сторінках (хвости понад 5000 точок), де запитів і так
+            // стільки, скільки даних; у звичайному погодинному зборі сума
+            // далеко нижче стелі.
+            if (distinct.Count > 1 && streams.Values.Sum(PointCount) >= first.MaxPoints)
+            {
+                foreach (var webId in distinct)
+                {
+                    await ReadChunkAsync(
+                            source,
+                            requests,
+                            [.. chunk.Where(c => string.Equals(c.Attribute.WebId, webId, StringComparison.Ordinal))],
+                            items,
+                            ct)
+                        .ConfigureAwait(false);
+                }
+
+                return;
+            }
 
             foreach (var (index, attribute) in chunk)
             {
@@ -281,6 +311,12 @@ public sealed partial class PiWebApiDataSource
 
         return streams;
     }
+
+    /// <summary>Скільки точок віддав потік.</summary>
+    private static int PointCount(JsonElement stream)
+        => stream.TryGetProperty("Items", out var points) && points.ValueKind == JsonValueKind.Array
+            ? points.GetArrayLength()
+            : 0;
 
     /// <summary>Чи прийшов потік із помилкою замість точок.</summary>
     /// <remarks>

@@ -42,6 +42,12 @@ internal sealed class FakePiWebApiServer : HttpMessageHandler
     /// <summary>WebId, чий потік у <c>streamsets</c> приходить з <c>Errors</c>.</summary>
     public HashSet<string> FailingStreams { get; } = [];
 
+    /// <summary>
+    /// <c>maxCount</c> у <c>streamsets/recorded</c> — стеля на ВСЮ відповідь,
+    /// а не на потік (альтернативна семантика, яку код мусить витримати).
+    /// </summary>
+    public bool MaxCountIsTotal { get; init; }
+
     /// <summary><c>streamsets/recorded</c> відповідає 401.</summary>
     public bool RefuseStreamsets { get; set; }
 
@@ -149,9 +155,23 @@ internal sealed class FakePiWebApiServer : HttpMessageHandler
             WebIdsPerStreamsetRequest.Add(webIds.Count);
         }
 
-        var streams = webIds.Select(w => FailingStreams.Contains(w)
-            ? $$"""{"WebId":"{{w}}","Items":[],"Errors":["PI Point not found."]}"""
-            : Values(w, start, end, max).Insert(1, "\"WebId\":\"" + w + "\","));
+        // У режимі MaxCountIsTotal стеля ділиться між потоками по черзі:
+        // ранні потоки вибирають її, пізнім лишається менше — аж до нуля.
+        var remaining = max;
+        var streams = new List<string>();
+
+        foreach (var w in webIds)
+        {
+            if (FailingStreams.Contains(w))
+            {
+                streams.Add($$"""{"WebId":"{{w}}","Items":[],"Errors":["PI Point not found."]}""");
+                continue;
+            }
+
+            var take = MaxCountIsTotal ? remaining : max;
+            streams.Add(Values(w, start, end, take).Insert(1, "\"WebId\":\"" + w + "\","));
+            remaining -= Math.Min(take, Stamps(w).Count(s => s >= start && s < end));
+        }
 
         return Json("{\"Items\":[" + string.Join(',', streams) + "]}");
     }
@@ -159,14 +179,14 @@ internal sealed class FakePiWebApiServer : HttpMessageHandler
     private string WebId(string attribute)
         => "W-" + attribute + new string('x', Math.Max(0, WebIdPadding - attribute.Length - 2));
 
-    private string Values(string webId, DateTime start, DateTime end, int max)
-    {
-        var attribute = webId[2..].TrimEnd('x');
-        var stamps = Data is { } data
-            ? data[attribute]
+    private List<DateTime> Stamps(string webId)
+        => Data is { } data
+            ? data[webId[2..].TrimEnd('x')]
             : [.. Enumerable.Range(0, 120 * 48).Select(i => DataStart.AddMinutes(30 * i))];
 
-        var items = stamps
+    private string Values(string webId, DateTime start, DateTime end, int max)
+    {
+        var items = Stamps(webId)
             .Select((stamp, index) => (stamp, index))
             .Where(p => p.stamp >= start && p.stamp < end)
             .Take(max)
