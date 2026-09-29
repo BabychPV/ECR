@@ -7608,6 +7608,13 @@
             },
             "type": "array"
           },
+          "rules": {
+            "description": "Порушення правил довідника після пакета (RT-17a, §7.1): записані рядки й батьки композиції.\nЗастосований пакет несе лише `Info`/`Warning` (`Error` — відмова\n`422 ECR-REG-4221`); `dryRun` — усі рівні, і `Error` теж: так сітка бачить Σ до\nзбереження. Порожньо — порушень немає або пакет не дійшов до правил через помилки рядків.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleViolationDto"
+            },
+            "type": "array"
+          },
           "unchanged": {
             "description": "Записів без фактичної зміни.",
             "format": "int32",
@@ -8084,6 +8091,13 @@
             "description": "Запис.",
             "format": "int64",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Порушення правил довідника рівнів `Info`/`Warning` (RT-17a, §7.1): запис збережено, але\nправило не виконане. Порожньо — порушень немає. Рівень `Error` сюди не потрапляє — він\nвідхиляє запис (`422 ECR-REG-4221`).",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleViolationDto"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -8151,6 +8165,13 @@
             "description": "Записів, у яких змінилося хоча б одне поле.",
             "format": "int32",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Порушення правил довідника рівнів `Info`/`Warning` після застосування файлу (RT-17a):\nзаписи збережено. `Error` — відмова всього файлу `422 ECR-REG-4221`. Прев'ю\n(`dryRun`) правил не виконує: воно нічого не записує.",
+            "items": {
+              "$ref": "#/components/schemas/RegistryRuleViolationDto"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -8926,6 +8947,48 @@
           "messageL10n",
           "parametersJson",
           "isActive"
+        ],
+        "type": "object"
+      },
+      "RegistryRuleViolationDto": {
+        "description": "Порушення правила довідника одним записом (RT-17a, FEATURE-REGISTRY-TABLES §6, §7.1).",
+        "properties": {
+          "entryCode": {
+            "description": "Його код — для людини.",
+            "type": "string"
+          },
+          "entryId": {
+            "description": "Запис, на якому правило не виконалося.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "messageKey": {
+            "description": "Ключ тексту в каталозі.",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Параметри тексту: `rule`, `entryCode`, `message` (текст правила мовою\nкористувача); за потреби `value` (значення Σ шаблону «Сума дочірніх»),\n`field`, `errorCode` (вираз дав помилку-значення).",
+            "type": "object"
+          },
+          "rule": {
+            "description": "Код правила.",
+            "type": "string"
+          },
+          "severity": {
+            "description": "Рівень: `Info`, `Warning` або `Error`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entryId",
+          "entryCode",
+          "rule",
+          "severity",
+          "messageKey",
+          "params"
         ],
         "type": "object"
       },

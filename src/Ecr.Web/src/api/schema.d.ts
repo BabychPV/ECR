@@ -18650,6 +18650,11 @@ export interface components {
             dryRun: boolean;
             /** @description Результат кожного рядка пакета в його порядку. */
             rows: components["schemas"]["RegistryBatchRowResult"][];
+            /** @description Порушення правил довідника після пакета (RT-17a, §7.1): записані рядки й батьки композиції.
+             *     Застосований пакет несе лише `Info`/`Warning` (`Error` — відмова
+             *     `422 ECR-REG-4221`); `dryRun` — усі рівні, і `Error` теж: так сітка бачить Σ до
+             *     збереження. Порожньо — порушень немає або пакет не дійшов до правил через помилки рядків. */
+            rules?: components["schemas"]["RegistryRuleViolationDto"][];
             /**
              * Format: int32
              * @description Записів без фактичної зміни.
@@ -18854,6 +18859,10 @@ export interface components {
              * @description Запис.
              */
             id: number;
+            /** @description Порушення правил довідника рівнів `Info`/`Warning` (RT-17a, §7.1): запис збережено, але
+             *     правило не виконане. Порожньо — порушень немає. Рівень `Error` сюди не потрапляє — він
+             *     відхиляє запис (`422 ECR-REG-4221`). */
+            warnings?: components["schemas"]["RegistryRuleViolationDto"][];
         };
         /** @description Помилка одного рядка імпорту записів довідника. */
         RegistryEntryImportError: {
@@ -18891,6 +18900,10 @@ export interface components {
              * @description Записів, у яких змінилося хоча б одне поле.
              */
             updated: number;
+            /** @description Порушення правил довідника рівнів `Info`/`Warning` після застосування файлу (RT-17a):
+             *     записи збережено. `Error` — відмова всього файлу `422 ECR-REG-4221`. Прев'ю
+             *     (`dryRun`) правил не виконує: воно нічого не записує. */
+            warnings?: components["schemas"]["RegistryRuleViolationDto"][];
         };
         /** @description Створення або оновлення запису довідника. */
         RegistryEntryUpsertDto: {
@@ -19220,6 +19233,28 @@ export interface components {
             /** @description Вид правила; у наявного не змінюється. */
             ruleKind: string;
             /** @description Рівень порушення. */
+            severity: string;
+        };
+        /** @description Порушення правила довідника одним записом (RT-17a, FEATURE-REGISTRY-TABLES §6, §7.1). */
+        RegistryRuleViolationDto: {
+            /** @description Його код — для людини. */
+            entryCode: string;
+            /**
+             * Format: int64
+             * @description Запис, на якому правило не виконалося.
+             */
+            entryId: number;
+            /** @description Ключ тексту в каталозі. */
+            messageKey: string;
+            /** @description Параметри тексту: `rule`, `entryCode`, `message` (текст правила мовою
+             *     користувача); за потреби `value` (значення Σ шаблону «Сума дочірніх»),
+             *     `field`, `errorCode` (вираз дав помилку-значення). */
+            params: {
+                [key: string]: string;
+            };
+            /** @description Код правила. */
+            rule: string;
+            /** @description Рівень: `Info`, `Warning` або `Error`. */
             severity: string;
         };
         /**
