@@ -42,12 +42,31 @@ public static class PasswordChangeGate
         "/api/v1/ui-strings",
     ];
 
+    /// <summary>Префікс каталогу рядків — із нього дозволене лише ЧИТАННЯ однієї мови.</summary>
+    private const string UiStrings = "/api/v1/ui-strings";
+
+    /// <summary>
+    /// Літеральні маршрути під <see cref="UiStrings"/>, які шаблон <c>{lang}</c>
+    /// не перекриває: адміністративні зрізи каталогу, а не тексти екрана.
+    /// </summary>
+    private static readonly string[] UiStringsAdminSegments = ["coverage", "import", "export.csv"];
+
     /// <summary>Перелік дозволених шляхів; відкритий для сторожа архітектури.</summary>
     public static IReadOnlyList<string> AllowedPaths => Allowed;
 
-    /// <summary>Чи дозволений маршрут із непоміненим паролем.</summary>
+    /// <summary>Чи дозволений запит із непоміненим паролем.</summary>
+    /// <param name="method">HTTP-метод запиту.</param>
     /// <param name="path">Шлях запиту.</param>
     /// <remarks>
+    /// ⛔ S16: під префіксом <c>/api/v1/ui-strings</c> живуть не лише тексти
+    /// екрана, а й ЗАПИС каталогу — <c>PUT {lang}/{key}</c> і
+    /// <c>POST import</c>. Префікс без методу пускав туди власника разового
+    /// пароля, тобто того, хто ще не довів, що знає пароль (разовий знає й
+    /// адміністратор, що його видав). Екранові зміни пароля потрібне рівно
+    /// <c>GET /api/v1/ui-strings/{lang}</c> (<c>shared/i18n</c>) — лише воно
+    /// й дозволене; решта маршрутів переліку — без обмеження методу, як і
+    /// досі.
+    ///
     /// ⛔ Порівняння — на **межі сегмента шляху**, не голим префіксом. Голий
     /// <c>StartsWith</c> тут був дірою в безпеці: <c>/api/v1/methodologies</c>
     /// починається на <c>/api/v1/me</c> («me» в «methodologies»), тож разовий
@@ -56,7 +75,7 @@ public static class PasswordChangeGate
     /// довів, що знає власний пароль. Дефект невидимий за побудовою: жоден
     /// маршрут не «падає», просто дозволяється зайвий.
     /// </remarks>
-    public static bool IsAllowed(string? path)
+    public static bool IsAllowed(string? method, string? path)
     {
         if (string.IsNullOrEmpty(path))
         {
@@ -75,20 +94,55 @@ public static class PasswordChangeGate
             // починається з тих самих літер.
             if (path.Length == allowed.Length || path[allowed.Length] is '/' or '?' or '#')
             {
-                return true;
+                return string.Equals(allowed, UiStrings, StringComparison.Ordinal)
+                    ? IsCatalogRead(method, path)
+                    : true;
             }
         }
 
         return false;
     }
 
+    /// <summary>
+    /// Чи це <c>GET /api/v1/ui-strings/{lang}</c> — читання текстів однієї мови.
+    /// </summary>
+    /// <param name="method">HTTP-метод.</param>
+    /// <param name="path">Шлях, що вже починається з <see cref="UiStrings"/> на межі сегмента.</param>
+    private static bool IsCatalogRead(string? method, string path)
+    {
+        if (!string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var rest = path[UiStrings.Length..];
+        var end = rest.IndexOfAny(['?', '#']);
+        if (end >= 0)
+        {
+            rest = rest[..end];
+        }
+
+        // Рівно ОДИН непорожній сегмент після префікса — мова. Сам префікс
+        // (перелік бракуючих ключів) і `{lang}/{key}` сюди не проходять.
+        if (rest.Length < 2 || rest[0] != '/')
+        {
+            return false;
+        }
+
+        var segment = rest[1..];
+        return !segment.Contains('/', StringComparison.Ordinal)
+            && !UiStringsAdminSegments.Contains(segment, StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>Перевіряє запит; кидає, якщо пароль треба змінити.</summary>
     /// <param name="mustChangePassword">Прапорець облікового запису.</param>
+    /// <param name="method">HTTP-метод запиту.</param>
     /// <param name="path">Шлях запиту.</param>
     /// <exception cref="BusinessRuleException">Потрібна зміна пароля — <c>ECR-PWD-0428</c>.</exception>
-    public static void Ensure(bool mustChangePassword, string? path)
+    public static void Ensure(bool mustChangePassword, string? method, string? path)
     {
-        if (!mustChangePassword || IsAllowed(path))
+        if (!mustChangePassword || IsAllowed(method, path))
         {
             return;
         }

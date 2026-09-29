@@ -75,7 +75,7 @@ public sealed partial class MainPathLocalizedErrorTests
             Substitute.For<IAccessDecisionService>(), anonymous, "Document.View", CancellationToken.None));
         var gate = await DetailAsync(() =>
         {
-            PasswordChangeGate.Ensure(true, "/api/v1/documents/7");
+            PasswordChangeGate.Ensure(true, "GET", "/api/v1/documents/7");
             return Task.CompletedTask;
         });
 
