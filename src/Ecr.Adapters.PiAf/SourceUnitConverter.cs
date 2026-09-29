@@ -1,5 +1,6 @@
 using Ecr.Application.Errors;
 using Ecr.Application.Ports;
+using Ecr.Application.Sources;
 using Ecr.Domain.Services;
 
 namespace Ecr.Adapters.PiAf;
@@ -117,34 +118,10 @@ public sealed class SourceUnitConverter(UnitConverter converter, IUnitCatalog ca
 
         EnsureDeclaredUnit(declaredSourceUnitId, actualSourceUnitCode, catalogSnapshot, "—");
 
-        if (declaredSourceUnitId == targetUnitId)
-        {
-            return value;
-        }
-
-        // ⚠ Сама арифметика — в доменному UnitConverter, а не тут. Другий
-        // множник у другому місці розійшовся б із першим тихо: обидва дають
-        // число, і жодне не падає.
-        return converter.Convert(
-            value,
-            Spec(catalogSnapshot, declaredSourceUnitId),
-            Spec(catalogSnapshot, targetUnitId),
-            explicitConversion: null);
-    }
-
-    /// <summary>Одиниця довідника у формі, потрібній конверсії.</summary>
-    private static UnitSpec Spec(UnitCatalogSnapshot catalogSnapshot, int unitId)
-    {
-        var unit = catalogSnapshot.Units.Values.FirstOrDefault(u => u.Id == unitId)
-                   ?? throw new BusinessRuleException(
-                       UnitChangedCode,
-                       $"Одиниці {unitId} немає в довіднику: конверсія на межі неможлива.",
-                       new Dictionary<string, object?>
-                       {
-                           ["messageKey"] = "err.ECR-INT-0422.unitMissingFromSnapshot",
-                           ["unitId"] = unitId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                       });
-
-        return new UnitSpec(unit.Id, unit.Code, unit.DimensionId, unit.FactorToBase, unit.OffsetToBase);
+        // ⛔ D-173 (V-4): арифметика — у `BoundaryUnitConversion` (Ecr.Application),
+        // тут лише делегування. Матеріалізація живе в інфраструктурі, яка на
+        // цей адаптер не посилається; друга копія множника розійшлася б із
+        // першою тихо: обидві дають число, і жодна не падає.
+        return BoundaryUnitConversion.Convert(value, declaredSourceUnitId, targetUnitId, catalogSnapshot, converter);
     }
 }

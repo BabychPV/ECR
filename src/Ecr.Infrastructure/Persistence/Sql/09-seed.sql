@@ -4713,6 +4713,13 @@ USING (VALUES
     (N'err.ECR-CALC-0422.rowScopeReferencesSubstance', N'en', N'Formula "{formula}" is calculated once per row, but it uses {reference}, which has a value only for a substance. Make "{formula}" a per-substance formula or remove the reference.', 1),
     (N'err.ECR-CALC-0422.rowOutputFromSubstanceFormula', N'en', N'Output "{output}" is written once per row, but its formula is calculated for every substance, so it is unclear which value belongs to the row. Make the formula per-row or write the output per substance.', 1),
     -- HSE301:A3a ── кінець секції
+
+    -- HSE301:F3 ── конверсія одиниць на межі після згортки (FEATURE-HSE301-VIEW §4.2, D-173, ФВ-16.10):
+    -- несумісна одиниця чи інтеграл без одиниць — відмова, а не число в одиниці джерела.
+    (N'err.ECR-UOM-0422.integralUnitsUndeclared', N'en', N'A time integral can only be written with both the source and the target unit declared on the mapping; otherwise the value would stay in unit × seconds.', 1),
+    (N'err.ECR-UOM-0422.integralSourceNotRate', N'en', N'A time integral needs a rate unit (quantity per time) at the source; "{code}" is not one.', 1),
+    (N'err.ECR-UOM-0422.boundaryConversionFailed', N'en', N'{count} mapped values could not be converted to their target unit and were not written: {fields}', 1),
+    -- HSE301:F3 ── кінець секції
     -- UX-прохід, четвертий раунд, лінія E2 (оболонка й адмін-екрани).
     (N'common.technicalDetails', N'en', N'Technical details', 1),
     -- R-19: відповідь без тіла problem+json (шлюз, проксі) — ключі публічні,
