@@ -106,6 +106,12 @@ public sealed class UpsertRegistryEntryHandler(
         // ⛔ D-211: записи External-довідника — лише синком з AF. Гард → запис → правила.
         ExternalRegistryGuard.EnsureManualEditAllowed(definition);
 
+        // ⛔ Число текстом — за мовою користувача, до writer'а («12,5» не стає 125). Неоднозначне
+        // («1,234» в en-US) — 422 з обома прочитаннями, до створення запису. Writer і синк лишаються
+        // інваріантними (RegistryUserNumbers).
+        var values = RegistryUserNumbers.Parse(
+            definition, dto.Values, Localization.NumberCulture.ForLanguage(currentUser.Language));
+
         // Код валідується як EcrCode (D-89) — тим самим правилом, що коди
         // колонок і шаблонів. Окреме «майже таке саме» правило для довідників
         // розійшлося б із рештою системи на першому ж символі.
@@ -135,7 +141,7 @@ public sealed class UpsertRegistryEntryHandler(
         entry.Rename(dto.Id is null ? WithoutEmpty(dto.Display) : Merge(entry.DisplayL10n, dto.Display));
         entry.SetParent(dto.ParentEntryId);
 
-        var changes = await writer.ApplyValuesAsync(definition, entry, dto.Values, prefetch: null, ct).ConfigureAwait(false);
+        var changes = await writer.ApplyValuesAsync(definition, entry, values, prefetch: null, ct).ConfigureAwait(false);
 
         // ⛔ Вікно дії сюди НЕ приймається, хоча воно є полем запису: його
         // зміна тягне перерахунок IsOrphaned (ФВ-8.13a), і зроблена мимохідь

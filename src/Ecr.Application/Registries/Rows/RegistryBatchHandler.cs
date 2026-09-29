@@ -92,6 +92,7 @@ public sealed partial class RegistryBatchHandler(
 
         var states = items.Select(i => new RowState(i)).ToList();
         await ResolveAsync(definition, states, ct).ConfigureAwait(false);
+        ParseNumbers(definition, states);
         await CheckVersionsAsync(states, ct).ConfigureAwait(false);
 
         IReadOnlyList<RegistryEntryWriteRow> written = [];
@@ -222,6 +223,31 @@ public sealed partial class RegistryBatchHandler(
         }
     }
 
+    /// <summary>
+    /// Числа, набрані текстом, — за мовою користувача (<see cref="RegistryUserNumbers"/>), ДО звірки
+    /// ключів і writer'а: і <c>CheckKeysAsync</c>, і <c>RegistryBatchKeys</c> у writer'і бачать те саме
+    /// число, тож «12,5» (ru) і <c>12.5</c> (JSON) — дубль ключа, а не два записи.
+    /// </summary>
+    /// <remarks>Нечислове чи неоднозначне — помилка РЯДКА (звіт 200, <c>applied=false</c>), як решта RT-14.</remarks>
+    private void ParseNumbers(RegistryDef definition, List<RowState> states)
+    {
+        var culture = Localization.NumberCulture.ForLanguage(currentUser.Language);
+        foreach (var state in states.Where(s => s.Item.Op == "upsert" && s.Errors.Count == 0))
+        {
+            if (RegistryUserNumbers.TryParse(definition, state.Item.Values, culture, out var error) is { } parsed)
+            {
+                state.Values = parsed;
+                continue;
+            }
+
+            state.Fail(
+                error!.FieldCode, "ECR-REG-0422", RegistryNumberTextError.MessageKey,
+                [.. error.Details()
+                    .Where(d => d.Key != "messageKey")
+                    .Select(d => (d.Key, d.Value as string))]);
+        }
+    }
+
     /// <summary>Застарілий <c>baseVersion</c> — помилка рядка <c>entryChanged</c> (<c>D-166</c>).</summary>
     private async Task CheckVersionsAsync(List<RowState> states, CancellationToken ct)
     {
@@ -295,7 +321,7 @@ public sealed partial class RegistryBatchHandler(
             try
             {
                 var existing = state.Entry is null ? [] : stored[state.Entry.Id].ToList();
-                effective.Add((state, RegistryBatchKeys.EffectiveValues(definition, existing, state.Item.Values ?? new Dictionary<string, object?>())));
+                effective.Add((state, RegistryBatchKeys.EffectiveValues(definition, existing, state.Values)));
             }
             catch (Ecr.Domain.Abstractions.DomainException)
             {
@@ -342,7 +368,7 @@ public sealed partial class RegistryBatchHandler(
 
         var batch = new RegistryEntryWriteBatch(
             definition.Id,
-            [.. upserts.Select(s => new RegistryEntryWrite(s.Code, s.Item.Values ?? new Dictionary<string, object?>()))])
+            [.. upserts.Select(s => new RegistryEntryWrite(s.Code, s.Values))])
         {
             PlaceholderAutoCodes = dryRun,
         };
@@ -438,6 +464,9 @@ public sealed partial class RegistryBatchHandler(
 
         /// <summary>Код для writer'а: наявного запису або нового (порожньо — авто-код).</summary>
         public string Code { get; set; } = string.Empty;
+
+        /// <summary>Значення рядка з числами, розібраними за мовою користувача (<see cref="RegistryUserNumbers"/>).</summary>
+        public IReadOnlyDictionary<string, object?> Values { get; set; } = new Dictionary<string, object?>();
 
         /// <summary>Видалення рядка виконано в транзакції пакета.</summary>
         public bool Deleted { get; set; }
