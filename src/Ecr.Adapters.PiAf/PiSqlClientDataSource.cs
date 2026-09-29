@@ -330,9 +330,17 @@ public sealed class PiSqlClientDataSource(
     private const string QueryNotConfigured = "ECR-INT-0422";
 
     /// <summary>Текст запиту з налаштування або відмова <c>ECR-INT-0422</c>.</summary>
-    private string ConfiguredOrRefuse(string key, string kind)
+    /// <param name="key">Спільний ключ.</param>
+    /// <param name="kind">Тип запиту — для відмови.</param>
+    /// <param name="dataSourceCode">
+    /// Код джерела: спершу його власний ключ (<see cref="ConfiguredQuery"/>);
+    /// <c>null</c> — лише спільний (перевірка ДО пошуку джерела, як для інтерпольованого).
+    /// </param>
+    private string ConfiguredOrRefuse(string key, string kind, string? dataSourceCode = null)
     {
-        var configured = settings?.Find(key);
+        var configured = dataSourceCode is null
+            ? settings?.Find(key)
+            : ConfiguredQuery(settings, dataSourceCode, key);
         if (!string.IsNullOrWhiteSpace(configured))
         {
             return configured;
@@ -431,6 +439,224 @@ public sealed class PiSqlClientDataSource(
 
         return new CurrentValuesResult(values, failures);
     }
+
+    /// <summary>Ключ запиту подій (HSE301 §4.7.2). Типового тексту немає.</summary>
+    /// <remarks>
+    /// ⛔ Типового тексту немає (V-3): імена RTQP-об'єктів подій факела в
+    /// репозиторії не підтверджені. Без ключа — <c>ECR-INT-0422</c>
+    /// <c>.queryKindNotConfigured</c>, не порожній список.
+    /// <para>
+    /// Контракт тексту: заповнювач <c>{template}</c> — літералом
+    /// (<see cref="Literal"/>); параметри <c>?</c> — від і до, UTC (події, що
+    /// перетинають <c>[від, до)</c>, — справа тексту). Результат — довга форма,
+    /// рядок на атрибут: <c>EventId</c>, <c>StartTime</c> (обов'язкові),
+    /// <c>EventName</c>, <c>Template</c>, <c>EndTime</c>, <c>Modified</c>,
+    /// <c>PrimaryElement</c>, <c>ParentId</c>, <c>AttrScope</c> (<c>E</c>/<c>P</c>),
+    /// <c>AttrName</c>, <c>AttrValue</c>, <c>AttrUom</c>. Подія без атрибутів —
+    /// рядок з <c>AttrName = NULL</c>. Рядки однієї події — поспіль
+    /// (<c>ORDER BY StartTime, EventId</c>): стеля рахує події (<see cref="SourceEventFolder"/>).
+    /// </para>
+    /// </remarks>
+    public const string EventQueryKey = "PiSqlClient:EventQuery";
+
+    /// <summary>Ключ запиту каталогу шаблонів подій. Типового тексту немає.</summary>
+    /// <remarks>
+    /// Результат: <c>Template</c>, необов'язкові <c>AttrScope</c>, <c>AttrName</c>,
+    /// <c>AttrUom</c>, <c>AttrType</c>; шаблон без атрибутів — рядок з <c>AttrName = NULL</c>.
+    /// </remarks>
+    public const string EventTemplateQueryKey = "PiSqlClient:EventTemplateQuery";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Шаблону елемента не потребує (на відміну від <see cref="ReadAsync"/>):
+    /// шаблон подій приходить у запиті. Без <see cref="EventQueryKey"/> — власного
+    /// ключа джерела чи спільного — відмова <c>ECR-INT-0422</c> до з'єднання.
+    /// </remarks>
+    public async Task<SourceEventResult> ReadEventsAsync(SourceEventQuery query, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentException.ThrowIfNullOrWhiteSpace(query.Template, nameof(query));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(query.MaxEvents, nameof(query));
+
+        var from = AsUtc(query.FromUtc);
+        var to = AsUtc(query.ToUtc);
+        if (to <= from)
+        {
+            throw new ArgumentException("Вікно подій порожнє або перевернуте.", nameof(query));
+        }
+
+        var source = await store.FindDataSourceAsync(query.DataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable($"Джерело {query.DataSourceId} не існує або вимкнене.", query.DataSourceId);
+
+        var text = ConfiguredOrRefuse(EventQueryKey, IExternalDataSource.EventQueryKind, source.Code);
+
+        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = EventQuery(text, query.Template);
+        command.Parameters.Add(new OdbcParameter("from", OdbcType.DateTime) { Value = from });
+        command.Parameters.Add(new OdbcParameter("to", OdbcType.DateTime) { Value = to });
+
+        using var reader = await RetryAsync(
+            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+            IsTransientOdbcFailure,
+            ct).ConfigureAwait(false);
+
+        return await ReadEventRowsAsync(reader, source.Code, query.Template, query.MaxEvents, query.Attributes, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SourceEventTemplate>> DiscoverEventTemplatesAsync(
+        int dataSourceId, CancellationToken ct)
+    {
+        var source = await store.FindDataSourceAsync(dataSourceId, ct).ConfigureAwait(false)
+                     ?? throw Unavailable($"Джерело {dataSourceId} не існує або вимкнене.", dataSourceId);
+
+        var text = ConfiguredOrRefuse(EventTemplateQueryKey, IExternalDataSource.EventTemplateQueryKind, source.Code);
+
+        using var connection = await OpenAsync(source, ct).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = text;
+
+        using var reader = await RetryAsync(
+            () => command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct),
+            IsTransientOdbcFailure,
+            ct).ConfigureAwait(false);
+
+        return await ReadEventTemplatesAsync(reader, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Події з результату запиту подій (контракт колонок — <see cref="EventQueryKey"/>).</summary>
+    /// <remarks>
+    /// Час — правилом <see cref="Utc"/>: <c>StartTime</c> обов'язковий, <c>EndTime</c>
+    /// і <c>Modified</c> можуть бути <c>NULL</c>; нечитабельний тип — відмова
+    /// <c>.timestampUnreadable</c>. Публічний для тестів: <c>OdbcDataReader</c> ззовні не зробиш.
+    /// </remarks>
+    /// <param name="reader">Відкритий результат запиту.</param>
+    /// <param name="dataSource">Код джерела — для тексту відмови.</param>
+    /// <param name="template">Шаблон запиту.</param>
+    /// <param name="maxEvents">Стеля подій.</param>
+    /// <param name="attributes">Які атрибути лишити; порожньо — усі.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<SourceEventResult> ReadEventRowsAsync(
+        DbDataReader reader,
+        string dataSource,
+        string template,
+        int maxEvents,
+        IReadOnlyCollection<SourceEventAttributeRef>? attributes,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        var folder = new SourceEventFolder(template, maxEvents, attributes);
+
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var row = Row(reader);
+            var id = Text(Column(row, "EventId"));
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                // Без ідентифікатора подію не зв'язати з рядком документа ніколи:
+                // це дефект тексту запиту, а не стан даних.
+                throw new InvalidOperationException(
+                    $"Запит подій джерела {dataSource} повернув рядок без EventId: ключа синхронізації немає.");
+            }
+
+            var added = folder.Add(new SourceEventRow(
+                id,
+                Text(Column(row, "EventName")),
+                Text(Column(row, "Template")),
+                Utc(Column(row, "StartTime"), dataSource, $"{id}|StartTime"),
+                UtcOrNull(Column(row, "EndTime"), dataSource, $"{id}|EndTime"),
+                UtcOrNull(Column(row, "Modified"), dataSource, $"{id}|Modified"),
+                Text(Column(row, "PrimaryElement")),
+                Text(Column(row, "ParentId")),
+                Text(Column(row, "AttrScope")),
+                Text(Column(row, "AttrName")),
+                Column(row, "AttrValue"),
+                Text(Column(row, "AttrUom"))));
+
+            if (!added)
+            {
+                break;
+            }
+        }
+
+        return folder.ToResult();
+    }
+
+    /// <summary>Каталог шаблонів подій з результату запиту (<see cref="EventTemplateQueryKey"/>).</summary>
+    /// <param name="reader">Відкритий результат запиту.</param>
+    /// <param name="ct">Скасування.</param>
+    public static async Task<IReadOnlyList<SourceEventTemplate>> ReadEventTemplatesAsync(
+        DbDataReader reader, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        var order = new List<string>();
+        var byName = new Dictionary<string, List<SourceEventAttributeDescriptor>>(StringComparer.Ordinal);
+        var rows = 0;
+
+        while (rows < MaxCatalogRows && await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows++;
+            var row = Row(reader);
+            var name = Text(Column(row, "Template"));
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            if (!byName.TryGetValue(name, out var attributes))
+            {
+                attributes = [];
+                byName.Add(name, attributes);
+                order.Add(name);
+            }
+
+            var attribute = Text(Column(row, "AttrName"));
+            if (!string.IsNullOrWhiteSpace(attribute))
+            {
+                attributes.Add(new SourceEventAttributeDescriptor(
+                    attribute,
+                    SourceEventFolder.Scope(Text(Column(row, "AttrScope"))),
+                    Text(Column(row, "AttrUom")),
+                    Text(Column(row, "AttrType"))));
+            }
+        }
+
+        return [.. order.Select(name => new SourceEventTemplate(name, byName[name]))];
+    }
+
+    /// <summary>Текст запиту подій із шаблоном, підставленим літералом.</summary>
+    /// <remarks>
+    /// ⚠ Шаблон — текстом, не параметром: RTQP вимагає його літералом (як
+    /// <c>{template}</c> у <see cref="ValueQueryKey"/>), тож він проходить
+    /// <see cref="Literal"/> — подвоєння лапки й заборона керівних символів.
+    /// Публічний для тестів.
+    /// </remarks>
+    /// <param name="configured">Текст із <see cref="EventQueryKey"/>.</param>
+    /// <param name="template">Шаблон подій.</param>
+    public static string EventQuery(string configured, string template)
+    {
+        ArgumentNullException.ThrowIfNull(configured);
+        ArgumentNullException.ThrowIfNull(template);
+
+        return configured.Replace("{template}", Literal(template), StringComparison.Ordinal);
+    }
+
+    /// <summary>Межа вікна в UTC: місцевий час переводиться, без поясу — вважається UTC.</summary>
+    private static DateTime AsUtc(DateTime value)
+        => value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+    /// <summary>Текстове подання значення колонки; <c>NULL</c> — <c>null</c>.</summary>
+    private static string? Text(object? raw)
+        => raw switch
+        {
+            null => null,
+            string text => text,
+            _ => Convert.ToString(raw, CultureInfo.InvariantCulture),
+        };
 
     /// <summary>Текст summary-запиту з підставленими літералами.</summary>
     /// <param name="configured">Текст із <see cref="SummaryQueryKey"/>.</param>
