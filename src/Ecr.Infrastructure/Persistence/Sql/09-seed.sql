@@ -4915,6 +4915,10 @@ USING (VALUES
     (N'err.ECR-REG-0422.valueAmbiguousSeparator', N'en', N'"{value}" can be read as {asGroup} or {asDecimal}. Write it without thousands separators or with the decimal separator of your language.', 1),
     (N'err.ECR-CELL-0422.ambiguousSeparator',     N'en', N'"{value}" can be read as {asGroup} or {asDecimal}. Write it without thousands separators or with the decimal separator of your language.', 1),
     (N'err.ECR-HDR-0422.ambiguousSeparator',      N'en', N'"{value}" can be read as {asGroup} or {asDecimal}. Write it without thousands separators or with the decimal separator of your language.', 1),
+    -- D-210: ціль «View as» — не bootstrap і не власник небезпечних прав (`StartSimulationHandler`).
+    (N'err.ECR-SIM-4031',                      N'en', N'Viewing as this user is not allowed', 1),
+    (N'err.ECR-SIM-4031.bootstrapTarget',      N'en', N'You cannot view the system as the initial setup administrator.', 1),
+    (N'err.ECR-SIM-4031.dangerousTarget',      N'en', N'You cannot view the system as a user who holds dangerous permissions: the session would show you rights you do not have.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).

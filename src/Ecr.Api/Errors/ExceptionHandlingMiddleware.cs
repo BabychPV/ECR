@@ -499,6 +499,11 @@ public sealed partial class ExceptionHandlingMiddleware(
         BusinessRuleException e when e.ErrorCode == ErrorCodes.RegistryRuleViolation =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 
+        // ⛔ D-210: ціль «View as» заборонена ПОЛІТИКОЮ (bootstrap або небезпечні права) —
+        // запит правильний, відмовляє право бачити, тож 403. Без цього арма — 422 нижче.
+        BusinessRuleException e when e.ErrorCode == ErrorCodes.SimulationTargetForbidden =>
+            (StatusCodes.Status403Forbidden, e.ErrorCode, e.Message, e.Details),
+
         BusinessRuleException e =>
             (StatusCodes.Status422UnprocessableEntity, e.ErrorCode, e.Message, e.Details),
 

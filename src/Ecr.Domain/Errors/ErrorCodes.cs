@@ -745,4 +745,20 @@ public static class ErrorCodes
     /// <c>warnings[]</c> відповіді.
     /// </remarks>
     public const string RegistryRuleViolation = "ECR-REG-4221";
+
+    /// <summary>
+    /// Ціль «View as» (<c>Security.Simulate</c>) заборонена політикою
+    /// (<c>ECR-SIM-4031</c>, <c>D-210</c>): bootstrap-адміністратор або власник
+    /// хоча б одного небезпечного права (<c>sec.Permission.IsDangerous</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>403</c>, а не <c>422</c>: запит складено правильно, відмовляє
+    /// ПОЛІТИКА — сеанс показав би актору права, яких він не має. <c>4031</c>,
+    /// а не <c>0403</c>: той зайнятий <see cref="SimulationReadOnly"/> (запис під
+    /// сеансом), і клієнт розрізняє стани саме кодом. Причину називає
+    /// <c>messageKey</c> (<c>bootstrapTarget</c>, <c>dangerousTarget</c>).
+    /// Кидається як <c>BusinessRuleException</c> — без власного арма в
+    /// <c>ExceptionHandlingMiddleware</c> доїхав би як 422.
+    /// </remarks>
+    public const string SimulationTargetForbidden = "ECR-SIM-4031";
 }
