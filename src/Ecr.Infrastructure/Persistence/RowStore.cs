@@ -32,14 +32,9 @@ public sealed class RowStore(
     // (поведінка та сама, що й до цього фіксу), а не падіння з NRE.
     /// <inheritdoc />
     /// <remarks>
-    /// ⚠ <c>WR-05</c>, названо й НЕ зроблено. Запит іде до партиціонованої
-    /// <c>doc.TableInstance</c> за самим <c>Id</c>, тобто по всіх партиціях.
-    /// Прокинути сюди <c>PeriodKey</c> без зміни сигнатури порту неможливо, а
-    /// зміна сигнатури зачіпає шість викликачів у трьох збірках і їхні
-    /// підробки в тестах — це обсяг <c>WR-04</c> п. 2 («контролер передає
-    /// розв'язаний <c>TableInstanceRef</c> в обробник»), а не цього рядка.
-    /// Ціна зволікання обмежена: запит одиничний і повертає один рядок, тоді
-    /// як виправлені тут коштували скану на кожен зріз і на кожен <c>PATCH</c>.
+    /// <c>WR-05</c>/O3: пошук за <c>Id</c> іде через
+    /// <see cref="TableInstancesByIdQuery"/> — див. там, чому це seek, а не
+    /// скан усіх партицій, хоч період викликачеві невідомий.
     /// </remarks>
     public async Task<TableInstanceRef> ResolveTableInstanceAsync(long tableInstanceId, CancellationToken ct)
         => (await ResolveTableInstancesAsync([tableInstanceId], ct).ConfigureAwait(false))[tableInstanceId];
@@ -47,8 +42,7 @@ public sealed class RowStore(
     /// <inheritdoc />
     /// <remarks>
     /// ⚠ P8: єдина реалізація і для одного екземпляра
-    /// (<see cref="ResolveTableInstanceAsync"/>), і для книги імпорту. Той самий
-    /// <c>WR-05</c>, що й у поштучного, — ключа партиції звідки взяти немає.
+    /// (<see cref="ResolveTableInstanceAsync"/>), і для книги імпорту.
     /// </remarks>
     public async Task<IReadOnlyDictionary<long, TableInstanceRef>> ResolveTableInstancesAsync(
         IReadOnlyCollection<long> tableInstanceIds, CancellationToken ct)
@@ -64,15 +58,18 @@ public sealed class RowStore(
         // Один запит через увесь ланцюг: екземпляр → документ → проєкт.
         // TemplateVersionId живе на проєкті, і без нього use-case не знає,
         // яку структуру брати з кешу метаданих.
-        var found = (await (
-                from instance in db.TableInstances.AsNoTracking()
-                where ids.Contains(instance.Id)
-                join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
-                join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
-                select new TableInstanceRef(
-                    instance.Id, instance.DocumentId, instance.TableDefId,
-                    project.TemplateVersionId, instance.PeriodKeyValue))
-            .ToListAsync(ct).ConfigureAwait(false))
+        var found = (await FindTableInstancesAsync(
+                db,
+                ids,
+                instances =>
+                    from instance in instances
+                    join document in db.Documents.AsNoTracking() on instance.DocumentId equals document.Id
+                    join project in db.Projects.AsNoTracking() on document.ProjectId equals project.Id
+                    select new TableInstanceRef(
+                        instance.Id, instance.DocumentId, instance.TableDefId,
+                        project.TemplateVersionId, instance.PeriodKeyValue),
+                r => r.TableInstanceId,
+                ct).ConfigureAwait(false))
             .ToDictionary(r => r.TableInstanceId);
 
         // ⛔ Відсутній — відмова, а не пропуск: словник без запису викликач
@@ -875,6 +872,88 @@ public sealed class RowStore(
         return db.TableInstances
             .AsNoTracking()
             .Where(t => t.PeriodKeyValue == periodKey.Value && t.DocumentId == documentId);
+    }
+
+    /// <summary>
+    /// Екземпляри таблиць за <c>Id</c>, коли період викликачеві НЕвідомий
+    /// (<c>WR-05</c>/O3).
+    /// </summary>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceIds">Ідентифікатори екземплярів.</param>
+    /// <returns>Незавершений запит; з'єднання й проєкцію добирає викликач.</returns>
+    /// <remarks>
+    /// ⛔ Кластерний ключ <c>doc.TableInstance</c> — <c>(PeriodKey, Id)</c>, і
+    /// всі її індекси вирівняні по <c>ps_ByPeriodKey</c>
+    /// (<c>07-partition-tables.sql</c> падає з <c>THROW 50031</c> на
+    /// невирівняному). Предикат лише за <c>Id</c> тому читає ВЕСЬ індекс у
+    /// всіх партиціях: замір I2 — 1 984 логічних читання і ~135 мс ЦП на
+    /// кожен <c>GET</c> зрізу (<c>docs/build/perf/I2-annual-recalc-2026-09-29.md</c>).
+    ///
+    /// <para>Період тут узяти нізвідки — саме цей запит його й визначає. Тому
+    /// ключ партиції береться з множини ВСІХ періодів (<c>doc.Period</c> —
+    /// десятки рядків): <c>PeriodKey IN (SELECT PeriodKey FROM doc.Period)</c>
+    /// дає оптимізатору зовнішній цикл по періодах і рівність за обома
+    /// стовпцями ключа, тобто по одному seek на партицію замість скану.
+    /// Заміряно на <c>EcrPerfI2</c> (349 560 екземплярів, 24 партиції):
+    /// 48 читань замість 1 984.</para>
+    ///
+    /// ⚠ Екземпляр, чийого періоду немає в <c>doc.Period</c>, цей запит НЕ
+    /// знайде. Щоб результат лишився тим самим, що й до O3, викликачі ходять
+    /// через <see cref="FindTableInstancesAsync{TResult}"/>, яка для таких
+    /// (і для неіснуючих) <c>Id</c> повторює колишній пошук без ключа.
+    /// </remarks>
+    public static IQueryable<TableInstance> TableInstancesByIdQuery(
+        EcrDbContext db, IReadOnlyCollection<long> tableInstanceIds)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(tableInstanceIds);
+
+        return db.TableInstances
+            .AsNoTracking()
+            .Where(t => db.Periods.Select(p => p.PeriodKeyValue).Contains(t.PeriodKeyValue)
+                        && tableInstanceIds.Contains(t.Id));
+    }
+
+    /// <summary>
+    /// Екземпляри таблиць за <c>Id</c>: спершу з ключем партиції
+    /// (<see cref="TableInstancesByIdQuery"/>), для незнайдених — колишнім
+    /// пошуком без ключа.
+    /// </summary>
+    /// <typeparam name="TResult">Проєкція викликача.</typeparam>
+    /// <param name="db">Контекст.</param>
+    /// <param name="tableInstanceIds">Ідентифікатори; без повторів.</param>
+    /// <param name="shape">З'єднання й проєкція поверх екземплярів.</param>
+    /// <param name="idOf">Ідентифікатор екземпляра в проєкції.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <returns>Знайдені рядки — той самий набір, що й запит без ключа.</returns>
+    /// <remarks>
+    /// ⚠ Другий запит — не оптимізація, а гарантія еквівалентності: він
+    /// виконується лише тоді, коли першого не вистачило (неіснуючий <c>Id</c>
+    /// → 404, або період без рядка в <c>doc.Period</c>), і коштує рівно
+    /// стільки, скільки весь пошук коштував до O3. На робочому шляху —
+    /// жодного разу.
+    /// </remarks>
+    internal static async Task<List<TResult>> FindTableInstancesAsync<TResult>(
+        EcrDbContext db,
+        IReadOnlyCollection<long> tableInstanceIds,
+        Func<IQueryable<TableInstance>, IQueryable<TResult>> shape,
+        Func<TResult, long> idOf,
+        CancellationToken ct)
+    {
+        var found = await shape(TableInstancesByIdQuery(db, tableInstanceIds))
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var seen = found.Select(idOf).ToHashSet();
+        var missing = tableInstanceIds.Where(id => !seen.Contains(id)).ToList();
+        if (missing.Count == 0)
+        {
+            return found;
+        }
+
+        found.AddRange(await shape(db.TableInstances.AsNoTracking().Where(t => missing.Contains(t.Id)))
+            .ToListAsync(ct).ConfigureAwait(false));
+
+        return found;
     }
 
     /// <summary>Осиротілі рядки документа в одному періоді.</summary>

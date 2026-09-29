@@ -65,7 +65,7 @@ public sealed partial class PartitionKeyQueryTests
     /// ⚠ Число має РОСТИ, коли запити переносять у фабрики, і не має права
     /// падати: зменшити його означає вивести запит з-під сторожа.
     /// </remarks>
-    private const int MinimumFactories = 7;
+    private const int MinimumFactories = 8;
 
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage8)]

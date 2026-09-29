@@ -1175,16 +1175,17 @@ public sealed class AccessDecisionService(
     {
         var ids = tableInstanceIds.Distinct().ToList();
 
-        // ⚠ `WR-05`, названо й НЕ зроблено — той самий випадок, що
-        // `RowStore.ResolveTableInstanceAsync`: саме цей запит і ВИЗНАЧАЄ
-        // період, тож узяти ключ партиції нізвідки. Дати його може лише
-        // викликач, а це зміна сигнатури `IAccessDecisionService` — обсяг
-        // `WR-03`/`RD-02`, де порт і так переробляється.
-        var instances = await db.TableInstances
-            .AsNoTracking()
-            .Where(t => ids.Contains(t.Id))
-            .Select(t => new { t.Id, t.DocumentId, t.TableDefId, t.PeriodKeyValue })
-            .ToListAsync(ct)
+        // `WR-05`/O3: саме цей запит і ВИЗНАЧАЄ період, тож ключ партиції
+        // береться з множини періодів — seek на партицію замість скану всіх
+        // (`RowStore.TableInstancesByIdQuery`). Набір рядків той самий, що й
+        // без ключа: незнайдене шукається ще раз колишнім запитом, тож
+        // відмова нижче спрацьовує рівно тоді, коли й раніше.
+        var instances = await RowStore.FindTableInstancesAsync(
+                db,
+                ids,
+                q => q.Select(t => new { t.Id, t.DocumentId, t.TableDefId, t.PeriodKeyValue }),
+                i => i.Id,
+                ct)
             .ConfigureAwait(false);
 
         // ⛔ Відсутній екземпляр — та сама відмова, що й у поштучного шляху,
