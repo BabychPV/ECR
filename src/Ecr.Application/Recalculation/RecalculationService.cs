@@ -267,7 +267,8 @@ public sealed class RecalculationService(
         var written = 0;
         foreach (var group in instances.GroupBy(i => i.TemplateVersionId).OrderBy(g => g.Key))
         {
-            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId, heldSheetDefId).ConfigureAwait(false);
+            written += await RunAsync(group.First(), dirty: null, ct, sheetDefId, heldSheetDefId, instances)
+                .ConfigureAwait(false);
         }
 
         return written;
@@ -289,9 +290,14 @@ public sealed class RecalculationService(
     /// Аркуш, виняткове блокування якого ВЖЕ тримає викликач у цій самій
     /// транзакції (подання); <c>null</c> — таких немає.
     /// </param>
+    /// <param name="knownInstances">
+    /// Екземпляри документа за період, уже прочитані викликачем (O2: повний
+    /// прогін читав той самий перелік тричі — тут, у викликачі й у
+    /// <see cref="LoadPeriodAsync"/>); <c>null</c> — прочитати.
+    /// </param>
     private async Task<int> RunAsync(
         TableInstanceRef instance, DirtySet? dirty, CancellationToken ct, int? sheetDefId = null,
-        int? heldSheetDefId = null)
+        int? heldSheetDefId = null, IReadOnlyList<TableInstanceRef>? knownInstances = null)
     {
         var periodKey = new PeriodKey(instance.PeriodKey);
 
@@ -304,7 +310,7 @@ public sealed class RecalculationService(
         // сталася правка. Формула сусідньої таблиці, яка читає цю, живе в
         // СВОЄМУ екземплярі: з одним переліком рядків вона не отримала б ані
         // ребра графа, ані місця для запису — і мовчки не перераховувалася б.
-        var instances = await rowStore
+        var instances = knownInstances ?? await rowStore
             .GetTableInstancesAsync(instance.DocumentId, periodKey, ct)
             .ConfigureAwait(false);
 
@@ -452,7 +458,7 @@ public sealed class RecalculationService(
             ? null
             : new HashSet<long>(dirty.Seeds.Select(seed => seed.TableRowId));
 
-        var (values, stored) = await LoadValuesAsync(instance, scope, ct).ConfigureAwait(false);
+        var (values, stored) = await LoadValuesAsync(instance, scope, (instances, rowIdsBatch), ct).ConfigureAwait(false);
 
         // ⛔ Знімок довідника одиниць передається В КОНТЕКСТ, а не читається
         // ним самим: `IEvaluationContext.Convert` — синхронний метод діалекту
@@ -976,11 +982,20 @@ public sealed class RecalculationService(
     /// </remarks>
     /// <param name="instance">Екземпляр таблиці — джерело документа й періоду.</param>
     /// <param name="scope">Замикання читання: що саме потрібно цьому прогону.</param>
+    /// <param name="current">
+    /// Екземпляри й рядки ПОТОЧНОГО періоду, уже прочитані <see cref="RunAsync"/>
+    /// (O2): читати їх тут удруге означало б два зайві звернення на кожен
+    /// документо-період.
+    /// </param>
     /// <param name="ct">Токен скасування.</param>
     private async Task<(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> Values,
         Dictionary<CellKey, CellValueData> Stored)> LoadValuesAsync(
-        TableInstanceRef instance, RecalculationReadScope scope, CancellationToken ct)
+        TableInstanceRef instance,
+        RecalculationReadScope scope,
+        (IReadOnlyList<TableInstanceRef> Instances,
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds) current,
+        CancellationToken ct)
     {
         var values = new Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue>();
 
@@ -998,7 +1013,7 @@ public sealed class RecalculationService(
         var periodKey = new PeriodKey(instance.PeriodKey);
 
         await LoadPeriodAsync(
-                values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct)
+                values, stored, instance.DocumentId, periodKey, offset: 0, scope.TableDefIds, ct, current)
             .ConfigureAwait(false);
 
         // ⛔ Попередній період завантажується, коли він існує. `[Period:-1]` у
@@ -1039,6 +1054,12 @@ public sealed class RecalculationService(
     /// пакетні запити не потрапляють. <c>null</c> — читати весь документ.
     /// </param>
     /// <param name="ct">Токен скасування.</param>
+    /// <param name="known">
+    /// Екземпляри й рядки ВСІХ таблиць цього періоду, уже прочитані викликачем;
+    /// <c>null</c> — прочитати (суміжний період). Рядки екземпляра від
+    /// переліку інших не залежать, тож підмножина надмножини — те саме, що
+    /// окремий запит на підмножину.
+    /// </param>
     private async Task LoadPeriodAsync(
         Dictionary<CellKey, Ecr.Expressions.Evaluation.ExpressionValue> values,
         Dictionary<CellKey, CellValueData>? stored,
@@ -1046,9 +1067,12 @@ public sealed class RecalculationService(
         PeriodKey periodKey,
         int offset,
         IReadOnlySet<int>? tableDefIds,
-        CancellationToken ct)
+        CancellationToken ct,
+        (IReadOnlyList<TableInstanceRef> Instances,
+            IReadOnlyDictionary<long, IReadOnlyDictionary<string, long>> RowIds)? known = null)
     {
-        var all = await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
+        var all = known?.Instances
+                  ?? await rowStore.GetTableInstancesAsync(documentId, periodKey, ct).ConfigureAwait(false);
 
         // ⛔ `CAL-02`. Фільтр стоїть ДО обох пакетних запитів, а не після них:
         // сенс рядка саме в тому, скільки комірок віддає база, а не скільки з
@@ -1068,7 +1092,8 @@ public sealed class RecalculationService(
         // `RunAsync` вище — ОДИН пакетний запит на рядки і на комірки ВСІХ
         // таблиць документа за період замість запиту на кожну; викликається
         // на кожне редагування комірки (`LoadValuesAsync` читає ДВА періоди).
-        var rowIdsBatch = await rowStore.GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
+        var rowIdsBatch = known?.RowIds
+                          ?? await rowStore.GetRowIdsBatchAsync(instanceIds, periodKey, ct).ConfigureAwait(false);
         var cellsBatch = await cellStore.ReadSlicesAsync(instanceIds, ct).ConfigureAwait(false);
 
         foreach (var table in instances)

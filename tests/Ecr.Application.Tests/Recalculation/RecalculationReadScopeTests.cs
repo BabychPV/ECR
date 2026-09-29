@@ -103,9 +103,10 @@ public sealed class RecalculationReadScopeTests
 
         Assert.Single(_sliceReads);
 
-        // ⚠ Заразом і рядки: другий прохід коштував не лише комірок. Два
-        // виклики — це побудова плану в `RunAsync` і читання поточного періоду.
-        await _rows.Received(2).GetRowIdsBatchAsync(
+        // ⚠ Заразом і рядки: другий прохід коштував не лише комірок. Один
+        // виклик — побудова плану в `RunAsync`; читання поточного періоду з O2
+        // бере вже прочитані рядки, а не ходить по них удруге.
+        await _rows.Received(1).GetRowIdsBatchAsync(
             Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
 
         await _rows.DidNotReceive().GetTableInstancesAsync(

@@ -375,8 +375,9 @@ public sealed class CascadeRecalculationTests
         // Два незалежні проходи існували вже ДО фіксу (побудова плану в
         // RunAsync і завантаження значень у LoadValuesAsync) — Q-166 не про
         // їх злиття, а про те, що кожен із них ходив у базу окремо НА КОЖНУ
-        // таблицю. Тепер кожен прохід — рівно один пакетний виклик.
-        await _rows.Received(2).GetRowIdsBatchAsync(
+        // таблицю. O2 злив і їх: завантаження поточного періоду бере рядки,
+        // уже прочитані для плану, — один пакетний виклик на прогін.
+        await _rows.Received(1).GetRowIdsBatchAsync(
             Arg.Any<IReadOnlyList<long>>(), Arg.Any<PeriodKey>(), Arg.Any<CancellationToken>());
         await _cells.Received(1).ReadSlicesAsync(Arg.Any<IReadOnlyList<long>>(), Arg.Any<CancellationToken>());
 
