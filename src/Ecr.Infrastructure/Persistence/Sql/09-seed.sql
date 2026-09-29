@@ -4088,6 +4088,10 @@ USING (VALUES
     (N'grants.discardText',                     N'en', N'The grant changes of this role have not been saved. Switching the role discards them.', 1),
     (N'grants.discardVerb',                     N'en', N'Discard changes', 1),
     -- COLL:grants ── кінець секції ──
+    -- COLL:calc-limits ── Бюджет комірок входу прив'язки методології (ФВ-9.8, D-205, `CalculationOrchestrator`) ──
+    (N'err.ECR-CALC-4222',                      N'en', N'Calculation input is too large', 1),
+    (N'err.ECR-CALC-4222.inputCellsOverBudget', N'en', N'Methodology {code} bound to table {tableInstanceId} has {cells} input cells, more than the limit of {limit} per binding. Check the data and the binding rule, or raise Calculations:MaxInputCellsPerBinding.', 1),
+    -- COLL:calc-limits ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),

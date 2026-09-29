@@ -706,4 +706,18 @@ public static class ErrorCodes
     /// окремий від архівації (<see cref="Archiving"/>), бо причина й дія інші.
     /// </remarks>
     public const string StartupSchemaIncompatible = "ECR-SYS-5031";
+
+    /// <summary>
+    /// Прив'язка методології має більше комірок входу, ніж дозволяє бюджет
+    /// прогону (<c>ECR-CALC-4222</c>, ФВ-9.8, <c>D-205</c>).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Окремий код, а не <see cref="MethodologyInvalid"/>: методологія тут
+    /// ні до чого — надто великий ОБСЯГ даних прив'язки, і дія інша (перевірити
+    /// дані чи правило прив'язки, або підняти <c>Calculations:MaxInputCellsPerBinding</c>).
+    /// <c>422</c> за цифрами коду — загальний арм <c>DomainException</c> віддає саме
+    /// його, окремий арм не потрібен. Доменний виняток не ретраїться
+    /// (<c>QuartzJobAdapter.IsWorthRetrying</c>): ті самі дані дали б той самий вердикт.
+    /// </remarks>
+    public const string CalculationInputTooLarge = "ECR-CALC-4222";
 }
