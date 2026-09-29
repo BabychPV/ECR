@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react';
-import { Button, Group, Modal, Skeleton, Stack, TextInput } from '@mantine/core';
+import { Alert, Button, Fieldset, Group, Modal, Skeleton, Stack, TextInput } from '@mantine/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/api/client';
 import { queryKeys } from '@/api/queryKeys';
@@ -37,6 +37,16 @@ export interface EntryFormState {
 }
 
 const EmptyForm: EntryFormState = { code: '', display: {}, values: {} };
+
+/**
+ * D-211: записи довідника з master-джерелом `External` вручну не змінюються —
+ * master AF, дані приходять синком. Сервер відмовляє `409 ECR-REG-0409`
+ * (`externalSource`); інтерфейс не пропонує дії, яка напевно впаде.
+ * `Hybrid` і `Local` — редагуються.
+ */
+export function isExternalRegistry(registry: Pick<RegistryDefDto, 'sourceKind'> | undefined): boolean {
+  return registry?.sourceKind === 'External';
+}
 
 /** Стан форми з повного запису (X-03, R-04). */
 export function entryFormOf(detail: RegistryEntryDetailDto): EntryFormState {
@@ -182,6 +192,9 @@ function EntryForm({
 }): JSX.Element {
   const queryClient = useQueryClient();
 
+  // D-211: External — лише перегляд; поля й збереження неактивні, підказка каже, де правити.
+  const readOnly = isExternalRegistry(registry);
+
   const [code, setCode] = useState(initial.code);
   const [display, setDisplay] = useState<LocalizedValue>(initial.display);
   const [values, setValues] = useState<Record<string, string>>({ ...initial.values });
@@ -205,15 +218,24 @@ function EntryForm({
 
   return (
     <>
+      {readOnly && (
+        <Alert color="statusWarning" mb="sm" data-registry-external="read-only">
+          {t('registries.externalReadOnly')}
+        </Alert>
+      )}
+
       <TextInput
         label={t('registries.code')}
         description={t('registries.entryCodeHint')}
         value={code}
         onChange={(event) => setCode(event.currentTarget.value)}
+        disabled={readOnly}
         data-autofocus
       />
 
-      <LocalizedInput label={t('registries.name')} value={display} onChange={setDisplay} />
+      <Fieldset variant="unstyled" disabled={readOnly}>
+        <LocalizedInput label={t('registries.name')} value={display} onChange={setDisplay} />
+      </Fieldset>
 
       {/* ⚠ Поля довідника описані в його схемі й у кожного свій тип. Поки
           редактор приймає їх текстом: сервер знає типи і відхилить невідповідне
@@ -228,6 +250,7 @@ function EntryForm({
               label={`${localized(field.nameL10n) || field.code}${field.isRequired ? ' *' : ''}`}
               description={`${field.code} · ${dataTypeLabel(field.dataType)}`}
               value={values[field.code] ?? ''}
+              disabled={readOnly}
               onChange={(event) => {
                 // ⛔ Той самий клас дефекту, що `CreateDocumentModal.tsx`:
                 // `event.currentTarget` React обнуляє одразу після завершення
@@ -250,7 +273,7 @@ function EntryForm({
           {t('common.cancel')}
         </Button>
         <Button
-          disabled={code.trim().length === 0 || !hasAnyText(display)}
+          disabled={readOnly || code.trim().length === 0 || !hasAnyText(display)}
           loading={upsert.isPending}
           onClick={() => upsert.mutate()}
         >

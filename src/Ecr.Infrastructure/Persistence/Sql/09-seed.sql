@@ -4882,6 +4882,7 @@ USING (VALUES
     (N'security.scopeNarrowedWarning',         N'en', N'A role limited to sheets or periods opens the documents of its projects, but inside a document it shows only its sheets and periods. It gives no project-wide rights (calculations, reports, creating or deleting documents, managing the project).', 1),
     -- D-211: записи External-довідника вручну не змінюються — master AF (`ExternalRegistryGuard`).
     (N'err.ECR-REG-0409.externalSource',       N'en', N'Entries of this registry are synchronized from AF. Change them in AF.', 1),
+    (N'registries.externalReadOnly',           N'en', N'Entries of this registry are synchronized from AF and cannot be edited here.', 1),
     -- SEC: кінець секції
     -- D16: ФВ-2.16 — підтвердження пакетних правок (вставка, протягування) і
     -- серверна відмова батчу без підтвердження (`PatchCellsHandler.EnsureConfirmed`).

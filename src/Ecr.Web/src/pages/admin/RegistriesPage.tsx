@@ -14,6 +14,7 @@ import { CreateRegistryModal } from '@/features/registries/CreateRegistryModal';
 import {
   RegistryEntryEditor,
   ValidityEditor,
+  isExternalRegistry,
 } from '@/features/registries/RegistryEntryEditor';
 import { RegistryImportPanel } from '@/features/registries/RegistryImportPanel';
 import { SourceKindSwitch } from '@/features/registries/SourceKindSwitch';
@@ -199,6 +200,9 @@ export function RegistriesPage(): JSX.Element {
 
   const canEditData = can(session.data, 'Registry.EditData');
 
+  // D-211: записи External-довідника — лише синком з AF; правка відкривається для перегляду.
+  const externalReadOnly = isExternalRegistry(selected);
+
   /*
    * Колонки переліку записів. Чотири плюс дії — межа `L5` (сім) із запасом.
    *
@@ -286,7 +290,12 @@ export function RegistriesPage(): JSX.Element {
                 {/* ⚠ Вікно чинності — окрема дія, і саме воно замінює
                     видалення: запис, на який посилаються комірки, закривають
                     датою (`ФВ-8.5`). */}
-                <Button size="compact-xs" variant="subtle" onClick={() => setValidity(entry)}>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  disabled={externalReadOnly}
+                  onClick={() => setValidity(entry)}
+                >
                   {t('registries.validity')}
                 </Button>
 
@@ -302,6 +311,7 @@ export function RegistriesPage(): JSX.Element {
                   size="compact-xs"
                   variant="subtle"
                   color="statusError"
+                  disabled={externalReadOnly}
                   onClick={() => {
                     remove.reset();
                     setDeleting(entry);
@@ -349,7 +359,7 @@ export function RegistriesPage(): JSX.Element {
                 записів — це колонка типу `Lookup`, яка не пропонує нічого,
                 тобто документ, який неможливо заповнити. */}
             {selected !== undefined && can(session.data, 'Registry.EditData') && (
-              <Button size="xs" onClick={() => setEditing(null)}>
+              <Button size="xs" disabled={externalReadOnly} onClick={() => setEditing(null)}>
                 {t('registries.newEntry')}
               </Button>
             )}
@@ -360,7 +370,14 @@ export function RegistriesPage(): JSX.Element {
                 upsert запису (`Registry.EditData`) — імпорт лише пришвидшує
                 той самий шлях, не обходить його. */}
             {selected !== undefined && canEditData && (
-              <RegistryImportPanel registryCode={selected.code} />
+              <RegistryImportPanel registryCode={selected.code} disabled={externalReadOnly} />
+            )}
+
+            {/* D-211: чому кнопки правки неактивні — словами, а не лише сірим кольором. */}
+            {externalReadOnly && canEditData && (
+              <Text size="xs" c="dimmed" maw={260} data-registry-external="read-only">
+                {t('registries.externalReadOnly')}
+              </Text>
             )}
 
             {/* ⛔ Вхід у конструктор (`ФВ-8.12`). Опис довідника — поля,

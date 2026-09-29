@@ -11,6 +11,9 @@ import { t } from '@/shared/i18n';
 export interface RegistryImportPanelProps {
   /** Код довідника, у записи якого імпортують. */
   registryCode: string;
+
+  /** D-211: довідник External — записи лише синком з AF, імпорт недоступний. */
+  disabled?: boolean;
 }
 
 /**
@@ -28,7 +31,7 @@ export interface RegistryImportPanelProps {
  * перегляду є хоч одна помилка (`blocked` нижче) — так само, як `ImportPanel`
  * блокує застосування при конфліктах чи відхиленнях.
  */
-export function RegistryImportPanel({ registryCode }: RegistryImportPanelProps): JSX.Element {
+export function RegistryImportPanel({ registryCode, disabled = false }: RegistryImportPanelProps): JSX.Element {
   const queryClient = useQueryClient();
   const picker = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -115,6 +118,7 @@ export function RegistryImportPanel({ registryCode }: RegistryImportPanelProps):
       <Button
         size="xs"
         variant="default"
+        disabled={disabled}
         loading={preview.isPending}
         onClick={() => picker.current?.click()}
       >
