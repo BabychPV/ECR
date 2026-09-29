@@ -277,6 +277,35 @@ public sealed class ExcelImporterAtomicApplyTests
         await _previews.Received(1).RemoveAsync(Token, Arg.Any<CancellationToken>());
     }
 
+    /// <summary>
+    /// MI-02 (в), умова «Аудиту» 2: черга в базі — постановка ОСТАННІМ
+    /// оператором транзакції книги, після всього запису (<c>SaveChanges</c>) і до коміту.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Постановка на ціль тримає HOLDLOCK слоту до кінця транзакції — лише
+    /// в самому кінці це мілісекунди. Мутації: поставити на початку замикання
+    /// (або до запису книги) — «enqueue» перед «write»; після коміту — після
+    /// «tx:commit»; обидва червоні.
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage5)]
+    [Trait("Requirement", "MI-02")]
+    public async Task Черга_в_базі_постановка_останній_оператор_транзакції_книги()
+    {
+        _jobs.EnlistsInCallerTransaction.Returns(true);
+        _uow.When(u => u.SaveChangesAsync(Arg.Any<CancellationToken>())).Do(_ => _trace.Add("save"));
+        _audit.When(a => a.WriteCellChangesAsync(Arg.Any<IReadOnlyList<CellChangeRecord>>(), Arg.Any<CancellationToken>()))
+              .Do(_ => _trace.Add("audit"));
+
+        await Importer().ApplyAsync(DocumentId, Token, CancellationToken.None);
+
+        Assert.Equal(
+            ["tx:open", "write:501", "write:502", "write:503", "audit", "save", "enqueue", "tx:commit"],
+            _trace);
+        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
+            Arg.Any<object>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     [Trait(TestCategories.Stage, TestCategories.Stage5)]
     [Trait("Requirement", "DAT-05")]

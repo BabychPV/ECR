@@ -80,6 +80,10 @@ public sealed class QuartzJobScheduler(
     /// </remarks>
     public const string RecurringKey = "ecr.recurring";
 
+    /// <inheritdoc />
+    /// <remarks>⚠ Черга в пам'яті: постановка — лише ПІСЛЯ коміту викликача (MI-02 (в)).</remarks>
+    public bool EnlistsInCallerTransaction => false;
+
     /// <summary>Чи поставлена задача через <see cref="ScheduleAsync{TJob}"/> (крон).</summary>
     /// <param name="detail">Деталь задачі; <c>null</c> — задачі немає.</param>
     /// <remarks>

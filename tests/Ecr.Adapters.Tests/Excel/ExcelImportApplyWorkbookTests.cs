@@ -155,7 +155,97 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
         Assert.Equal(before, await StateAsync(world));
     }
 
+    /// <summary>
+    /// MI-02 (в), F1d: черга в базі — задача перерахунку книги в транзакції
+    /// імпорту: успіх — рівно одна, відкат після постановки — жодної.
+    /// </summary>
+    /// <remarks>
+    /// Мутація: постановка після коміту — в транзакції задачі немає, червоне
+    /// «до відкату стояла одна».
+    /// </remarks>
+    [Fact]
+    [Trait(TestCategories.Stage, TestCategories.Stage6)]
+    [Trait(TestCategories.Category, TestCategories.Integration)]
+    [Trait("Requirement", "MI-02")]
+    public async Task Черга_в_базі_імпорт_ставить_одну_задачу_в_транзакції_а_відкат_її_прибирає()
+    {
+        await PurgeQueueAsync();
+        try
+        {
+            var world = await ArrangeAsync(3);
+
+            await using (var db = CreateContext())
+            {
+                var inTransaction = -1;
+                var uow = new FailingAfterBodyUnitOfWork(db, async () =>
+                {
+                    inTransaction = await db.JobProgresses.CountAsync(p => p.Lane != null);
+                    throw new InvalidOperationException("F1D_IMPORT_FAULT");
+                });
+                var plan = await PlanAsync(world, 3);
+                await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                    Importer(db, Writer(world), plan, DatabaseJobs(db), uow)
+                        .ApplyAsync(world.Doc.DocumentId, Token, CancellationToken.None));
+
+                Assert.Equal(1, inTransaction);
+            }
+
+            Assert.Equal(0, await QueueCountAsync());
+
+            await using (var db = CreateContext())
+            {
+                await Importer(db, Writer(world), await PlanAsync(world, 3), DatabaseJobs(db))
+                    .ApplyAsync(world.Doc.DocumentId, Token, CancellationToken.None);
+            }
+
+            Assert.Equal(1, await QueueCountAsync());
+        }
+        finally
+        {
+            await PurgeQueueAsync();
+        }
+    }
+
     // ── Світ ─────────────────────────────────────────────────────────────────
+
+    private static Ecr.Infrastructure.Jobs.DbBackgroundJobScheduler DatabaseJobs(EcrDbContext db)
+        => new(
+            new Ecr.Infrastructure.Jobs.DbJobQueue(db, new TestClock(Now)),
+            new Ecr.Infrastructure.Jobs.QuartzJobScheduler(null, new JobProgressStore(db), new TestClock(Now)),
+            new Ecr.Infrastructure.Jobs.JobQueueSignal());
+
+    private async Task<int> QueueCountAsync()
+    {
+        await using var db = CreateContext();
+        return await db.JobProgresses.CountAsync(p => p.Lane != null);
+    }
+
+    private async Task PurgeQueueAsync()
+    {
+        await using var db = CreateContext();
+        await db.JobProgresses.Where(p => p.Lane != null).ExecuteDeleteAsync();
+    }
+
+    /// <summary>Справжня одиниця роботи; зовнішня транзакція після тіла кличе <c>fault</c> — до коміту.</summary>
+    private sealed class FailingAfterBodyUnitOfWork(EcrDbContext db, Func<Task> fault) : IUnitOfWork
+    {
+        private readonly UnitOfWork inner = new(db);
+
+        public Task<int> SaveChangesAsync(CancellationToken ct) => inner.SaveChangesAsync(ct);
+
+        public Task<IAsyncDisposable> BeginTransactionAsync(CancellationToken ct) => inner.BeginTransactionAsync(ct);
+
+        public Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct)
+            => db.Database.CurrentTransaction is not null
+                ? inner.ExecuteInTransactionAsync(operation, ct)
+                : inner.ExecuteInTransactionAsync(
+                    async c =>
+                    {
+                        await operation(c);
+                        await fault();
+                    },
+                    ct);
+    }
 
     private sealed record World(TestDocument Doc, IReadOnlyList<ExtraTable> Tables);
 
@@ -195,7 +285,8 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
         return JsonSerializer.Serialize(new ImportPlan(world.Doc.DocumentId, PeriodKeyValue, diffs), Options);
     }
 
-    private ExcelImporter Importer(EcrDbContext db, AccessProfile profile, string plan)
+    private ExcelImporter Importer(
+        EcrDbContext db, AccessProfile profile, string plan, IBackgroundJobScheduler? jobs = null, IUnitOfWork? uow = null)
     {
         var clock = new TestClock(Now);
         var metadata = new MetadataCache(_memory, db);
@@ -240,10 +331,10 @@ public sealed class ExcelImportApplyWorkbookTests(SqlServerFixture sql) : IDispo
 
         var cells = new NormalizedCellStore(db);
         var rows = new RowStore(db, new BulkCellLoader(sql.ConnectionString, 1000), clock);
-        var uow = new UnitOfWork(db, clock);
+        uow ??= new UnitOfWork(db, clock);
         var gate = new SheetEditGate(db);
         var registries = new RegistryStore(db);
-        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs ??= Substitute.For<IBackgroundJobScheduler>();
 
         var patch = new PatchCellsHandler(
             cells, rows, new DocumentStore(db), new PeriodStore(db), metadata, access,

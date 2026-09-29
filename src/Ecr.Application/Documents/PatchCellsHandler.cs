@@ -63,13 +63,6 @@ public sealed partial class PatchCellsHandler(
     /// </exception>
     /// <param name="request">Батч.</param>
     /// <param name="ct">Скасування.</param>
-    /// <param name="deferRecalculationUntilMi02">
-    /// <b>ТИМЧАСОВИЙ</b> внутрішній параметр (`DAT-05`). <c>null</c> —
-    /// звичайний шлях: перерахунок ставиться в чергу тут, після коміту. Не
-    /// <c>null</c> — задача НЕ ставиться, а насіння каскаду складається в цю
-    /// колекцію, і поставити одну задачу зобов'язаний викликач — ПІСЛЯ коміту
-    /// СВОЄЇ, ширшої транзакції.
-    /// </param>
     /// <param name="resolvedInstance">
     /// Екземпляр таблиці, уже розв'язаний викликачем (`WR-04` п. 2 —
     /// <c>CellsController</c>); <c>null</c> — розв'язати тут.
@@ -78,27 +71,10 @@ public sealed partial class PatchCellsHandler(
     /// Орієнтир — тільки послідовність кроків: увесь контекст рішень,
     /// порядок і межі транзакції описані в коментарях відповідних
     /// приватних методів нижче, а не тут.
-    ///
-    /// ⛔ <paramref name="deferRecalculationUntilMi02"/> існує рівно тому, що
-    /// черги задач ще НЕ транзакційні (`MI-02` не зроблена). Єдиний викликач —
-    /// <c>ExcelImporter.ApplyAsync</c>, який тримає одну транзакцію на ВСЮ
-    /// книгу (`DAT-05`, «все або нічого»): поставлена звідси задача стартувала
-    /// б у воркері РАНІШЕ за коміт цієї транзакції і під RCSI прочитала б
-    /// старі дані — або дані, яких після відкату не буде взагалі.
-    ///
-    /// ⚠ Параметр названий із номером підзадачі навмисно: після `MI-02`
-    /// (транзакційна черга) постановка стає частиною тієї самої транзакції,
-    /// відкладати стає нічого — і параметр зникає разом із цим коментарем.
-    ///
-    /// ⚠ Колекція, а не булевий прапорець: «не ставити задачу» без повернення
-    /// насіння означало б, що викликач ВІДНОВЛЮЄ перелік змінених комірок сам
-    /// — другим, незалежним обчисленням того самого, яке одного дня розійшлося
-    /// б із тим, що насправді записано.
     /// </remarks>
     public async Task<PatchCellsResponse> HandleAsync(
         PatchCellsRequest request,
         CancellationToken ct,
-        ICollection<RecalculationSeed>? deferRecalculationUntilMi02 = null,
         TableInstanceRef? resolvedInstance = null)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -165,31 +141,27 @@ public sealed partial class PatchCellsHandler(
         var isLateEdit = await DetermineIsLateEditAsync(context.Instance.DocumentId, request.PeriodKey, ct)
             .ConfigureAwait(false);
 
-        // ⚠ Далі — лише `changes` із СПРАВЖНІМИ ідентифікаторами нових рядків:
-        // насіння перерахунку з тимчасовими від'ємними адресами вказувало б у
-        // нікуди.
-        changes = await PersistChangesAsync(request, context, changes, now, isLateEdit, previous, ct)
-            .ConfigureAwait(false);
-
-        var seeds = BuildRecalculationSeeds(changes);
-
         // ⚠ `BE-05`: ідентифікатор поставленої задачі їде клієнтові у відповіді.
-        // У гілці відкладання він лишається `null` — і це чесно: перерахунку
-        // ЩЕ НЕ ПОСТАВЛЕНО, а назвати тут ідентифікатор задачі, яку поставить
-        // викликач після свого коміту, означало б збрехати про те, що сталося.
         string? recalculationJobId = null;
 
-        if (deferRecalculationUntilMi02 is null)
-        {
-            recalculationJobId = await EnqueueRecalculationAsync(request, seeds, context.UserId, ct)
+        // ⚠ Насіння — лише зі `changes` зі СПРАВЖНІМИ ідентифікаторами нових
+        // рядків: тимчасові від'ємні адреси вказували б у нікуди.
+        async Task EnqueueAsync(CellChangeLists applied, CancellationToken token)
+            => recalculationJobId = await EnqueueRecalculationAsync(
+                    request, BuildRecalculationSeeds(applied), context.UserId, token)
                 .ConfigureAwait(false);
-        }
-        else
+
+        // ⛔ MI-02 (в): черга в базі — постановка ВСЕРЕДИНІ транзакції запису,
+        // останнім оператором (відкат запису відкочує й задачу, воркер бачить
+        // її лише з комітом); Quartz у пам'яті — ПІСЛЯ коміту, як і досі.
+        var enlist = jobs.EnlistsInCallerTransaction;
+        changes = await PersistChangesAsync(
+                request, context, changes, now, isLateEdit, previous, enlist ? EnqueueAsync : null, ct)
+            .ConfigureAwait(false);
+
+        if (!enlist)
         {
-            foreach (var seed in seeds)
-            {
-                deferRecalculationUntilMi02.Add(seed);
-            }
+            await EnqueueAsync(changes, ct).ConfigureAwait(false);
         }
 
         return await BuildResponseAsync(request, context, changes, messages, recalculationJobId, ct)
@@ -2093,11 +2065,13 @@ public sealed partial class PatchCellsHandler(
         DateTime now,
         bool isLateEdit,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        Func<CellChangeLists, CancellationToken, Task>? enqueueInTransaction,
         CancellationToken ct)
     {
         try
         {
-            return await PersistCoreAsync(request, context, changes, now, isLateEdit, previous, ct)
+            return await PersistCoreAsync(
+                    request, context, changes, now, isLateEdit, previous, enqueueInTransaction, ct)
                 .ConfigureAwait(false);
         }
         catch (ConcurrencyConflictException ex) when (StaleRowIds(ex) is { Count: > 0 } staleRowIds)
@@ -2177,6 +2151,7 @@ public sealed partial class PatchCellsHandler(
         DateTime now,
         bool isLateEdit,
         IReadOnlyDictionary<CellAddress, CellValueData> previous,
+        Func<CellChangeLists, CancellationToken, Task>? enqueueInTransaction,
         CancellationToken ct)
     {
         var applied = planned;
@@ -2221,6 +2196,15 @@ public sealed partial class PatchCellsHandler(
             await WriteAuditAsync(request, context, changes, now, isLateEdit, previous, innerCt).ConfigureAwait(false);
 
             await uow.SaveChangesAsync(innerCt).ConfigureAwait(false);
+
+            // ⛔ MI-02 (в): постановка — ОСТАННІЙ оператор транзакції, після
+            // всього запису (<c>null</c> — черга поза базою, ставить викликач
+            // після коміту). Повтор тіла стратегією EF поставить заново — рядок
+            // першої спроби відкотився разом із нею.
+            if (enqueueInTransaction is not null)
+            {
+                await enqueueInTransaction(changes, innerCt).ConfigureAwait(false);
+            }
         }, ct).ConfigureAwait(false);
 
         return applied;
@@ -2375,9 +2359,10 @@ public sealed partial class PatchCellsHandler(
     }
 
     /// <summary>
-    /// ⚠ Перерахунок ставиться в чергу ПІСЛЯ commit і поза транзакцією:
-    /// воркер інакше почав би читати рядки, яких ще не видно, і отримав би
-    /// або старі значення, або блокування на піку останнього дня.
+    /// ⚠ Постановка перерахунку. Момент задає планувальник
+    /// (<see cref="IBackgroundJobScheduler.EnlistsInCallerTransaction"/>, MI-02 (в)):
+    /// черга в базі — останнім оператором транзакції запису; Quartz у пам'яті —
+    /// ПІСЛЯ коміту, інакше воркер почав би читати рядки, яких ще не видно.
     /// </summary>
     /// <remarks>
     /// ⛔ Задача — <c>IFormulaRecalculationJob</c>, а не <c>IRecalculationJob</c>.
@@ -2415,9 +2400,9 @@ public sealed partial class PatchCellsHandler(
     /// <summary>Насіння каскаду: адреси всіх записаних і стертих комірок батчу.</summary>
     /// <remarks>
     /// ⚠ Виділено з <see cref="EnqueueRecalculationAsync"/> окремим методом
-    /// (`DAT-05`), щоб відкладена постановка (<c>deferRecalculationUntilMi02</c>)
-    /// і звичайна брали насіння з ОДНОГО місця. Два обчислення того самого
-    /// переліку — це два переліки, які колись розійдуться.
+    /// (`DAT-05`), щоб поштучний запис і книга (<see cref="HandleWorkbookAsync"/>,
+    /// одна задача на книгу в <c>ExcelImporter</c>) брали насіння з ОДНОГО місця.
+    /// Два обчислення того самого переліку — це два переліки, які колись розійдуться.
     /// </remarks>
     private static List<RecalculationSeed> BuildRecalculationSeeds(CellChangeLists changes)
         => changes.Upserts

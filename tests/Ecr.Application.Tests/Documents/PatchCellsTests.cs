@@ -1347,65 +1347,55 @@ public sealed class PatchCellsTests
     }
 
     /// <summary>
-    /// `DAT-05`: з переданою колекцією обробник НЕ ставить задачу сам, а
-    /// віддає насіння каскаду викликачеві.
+    /// MI-02 (в): момент постановки задає планувальник — черга в базі ставить
+    /// ВСЕРЕДИНІ транзакції запису, Quartz — ПІСЛЯ її завершення.
     /// </summary>
     /// <remarks>
-    /// ⛔ Це половина контракту тимчасового параметра
-    /// <c>deferRecalculationUntilMi02</c>. Друга половина — що викликач
-    /// (<c>ExcelImporter</c>) справді ставить ОДНУ задачу після коміту —
-    /// доводиться в <c>Ecr.Adapters.Tests</c> і наскрізно в
-    /// <c>Ecr.Scenarios.Tests</c>. Порізно ці дві перевірки нічого не варті:
-    /// «не поставив» без «хтось поставив» означало б, що перерахунок після
-    /// імпорту не відбувається взагалі.
+    /// ⚠ Тут — лише «де» відносно замикання транзакції; що відкат справді
+    /// відкочує задачу і що до коміту її не видно іншому з'єднанню, доводить
+    /// <c>PatchCellsTransactionalEnqueueTests</c> на справжній базі. Мутації: у
+    /// режимі бази поставити після коміту — рядок <c>true</c> червоний; у
+    /// Quartz — всередину — рядок <c>false</c>.
     /// </remarks>
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "DAT-05")]
-    public async Task Відкладений_перерахунок_не_ставить_задачу_а_віддає_насіння()
+    [Theory] [Trait(TestCategories.Stage, TestCategories.Stage2)]
+    [Trait("Requirement", "MI-02")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Перерахунок_ставиться_в_транзакції_лише_коли_черга_в_ній(bool enlists)
     {
-        var seeds = new List<RecalculationSeed>();
+        _jobs.EnlistsInCallerTransaction.Returns(enlists);
 
-        await Handler().HandleAsync(
+        var inTransaction = false;
+        bool? enqueuedInTransaction = null;
+        _uow.ExecuteInTransactionAsync(Arg.Any<Func<CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                inTransaction = true;
+                await call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1));
+                inTransaction = false;
+            });
+        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+             .Returns(_ =>
+             {
+                 enqueuedInTransaction = inTransaction;
+                 return "IFormulaRecalculationJob#78";
+             });
+
+        var response = await Handler().HandleAsync(
             Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
-            CancellationToken.None,
-            deferRecalculationUntilMi02: seeds);
+            CancellationToken.None);
 
-        // ⛔ Жодної задачі: поставлена звідси, вона стартувала б усередині ще
-        // не закоміченої транзакції імпорту — і під RCSI прочитала б старі
-        // дані або дані, яких після відкату не буде взагалі.
-        await _jobs.DidNotReceive().EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        Assert.Equal(enlists, enqueuedInTransaction);
+        Assert.Equal("IFormulaRecalculationJob#78", response.RecalculationJobId);
 
-        // ⚠ Насіння — не «щось непорожнє», а РІВНО та комірка, яку записали:
-        // перелік, зібраний із іншого джерела, одного дня розійшовся б із тим,
-        // що насправді лежить у базі.
-        var seed = Assert.Single(seeds);
-        Assert.Equal(1001L, seed.RowId);
-        Assert.Equal(VolumeColumnId, seed.ColumnDefId);
-
-        // Запис при цьому відбувся: відкладається постановка задачі, а не робота.
-        await _cells.Received(1).ApplyAsync(Arg.Any<CellChangeSet>(), Arg.Any<CancellationToken>());
-    }
-
-    /// <summary>
-    /// `DAT-05`: без параметра поведінка не змінилася — одна задача на батч.
-    /// </summary>
-    /// <remarks>
-    /// ⚠ Опудало проти «полагодив імпорт — зламав сітку»: звичайний
-    /// <c>PATCH</c> із сітки документа передає <c>null</c>, і перерахунок
-    /// мусить ставитися так само, як до `DAT-05`.
-    /// </remarks>
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "DAT-05")]
-    public async Task Без_відкладання_задача_ставиться_як_і_раніше()
-    {
-        await Handler().HandleAsync(
-            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
-            CancellationToken.None,
-            deferRecalculationUntilMi02: null);
-
-        await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
-            Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        // В обох режимах — після всього запису.
+        Received.InOrder(() =>
+        {
+            _uow.SaveChangesAsync(Arg.Any<CancellationToken>());
+            _jobs.EnqueueAsync<IFormulaRecalculationJob>(
+                Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>());
+        });
     }
 
     /// <summary>
@@ -1446,35 +1436,6 @@ public sealed class PatchCellsTests
         // повертає редактору `403` на власний перерахунок.
         await _jobs.Received(1).EnqueueAsync<IFormulaRecalculationJob>(
             Arg.Any<object>(), Arg.Any<CancellationToken>(), 9);
-    }
-
-    /// <summary>
-    /// `BE-05` + `DAT-05`: у гілці відкладання поле — рівно <c>null</c>, а не
-    /// порожній рядок.
-    /// </summary>
-    /// <remarks>
-    /// ⛔ Різниця не косметична. <c>null</c> клієнт читає як «стежити нема за
-    /// чим» і мовчить; порожній рядок пройшов би перевірку «поле є» і послав
-    /// статус-рядок опитувати <c>GET /api/v1/jobs/</c> — адресу без сегмента,
-    /// тобто перелік задач замість стану однієї, під правом
-    /// <c>System.ViewHealth</c>, якого в редактора немає.
-    /// </remarks>
-    [Fact] [Trait(TestCategories.Stage, TestCategories.Stage2)]
-    [Trait("Requirement", "BE-05")]
-    public async Task Відкладений_перерахунок_дає_recalculationJobId_рівно_null()
-    {
-        // ⚠ Підробка ГОТОВА віддати ідентифікатор — саме тому тест доводить, що
-        // `null` тут від гілки відкладання, а не від ненаповненого substitute.
-        _jobs.EnqueueAsync<IFormulaRecalculationJob>(
-                 Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
-             .Returns("IFormulaRecalculationJob#77");
-
-        var response = await Handler().HandleAsync(
-            Request(new PatchRow("7001001", "0x0A", [new PatchCell("Volume", 12500m)])),
-            CancellationToken.None,
-            deferRecalculationUntilMi02: []);
-
-        Assert.Null(response.RecalculationJobId);
     }
 
     [Fact]

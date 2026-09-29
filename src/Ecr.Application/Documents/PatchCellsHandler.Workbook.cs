@@ -40,9 +40,12 @@ public sealed partial class PatchCellsHandler
     /// Застосовує зміни кількох екземплярів одного документа за один період.
     /// </summary>
     /// <param name="requests">Батчі по екземплярах; екземпляри не повторюються, період один.</param>
-    /// <param name="deferRecalculationUntilMi02">
-    /// Насіння перерахунку всієї книги; задачу ставить викликач ПІСЛЯ свого коміту
-    /// (див. однойменний параметр <see cref="HandleAsync"/>).
+    /// <param name="recalculationSeeds">
+    /// Насіння перерахунку всієї книги. Задачі цей метод НЕ ставить: одну на книгу
+    /// ставить викликач, що тримає транзакцію (<c>ExcelImporter</c>), — останнім
+    /// оператором своєї транзакції або після коміту залежно від
+    /// <see cref="IBackgroundJobScheduler.EnlistsInCallerTransaction"/> (MI-02 (в)).
+    /// Колекція, а не прапорець: викликач не відновлює перелік змінених комірок сам.
     /// </param>
     /// <param name="ct">Скасування.</param>
     /// <param name="heldSheetStatuses">
@@ -59,12 +62,12 @@ public sealed partial class PatchCellsHandler
     /// </remarks>
     public async Task<IReadOnlyList<PatchCellsResponse>> HandleWorkbookAsync(
         IReadOnlyList<PatchCellsRequest> requests,
-        ICollection<RecalculationSeed> deferRecalculationUntilMi02,
+        ICollection<RecalculationSeed> recalculationSeeds,
         CancellationToken ct,
         IReadOnlyDictionary<int, Domain.Enums.DocumentStatus>? heldSheetStatuses = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
-        ArgumentNullException.ThrowIfNull(deferRecalculationUntilMi02);
+        ArgumentNullException.ThrowIfNull(recalculationSeeds);
 
         if (requests.Count == 0)
         {
@@ -141,7 +144,7 @@ public sealed partial class PatchCellsHandler
 
             foreach (var seed in BuildRecalculationSeeds(applied))
             {
-                deferRecalculationUntilMi02.Add(seed);
+                recalculationSeeds.Add(seed);
             }
 
             var versions = (IReadOnlyDictionary<string, string>?)MergedRowVersions(item.Context, applied)

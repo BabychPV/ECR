@@ -312,10 +312,17 @@ public sealed class ExcelImporter(
     /// ⚠ Ціна — довша транзакція; межу задає розмір книги (`S-16`/`S-17`), а
     /// під RCSI читачів вона не блокує.
     ///
-    /// ⚠ Перерахунок ставиться ОДИН на документ і ПІСЛЯ коміту. До `MI-02`
-    /// (транзакційна черга) це неможливо зробити всередині: Quartz тримає чергу
-    /// в пам'яті, воркер стартує раніше за коміт і прочитав би або старі дані,
+    /// ⚠ Перерахунок ставиться ОДИН на документ. Момент — за планувальником
+    /// (MI-02 (в), <see cref="IBackgroundJobScheduler.EnlistsInCallerTransaction"/>):
+    /// черга в базі — ОСТАННІМ оператором транзакції книги, після всього запису
+    /// (відкат книги відкочує й задачу); Quartz тримає чергу в пам'яті — ПІСЛЯ
+    /// коміту, бо воркер стартує раніше за коміт і прочитав би або старі дані,
     /// або — після відкату — дані, яких не було ніколи.
+    ///
+    /// ⛔ Саме останнім (умова «Аудиту» 2): постановка на ціль бере
+    /// UPDLOCK+HOLDLOCK на слот у <c>UX_JobProgress_Target_Queued</c> до кінця
+    /// транзакції, і на початку чи посередині книги він тримався б увесь її
+    /// запис (<c>ExcelImportTransactionalEnqueueTests</c> — тест порядку).
     ///
     /// ⛔ P8 (застосування 3/3): книга пише ОДНИМ книжковим шляхом
     /// (<see cref="PatchCellsHandler.HandleWorkbookAsync"/>), а не циклом
@@ -336,6 +343,25 @@ public sealed class ExcelImporter(
 
         var period = new PeriodKey(plan.PeriodKey);
         var sheets = await SheetsInLockOrderAsync(documentId, period, plan, ct).ConfigureAwait(false);
+
+        var enlist = jobs.EnlistsInCallerTransaction;
+
+        // ⚠ Одна задача на ВСЮ книгу, а не одна на таблицю. Каскад і так
+        // документний: `RecalculationService.RunAsync` резолвить документ із
+        // переданого екземпляра таблиці й далі читає ВСІ таблиці документа за
+        // період — формула сусіднього аркуша має право читати цю. Тому
+        // `TableInstanceId` тут — лише точка входу в документ, а насіння
+        // (`seeds`) зібране з усіх таблиць книги.
+        async Task EnqueueRecalculationAsync(CancellationToken token)
+        {
+            if (seeds.Count > 0)
+            {
+                await jobs
+                    .EnqueueAsync<IFormulaRecalculationJob>(
+                        new { TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds }, token)
+                    .ConfigureAwait(false);
+            }
+        }
 
         await uow.ExecuteInTransactionAsync(
             async innerCt =>
@@ -419,22 +445,19 @@ public sealed class ExcelImporter(
                 }
 
                 seedTableInstanceId = diffs.Count > 0 ? diffs[0].TableInstanceId : 0;
+
+                // ⛔ MI-02 (в): останній оператор транзакції — див. remarks.
+                if (enlist)
+                {
+                    await EnqueueRecalculationAsync(innerCt).ConfigureAwait(false);
+                }
             },
             ct)
             .ConfigureAwait(false);
 
-        // ⚠ Одна задача на ВСЮ книгу, а не одна на таблицю. Каскад і так
-        // документний: `RecalculationService.RunAsync` резолвить документ із
-        // переданого екземпляра таблиці й далі читає ВСІ таблиці документа за
-        // період — формула сусіднього аркуша має право читати цю. Тому
-        // `TableInstanceId` тут — лише точка входу в документ, а насіння
-        // (`seeds`) зібране з усіх таблиць книги.
-        if (seeds.Count > 0)
+        if (!enlist)
         {
-            await jobs
-                .EnqueueAsync<IFormulaRecalculationJob>(
-                    new { TableInstanceId = seedTableInstanceId, plan.PeriodKey, Cells = seeds }, ct)
-                .ConfigureAwait(false);
+            await EnqueueRecalculationAsync(ct).ConfigureAwait(false);
         }
 
         // Прибирається ЛИШЕ після успіху: якщо застосування впало на конфлікті,

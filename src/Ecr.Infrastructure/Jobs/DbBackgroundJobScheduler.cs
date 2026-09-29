@@ -48,6 +48,10 @@ public sealed class DbBackgroundJobScheduler(
     /// <summary>Серіалізація payload — та сама, що в <see cref="QuartzJobScheduler"/> (Web-налаштування).</summary>
     private static readonly JsonSerializerOptions PayloadOptions = new(JsonSerializerDefaults.Web);
 
+    /// <inheritdoc />
+    /// <remarks>⚠ Постановка — сирий SQL у поточній транзакції <c>EcrDbContext</c> scope.</remarks>
+    public bool EnlistsInCallerTransaction => true;
+
     /// <summary>Режим із конфігурації; не задано — <see cref="JobQueueMode.Quartz"/>.</summary>
     public static JobQueueMode ReadMode(IConfiguration configuration)
     {

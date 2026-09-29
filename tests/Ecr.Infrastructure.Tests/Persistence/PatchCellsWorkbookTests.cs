@@ -281,7 +281,7 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         {
             foreach (var request in requests)
             {
-                await handler.HandleAsync(request, CancellationToken.None, new List<RecalculationSeed>());
+                await handler.HandleAsync(request, CancellationToken.None);
             }
         });
 
@@ -394,9 +394,22 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
     private async Task<Run> RunSequentialAsync(World world, AccessProfile profile, List<PatchCellsRequest> requests)
     {
         await using var db = world.Builder.CreateContext();
-        var handler = Handler(db, profile);
         var seeds = new List<RecalculationSeed>();
         var responses = new List<PatchCellsResponse>();
+
+        // ⚠ MI-02 (в): поштучний шлях сам ставить задачу — насіння береться з
+        // її payload (`Cells`), тим самим переліком, що пішов би в чергу.
+        // Ідентифікатор — null: відповіді книги його не несуть (одна задача на
+        // книгу — в `ExcelImporter`), і порівнюються тут лише записані дані.
+        var jobs = Substitute.For<IBackgroundJobScheduler>();
+        jobs.EnqueueAsync<IFormulaRecalculationJob>(Arg.Any<object>(), Arg.Any<CancellationToken>(), Arg.Any<int?>())
+            .Returns(call =>
+            {
+                var payload = call.ArgAt<object>(0);
+                seeds.AddRange((IEnumerable<RecalculationSeed>)payload.GetType().GetProperty("Cells")!.GetValue(payload)!);
+                return (string)null!;
+            });
+        var handler = Handler(db, profile, jobs: jobs);
 
         await new UnitOfWork(db).ExecuteInTransactionAsync(
             async ct =>
@@ -405,7 +418,7 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
                 responses.Clear();
                 foreach (var request in requests)
                 {
-                    responses.Add(await handler.HandleAsync(request, ct, seeds));
+                    responses.Add(await handler.HandleAsync(request, ct));
                 }
             },
             CancellationToken.None);
@@ -417,7 +430,8 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
         EcrDbContext db,
         AccessProfile profile,
         Func<ICellStore, ICellStore>? cells = null,
-        Func<ISheetEditGate, ISheetEditGate>? gate = null)
+        Func<ISheetEditGate, ISheetEditGate>? gate = null,
+        IBackgroundJobScheduler? jobs = null)
     {
         var clock = new TestClock(Now);
         var metadata = new MetadataCache(_memory, db);
@@ -473,7 +487,7 @@ public sealed class PatchCellsWorkbookTests(SqlServerFixture sql) : IDisposable
             new DocumentHeaderStore(db),
             new AuditWriter(db),
             new AuditReader(db),
-            Substitute.For<IBackgroundJobScheduler>(),
+            jobs ?? Substitute.For<IBackgroundJobScheduler>(),
             new UnitOfWork(db, clock),
             user,
             clock,
