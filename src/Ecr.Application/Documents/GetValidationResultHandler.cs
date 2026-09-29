@@ -59,12 +59,12 @@ public sealed class GetValidationResultHandler(
         // документа. Читати збережений результат має право рівно той, хто мав
         // би право його порахувати.
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var summary = await results
             .GetLatestAsync(documentId, periodKey.Value, ct).ConfigureAwait(false);

@@ -27,7 +27,7 @@ public sealed class BuildPeriodCalendarHandler(
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, "Document.View", ct)
+            .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
         // ⛔ `ECR-PRJ-0404`, а не `ECR-PRD-0422` (`P-25`, рядок 4). Старий код
@@ -61,6 +61,9 @@ public sealed class BuildPeriodCalendarHandler(
                     ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, "Document.View", projectId);
 
         // ⚠ Сама побудова живе в `PeriodCalendarMaterializer`, бо той самий
         // календар потрібен і активації проєкту, у якої ІНШЕ право. Тут

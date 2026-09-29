@@ -52,7 +52,7 @@ public sealed class DownloadExportHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(exportId);
 
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⚠ Існування ПЕРЕД грантом — той самий порядок, що й у Q-179: без
@@ -72,7 +72,7 @@ public sealed class DownloadExportHandler(
 
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, book.DocumentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, book.DocumentId, Permission, ct).ConfigureAwait(false);
 
         return book.Content;
     }

@@ -48,8 +48,13 @@ public sealed class ExcelImportJob(
         // ⛔ Право — ще раз, у мить виконання, а не лише при постановці: між
         // ними право могли відкликати, і задача не має писати від імені
         // людини, яка вже не має права імпортувати.
-        _ = await PermissionCheck
-            .RequireAsync(access, currentUser, ApplyImportHandler.Permission, ct)
+        var profile = await PermissionCheck
+            .RequireInAnyProjectAsync(access, currentUser, ApplyImportHandler.Permission, ct)
+            .ConfigureAwait(false);
+
+        // ⛔ ФВ-6.14: право — у проєкті документа, як і при постановці.
+        await DocumentVisibility
+            .RequireVisibleAsync(access, profile, task.DocumentId, ApplyImportHandler.Permission, ct)
             .ConfigureAwait(false);
 
         await progress.ReportKeyAsync(10, "jobs.importApplyingDiff", ct).ConfigureAwait(false);

@@ -70,7 +70,7 @@ public sealed class GetDocumentTemplateHandler(
     public async Task<DocumentTemplateDto> HandleAsync(int projectId, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, CreateDocumentHandler.Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, CreateDocumentHandler.Permission, ct)
             .ConfigureAwait(false);
 
         var project = await periods.FindProjectAsync(projectId, ct).ConfigureAwait(false);
@@ -98,6 +98,9 @@ public sealed class GetDocumentTemplateHandler(
                     ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        PermissionCheck.RequireIn(profile, CreateDocumentHandler.Permission, projectId);
 
         var templateVersionId = project.TemplateVersionId;
 

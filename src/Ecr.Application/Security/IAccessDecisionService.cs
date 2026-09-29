@@ -61,6 +61,13 @@ public interface IAccessDecisionService
     /// <summary>Чи може користувач читати документ.</summary>
     public Task<EditDecision> CanReadDocumentAsync(AccessProfile profile, long documentId, CancellationToken ct);
 
+    /// <summary>Проєкт документа; <c>null</c> — документа немає.</summary>
+    /// <remarks>
+    /// Потрібен для проєктного функціонального права (ФВ-6.14,
+    /// <see cref="AccessProfile.Has(string, int)"/>) у точках, що знають лише документ.
+    /// </remarks>
+    public Task<int?> DocumentProjectIdAsync(long documentId, CancellationToken ct);
+
     /// <summary>Чи може користувач редагувати конкретну комірку.</summary>
     public Task<EditDecision> CanEditCellAsync(
         AccessProfile profile, long documentId, CellAddress address, CancellationToken ct);

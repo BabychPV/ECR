@@ -82,12 +82,12 @@ public sealed class GetTableStatusHandler(
         // (`A7-53`, `Q-172`): функціональне право каже «цей користувач узагалі
         // працює з документами», грант — «з ЦИМ».
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var key = PeriodKey.Parse(periodKey);
 

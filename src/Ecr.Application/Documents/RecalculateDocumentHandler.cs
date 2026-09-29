@@ -68,7 +68,7 @@ public sealed class RecalculateDocumentHandler(
         long documentId, PeriodKey periodKey, int? sheetDefId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ І ГРАНТ на проєкт документа (Q-174, аудит фази 2). Право саме по
@@ -78,7 +78,8 @@ public sealed class RecalculateDocumentHandler(
         // перезапис обчислених значень чужого документа.
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        // ФВ-6.14: і право — у проєкті документа.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         // ⛔ Q-331: аркуш мусить входити в СКЛАД документа — той самий гейт,
         // що вже стоїть перед `SubmitSheetHandler` (`ФВ-3.2`). Без нього

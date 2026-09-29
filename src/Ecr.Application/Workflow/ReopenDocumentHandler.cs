@@ -55,7 +55,12 @@ public sealed class ReopenDocumentHandler(
 
         // Право небезпечне і тому перевіряється окремо від грантів: воно дає
         // змогу змінити вже подані числа (ФВ-6.12).
-        if (!profile.Has(Permission))
+        // ⛔ ФВ-6.14: у проєкті ЦЬОГО документа — роль з областю діє лише там.
+        // Проєкт питається лише тоді, коли права немає глобально.
+        var allowed = profile.Has(Permission)
+                      || (await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false) is { } documentProject
+                          && profile.Has(Permission, documentProject));
+        if (!allowed)
         {
             throw new AccessDeniedException(
                 "ECR-ACCS-0403", $"Потрібне право {Permission}.",

@@ -59,7 +59,7 @@ public sealed class ExportSnapshotHandler(
     public async Task<SnapshotExport> HandleAsync(long snapshotId, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var projectId = await snapshots.FindProjectIdAsync(snapshotId, ct).ConfigureAwait(false);
@@ -67,8 +67,10 @@ public sealed class ExportSnapshotHandler(
         // ⛔ Чужий = неіснуючий, той самий 404, що й у рядків (BE-17, Q-239):
         // перелік чужих зрізів не показує взагалі, і відмова «є, але не твій»
         // розповідала б перебором ідентифікаторів те, що перелік приховує.
+        // ФВ-6.14: без права в проєкті зрізу — так само.
         if (projectId is not { } project
-            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read)
+            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read
+            || !profile.Has(Permission, project))
         {
             throw NotFound(snapshotId);
         }

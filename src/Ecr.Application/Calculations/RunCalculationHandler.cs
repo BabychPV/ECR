@@ -62,7 +62,7 @@ public sealed class RunCalculationHandler(
         int projectId, int? periodKey, long? approvalId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ Q-238: те саме, чого бракувало документному перерахунку до Q-174
@@ -75,6 +75,9 @@ public sealed class RunCalculationHandler(
         // `CanReadDocumentAsync`): той самий, що й для запиту погодження, і
         // заданий в ОДНОМУ місці (аудит S1, питання S13).
         RecalculationApprovalPolicy.RequireProjectGrant(profile, projectId, RecalculationApprovalPolicy.InitiatorGrant);
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
 
         var userId = currentUser.UserId
             ?? throw new AccessDeniedException(

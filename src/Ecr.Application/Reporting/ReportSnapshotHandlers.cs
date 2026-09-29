@@ -45,13 +45,16 @@ public sealed class ListReportSnapshotsHandler(
         int? projectId, int? periodKey, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
+
+        // ⛔ ФВ-6.14: лише проєкти, де є і грант, і право перегляду звітів.
+        var visible = VisibleProjects(profile).Where(id => profile.Has(Permission, id)).ToList();
 
         // ⚠ Позначку формату (`HashFormat`) перелік бере зі збереженої колонки й
         // нічого не перераховує: перерахунок читає всі рядки зрізу (рішення 2026-09-21).
         return await snapshots
-            .ListAsync(projectId, periodKey, VisibleProjects(profile), ct)
+            .ListAsync(projectId, periodKey, visible, ct)
             .ConfigureAwait(false);
     }
 
@@ -141,7 +144,7 @@ public sealed class BuildReportSnapshotHandler(
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
 
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⚠ Поріг — `Read`, той самий, що й у `CanReadDocumentAsync` і у
@@ -162,6 +165,9 @@ public sealed class BuildReportSnapshotHandler(
                     ["projectId"] = projectId.ToString(CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        PermissionCheck.RequireIn(profile, Permission, projectId);
 
         // ⚠ Версія резолвиться ТУТ, а не в задачі. Невідомий код звіту має
         // дати 404 одразу, а не через хвилину у вигляді задачі, яка
@@ -208,7 +214,7 @@ public sealed class VerifyReportSnapshotHandler(
     public async Task<SnapshotVerifyResponse> HandleAsync(long snapshotId, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, ListReportSnapshotsHandler.Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, ListReportSnapshotsHandler.Permission, ct)
             .ConfigureAwait(false);
 
         var projectId = await snapshots.FindProjectIdAsync(snapshotId, ct).ConfigureAwait(false);
@@ -218,7 +224,10 @@ public sealed class VerifyReportSnapshotHandler(
         // не твій» розповідала б перебором ідентифікаторів те, що перелік
         // приховує.
         if (projectId is not { } project
-            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read)
+            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read
+
+            // ⛔ ФВ-6.14: без права в проєкті зрізу — так само «немає».
+            || !profile.Has(ListReportSnapshotsHandler.Permission, project))
         {
             throw NotFound(snapshotId);
         }
@@ -314,14 +323,17 @@ public sealed class GetSnapshotRowsHandler(
     public async Task<SnapshotRowsPage> HandleAsync(long snapshotId, int? cursor, int? limit, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, ListReportSnapshotsHandler.Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, ListReportSnapshotsHandler.Permission, ct)
             .ConfigureAwait(false);
 
         var projectId = await snapshots.FindProjectIdAsync(snapshotId, ct).ConfigureAwait(false);
 
         // ⛔ Чужий = неіснуючий, той самий 404, що й у перевірки (BE-17, Q-239).
         if (projectId is not { } project
-            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read)
+            || profile.LevelFor(ResourceKind.Project, project) < GrantLevel.Read
+
+            // ⛔ ФВ-6.14: без права в проєкті зрізу — так само «немає».
+            || !profile.Has(ListReportSnapshotsHandler.Permission, project))
         {
             throw NotFound(snapshotId);
         }

@@ -222,7 +222,9 @@ public static class JobResultUrl
             || documentId is not { } doc
             || rawMessage is not { Length: 32 } exportId
             || !exportId.All(Uri.IsHexDigit)
-            || !profile.Has(Documents.DownloadExportHandler.Permission))
+            // ⚠ ФВ-6.14: лише підказка-посилання; саме завантаження
+            // (`DownloadExportHandler`) перевіряє право в проєкті документа.
+            || !profile.HasInAnyProject(Documents.DownloadExportHandler.Permission))
         {
             return null;
         }

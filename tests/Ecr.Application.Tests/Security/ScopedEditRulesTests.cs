@@ -119,7 +119,8 @@ public sealed class ScopedEditRulesTests
                 [projectId] = new(
                     grants ?? new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
                     denies ?? new HashSet<string>(StringComparer.Ordinal),
-                    new HashSet<int>(baseline.RoleIds) { ScopedRole }),
+                    new HashSet<int>(baseline.RoleIds) { ScopedRole },
+                    new HashSet<string>(StringComparer.Ordinal)),
             },
         };
     }

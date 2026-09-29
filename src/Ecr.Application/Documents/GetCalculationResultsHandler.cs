@@ -52,7 +52,7 @@ public sealed class GetCalculationResultsHandler(
     public async Task<IReadOnlyList<CalculationResultDto>> HandleAsync(
         long documentId, int periodKey, CancellationToken ct)
     {
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         // ⛔ І ГРАНТ на проєкт документа (Q-175, аудит фази 2). `Calculation.View`
         // (а не `Document.View`) відповідає на питання «чи бачить ця людина
@@ -62,7 +62,7 @@ public sealed class GetCalculationResultsHandler(
         // викидів чужого проєкту.
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var rows = await results.ReadCurrentAsync(documentId, periodKey, ct).ConfigureAwait(false);
         if (rows.Count == 0)

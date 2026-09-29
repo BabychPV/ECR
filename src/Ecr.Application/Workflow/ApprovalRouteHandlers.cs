@@ -33,8 +33,11 @@ public sealed class GetApprovalRouteHandler(
     /// <param name="ct">Токен скасування.</param>
     public async Task<ApprovalRouteDto> HandleAsync(int projectId, CancellationToken ct)
     {
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                                             .ConfigureAwait(false);
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        PermissionCheck.RequireIn(profile, Permission, projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.
@@ -89,8 +92,11 @@ public sealed class ReplaceApprovalRouteHandler(
     {
         ArgumentNullException.ThrowIfNull(roleIds);
 
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct)
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct)
                                             .ConfigureAwait(false);
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        PermissionCheck.RequireIn(profile, Permission, projectId);
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.

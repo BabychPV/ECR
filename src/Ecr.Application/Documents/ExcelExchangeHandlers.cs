@@ -37,7 +37,7 @@ public sealed class ExportDocumentHandler(
         ArgumentNullException.ThrowIfNull(options);
 
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var normalized = DocumentExportFormat.Normalize(format)
@@ -56,7 +56,7 @@ public sealed class ExportDocumentHandler(
         // другої перевірки право `Document.Export`, видане роллю `DataEntry`,
         // відкривало б будь-який проєкт.
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         // ⚠ Ідентифікатор файлу створюється ТУТ і йде в завданні. Ключ
         // сховища не може дорівнювати jobId: той повертає черга вже після
@@ -113,11 +113,11 @@ public sealed class PreviewImportHandler(
     public async Task<ImportPreview> HandleAsync(long documentId, Stream file, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         // ⚠ Синхронно, попри розмір файлу: користувач стоїть над результатом і
         // без нього не може зробити наступний крок. Перегляд у фоні означав би
@@ -176,11 +176,11 @@ public sealed class ApplyImportHandler(
         long documentId, string previewToken, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ B-08: невидимий документ — 404, як неіснуючий (`DocumentVisibility`).
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var pendingCount = await importer.CountPendingChangesAsync(previewToken, ct).ConfigureAwait(false);
 

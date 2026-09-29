@@ -26,13 +26,13 @@ public sealed class GetDocumentHeaderHandler(
     /// <exception cref="NotFoundException">Документа немає або він не видимий.</exception>
     public async Task<DocumentHeaderDto> HandleAsync(long documentId, CancellationToken ct)
     {
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         // ⛔ Той самий шлях, що ValidateDocumentHandler: право перевіряється
         // ТУТ, а не лише в контролері (A7-53) — шапка несе зміст документа.
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var templateVersionId = await documents.GetTemplateVersionIdAsync(documentId, ct).ConfigureAwait(false);
         var snapshot = await metadata.GetAsync(templateVersionId, ct).ConfigureAwait(false);

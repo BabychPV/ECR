@@ -83,7 +83,7 @@ public sealed class GetCellChangesHandler(
         // History в інспекторі комірки була б порожньою для всіх, крім
         // аудиторів: `Security.ViewAudit` має мізерна частка ролей.
         var single = filter.IsSingleCell;
-        if (!profile.Has(Permission) && !(single && profile.Has(CellHistoryPermission)))
+        if (!profile.Has(Permission) && !(single && profile.HasInAnyProject(CellHistoryPermission)))
         {
             // ⚠ Називається право, якого бракує САМЕ ДЛЯ ЦЬОГО запиту: сказати
             // власникові `Document.View` «потрібне Security.ViewAudit» на
@@ -180,6 +180,21 @@ public sealed class GetCellChangesHandler(
                         ["messageKey"] = "err.ECR-AUTH-0403.noDocumentAccess",
                         ["documentId"] = id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         ["reason"] = read.Reason.ToString(),
+                    });
+            }
+
+            // ⛔ ФВ-6.14: історія комірки за `Document.View` (а не за глобальним
+            // `Security.ViewAudit`) — лише в проєкті, де це право є.
+            if (!profile.Has(Permission)
+                && await access.DocumentProjectIdAsync(id, ct).ConfigureAwait(false) is { } projectId
+                && !profile.Has(CellHistoryPermission, projectId))
+            {
+                throw new AccessDeniedException(
+                    "ECR-AUTH-0403", $"Потрібне право {CellHistoryPermission}.",
+                    new Dictionary<string, object?>
+                    {
+                        ["messageKey"] = "err.ECR-AUTH-0403.permission",
+                        ["permission"] = CellHistoryPermission,
                     });
             }
         }

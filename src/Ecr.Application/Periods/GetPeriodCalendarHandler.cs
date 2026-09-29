@@ -29,7 +29,7 @@ public sealed class GetPeriodCalendarHandler(
         // ⛔ Право перевіряється ТУТ (`A7-53`). До цього ендпоінт мав лише
         // `[Authorize]`, тобто оголошене контрактом право не перевіряв ніхто.
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, "Document.View", ct)
+            .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
         // ⛔ `ECR-PRJ-0404`: суб'єкт відмови — проєкт, а старий `ECR-PRD-0422`
@@ -61,6 +61,9 @@ public sealed class GetPeriodCalendarHandler(
                     ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, "Document.View", projectId);
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(project.TimeZoneId);
 

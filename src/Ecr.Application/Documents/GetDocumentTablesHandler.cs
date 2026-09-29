@@ -39,7 +39,7 @@ public sealed class GetDocumentTablesHandler(
         long documentId, int periodKey, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ І ГРАНТ на проєкт (Q-172, аудит фази 2). Право саме по собі каже
@@ -50,7 +50,7 @@ public sealed class GetDocumentTablesHandler(
         // ще не відкривали, — власним записом).
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, Permission, ct).ConfigureAwait(false);
 
         var key = PeriodKey.Parse(periodKey);
 

@@ -47,6 +47,42 @@ public static class DocumentVisibility
         }
     }
 
+    /// <summary>
+    /// Вимагає видимості документа І проєктного права в його проєкті
+    /// (ФВ-6.14).
+    /// </summary>
+    /// <param name="access">Служба рішень доступу.</param>
+    /// <param name="profile">Профіль користувача.</param>
+    /// <param name="documentId">Документ.</param>
+    /// <param name="permission">Проєктне право дії.</param>
+    /// <param name="ct">Токен скасування.</param>
+    /// <exception cref="NotFoundException"><c>ECR-DOC-0404</c> — документа немає або він невидимий.</exception>
+    /// <exception cref="AccessDeniedException"><c>ECR-AUTH-0403</c> — права в проєкті документа немає.</exception>
+    /// <remarks>
+    /// ⚠ Видимий документ без права — <c>403</c>, як і було для права з
+    /// ролі без області: приховувати тут нічого, документ людина бачить.
+    /// Проєкт питається лише тоді, коли права немає глобально, — власник
+    /// ролі без області не платить зайвим запитом.
+    /// </remarks>
+    public static async Task RequireVisibleAsync(
+        IAccessDecisionService access, AccessProfile profile, long documentId, string permission, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        await RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+
+        if (profile.Has(permission))
+        {
+            return;
+        }
+
+        var projectId = await access.DocumentProjectIdAsync(documentId, ct).ConfigureAwait(false)
+                        ?? throw NotFound(documentId);
+
+        PermissionCheck.RequireIn(profile, permission, projectId);
+    }
+
     /// <summary>Відповідь «документа немає» — однакова для відсутнього й невидимого.</summary>
     /// <param name="documentId">Документ.</param>
     public static NotFoundException NotFound(long documentId)

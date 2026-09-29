@@ -37,7 +37,7 @@ public sealed class SetCurrentPeriodHandler(
     public async Task HandleAsync(int projectId, int? pinnedPeriodId, string? reason, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         var userId = currentUser.UserId
@@ -74,6 +74,9 @@ public sealed class SetCurrentPeriodHandler(
                     ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
 
         var now = clock.UtcNow;
         var before = project.CurrentPeriodId;

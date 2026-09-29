@@ -217,10 +217,13 @@ public sealed class RecalculationApprovalHandlers(
     private async Task<int> RequireAsync(int projectId, GrantLevel level, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, RunCalculationHandler.Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, RunCalculationHandler.Permission, ct)
             .ConfigureAwait(false);
 
         RecalculationApprovalPolicy.RequireProjectGrant(profile, projectId, level);
+
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        PermissionCheck.RequireIn(profile, RunCalculationHandler.Permission, projectId);
         return currentUser.UserId!.Value;
     }
 }

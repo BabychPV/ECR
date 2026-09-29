@@ -39,7 +39,7 @@ public sealed class DeleteDocumentHandler(
     /// <exception cref="DomainException"><c>ECR-DOC-0409</c> — документ не чернетка.</exception>
     public async Task HandleAsync(long documentId, CancellationToken ct)
     {
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(
@@ -58,6 +58,9 @@ public sealed class DeleteDocumentHandler(
                     ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ ФВ-6.14: право — у проєкті ЦЬОГО документа.
+        PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
 
         if (profile.LevelFor(ResourceKind.Project, document.ProjectId) < GrantLevel.Write)
         {

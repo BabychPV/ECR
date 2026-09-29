@@ -54,7 +54,9 @@ public sealed partial class ReopenPeriodHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        // ⛔ ФВ-6.14: вхід — «хоч у якомусь проєкті»; у проєкті періоду —
+        // `RequireIn` нижче, щойно проєкт відомий.
+        if (!profile.HasInAnyProject(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -135,6 +137,8 @@ public sealed partial class ReopenPeriodHandler(
                         ["projectId"] = project.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     });
             }
+
+            PermissionCheck.RequireIn(profile, Permission, project.Id);
 
             // Архівований проєкт — кінцевий стан: відкривати в ньому нема чого,
             // дані вже поїхали в архівні партиції (ФВ-1.10).

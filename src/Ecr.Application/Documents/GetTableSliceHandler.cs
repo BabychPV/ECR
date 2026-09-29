@@ -62,7 +62,7 @@ public sealed class GetTableSliceHandler(
         // ⛔ Право перевіряється ТУТ (`A7-53`). Контролер будував профіль і
         // передавав його далі, не питаючи нічого: `[Authorize]` пропускав
         // будь-кого, хто увійшов.
-        if (!profile.Has("Document.View"))
+        if (!profile.HasInAnyProject("Document.View"))
         {
             throw new Errors.AccessDeniedException(
                 "ECR-AUTH-0403", "Потрібне право Document.View.",
@@ -80,7 +80,8 @@ public sealed class GetTableSliceHandler(
         // існувала і не мала жодного виклику.
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        // ФВ-6.14: і право — у проєкті документа.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
         var instance = await rowStore.ResolveTableInstanceAsync(tableInstanceId, ct).ConfigureAwait(false);
 

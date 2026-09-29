@@ -109,8 +109,40 @@ public sealed class AccessProfile
     /// <summary>Хто симулює. Автор в аудиті — саме він, не суб'єкт.</summary>
     public int? SimulationActorUserId { get; init; }
 
-    /// <summary>Чи має користувач функціональне право.</summary>
+    /// <summary>
+    /// Чи має користувач функціональне право БЕЗ огляду на проєкт — лише з
+    /// ролей без області дії.
+    /// </summary>
+    /// <remarks>
+    /// ⛔ Для проєктного права (усе, чого немає в
+    /// <see cref="Domain.Entities.Security.PermissionScopes.Global"/>) там, де
+    /// проєкт відомий, — <see cref="Has(string, int)"/>. Сторож
+    /// <c>ProjectPermissionCheckTests</c> (IL) тримає це правило.
+    /// </remarks>
     public bool Has(string permissionCode) => Permissions.Contains(permissionCode);
+
+    /// <summary>
+    /// Чи має користувач функціональне право в проєкті (ФВ-6.14): з ролей
+    /// без області — скрізь, з ролей з областю — лише в її проєктах.
+    /// </summary>
+    /// <param name="permissionCode">Код права.</param>
+    /// <param name="projectId">Проєкт, у якому діє перевірка.</param>
+    public bool Has(string permissionCode, int projectId)
+        => Permissions.Contains(permissionCode)
+           || (Scoped.TryGetValue(projectId, out var scoped) && scoped.Permissions.Contains(permissionCode));
+
+    /// <summary>
+    /// Чи є право бодай у якомусь проєкті — вхідна перевірка ПЕРЕЛІКІВ через
+    /// проєкти.
+    /// </summary>
+    /// <param name="permissionCode">Код права.</param>
+    /// <remarks>
+    /// ⛔ Лише як вхід: далі кожен елемент переліку фільтрується через
+    /// <see cref="Has(string, int)"/>. Сама по собі дала б оператору проєкту A
+    /// бачити B. Сторож вимагає реєструвати кожне використання.
+    /// </remarks>
+    public bool HasInAnyProject(string permissionCode)
+        => Permissions.Contains(permissionCode) || Scoped.Values.Any(s => s.Permissions.Contains(permissionCode));
 
     /// <summary>Ефективний рівень гранта на ресурс з урахуванням заборон.</summary>
     public GrantLevel LevelFor(ResourceKind kind, int resourceId)
@@ -143,7 +175,12 @@ public sealed class AccessProfile
 /// <param name="Grants">Гранти на аркуш/таблицю/колонку: ключ <c>"{ResourceKind}:{ResourceId}"</c>.</param>
 /// <param name="Denies">Заборони на аркуш/таблицю/колонку.</param>
 /// <param name="RoleIds">Ролі, чинні в проєкті: без області плюс ті, чия область його містить.</param>
+/// <param name="Permissions">
+/// Проєктні функціональні права ролей з областю, що містить цей проєкт;
+/// глобальні (<see cref="Domain.Entities.Security.PermissionScopes.Global"/>) сюди не потрапляють.
+/// </param>
 public sealed record ScopedProjectAccess(
     IReadOnlyDictionary<string, GrantLevel> Grants,
     IReadOnlySet<string> Denies,
-    IReadOnlySet<int> RoleIds);
+    IReadOnlySet<int> RoleIds,
+    IReadOnlySet<string> Permissions);

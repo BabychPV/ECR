@@ -5,6 +5,7 @@ using Ecr.Domain.Abstractions;
 using Ecr.Domain.Enums;
 using Ecr.Domain.Entities.Configuration;
 using Ecr.Domain.Entities.Documents;
+using Ecr.Domain.Entities.Security;
 using Ecr.Domain.ValueObjects;
 using Ecr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -113,6 +114,7 @@ public sealed class AccessDecisionService(
                 {
                     Grants = new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
                     RoleIds = new HashSet<int>(),
+                    Permissions = new HashSet<string>(StringComparer.Ordinal),
                 }),
             IsIntegrationWriter = true,
         };
@@ -312,22 +314,29 @@ public sealed class AccessDecisionService(
         }
 
         var roleIds = unscopedRoleIds.Concat(scopedProjects.Keys).Distinct().ToList();
-        var permissionRoleIds = unscopedRoleIds.ToList();
 
-        // ⛔ Функціональні права — ЛИШЕ з ролей без області. Право на кшталт
-        // `Security.ManageUsers` не має проєкту, і роль «лише в проєкті A»
-        // дала б його глобально. Обмежити функціональне право проєктом
-        // можна лише в точці перевірки, а там проєкту здебільшого немає —
-        // тому закрито в безпечний бік.
-        var permissions = permissionRoleIds.Count == 0
+        var rolePermissions = roleIds.Count == 0
             ? []
             : await db.RolePermissions
                 .AsNoTracking()
-                .Where(rp => permissionRoleIds.Contains(rp.RoleId))
-                .Select(rp => rp.PermissionCode)
-                .Distinct()
+                .Where(rp => roleIds.Contains(rp.RoleId))
+                .Select(rp => new { rp.RoleId, rp.PermissionCode })
                 .ToListAsync(ct)
                 .ConfigureAwait(false);
+
+        // ⛔ Функціональні права ролей без області — глобальні (`Has(code)`).
+        // Ролей з областю — лише в її проєктах (`Has(code, projectId)`) і лише
+        // ПРОЄКТНІ: право без проєкту (`PermissionScopes.Global` —
+        // `Security.*`, `System.*`, шаблони, довідники…) роль «лише в проєкті
+        // A» не дає ніде — інакше вона дала б його всій системі.
+        var permissions = rolePermissions
+            .Where(rp => unscopedRoleIds.Contains(rp.RoleId))
+            .Select(rp => rp.PermissionCode)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var scopedPermissions = rolePermissions
+            .Where(rp => scopedProjects.ContainsKey(rp.RoleId) && !PermissionScopes.IsGlobal(rp.PermissionCode))
+            .ToLookup(rp => rp.RoleId, rp => rp.PermissionCode);
 
         var rows = roleIds.Count == 0
             ? []
@@ -392,15 +401,18 @@ public sealed class AccessDecisionService(
         var scoped = new Dictionary<int, ScopedProjectAccess>();
         foreach (var projectId in scopedProjects.Values.SelectMany(p => p).Distinct())
         {
+            var scopedHere = scopedProjects.Where(p => p.Value.Contains(projectId)).Select(p => p.Key).ToList();
             var rolesHere = unscopedRoleIds.ToHashSet();
-            rolesHere.UnionWith(scopedProjects.Where(p => p.Value.Contains(projectId)).Select(p => p.Key));
+            rolesHere.UnionWith(scopedHere);
+            var permissionsHere = scopedHere.SelectMany(r => scopedPermissions[r]).ToHashSet(StringComparer.Ordinal);
 
             scoped[projectId] = layers.TryGetValue(projectId, out var layer)
-                ? new ScopedProjectAccess(layer.Grants, layer.Denies, rolesHere)
+                ? new ScopedProjectAccess(layer.Grants, layer.Denies, rolesHere, permissionsHere)
                 : new ScopedProjectAccess(
                     new Dictionary<string, GrantLevel>(StringComparer.Ordinal),
                     new HashSet<string>(StringComparer.Ordinal),
-                    rolesHere);
+                    rolesHere,
+                    permissionsHere);
         }
 
         // ⛔ Успадкування Project → Sheet → Table → Column тут НЕ розгортається
@@ -1593,6 +1605,14 @@ public sealed class AccessDecisionService(
     }
 
     /// <summary>Проєкт документа.</summary>
+    /// <inheritdoc />
+    public Task<int?> DocumentProjectIdAsync(long documentId, CancellationToken ct)
+        => db.Documents
+            .AsNoTracking()
+            .Where(d => d.Id == documentId)
+            .Select(d => (int?)d.ProjectId)
+            .FirstOrDefaultAsync(ct);
+
     private async Task<int> ProjectIdAsync(long documentId, CancellationToken ct)
         => await db.Documents
             .AsNoTracking()

@@ -50,7 +50,7 @@ public sealed class CreateDocumentHandler(
         ArgumentNullException.ThrowIfNull(sheetDefIds);
 
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ І ГРАНТ на проєкт (Q-176, аудит фази 2). `Document.Create` каже
@@ -69,6 +69,9 @@ public sealed class CreateDocumentHandler(
                     ["projectId"] = projectId.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 });
         }
+
+        // ⛔ ФВ-6.14: і право — у ЦЬОМУ проєкті, не «хоч десь».
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
 
         var userId = currentUser.UserId
                      ?? throw new AccessDeniedException(

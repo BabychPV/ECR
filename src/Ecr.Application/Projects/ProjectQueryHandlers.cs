@@ -48,7 +48,7 @@ public sealed class ListProjectsHandler(
                          new Dictionary<string, object?> { ["messageKey"] = "err.ECR-AUTH-0401.signInRequired" });
 
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
-        if (!profile.Has(Permission))
+        if (!profile.HasInAnyProject(Permission))
         {
             throw new AccessDeniedException(
                 "ECR-AUTH-0403", $"Потрібне право {Permission}.",
@@ -86,6 +86,10 @@ public sealed class ListProjectsHandler(
             .Select(ProjectIdOf)
             .OfType<int>()
             .Where(id => profile.LevelFor(ResourceKind.Project, id) >= GrantLevel.Read)
+
+            // ⛔ ФВ-6.14: і право перегляду — в самому проєкті (оператор
+            // з областю «A» бачить у переліку лише A).
+            .Where(id => profile.Has(Permission, id))
             .ToList();
 
         return await projects.ListAsync(page, visibleIds, ct).ConfigureAwait(false);
@@ -492,7 +496,7 @@ public sealed class ActivateProjectHandler(
     public async Task HandleAsync(int projectId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⛔ Родина PRJ, а не ROW (`P-25`, рядок 2). `ROW` — це рядок ТАБЛИЦІ
@@ -517,6 +521,9 @@ public sealed class ActivateProjectHandler(
         // право каже «ця людина взагалі керує проєктами», грант — «саме
         // цим». Той самий патерн, що вже застосований до `CreateDocumentHandler`
         // (`Q-176`) і сусідів.
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
+
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
@@ -693,7 +700,7 @@ public sealed class ArchiveProjectHandler(
     public async Task HandleAsync(int projectId, CancellationToken ct)
     {
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
@@ -709,6 +716,9 @@ public sealed class ArchiveProjectHandler(
 
         // ⛔ Q-179 (аудит фази 2, авторизація): грант на КОНКРЕТНИЙ проєкт,
         // не лише глобальне `Project.Manage` — рішення людини.
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
+
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(
@@ -813,7 +823,7 @@ public sealed class ChangeProjectTimeZoneHandler(
     public async Task HandleAsync(int projectId, string timeZoneId, CancellationToken ct)
     {
         var profile = await PermissionCheck
-            .RequireAsync(access, currentUser, Permission, ct)
+            .RequireInAnyProjectAsync(access, currentUser, Permission, ct)
             .ConfigureAwait(false);
 
         // ⚠ Існування — ДО гранта (див. пояснення в `ActivateProjectHandler`):
@@ -830,6 +840,9 @@ public sealed class ChangeProjectTimeZoneHandler(
         // ⛔ Той самий патерн гранта на КОНКРЕТНИЙ проєкт, що й
         // Activate/Archive/Clone (Q-179): глобальне `Project.Manage` каже «ця
         // людина взагалі керує проєктами», грант — «саме цим».
+        // ⛔ ФВ-6.14: право — у ЦЬОМУ проєкті.
+        Security.PermissionCheck.RequireIn(profile, Permission, projectId);
+
         if (profile.LevelFor(ResourceKind.Project, projectId) < GrantLevel.Manage)
         {
             throw new AccessDeniedException(

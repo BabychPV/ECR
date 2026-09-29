@@ -9,7 +9,7 @@ namespace Ecr.Application.Search;
 /// <summary>Пошук даних для командної палітри (BE-19): документи, шаблони, довідники.</summary>
 /// <remarks>
 /// ⛔ Видимість — ТІ САМІ перевірки, що й у переліків: <c>Document.View</c> +
-/// гранти проєкту (<see cref="Documents.ListDocumentsHandler.ReadableProjects"/>),
+/// гранти проєкту (<c>ListDocumentsHandler.ReadableProjects</c>, ФВ-6.14 — лише проєкти з правом),
 /// <c>Template.View</c>, <c>Registry.View</c>. Немає права на тип — тип просто
 /// не шукається (не 403): палітра одна для всіх ролей.
 /// </remarks>
@@ -47,8 +47,8 @@ public sealed class SearchHandler(ISearchStore store, IAccessDecisionService acc
         var profile = await access.BuildProfileAsync(userId, ct).ConfigureAwait(false);
 
         var scope = new SearchScope(
-            profile.Has(Documents.ListDocumentsHandler.Permission)
-                ? Documents.ListDocumentsHandler.ReadableProjects(profile)
+            profile.HasInAnyProject(Documents.ListDocumentsHandler.Permission)
+                ? Documents.ListDocumentsHandler.ReadableProjects(profile, Documents.ListDocumentsHandler.Permission)
                 : null,
             profile.Has(Templates.ListTemplatesHandler.Permission),
             profile.Has(Registries.ListRegistriesHandler.Permission));

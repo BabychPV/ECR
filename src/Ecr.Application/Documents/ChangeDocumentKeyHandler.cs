@@ -49,7 +49,7 @@ public sealed class ChangeDocumentKeyHandler(
     public async Task HandleAsync(
         long documentId, string? newKey, string? expectedKey, string? reason, CancellationToken ct)
     {
-        var profile = await PermissionCheck.RequireAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
+        var profile = await PermissionCheck.RequireInAnyProjectAsync(access, currentUser, Permission, ct).ConfigureAwait(false);
 
         var key = newKey?.Trim() ?? string.Empty;
         var why = reason?.Trim() ?? string.Empty;
@@ -85,6 +85,9 @@ public sealed class ChangeDocumentKeyHandler(
                         ["documentId"] = documentId.ToString(CultureInfo.InvariantCulture),
                     });
             }
+
+            // ⛔ ФВ-6.14: право — у проєкті ЦЬОГО документа.
+            PermissionCheck.RequireIn(profile, Permission, document.ProjectId);
 
             if (profile.LevelFor(ResourceKind.Project, document.ProjectId) < GrantLevel.Write)
             {

@@ -35,12 +35,13 @@ public sealed class ValidateDocumentHandler(
         // і повертає повідомлення з підписами рядків і колонок — тобто його
         // зміст. До цього її міг запустити будь-хто, хто увійшов.
         var profile = await Security.PermissionCheck
-            .RequireAsync(access, currentUser, "Document.View", ct)
+            .RequireInAnyProjectAsync(access, currentUser, "Document.View", ct)
             .ConfigureAwait(false);
 
         // ⛔ B-08: невидимий документ — 404, як і `GET /documents/{id}`, а не 403
         // «NoGrant»: різниця відповідей сама розкривала б, що документ існує.
-        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, ct).ConfigureAwait(false);
+        // ФВ-6.14: і право — у проєкті документа.
+        await DocumentVisibility.RequireVisibleAsync(access, profile, documentId, "Document.View", ct).ConfigureAwait(false);
 
         // ⚠ Екземпляри таблиць беруться ОДНИМ запитом, а не по аркушах:
         // бюджет — 3 с p95 на весь документ, і похід у базу на кожну з
