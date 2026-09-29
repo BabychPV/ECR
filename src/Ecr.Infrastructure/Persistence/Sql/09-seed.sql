@@ -4188,6 +4188,12 @@ USING (VALUES
     -- `AbandonedWorkSweeper.AbandonedCollectionRunReason`: прогін, який ніхто не закрив.
     (N'jobs.collectionAbandoned',                 N'en', N'The run was not closed: the job was cancelled or the process stopped before the run recorded its result.', 1),
     -- COLL:collector-msg ── кінець секції ──
+    -- COLL:jobqueue ── Черга задач у базі (MI-02, D-208, `DbJobQueue`) ──
+    -- Ретрай задачі поглинула Queued позаду на ту саму ціль (вона вже несе актуальний стан цілі).
+    (N'jobs.absorbedBy',                        N'en', N'Superseded by job {jobId}, queued for the same target.', 1),
+    -- Отруйна задача: оренду втрачено {reclaims} разів поспіль — процес-виконавець щоразу зникав.
+    (N'jobs.leaseLostTooOften',                 N'en', N'Stopped: the worker lost this job {reclaims} times in a row (its process stopped each time). Restart the job after checking the logs.', 1),
+    -- COLL:jobqueue ── кінець секції ──
     (N'health.sources.notRegistered',           N'en', N'The collection store is not registered in the container.', 1),
     (N'health.sources.noneActive',              N'en', N'No active collection sources.', 1),
     (N'health.sources.failedCount',             N'en', N'Sources with a failed last run: {count}.', 1),
