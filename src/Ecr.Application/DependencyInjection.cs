@@ -242,6 +242,9 @@ public static class DependencyInjection
         services.AddScoped<Registries.GetRegistryHistoryHandler>();
         services.AddScoped<Registries.GetRegistryUsageHandler>();
         services.AddScoped<Registries.ImportRegistryEntriesHandler>();
+        services.AddScoped<Registries.ListRegistryExternalKeysHandler>(); // FEATURE-REGISTRY-SYNC S2
+        services.AddScoped<Registries.BindRegistryExternalKeyHandler>();
+        services.AddScoped<Registries.UnbindRegistryExternalKeyHandler>();
 
         // ── FEATURE-REGISTRY-TABLES: append-only блоки треків (RT-01) ──
         // Крок дописує реєстрації ЛИШЕ під свій маркер; власники —
