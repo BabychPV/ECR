@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi, beforeAll } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DocumentHeaderPanel } from '@/features/documents/DocumentHeaderPanel';
 import { showDone } from '@/shared/ui/notify';
+import { flushUnsaved, hasUnsavedChanges, unsavedCount } from '@/shared/ui/unsavedSources';
 import { testTheme } from '@/test/render';
 
 /**
@@ -642,6 +643,171 @@ describe('DocumentHeaderPanel: Lookup-поле — picker за довідник�
     // надсилати) — цей рядок почервоніє: query-параметр зникне або
     // з'явиться для нетемпорального тесту вище.
     expect(request?.query).toBe(expected);
+  });
+});
+
+/**
+ * ⛔ Аудит U13: змінена шапка — джерело незбережених змін для `UnsavedGuard`.
+ * Доти перехід у меню зі зміненими полями шапки губив їх мовчки: сторож знав
+ * лише сітку й гранти.
+ */
+describe('DocumentHeaderPanel: незбережені зміни (U13)', () => {
+  function twoFields(): HeaderField[] {
+    return [
+      field({ code: 'A', dataType: 'String', value: 'стара', label: { values: { en: 'A' } } }),
+      field({ code: 'B', dataType: 'String', value: 'інша', label: { values: { en: 'B' } } }),
+    ];
+  }
+
+  it('зміна поля реєструє джерело; лічильник — кількість змінених полів', async () => {
+    show({ fields: twoFields() });
+
+    const a = await screen.findByLabelText('A');
+    expect(hasUnsavedChanges()).toBe(false);
+
+    fireEvent.change(a, { target: { value: 'нова' } });
+
+    // ⛔ Мутаційний доказ: прибери `registerUnsavedSource` із панелі — тут червоне.
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+    expect(unsavedCount()).toBe(1);
+
+    fireEvent.change(await screen.findByLabelText('B'), { target: { value: 'ще' } });
+    await waitFor(() => expect(unsavedCount()).toBe(2));
+
+    // Повернення значення назад — поле більше не змінене.
+    fireEvent.change(a, { target: { value: 'стара' } });
+    await waitFor(() => expect(unsavedCount()).toBe(1));
+  });
+
+  it('flush (вихід через UnsavedGuard) зберігає змінені поля і знімає джерело', async () => {
+    show({ fields: twoFields() });
+
+    fireEvent.change(await screen.findByLabelText('A'), { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    await expect(flushUnsaved(5_000)).resolves.toBe(true);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'A', isEmpty: false, value: 'нова' }],
+      baseVersion: HeaderVersion,
+    });
+
+    // ⛔ Мутаційний доказ: не знімати реєстрацію після збереження — тут червоне.
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(false));
+  });
+
+  it('flush, який сервер відхилив (422 на невалідне поле), — false, чернетка лишається', async () => {
+    show({
+      fields: [field({ code: 'QTY', dataType: 'Int', value: 5 })],
+      patchResponse: {
+        status: 422,
+        body: { title: 'Unprocessable Entity', status: 422, errorCode: 'ECR-HDR-0422', detail: 'x' },
+      },
+    });
+
+    const input = await screen.findByLabelText('Label');
+    fireEvent.change(input, { target: { value: 'abc' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    // Відмова — `false`: сторож покаже діалог, а не піде мовчки.
+    await expect(flushUnsaved(5_000)).resolves.toBe(false);
+    expect(sent).toHaveLength(1);
+    expect(hasUnsavedChanges()).toBe(true);
+    expect((input as HTMLInputElement).value).toBe('abc');
+  });
+
+  it('збереження кнопкою знімає джерело', async () => {
+    show({ fields: twoFields() });
+
+    fireEvent.change(await screen.findByLabelText('A'), { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(false));
+  });
+
+  it('скасування знімає джерело і повертає значення сервера', async () => {
+    show({ fields: twoFields() });
+
+    const a = await screen.findByLabelText('A');
+    fireEvent.change(a, { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.cancel⟧' }));
+
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(false));
+    expect((a as HTMLInputElement).value).toBe('стара');
+  });
+
+  it('розмонтування знімає джерело', async () => {
+    show({ fields: twoFields() });
+
+    fireEvent.change(await screen.findByLabelText('A'), { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    cleanup();
+
+    expect(hasUnsavedChanges()).toBe(false);
+  });
+
+  it('закриття вкладки зі зміненою шапкою — рідне питання браузера; без змін — ні', async () => {
+    show({ fields: twoFields() });
+
+    const a = await screen.findByLabelText('A');
+    const clean = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(clean);
+    expect(clean.defaultPrevented).toBe(false);
+
+    fireEvent.change(a, { target: { value: 'нова' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    const dirtyEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+  });
+
+  it('перезапит НЕ затирає змінену чернетку, і збереження несе версію, на якій правили', async () => {
+    const fields = twoFields();
+    const client = show({ fields });
+
+    const a = await screen.findByLabelText('A');
+    fireEvent.change(a, { target: { value: 'моя' } });
+    await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
+
+    // Хтось інший змінив поле — фоновий перезапит приносить нове значення.
+    fields[0] = { ...fields[0]!, value: 'чужа' };
+    await client.invalidateQueries({ queryKey: ['document-header', DocumentId] });
+    await waitFor(() => expect(headerGets.count).toBe(2));
+
+    // ⛔ Мутаційний доказ: наповнювати чернетку КОЖНОЮ відповіддю — тут червоне.
+    expect((a as HTMLInputElement).value).toBe('моя');
+    expect(hasUnsavedChanges()).toBe(true);
+
+    fireEvent.click(await screen.findByRole('button', { name: '⟦common.save⟧' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toEqual({
+      fields: [{ code: 'A', isEmpty: false, value: 'моя' }],
+      baseVersion: HeaderVersion,
+    });
+  });
+
+  it('незмінена чернетка йде за перезапитом і не вважається зміненою', async () => {
+    const fields = twoFields();
+    const client = show({ fields });
+
+    const a = await screen.findByLabelText('A');
+
+    fields[0] = { ...fields[0]!, value: 'чужа' };
+    await client.invalidateQueries({ queryKey: ['document-header', DocumentId] });
+
+    // ⛔ Доти поле лишалось «стара» і ставало «зміненим» проти нової відповіді —
+    // «Зберегти» мовчки повернуло б чуже значення назад.
+    await waitFor(() => expect((a as HTMLInputElement).value).toBe('чужа'));
+    expect(hasUnsavedChanges()).toBe(false);
+    expect((await screen.findByRole('button', { name: '⟦common.save⟧' })).hasAttribute('disabled')).toBe(true);
   });
 });
 

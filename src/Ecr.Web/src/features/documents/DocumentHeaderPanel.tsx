@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Button, Checkbox, Group, Select, Stack, TextInput, Title } from '@mantine/core';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, EcrApiError } from '@/api/client';
@@ -13,6 +13,7 @@ import { localized } from '@/shared/i18n/localized';
 import { t } from '@/shared/i18n';
 import { ErrorAlert } from '@/shared/ui/ErrorAlert';
 import { showDone } from '@/shared/ui/notify';
+import { registerUnsavedSource } from '@/shared/ui/unsavedSources';
 
 /**
  * Шапка документа: поля версії шаблону разом із поточними значеннями
@@ -186,6 +187,44 @@ function fieldsOf(dto: DocumentHeaderDto | null | undefined): readonly DocumentH
   return dto !== null && dto !== undefined && Array.isArray(dto.fields) ? dto.fields : [];
 }
 
+/** Ідентифікатор шапки в реєстрі джерел незбережених змін (`unsavedSources.ts`). */
+const HeaderUnsavedSourceId = 'document-header';
+
+/**
+ * Зберегти змінену шапку при виході (`UnsavedGuard`) і дочекатися результату.
+ *
+ * ⚠ Та сама семантика, що `flush` сітки (`autosave.ts`): `true` — нічого
+ * незбереженого не лишилось; `false` — лишилось (відмова сервера, зокрема
+ * `422` на невалідне поле, `409`, або не встигли за `timeoutMs`). На `false`
+ * сторож показує діалог «є незбережені зміни», а не йде мовчки.
+ */
+async function flushHeaderDraft(
+  current: {
+    readonly dirtyPatch: readonly PatchHeaderField[];
+    readonly saveAsync: (fields: readonly PatchHeaderField[]) => Promise<DocumentHeaderDto>;
+  },
+  timeoutMs: number,
+): Promise<boolean> {
+  if (current.dirtyPatch.length === 0) return true;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      current.saveAsync(current.dirtyPatch).then(
+        () => true,
+        () => false,
+      ),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface DocumentHeaderPanelProps {
   /** Документ, чию шапку показуємо. */
   readonly documentId: number;
@@ -355,25 +394,53 @@ export function DocumentHeaderPanel({
   });
 
   const [draft, setDraft] = useState<Draft>({});
-  const [loadedFor, setLoadedFor] = useState<number | null>(null);
+
+  /*
+   * ⛔ Аудит U13: точка відліку чернетки — ТА відповідь сервера, на якій
+   * людина почала правити (разом із її `version`), а не будь-яка остання.
+   * Доти чернетка наповнювалась лише раз на документ, а «змінено» рахувалось
+   * проти ОСТАННЬОЇ відповіді: фоновий перезапит (фокус вікна) із чужою
+   * правкою робив непорушене поле «зміненим» — і «Зберегти» мовчки повертало
+   * старе значення, ще й із НОВОЮ `baseVersion`, тобто без `409`.
+   */
+  const [seed, setSeed] = useState<{ documentId: number; dto: DocumentHeaderDto } | null>(null);
+  const seedFields = seed !== null && seed.documentId === documentId ? fieldsOf(seed.dto) : [];
+
+  const dirty = seedFields.filter(
+    (field) => !sameHeaderValue(effectiveValueOf(field, draft[field.code]), field.value),
+  );
 
   // ⚠ Наповнюється при зміні відповіді, а не в ефекті (той самий прийом, що
   // `RegistryEntryEditor.tsx`): ефект дав би зайвий рендер із порожньою
   // чернеткою, і поля на мить показали б порожні значення.
   //
+  // ⛔ Змінену чернетку відповідь перезапиту НЕ перезаписує (той самий
+  // принцип, що `GrantsPanel.tsx`, U6): інакше незбережене зникало б мовчки.
+  // Незмінена — іде за сервером, щоб показувати чинні значення.
+  //
   // ⛔ `fieldsOf` (не сире `header.data.fields`) — захист від форми відповіді,
   // якої компонент не очікував: коментар над `fieldsOf` описує, чому саме.
-  if (header.data !== undefined && loadedFor !== documentId) {
-    setLoadedFor(documentId);
+  if (
+    header.data !== undefined &&
+    (seed === null ||
+      seed.documentId !== documentId ||
+      (seed.dto !== header.data && dirty.length === 0))
+  ) {
+    setSeed({ documentId, dto: header.data });
     setDraft(draftOf(fieldsOf(header.data)));
+  }
+
+  function adopt(dto: DocumentHeaderDto): void {
+    setSeed({ documentId, dto });
+    setDraft(draftOf(fieldsOf(dto)));
   }
 
   const save = useMutation({
     mutationFn: (fields: readonly PatchHeaderField[]) =>
-      patchDocumentHeader(documentId, fields, header.data?.version ?? ''),
+      patchDocumentHeader(documentId, fields, seed?.dto.version ?? header.data?.version ?? ''),
     onSuccess: (result) => {
       queryClient.setQueryData(['document-header', documentId], result);
-      setDraft(draftOf(fieldsOf(result)));
+      adopt(result);
       showDone(t('document.header.saved'));
     },
     onError: async (error) => {
@@ -382,10 +449,50 @@ export function DocumentHeaderPanel({
       // «Зберегти» з новою версією перезаписало б те, чого людина не бачила.
       if (error instanceof EcrApiError && error.problem.status === 409) {
         const fresh = await header.refetch();
-        if (fresh.data !== undefined) setDraft(draftOf(fieldsOf(fresh.data)));
+        if (fresh.data !== undefined) adopt(fresh.data);
       }
     },
   });
+
+  const dirtyPatch = dirty.map((field) => patchFieldOf(field, effectiveValueOf(field, draft[field.code])));
+
+  // ⚠ Знімок для `UnsavedGuard`: він читає стан у момент виклику (перехід,
+  // закриття вкладки), а не той, що був при реєстрації.
+  const latest = useRef({ dirtyPatch, saveAsync: save.mutateAsync });
+  useEffect(() => {
+    latest.current = { dirtyPatch, saveAsync: save.mutateAsync };
+  });
+
+  /*
+   * ⛔ Аудит U13: шапка — джерело незбережених змін для `UnsavedGuard`
+   * (`shared/ui/unsavedSources.ts`), як сітка (`autosave.ts`) і гранти
+   * (`GrantsPanel.tsx`). Доти перехід у меню зі зміненою шапкою губив
+   * правки мовчки. Джерело зареєстроване РІВНО доки чернетка змінена: після
+   * збереження, скасування чи розмонтування реєстрацію знято.
+   */
+  const hasDirty = dirty.length > 0;
+  useEffect(() => {
+    if (!hasDirty) return undefined;
+
+    const off = registerUnsavedSource(HeaderUnsavedSourceId, {
+      hasUnsaved: () => true,
+      unsavedCount: () => latest.current.dirtyPatch.length,
+      flush: (timeoutMs) => flushHeaderDraft(latest.current, timeoutMs),
+    });
+
+    // ⚠ Закриття вкладки: автозбереження в шапки немає (на відміну від
+    // сітки, `registerUnloadFlush`), тож єдиний захист — рідне питання
+    // браузера. Невалідну чернетку keepalive-запитом усе одно не зберегти.
+    const onUnload = (event: BeforeUnloadEvent): void => {
+      if (latest.current.dirtyPatch.length > 0) event.preventDefault();
+    };
+    window.addEventListener('beforeunload', onUnload);
+
+    return () => {
+      off();
+      window.removeEventListener('beforeunload', onUnload);
+    };
+  }, [hasDirty]);
 
   // ⚠ Поки триває перший запит — нічого: сторінка вже показує кілька
   // одночасних завантажень (`summary`/`tables`/`validation`), і ще один
@@ -397,21 +504,21 @@ export function DocumentHeaderPanel({
     return <ErrorAlert error={header.error} onRetry={() => void header.refetch()} />;
   }
 
-  const fields = fieldsOf(header.data);
+  // ⚠ Поля — з точки відліку чернетки (`seed`), а не з останньої відповіді:
+  // саме з ними порівнюється «змінено», і саме їх людина бачила.
+  const fields = seedFields;
 
   // ⛔ Мутаційний доказ задачі: порожній перелік полів — панелі НЕМАЄ взагалі.
   if (fields.length === 0) return null;
-
-  const dirty = fields.filter(
-    (field) => !sameHeaderValue(effectiveValueOf(field, draft[field.code]), field.value),
-  );
 
   function setField(code: string, value: unknown): void {
     setDraft((current) => ({ ...current, [code]: value }));
   }
 
   function resetDraft(): void {
-    setDraft(draftOf(fieldsOf(header.data)));
+    // ⚠ Скасування — до ОСТАННЬОЇ відомої відповіді сервера, не до старої
+    // точки відліку: чужі правки, що приїхали перезапитом, стають видимими.
+    if (header.data !== undefined) adopt(header.data);
   }
 
   return (
@@ -452,9 +559,7 @@ export function DocumentHeaderPanel({
             size="xs"
             disabled={dirty.length === 0}
             loading={save.isPending}
-            onClick={() =>
-              save.mutate(dirty.map((field) => patchFieldOf(field, effectiveValueOf(field, draft[field.code]))))
-            }
+            onClick={() => save.mutate(dirtyPatch)}
           >
             {t('common.save')}
           </Button>
