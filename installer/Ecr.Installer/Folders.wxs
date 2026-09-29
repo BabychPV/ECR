@@ -35,10 +35,21 @@
       Exclude Ecr.Api.exe: цей файл — окремий компонент у Service.wxs
       (KeyPath ServiceInstall/ServiceControl), інакше той самий файл
       потрапляє у два компоненти з різними GUID — WIX0369/WIX1070.
+      Ecr.Worker.exe — з тієї ж причини, його компонент у Worker.wxs.
+
+      ⚠ worker.settings.json лишається ТУТ, у теці застосунку, і оновлення
+      його перезаписує — навмисно, це типові значення збірки (як
+      appsettings.json), а не конфіг майданчика. Ecr.Worker читає його поруч
+      з exe і не читає %ProgramData% (P1). Налаштування майданчика —
+      змінні ECR_Jobs__Workers__* у Services\EcrWorker\Environment:
+      вони перекривають файл і переживають оновлення. NeverOverwrite тут
+      заморозив би типові значення першої установки назавжди, разом із
+      ключами, яких тоді ще не було.
     -->
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
       <Files Include="$(PublishDir)\**">
         <Exclude Files="$(PublishDir)\Ecr.Api.exe" />
+        <Exclude Files="$(PublishDir)\Ecr.Worker.exe" />
       </Files>
     </ComponentGroup>
 

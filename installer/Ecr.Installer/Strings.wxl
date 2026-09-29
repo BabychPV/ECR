@@ -7,6 +7,9 @@
   <String Id="ServiceDescription"
           Value="Environmental Compliance Reporting web application. Serves the SPA and the REST API." />
   <String Id="FirewallRuleName" Value="ECR Web API (TCP-in)" />
+  <String Id="WorkerServiceDisplayName" Value="ECR Web recalculation worker" />
+  <String Id="WorkerServiceDescription"
+          Value="ECR Web recalculation worker pool supervisor. Runs recalculation jobs in child processes under a Windows Job Object memory limit." />
   <String Id="DowngradeError"
           Value="A newer version of ECR Web is already installed. Uninstall it before installing an older version." />
   <String Id="RequireWin2012R2" Value="Windows Server 2012 R2 x64 or later is required." />

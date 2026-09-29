@@ -52,12 +52,22 @@
 
     <Property Id="APP_PORT" Value="5000" Secure="yes" />
 
+    <!--
+      Служба EcrWorker (пул перерахунку, ФВ-9.8, D-206; Worker.wxs). Типово 0:
+      служба не реєструється і не стартує — установка без цієї властивості
+      поводиться рівно як до появи воркера. Увімкнути: WORKER_ENABLED=1.
+      Secure: значення має дійти з клієнтської частини у серверну при /qn і UI.
+    -->
+    <Property Id="WORKER_ENABLED" Value="0" Secure="yes" />
+
     <!-- ───────────── Склад ───────────── -->
 
     <Feature Id="Main" Title="!(loc.FeatureMain)" Level="1" AllowAbsent="no">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentGroupRef Id="AppFolders" />
       <ComponentGroupRef Id="AppService" />
+      <!-- Умовна всередині (WORKER_ENABLED), тому окрема фіча не потрібна. -->
+      <ComponentGroupRef Id="WorkerService" />
     </Feature>
 
     <!-- ───────────── UI ───────────── -->
