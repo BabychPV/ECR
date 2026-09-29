@@ -6,7 +6,17 @@ namespace Ecr.Application.Ports;
 /// <param name="Id">Ідентифікатор рядка журналу.</param>
 /// <param name="DetectedAt">Момент виявлення в UTC.</param>
 /// <param name="Severity">Вага: 1 інформація, 2 попередження, 3 помилка.</param>
-/// <param name="RuleCode">Код правила: <c>ORPHANED_CELL</c>, <c>BROKEN_FK</c>, <c>ARCHIVE_CHECKSUM</c>.</param>
+/// <param name="RuleCode">
+/// Код правила: <c>ORPHANED_CELL</c> (комірка посилається на відсутній запис
+/// довідника; <c>doc.CellValue</c>, вага 2), <c>BROKEN_FK</c> (рядок посилається
+/// на відсутній екземпляр таблиці; <c>doc.TableRow</c>, вага 3),
+/// <c>ARCHIVE_CHECKSUM</c> (контрольні суми архіву й джерела не збіглися;
+/// <c>itg.ArchiveRun</c>, вага 3), <c>UNBOUND_CALCULATED_COLUMN</c> (колонка
+/// <c>Calculated</c> версії живого проєкту без чинної прив'язки методології;
+/// <c>cfg.ColumnDef</c>, вага 2), <c>UNSOURCED_FORMULA_COLUMN</c> (колонка
+/// <c>Formula</c> опублікованої або виведеної з обігу версії без формули шаблону
+/// й без чинної прив'язки методології; <c>cfg.ColumnDef</c>, вага 2).
+/// </param>
 /// <param name="EntityType">Тип зачепленої сутності: <c>doc.CellValue</c>, <c>doc.TableRow</c>…</param>
 /// <param name="EntityId">Ідентифікатор зачепленої сутності.</param>
 /// <param name="Message">
